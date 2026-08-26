@@ -133,7 +133,13 @@ describe("resolveSwiftWorkspace", () => {
 		const resolved = resolveSwiftWorkspace({
 			workspaceRoot: checkout,
 			dataDir,
-			env: { PATH: "/nowhere" },
+			// 🗝 The override, not an empty PATH. `findXcodeBuildServer` falls back to
+			// the three usual install prefixes whatever PATH says - Electron's PATH
+			// routinely lacks homebrew - so on a machine that HAS the tool an empty
+			// PATH cannot express its absence, and this test failed there and passed
+			// in CI. The override resolving to nothing is the same absence, stated in
+			// a way the test controls.
+			env: { PATH: "/nowhere", AO_LSP_XCODE_BUILD_SERVER: path.join(tmp, "no-xcode-build-server") },
 			derivedDataDir,
 		});
 		expect(resolved.kind).toBe("unconfigured");

@@ -18,6 +18,14 @@ export type JsonRpcMessage = Record<string, unknown>;
 
 export type LspResultOutcome = "ok" | "empty" | "error";
 
+/**
+ * The server's own token vocabulary, from its `initialize` reply. Every index in
+ * a `textDocument/semanticTokens` answer is an offset into these lists, so it
+ * travels with the client rather than being assumed: sourcekit-lsp publishes 28
+ * types and 21 modifiers, gopls 14 and 15, and neither is a prefix of the other.
+ */
+export type SemanticTokensLegend = { tokenTypes: string[]; tokenModifiers: string[] };
+
 export type LspTransport = {
 	send(handleId: string, message: JsonRpcMessage): void;
 	noteResult(handleId: string, outcome: LspResultOutcome): void;
@@ -32,6 +40,8 @@ export type LspClient = {
 	 * on Swift kills ⌘click silently while symbol search carries on working.
 	 */
 	documentUri(absolutePath: string): string;
+	/** Null when this server advertised no `semanticTokensProvider`. */
+	semanticTokensLegend(): SemanticTokensLegend | null;
 	request<T>(method: string, params: unknown): Promise<T>;
 	notify(method: string, params: unknown): void;
 	didOpen(uri: string, languageId: string, text: string): void;
@@ -47,7 +57,11 @@ function isEmptyResult(result: unknown): boolean {
 	return false;
 }
 
-export function createLspClient(handleId: string, transport: LspTransport, mapping: DocumentMapping): LspClient {
+export function createLspClient(
+	handleId: string,
+	transport: LspTransport,
+	mapping: DocumentMapping & { semanticTokens?: SemanticTokensLegend | null },
+): LspClient {
 	let nextId = 1;
 	let disposed = false;
 	const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; method: string }>();
@@ -93,6 +107,9 @@ export function createLspClient(handleId: string, transport: LspTransport, mappi
 		handleId,
 		documentUri(absolutePath) {
 			return documentUriForPath(absolutePath, mapping);
+		},
+		semanticTokensLegend() {
+			return mapping.semanticTokens ?? null;
 		},
 		request<T>(method: string, params: unknown): Promise<T> {
 			if (disposed) return Promise.reject(new Error(`LSP client disposed (${method})`));

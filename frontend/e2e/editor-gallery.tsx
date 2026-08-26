@@ -1,6 +1,7 @@
 // ⚠️ First, before anything that reaches `lib/api-client`: the stub has to
 // replace `window.fetch` before openapi-fetch captures it. See the module.
 import { GALLERY_PATH } from "./editor-gallery-api-stub";
+import { GALLERY_WORKSPACE_ROOT, installFakeLspBridge } from "./editor-gallery-lsp-stub";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
@@ -17,6 +18,13 @@ import "../src/renderer/styles.css";
 const params = new URLSearchParams(window.location.search);
 const width = Number(params.get("width") ?? 900);
 const initialTheme = params.get("theme") === "light" ? "light" : "dark";
+// Monaco renders only the lines in view, so a spec that measures a token has to
+// be able to say which part of the file to be looking at.
+const line = Number(params.get("line") ?? 26);
+// `?lsp=1` gives the page a language server. Off by default so every other spec
+// keeps measuring the grammar alone, which is what they were written against.
+const withLsp = params.get("lsp") === "1";
+if (withLsp) installFakeLspBridge();
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
@@ -44,7 +52,13 @@ function Gallery() {
 					    shrink-wrap to its content (~630px) and silently ignore `?width=`
 					    above that — every "at 1240px" measurement was really at 630px. */}
 					<div data-testid="editor-frame" style={{ width, flex: "none", minHeight: 0 }}>
-						<WorkspaceFileView sessionId="gallery" path={GALLERY_PATH} line={26} onClose={() => {}} />
+						<WorkspaceFileView
+							sessionId="gallery"
+							path={GALLERY_PATH}
+							line={line}
+							workspaceRoot={withLsp ? GALLERY_WORKSPACE_ROOT : undefined}
+							onClose={() => {}}
+						/>
 					</div>
 					<div style={{ flex: 1, background: "var(--bg-1)" }} />
 				</div>

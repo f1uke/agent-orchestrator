@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { createLspClient, type LspClient, type LspResultOutcome, type LspTransport } from "./lsp-client";
+import {
+	createLspClient,
+	type LspClient,
+	type LspResultOutcome,
+	type LspTransport,
+	type SemanticTokensLegend,
+} from "./lsp-client";
 
 /**
  * Attach a pane to the language server for its (workspace, language), and keep
@@ -26,10 +32,14 @@ export type LanguageServerHandle = {
 };
 
 type Bridge = {
-	attach(input: {
-		root: string;
-		languageId: string;
-	}): Promise<{ handleId: string; state: LspState; detail?: string; documentRoot?: string; warning?: string }>;
+	attach(input: { root: string; languageId: string }): Promise<{
+		handleId: string;
+		state: LspState;
+		detail?: string;
+		documentRoot?: string;
+		warning?: string;
+		semanticTokens?: SemanticTokensLegend | null;
+	}>;
 	detach(handleId: string): void;
 	send(handleId: string, message: Record<string, unknown>): void;
 	noteResult(handleId: string, outcome: LspResultOutcome): void;
@@ -106,6 +116,10 @@ export function useLanguageServer(workspaceRoot: string | undefined, languageId:
 					// workspace root is right for every language but Swift, and Swift
 					// cannot attach without a main process anyway.
 					documentRoot: attachment.documentRoot ?? workspaceRoot,
+					// Absent from older bridges and from the browser-preview stub, which
+					// is the same thing as a server that advertised no legend: the
+					// provider then has nothing to decode against and stays quiet.
+					semanticTokens: attachment.semanticTokens ?? null,
 				});
 				setHandle({ client, state: attachment.state, detail: attachment.detail, warning: attachment.warning });
 			})

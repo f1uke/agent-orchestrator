@@ -41,6 +41,18 @@ describe("keying", () => {
 		expect(health[0].attachments).toBe(2);
 	});
 
+	test("the attachment carries the server's semantic-token legend to the renderer", async () => {
+		// The renderer cannot ask the server itself - main owns the handshake - so
+		// if this does not travel with the attachment, semantic highlighting has
+		// nothing to decode against and simply never appears.
+		const r = make();
+		const a = await r.attach({ root: HERE, languageId: "go" });
+		expect(a.semanticTokens).toEqual({
+			tokenTypes: ["property", "identifier"],
+			tokenModifiers: ["declaration", "defaultLibrary"],
+		});
+	});
+
 	test("two roots get two servers - a server cannot be shared across worktrees", async () => {
 		// The spike claimed one-server-per-workspace dedupes across AO sessions. It
 		// does not: every session has its OWN worktree, a different directory with

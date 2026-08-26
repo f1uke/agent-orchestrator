@@ -1,6 +1,6 @@
 import { serverForLanguage } from "./language-servers";
 import type { JsonRpcMessage } from "./lsp-framing";
-import { type LspProcess, type LspState, startLspProcess } from "./lsp-process";
+import { type LspProcess, type LspState, type SemanticTokensLegend, startLspProcess } from "./lsp-process";
 
 /**
  * Every language server this app has alive, and the policy that keeps them from
@@ -50,6 +50,13 @@ export type LspAttachment = {
 	documentRoot: string;
 	/** Configured enough to run, but a feature will find nothing. Say which. */
 	warning?: string;
+	/**
+	 * The server's semantic-token vocabulary, or null where it advertised none.
+	 * Sent with the attachment so the renderer can map by NAME: the two servers
+	 * this app runs publish legends of different shapes, and the indices in every
+	 * answer are offsets into whichever one arrived.
+	 */
+	semanticTokens: SemanticTokensLegend | null;
 };
 
 export type LspResultOutcome = "ok" | "empty" | "error";
@@ -272,6 +279,7 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 				detail: entry.proc.detail,
 				documentRoot: entry.documentRoot,
 				warning: entry.warning,
+				semanticTokens: entry.proc.semanticTokensLegend,
 			};
 		},
 

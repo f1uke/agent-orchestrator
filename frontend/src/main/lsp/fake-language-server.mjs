@@ -75,7 +75,24 @@ function handle(msg) {
 				jsonrpc: "2.0",
 				id: msg.id,
 				result: {
-					capabilities: { definitionProvider: true, workspaceSymbolProvider: true, textDocumentSync: 1 },
+					capabilities: {
+						definitionProvider: true,
+						workspaceSymbolProvider: true,
+						textDocumentSync: 1,
+						// A legend is only usable as the exact list the server sent, in
+						// order, so the supervisor has to carry it through to the renderer
+						// untouched. FAKE_LSP_NO_SEMANTIC_TOKENS covers the other case: a
+						// server that advertises none at all.
+						...(process.env.FAKE_LSP_NO_SEMANTIC_TOKENS === "1"
+							? {}
+							: {
+									semanticTokensProvider: {
+										full: true,
+										range: true,
+										legend: { tokenTypes: ["property", "identifier"], tokenModifiers: ["declaration", "defaultLibrary"] },
+									},
+								}),
+					},
 					// The rootUri is echoed back so a test can assert main sent a REAL
 					// root rather than the null monaco.lsp hardcodes.
 					...(process.env.FAKE_LSP_NO_SERVER_INFO === "1"

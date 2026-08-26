@@ -74,6 +74,14 @@ jobs:
   # neither to a screen. It asserts node COUNTS, never timings, so it is a real
   # regression guard rather than a flake on a shared runner.
   #
+  # e2e/editor-semantic.spec.ts is the sixth. LSP semantic tokens fail by looking
+  # like nothing happened: Monaco standalone has semantic highlighting off unless
+  # an editor option turns it on, a provider can be registered and simply never
+  # asked, and tokens resolved against a theme rule that does not exist repaint
+  # with the DEFAULT foreground - which is what unstyled text already looks like.
+  # The only assertion that separates those from success is the colour a browser
+  # computed for a span, so it belongs here rather than in jsdom.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -101,4 +109,5 @@ jobs:
       - name: Measure the status glyphs, the sidebar qa pip, the editor and the Files rail in a real browser
         run: >-
           npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
-          e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/files-perf.spec.ts
+          e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
+          e2e/files-perf.spec.ts
