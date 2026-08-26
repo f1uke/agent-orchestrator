@@ -176,6 +176,41 @@ describe("FileTree", () => {
 	});
 });
 
+describe("FileTree virtualisation", () => {
+	// 7,000 files flatten to ~8,500 rows and ~91,000 DOM nodes, which measured at
+	// 568 ms to first paint and 292 ms of blocked main thread per keystroke in the
+	// filter box. Only the rows in view may exist.
+	const manyPaths = Array.from({ length: 2000 }, (_, i) => `src/mod${i % 40}/file${i}.ts`);
+
+	it("renders a window of rows, not the whole tree", () => {
+		render(<Harness paths={manyPaths} />);
+		const rendered = screen.getAllByRole("treeitem");
+		expect(rendered.length).toBeGreaterThan(0);
+		// A viewport's worth plus overscan — two orders of magnitude below the 2,041
+		// rows the model holds (2,000 files, 40 directories, and the `src` above them).
+		expect(rendered.length).toBeLessThan(100);
+	});
+
+	// The DOM is a slice, so each row has to carry its place in the whole tree or
+	// a screen reader would announce "3 of 41" on a tree of thousands.
+	it("reports each row's position in the whole tree, not in the window", () => {
+		render(<Harness paths={manyPaths} />);
+		const first = screen.getAllByRole("treeitem")[0];
+		expect(first).toHaveAttribute("aria-posinset", "1");
+		expect(Number(first.getAttribute("aria-setsize"))).toBe(2041);
+	});
+
+	// Rows are absolutely positioned, so `top` is the only thing sequencing them.
+	it("places rows by offset, a fixed row height apart", () => {
+		render(<Harness paths={manyPaths} />);
+		const [first, second] = screen.getAllByRole("treeitem");
+		expect(Number.parseFloat(first.style.top)).toBe(0);
+		expect(Number.parseFloat(second.style.top) - Number.parseFloat(first.style.top)).toBe(
+			Number.parseFloat(first.style.height),
+		);
+	});
+});
+
 function indentOf(el: HTMLElement): number {
 	return Number.parseFloat(el.style.paddingLeft || "0");
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildFileTree, flattenFileTree, matchesFileQuery, orderedFileItems } from "./file-tree";
+import {
+	buildFileTree,
+	collapsedBelowTopLevel,
+	flattenFileTree,
+	matchesFileQuery,
+	orderedFileItems,
+} from "./file-tree";
 
 type Item = { path: string };
 const items = (...paths: string[]): Item[] => paths.map((path) => ({ path }));
@@ -158,5 +164,38 @@ describe("matchesFileQuery", () => {
 		// the RegExp constructor raw.
 		expect(matchesFileQuery("a+b/c.ts", "a+b/*")).toBe(true);
 		expect(matchesFileQuery("weird(name)/c.ts", "weird(name)/*")).toBe(true);
+	});
+});
+
+describe("collapsedBelowTopLevel", () => {
+	const tree = () =>
+		build(
+			"README.md",
+			"App/Features/Wallet/View.swift",
+			"App/Features/Wallet/Deep/Nested/Cell.swift",
+			"Vendor/Thing.swift",
+		);
+
+	// Only the TOP level stays open: it is what makes a 7,000-file worktree
+	// something to walk down into rather than scroll past. "Top level" means the
+	// tree's own first row, which after chain merging is the first BRANCH point —
+	// `App/Features/Wallet`, not `App`.
+	it("closes every directory below the top level and none at it", () => {
+		const collapsed = collapsedBelowTopLevel(tree());
+		expect(flattenFileTree(tree(), collapsed).map((r) => r.node.label)).toEqual([
+			"App/Features/Wallet",
+			"Deep/Nested",
+			"View.swift",
+			"Vendor",
+			"Thing.swift",
+			"README.md",
+		]);
+		expect(collapsed.has("App/Features/Wallet")).toBe(false);
+		expect(collapsed.has("Vendor")).toBe(false);
+		expect(collapsed.has("App/Features/Wallet/Deep/Nested")).toBe(true);
+	});
+
+	it("closes nothing in a tree that is only files", () => {
+		expect(collapsedBelowTopLevel(build("a.ts", "b.ts")).size).toBe(0);
 	});
 });

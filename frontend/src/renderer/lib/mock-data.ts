@@ -1841,6 +1841,8 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
  * live session.
  */
 export function mockWorkspaceFiles(sessionId: string): WorkspaceFilesResponse {
+	const supplied = mockOverride()?.files?.(sessionId);
+	if (supplied) return supplied;
 	if (sessionId.startsWith("demo-merged")) {
 		return { available: false, reason: "no_workspace", paths: [], truncated: false };
 	}
@@ -2031,6 +2033,8 @@ function mockFileText(path: string): string {
 type MockFileOverride = {
 	file?(path: string): WorkspaceFileResponse | null;
 	diff?(path: string): DiffContextResponse | null;
+	/** The Files rail's Browse index — how `e2e/files-bench` supplies a 7k-file tree. */
+	files?(sessionId: string): WorkspaceFilesResponse | null;
 };
 
 function mockOverride(): MockFileOverride | undefined {

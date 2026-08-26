@@ -1274,7 +1274,19 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--fg);
 }
 
+/* The tree and the flat list each own their own scrolling — the tree because a
+   virtualiser needs the scrolling element, the list so the two views behave the
+   same. What is left here is the column that holds them, plus the truncation
+   note, which now stays pinned below the rows instead of scrolling away. */
 .files-panel__list {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.files-panel__flat {
 	min-height: 0;
 	flex: 1;
 	overflow-y: auto;
@@ -1527,20 +1539,35 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 }
 
 /* ── Folder tree (shared with Browse mode when it lands) ─────────────────── */
+/* Scrolls itself: FileTree is virtualised and needs to own the scroller. */
 .file-tree {
-	display: flex;
-	flex-direction: column;
+	min-height: 0;
+	flex: 1;
+	overflow-y: auto;
+	padding-bottom: 10px;
 }
 
-.file-tree__row {
+/* Holds the full scroll height while only the visible rows exist inside it. */
+.file-tree__canvas {
 	position: relative;
+	width: 100%;
+}
+
+/* Rows are placed by the virtualiser, so `top` — not source order — is what puts
+   them in sequence. Both `top` and `height` come from FileTree.tsx as inline
+   styles, which is why there is no `padding-block` here any more: ROW_HEIGHT has
+   to be the ONE source of the row's height, or the scrollbar lies. Content-sized
+   rows measured 29.75px and 30.5px depending on their icon, and half a pixel
+   compounds into thousands across a 7,000-file tree. */
+.file-tree__row {
+	position: absolute;
+	left: 0;
 	display: flex;
 	width: 100%;
 	min-width: 0;
 	align-items: center;
 	gap: 5px;
 	border-left: 2px solid transparent;
-	padding-block: 5.5px;
 	padding-right: 11px;
 	text-align: left;
 	cursor: pointer;

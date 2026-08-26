@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { apiErrorMessage } from "../lib/api-client";
-import { buildFileTree, matchesFileQuery, orderedFileItems } from "../lib/file-tree";
+import { buildFileTree, collapsedBelowTopLevel, matchesFileQuery, orderedFileItems } from "../lib/file-tree";
 import { cn } from "../lib/utils";
 import { FileTree } from "./FileTree";
 import { Skeleton } from "./ui/skeleton";
@@ -144,20 +144,57 @@ export function FilesPanel({
 		}
 	};
 
+	const searching = search.trim() !== "";
+
 	const worktreePaths = useMemo(() => browse.data?.paths ?? [], [browse.data]);
 	const browseVisible = useMemo(
 		() => worktreePaths.filter((p) => matchesFileQuery(p, search)).map((path) => ({ path })),
 		[worktreePaths, search],
 	);
 	const browseTree = useMemo(() => buildFileTree(browseVisible, (f) => f.path), [browseVisible]);
-	const browseOrdered = useMemo(() => orderedFileItems(browseVisible, (f) => f.path), [browseVisible]);
+	// Only the view that is actually on screen pays for its ordering. On a 7,000
+	// file workspace this call builds a SECOND whole tree — 20ms of it — and it was
+	// being spent on every keystroke to order a flat list nobody was looking at.
+	const browseOrdered = useMemo(
+		() => (view === "list" ? orderedFileItems(browseVisible, (f) => f.path) : []),
+		[browseVisible, view],
+	);
 
 	const files = useMemo(() => data?.files ?? [], [data]);
 	const visible = useMemo(() => files.filter((f) => matchesFileQuery(f.path, search)), [files, search]);
 	const tree = useMemo(() => buildFileTree(visible, (f) => f.path), [visible]);
 	// The flat list follows the tree's order too, so switching views re-groups the
 	// rows without resequencing them — and both match the stacked diffs.
-	const ordered = useMemo(() => orderedFileItems(visible, (f) => f.path), [visible]);
+	const ordered = useMemo(() => (view === "list" ? orderedFileItems(visible, (f) => f.path) : []), [visible, view]);
+
+	// Browse's folds. Unlike Changes — a diff, where every row is a row the reviewer
+	// came for — a worktree tree opens showing only its top level, because 7,000
+	// files is ~8,500 rows and an unfoldable list that long is not navigable however
+	// fast it paints. `null` means "the reader has not touched the folds yet".
+	const [browseFolds, setBrowseFolds] = useState<ReadonlySet<string> | null>(null);
+	// Folds made while a search is running live only as long as that query: the
+	// results are a different tree each keystroke, and carrying folds across them
+	// would hide matches behind directories the reader never closed. Keyed rather
+	// than reset in an effect so there is no frame where the wrong set is live.
+	const [searchFolds, setSearchFolds] = useState<{ query: string; folds: ReadonlySet<string> }>({
+		query: "",
+		folds: EMPTY_COLLAPSED,
+	});
+	const browseDefaultFolds = useMemo(
+		() => (searching ? EMPTY_COLLAPSED : collapsedBelowTopLevel(browseTree)),
+		[browseTree, searching],
+	);
+	const browseCollapsed = searching
+		? searchFolds.query === search
+			? searchFolds.folds
+			: EMPTY_COLLAPSED
+		: (browseFolds ?? browseDefaultFolds);
+	const toggleBrowseDir = (key: string) => {
+		const next = new Set(browseCollapsed);
+		if (!next.delete(key)) next.add(key);
+		if (searching) setSearchFolds({ query: search, folds: next });
+		else setBrowseFolds(next);
+	};
 
 	const toggleDir = (key: string) =>
 		setCollapsedDirs((prev) => {
@@ -246,6 +283,8 @@ export function FilesPanel({
 						files={browseVisible}
 						tree={browseTree}
 						ordered={browseOrdered}
+						collapsed={browseCollapsed}
+						onToggleDir={toggleBrowseDir}
 						total={worktreePaths.length}
 						view={view}
 						search={search}
@@ -709,6 +748,8 @@ function BrowsePanel({
 	files,
 	tree,
 	ordered,
+	collapsed,
+	onToggleDir,
 	total,
 	view,
 	search,
@@ -724,6 +765,8 @@ function BrowsePanel({
 	files: readonly WorktreeFile[];
 	tree: ReturnType<typeof buildFileTree<WorktreeFile>>;
 	ordered: readonly WorktreeFile[];
+	collapsed: ReadonlySet<string>;
+	onToggleDir: (key: string) => void;
 	total: number;
 	view: FilesView;
 	search: string;
@@ -765,8 +808,8 @@ function BrowsePanel({
 					{view === "tree" ? (
 						<FileTree
 							nodes={tree}
-							collapsed={EMPTY_COLLAPSED}
-							onToggleDir={() => {}}
+							collapsed={collapsed}
+							onToggleDir={onToggleDir}
 							onSelectFile={(f) => onOpen?.(f)}
 							selectedKey={selectedPath}
 							label="Workspace files"
@@ -804,9 +847,5 @@ function BrowsePanel({
 	);
 }
 
-/**
- * Browse's tree is fully expanded and stays that way. Its own collapse state
- * would be a THIRD thing to remember per session, and the search box already
- * does the narrowing a collapse would.
- */
+/** Nothing folded — what a searching tree passes, so no match can hide. */
 const EMPTY_COLLAPSED: ReadonlySet<string> = new Set();

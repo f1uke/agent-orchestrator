@@ -146,6 +146,28 @@ export function orderedFileItems<T>(items: readonly T[], getPath: (item: T) => s
 }
 
 /**
+ * The directory keys to CLOSE so a tree opens showing only its top level.
+ *
+ * The default a huge tree needs: 7,000 files flatten to ~8,500 rows, and a list
+ * that deep is not navigable however fast it paints — the reader wants to walk
+ * DOWN into it, not past it. A tree small enough to read whole gets nothing from
+ * this, which is why Changes mode still opens fully expanded: it is a diff, and
+ * every row in it is a row the reviewer came for.
+ */
+export function collapsedBelowTopLevel<T>(nodes: readonly FileTreeNode<T>[]): ReadonlySet<string> {
+	const keys = new Set<string>();
+	const walk = (children: readonly FileTreeNode<T>[]) => {
+		for (const node of children) {
+			if (node.kind !== "dir") continue;
+			keys.add(node.key);
+			walk(node.children);
+		}
+	};
+	for (const node of nodes) if (node.kind === "dir") walk(node.children);
+	return keys;
+}
+
+/**
  * Does `path` match the panel's search box?
  *
  * Substring by default — searching `fix` has to find `hotfix/login-crash`, and a

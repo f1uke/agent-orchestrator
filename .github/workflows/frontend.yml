@@ -66,6 +66,14 @@ jobs:
   # all because the file viewer gained a VITE_NO_ELECTRON branch: before that this
   # surface rendered a header and then nothing under `dev:web`.
   #
+  # e2e/files-perf.spec.ts is the fifth, and the clearest case of all: it counts
+  # the DOM the Files rail builds for a workspace the size of a real iOS app. The
+  # rail shipped rendering every one of ~8,500 rows — 91,295 nodes, 568 ms to
+  # paint, 292 ms of blocked main thread per keystroke — and jsdom cannot tell a
+  # windowed tree from a whole one, because it renders both to the same markup and
+  # neither to a screen. It asserts node COUNTS, never timings, so it is a real
+  # regression guard rather than a flake on a shared runner.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -90,7 +98,7 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Measure the status glyphs, the sidebar qa pip and the editor in a real browser
+      - name: Measure the status glyphs, the sidebar qa pip, the editor and the Files rail in a real browser
         run: >-
           npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
-          e2e/editor.spec.ts e2e/editor-save.spec.ts
+          e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/files-perf.spec.ts

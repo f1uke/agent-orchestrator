@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Files rail bench</title>
+	</head>
+	<body>
+		<!--
+			Dev-only harness for e2e/files-perf.spec.ts. Served by the Vite dev server
+			(root = frontend/) and deliberately NOT a rollup input, so it never ships.
+
+			It renders the real FilesPanel in Browse mode over a synthetic index the
+			size and shape of a large iOS app, because the cost this measures — React
+			reconciliation and DOM nodes for thousands of rows — is invisible to jsdom,
+			which has no layout and no renderer memory.
+		-->
+		<div id="root"></div>
+		<script type="module" src="./files-bench.tsx"></script>
+	</body>
+</html>

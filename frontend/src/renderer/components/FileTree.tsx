@@ -1,5 +1,6 @@
+import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual";
 import { File, FileCode2, FileCog, FileImage, FileJson2, FileText, FileType2, Folder, FolderOpen } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { type FileKind, fileKindFor } from "../lib/file-kind";
 import { type FileTreeNode, flattenFileTree } from "../lib/file-tree";
 import { cn } from "../lib/utils";
@@ -14,6 +15,32 @@ const KIND_ICON: Record<FileKind, typeof File> = {
 	config: FileCog,
 	other: File,
 };
+
+/**
+ * Row height, in px. Pinned in CSS (`.file-tree__row`) rather than left to the
+ * content, so this number is EXACT rather than an estimate: 7,000 files is 8,500
+ * rows, and a per-row error of even half a pixel — which is what the content-sized
+ * rows measured, 29.75px for some and 30.5px for others — accumulates into
+ * thousands of pixels of scrollbar drift down a tree that size.
+ */
+const ROW_HEIGHT = 30;
+
+/**
+ * How many rows to render beyond the viewport. Enough that a fast flick does not
+ * expose blank rows, small enough that the DOM stays a viewport's worth.
+ */
+const OVERSCAN = 10;
+
+/**
+ * The viewport a tree assumes when its scroller measures zero-height.
+ *
+ * jsdom has no layout, so `getBoundingClientRect()` there is all zeros and a
+ * virtualiser told the truth would render nothing at all — every existing tree
+ * test would go blank. It is also the right answer in the browser for the moment
+ * before layout has run: rows appear immediately and the ResizeObserver corrects
+ * the count on the next frame.
+ */
+const FALLBACK_VIEWPORT = { width: 320, height: 900 };
 
 const INDENT_BASE = 8;
 /** Indent per level, and the half-step levels past `TAPER_AFTER` fall back to. */
@@ -49,6 +76,17 @@ function indentFor(depth: number): number {
  * Indent tapers with depth rather than stopping (see `indentFor`), and
  * single-child directory chains are already merged upstream in `buildFileTree`,
  * so most trees never reach the narrow steps at all.
+ *
+ * VIRTUALISED: it renders the rows in view and a little either side, never the
+ * whole tree. A real 7,000-file iOS project flattens to ~8,500 rows and ~91,000
+ * DOM nodes — the indent hairlines alone are one node per ancestor per row — which
+ * measured at 568 ms to first paint and 292 ms of blocked main thread on EVERY
+ * keystroke in the filter box. Windowing is what makes the rail usable at that
+ * size; the tree model above it is cheap (~40 ms) and was never the problem.
+ *
+ * It owns its own scroll container for that reason: a virtualiser needs the
+ * scrolling element, and passing a ref up into the panel would make every caller
+ * responsible for a detail that belongs to the tree.
  */
 export function FileTree<T>({
 	nodes,
@@ -92,74 +130,120 @@ export function FileTree<T>({
 	getFileLabel?: (item: T, label: string) => string;
 	getTitle?: (item: T) => string;
 }) {
-	const rows = flattenFileTree(nodes, collapsed);
+	const rows = useMemo(() => flattenFileTree(nodes, collapsed), [nodes, collapsed]);
+	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const virtualizer = useVirtualizer({
+		count: rows.length,
+		getScrollElement: () => scrollRef.current,
+		estimateSize: () => ROW_HEIGHT,
+		overscan: OVERSCAN,
+		observeElementRect: measuredOrFallbackRect,
+	});
+
+	// A revealed row can be thousands of rows outside the rendered window, where
+	// the owner's `scrollIntoView` has no element to find — so the tree scrolls to
+	// it by INDEX instead. `scrollToIndex` is also what makes reveal work at all
+	// once windowing is on, which is the reason this is not hand-rolled.
+	const revealIndex = revealedKey == null ? -1 : rows.findIndex((r) => rowKey(r.node, getFileKey) === revealedKey);
+	useEffect(() => {
+		if (revealIndex >= 0) virtualizer.scrollToIndex(revealIndex, { align: "auto" });
+	}, [revealIndex, virtualizer]);
 
 	return (
-		<div className="file-tree" role="tree" aria-label={label}>
-			{rows.map(({ node, depth, expanded }) => {
-				const indent = indentFor(depth);
-				const guides = <IndentGuides depth={depth} />;
-				if (node.kind === "dir") {
+		<div className="file-tree" role="tree" aria-label={label} ref={scrollRef}>
+			<div className="file-tree__canvas" style={{ height: virtualizer.getTotalSize() }}>
+				{virtualizer.getVirtualItems().map((virtualRow) => {
+					const { node, depth, expanded } = rows[virtualRow.index];
+					const indent = indentFor(depth);
+					const guides = <IndentGuides depth={depth} />;
+					// Rows are absolutely placed by the virtualiser, so the only thing
+					// keeping the list in order is `top` — never source order.
+					const position = { top: virtualRow.start, height: ROW_HEIGHT, paddingLeft: indent };
+					// The window is a slice of the tree, so the row has to SAY where it
+					// sits in the whole thing; a screen reader counting the DOM would
+					// otherwise report "3 of 14" on a 8,500-row tree.
+					const seat = { "aria-setsize": rows.length, "aria-posinset": virtualRow.index + 1 };
+					if (node.kind === "dir") {
+						return (
+							<button
+								key={node.key}
+								type="button"
+								role="treeitem"
+								aria-expanded={expanded}
+								aria-level={depth + 1}
+								{...seat}
+								className="file-tree__row file-tree__row--dir"
+								style={position}
+								onClick={() => onToggleDir(node.key)}
+								title={node.key}
+							>
+								{guides}
+								{/* An open/closed folder carries the expansion state on its own, the
+								    way GitLab's tree does — no separate chevron column to pay for. */}
+								{expanded ? (
+									<FolderOpen aria-hidden="true" className="file-tree__icon file-tree__icon--folder" />
+								) : (
+									<Folder aria-hidden="true" className="file-tree__icon file-tree__icon--folder" />
+								)}
+								<span className="file-tree__dir-label">
+									<bdi>{node.label}</bdi>
+								</span>
+							</button>
+						);
+					}
+					const kind = fileKindFor(node.key);
+					const KindIcon = KIND_ICON[kind];
+					const key = getFileKey ? getFileKey(node.item) : node.key;
+					const selected = selectedKey != null && key === selectedKey;
 					return (
 						<button
 							key={node.key}
 							type="button"
 							role="treeitem"
-							aria-expanded={expanded}
 							aria-level={depth + 1}
-							className="file-tree__row file-tree__row--dir"
-							style={{ paddingLeft: indent }}
-							onClick={() => onToggleDir(node.key)}
-							title={node.key}
+							{...seat}
+							aria-current={selected ? "true" : undefined}
+							data-path={key}
+							className={cn(
+								"file-tree__row file-tree__row--file",
+								selected && "is-selected",
+								revealedKey != null && key === revealedKey && "is-revealed",
+							)}
+							style={position}
+							onClick={() => onSelectFile?.(node.item)}
+							title={getTitle ? getTitle(node.item) : node.key}
 						>
 							{guides}
-							{/* An open/closed folder carries the expansion state on its own, the
-							    way GitLab's tree does — no separate chevron column to pay for. */}
-							{expanded ? (
-								<FolderOpen aria-hidden="true" className="file-tree__icon file-tree__icon--folder" />
-							) : (
-								<Folder aria-hidden="true" className="file-tree__icon file-tree__icon--folder" />
-							)}
-							<span className="file-tree__dir-label">
-								<bdi>{node.label}</bdi>
+							<KindIcon aria-hidden="true" className={cn("file-tree__icon", `file-tree__icon--${kind}`)} />
+							{renderLead ? <span className="file-tree__lead">{renderLead(node.item)}</span> : null}
+							<span className="file-tree__name">
+								<bdi>{getFileLabel ? getFileLabel(node.item, node.label) : node.label}</bdi>
 							</span>
+							{renderMeta ? <span className="file-tree__meta">{renderMeta(node.item)}</span> : null}
 						</button>
 					);
-				}
-				const kind = fileKindFor(node.key);
-				const KindIcon = KIND_ICON[kind];
-				const key = getFileKey ? getFileKey(node.item) : node.key;
-				const selected = selectedKey != null && key === selectedKey;
-				return (
-					<button
-						key={node.key}
-						type="button"
-						role="treeitem"
-						aria-level={depth + 1}
-						aria-current={selected ? "true" : undefined}
-						data-path={key}
-						className={cn(
-							"file-tree__row file-tree__row--file",
-							selected && "is-selected",
-							revealedKey != null && key === revealedKey && "is-revealed",
-						)}
-						style={{ paddingLeft: indent }}
-						onClick={() => onSelectFile?.(node.item)}
-						title={getTitle ? getTitle(node.item) : node.key}
-					>
-						{guides}
-						<KindIcon aria-hidden="true" className={cn("file-tree__icon", `file-tree__icon--${kind}`)} />
-						{renderLead ? <span className="file-tree__lead">{renderLead(node.item)}</span> : null}
-						<span className="file-tree__name">
-							<bdi>{getFileLabel ? getFileLabel(node.item, node.label) : node.label}</bdi>
-						</span>
-						{renderMeta ? <span className="file-tree__meta">{renderMeta(node.item)}</span> : null}
-					</button>
-				);
-			})}
+				})}
+			</div>
 		</div>
 	);
 }
+
+/** The key a row is addressed by — the caller's override, or the node's path. */
+function rowKey<T>(node: FileTreeNode<T>, getFileKey?: (item: T) => string): string {
+	return node.kind === "file" && getFileKey ? getFileKey(node.item) : node.key;
+}
+
+/**
+ * The scroller's size, falling back to a nominal viewport when it measures zero.
+ *
+ * `observeElementRect` is the library's own implementation; all this adds is the
+ * floor. See FALLBACK_VIEWPORT for why a zero-height scroller must not mean an
+ * empty tree.
+ */
+const measuredOrFallbackRect: typeof observeElementRect = (instance, cb) =>
+	observeElementRect(instance, (rect) =>
+		cb(rect.height > 0 ? rect : { width: rect.width || FALLBACK_VIEWPORT.width, height: FALLBACK_VIEWPORT.height }),
+	);
 
 /**
  * The hairlines that trace each open ancestor down the rows beneath it, as
