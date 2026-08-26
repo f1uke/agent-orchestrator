@@ -60,6 +60,22 @@ function tokenColour(spans: Span[], text: string): string {
 	return found[0].colour;
 }
 
+/**
+ * Polled, never read once.
+ *
+ * 🗝 A token's span boundary depends on BOTH layers having landed, and they land
+ * independently: the shiki grammar arrives as its own lazily-imported chunk and
+ * re-tokenizes the model when it does, while the semantic answer arrives over
+ * the bridge. On a slower runner the two settle in either order, and a
+ * single-shot read of the grammar-owned token caught the window between them -
+ * the line had 4 spans instead of 7 and the assertion failed on a colour that
+ * was about to be right. Polling waits for the steady state and still fails on a
+ * colour that never becomes right.
+ */
+async function expectColour(page: Page, line: string, token: string, hex: string): Promise<void> {
+	await expect.poll(async () => tokenColour(await spansOfLine(page, line), token), { timeout: 15_000 }).toBe(rgb(hex));
+}
+
 /** The colour of whatever run this text sits inside, split out or not. */
 function colourAround(spans: Span[], text: string): string {
 	return spans.find((s) => s.text.includes(text))?.colour ?? `no span containing "${text}"`;
@@ -75,9 +91,7 @@ function colourAround(spans: Span[], text: string): string {
 async function openWithTokens(page: Page, theme: "dark" | "light" = "dark"): Promise<void> {
 	await page.goto(`${GALLERY}${theme === "light" ? "&theme=light" : ""}`);
 	await page.locator(".view-lines").first().waitFor();
-	await expect
-		.poll(async () => tokenColour(await spansOfLine(page, PROPERTY_LINE), "reuseIdentifier"), { timeout: 15_000 })
-		.toBe(rgb(EDITOR_THEME_TOKENS[theme]["--code-declaration"]));
+	await expectColour(page, PROPERTY_LINE, "reuseIdentifier", EDITOR_THEME_TOKENS[theme]["--code-declaration"]);
 }
 
 test.describe("LSP semantic tokens", () => {
@@ -95,8 +109,7 @@ test.describe("LSP semantic tokens", () => {
 	 */
 	test("a property declaration the grammar left plain gains Xcode's declaration colour", async ({ page }) => {
 		await openWithTokens(page);
-		const spans = await spansOfLine(page, PROPERTY_LINE);
-		expect(tokenColour(spans, "reuseIdentifier")).toBe(rgb(EDITOR_THEME_TOKENS.dark["--code-declaration"]));
+		await expectColour(page, PROPERTY_LINE, "reuseIdentifier", EDITOR_THEME_TOKENS.dark["--code-declaration"]);
 	});
 
 	/**
@@ -106,8 +119,7 @@ test.describe("LSP semantic tokens", () => {
 	 */
 	test("an SDK type is re-tinted to the system colour", async ({ page }) => {
 		await openWithTokens(page);
-		const spans = await spansOfLine(page, CLASS_LINE);
-		expect(tokenColour(spans, "UIViewController")).toBe(rgb(EDITOR_THEME_TOKENS.dark["--code-type-system"]));
+		await expectColour(page, CLASS_LINE, "UIViewController", EDITOR_THEME_TOKENS.dark["--code-type-system"]);
 	});
 
 	/**
@@ -118,8 +130,7 @@ test.describe("LSP semantic tokens", () => {
 	 */
 	test("a type declaration the grammar already knew keeps its own colour", async ({ page }) => {
 		await openWithTokens(page);
-		const spans = await spansOfLine(page, CLASS_LINE);
-		expect(tokenColour(spans, "PromotionHubViewController")).toBe(rgb(EDITOR_THEME_TOKENS.dark["--code-type"]));
+		await expectColour(page, CLASS_LINE, "PromotionHubViewController", EDITOR_THEME_TOKENS.dark["--code-type"]);
 	});
 
 	/**
@@ -130,6 +141,9 @@ test.describe("LSP semantic tokens", () => {
 	 */
 	test("an operator stays plain", async ({ page }) => {
 		await openWithTokens(page);
+		// The declaration on this line IS split out, so waiting for it is waiting
+		// for both layers to have settled around the `=` as well.
+		await expectColour(page, PROPERTY_LINE, "reuseIdentifier", EDITOR_THEME_TOKENS.dark["--code-declaration"]);
 		const spans = await spansOfLine(page, PROPERTY_LINE);
 		expect(spans.filter((s) => s.text === "=")).toHaveLength(0);
 		expect(colourAround(spans, "=")).toBe(rgb(EDITOR_THEME_TOKENS.dark["--code-plain"]));
@@ -142,8 +156,6 @@ test.describe("LSP semantic tokens", () => {
 	 */
 	test("the light theme paints the same roles from its own palette", async ({ page }) => {
 		await openWithTokens(page, "light");
-		expect(tokenColour(await spansOfLine(page, CLASS_LINE), "UIViewController")).toBe(
-			rgb(EDITOR_THEME_TOKENS.light["--code-type-system"]),
-		);
+		await expectColour(page, CLASS_LINE, "UIViewController", EDITOR_THEME_TOKENS.light["--code-type-system"]);
 	});
 });
