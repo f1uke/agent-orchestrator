@@ -168,3 +168,81 @@ test("a truncated read is read-only, and says what saving would destroy", async 
 	// Never a control that always fails.
 	await expect(page.getByTestId("save-file")).toBeHidden();
 });
+
+// ── nothing thrown into the renderer ─────────────────────────────────────────
+
+/**
+ * Collect everything the page throws, from before the first navigation.
+ *
+ * 🗝 These two errors were invisible to every other spec in this file. The next
+ * `setModel` papered over them, so the diff still drew and every assertion about
+ * what is on screen still passed — while `TextModel got disposed before
+ * DiffEditorWidget model got reset` and `no diff result available` were thrown
+ * on EVERY entry into diff mode, a whole diff computation was discarded each
+ * time, and in Electron those are real unhandled errors in the renderer. Only a
+ * test that watches the error channel itself can see that, which is why this one
+ * asserts on nothing visible.
+ */
+function collectPageErrors(page: Page): string[] {
+	const errors: string[] = [];
+	page.on("pageerror", (error) => errors.push(error.message.split("\n")[0]));
+	return errors;
+}
+
+/**
+ * Wait for the diff to have actually been COMPUTED, not merely mounted.
+ *
+ * A decoration on a changed line is the proof: "no diff result available" is the
+ * diff worker giving up, and a widget that never computed has no insert or
+ * delete lines to show. This is also what keeps the assertion below off a sleep
+ * — the errors arrive asynchronously after `setModel`, so the test has to wait
+ * for something real rather than for a duration.
+ */
+async function waitForDiffToCompute(page: Page): Promise<void> {
+	await expect(page.locator(".monaco-diff-editor")).toBeVisible();
+	await expect(
+		page.locator(".monaco-diff-editor .line-insert, .monaco-diff-editor .line-delete").first(),
+	).toBeVisible();
+}
+
+test("entering Changes mode throws nothing, and re-entering it throws nothing either", async ({ page }) => {
+	const errors = collectPageErrors(page);
+	await openFile(page, ORDINARY);
+	// The baseline matters: if opening a file already threw, a clean diff
+	// assertion below would be measuring the wrong thing.
+	expect(errors).toEqual([]);
+
+	const pane = page.getByTestId("terminal");
+	await pane.getByRole("tab", { name: "Changes" }).click();
+	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
+	await waitForDiffToCompute(page);
+	expect(errors).toEqual([]);
+
+	// The second entry is its own case: the original model is reused when its
+	// text has not moved, and reuse is exactly where a disposed model would be
+	// handed back to the widget.
+	await pane.getByRole("tab", { name: "Browse" }).click();
+	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "code");
+	await pane.getByRole("tab", { name: "Changes" }).click();
+	await waitForDiffToCompute(page);
+	expect(errors).toEqual([]);
+});
+
+// 🗝 The same guard on this slice's headline path. A reader reaches the diff
+// editor here having just been refused a save, which is the worst possible
+// moment for the pane to be quietly throwing away its diff computation.
+test("resolving a conflict throws nothing into the renderer", async ({ page }) => {
+	const errors = collectPageErrors(page);
+	await openFile(page, CONFLICTING);
+	await typeIntoEditor(page, "// my edit");
+	await page.getByTestId("save-file").click();
+	await expect(page.getByTestId("file-drift-banner")).toBeVisible();
+	// A refused save is not an error channel event either.
+	expect(errors).toEqual([]);
+
+	await page.getByRole("button", { name: /review changes/i }).click();
+	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
+	await waitForDiffToCompute(page);
+
+	expect(errors).toEqual([]);
+});
