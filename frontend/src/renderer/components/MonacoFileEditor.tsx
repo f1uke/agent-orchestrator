@@ -449,10 +449,35 @@ export default function MonacoFileEditor({
 				appliedTextRef.current = text;
 			}
 			if (mode === "diff") {
-				originalModelRef.current?.dispose();
-				const original = monaco.editor.createModel(diffOriginal?.text ?? "", language);
-				originalModelRef.current = original;
-				(editor as monaco.editor.IStandaloneDiffEditor).setModel({ original, modified: model });
+				const diffEditor = editor as monaco.editor.IStandaloneDiffEditor;
+				const wanted = diffOriginal?.text ?? "";
+				const current = originalModelRef.current;
+				// 🗝 Two rules here, and BOTH were needed to stop this pane throwing
+				// `TextModel got disposed before DiffEditorWidget model got reset`
+				// and `no diff result available` on every single entry into diff
+				// mode — the conflict flow's "Review changes" included, which is
+				// this slice's headline path. The next setModel papered over them,
+				// so the diff still drew, but a whole diff computation was thrown
+				// away each time and in Electron these are real unhandled errors in
+				// the renderer.
+				//
+				// 1. REUSE the original when its text has not changed. This effect
+				//    runs twice on entry — once for `mode`, once when
+				//    `editorGeneration` catches up — and building a second model
+				//    disposed the first while the diff worker was still computing
+				//    against it, which is where "no diff result available" came
+				//    from.
+				// 2. Point the widget at the new pair BEFORE disposing the old
+				//    model, never after.
+				if (!current || current.isDisposed() || current.getValue() !== wanted) {
+					const stale = current;
+					const original = monaco.editor.createModel(wanted, language);
+					originalModelRef.current = original;
+					diffEditor.setModel({ original, modified: model });
+					stale?.dispose();
+				} else if (diffEditor.getModel()?.modified !== model) {
+					diffEditor.setModel({ original: current, modified: model });
+				}
 			} else {
 				(editor as monaco.editor.IStandaloneCodeEditor).setModel(model);
 			}
