@@ -213,14 +213,28 @@
 	--diff-del-sign: #e88f8f;
 	--diff-context-sign: #5c5c63;
 
-	/* Syntax tokens — Xcode "Midnight" in dark, Xcode "Default" in light. */
-	--code-keyword: #fc5fa3;
-	--code-string: #fc6a5d;
-	--code-comment: #6c7986;
-	--code-number: #d0bf69;
-	--code-type: #5dd8ff;
-	--code-fn: #67b7a4;
-	--code-plain: #e8e8ea;
+	/* Syntax tokens — Xcode's "Default (Dark)" scheme, role for role.
+	   The editor is the ONE place the renderer does not clone the reference app:
+	   the human reads Swift here with Xcode open beside it, so the palette is
+	   Xcode's (explicit decision, 2026-08-26). Scope is the syntax colours only —
+	   chrome, rails and the terminal still clone the reference app.
+	   Values are `DVTSourceTextSyntaxColors` read out of
+	   ~/Library/Developer/Xcode/UserData/FontAndColorThemes/Default (Dark).xccolortheme,
+	   and each role's Xcode key is named beside it. All twelve clear 4.5:1 on
+	   `--viewer-bg`, and all twelve are DISTINCT — see `monaco-theme.ts` for why a
+	   shared colour would silently kill the minimap's `// MARK:` bands. */
+	--code-plain: #dadada; /* xcode.syntax.plain: white @85%, flattened onto the surface */
+	--code-comment: #6c7986; /* xcode.syntax.comment, and .comment.doc */
+	--code-string: #fc6a5d; /* xcode.syntax.string, and .regex */
+	--code-number: #d0bf69; /* xcode.syntax.number, and .character */
+	--code-keyword: #fc5fa3; /* xcode.syntax.keyword */
+	--code-attribute: #bf8555; /* xcode.syntax.attribute: @IBOutlet, @available */
+	--code-directive: #fd8f3f; /* xcode.syntax.preprocessor, and .identifier.macro */
+	--code-type: #5dd8ff; /* xcode.syntax.declaration.type: the name in `class Foo` */
+	--code-declaration: #41a1c0; /* xcode.syntax.declaration.other: the name in `func foo` */
+	--code-type-ref: #9ef1dd; /* xcode.syntax.identifier.type: a type being USED */
+	--code-fn: #67b7a4; /* xcode.syntax.identifier.function, .variable, .constant */
+	--code-type-system: #d0a8ff; /* xcode.syntax.identifier.type.system: a built-in type */
 
 	/* Full-file viewer chrome (the center-pane code/diff surface). */
 	--viewer-bg: #060607;
@@ -380,15 +394,23 @@
 	--diff-del-sign: #c0392b;
 	--diff-context-sign: #6a6a74;
 
-	/* Xcode "Default" (light) syntax scheme — the light-mode sibling of the
-	   Midnight palette used in dark. All seven clear 4.5:1 on the code surface. */
-	--code-keyword: #9b2393;
-	--code-string: #c41a16;
+	/* Xcode's "Default (Light)" scheme — the light-mode sibling of the dark block
+	   above, same roles, same Xcode keys. Read out of Xcode's own bundled theme
+	   (DVTUserInterfaceKit.framework/Resources/FontAndColorThemes), which is the
+	   light theme the human actually runs. All twelve clear 4.5:1 on the code
+	   surface, and all twelve are distinct. */
+	--code-plain: #262626; /* xcode.syntax.plain: black @85%, flattened onto the surface */
 	--code-comment: #5d6c79;
+	--code-string: #c41a16;
 	--code-number: #1c00cf;
+	--code-keyword: #9b2393;
+	--code-attribute: #815f03;
+	--code-directive: #643820;
 	--code-type: #0b4f79;
-	--code-fn: #266b60;
-	--code-plain: var(--fg);
+	--code-declaration: #0f68a0;
+	--code-type-ref: #1c464a;
+	--code-fn: #326d74;
+	--code-type-system: #3900a0;
 
 	--viewer-bg: var(--bg);
 	--viewer-card-bg: var(--bg-1);

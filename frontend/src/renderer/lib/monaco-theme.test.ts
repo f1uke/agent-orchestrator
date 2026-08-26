@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { AO_DARK_THEME, AO_LIGHT_THEME, EDITOR_THEME_TOKENS } from "./monaco-theme";
+import { AO_DARK_THEME, AO_LIGHT_THEME, EDITOR_THEME_TOKENS, SYNTAX_ROLES } from "./monaco-theme";
 
 /**
  * Monaco cannot read a CSS custom property: it tokenizes into a packed colour
@@ -103,16 +103,38 @@ describe("shiki → Monaco scope round-trip", () => {
 
 		it(`${theme.name}: every syntax role has its own colour`, () => {
 			const t = EDITOR_THEME_TOKENS[theme.type];
-			const roles = [
-				t["--code-keyword"],
-				t["--code-string"],
-				t["--code-comment"],
-				t["--code-number"],
-				t["--code-type"],
-				t["--code-fn"],
-				t["--code-plain"],
-			];
-			expect(new Set(roles).size).toBe(roles.length);
+			const byColour = new Map<string, string>();
+			for (const role of SYNTAX_ROLES) {
+				const colour = t[role].toLowerCase();
+				expect(byColour.get(colour), `${role} and ${byColour.get(colour)} share ${colour}`).toBeUndefined();
+				byColour.set(colour, role);
+			}
+			expect(byColour.size).toBe(SYNTAX_ROLES.length);
+		});
+
+		/**
+		 * `--code-plain` is the editor's default foreground AND the colour of the
+		 * `keyword.operator` rule (Xcode paints operators as plain text), so every
+		 * unstyled token reverse-maps to whatever scope that first rule names. That
+		 * scope decides the token's `StandardTokenType`: name it something matching
+		 * `/\b(comment|string|regex|regexp)\b/` and Monaco would read plain code as
+		 * a comment, banding the minimap off arbitrary lines.
+		 */
+		it(`${theme.name}: the plain colour reverse-maps to a scope Monaco reads as Other`, () => {
+			const plain = EDITOR_THEME_TOKENS[theme.type]["--code-plain"].toLowerCase();
+			const first = rules.find((r) => r.foreground?.toLowerCase() === plain);
+			expect(first?.scope, "no rule carries the plain colour").toBeTruthy();
+			expect(first?.scope).not.toMatch(/\b(comment|string|regex|regexp)\b/);
+		});
+
+		it(`${theme.name}: every rule colour is one of the syntax roles`, () => {
+			const known = new Set(SYNTAX_ROLES.map((role) => EDITOR_THEME_TOKENS[theme.type][role].toLowerCase()));
+			for (const rule of rules) {
+				if (!rule.foreground) continue;
+				expect(known, `${rule.scope} paints ${rule.foreground}, which is no --code-* role`).toContain(
+					rule.foreground.toLowerCase(),
+				);
+			}
 		});
 	}
 });
