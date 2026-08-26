@@ -1624,62 +1624,109 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 }
 
 /**
- * A stand-in per-file diff for mock mode, so the stacked Changes view renders
- * without a daemon (`verify-renderer-ui-with-mock-data.md`). Long enough to make
- * sticky headers and scroll-spy observable while scrolling.
- *
- * Deliberately THREE hunks with real numeric gaps between them (lines 30-53 and
- * 62-119 are skipped) and a first hunk that starts mid-file. A single contiguous
- * block would look like a diff while quietly failing to exercise the case that
- * matters here: what the viewer does where the diff skips lines.
+ * One mock edit, described in NEW-side coordinates: `dels` are the old lines it
+ * replaced and `adds` is how many of the new file's lines sit at `at`.
  */
-export function mockWorkspaceFileDiff(path: string): DiffContextResponse {
-	const name = path.slice(path.lastIndexOf("/") + 1);
+type MockEdit = { at: number; dels: string[]; adds: number };
+
+/**
+ * The uncommitted level (HEAD .. working tree) for the mock file. These MUST
+ * agree with `mockWorkspaceFile`'s `changedLines`, or the two gutter lanes and
+ * the discard popover would each be describing a different file.
+ */
+const MOCK_UNCOMMITTED_EDITS: MockEdit[] = [
+	{ at: 10, dels: ["\tconst legacy = read(path);", "\tif (!legacy) return null;", "\treturn legacy.value;"], adds: 3 },
+	{ at: 20, dels: ["\t// removed while working on this"], adds: 0 },
+	{ at: 31, dels: [], adds: 4 },
+];
+
+/** The branch level: everything above, plus what this branch already committed. */
+const MOCK_BRANCH_EDITS: MockEdit[] = [
+	...MOCK_UNCOMMITTED_EDITS,
+	{ at: 50, dels: ["\t// the shape this file had on the target branch"], adds: 2 },
+	{ at: 70, dels: [], adds: 3 },
+];
+
+/**
+ * A stand-in per-file diff for mock mode, so the stacked Changes view and the
+ * editor's two change lanes both render without a daemon
+ * (`verify-renderer-ui-with-mock-data.md`).
+ *
+ * It is built by replaying `mockWorkspaceFile`'s own content through a list of
+ * edits, rather than invented separately, so the NEW side of this diff really is
+ * the file the editor has open. Without that the branch lane would mark lines
+ * the buffer does not have.
+ *
+ * The windowed form keeps THREE hunks with real numeric gaps between them and a
+ * first hunk that starts mid-file. A single contiguous block would look like a
+ * diff while quietly failing to exercise the case that matters there: what the
+ * viewer does where the diff skips lines.
+ */
+export function mockWorkspaceFileDiff(
+	path: string,
+	options?: { base?: "target" | "head"; fullContext?: boolean },
+): DiffContextResponse {
+	const newLines = mockFileText(path).split("\n");
+	const edits = options?.base === "head" ? MOCK_UNCOMMITTED_EDITS : MOCK_BRANCH_EDITS;
 	const lines: DiffContextResponse["lines"] = [];
-	// Old and new cursors are tracked separately, exactly as the backend parser
-	// does, so the numbering stays honest once a hunk has added a net line.
-	let oldN = 0;
-	let newN = 0;
-	const ctx = (count: number) => {
-		for (let i = 0; i < count; i++) {
-			lines.push({ kind: "context", text: `\t// line ${newN} of ${name}`, oldLine: oldN, newLine: newN });
+	let oldN = 1;
+	let newN = 1;
+
+	const context = (upTo: number) => {
+		while (newN < upTo && newN <= newLines.length) {
+			lines.push({ kind: "context", text: newLines[newN - 1], oldLine: oldN, newLine: newN });
 			oldN++;
 			newN++;
 		}
 	};
-	const del = (text: string) => {
-		lines.push({ kind: "del", text, oldLine: oldN, newLine: 0 });
-		oldN++;
-	};
-	const add = (text: string) => {
-		lines.push({ kind: "add", text, oldLine: 0, newLine: newN });
-		newN++;
-	};
-	const hunk = (header: string, oldStart: number, newStart: number) => {
-		lines.push({ kind: "hunk", text: header, oldLine: oldStart, newLine: newStart });
-		oldN = oldStart;
-		newN = newStart;
-	};
+	for (const edit of edits) {
+		context(edit.at);
+		for (const text of edit.dels) {
+			lines.push({ kind: "del", text, oldLine: oldN, newLine: 0 });
+			oldN++;
+		}
+		for (let i = 0; i < edit.adds; i++) {
+			lines.push({ kind: "add", text: newLines[newN - 1] ?? "", oldLine: 0, newLine: newN });
+			newN++;
+		}
+	}
+	context(newLines.length + 1);
 
-	hunk("@@ -20,9 +20,10 @@ export function load(name: string) {", 20, 20);
-	ctx(6);
-	del(`\tconst legacy = read("${name}");`);
-	add(`\tconst next = read("${name}", { strict: true });`);
-	add("\tif (!next) return null;");
-	ctx(2);
+	if (options?.fullContext) return { available: true, truncated: false, mode: "file", path, lines };
+	return { available: true, truncated: false, mode: "file", path, lines: windowMockDiff(lines) };
+}
 
-	hunk("@@ -54,8 +55,8 @@ export function refresh() {", 54, 55);
-	ctx(4);
-	del("\tcache.clear();");
-	add("\tcache.invalidate({ cascade: true });");
-	ctx(3);
-
-	hunk("@@ -120,6 +121,7 @@ export function teardown() {", 120, 121);
-	ctx(3);
-	add("\tlisteners.removeAll();");
-	ctx(3);
-
-	return { available: true, truncated: false, mode: "file", path, lines };
+/**
+ * Trim a whole-file diff to git's default three lines of context, inserting the
+ * `hunk` skip marker wherever lines were dropped — the same marker the daemon
+ * emits, and the reason the windowed payload can never be replayed as a file.
+ */
+function windowMockDiff(lines: DiffContextResponse["lines"]): DiffContextResponse["lines"] {
+	const CONTEXT = 3;
+	const keep = new Set<number>();
+	lines.forEach((line, i) => {
+		if (line.kind === "context") return;
+		for (let j = Math.max(0, i - CONTEXT); j <= Math.min(lines.length - 1, i + CONTEXT); j++) keep.add(j);
+	});
+	const out: DiffContextResponse["lines"] = [];
+	let skipped = false;
+	lines.forEach((line, i) => {
+		if (!keep.has(i)) {
+			skipped = true;
+			return;
+		}
+		if (skipped) {
+			out.push({
+				kind: "hunk",
+				text: `@@ -${line.oldLine},0 +${line.newLine},0 @@`,
+				oldLine: line.oldLine,
+				newLine: line.newLine,
+			});
+			skipped = false;
+		}
+		out.push(line);
+	});
+	return out;
 }
 
 /**
