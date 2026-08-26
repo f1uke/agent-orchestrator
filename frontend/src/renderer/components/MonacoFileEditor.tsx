@@ -7,7 +7,7 @@ import { revertEdit } from "../lib/editor/revert";
 import { registerLspNavigation } from "../lib/lsp/definition";
 import { registerSemanticTokens } from "../lib/lsp/semantic-provider";
 import { languageIdForLsp } from "../lib/lsp/language-ids";
-import { type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
+import { hasLanguageServers, type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
 import { ensureLanguage, ensureMonacoReady, languageForPath, monaco } from "../lib/monaco-setup";
 import { editorThemeName } from "../lib/monaco-theme";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
@@ -335,7 +335,11 @@ export default function MonacoFileEditor({
 	// as well as per language, because Monaco asks one provider about every model
 	// of that language and two Swift panes are ordinary.
 	useEffect(() => {
-		if (!ready || !lspLanguage || modelGeneration === 0) return;
+		// 🗝 `hasLanguageServers()` and not the pane's state: it is a property of the
+		// environment and never flips, so the registration is stable. Gating on the
+		// state instead would tear the provider down and rebuild it on every
+		// transition, and disposing it is what clears the colours already applied.
+		if (!ready || !lspLanguage || modelGeneration === 0 || !hasLanguageServers()) return;
 		const registration = registerSemanticTokens({
 			languageId: lspLanguage,
 			modelUri: uri.toString(),

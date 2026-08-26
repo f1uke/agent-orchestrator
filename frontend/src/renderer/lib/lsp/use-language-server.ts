@@ -51,6 +51,18 @@ function bridge(): Bridge | null {
 	return (globalThis as unknown as { ao?: { lsp?: Bridge } }).ao?.lsp ?? null;
 }
 
+/**
+ * Whether this renderer can have a language server AT ALL.
+ *
+ * A property of the environment, not of any pane or state, so a caller can skip
+ * wiring up machinery that could never answer - the browser-preview build and
+ * the e2e harness have no main process, and there a provider registered against
+ * a server that will never exist is pure cost.
+ */
+export function hasLanguageServers(): boolean {
+	return bridge() !== null;
+}
+
 /** The IPC channel as the client sees it, or null where there is no main process. */
 export function lspTransport(): LspTransport | null {
 	const api = bridge();
