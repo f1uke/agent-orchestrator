@@ -620,6 +620,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					path={workspaceFile.path}
 					line={workspaceFile.line}
 					column={workspaceFile.column}
+					focus={workspaceFile.focus}
 					workspaceRoot={directory}
 					onClose={() => setWorkspaceFile(null)}
 					onOpenFile={openWorkspaceFile}
@@ -747,9 +748,25 @@ export function SessionView({ sessionId }: SessionViewProps) {
 									onToggleBrowserPopOut={setBrowserPoppedOut}
 									onViewChange={setInspectorView}
 									onOpenFile={setFileView}
-									onOpenChangedFile={({ path }) => {
+									onOpenChangedFile={({ path, status, binary }) => {
 										setActiveChangedPath(path);
-										setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
+										// 🗝 A DELETED or BINARY row has no working-tree buffer to
+										// open, which is exactly the trap ChangedFileTarget's own
+										// comment names: routing every row at the file endpoint 404s
+										// on the rows a reviewer most wants. Those keep going to the
+										// stacked diff; everything else opens in the editor, landing
+										// on the first hunk rather than on line 1.
+										if (status === "deleted" || binary) {
+											setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
+											return;
+										}
+										setChangesFocus(null);
+										openWorkspaceFile({ path, focus: "first-hunk", inWorkspace: true });
+									}}
+									onOpenWorktreeFile={({ path }) => openWorkspaceFile({ path, inWorkspace: true })}
+									onReviewAllChanges={() => {
+										setWorkspaceFile(null);
+										setChangesFocus((prev) => ({ path: prev?.path ?? "", nonce: (prev?.nonce ?? 0) + 1 }));
 									}}
 									selectedChangedPath={activeChangedPath ?? undefined}
 									revealInTree={revealInTree}

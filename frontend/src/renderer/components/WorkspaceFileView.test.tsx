@@ -42,22 +42,30 @@ const response = {
 
 // The body the mocked endpoint returns; overridden per test.
 let body: Record<string, unknown> = response;
+/** The branch-level diff, when a test needs one. */
+let diffBody: Record<string, unknown> | null = null;
 
 beforeEach(() => {
 	body = response;
 	editorProps.current = null;
 	putMock.mockReset();
-	getMock.mockReset().mockImplementation(async (path: string) => {
+	diffBody = null;
+	// `/workspace/file-diff` also contains "/workspace/file", so the diff route is
+	// matched FIRST or the file body would be served as a diff.
+	getMock.mockReset().mockImplementation(async (path: string, init?: { params?: { query?: { base?: string } } }) => {
+		if (path.includes("/workspace/file-diff")) {
+			return { data: init?.params?.query?.base === "head" ? null : diffBody };
+		}
 		if (path.includes("/workspace/file")) return { data: body };
 		return { data: null };
 	});
 });
 
-function renderView(onClose = vi.fn(), path = "pkg/app.go", line?: number) {
+function renderView(onClose = vi.fn(), path = "pkg/app.go", line?: number, focus?: "first-hunk") {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	render(
 		<QueryClientProvider client={client}>
-			<WorkspaceFileView sessionId="proj-1" path={path} line={line} onClose={onClose} />
+			<WorkspaceFileView sessionId="proj-1" path={path} line={line} focus={focus} onClose={onClose} />
 		</QueryClientProvider>,
 	);
 	return onClose;
@@ -133,6 +141,42 @@ describe("WorkspaceFileView", () => {
 		expect(screen.getByTestId("read-only-detail")).toHaveTextContent(/delete everything after them/i);
 		expect(screen.queryByTestId("save-file")).toBeNull();
 		expect(editorProps.current?.readOnly).toBe(true);
+	});
+
+	// A Changes row means "show me this file's changes", and line 1 is almost
+	// never where they are.
+	it("lands on the first branch hunk when asked to, not on line 1", async () => {
+		diffBody = {
+			available: true,
+			truncated: false,
+			mode: "file",
+			path: "pkg/app.go",
+			lines: [
+				{ kind: "context", text: "package app", oldLine: 1, newLine: 1 },
+				{ kind: "context", text: "", oldLine: 2, newLine: 2 },
+				{ kind: "add", text: "func Run() {", oldLine: 0, newLine: 3 },
+			],
+		};
+		renderView(vi.fn(), "pkg/app.go", undefined, "first-hunk");
+
+		await waitFor(() => expect(editorProps.current?.branchLines).toEqual([3]));
+		expect(editorProps.current?.line).toBe(3);
+	});
+
+	// An explicit line always wins: a terminal `:42` and a go-to-definition
+	// target both name a line the reader actually asked for.
+	it("prefers an explicit line over the first hunk", async () => {
+		diffBody = {
+			available: true,
+			truncated: false,
+			mode: "file",
+			path: "pkg/app.go",
+			lines: [{ kind: "add", text: "x", oldLine: 0, newLine: 3 }],
+		};
+		renderView(vi.fn(), "pkg/app.go", 2, "first-hunk");
+
+		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
+		expect(editorProps.current?.line).toBe(2);
 	});
 
 	it("calls onClose when the back button is clicked", async () => {

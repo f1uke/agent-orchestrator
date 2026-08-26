@@ -43,6 +43,14 @@ export type WorkspaceFileOpen = {
 	 * every caller of this type changing shape on that day.
 	 */
 	column?: number;
+	/**
+	 * Where to land when no explicit `line` is given. "first-hunk" opens on what
+	 * this branch changed rather than on line 1 — a Changes row means "show me
+	 * this file's changes", and line 1 is almost never where they are. An
+	 * explicit `line` always wins: a terminal `:42` and a go-to-definition target
+	 * both name a line the reader asked for.
+	 */
+	focus?: "first-hunk";
 	/** Carried through so the caller can decide whether to reveal it in the tree. */
 	inWorkspace?: boolean;
 };
