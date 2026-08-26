@@ -39,7 +39,12 @@ function renderPalette(
 	onOpenFile = vi.fn(),
 	props: { enabled?: boolean; sessionId?: string; workspaceRoot?: string } = {},
 ) {
-	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	// `retryDelay: 0` matters as much as `retry: false` here. `useWorkspaceFiles`
+	// sets `retry: 1` ITSELF, which overrides the client default, and react-query's
+	// first retry delay is 1000ms - exactly `waitFor`'s default timeout. Without
+	// this the error-path test races a delay it can never reliably beat, and fails
+	// only under parallel load.
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
 	render(
 		<QueryClientProvider client={client}>
 			<OpenQuicklyPalette
@@ -358,6 +363,24 @@ describe("OpenQuicklyPalette", () => {
 				await user.type(searchBox(), "confined");
 				expect(await screen.findByText(/isn.t running/i)).toBeInTheDocument();
 				expect(screen.getByText(/ENOENT/)).toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+
+		it("a workspace with no Go files never starts a server at all", async () => {
+			// The file index is already in hand, so this guard is free - and without
+			// it, ⌘⇧O in a TypeScript-only repo spawns gopls in a directory with no
+			// go.mod, every single time the palette opens.
+			body = { available: true, paths: PATHS.filter((p) => !p.endsWith(".go")), truncated: false };
+			const restore = installLanguageServer({ state: "ready", symbols: [GO_SYMBOL] });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "sessionview");
+				await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+				expect(screen.queryByTestId("open-quickly-symbols")).not.toBeInTheDocument();
 			} finally {
 				restore();
 			}

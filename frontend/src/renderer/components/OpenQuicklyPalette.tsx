@@ -24,6 +24,7 @@ const SYMBOL_DEBOUNCE_MS = 90;
 
 /** The one language this slice serves. Slice 5 and 7 add to it. */
 const SYMBOL_LANGUAGE = "go";
+const SYMBOL_EXTENSION = ".go";
 
 /** ⌘⇧O on macOS, Ctrl+⇧O elsewhere. Nothing else in the app binds O. */
 function isOpenQuicklyShortcut(event: KeyboardEvent): boolean {
@@ -124,10 +125,18 @@ export function OpenQuicklyPalette({
 
 	const results = useMemo(() => rankFiles(paths ?? [], query, MAX_RESULTS), [paths, query]);
 
+	// Only attach where there is actually Go to serve. The file index is already
+	// in hand, so this costs nothing - and without it, ⌘⇧O in a TypeScript-only
+	// repo would spawn gopls in a directory with no go.mod, every time.
+	const hasSymbolLanguage = useMemo(() => paths?.some((p) => p.endsWith(SYMBOL_EXTENSION)) ?? false, [paths]);
+
 	// The Go server for THIS workspace, attached only while the palette is OPEN.
 	// Pressing ⌘⇧O is therefore what starts gopls - not opening a session, and
 	// not launching the app - and closing the palette begins its idle countdown.
-	const server = useLanguageServer(open && workspaceRoot ? workspaceRoot : undefined, SYMBOL_LANGUAGE);
+	const server = useLanguageServer(
+		open && workspaceRoot && hasSymbolLanguage ? workspaceRoot : undefined,
+		SYMBOL_LANGUAGE,
+	);
 	const trimmedQuery = query.trim();
 
 	/**
