@@ -619,7 +619,10 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					sessionId={sessionId}
 					path={workspaceFile.path}
 					line={workspaceFile.line}
+					column={workspaceFile.column}
+					workspaceRoot={directory}
 					onClose={() => setWorkspaceFile(null)}
+					onOpenFile={openWorkspaceFile}
 				/>
 			);
 		}
@@ -769,7 +772,12 @@ export function SessionView({ sessionId }: SessionViewProps) {
           and knows nothing about the viewer above — which is why swapping that
           viewer for Monaco did not touch it. `hasInspector` is the "this session
           has a worktree" test; an orchestrator has none to index. */}
-			<OpenQuicklyPalette enabled={hasInspector} onOpenFile={openWorkspaceFile} sessionId={sessionId} />
+			<OpenQuicklyPalette
+				enabled={hasInspector}
+				onOpenFile={openWorkspaceFile}
+				sessionId={sessionId}
+				workspaceRoot={directory}
+			/>
 			<SplitDragLayer />
 			{browserPoppedOut && hasWebUI && session
 				? createPortal(

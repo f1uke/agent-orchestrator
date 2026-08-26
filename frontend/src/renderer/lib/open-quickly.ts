@@ -65,7 +65,7 @@ const LEAD_GAP = 1; // per character skipped before the match begins
  * a bonus would put the spike's own regression back on the table, so it stays
  * absolute until someone decides otherwise with a case in hand.
  */
-const NAME_TIER = 1000;
+export const NAME_TIER = 1000;
 
 const EXACT_NAME = 100; // basename === query
 const EXACT_STEM = 60; // basename without its extension === query
@@ -250,7 +250,7 @@ function extensionOf(basename: string): string {
 }
 
 /** Rule 2: what kind of file this is, as a score adjustment. */
-function kindWeight(basename: string): number {
+export function kindWeight(basename: string): number {
 	const ext = extensionOf(basename);
 	if (ext === "") return 0;
 	if (CODE_EXT.has(ext)) return KIND_CODE;
@@ -260,7 +260,7 @@ function kindWeight(basename: string): number {
 }
 
 /** Rule 3: how much of this path's SHAPE says "generated". */
-function generatedPenalty(path: string): number {
+export function generatedPenalty(path: string): number {
 	let penalty = 0;
 	const cut = basenameStart(path);
 	const dirs = path.slice(0, cut === 0 ? 0 : cut - 1);
@@ -418,6 +418,24 @@ function greedyAlignment(lowerText: string, lowerQuery: string): Scored | null {
 	if (j < lowerQuery.length) return null;
 	return { score: MATCH * lowerQuery.length, positions };
 }
+
+/**
+ * The alignment scorer, exposed so SYMBOL ranking reuses it rather than growing
+ * a second one that drifts from this one the first time either is tuned.
+ *
+ * `scoreFile` below is unchanged and its tests must stay green byte-for-byte -
+ * this is an extraction of the dispatch between the exact scorer and the
+ * long-text greedy fallback, not a retune of either.
+ */
+export function scoreText(text: string, query: string, lowerQuery: string): Scored | null {
+	const lowerText = text.toLowerCase();
+	if (subsequenceEnd(lowerText, lowerQuery) < 0) return null;
+	return lowerText.length > MAX_SCORED_LENGTH
+		? greedyAlignment(lowerText, lowerQuery)
+		: scoreAlignment(text, lowerText, query, lowerQuery);
+}
+
+export type { Scored };
 
 /**
  * Score one path against a query, or null if the query cannot be read out of it.

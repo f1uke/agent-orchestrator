@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { components } from "../../api/schema";
 import { MONO } from "../lib/comment-inbox";
+import { registerLspNavigation } from "../lib/lsp/definition";
+import { languageIdForLsp } from "../lib/lsp/language-ids";
+import { fileUriForPath } from "../lib/lsp/lsp-uri";
+import { type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
 import { ensureLanguage, ensureMonacoReady, languageForPath, monaco } from "../lib/monaco-setup";
 import { editorThemeName } from "../lib/monaco-theme";
+import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 
 type LineChange = components["schemas"]["LineChangeDTO"];
 
@@ -139,14 +144,33 @@ export default function MonacoFileEditor({
 	text,
 	changedLines,
 	line,
+	column,
 	theme,
+	absolutePath,
+	workspaceRoot,
+	onOpenFile,
+	onServerState,
 }: {
 	sessionId: string;
 	path: string;
 	text: string;
 	changedLines: LineChange[];
 	line?: number;
+	/** 1-based column. Slice 2 left this field on the seam for exactly this. */
+	column?: number;
 	theme: "dark" | "light";
+	/**
+	 * The file's absolute on-disk path. A language server speaks `file:` URIs and
+	 * knows nothing about this app's `ao-file:` models, so without it there is no
+	 * intelligence for this pane.
+	 */
+	absolutePath?: string;
+	/** The session's worktree root - the key the language server is shared under. */
+	workspaceRoot?: string;
+	/** The single file-open seam, so ⌘click opens a target the way everything else does. */
+	onOpenFile?: (file: WorkspaceFileOpen) => void;
+	/** Lets the chrome above report what the language server is doing. */
+	onServerState?: (state: { state: LanguageServerHandle["state"]; detail?: string }) => void;
 }) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -171,6 +195,52 @@ export default function MonacoFileEditor({
 		() => monaco.Uri.from({ scheme: "ao-file", path: path.startsWith("/") ? path : `/${sessionId}/${path}` }),
 		[path, sessionId],
 	);
+
+	// The language server for this file's language, in this workspace. Nothing
+	// starts until a file of a language we serve is actually opened, so a session
+	// nobody opens a .go file in never pays for gopls.
+	const lspLanguage = useMemo(() => languageIdForLsp(language), [language]);
+	const server = useLanguageServer(workspaceRoot, lspLanguage);
+
+	// Read through refs by the Monaco provider, which is registered once per
+	// LANGUAGE and must survive an idle stop and re-attach without being torn
+	// down and rebuilt underneath the editor.
+	const serverRef = useRef(server);
+	serverRef.current = server;
+	const openFileRef = useRef(onOpenFile);
+	openFileRef.current = onOpenFile;
+	const absolutePathRef = useRef(absolutePath);
+	absolutePathRef.current = absolutePath;
+
+	useEffect(() => {
+		onServerState?.({ state: server.state, detail: server.detail });
+	}, [server.state, server.detail, onServerState]);
+
+	// ⌘click. Both halves - the provider AND the opener - live in
+	// registerLspNavigation; a provider alone resolves the definition and then
+	// does not move the editor.
+	useEffect(() => {
+		if (!ready || !lspLanguage) return;
+		const registration = registerLspNavigation({
+			languageId: lspLanguage,
+			getClient: () => serverRef.current.client,
+			getWorkspaceRoot: () => workspaceRoot,
+			getAbsolutePath: () => absolutePathRef.current ?? null,
+			openFile: (file) => openFileRef.current?.(file),
+		});
+		return () => registration.dispose();
+	}, [ready, lspLanguage, workspaceRoot]);
+
+	// Tell the server about this buffer. Keyed on the CLIENT, so a re-attached
+	// server learns about the file that is on screen - the spike's prototype
+	// short-circuited here and left the pane with no intelligence and no error.
+	useEffect(() => {
+		const client = server.client;
+		if (!client || !absolutePath || !lspLanguage || modelGeneration === 0) return;
+		const fileUri = fileUriForPath(absolutePath);
+		client.didOpen(fileUri, lspLanguage, text);
+		return () => client.didClose(fileUri);
+	}, [server.client, absolutePath, lspLanguage, text, modelGeneration]);
 
 	// Create once per mount; content, language and decorations are applied by the
 	// effects below so a re-render never tears the editor down.
@@ -271,16 +341,20 @@ export default function MonacoFileEditor({
 		collection.set(decorations);
 	}, [modelGeneration, changedLines]);
 
-	// Land on the referenced line rather than on line 1.
+	// Land on the referenced line and column rather than on line 1. A terminal
+	// reference carries no column and ⌘⇧O over files opens at the top, but a
+	// go-to-definition target lands on a SYMBOL, and putting the caret on it is
+	// the difference between "it moved" and "it moved to roughly the right place".
 	useEffect(() => {
 		if (modelGeneration === 0 || line == null) return;
 		const editor = editorRef.current;
 		const model = editor?.getModel();
 		if (!editor || !model) return;
 		const target = Math.min(Math.max(line, 1), model.getLineCount());
-		editor.setPosition({ lineNumber: target, column: 1 });
+		const targetColumn = Math.min(Math.max(column ?? 1, 1), model.getLineMaxColumn(target));
+		editor.setPosition({ lineNumber: target, column: targetColumn });
 		editor.revealLineInCenter(target);
-	}, [modelGeneration, line]);
+	}, [modelGeneration, line, column]);
 
 	return (
 		<div style={{ position: "relative", flex: 1, minHeight: 0 }}>

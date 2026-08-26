@@ -1,0 +1,120 @@
+import { pathForFileUri } from "./lsp/lsp-uri";
+import { generatedPenalty, kindWeight, NAME_TIER, normalizeQuery, scoreText } from "./open-quickly";
+
+/**
+ * Ranking for the SYMBOL half of ⌘⇧O.
+ *
+ * Built ON the file scorer rather than beside it. The editor spike measured four
+ * rules against Xcode's own Open Quickly, and slice 2 already implements all
+ * four for paths; a second scorer would drift from the first the moment either
+ * one is tuned.
+ *
+ * The one rule that is genuinely new here is DEDUPE PER DECLARATION. A symbol
+ * index holds one unit per built arch/target, so the same declaration arrives
+ * two or three times. The key is (name, kind, uri, line) rather than name alone,
+ * because two real declarations of the same name in one file must both survive.
+ */
+export type SymbolHit = {
+	name: string;
+	kind: number;
+	containerName?: string;
+	uri: string;
+	/** 1-based, already converted from LSP's 0-based. */
+	line: number;
+	/** 1-based. */
+	column: number;
+};
+
+export type SymbolMatch = SymbolHit & {
+	/** Workspace-relative inside the root, absolute outside it - the seam's shape. */
+	path: string;
+	score: number;
+	/** Indices into `name` that the query matched; the palette underlines these. */
+	positions: number[];
+};
+
+type RawLocation = { uri?: unknown; range?: { start?: { line?: unknown; character?: unknown } } };
+
+/**
+ * `workspace/symbol` answers with `SymbolInformation[]` or `WorkspaceSymbol[]`,
+ * and the latter's `location` may be `{uri}` alone. Anything else degrades to
+ * nothing rather than throwing: a palette that crashes on an odd server reply is
+ * worse than one that finds no symbols.
+ */
+export function parseWorkspaceSymbols(result: unknown): SymbolHit[] {
+	if (!Array.isArray(result)) return [];
+	const hits: SymbolHit[] = [];
+	for (const raw of result) {
+		if (!raw || typeof raw !== "object") continue;
+		const item = raw as { name?: unknown; kind?: unknown; containerName?: unknown; location?: RawLocation };
+		const location = item.location;
+		if (typeof item.name !== "string" || item.name === "" || typeof location?.uri !== "string") continue;
+		const start = location.range?.start;
+		hits.push({
+			name: item.name,
+			kind: typeof item.kind === "number" ? item.kind : 0,
+			containerName: typeof item.containerName === "string" ? item.containerName : undefined,
+			uri: location.uri,
+			line: typeof start?.line === "number" ? start.line + 1 : 1,
+			column: typeof start?.character === "number" ? start.character + 1 : 1,
+		});
+	}
+	return hits;
+}
+
+function relativePath(uri: string, workspaceRoot: string): string {
+	const absolute = pathForFileUri(uri);
+	const root = workspaceRoot.endsWith("/") ? workspaceRoot.slice(0, -1) : workspaceRoot;
+	return absolute.startsWith(`${root}/`) ? absolute.slice(root.length + 1) : absolute;
+}
+
+/** Longer names lose ties, matching the file scorer's tiebreak. */
+const LENGTH_TIEBREAK = 0.05;
+
+export function rankSymbols(
+	hits: readonly SymbolHit[],
+	query: string,
+	workspaceRoot: string,
+	limit = 50,
+): SymbolMatch[] {
+	const trimmed = normalizeQuery(query);
+	if (trimmed === "") return [];
+	const lowerQuery = trimmed.toLowerCase();
+
+	const seen = new Set<string>();
+	const matches: SymbolMatch[] = [];
+	for (const hit of hits) {
+		// NUL as the separator, written as an ESCAPE rather than a raw byte: it
+		// cannot occur in a name, a uri or a number, so no combination of fields
+		// can collide - and a literal NUL in the source would make git treat this
+		// file as binary, which silently costs every diff and review of it.
+		const key = `${hit.name}\0${hit.kind}\0${hit.uri}\0${hit.line}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+
+		const scored = scoreText(hit.name, trimmed, lowerQuery);
+		if (!scored) continue;
+		const path = relativePath(hit.uri, workspaceRoot);
+		// NAME_TIER for parity with the file scorer, where it separates a basename
+		// match from a directory-only one. A symbol always matched its NAME, so the
+		// tier is constant here; it keeps the two scales comparable if they are ever
+		// merged into one ranked list.
+		const score =
+			NAME_TIER +
+			scored.score +
+			kindWeight(path.slice(path.lastIndexOf("/") + 1)) +
+			generatedPenalty(path) -
+			hit.name.length * LENGTH_TIEBREAK;
+		matches.push({ ...hit, path, score, positions: scored.positions });
+	}
+
+	// Ties break on name then path, so the order is deterministic: a list that
+	// reshuffles between two identical queries is a list you cannot learn.
+	matches.sort(
+		(a, b) =>
+			b.score - a.score ||
+			(a.name < b.name ? -1 : a.name > b.name ? 1 : 0) ||
+			(a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+	);
+	return matches.slice(0, limit);
+}

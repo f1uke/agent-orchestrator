@@ -8,6 +8,9 @@ import type { OpenInTargets } from "./main/open-in-targets";
 import type { RunXcodegenResult } from "./main/run-xcodegen";
 import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
 import type { CompanionSettings } from "./main/companion-settings";
+import type { JsonRpcMessage } from "./main/lsp/lsp-framing";
+import type { LspState } from "./main/lsp/lsp-process";
+import type { LspAttachment, LspHealth, LspResultOutcome } from "./main/lsp/lsp-registry";
 
 export type BrowserBoundsInput = {
 	viewId: string;
@@ -96,6 +99,37 @@ const api = {
 			ipcRenderer.on("browser:navState", wrapped);
 			return () => {
 				ipcRenderer.off("browser:navState", wrapped);
+			};
+		},
+	},
+	// Language servers. The renderer cannot spawn a child, so this is the whole
+	// channel: `attach` resolves only once the server has finished its handshake
+	// and settled, so a client here is never one that looks connected and answers
+	// nothing.
+	lsp: {
+		attach: (input: { root: string; languageId: string }) =>
+			ipcRenderer.invoke("lsp:attach", input) as Promise<LspAttachment>,
+		detach: (handleId: string) => ipcRenderer.send("lsp:detach", handleId),
+		send: (handleId: string, message: JsonRpcMessage) => ipcRenderer.send("lsp:send", { handleId, message }),
+		noteResult: (handleId: string, outcome: LspResultOutcome) =>
+			ipcRenderer.send("lsp:noteResult", { handleId, outcome }),
+		health: () => ipcRenderer.invoke("lsp:health") as Promise<LspHealth[]>,
+		onMessage: (listener: (event: { handleId: string; message: JsonRpcMessage }) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, payload: { handleId: string; message: JsonRpcMessage }) =>
+				listener(payload);
+			ipcRenderer.on("lsp:message", wrapped);
+			return () => {
+				ipcRenderer.off("lsp:message", wrapped);
+			};
+		},
+		onState: (listener: (event: { handleId: string; key: string; state: LspState; detail?: string }) => void) => {
+			const wrapped = (
+				_event: Electron.IpcRendererEvent,
+				payload: { handleId: string; key: string; state: LspState; detail?: string },
+			) => listener(payload);
+			ipcRenderer.on("lsp:state", wrapped);
+			return () => {
+				ipcRenderer.off("lsp:state", wrapped);
 			};
 		},
 	},

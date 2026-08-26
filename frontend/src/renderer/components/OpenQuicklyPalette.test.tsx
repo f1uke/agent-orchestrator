@@ -35,15 +35,74 @@ beforeEach(() => {
 	});
 });
 
-function renderPalette(onOpenFile = vi.fn(), props: { enabled?: boolean; sessionId?: string } = {}) {
-	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPalette(
+	onOpenFile = vi.fn(),
+	props: { enabled?: boolean; sessionId?: string; workspaceRoot?: string } = {},
+) {
+	// `retryDelay: 0` matters as much as `retry: false` here. `useWorkspaceFiles`
+	// sets `retry: 1` ITSELF, which overrides the client default, and react-query's
+	// first retry delay is 1000ms - exactly `waitFor`'s default timeout. Without
+	// this the error-path test races a delay it can never reliably beat, and fails
+	// only under parallel load.
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
 	render(
 		<QueryClientProvider client={client}>
-			<OpenQuicklyPalette sessionId={props.sessionId ?? "proj-1"} enabled={props.enabled} onOpenFile={onOpenFile} />
+			<OpenQuicklyPalette
+				sessionId={props.sessionId ?? "proj-1"}
+				enabled={props.enabled}
+				onOpenFile={onOpenFile}
+				workspaceRoot={props.workspaceRoot}
+			/>
 		</QueryClientProvider>,
 	);
 	return onOpenFile;
 }
+
+/**
+ * Stand a language server up on `window.ao.lsp` in whatever state a test needs.
+ * `symbols` is the raw `workspace/symbol` payload, so the parser is exercised
+ * rather than bypassed.
+ */
+function installLanguageServer(options: {
+	state: "indexing" | "ready" | "failed";
+	detail?: string;
+	symbols?: unknown[];
+	onRequest?: (method: string, params: unknown) => Promise<unknown>;
+}) {
+	const previous = (globalThis as unknown as { ao?: Record<string, unknown> }).ao;
+	const bridge = {
+		attach: async () => {
+			if (options.state === "failed") throw new Error(options.detail ?? "gopls: spawn ENOENT");
+			return { handleId: "h1", key: "go /w", state: options.state, detail: options.detail };
+		},
+		detach: () => undefined,
+		send: (handleId: string, message: Record<string, unknown>) => {
+			if (typeof message.id !== "number") return;
+			const answer =
+				options.onRequest?.(String(message.method), message.params) ?? Promise.resolve(options.symbols ?? []);
+			void answer.then((result) => listeners.forEach((l) => l({ handleId, message: { id: message.id, result } })));
+		},
+		noteResult: () => undefined,
+		health: async () => [],
+		onMessage: (cb: (e: { handleId: string; message: Record<string, unknown> }) => void) => {
+			listeners.add(cb);
+			return () => listeners.delete(cb);
+		},
+		onState: () => () => undefined,
+	};
+	const listeners = new Set<(e: { handleId: string; message: Record<string, unknown> }) => void>();
+	(globalThis as unknown as { ao: Record<string, unknown> }).ao = { ...previous, lsp: bridge };
+	return () => {
+		(globalThis as unknown as { ao?: Record<string, unknown> }).ao = previous;
+	};
+}
+
+const GO_SYMBOL = {
+	name: "ConfinedPath",
+	kind: 12,
+	containerName: "previewutil",
+	location: { uri: "file:///w/internal/preview/entry.go", range: { start: { line: 210, character: 5 } } },
+};
 
 /** ⌘⇧O, the way the window listener sees it. */
 async function pressOpenQuickly(user: ReturnType<typeof userEvent.setup>) {
@@ -258,5 +317,177 @@ describe("OpenQuicklyPalette", () => {
 		renderPalette();
 		await pressOpenQuickly(user);
 		await waitFor(() => expect(screen.getByText(/daemon is down/i)).toBeInTheDocument());
+	});
+
+	/**
+	 * 🗝 A server that is up, answering, and returning empty must be
+	 * DISTINGUISHABLE from one that is still indexing and from one that is not
+	 * running. Three distinct strings, asserted, because answering NOTHING while
+	 * looking healthy is what this whole stack does wrong.
+	 */
+	describe("the symbol section never goes silent", () => {
+		it("not ready → says it is loading packages, and shows no symbol rows", async () => {
+			const restore = installLanguageServer({ state: "indexing" });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "confined");
+				expect(await screen.findByText(/loading this workspace.s go packages/i)).toBeInTheDocument();
+				expect(screen.queryByText(/no go symbols match/i)).not.toBeInTheDocument();
+				expect(screen.queryByText("ConfinedPath")).not.toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+
+		it("ready but empty → says nothing matched, naming the query", async () => {
+			const restore = installLanguageServer({ state: "ready", symbols: [] });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "confined");
+				expect(await screen.findByText(/no go symbols match .confined./i)).toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+
+		it("failed → says the server is not running, and why", async () => {
+			const restore = installLanguageServer({ state: "failed", detail: "gopls: spawn ENOENT" });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "confined");
+				expect(await screen.findByText(/isn.t running/i)).toBeInTheDocument();
+				expect(screen.getByText(/ENOENT/)).toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+
+		it("a workspace with no Go files never starts a server at all", async () => {
+			// The file index is already in hand, so this guard is free - and without
+			// it, ⌘⇧O in a TypeScript-only repo spawns gopls in a directory with no
+			// go.mod, every single time the palette opens.
+			body = { available: true, paths: PATHS.filter((p) => !p.endsWith(".go")), truncated: false };
+			const restore = installLanguageServer({ state: "ready", symbols: [GO_SYMBOL] });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "sessionview");
+				await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+				expect(screen.queryByTestId("open-quickly-symbols")).not.toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+
+		it("no workspace root → no symbol section at all, and files still work", async () => {
+			// An orchestrator session has no worktree. The FILE half must not be held
+			// hostage by the half that needs a language server.
+			const restore = installLanguageServer({ state: "ready", symbols: [GO_SYMBOL] });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn());
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "sessionview");
+				await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+				expect(screen.queryByTestId("open-quickly-symbols")).not.toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+	});
+
+	describe("choosing a symbol", () => {
+		it("opens through the seam WITH a column", async () => {
+			const restore = installLanguageServer({ state: "ready", symbols: [GO_SYMBOL] });
+			try {
+				const user = userEvent.setup();
+				const onOpenFile = renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "confinedpath");
+				await user.click(await screen.findByText("ConfinedPath"));
+				// A column is the whole reason slice 2 left that field on the seam.
+				expect(onOpenFile).toHaveBeenCalledWith({
+					path: "internal/preview/entry.go",
+					line: 211,
+					column: 6,
+					inWorkspace: true,
+				});
+			} finally {
+				restore();
+			}
+		});
+
+		it("a symbol outside the workspace opens as an absolute path", async () => {
+			// Go definitions land in GOROOT constantly; dropping them would make the
+			// most common ⌘⇧O hit a dead row.
+			const restore = installLanguageServer({
+				state: "ready",
+				symbols: [
+					{
+						name: "Printf",
+						kind: 12,
+						location: { uri: "file:///usr/local/go/src/fmt/print.go", range: { start: { line: 0, character: 5 } } },
+					},
+				],
+			});
+			try {
+				const user = userEvent.setup();
+				const onOpenFile = renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "printf");
+				await user.click(await screen.findByText("Printf"));
+				expect(onOpenFile).toHaveBeenCalledWith({
+					path: "/usr/local/go/src/fmt/print.go",
+					line: 1,
+					column: 6,
+					inWorkspace: false,
+				});
+			} finally {
+				restore();
+			}
+		});
+	});
+
+	describe("a stale symbol answer is discarded, not shown late", () => {
+		it("the previous query's symbols vanish the moment the query changes", async () => {
+			// 🗝 The tag, not the cancellation guard, is what this pins. A request is
+			// debounced, so between the keystroke and the next answer there is a
+			// window in which the OLD query's rows are still in state. Without
+			// checking that the answer's tag still equals the box, those rows sit
+			// there as if they answered the new query - which is exactly the
+			// wrong-then-right behaviour the spike hit on the symbol side.
+			const restore = installLanguageServer({
+				state: "ready",
+				onRequest: async (_method, params) => {
+					const query = (params as { query: string }).query;
+					if (query === "confined") return [GO_SYMBOL];
+					// Never resolves, so the assertion below runs INSIDE the window.
+					return new Promise(() => {});
+				},
+			});
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "confined");
+				// The row, not its text: a prefix match splits the name across <mark>
+				// runs, so the matched characters are literally in separate elements.
+				const symbolSection = () => screen.getByTestId("open-quickly-symbols");
+				await waitFor(() => expect(within(symbolSection()).getAllByRole("option")).toHaveLength(1));
+
+				await user.type(searchBox(), "x"); // now "confinedx"; its answer never arrives
+				await waitFor(() => expect(within(symbolSection()).queryAllByRole("option")).toHaveLength(0));
+				expect(screen.getByText(/searching symbols/i)).toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
 	});
 });

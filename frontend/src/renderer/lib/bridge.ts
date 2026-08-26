@@ -128,6 +128,21 @@ export const aoBridge: AoBridge =
 			onOpenPetLibrary: () => () => undefined,
 			looksChanged: () => undefined,
 		},
+		// No main process means no child processes, so there is no language server
+		// and there never will be one on this path. `attach` REJECTS with the reason
+		// rather than resolving into a channel that answers nothing - the editor
+		// then shows "no language server" instead of a permanent spinner.
+		lsp: {
+			attach: async () => {
+				throw new Error("no Electron main process: language servers are unavailable in browser preview");
+			},
+			detach: () => undefined,
+			send: () => undefined,
+			noteResult: () => undefined,
+			health: async () => [],
+			onMessage: () => () => undefined,
+			onState: () => () => undefined,
+		},
 		updates: {
 			getStatus: async () => ({ state: "idle" }),
 			check: async () => undefined,

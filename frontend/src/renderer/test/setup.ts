@@ -175,5 +175,19 @@ if (typeof window !== "undefined") {
 			install: async () => undefined,
 			onStatus: () => () => undefined,
 		},
+		// The default: no language server. A test that wants one installs its own
+		// `window.ao.lsp` over this, so a component under test never accidentally
+		// gets intelligence it did not ask for.
+		lsp: {
+			attach: async () => {
+				throw new Error("no language server in tests");
+			},
+			detach: () => undefined,
+			send: () => undefined,
+			noteResult: () => undefined,
+			health: async () => [],
+			onMessage: () => () => undefined,
+			onState: () => () => undefined,
+		},
 	};
 } // end if (typeof window !== "undefined")
