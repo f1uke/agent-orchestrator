@@ -246,3 +246,40 @@ test("resolving a conflict throws nothing into the renderer", async ({ page }) =
 
 	expect(errors).toEqual([]);
 });
+
+/**
+ * 🗝 Monaco throws `TextModel got disposed before DiffEditorWidget model got
+ * reset` when a model is dropped while a live editor still holds it — and it
+ * throws it into the page, where jsdom tests and a green suite both see
+ * nothing. In Electron that is a real unhandled error in the renderer.
+ *
+ * qa found the first occurrence (entering diff mode). This is the second, in
+ * the path that only opens when a file's branch diff is ALREADY CACHED: a file
+ * opened for the first time has none, so the pane drops out of diff mode before
+ * the switch and the hazard is closed by accident rather than by design.
+ *
+ * The warm-up below is therefore load-bearing, not ceremony. Without it this
+ * test passes against the broken code.
+ */
+test("switching to an already-visited file while in diff mode throws nothing", async ({ page }) => {
+	const errors: string[] = [];
+	page.on("pageerror", (e) => errors.push(e.message));
+
+	await openFile(page, CONFLICTING);
+	const pane = page.getByTestId("terminal");
+	await pane.getByRole("tab", { name: "Changes" }).click();
+	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
+
+	await openFile(page, ORDINARY);
+	await pane.getByRole("tab", { name: "Changes" }).click();
+	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
+	// Both diffs are cached now; anything thrown so far belongs to another case.
+	errors.length = 0;
+
+	// Back to the first file. Its diff is cached, so the pane stays in diff mode
+	// across the switch — which is what leaves a live diff editor holding the
+	// model the path change is about to drop.
+	await openFile(page, CONFLICTING);
+	await expect(page.getByTestId("monaco-file-editor")).toBeVisible();
+	expect(errors, `switching to a cached file: ${errors.join(" | ")}`).toEqual([]);
+});

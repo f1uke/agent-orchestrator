@@ -491,10 +491,23 @@ export default function MonacoFileEditor({
 
 	// The model outlives every editor and every mode switch, and is disposed only
 	// when this pane goes away or points at a different file.
+	//
+	// 🗝 Never dispose it while a live editor still holds it — the same defect as
+	// the diff-original one above, in a second place. On UNMOUNT this is safe
+	// because the editor effect's cleanup is declared earlier and so runs first,
+	// leaving `codeEditorRef` null. On a PATH CHANGE it is not: the editor is
+	// still on screen showing this model, and the content effect below disposes
+	// it properly after attaching the replacement.
+	//
+	// It was previously closed only by accident — a newly opened file has no
+	// cached branch diff, so the pane fell back out of diff mode before the
+	// switch. Re-opening a file whose diff IS already cached leaves it in diff
+	// mode, and then this fired with the model still attached.
 	useEffect(() => {
 		return () => {
 			appliedTextRef.current = null;
-			monaco.editor.getModel(uri)?.dispose();
+			const model = monaco.editor.getModel(uri);
+			if (model && codeEditorRef.current?.getModel() !== model) model.dispose();
 		};
 	}, [uri]);
 
