@@ -52,9 +52,13 @@ const SERVERS: LanguageServerSpec[] = [
 /**
  * The spec for a language, or null when this app ships no server for it.
  *
- * `env` carries a test-only escape hatch (`AO_LSP_COMMAND_<LANG>`) so the
- * registry's lifecycle policy can be exercised against a fake server on a
- * machine with no gopls. It is never set in production.
+ * `AO_LSP_COMMAND_<LANG>` / `AO_LSP_ARGS_<LANG>` override which binary is
+ * spawned. The tests use it to exercise the registry's lifecycle policy against
+ * a fake server on a machine with no gopls - but it is read from the resolved
+ * LOGIN-SHELL env like everything else here, so a user with gopls somewhere
+ * unusual can set it deliberately. That is the same trust level as `PATH`
+ * already carries, and it is stated rather than described as test-only, because
+ * nothing enforces test-only.
  */
 export function serverForLanguage(languageId: string, env: NodeJS.ProcessEnv = {}): LanguageServerSpec | null {
 	const spec = SERVERS.find((s) => s.languageId === languageId);
