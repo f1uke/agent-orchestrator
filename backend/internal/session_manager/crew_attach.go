@@ -40,6 +40,14 @@ import (
 // AttachCrewMember adds a member in `role` to the task dev works on, and starts
 // it.
 //
+// `requestedBy` is the CALLER's own session id when an AO session made the call
+// (`ao crew add` sends $AO_SESSION_ID), and empty when a human did - the desktop
+// app's `+ qa`, or the CLI typed in an ordinary shell, neither of which has that
+// variable set. It is the only thing that can tell the two apart: both arrive on
+// the same route, from the same loopback address, and the daemon cannot see who
+// is at the keyboard. It exists for exactly one refusal, below, and an
+// unidentified caller is never refused.
+//
 // The "is this task finished?" refusal is NOT here: it needs the session's
 // derived status, which is assembled from PR facts at service read time. See
 // Service.AttachCrewMember.
@@ -47,8 +55,8 @@ import (
 // Starting is BEST EFFORT and deliberately not fatal: the member is on the task
 // either way, and a human who asked for a qa would rather have one they can open
 // than an error and no member at all.
-func (m *Manager) AttachCrewMember(ctx context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
-	member, err := m.attachCrewMemberRow(ctx, devID, role)
+func (m *Manager) AttachCrewMember(ctx context.Context, devID domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.SessionRecord, error) {
+	member, err := m.attachCrewMemberRow(ctx, devID, role, requestedBy)
 	if err != nil {
 		return domain.SessionRecord{}, err
 	}
@@ -67,7 +75,7 @@ func (m *Manager) AttachCrewMember(ctx context.Context, devID domain.SessionID, 
 // because a mutex is a property of one process and the invariant should be a
 // property of the data. Starting the member happens after this returns, because
 // Resume takes the same lock and lockCrew is not reentrant.
-func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
+func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.SessionRecord, error) {
 	defer m.lockCrew(devID)()
 
 	dev, err := m.getRecord(ctx, devID)
@@ -83,6 +91,21 @@ func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionI
 	project, err := m.loadProject(ctx, dev.ProjectID)
 	if err != nil {
 		return domain.SessionRecord{}, err
+	}
+	// THE POLICY GATE. A project that has turned automatic crew formation off
+	// keeps its manual escape hatch for a HUMAN and closes it to every AO
+	// session. Read from the loaded ProjectRecord, never from a config payload on
+	// the wire: `disableAutoCrew` is a bool with `omitempty`, so absent and false
+	// are the same bytes there, and a reader that cannot tell them apart is the
+	// exact trap that wiped a config file in #249.
+	if requestedBy != "" && project.Config.DisableAutoCrew {
+		return domain.SessionRecord{}, fmt.Errorf(
+			"%w: %s has \"Never form a crew automatically\" turned on, so an AO session may not attach a %s to %s. "+
+				"This is the project's policy, not a temporary failure, and there is no flag that overrides it: "+
+				"do the work solo and own the smoke checklist yourself. A person can still add one by hand - "+
+				"the `+ qa` control on the task in the app, or `ao crew add %s` typed in their own shell - "+
+				"so ask them if this task really needs a second agent",
+			ErrCrewAutoFormationOff, dev.ProjectID, role, devID, devID)
 	}
 	// One shared eligibility test with the spawn seam: orchestrator, workspace
 	// project, terminated dev, no materialized worktree, no nesting, bad role.
@@ -108,6 +131,17 @@ func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionI
 	}
 	m.logger.Info("crew: member attached to a running task",
 		"crew", dev.ID, "dev", dev.ID, "member", member.ID, "role", string(role), "taskSize", string(dev.TaskSize.WithDefault()))
+	// A qa on a crew-off project is a human overruling their own setting, which
+	// is allowed and must never be silent. What let the incident this gate fixes
+	// run for two days was that nothing anywhere said "a qa appeared on a project
+	// that forms none": the agents' reports mentioned it as an ordinary
+	// implementation detail and it read as one. So every such attach leaves a
+	// WARN naming the project, the task and the member - findable after the fact
+	// even when the gate above lets the call through.
+	if project.Config.DisableAutoCrew {
+		m.logger.Warn("crew: a member was attached to a task on a project that forms no crews automatically",
+			"project", dev.ProjectID, "crew", dev.ID, "member", member.ID, "role", string(role), "requestedBy", string(requestedBy))
+	}
 	return member, nil
 }
 

@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -50,6 +52,12 @@ type crewWakeResponse struct {
 
 type crewAddRequest struct {
 	Role string `json:"role,omitempty"`
+	// From names the SENDING session, the same way `ao send` and `ao smoke set`
+	// do. It is the only thing that tells the daemon an AGENT ran this rather
+	// than a person: a human's shell has no $AO_SESSION_ID, so the field is empty
+	// and the call is never refused, while every AO session identifies itself and
+	// is refused on a project that has turned automatic crew formation off.
+	From string `json:"from,omitempty"`
 }
 
 type crewAddResponse struct {
@@ -115,7 +123,12 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 			"merged, or its agent has been torn down).\n\n" +
 			"Attaching is one-way. To undo it, stand the member down with `ao session kill` -\n" +
 			"which leaves the task's worktree, branch and pull request with dev, exactly where\n" +
-			"they were - and `ao session restore` brings the SAME member back.",
+			"they were - and `ao session restore` brings the SAME member back.\n\n" +
+			"On a project whose settings say `Never form a crew automatically`, this command\n" +
+			"is refused when an AO SESSION runs it - the switch turns off the automatic half\n" +
+			"and keeps the manual one, and the manual one is a person's. A human adds a qa\n" +
+			"there from the task's `+ qa` control in the app, or by running this in their own\n" +
+			"shell.",
 		Example: `  ao crew add agent-orchestrator-230   # this task should have a qa after all`,
 		Args:    oneSessionIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -124,8 +137,9 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 				return err
 			}
 			var out crewAddResponse
-			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/members", crewAddRequest{Role: strings.TrimSpace(role)}, &out); err != nil {
-				return err
+			body := crewAddRequest{Role: strings.TrimSpace(role), From: strings.TrimSpace(os.Getenv("AO_SESSION_ID"))}
+			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/members", body, &out); err != nil {
+				return explainCrewAddRefusal(err)
 			}
 			_, printErr := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is on the task and working, in the same worktree; dev keeps running.\n",
 				out.Session.ID, crewRoleOf(out.Session))
@@ -134,6 +148,25 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&role, "role", "qa", "Role the new member fills (only `qa` today: dev is the crew's root, not a seat)")
 	return cmd
+}
+
+// explainCrewAddRefusal turns the crew-off refusal into a usage error (exit 2),
+// the same way `ao smoke set` treats its two: it is not a failure of the command
+// but a statement that this caller may not do this here, and the daemon's
+// message already names who can. Everything else passes through unchanged, so a
+// real error still exits 1 and still looks like one.
+func explainCrewAddRefusal(err error) error {
+	var apiErr apiResponseError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	if apiErr.ErrorBody.Code != "CREW_AUTO_FORMATION_OFF" {
+		return err
+	}
+	if strings.TrimSpace(apiErr.ErrorBody.Message) == "" {
+		return err
+	}
+	return usageError{errors.New(apiErr.ErrorBody.Message)}
 }
 
 func newCrewWakeCommand(ctx *commandContext) *cobra.Command {

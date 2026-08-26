@@ -567,7 +567,7 @@ func (f *fakeCommander) CrewMember(_ context.Context, id domain.SessionID, role 
 	return rec, ok, nil
 }
 
-func (f *fakeCommander) AttachCrewMember(_ context.Context, devID domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
+func (f *fakeCommander) AttachCrewMember(_ context.Context, devID domain.SessionID, role domain.CrewRole, _ domain.SessionID) (domain.SessionRecord, error) {
 	f.crewAttached = append(f.crewAttached, devID)
 	rec := domain.SessionRecord{ID: devID + "-qa", ProjectID: "mer", Kind: domain.KindWorker, IsSuspended: true}
 	rec.CrewID = devID
@@ -1826,7 +1826,7 @@ func TestAttachCrewMember_RefusesAFinishedTask(t *testing.T) {
 			cmd := &fakeCommander{crewDevOf: map[domain.SessionID]domain.SessionRecord{"dev-1": st.sessions["dev-1"]}}
 			svc := &Service{store: st, manager: cmd}
 
-			member, err := svc.AttachCrewMember(context.Background(), "dev-1", domain.CrewRoleQA)
+			member, err := svc.AttachCrewMember(context.Background(), "dev-1", domain.CrewRoleQA, "")
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("a finished task accepted a new crew member")
@@ -1868,7 +1868,7 @@ func TestAttachCrewMember_ResolvesEitherMemberToTheTask(t *testing.T) {
 	}}
 	svc := &Service{store: st, manager: cmd}
 
-	if _, err := svc.AttachCrewMember(context.Background(), "qa-1", domain.CrewRoleQA); err != nil {
+	if _, err := svc.AttachCrewMember(context.Background(), "qa-1", domain.CrewRoleQA, ""); err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
 	if len(cmd.crewAttached) != 1 || cmd.crewAttached[0] != "dev-1" {

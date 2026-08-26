@@ -89,11 +89,18 @@ type ProjectConfig struct {
 	//
 	// It is opt-in (false) so every existing project keeps forming crews exactly
 	// as it did. When it is set, no qa is ever created on its own here - whatever
-	// the task size, and whether or not dev touches a runtime surface - while `ao
-	// crew add` and the topbar's `+ qa` keep working, so one task can still be
-	// opted into a tester by hand. That is the whole point of turning off the
-	// AUTOMATIC half rather than the capability: the cost saving without losing
-	// the escape hatch.
+	// the task size, and whether or not dev touches a runtime surface - while a
+	// PERSON can still opt one task into a tester by hand, from the topbar's `+
+	// qa` or `ao crew add` typed in their own shell. That is the whole point of
+	// turning off the AUTOMATIC half rather than the capability: the cost saving
+	// without losing the escape hatch.
+	//
+	// The hatch is a person's, and AttachCrewMember enforces that. It was built
+	// for a human clicking, and an AGENT walked through it too: with this set,
+	// six consecutive tasks still got a qa, because each worker's brief hands the
+	// smoke checklist to qa, so on finding none it ran `ao crew add` itself. An
+	// attach that names a calling session is now refused (ErrCrewAutoFormationOff),
+	// the orchestrator included.
 	//
 	// It is deliberately NOT the same fact as `--task-size mechanical`, which
 	// additionally authorizes an agent to skip the brainstorm -> plan -> TDD

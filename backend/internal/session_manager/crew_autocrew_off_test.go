@@ -1,6 +1,9 @@
 package sessionmanager
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -136,7 +139,7 @@ func TestAddCrewMember_StillWorksOnACrewOffProject(t *testing.T) {
 	m, st, _, _ := crewOffManager(t)
 	dev := standardDev(t, m, st)
 
-	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 	if err != nil {
 		t.Fatalf("a human could not add a qa by hand on a crew-off project: %v", err)
 	}
@@ -171,5 +174,121 @@ func TestNoteRuntimeTouch_OtherProjectsStillFormCrews(t *testing.T) {
 
 	if !st.sessions[dev.ID].InCrew() {
 		t.Fatal("turning automatic crew off for one project turned it off for another")
+	}
+}
+
+// THE HATCH IS A PERSON'S, AND THE GATE IS WHAT MAKES THAT TRUE.
+//
+// The escape hatch above was designed for a human clicking `+ qa`. An AGENT can
+// walk through it too, and did: with the flag on, six consecutive tasks still
+// got a qa, because each worker's brief says the smoke checklist belongs to qa,
+// so on finding none it ran `ao crew add` itself. `crew_join_reason` recorded
+// `manual` on every one of them and nothing anywhere said the project's own
+// setting was being overruled - for two days.
+//
+// So an attach that identifies itself as coming from an AO session is refused
+// here. `requestedBy` is that identity: `ao crew add` sends $AO_SESSION_ID, and
+// a human's shell and the desktop app both send nothing.
+func TestAttachCrewMember_RefusesAnAOSessionOnACrewOffProject(t *testing.T) {
+	m, st, _, _ := crewOffManager(t)
+	dev := standardDev(t, m, st)
+	before := len(st.sessions)
+
+	_, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "mer-42")
+	if !errors.Is(err, ErrCrewAutoFormationOff) {
+		t.Fatalf("an agent attached a qa on a crew-off project: err = %v, want ErrCrewAutoFormationOff", err)
+	}
+	if len(st.sessions) != before {
+		t.Fatalf("a refused attach still wrote a row: %d sessions, want %d", len(st.sessions), before)
+	}
+	if st.sessions[dev.ID].InCrew() {
+		t.Fatal("a refused attach still put dev in a crew")
+	}
+
+	// THE REFUSAL HAS TO BE ACTIONABLE. A bare "refused" sends the next agent
+	// hunting for a workaround, which is how the incident happened in the first
+	// place: it must say this is the project's policy and that a PERSON can still
+	// add a qa from the app.
+	for _, want := range []string{"Never form a crew automatically", "person", "+ qa", "app"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal does not mention %q, so the caller cannot act on it: %v", want, err)
+		}
+	}
+}
+
+// THE ORCHESTRATOR IS NOT EXEMPT. It is an AO session like any other, and it is
+// the agent most able to override a project policy at scale - it is the one that
+// dispatches every task. Its own `ao crew add` sends $AO_SESSION_ID exactly as a
+// worker's does, so the same refusal answers it, and the human is the only
+// caller left.
+func TestAttachCrewMember_RefusesTheOrchestratorToo(t *testing.T) {
+	m, st, _, _ := crewOffManager(t)
+	dev := standardDev(t, m, st)
+
+	orc, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindOrchestrator, Prompt: "dispatch"})
+	if err != nil {
+		t.Fatalf("Spawn orchestrator: %v", err)
+	}
+	if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, orc.ID); !errors.Is(err, ErrCrewAutoFormationOff) {
+		t.Fatalf("the orchestrator attached a qa on a crew-off project: err = %v, want ErrCrewAutoFormationOff", err)
+	}
+}
+
+// THE GATE IS THE FLAG, NOT THE CALLER. An agent on an ordinary project still
+// attaches a qa: `ao crew add` is a normal thing for a worker to run, and this
+// change must not turn it into a refusal everywhere.
+func TestAttachCrewMember_AnAOSessionStillAttachesOnAnOrdinaryProject(t *testing.T) {
+	m, st, _, _ := newManager()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
+	dev := standardDev(t, m, st)
+
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "mer-42")
+	if err != nil {
+		t.Fatalf("an agent could not add a qa on a project that forms crews: %v", err)
+	}
+	if qa.CrewRole != domain.CrewRoleQA || qa.CrewID != dev.ID {
+		t.Fatalf("qa row role=%q crew=%q, want qa/%s", qa.CrewRole, qa.CrewID, dev.ID)
+	}
+}
+
+// A QA ON A CREW-OFF PROJECT IS NEVER SILENT. The human path stays open, so one
+// can still appear there - and what made the incident last two days was that
+// nothing said so. Every such attach leaves a WARN naming the project, the task
+// and the member, whoever asked.
+func TestAttachCrewMember_LogsWhenAQAAppearsOnACrewOffProject(t *testing.T) {
+	m, st, _, _ := crewOffManager(t)
+	var buf bytes.Buffer
+	m.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	dev := standardDev(t, m, st)
+
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
+	if err != nil {
+		t.Fatalf("AttachCrewMember: %v", err)
+	}
+	logged := buf.String()
+	if !strings.Contains(logged, "forms no crews automatically") {
+		t.Fatalf("a qa appeared on a crew-off project and nothing was logged at WARN:\n%s", logged)
+	}
+	for _, want := range []string{string(dev.ProjectID), string(dev.ID), string(qa.ID)} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("the warning does not name %q, so it cannot be traced back:\n%s", want, logged)
+		}
+	}
+}
+
+// The ordinary project stays quiet: a warning on every attach everywhere is a
+// warning nobody reads.
+func TestAttachCrewMember_DoesNotWarnOnAnOrdinaryProject(t *testing.T) {
+	m, st, _, _ := newManager()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
+	var buf bytes.Buffer
+	m.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	dev := standardDev(t, m, st)
+
+	if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, ""); err != nil {
+		t.Fatalf("AttachCrewMember: %v", err)
+	}
+	if strings.Contains(buf.String(), "forms no crews automatically") {
+		t.Fatalf("a project that forms crews warned about forming one:\n%s", buf.String())
 	}
 }

@@ -38,7 +38,7 @@ func TestAttachCrewMember_TurnsASoloMechanicalTaskIntoACrew(t *testing.T) {
 	rtCreatedBeforeAttach, wsCreatedBeforeAttach := rt.created, ws.createCalls
 	_ = wsCreatedBeforeAttach
 
-	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 	if err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestAttachCrewMember_LeavesDevRunning(t *testing.T) {
 	handleBefore := st.sessions[dev.ID].Metadata.RuntimeHandleID
 	destroyedBefore := rt.destroyed
 
-	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 	if err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestAttachCrewMember_LeavesDevRunning(t *testing.T) {
 func TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow(t *testing.T) {
 	m, _, _, _ := newManager()
 	dev := spawnMechanical(t, m)
-	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 	if err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
@@ -154,10 +154,10 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 	t.Run("attached twice", func(t *testing.T) {
 		m, st, _, _ := newManager()
 		dev := spawnMechanical(t, m)
-		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA); err != nil {
+		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, ""); err != nil {
 			t.Fatalf("first attach: %v", err)
 		}
-		_, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+		_, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 		if !errors.Is(err, ErrCrewRoleTaken) {
 			t.Fatalf("second attach err = %v, want ErrCrewRoleTaken", err)
 		}
@@ -175,7 +175,7 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 			t.Fatalf("Spawn: %v", err)
 		}
 		m.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinSim)
-		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA); !errors.Is(err, ErrCrewRoleTaken) {
+		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, ""); !errors.Is(err, ErrCrewRoleTaken) {
 			t.Fatalf("attach to a full crew err = %v, want ErrCrewRoleTaken", err)
 		}
 		if len(st.sessions) != 2 {
@@ -186,7 +186,7 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 	t.Run("the qa was stood down", func(t *testing.T) {
 		m, st, _, _ := newManager()
 		dev := spawnMechanical(t, m)
-		qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+		qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 		if err != nil {
 			t.Fatalf("attach: %v", err)
 		}
@@ -194,7 +194,7 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 		if _, err := m.Teardown(ctx, qa.ID, "test: stand qa down"); err != nil {
 			t.Fatalf("Teardown(qa): %v", err)
 		}
-		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA); !errors.Is(err, ErrCrewRoleTaken) {
+		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, ""); !errors.Is(err, ErrCrewRoleTaken) {
 			t.Fatalf("a replacement qa was accepted: %v - restore the original id instead", err)
 		}
 		if len(st.sessions) != 2 {
@@ -212,7 +212,7 @@ func TestAttachCrewMember_RefusesWhatCanNeverHostACrew(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Spawn: %v", err)
 		}
-		if _, err := m.AttachCrewMember(ctx, orc.ID, domain.CrewRoleQA); !errors.Is(err, ErrInvalidCrew) {
+		if _, err := m.AttachCrewMember(ctx, orc.ID, domain.CrewRoleQA, ""); !errors.Is(err, ErrInvalidCrew) {
 			t.Fatalf("err = %v, want ErrInvalidCrew", err)
 		}
 	})
@@ -223,7 +223,7 @@ func TestAttachCrewMember_RefusesWhatCanNeverHostACrew(t *testing.T) {
 		if _, err := m.Teardown(ctx, dev.ID, "test: task over"); err != nil {
 			t.Fatalf("Teardown: %v", err)
 		}
-		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA); !errors.Is(err, ErrInvalidCrew) {
+		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, ""); !errors.Is(err, ErrInvalidCrew) {
 			t.Fatalf("err = %v, want ErrInvalidCrew", err)
 		}
 	})
@@ -237,7 +237,7 @@ func TestAttachCrewMember_RefusesWhatCanNeverHostACrew(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PrepareTodo: %v", err)
 		}
-		err = func() error { _, e := m.AttachCrewMember(ctx, todo.ID, domain.CrewRoleQA); return e }()
+		err = func() error { _, e := m.AttachCrewMember(ctx, todo.ID, domain.CrewRoleQA, ""); return e }()
 		if !errors.Is(err, ErrInvalidCrew) {
 			t.Fatalf("err = %v, want ErrInvalidCrew", err)
 		}
@@ -255,7 +255,7 @@ func TestAttachCrewMember_RefusesWhatCanNeverHostACrew(t *testing.T) {
 		p := st.projects["mer"]
 		p.Kind = domain.ProjectKindWorkspace
 		st.projects["mer"] = p
-		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA); !errors.Is(err, ErrInvalidCrew) {
+		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, ""); !errors.Is(err, ErrInvalidCrew) {
 			t.Fatalf("err = %v, want ErrInvalidCrew", err)
 		}
 	})
@@ -263,7 +263,7 @@ func TestAttachCrewMember_RefusesWhatCanNeverHostACrew(t *testing.T) {
 	t.Run("dev is not a joinable role", func(t *testing.T) {
 		m, _, _, _ := newManager()
 		dev := spawnMechanical(t, m)
-		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleDev); !errors.Is(err, ErrInvalidCrew) {
+		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleDev, ""); !errors.Is(err, ErrInvalidCrew) {
 			t.Fatalf("err = %v, want ErrInvalidCrew - dev is the crew's root, not a seat", err)
 		}
 	})
@@ -283,7 +283,7 @@ func TestAttachCrewMember_ConcurrentAttachesProduceExactlyOneQA(t *testing.T) {
 	for i := range callers {
 		go func() {
 			defer wg.Done()
-			_, errs[i] = m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+			_, errs[i] = m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 		}()
 	}
 	wg.Wait()
@@ -319,7 +319,7 @@ func TestCrewDevOf_ResolvesEitherIdToTheTask(t *testing.T) {
 		t.Fatalf("CrewDevOf(solo) = %v/%v, want itself (%s)", solo.ID, err, dev.ID)
 	}
 
-	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 	if err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestAttachCrewMember_StartingTheAttachedMemberLeavesDevRunning(t *testing.T
 		rt.aliveByHandle = map[string]bool{}
 	}
 	rt.aliveByHandle["h1"] = true
-	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA)
+	qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
 	if err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}

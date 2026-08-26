@@ -256,3 +256,95 @@ func TestCrewAdd_SurfacesTheDaemonsRefusal(t *testing.T) {
 		t.Fatalf("the daemon's reason did not reach the user: %v / %s", err, errOut)
 	}
 }
+
+// `ao crew add` IDENTIFIES ITSELF. The daemon cannot see who is at the keyboard -
+// the agent's CLI and a person's CLI reach the same loopback route - so the one
+// thing that separates them is $AO_SESSION_ID, which only an AO session's shell
+// has. Sending it is what lets a crew-off project refuse the agent and still
+// serve the human.
+func TestCrewAdd_SendsTheCallingSessionID(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-7")
+	cfg := setConfigEnv(t)
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-2","session":{"id":"demo-9","crew":{"id":"demo-2","role":"qa"}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "add", "demo-2"); err != nil {
+		t.Fatalf("ao crew add: %v stderr=%s", err, errOut)
+	}
+	if len(bodies) != 1 || !strings.Contains(bodies[0], `"from":"demo-7"`) {
+		t.Fatalf("body = %v, want it to carry the calling session id", bodies)
+	}
+}
+
+// A HUMAN'S SHELL SENDS NOTHING. $AO_SESSION_ID is set by AO when it launches an
+// agent; a person's terminal has no such variable, and an absent `from` is what
+// makes the manual escape hatch still work on a crew-off project. Sending an
+// empty string instead would be the same bytes as an agent claiming to be one.
+func TestCrewAdd_SendsNoSessionIDFromAnOrdinaryShell(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-2","session":{"id":"demo-9","crew":{"id":"demo-2","role":"qa"}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "add", "demo-2"); err != nil {
+		t.Fatalf("ao crew add: %v stderr=%s", err, errOut)
+	}
+	if len(bodies) != 1 || strings.Contains(bodies[0], `"from"`) {
+		t.Fatalf("body = %v, want no `from` at all from a shell with no AO_SESSION_ID", bodies)
+	}
+}
+
+// The crew-off refusal reaches the agent as the daemon's own sentences, because
+// every one of them is there to stop the next agent looking for a way around it.
+func TestCrewAdd_SurfacesTheCrewOffRefusal(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-7")
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"conflict","code":"CREW_AUTO_FORMATION_OFF","message":"session: mer has \"Never form a crew automatically\" turned on, so an AO session may not attach a qa. A person can still add one - the + qa control in the app"}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	_, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "add", "demo-2")
+	if err == nil {
+		t.Fatal("a refused attach exited 0")
+	}
+	if !strings.Contains(err.Error()+errOut, "Never form a crew automatically") {
+		t.Fatalf("the daemon's reason did not reach the caller: %v / %s", err, errOut)
+	}
+	if !strings.Contains(err.Error()+errOut, "+ qa") {
+		t.Fatalf("the caller was not told who can still add a qa: %v / %s", err, errOut)
+	}
+}
