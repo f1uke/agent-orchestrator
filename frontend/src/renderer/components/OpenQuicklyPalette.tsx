@@ -329,7 +329,7 @@ export function OpenQuicklyPalette({
 							) : server.state !== "ready" ? (
 								/* Gate on READINESS, not latency: an empty list here would be a
 								   lie told in exactly the seconds people use this most. */
-								<p className="open-quickly__note">Indexing this workspace&rsquo;s Go packages&hellip;</p>
+								<p className="open-quickly__note">Loading this workspace&rsquo;s Go packages&hellip;</p>
 							) : symbolAnswer?.query !== trimmedQuery ? (
 								<p className="open-quickly__note">Searching symbols&hellip;</p>
 							) : symbols.length === 0 ? (
