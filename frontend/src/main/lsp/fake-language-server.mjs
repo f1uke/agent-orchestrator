@@ -1,0 +1,97 @@
+// A real stdio LSP server, for tests. Not shipped: it exists so lsp-process and
+// lsp-registry can be tested against an ACTUAL child process - framing, pipes,
+// exit codes and the kill path included - without needing gopls installed.
+//
+// Behaviour is steered by env vars so one script covers every path the
+// supervisor has to survive. See lsp-process.test.ts / lsp-registry.test.ts.
+let buffer = Buffer.alloc(0);
+const send = (msg) => {
+	const body = Buffer.from(JSON.stringify(msg), "utf8");
+	process.stdout.write(`Content-Length: ${body.length}\r\n\r\n`);
+	process.stdout.write(body);
+};
+
+const parseJson = (name, fallback) => {
+	try {
+		return process.env[name] ? JSON.parse(process.env[name]) : fallback;
+	} catch {
+		return fallback;
+	}
+};
+
+// A server→client request nobody answers stalls a real server silently. The
+// supervisor is supposed to answer workspace/configuration itself; this exits
+// non-zero if it does not, so "we answered it" is a fact and not a hope.
+let configAnswered = false;
+if (process.env.FAKE_LSP_ASK_CONFIG === "1") {
+	setTimeout(() => {
+		send({ jsonrpc: "2.0", id: 9001, method: "workspace/configuration", params: { items: [{ section: "go" }] } });
+		setTimeout(() => {
+			if (!configAnswered) process.exit(3);
+		}, 500);
+	}, 10);
+}
+
+process.stdin.on("data", (chunk) => {
+	buffer = Buffer.concat([buffer, chunk]);
+	for (;;) {
+		const sep = buffer.indexOf("\r\n\r\n");
+		if (sep < 0) return;
+		const len = Number(/content-length:\s*(\d+)/i.exec(buffer.subarray(0, sep).toString("ascii"))?.[1] ?? -1);
+		if (len < 0 || buffer.length < sep + 4 + len) return;
+		const msg = JSON.parse(buffer.subarray(sep + 4, sep + 4 + len).toString("utf8"));
+		buffer = buffer.subarray(sep + 4 + len);
+		handle(msg);
+	}
+});
+
+function handle(msg) {
+	if (msg.id === 9001) {
+		configAnswered = true;
+		return;
+	}
+	switch (msg.method) {
+		case "initialize":
+			if (process.env.FAKE_LSP_HANG_INITIALIZE === "1") return;
+			send({
+				jsonrpc: "2.0",
+				id: msg.id,
+				result: {
+					capabilities: { definitionProvider: true, workspaceSymbolProvider: true, textDocumentSync: 1 },
+					// The rootUri is echoed back so a test can assert main sent a REAL
+					// root rather than the null monaco.lsp hardcodes.
+					serverInfo: { name: "fake", version: String(msg.params?.rootUri ?? "") },
+				},
+			});
+			return;
+		case "initialized":
+			if (process.env.FAKE_LSP_PROGRESS === "1") {
+				send({ jsonrpc: "2.0", id: 9100, method: "window/workDoneProgress/create", params: { token: "load" } });
+				send({
+					jsonrpc: "2.0",
+					method: "$/progress",
+					params: { token: "load", value: { kind: "begin", title: "Loading packages" } },
+				});
+				setTimeout(
+					() => send({ jsonrpc: "2.0", method: "$/progress", params: { token: "load", value: { kind: "end" } } }),
+					150,
+				);
+			}
+			return;
+		case "textDocument/definition":
+			send({ jsonrpc: "2.0", id: msg.id, result: parseJson("FAKE_LSP_DEFINITION", null) });
+			return;
+		case "workspace/symbol":
+			send({ jsonrpc: "2.0", id: msg.id, result: parseJson("FAKE_LSP_SYMBOLS", []) });
+			return;
+		case "shutdown":
+			send({ jsonrpc: "2.0", id: msg.id, result: null });
+			return;
+		case "exit":
+			if (process.env.FAKE_LSP_IGNORE_SHUTDOWN === "1") return; // provoke the SIGKILL backstop
+			process.exit(0);
+			return;
+		default:
+			if (msg.id !== undefined) send({ jsonrpc: "2.0", id: msg.id, result: null });
+	}
+}
