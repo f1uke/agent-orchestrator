@@ -4531,12 +4531,41 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 .ao-change-bar::before {
 	content: "";
 	position: absolute;
-	left: 4px;
+	/* Inboard of the branch hairline: line number, branch lane, uncommitted
+	   bar, code. The uncommitted lane is the one nearest the code because it is
+	   the one you act on - it is what Discard Change undoes. */
+	left: 7px;
 	top: 0;
 	bottom: 0;
 	width: 3px;
 	border-radius: 1px;
 	background: currentcolor;
+}
+
+/*
+ * The BRANCH lane: everything this branch changed, committed or not.
+ *
+ * A single neutral hairline, never coloured by kind. Colouring it the way the
+ * uncommitted lane is coloured was tried and was wrong: on a branch under
+ * review nearly every line is changed, so the two kind-coloured bars sat side
+ * by side and read as ONE thick bar. This lane answers only "is this line part
+ * of what my branch changed"; which kind it is already lives in the rail's
+ * +N -M.
+ */
+.ao-branch-bar {
+	position: relative;
+	width: 100%;
+}
+
+.ao-branch-bar::before {
+	content: "";
+	position: absolute;
+	left: 2px;
+	top: 0;
+	bottom: 0;
+	width: 2px;
+	border-radius: 1px;
+	background: color-mix(in oklab, var(--fg-passive) 62%, transparent);
 }
 
 .ao-change-bar--added {
