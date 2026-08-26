@@ -4613,13 +4613,27 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
-      - description: Repo-relative path of the file to diff against the session's
-          target branch. Absolute and ~/ paths are rejected.
+      - description: Repo-relative path of the file to diff. Absolute and ~/ paths
+          are rejected.
         in: query
         name: path
         schema:
-          description: Repo-relative path of the file to diff against the session's
-            target branch. Absolute and ~/ paths are rejected.
+          description: Repo-relative path of the file to diff. Absolute and ~/ paths
+            are rejected.
+          type: string
+      - description: 'Which change level to answer: "target" (default) is merge-base(target,
+          HEAD)..working tree - everything this branch did, committed or not; "head"
+          is HEAD..working tree - what Discard Change can undo. Any other value is
+          a 400: the two answer different questions, so falling back silently would
+          answer one that was not asked.'
+        in: query
+        name: base
+        schema:
+          description: 'Which change level to answer: "target" (default) is merge-base(target,
+            HEAD)..working tree - everything this branch did, committed or not; "head"
+            is HEAD..working tree - what Discard Change can undo. Any other value
+            is a 400: the two answer different questions, so falling back silently
+            would answer one that was not asked.'
           type: string
       responses:
         "200":
@@ -4628,6 +4642,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/DiffContextResponse'
           description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
         "404":
           content:
             application/json:
@@ -4646,7 +4666,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: Return one file's diff against the session's target branch (no PR required)
+      summary: Return one file's diff against the session's target branch or HEAD
+        (no PR required)
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/workspace/files:

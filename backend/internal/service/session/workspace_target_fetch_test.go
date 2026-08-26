@@ -541,7 +541,7 @@ func TestWorkspaceFileDiff_UsesFreshTarget(t *testing.T) {
 
 	// mine-first.txt has already landed on the target, so against a fresh target
 	// it is not part of this session's diff at all.
-	res, err := f.service(t).WorkspaceFileDiff(context.Background(), "s1", "mine-first.txt")
+	res, err := f.service(t).WorkspaceFileDiff(context.Background(), "s1", "mine-first.txt", DiffBaseTarget)
 	if err != nil {
 		t.Fatal(err)
 	}
