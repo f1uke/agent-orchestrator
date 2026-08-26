@@ -1482,10 +1482,11 @@ func sessionOperations() []operation {
 		},
 		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/workspace/file-diff", id: "workspaceFileDiff", tag: "sessions",
-			summary:    "Return one file's diff against the session's target branch (no PR required)",
+			summary:    "Return one file's diff against the session's target branch or HEAD (no PR required)",
 			pathParams: []any{controllers.SessionIDParam{}, controllers.WorkspaceFileDiffParams{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.DiffContextResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

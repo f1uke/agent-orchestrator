@@ -1624,62 +1624,111 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 }
 
 /**
- * A stand-in per-file diff for mock mode, so the stacked Changes view renders
- * without a daemon (`verify-renderer-ui-with-mock-data.md`). Long enough to make
- * sticky headers and scroll-spy observable while scrolling.
- *
- * Deliberately THREE hunks with real numeric gaps between them (lines 30-53 and
- * 62-119 are skipped) and a first hunk that starts mid-file. A single contiguous
- * block would look like a diff while quietly failing to exercise the case that
- * matters here: what the viewer does where the diff skips lines.
+ * One mock edit, described in NEW-side coordinates: `dels` are the old lines it
+ * replaced and `adds` is how many of the new file's lines sit at `at`.
  */
-export function mockWorkspaceFileDiff(path: string): DiffContextResponse {
-	const name = path.slice(path.lastIndexOf("/") + 1);
+type MockEdit = { at: number; dels: string[]; adds: number };
+
+/**
+ * The uncommitted level (HEAD .. working tree) for the mock file. These MUST
+ * agree with `mockWorkspaceFile`'s `changedLines`, or the two gutter lanes and
+ * the discard popover would each be describing a different file.
+ */
+const MOCK_UNCOMMITTED_EDITS: MockEdit[] = [
+	{ at: 10, dels: ["\tconst legacy = read(path);", "\tif (!legacy) return null;", "\treturn legacy.value;"], adds: 3 },
+	{ at: 20, dels: ["\t// removed while working on this"], adds: 0 },
+	{ at: 31, dels: [], adds: 4 },
+];
+
+/** The branch level: everything above, plus what this branch already committed. */
+const MOCK_BRANCH_EDITS: MockEdit[] = [
+	...MOCK_UNCOMMITTED_EDITS,
+	{ at: 50, dels: ["\t// the shape this file had on the target branch"], adds: 2 },
+	{ at: 70, dels: [], adds: 3 },
+];
+
+/**
+ * A stand-in per-file diff for mock mode, so the stacked Changes view and the
+ * editor's two change lanes both render without a daemon
+ * (`verify-renderer-ui-with-mock-data.md`).
+ *
+ * It is built by replaying `mockWorkspaceFile`'s own content through a list of
+ * edits, rather than invented separately, so the NEW side of this diff really is
+ * the file the editor has open. Without that the branch lane would mark lines
+ * the buffer does not have.
+ *
+ * The windowed form keeps THREE hunks with real numeric gaps between them and a
+ * first hunk that starts mid-file. A single contiguous block would look like a
+ * diff while quietly failing to exercise the case that matters there: what the
+ * viewer does where the diff skips lines.
+ */
+export function mockWorkspaceFileDiff(
+	path: string,
+	options?: { base?: "target" | "head"; fullContext?: boolean },
+): DiffContextResponse {
+	const supplied = mockOverride()?.diff?.(path);
+	if (supplied) return supplied;
+	const newLines = mockFileText(path).split("\n");
+	const edits = options?.base === "head" ? MOCK_UNCOMMITTED_EDITS : MOCK_BRANCH_EDITS;
 	const lines: DiffContextResponse["lines"] = [];
-	// Old and new cursors are tracked separately, exactly as the backend parser
-	// does, so the numbering stays honest once a hunk has added a net line.
-	let oldN = 0;
-	let newN = 0;
-	const ctx = (count: number) => {
-		for (let i = 0; i < count; i++) {
-			lines.push({ kind: "context", text: `\t// line ${newN} of ${name}`, oldLine: oldN, newLine: newN });
+	let oldN = 1;
+	let newN = 1;
+
+	const context = (upTo: number) => {
+		while (newN < upTo && newN <= newLines.length) {
+			lines.push({ kind: "context", text: newLines[newN - 1], oldLine: oldN, newLine: newN });
 			oldN++;
 			newN++;
 		}
 	};
-	const del = (text: string) => {
-		lines.push({ kind: "del", text, oldLine: oldN, newLine: 0 });
-		oldN++;
-	};
-	const add = (text: string) => {
-		lines.push({ kind: "add", text, oldLine: 0, newLine: newN });
-		newN++;
-	};
-	const hunk = (header: string, oldStart: number, newStart: number) => {
-		lines.push({ kind: "hunk", text: header, oldLine: oldStart, newLine: newStart });
-		oldN = oldStart;
-		newN = newStart;
-	};
+	for (const edit of edits) {
+		context(edit.at);
+		for (const text of edit.dels) {
+			lines.push({ kind: "del", text, oldLine: oldN, newLine: 0 });
+			oldN++;
+		}
+		for (let i = 0; i < edit.adds; i++) {
+			lines.push({ kind: "add", text: newLines[newN - 1] ?? "", oldLine: 0, newLine: newN });
+			newN++;
+		}
+	}
+	context(newLines.length + 1);
 
-	hunk("@@ -20,9 +20,10 @@ export function load(name: string) {", 20, 20);
-	ctx(6);
-	del(`\tconst legacy = read("${name}");`);
-	add(`\tconst next = read("${name}", { strict: true });`);
-	add("\tif (!next) return null;");
-	ctx(2);
+	if (options?.fullContext) return { available: true, truncated: false, mode: "file", path, lines };
+	return { available: true, truncated: false, mode: "file", path, lines: windowMockDiff(lines) };
+}
 
-	hunk("@@ -54,8 +55,8 @@ export function refresh() {", 54, 55);
-	ctx(4);
-	del("\tcache.clear();");
-	add("\tcache.invalidate({ cascade: true });");
-	ctx(3);
-
-	hunk("@@ -120,6 +121,7 @@ export function teardown() {", 120, 121);
-	ctx(3);
-	add("\tlisteners.removeAll();");
-	ctx(3);
-
-	return { available: true, truncated: false, mode: "file", path, lines };
+/**
+ * Trim a whole-file diff to git's default three lines of context, inserting the
+ * `hunk` skip marker wherever lines were dropped — the same marker the daemon
+ * emits, and the reason the windowed payload can never be replayed as a file.
+ */
+function windowMockDiff(lines: DiffContextResponse["lines"]): DiffContextResponse["lines"] {
+	const CONTEXT = 3;
+	const keep = new Set<number>();
+	lines.forEach((line, i) => {
+		if (line.kind === "context") return;
+		for (let j = Math.max(0, i - CONTEXT); j <= Math.min(lines.length - 1, i + CONTEXT); j++) keep.add(j);
+	});
+	const out: DiffContextResponse["lines"] = [];
+	let skipped = false;
+	lines.forEach((line, i) => {
+		if (!keep.has(i)) {
+			skipped = true;
+			return;
+		}
+		if (skipped) {
+			out.push({
+				kind: "hunk",
+				text: `@@ -${line.oldLine},0 +${line.newLine},0 @@`,
+				oldLine: line.oldLine,
+				newLine: line.newLine,
+			});
+			skipped = false;
+		}
+		out.push(line);
+	});
+	return out;
 }
 
 /**
@@ -1831,5 +1880,258 @@ export function mockWorkspaceFiles(sessionId: string): WorkspaceFilesResponse {
 			"screenshots/OG-Promotion-Hub 2.png",
 			"ao-logo.svg",
 		],
+	};
+}
+
+// ── The editor, in `ao preview` ─────────────────────────────────────────────
+
+type WorkspaceFileResponse = components["schemas"]["WorkspaceFileResponse"];
+type WriteWorkspaceFileResponse = components["schemas"]["WriteWorkspaceFileResponse"];
+
+/**
+ * The path whose mock save ALWAYS answers `409 WORKSPACE_FILE_CONFLICT`.
+ *
+ * The conflict flow is the one part of slice 4 that cannot be judged from a
+ * still: an AO worktree has agents writing in it, so "the file moved under you"
+ * is the normal case, and the resolve view is the thing most worth reviewing.
+ * Without a fixed path that always conflicts it would be unreachable in
+ * `ao preview`, where there is no second writer to race.
+ */
+export const MOCK_CONFLICTING_PATH = "backend/internal/service/session/workspace_changes.go";
+
+/**
+ * Paths an imaginary agent has written since this pane opened them.
+ *
+ * A conflicting save puts its path in here, so the read that follows really does
+ * come back with the OTHER version — which is what makes the resolve view a
+ * genuine two-sided comparison in `ao preview` rather than a diff against
+ * itself. A successful save clears it: the reader's bytes are the ones on disk
+ * now.
+ */
+const mockAgentWrites = new Set<string>();
+
+/** The mock bytes a conflicting save finds already on disk. */
+const MOCK_CONFLICT_DISK_SUFFIX = [
+	"",
+	"// Written by the agent while you were editing this file.",
+	"func (s *Service) refreshTargetOnce(ctx context.Context, workspace, branch string) {",
+	'\ts.throttle.Do(workspace+"\\x00"+branch, func() { s.refreshTarget(ctx, workspace, branch) })',
+	"}",
+].join("\n");
+
+/**
+ * A stable content hash for mock bytes. FNV-1a over the string: the editor only
+ * ever compares hashes for equality and re-sends what it was handed, so what
+ * matters is that identical bytes hash identically and a save MOVES the hash —
+ * not that it is really SHA-256.
+ */
+function mockContentHash(content: string): string {
+	let h = 0x811c9dc5;
+	for (let i = 0; i < content.length; i++) {
+		h ^= content.charCodeAt(i);
+		h = Math.imul(h, 0x01000193) >>> 0;
+	}
+	return `sha256:mock${h.toString(16).padStart(8, "0")}`;
+}
+
+const MOCK_FILE_BODIES: Record<string, (name: string, stem: string) => string[]> = {
+	go: (name, stem) => [
+		"package session",
+		"",
+		"import (",
+		'\t"context"',
+		'\t"fmt"',
+		'\t"strings"',
+		")",
+		"",
+		`// ${stem} is the mock body ${name} renders with in \`ao preview\`.`,
+		`type ${stem} struct {`,
+		"\tWorkspace string",
+		"\tTarget    string",
+		"}",
+		"",
+		`func (r *${stem}) Resolve(ctx context.Context) (string, error) {`,
+		'\tif r.Workspace == "" {',
+		'\t\treturn "", fmt.Errorf("no workspace")',
+		"\t}",
+		"\treturn strings.TrimSpace(r.Target), nil",
+		"}",
+	],
+	ts: (name, stem) => [
+		'import { useMemo } from "react";',
+		"",
+		`/** ${name} — the mock body this file renders with in \`ao preview\`. */`,
+		`export function ${stem}(input: readonly string[]) {`,
+		"\treturn useMemo(() => {",
+		"\t\tconst seen = new Set<string>();",
+		"\t\treturn input.filter((value) => {",
+		"\t\t\tif (seen.has(value)) return false;",
+		"\t\t\tseen.add(value);",
+		"\t\t\treturn true;",
+		"\t\t});",
+		"\t}, [input]);",
+		"}",
+	],
+	md: (name) => [
+		`# ${name}`,
+		"",
+		"The mock body this file renders with in `ao preview`, where there is no",
+		"daemon and no worktree to read.",
+		"",
+		"- one",
+		"- two",
+		"- three",
+	],
+};
+
+/** An identifier-safe stem for a file name, so the mock body compiles by eye. */
+function mockStem(name: string): string {
+	const base = name.replace(/\.[^.]*$/, "").replace(/[^A-Za-z0-9]/g, "");
+	const stem = base === "" ? "Mock" : base;
+	return stem[0].toUpperCase() + stem.slice(1);
+}
+
+function mockFileText(path: string): string {
+	const name = path.slice(path.lastIndexOf("/") + 1);
+	const ext = name.slice(name.lastIndexOf(".") + 1);
+	const stem = mockStem(name);
+	const body =
+		MOCK_FILE_BODIES[ext] ??
+		MOCK_FILE_BODIES[ext === "tsx" || ext === "js" || ext === "jsx" ? "ts" : "md"] ??
+		MOCK_FILE_BODIES.md;
+	const head = body(name, stem);
+	// Padded to a length worth scrolling, so the minimap, sticky scroll and the
+	// two gutter lanes are all visible at once rather than in a 20-line stub.
+	const tail: string[] = [];
+	for (let i = head.length + 1; i <= 96; i++) tail.push(`// ${name}:${i}`);
+	return [...head, ...tail].join("\n");
+}
+
+/**
+ * One file's content for the renderer harness (`VITE_NO_ELECTRON=1`), where
+ * there is no daemon to read a worktree.
+ *
+ * Deliberately covers the states the editor must render differently, because
+ * each one is a different pane and none of them was previewable before:
+ * an ordinary editable file, a file that is `too_large` to display, and a file
+ * whose read was `truncated` (which is read-only — saving it would delete the
+ * tail). An ABSOLUTE path is served too, and is what exercises the
+ * outside-the-workspace read-only state.
+ */
+/**
+ * The e2e editor gallery's seam.
+ *
+ * 🗝 `e2e/editor-gallery-api-stub.ts` serves its Swift fixture by intercepting
+ * `window.fetch`. That worked while the viewer always went through the network —
+ * and stopped the moment the viewer grew a preview branch that issues no request
+ * at all, silently swapping the gallery's fixture for these mocks and taking
+ * every `// MARK:` section with it. The harness registers its payload here
+ * instead of the fixture having to become a second mock.
+ */
+type MockFileOverride = {
+	file?(path: string): WorkspaceFileResponse | null;
+	diff?(path: string): DiffContextResponse | null;
+};
+
+function mockOverride(): MockFileOverride | undefined {
+	return (globalThis as { __aoMockWorkspaceFile?: MockFileOverride }).__aoMockWorkspaceFile;
+}
+
+export function mockWorkspaceFile(path: string): WorkspaceFileResponse {
+	const supplied = mockOverride()?.file?.(path);
+	if (supplied) return supplied;
+	if (path.endsWith(".png") || path.endsWith(".svg")) {
+		return {
+			available: false,
+			reason: "binary",
+			path,
+			lines: [],
+			changedLines: [],
+			trailingNewline: true,
+			truncated: false,
+		};
+	}
+	if (path === "frontend/src/renderer/lib/generated-icons.ts") {
+		return {
+			available: false,
+			reason: "too_large",
+			path,
+			lines: [],
+			changedLines: [],
+			trailingNewline: true,
+			truncated: false,
+		};
+	}
+	const text = mockAgentWrites.has(path) ? mockFileText(path) + MOCK_CONFLICT_DISK_SUFFIX : mockFileText(path);
+	const rows = text.split("\n");
+	const truncated = path === "frontend/src/renderer/routeTree.gen.ts";
+	return {
+		available: true,
+		path,
+		truncated,
+		trailingNewline: true,
+		contentHash: mockContentHash(text),
+		lines: rows.map((row, i) => ({ kind: "context", text: row, oldLine: i + 1, newLine: i + 1 })),
+		// One run of each kind, so both gutter lanes and the discard popover have
+		// something real to draw without a git repository behind them.
+		changedLines: [
+			{ start: 10, end: 12, kind: "modified" },
+			{ start: 20, end: 20, kind: "removed" },
+			{ start: 31, end: 34, kind: "added" },
+		],
+	};
+}
+
+/** What a mock save answers: the moved hash, or a conflict for the fixed path. */
+export type MockSaveResult =
+	| { ok: true; response: WriteWorkspaceFileResponse }
+	| { ok: false; status: 409; body: components["schemas"]["APIError"] };
+
+/**
+ * 🗝 The conflict is preconditioned, not unconditional, and that is the point.
+ * A save that carries the hash of the version now ON DISK succeeds; one that
+ * carries the stale hash the reader started from is refused. That is exactly
+ * the daemon's own contract — the route refuses a BLIND clobber, not an
+ * informed one — so the preview really does demonstrate the way out of a 409,
+ * rather than a dead end that can only be dismissed.
+ */
+export function mockWorkspaceFileSave(path: string, content: string, baseHash?: string): MockSaveResult {
+	if (path === MOCK_CONFLICTING_PATH) {
+		const disk = mockFileText(path) + MOCK_CONFLICT_DISK_SUFFIX;
+		const diskHash = mockContentHash(disk);
+		if (baseHash === diskHash) {
+			mockAgentWrites.delete(path);
+			return {
+				ok: true,
+				response: { path, contentHash: mockContentHash(content), size: content.length, changedLines: [] },
+			};
+		}
+		mockAgentWrites.add(path);
+		return {
+			ok: false,
+			status: 409,
+			body: {
+				error: "conflict",
+				code: "WORKSPACE_FILE_CONFLICT",
+				message: "This file changed on disk since it was read.",
+				details: {
+					currentHash: diskHash,
+					currentSize: disk.length,
+					currentModifiedAt: new Date(Date.now() - 12_000).toISOString(),
+				},
+			} as components["schemas"]["APIError"],
+		};
+	}
+	return {
+		ok: true,
+		response: {
+			path,
+			contentHash: mockContentHash(content),
+			size: content.length,
+			changedLines: [
+				{ start: 10, end: 12, kind: "modified" },
+				{ start: 31, end: 34, kind: "added" },
+			],
+		},
 	};
 }

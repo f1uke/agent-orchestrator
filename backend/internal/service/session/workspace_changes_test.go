@@ -290,7 +290,7 @@ func TestWorkspaceFileDiff_NoPRRequired(t *testing.T) {
 	fake.sessions["s1"] = rec
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
 
-	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "keep.go")
+	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "keep.go", Base: DiffBaseTarget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestWorkspaceFileDiff_DeletedFile(t *testing.T) {
 	fake.sessions["s1"] = rec
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
 
-	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "gone.go")
+	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "gone.go", Base: DiffBaseTarget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestWorkspaceFileDiff_MarksSkippedRegions(t *testing.T) {
 	fake.sessions["s1"] = rec
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
 
-	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "wide.go")
+	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "wide.go", Base: DiffBaseTarget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestWorkspaceFileDiff_UntrackedFile(t *testing.T) {
 	fake.sessions["s1"] = rec
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
 
-	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", "untracked.go")
+	res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "untracked.go", Base: DiffBaseTarget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestWorkspaceFileDiff_ConfinesPathBeforeGit(t *testing.T) {
 		return nil, errors.New("stubbed")
 	}
 
-	if _, err := svc.WorkspaceFileDiff(context.Background(), "s1", "../../etc/passwd"); err != nil {
+	if _, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: "../../etc/passwd", Base: DiffBaseTarget}); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range pathspecs {
@@ -530,7 +530,7 @@ func TestWorkspaceFileDiff_AbsolutePathYieldsNothing(t *testing.T) {
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
 
 	for _, p := range []string{"/etc/passwd", "~/.ssh/id_rsa", "~", ""} {
-		res, err := svc.WorkspaceFileDiff(context.Background(), "s1", p)
+		res, err := svc.WorkspaceFileDiff(context.Background(), "s1", FileDiffQuery{Path: p, Base: DiffBaseTarget})
 		if err != nil {
 			t.Fatalf("%q: %v", p, err)
 		}

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { components } from "../../api/schema";
 import { MONO } from "../lib/comment-inbox";
+import type { Hunk } from "../lib/editor/change-lanes";
+import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/gutter-lanes";
+import { revertEdit } from "../lib/editor/revert";
 import { registerLspNavigation } from "../lib/lsp/definition";
 import { languageIdForLsp } from "../lib/lsp/language-ids";
 import { fileUriForPath } from "../lib/lsp/lsp-uri";
@@ -8,6 +11,7 @@ import { type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-lan
 import { ensureLanguage, ensureMonacoReady, languageForPath, monaco } from "../lib/monaco-setup";
 import { editorThemeName } from "../lib/monaco-theme";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
+import { DiscardHunkPopover } from "./DiscardHunkPopover";
 
 type LineChange = components["schemas"]["LineChangeDTO"];
 
@@ -105,8 +109,22 @@ const BASE_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	renderLineHighlight: "line",
 	renderLineHighlightOnlyWhenFocus: false,
 	lineNumbersMinChars: 4,
-	lineDecorationsWidth: 14,
-	glyphMargin: false,
+	// 0, not slice 1's 14. The two change lanes moved OUT of this margin (see
+	// glyphMargin below) and nothing else needs reserved space here — Monaco
+	// sizes the folding controls itself. Keeping 14 on top of the glyph margin's
+	// 20 would take 34px off the content width, and the minimap's `// MARK:`
+	// label budget is a function of that width: slice 1 measured
+	// "Collection View Source" as printing from ~610px, and it stopped.
+	lineDecorationsWidth: 0,
+	// 🗝 The two change lanes live in the GLYPH MARGIN, not in the line-decorations
+	// margin beside the code — and that is not a cosmetic choice. Monaco puts its
+	// folding controls in the line-decorations margin, and a folding chevron is a
+	// full-width node that sits ON TOP of anything decorated there: a click aimed
+	// at a change bar landed on the chevron and collapsed the block instead, and
+	// the discard popover could not be opened at all. The glyph margin is a strip
+	// nothing else claims. It is also where Xcode draws its change bar — the far
+	// left edge, outboard of the line numbers.
+	glyphMargin: true,
 	folding: true,
 	showFoldingControls: "mouseover",
 	foldingHighlight: true,
@@ -126,39 +144,44 @@ const BASE_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	minimap: MINIMAP,
 };
 
-/** The gutter bar classes; colours live in `styles.css` beside the diff tokens. */
-const CHANGE_BAR_CLASS: Record<string, string> = {
-	added: "ao-change-bar ao-change-bar--added",
-	modified: "ao-change-bar ao-change-bar--modified",
-	removed: "ao-change-bar ao-change-bar--removed",
+/**
+ * How wide the pane must be before the diff editor shows two columns. Below it
+ * Monaco falls back to the inline view on its own, which is the right answer in
+ * a split pane with a rail open — two 300px columns of code are unreadable.
+ */
+const SIDE_BY_SIDE_BREAKPOINT = 900;
+
+/** What the chrome above can do to the buffer without knowing it is Monaco. */
+export type EditorHandle = {
+	/** The buffer's current text, or null before a model exists. */
+	getValue(): string | null;
+	focus(): void;
 };
 
-/**
- * The read-only Monaco surface behind the workspace file viewer. Lazily imported
- * so Monaco never lands in the app's initial chunk — the cost is paid the first
- * time a file is opened, not at startup.
- */
-export default function MonacoFileEditor({
-	sessionId,
-	path,
-	text,
-	changedLines,
-	line,
-	column,
-	theme,
-	absolutePath,
-	workspaceRoot,
-	onOpenFile,
-	onServerState,
-}: {
+export type MonacoFileEditorProps = {
 	sessionId: string;
 	path: string;
+	/** The content considered SAVED. Dirty is measured against this. */
 	text: string;
 	changedLines: LineChange[];
+	/**
+	 * New-side lines the BRANCH lane marks: everything this branch changed,
+	 * committed or not. Flat and kindless on purpose — see `gutter-lanes.ts`.
+	 */
+	branchLines?: readonly number[];
+	/** The uncommitted hunks, with the old text each replaced, for Discard Change. */
+	hunks?: readonly Hunk[];
 	line?: number;
 	/** 1-based column. Slice 2 left this field on the seam for exactly this. */
 	column?: number;
 	theme: "dark" | "light";
+	readOnly: boolean;
+	/**
+	 * `code` is Browse mode. `diff` puts the SAME model on the modified side of a
+	 * diff editor, with `diffOriginal` on the left.
+	 */
+	mode?: "code" | "diff";
+	diffOriginal?: { text: string; label: string } | null;
 	/**
 	 * The file's absolute on-disk path. A language server speaks `file:` URIs and
 	 * knows nothing about this app's `ao-file:` models, so without it there is no
@@ -171,16 +194,67 @@ export default function MonacoFileEditor({
 	onOpenFile?: (file: WorkspaceFileOpen) => void;
 	/** Lets the chrome above report what the language server is doing. */
 	onServerState?: (state: { state: LanguageServerHandle["state"]; detail?: string }) => void;
-}) {
+	onDirtyChange?: (dirty: boolean) => void;
+	/** ⌘S inside the editor. The chrome above owns what saving means. */
+	onSave?: () => void;
+	onHandle?: (handle: EditorHandle | null) => void;
+};
+
+/**
+ * The Monaco surface behind the workspace file viewer. Lazily imported so Monaco
+ * never lands in the app's initial chunk — the cost is paid the first time a
+ * file is opened, not at startup.
+ *
+ * 🗝 ONE MODEL PER FILE, shared by both modes. The obvious implementation gives
+ * the diff its own `diff-head://` model, and then an edit made while reviewing
+ * is invisible in Browse and lost on the next open. Here the mode switch
+ * disposes the EDITOR and never the model; the diff's original side is the only
+ * extra model, and it is a throwaway.
+ */
+export default function MonacoFileEditor({
+	sessionId,
+	path,
+	text,
+	changedLines,
+	branchLines,
+	hunks,
+	line,
+	column,
+	theme,
+	readOnly,
+	mode = "code",
+	diffOriginal,
+	absolutePath,
+	workspaceRoot,
+	onOpenFile,
+	onServerState,
+	onDirtyChange,
+	onSave,
+	onHandle,
+}: MonacoFileEditorProps) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
-	const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+	const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | monaco.editor.IStandaloneDiffEditor | null>(null);
+	/** The editable code editor, whichever mode is mounted. */
+	const codeEditorRef = useRef<monaco.editor.ICodeEditor | null>(null);
 	const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+	const originalModelRef = useRef<monaco.editor.ITextModel | null>(null);
 	const [ready, setReady] = useState(false);
 	// Bumped once the model is attached AND its grammar has loaded, so the
 	// decoration and reveal effects below run against a tokenized model rather
 	// than racing the async grammar fetch.
 	const [modelGeneration, setModelGeneration] = useState(0);
+	// Bumped whenever the editor instance is replaced, which a mode switch does.
+	const [editorGeneration, setEditorGeneration] = useState(0);
 	const [failed, setFailed] = useState<string | null>(null);
+	const [discarding, setDiscarding] = useState<{ hunk: Hunk; top: number; left: number } | null>(null);
+	/**
+	 * 🗝 Owned here rather than left to Monaco's `useInlineViewWhenSpaceIsLimited`.
+	 * The column labels above the diff have to say the same thing the diff is
+	 * doing, and Monaco's own decision is not readable from the outside — so at
+	 * 1000px the editor fell back to the inline view while two side-by-side
+	 * labels went on claiming two columns that were not there.
+	 */
+	const [sideBySide, setSideBySide] = useState(true);
 
 	const themeName = editorThemeName(theme);
 	// Read inside async work that outlives the render that started it: the theme
@@ -211,6 +285,18 @@ export default function MonacoFileEditor({
 	openFileRef.current = onOpenFile;
 	const absolutePathRef = useRef(absolutePath);
 	absolutePathRef.current = absolutePath;
+	const onSaveRef = useRef(onSave);
+	onSaveRef.current = onSave;
+	const onDirtyRef = useRef(onDirtyChange);
+	onDirtyRef.current = onDirtyChange;
+	const hunksRef = useRef(hunks);
+	hunksRef.current = hunks;
+	// The text the model was last SET to. A model whose value has moved away from
+	// it carries unsaved edits, and must never be overwritten by an incoming
+	// refetch — which is exactly what the read-only version did on every `text`
+	// change, and would have silently destroyed edits the moment this pane became
+	// editable.
+	const appliedTextRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		onServerState?.({ state: server.state, detail: server.detail });
@@ -242,24 +328,26 @@ export default function MonacoFileEditor({
 		return () => client.didClose(fileUri);
 	}, [server.client, absolutePath, lspLanguage, text, modelGeneration]);
 
-	// Create once per mount; content, language and decorations are applied by the
-	// effects below so a re-render never tears the editor down.
+	// The host's own width, which is what decides the diff layout: this pane sits
+	// between a sidebar and a rail, so it is routinely far narrower than the
+	// window and a media query would be measuring the wrong box.
+	useEffect(() => {
+		const host = hostRef.current;
+		if (!host || typeof ResizeObserver === "undefined") return;
+		const observer = new ResizeObserver((entries) => {
+			const width = entries[0]?.contentRect.width ?? 0;
+			if (width > 0) setSideBySide(width >= SIDE_BY_SIDE_BREAKPOINT);
+		});
+		observer.observe(host);
+		return () => observer.disconnect();
+	}, []);
+
+	// Monaco itself, once per mount.
 	useEffect(() => {
 		let disposed = false;
-		const host = hostRef.current;
-		if (!host) return;
-		let editor: monaco.editor.IStandaloneCodeEditor | null = null;
 		ensureMonacoReady()
 			.then(() => {
-				if (disposed) return;
-				editor = monaco.editor.create(host, {
-					...BASE_OPTIONS,
-					theme: themeName,
-					minimap: { ...MINIMAP, markSectionHeaderRegex: MARK_SECTION_HEADER_REGEX },
-				});
-				editorRef.current = editor;
-				decorationsRef.current = editor.createDecorationsCollection([]);
-				setReady(true);
+				if (!disposed) setReady(true);
 			})
 			.catch((err: unknown) => {
 				if (disposed) return;
@@ -268,17 +356,69 @@ export default function MonacoFileEditor({
 			});
 		return () => {
 			disposed = true;
+		};
+	}, []);
+
+	// The EDITOR, rebuilt when the mode changes. The model is not touched here:
+	// disposing it on a mode switch is precisely the bug the one-buffer rule
+	// exists to prevent.
+	useEffect(() => {
+		if (!ready) return;
+		const host = hostRef.current;
+		if (!host) return;
+		let editor: monaco.editor.IStandaloneCodeEditor | monaco.editor.IStandaloneDiffEditor;
+		if (mode === "diff") {
+			const diffEditor = monaco.editor.createDiffEditor(host, {
+				...BASE_OPTIONS,
+				theme: themeName,
+				minimap: { ...MINIMAP, markSectionHeaderRegex: MARK_SECTION_HEADER_REGEX },
+				readOnly: false,
+				domReadOnly: false,
+				// The reviewer edits the MODIFIED side in place: that is what makes
+				// Changes mode a place to fix something rather than only to read.
+				originalEditable: false,
+				renderSideBySide: sideBySide,
+				// Monaco's own narrow-pane fallback is turned OFF: it decides
+				// silently, and the labels above cannot follow a decision they
+				// cannot read.
+				useInlineViewWhenSpaceIsLimited: false,
+				renderMarginRevertIcon: true,
+				renderOverviewRuler: false,
+			});
+			codeEditorRef.current = diffEditor.getModifiedEditor();
+			editor = diffEditor;
+		} else {
+			const codeEditor = monaco.editor.create(host, {
+				...BASE_OPTIONS,
+				theme: themeName,
+				minimap: { ...MINIMAP, markSectionHeaderRegex: MARK_SECTION_HEADER_REGEX },
+			});
+			codeEditorRef.current = codeEditor;
+			editor = codeEditor;
+		}
+		editorRef.current = editor;
+		decorationsRef.current = codeEditorRef.current.createDecorationsCollection([]);
+		setEditorGeneration((n) => n + 1);
+		return () => {
 			decorationsRef.current?.clear();
 			decorationsRef.current = null;
+			codeEditorRef.current = null;
 			editorRef.current = null;
-			const model = editor?.getModel();
-			editor?.dispose();
-			model?.dispose();
+			editor.dispose();
+			originalModelRef.current?.dispose();
+			originalModelRef.current = null;
 		};
-		// The editor instance outlives every prop; re-creating it on a theme or
-		// path change would drop scroll position and fold state.
+		// themeName is applied by its own effect; rebuilding on a theme change
+		// would drop scroll position and fold state. sideBySide is applied by the
+		// effect below for the same reason.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	}, [ready, mode]);
+
+	// Layout follows the pane's width without rebuilding the editor.
+	useEffect(() => {
+		if (editorGeneration === 0 || mode !== "diff") return;
+		(editorRef.current as monaco.editor.IStandaloneDiffEditor | null)?.updateOptions({ renderSideBySide: sideBySide });
+	}, [editorGeneration, mode, sideBySide]);
 
 	// Grammar first, then content. `ensureLanguage` loads the shiki grammar for
 	// this language (falling back to Monaco's own Monarch tokenizer when we ship
@@ -287,26 +427,136 @@ export default function MonacoFileEditor({
 	// first tokenization pass already uses the right tokenizer — a model attached
 	// before the provider exists keeps the tokens it computed then.
 	useEffect(() => {
-		if (!ready) return;
+		if (!ready || editorGeneration === 0) return;
 		let cancelled = false;
 		void ensureLanguage(language, themeRef.current).then(() => {
 			const editor = editorRef.current;
-			if (cancelled || !editor) return;
-			const previous = editor.getModel();
+			const codeEditor = codeEditorRef.current;
+			if (cancelled || !editor || !codeEditor) return;
+			const previous = codeEditor.getModel();
 			const existing = monaco.editor.getModel(uri);
 			const model = existing ?? monaco.editor.createModel(text, language, uri);
 			if (existing) {
-				if (existing.getValue() !== text) existing.setValue(text);
+				// 🗝 Only adopt incoming content when the buffer has NOT moved away
+				// from what we last put in it. Overwriting here would throw away
+				// unsaved edits every time the file query refetched — and this pane
+				// now polls while dirty, so that would be constant.
+				const dirty = appliedTextRef.current !== null && existing.getValue() !== appliedTextRef.current;
+				if (!dirty && existing.getValue() !== text) existing.setValue(text);
 				monaco.editor.setModelLanguage(existing, language);
 			}
-			editor.setModel(model);
-			if (previous && previous !== model) previous.dispose();
+			if (!existing || appliedTextRef.current === null || model.getValue() === text) {
+				appliedTextRef.current = text;
+			}
+			if (mode === "diff") {
+				const diffEditor = editor as monaco.editor.IStandaloneDiffEditor;
+				const wanted = diffOriginal?.text ?? "";
+				const current = originalModelRef.current;
+				// 🗝 Two rules here, and BOTH were needed to stop this pane throwing
+				// `TextModel got disposed before DiffEditorWidget model got reset`
+				// and `no diff result available` on every single entry into diff
+				// mode — the conflict flow's "Review changes" included, which is
+				// this slice's headline path. The next setModel papered over them,
+				// so the diff still drew, but a whole diff computation was thrown
+				// away each time and in Electron these are real unhandled errors in
+				// the renderer.
+				//
+				// 1. REUSE the original when its text has not changed. This effect
+				//    runs twice on entry — once for `mode`, once when
+				//    `editorGeneration` catches up — and building a second model
+				//    disposed the first while the diff worker was still computing
+				//    against it, which is where "no diff result available" came
+				//    from.
+				// 2. Point the widget at the new pair BEFORE disposing the old
+				//    model, never after.
+				if (!current || current.isDisposed() || current.getValue() !== wanted) {
+					const stale = current;
+					const original = monaco.editor.createModel(wanted, language);
+					originalModelRef.current = original;
+					diffEditor.setModel({ original, modified: model });
+					stale?.dispose();
+				} else if (diffEditor.getModel()?.modified !== model) {
+					diffEditor.setModel({ original: current, modified: model });
+				}
+			} else {
+				(editor as monaco.editor.IStandaloneCodeEditor).setModel(model);
+			}
+			if (previous && previous !== model && previous.uri.scheme === "ao-file") previous.dispose();
 			setModelGeneration((n) => n + 1);
 		});
 		return () => {
 			cancelled = true;
 		};
-	}, [ready, uri, text, language]);
+	}, [ready, editorGeneration, uri, text, language, mode, diffOriginal?.text]);
+
+	// The model outlives every editor and every mode switch, and is disposed only
+	// when this pane goes away or points at a different file.
+	//
+	// 🗝 Never dispose it while a live editor still holds it — the same defect as
+	// the diff-original one above, in a second place. On UNMOUNT this is safe
+	// because the editor effect's cleanup is declared earlier and so runs first,
+	// leaving `codeEditorRef` null. On a PATH CHANGE it is not: the editor is
+	// still on screen showing this model, and the content effect below disposes
+	// it properly after attaching the replacement.
+	//
+	// It was previously closed only by accident — a newly opened file has no
+	// cached branch diff, so the pane fell back out of diff mode before the
+	// switch. Re-opening a file whose diff IS already cached leaves it in diff
+	// mode, and then this fired with the model still attached.
+	useEffect(() => {
+		return () => {
+			appliedTextRef.current = null;
+			const model = monaco.editor.getModel(uri);
+			if (model && codeEditorRef.current?.getModel() !== model) model.dispose();
+		};
+	}, [uri]);
+
+	// Dirty tracking and the save command both live with the editor instance.
+	useEffect(() => {
+		if (modelGeneration === 0) return;
+		const codeEditor = codeEditorRef.current;
+		const model = codeEditor?.getModel();
+		if (!codeEditor || !model) return;
+		const report = () => onDirtyRef.current?.(model.getValue() !== text);
+		report();
+		const subscription = model.onDidChangeContent(report);
+		return () => subscription.dispose();
+	}, [modelGeneration, editorGeneration, text]);
+
+	// ⌘S from inside the editor. Deliberately a key handler rather than
+	// `addCommand`: that only exists on the STANDALONE editor, and Changes mode's
+	// editable side is the diff editor's modified pane, which is a plain
+	// ICodeEditor. One handler serves both modes.
+	useEffect(() => {
+		if (editorGeneration === 0) return;
+		const codeEditor = codeEditorRef.current;
+		if (!codeEditor) return;
+		const subscription = codeEditor.onKeyDown((event) => {
+			if (!(event.metaKey || event.ctrlKey) || event.keyCode !== monaco.KeyCode.KeyS) return;
+			event.preventDefault();
+			event.stopPropagation();
+			onSaveRef.current?.();
+		});
+		return () => subscription.dispose();
+	}, [editorGeneration]);
+
+	useEffect(() => {
+		if (editorGeneration === 0) return;
+		codeEditorRef.current?.updateOptions({ readOnly, domReadOnly: readOnly });
+	}, [editorGeneration, readOnly]);
+
+	// Expose the buffer to the chrome above, which owns what saving means.
+	useEffect(() => {
+		if (editorGeneration === 0) {
+			onHandle?.(null);
+			return;
+		}
+		onHandle?.({
+			getValue: () => codeEditorRef.current?.getModel()?.getValue() ?? null,
+			focus: () => codeEditorRef.current?.focus(),
+		});
+		return () => onHandle?.(null);
+	}, [editorGeneration, onHandle]);
 
 	// Runtime theme switch: one global call, no editor rebuild.
 	useEffect(() => {
@@ -314,32 +564,87 @@ export default function MonacoFileEditor({
 		monaco.editor.setTheme(themeName);
 	}, [ready, themeName]);
 
-	// Uncommitted-change bars, the same meaning (working tree vs HEAD) and the
-	// same colours the diff rows use.
+	// The two gutter lanes. Branch first so it draws on the outside, nearer the
+	// line number; the uncommitted bar sits inboard of it, next to the code.
 	useEffect(() => {
 		if (modelGeneration === 0) return;
-		const editor = editorRef.current;
 		const collection = decorationsRef.current;
-		const model = editor?.getModel();
+		const model = codeEditorRef.current?.getModel();
 		if (!collection || !model) return;
 		const lineCount = model.getLineCount();
-		const decorations: monaco.editor.IModelDeltaDecoration[] = [];
-		for (const change of changedLines) {
-			const className = CHANGE_BAR_CLASS[change.kind];
-			if (!className) continue;
-			if (change.kind === "removed") {
-				const at = Math.min(Math.max(change.start, 1), lineCount);
-				decorations.push({ range: new monaco.Range(at, 1, at, 1), options: { linesDecorationsClassName: className } });
-				continue;
+		const marks = [...branchMarks(branchLines ?? [], lineCount), ...uncommittedMarks(changedLines, lineCount)];
+		collection.set(
+			marks.map((mark) => ({
+				range: new monaco.Range(mark.line, 1, mark.line, 1),
+				options: { glyphMarginClassName: mark.className },
+			})),
+		);
+	}, [modelGeneration, editorGeneration, changedLines, branchLines]);
+
+	// A click on an uncommitted bar opens the discard popover. Never discards on
+	// the first click: a gutter bar is a one-pixel target beside a line number.
+	useEffect(() => {
+		if (editorGeneration === 0 || readOnly) return;
+		const codeEditor = codeEditorRef.current;
+		const host = hostRef.current;
+		if (!codeEditor || !host) return;
+		const subscription = codeEditor.onMouseDown((event) => {
+			if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+			// Belt and braces: the glyph margin is ours alone today, but a later
+			// slice putting breakpoints or diagnostics there must not silently start
+			// opening the discard popover.
+			const element = event.target.element;
+			if (!element || !element.className.includes(GUTTER_LANE_CLASS)) return;
+			const lineNumber = event.target.position?.lineNumber;
+			if (lineNumber == null) return;
+			const hunk = (hunksRef.current ?? []).find((h) => lineNumber >= h.start && lineNumber <= h.end);
+			if (!hunk) {
+				setDiscarding(null);
+				return;
 			}
-			const start = Math.min(Math.max(change.start, 1), lineCount);
-			const end = Math.min(Math.max(change.end, start), lineCount);
-			for (let ln = start; ln <= end; ln++) {
-				decorations.push({ range: new monaco.Range(ln, 1, ln, 1), options: { linesDecorationsClassName: className } });
-			}
-		}
-		collection.set(decorations);
-	}, [modelGeneration, changedLines]);
+			// getScrolledVisiblePosition, not getTopForLineNumber: the latter is off
+			// by a line once the editor has scrolled.
+			const at = codeEditor.getScrolledVisiblePosition({ lineNumber: hunk.start, column: 1 });
+			if (!at) return;
+			// Anchored to where the CODE starts, not to a magic number: the gutter's
+			// width is a function of the file's line count.
+			setDiscarding({ hunk, top: at.top + at.height + 4, left: at.left });
+		});
+		// 🗝 Only a scroll that MOVED the content closes the popover. Monaco fires
+		// onDidScrollChange for the caret placement the very same click makes — so
+		// an unfiltered listener dismissed the popover in the same tick it opened,
+		// and a gutter click looked like it did nothing at all.
+		const scroll = codeEditor.onDidScrollChange((event) => {
+			if (event.scrollTopChanged || event.scrollLeftChanged) setDiscarding(null);
+		});
+		return () => {
+			subscription.dispose();
+			scroll.dispose();
+		};
+	}, [editorGeneration, readOnly]);
+
+	const applyDiscard = () => {
+		const hunk = discarding?.hunk;
+		const codeEditor = codeEditorRef.current;
+		const model = codeEditor?.getModel();
+		setDiscarding(null);
+		if (!hunk || !codeEditor || !model) return;
+		const edit = revertEdit(hunk, model.getLineCount(), (ln) => model.getLineMaxColumn(ln));
+		// Through the model, so ⌘Z undoes it and the buffer simply becomes dirty:
+		// the reader saves it like any other edit, rather than the discard writing
+		// the whole file behind their back the way the spike's prototype did.
+		model.pushEditOperations(
+			null,
+			[
+				{
+					range: new monaco.Range(edit.startLine, edit.startColumn, edit.endLine, edit.endColumn),
+					text: edit.text,
+				},
+			],
+			() => null,
+		);
+		codeEditor.focus();
+	};
 
 	// Land on the referenced line and column rather than on line 1. A terminal
 	// reference carries no column and ⌘⇧O over files opens at the top, but a
@@ -347,18 +652,65 @@ export default function MonacoFileEditor({
 	// the difference between "it moved" and "it moved to roughly the right place".
 	useEffect(() => {
 		if (modelGeneration === 0 || line == null) return;
-		const editor = editorRef.current;
-		const model = editor?.getModel();
-		if (!editor || !model) return;
+		const codeEditor = codeEditorRef.current;
+		const model = codeEditor?.getModel();
+		if (!codeEditor || !model) return;
 		const target = Math.min(Math.max(line, 1), model.getLineCount());
 		const targetColumn = Math.min(Math.max(column ?? 1, 1), model.getLineMaxColumn(target));
-		editor.setPosition({ lineNumber: target, column: targetColumn });
-		editor.revealLineInCenter(target);
+		codeEditor.setPosition({ lineNumber: target, column: targetColumn });
+		codeEditor.revealLineInCenter(target);
 	}, [modelGeneration, line, column]);
 
 	return (
 		<div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-			<div ref={hostRef} data-testid="monaco-file-editor" style={{ position: "absolute", inset: 0 }} />
+			{mode === "diff" && diffOriginal && (
+				<div
+					style={{
+						position: "absolute",
+						top: 0,
+						left: 0,
+						right: 0,
+						zIndex: 5,
+						display: "flex",
+						fontFamily: MONO,
+						fontSize: 10.5,
+						letterSpacing: ".03em",
+						color: "var(--inbox-muted-2)",
+						background: "var(--viewer-bg)",
+						borderBottom: "1px solid var(--inbox-divider)",
+						pointerEvents: "none",
+					}}
+				>
+					{sideBySide ? (
+						<>
+							<span style={{ flex: 1, padding: "4px 12px" }}>{diffOriginal.label}</span>
+							<span style={{ flex: 1, padding: "4px 12px" }}>this worktree</span>
+						</>
+					) : (
+						// One column, so one label. Two of them over an inline diff
+						// claim a layout that is not on screen.
+						<span style={{ flex: 1, padding: "4px 12px" }}>{diffOriginal.label} → this worktree</span>
+					)}
+				</div>
+			)}
+			{/* The two data attributes are the e2e handles for state that lives
+			    inside Monaco and has no DOM of its own. */}
+			<div
+				ref={hostRef}
+				data-testid="monaco-file-editor"
+				data-editable={readOnly ? "false" : "true"}
+				data-mode={mode}
+				style={{ position: "absolute", inset: 0, top: mode === "diff" ? 22 : 0 }}
+			/>
+			{discarding && (
+				<DiscardHunkPopover
+					hunk={discarding.hunk}
+					top={discarding.top}
+					left={discarding.left}
+					onDiscard={applyDiscard}
+					onDismiss={() => setDiscarding(null)}
+				/>
+			)}
 			{failed && (
 				<p style={{ position: "absolute", inset: 0, padding: 20, fontSize: 12.5, color: "var(--red)" }}>{failed}</p>
 			)}

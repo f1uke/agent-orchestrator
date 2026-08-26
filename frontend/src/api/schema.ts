@@ -1440,7 +1440,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Return one file's diff against the session's target branch (no PR required) */
+        /** Return one file's diff against the session's target branch or HEAD (no PR required) */
         get: operations["workspaceFileDiff"];
         put?: never;
         post?: never;
@@ -8801,8 +8801,12 @@ export interface operations {
     workspaceFileDiff: {
         parameters: {
             query?: {
-                /** @description Repo-relative path of the file to diff against the session's target branch. Absolute and ~/ paths are rejected. */
+                /** @description Repo-relative path of the file to diff. Absolute and ~/ paths are rejected. */
                 path?: string;
+                /** @description Which change level to answer: "target" (default) is merge-base(target, HEAD)..working tree - everything this branch did, committed or not; "head" is HEAD..working tree - what Discard Change can undo. Any other value is a 400: the two answer different questions, so falling back silently would answer one that was not asked. */
+                base?: string;
+                /** @description Include every unchanged line rather than git's default three, so the caller can replay either whole side of the file. Off by default: the windowed payload is what carries the skip markers telling a reader that lines were left out. */
+                fullContext?: boolean;
             };
             header?: never;
             path: {
@@ -8820,6 +8824,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DiffContextResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */

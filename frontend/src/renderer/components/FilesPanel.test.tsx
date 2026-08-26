@@ -192,9 +192,11 @@ describe("FilesPanel", () => {
 		expect(await screen.findByText("No changes vs main")).toBeInTheDocument();
 	});
 
-	// Every row opens as a diff — including a deleted one, which has no
-	// working-tree content and would 404 through the file endpoint.
-	it("opens any row, including a deleted file, as a diff", async () => {
+	// 🗝 The row reports its STATUS, so its owner can route it. A deleted file has
+	// no working-tree content and would 404 through the file endpoint, so it has
+	// to stay distinguishable here even though this panel does not decide where
+	// it goes.
+	it("reports a row's status and binary flag, so a deleted file can be routed away from the editor", async () => {
 		respondWith({
 			available: true,
 			targetBranch: "main",
@@ -205,7 +207,32 @@ describe("FilesPanel", () => {
 		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
 
 		await userEvent.click(await screen.findByRole("treeitem", { name: /gone\.ts/ }));
-		expect(onOpenFile).toHaveBeenCalledWith({ path: "lib/gone.ts" });
+		expect(onOpenFile).toHaveBeenCalledWith({ path: "lib/gone.ts", status: "deleted", binary: false });
+	});
+
+	it("reports a binary row too, which has no text buffer to open either", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			truncated: false,
+			files: [file({ path: "logo.png", status: "modified", binary: true })],
+		});
+		const onOpenFile = vi.fn();
+		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("treeitem", { name: /logo\.png/ }));
+		expect(onOpenFile).toHaveBeenCalledWith({ path: "logo.png", status: "modified", binary: true });
+	});
+
+	// The stacked all-files review lost its only entry point when a ROW started
+	// opening the editor, so it gained one here rather than disappearing.
+	it("offers the stacked review from the summary line, but not when nothing changed", async () => {
+		respondWith({ available: true, targetBranch: "main", truncated: false, files: [file()] });
+		const onReviewAll = vi.fn();
+		render(<FilesPanel sessionId="s1" onReviewAll={onReviewAll} />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("button", { name: /review all changed files/i }));
+		expect(onReviewAll).toHaveBeenCalled();
 	});
 
 	it("marks the row currently open in the center pane", async () => {
@@ -216,11 +243,34 @@ describe("FilesPanel", () => {
 		await waitFor(() => expect(row(/DiffRows\.tsx/).getAttribute("aria-current")).toBe("true"));
 	});
 
-	it("keeps Browse present but disabled until it ships", async () => {
-		respondWith({ available: true, targetBranch: "main", truncated: false, files: [] });
+	it("switches to Browse, which lists the whole worktree rather than the diff", async () => {
+		getMock.mockImplementation(async (url: string) => {
+			if (url.includes("/workspace/files")) {
+				return { data: { available: true, truncated: false, paths: ["README.md", "src/app/main.ts"] } };
+			}
+			return { data: { available: true, targetBranch: "main", truncated: false, files: [file()] } };
+		});
+		const onOpenWorktreeFile = vi.fn();
+		render(<FilesPanel sessionId="s1" onOpenWorktreeFile={onOpenWorktreeFile} />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+
+		// An UNCHANGED file, which Changes mode by definition never lists.
+		await userEvent.click(await screen.findByRole("treeitem", { name: /main\.ts/ }));
+		expect(onOpenWorktreeFile).toHaveBeenCalledWith({ path: "src/app/main.ts" });
+		// The comparison line belongs to Changes; Browse has nothing to compare.
+		expect(screen.queryByText(/vs main/)).toBeNull();
+	});
+
+	// The index is a `git ls-files` over the whole tree. A rail opened on
+	// Changes - which is most of the time - must not pay for it.
+	it("does not index the worktree until Browse is chosen", async () => {
+		respondWith({ available: true, targetBranch: "main", truncated: false, files: [file()] });
 		render(<FilesPanel sessionId="s1" />, { wrapper });
-		const browse = await screen.findByRole("tab", { name: /Browse/ });
-		expect(browse).toBeDisabled();
+
+		await screen.findByRole("tab", { name: /Changes/ });
+		await waitFor(() => expect(getMock).toHaveBeenCalled());
+		expect(getMock.mock.calls.every(([url]) => !String(url).includes("/workspace/files"))).toBe(true);
 	});
 
 	describe("tree view", () => {

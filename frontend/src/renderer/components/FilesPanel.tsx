@@ -1,6 +1,17 @@
-import { FileText, FolderOpen, GitBranch, List, ListTree, RefreshCw, Search, TriangleAlert } from "lucide-react";
+import {
+	FileStack,
+	FileText,
+	FolderOpen,
+	GitBranch,
+	List,
+	ListTree,
+	RefreshCw,
+	Search,
+	TriangleAlert,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
+import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { apiErrorMessage } from "../lib/api-client";
 import { buildFileTree, matchesFileQuery, orderedFileItems } from "../lib/file-tree";
 import { cn } from "../lib/utils";
@@ -17,11 +28,26 @@ import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
  * to inspect. Diffing every row avoids the trap structurally instead of
  * special-casing the deleted status.
  */
-export type ChangedFileTarget = { path: string };
+export type ChangedFileTarget = {
+	path: string;
+	/**
+	 * Carried so the OWNER can route the row. A deleted or binary file has no
+	 * working-tree buffer to open, so those rows keep going to the stacked diff
+	 * view while everything else opens in the editor. Deciding that here would
+	 * hard-code a viewer this panel is deliberately ignorant of.
+	 */
+	status?: string;
+	binary?: boolean;
+};
+
+/** A row in Browse mode: any file in the worktree, changed or not. */
+export type WorktreeFile = { path: string };
 
 type FilesView = "tree" | "list";
+type FilesMode = "changes" | "browse";
 
 const VIEW_STORAGE_KEY = "ao.files.view";
+const MODE_STORAGE_KEY = "ao.files.mode";
 
 function storedView(): FilesView {
 	try {
@@ -29,6 +55,16 @@ function storedView(): FilesView {
 	} catch {
 		// Private-mode / disabled storage must not take the panel down with it.
 		return "tree";
+	}
+}
+
+// Changes stays the default: a worker's rail is opened to see what the agent
+// did far more often than to go looking for a file by name.
+function storedMode(): FilesMode {
+	try {
+		return window.localStorage?.getItem(MODE_STORAGE_KEY) === "browse" ? "browse" : "changes";
+	} catch {
+		return "changes";
 	}
 }
 
@@ -52,23 +88,37 @@ const REVEAL_RING_MS = 1400;
  *
  * Tree is the default; the flat list stays available because it is genuinely
  * better for a two-file diff, where a tree only spends indent.
- * Browse mode ships separately; its segment is present but disabled so the
- * control does not change shape when it lands.
+ *
+ * BROWSE mode is the same navigator over the whole worktree rather than over
+ * the diff, from the file index ⌘⇧O already uses. It shares the search box and
+ * the tree/list toggle, because a reader switching between them is asking the
+ * same question of a different set.
  */
 export function FilesPanel({
 	sessionId,
 	onOpenFile,
+	onOpenWorktreeFile,
+	onReviewAll,
 	selectedPath,
 	reveal,
 }: {
 	sessionId: string;
 	onOpenFile?: (target: ChangedFileTarget) => void;
+	/** A Browse row. Separate from onOpenFile because it is not a CHANGED file. */
+	onOpenWorktreeFile?: (file: WorktreeFile) => void;
+	/** The stacked, all-files review. */
+	onReviewAll?: () => void;
 	selectedPath?: string;
 	/** A terminal reference to reveal: expand to it, scroll it in, ring it briefly. */
 	reveal?: { path: string; nonce: number } | null;
 }) {
+	const [mode, setMode] = useState<FilesMode>(storedMode);
 	const query = useWorkspaceChanges(sessionId);
 	const data = query.data;
+	// The worktree index is fetched only once Browse is actually chosen: it is a
+	// `git ls-files` over the whole tree, and a rail opened on Changes must not
+	// pay for it.
+	const browse = useWorkspaceFiles(sessionId, mode === "browse");
 
 	const [view, setView] = useState<FilesView>(storedView);
 	const [search, setSearch] = useState("");
@@ -84,6 +134,23 @@ export function FilesPanel({
 			// Preference is a nicety; failing to persist it must not break the view.
 		}
 	};
+
+	const chooseMode = (next: FilesMode) => {
+		setMode(next);
+		try {
+			window.localStorage?.setItem(MODE_STORAGE_KEY, next);
+		} catch {
+			// Preference is a nicety; failing to persist it must not break the view.
+		}
+	};
+
+	const worktreePaths = useMemo(() => browse.data?.paths ?? [], [browse.data]);
+	const browseVisible = useMemo(
+		() => worktreePaths.filter((p) => matchesFileQuery(p, search)).map((path) => ({ path })),
+		[worktreePaths, search],
+	);
+	const browseTree = useMemo(() => buildFileTree(browseVisible, (f) => f.path), [browseVisible]);
+	const browseOrdered = useMemo(() => orderedFileItems(browseVisible, (f) => f.path), [browseVisible]);
 
 	const files = useMemo(() => data?.files ?? [], [data]);
 	const visible = useMemo(() => files.filter((f) => matchesFileQuery(f.path, search)), [files, search]);
@@ -151,32 +218,59 @@ export function FilesPanel({
 			<div className="files-panel" role="tabpanel">
 				<div className="files-panel__modes">
 					<div className="files-panel__seg" role="tablist" aria-label="Files mode">
-						<button type="button" role="tab" aria-selected="true" className="files-panel__seg-btn is-active">
+						<button
+							type="button"
+							role="tab"
+							aria-selected={mode === "changes"}
+							className={cn("files-panel__seg-btn", mode === "changes" && "is-active")}
+							onClick={() => chooseMode("changes")}
+						>
 							<ListTree aria-hidden="true" className="h-3 w-3 shrink-0" />
 							<span className="files-panel__seg-label">Changes</span>
 						</button>
-						<SimpleTooltip label="Browsing the whole worktree ships separately">
-							{/* A disabled button emits no pointer events, so the tooltip needs a
-						    wrapper to hover. */}
-							<span className="files-panel__seg-slot">
-								<button type="button" role="tab" aria-selected="false" disabled className="files-panel__seg-btn">
-									<FolderOpen aria-hidden="true" className="h-3 w-3 shrink-0" />
-									<span className="files-panel__seg-label">Browse</span>
-								</button>
-							</span>
-						</SimpleTooltip>
+						<button
+							type="button"
+							role="tab"
+							aria-selected={mode === "browse"}
+							className={cn("files-panel__seg-btn", mode === "browse" && "is-active")}
+							onClick={() => chooseMode("browse")}
+						>
+							<FolderOpen aria-hidden="true" className="h-3 w-3 shrink-0" />
+							<span className="files-panel__seg-label">Browse</span>
+						</button>
 					</div>
 				</div>
 
-				{query.isLoading ? <ChangesSkeleton /> : null}
+				{mode === "browse" ? (
+					<BrowsePanel
+						files={browseVisible}
+						tree={browseTree}
+						ordered={browseOrdered}
+						total={worktreePaths.length}
+						view={view}
+						search={search}
+						onSearch={setSearch}
+						onView={chooseView}
+						onOpen={onOpenWorktreeFile}
+						selectedPath={selectedPath}
+						loading={browse.isPending}
+						error={browse.error}
+						unavailableReason={browse.data && !browse.data.available ? browse.data.reason : undefined}
+						truncated={browse.data?.truncated ?? false}
+					/>
+				) : null}
 
-				{query.error ? (
+				{mode === "changes" && query.isLoading ? <ChangesSkeleton /> : null}
+
+				{mode === "changes" && query.error ? (
 					<p className="files-panel__empty-text">{apiErrorMessage(query.error, "Unable to load changes")}</p>
 				) : null}
 
-				{data && !data.available ? <UnavailableState reason={data.reason} branch={data.targetBranch} /> : null}
+				{mode === "changes" && data && !data.available ? (
+					<UnavailableState reason={data.reason} branch={data.targetBranch} />
+				) : null}
 
-				{data?.available ? (
+				{mode === "changes" && data?.available ? (
 					<>
 						<SummaryLine
 							branch={data.targetBranch}
@@ -191,6 +285,7 @@ export function FilesPanel({
 							refreshing={query.isFetching || data.targetFetch === "refreshing"}
 							fetchState={data.targetFetch}
 							fetchError={data.targetFetchError}
+							onReviewAll={files.length > 0 ? onReviewAll : undefined}
 						/>
 						{files.length === 0 ? (
 							<EmptyState
@@ -210,7 +305,7 @@ export function FilesPanel({
 												nodes={tree}
 												collapsed={collapsedDirs}
 												onToggleDir={toggleDir}
-												onSelectFile={(f) => onOpenFile?.({ path: f.path })}
+												onSelectFile={(f) => onOpenFile?.({ path: f.path, status: f.status, binary: f.binary })}
 												selectedKey={selectedPath}
 												revealedKey={revealedPath}
 												label="Changed files"
@@ -393,7 +488,7 @@ function ChangedFileRow({
 			data-path={file.path}
 			aria-current={selected ? "true" : undefined}
 			className={cn("files-panel__row", selected && "is-selected", revealed && "is-revealed")}
-			onClick={() => onOpen?.({ path: file.path })}
+			onClick={() => onOpen?.({ path: file.path, status: file.status, binary: file.binary })}
 			title={file.path}
 		>
 			<span className="files-panel__lead">
@@ -437,6 +532,7 @@ function SummaryLine({
 	refreshing,
 	fetchState,
 	fetchError,
+	onReviewAll,
 }: {
 	branch?: string;
 	inferred: boolean;
@@ -447,6 +543,13 @@ function SummaryLine({
 	refreshing: boolean;
 	fetchState?: string;
 	fetchError?: string;
+	/**
+	 * The stacked, all-files review. It lives here because a ROW now opens the
+	 * editor on that file's first hunk, and reading every file in sequence is a
+	 * different job from working on one — losing its only entry point would have
+	 * been a regression hidden inside an addition.
+	 */
+	onReviewAll?: () => void;
 }) {
 	return (
 		<div className="files-panel__summary">
@@ -465,6 +568,18 @@ function SummaryLine({
 			<span className="files-panel__totals">
 				<span className="files-panel__add">+{additions}</span> <span className="files-panel__del">−{deletions}</span>
 			</span>
+			{onReviewAll ? (
+				<SimpleTooltip label="Read every changed file in one scroll">
+					<button
+						type="button"
+						aria-label="Review all changed files"
+						className="files-panel__refresh"
+						onClick={onReviewAll}
+					>
+						<FileStack aria-hidden="true" className="h-3 w-3" />
+					</button>
+				</SimpleTooltip>
+			) : null}
 			<button
 				type="button"
 				aria-label="Refresh changes"
@@ -579,3 +694,119 @@ function ChangesSkeleton() {
 		</div>
 	);
 }
+
+/**
+ * Browse mode: the whole worktree as a tree, from the same file index ⌘⇧O uses.
+ *
+ * It shares the search box and the tree/list toggle with Changes deliberately —
+ * a reader switching modes is asking the same question of a different set, and
+ * a second, differently-shaped control for the same job is how a rail becomes
+ * two rails. What it does NOT share is the counts and the status box: an
+ * unchanged file has neither, and inventing a `+0 −0` for it would be noise
+ * that trains the eye to stop reading the column that matters in Changes.
+ */
+function BrowsePanel({
+	files,
+	tree,
+	ordered,
+	total,
+	view,
+	search,
+	onSearch,
+	onView,
+	onOpen,
+	selectedPath,
+	loading,
+	error,
+	unavailableReason,
+	truncated,
+}: {
+	files: readonly WorktreeFile[];
+	tree: ReturnType<typeof buildFileTree<WorktreeFile>>;
+	ordered: readonly WorktreeFile[];
+	total: number;
+	view: FilesView;
+	search: string;
+	onSearch: (value: string) => void;
+	onView: (view: FilesView) => void;
+	onOpen?: (file: WorktreeFile) => void;
+	selectedPath?: string;
+	loading: boolean;
+	error: unknown;
+	unavailableReason?: string;
+	truncated: boolean;
+}) {
+	if (loading) return <ChangesSkeleton />;
+	if (error)
+		return <p className="files-panel__empty-text">{apiErrorMessage(error, "Unable to index this workspace")}</p>;
+	if (unavailableReason) return <UnavailableState reason={unavailableReason} />;
+	if (total === 0) {
+		return (
+			<EmptyState
+				icon={<FolderOpen aria-hidden="true" className="h-6 w-6" />}
+				title="Nothing to browse"
+				detail="This session's workspace has no files the index could reach."
+			/>
+		);
+	}
+
+	return (
+		<>
+			<div className="files-panel__summary">
+				<span className="files-panel__count">
+					{total} {total === 1 ? "file" : "files"}
+				</span>
+			</div>
+			<Toolbar search={search} onSearch={onSearch} view={view} onView={onView} />
+			{files.length === 0 ? (
+				<p className="files-panel__truncated">No files match “{search.trim()}”.</p>
+			) : (
+				<div className="files-panel__list">
+					{view === "tree" ? (
+						<FileTree
+							nodes={tree}
+							collapsed={EMPTY_COLLAPSED}
+							onToggleDir={() => {}}
+							onSelectFile={(f) => onOpen?.(f)}
+							selectedKey={selectedPath}
+							label="Workspace files"
+							getTitle={(f) => f.path}
+						/>
+					) : (
+						<div role="listbox" aria-label="Workspace files" className="files-panel__flat">
+							{ordered.map((file) => (
+								<button
+									key={file.path}
+									type="button"
+									role="option"
+									aria-selected={file.path === selectedPath}
+									data-path={file.path}
+									className={cn("files-panel__row", file.path === selectedPath && "is-selected")}
+									onClick={() => onOpen?.(file)}
+									title={file.path}
+								>
+									<span className="files-panel__name">
+										<bdi>{file.path.slice(file.path.lastIndexOf("/") + 1)}</bdi>
+									</span>
+									<span className="files-panel__dir">
+										<bdi>{file.path.slice(0, Math.max(0, file.path.lastIndexOf("/")))}</bdi>
+									</span>
+								</button>
+							))}
+						</div>
+					)}
+					{truncated ? (
+						<p className="files-panel__truncated">Showing the first {total} files — the workspace is larger.</p>
+					) : null}
+				</div>
+			)}
+		</>
+	);
+}
+
+/**
+ * Browse's tree is fully expanded and stays that way. Its own collapse state
+ * would be a THIRD thing to remember per session, and the search box already
+ * does the narrowing a collapse would.
+ */
+const EMPTY_COLLAPSED: ReadonlySet<string> = new Set();

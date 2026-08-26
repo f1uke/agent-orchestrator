@@ -228,7 +228,9 @@ func (f *fakeSessionService) ListWorkspaceFiles(context.Context, domain.SessionI
 	return sessionsvc.WorkspaceFilesResult{}, nil
 }
 
-func (f *fakeSessionService) WorkspaceFileDiff(context.Context, domain.SessionID, string) (sessionsvc.DiffContextResult, error) {
+func (f *fakeSessionService) WorkspaceFileDiff(
+	context.Context, domain.SessionID, sessionsvc.FileDiffQuery,
+) (sessionsvc.DiffContextResult, error) {
 	return sessionsvc.DiffContextResult{}, nil
 }
 

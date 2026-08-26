@@ -58,6 +58,14 @@ jobs:
   # the token under it stopped reading as a comment. Both leave the DOM, the
   # decorations and the console exactly as they are when it works.
   #
+  # e2e/editor-save.spec.ts is the fourth: editing, saving and resolving a write
+  # conflict all depend on Monaco really holding a buffer — typing into its edit
+  # context, an edit reaching the model, a mode switch swapping one editor for
+  # another over the SAME model. jsdom has no Monaco, so the unit tests stub it and
+  # can only check the contract the chrome hands it. This spec is only runnable at
+  # all because the file viewer gained a VITE_NO_ELECTRON branch: before that this
+  # surface rendered a header and then nothing under `dev:web`.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -83,4 +91,6 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Measure the status glyphs, the sidebar qa pip and the editor in a real browser
-        run: npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts e2e/editor.spec.ts
+        run: >-
+          npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
+          e2e/editor.spec.ts e2e/editor-save.spec.ts

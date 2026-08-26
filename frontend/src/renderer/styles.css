@@ -4523,20 +4523,63 @@ body.is-resizing-x [data-slot="sidebar-container"] {
    `DiffRows` already uses for the identical meaning — working tree vs HEAD —
    so the editor and the review diff never disagree about what "changed" is.
    =========================================================================== */
+/*
+ * Both lanes are drawn in Monaco's GLYPH MARGIN — see MonacoFileEditor's
+ * BASE_OPTIONS for why they cannot live in the line-decorations margin beside
+ * the code (a folding chevron covers the whole of that one, and swallowed every
+ * click aimed at a change bar).
+ */
 .ao-change-bar {
 	position: relative;
 	width: 100%;
 }
 
-.ao-change-bar::before {
+/*
+ * 🗝 ::after, while the branch lane uses ::before — and that is load-bearing.
+ * The glyph margin holds ONE node per line, so on a line that is in both lanes
+ * Monaco concatenates both class names onto that single element. Two rules both
+ * claiming ::before would then draw one bar, not two, and the branch lane would
+ * silently vanish from exactly the lines that carry uncommitted work.
+ *
+ * Inboard of the branch hairline: branch lane, uncommitted bar, line numbers,
+ * code. The uncommitted lane sits nearer the code because it is the one you act
+ * on - it is what Discard Change undoes.
+ */
+.ao-change-bar::after {
 	content: "";
 	position: absolute;
-	left: 4px;
+	left: 8px;
 	top: 0;
 	bottom: 0;
 	width: 3px;
 	border-radius: 1px;
 	background: currentcolor;
+}
+
+/*
+ * The BRANCH lane: everything this branch changed, committed or not.
+ *
+ * A single neutral hairline, never coloured by kind. Colouring it the way the
+ * uncommitted lane is coloured was tried and was wrong: on a branch under
+ * review nearly every line is changed, so the two kind-coloured bars sat side
+ * by side and read as ONE thick bar. This lane answers only "is this line part
+ * of what my branch changed"; which kind it is already lives in the rail's
+ * +N -M.
+ */
+.ao-branch-bar {
+	position: relative;
+	width: 100%;
+}
+
+.ao-branch-bar::before {
+	content: "";
+	position: absolute;
+	left: 3px;
+	top: 0;
+	bottom: 0;
+	width: 2px;
+	border-radius: 1px;
+	background: color-mix(in oklab, var(--fg-passive) 62%, transparent);
 }
 
 .ao-change-bar--added {
@@ -4553,7 +4596,7 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	color: var(--red);
 }
 
-.ao-change-bar--removed::before {
+.ao-change-bar--removed::after {
 	bottom: auto;
 	height: 7px;
 	transform: translateY(-3px);

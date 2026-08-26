@@ -126,7 +126,7 @@ type SessionService interface {
 	WriteWorkspaceFile(ctx context.Context, id domain.SessionID, in sessionsvc.WriteWorkspaceFileInput) (sessionsvc.WriteWorkspaceFileResult, error)
 	WorkspaceChanges(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceChangesResult, error)
 	ListWorkspaceFiles(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceFilesResult, error)
-	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, path string) (sessionsvc.DiffContextResult, error)
+	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, q sessionsvc.FileDiffQuery) (sessionsvc.DiffContextResult, error)
 }
 
 // ActivityRecorder applies an agent activity-state signal to a session. It is
@@ -737,15 +737,20 @@ func (c *SessionsController) listWorkspaceFiles(w http.ResponseWriter, r *http.R
 	envelope.WriteJSON(w, http.StatusOK, workspaceFilesResponse(res))
 }
 
-// workspaceFileDiff returns one file's diff against the session's target
-// branch. Unlike diff-context it needs no PR, so it serves a worker mid-task,
-// and it renders a deleted file (which has no working-tree content to read).
+// workspaceFileDiff returns one file's diff against the session's target branch
+// (base "target", the default) or against HEAD (base "head"). Unlike
+// diff-context it needs no PR, so it serves a worker mid-task, and it renders a
+// deleted file (which has no working-tree content to read).
 func (c *SessionsController) workspaceFileDiff(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/file-diff")
 		return
 	}
-	res, err := c.Svc.WorkspaceFileDiff(r.Context(), sessionID(r), r.URL.Query().Get("path"))
+	res, err := c.Svc.WorkspaceFileDiff(r.Context(), sessionID(r), sessionsvc.FileDiffQuery{
+		Path:        r.URL.Query().Get("path"),
+		Base:        sessionsvc.DiffBase(r.URL.Query().Get("base")),
+		FullContext: r.URL.Query().Get("fullContext") == "true",
+	})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

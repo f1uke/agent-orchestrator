@@ -70,6 +70,8 @@ type fakeSessionService struct {
 	workspaceFilesErr     error
 	workspaceFileDiff     sessionsvc.DiffContextResult
 	workspaceFileDiffPath string
+	workspaceFileDiffBase sessionsvc.DiffBase
+	workspaceFileDiffFull bool
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
 	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
 	// in the response.
@@ -494,8 +496,12 @@ func (f *fakeSessionService) ListWorkspaceFiles(_ context.Context, _ domain.Sess
 	return f.workspaceFiles, f.workspaceFilesErr
 }
 
-func (f *fakeSessionService) WorkspaceFileDiff(_ context.Context, _ domain.SessionID, path string) (sessionsvc.DiffContextResult, error) {
-	f.workspaceFileDiffPath = path
+func (f *fakeSessionService) WorkspaceFileDiff(
+	_ context.Context, _ domain.SessionID, q sessionsvc.FileDiffQuery,
+) (sessionsvc.DiffContextResult, error) {
+	f.workspaceFileDiffPath = q.Path
+	f.workspaceFileDiffBase = q.Base
+	f.workspaceFileDiffFull = q.FullContext
 	return f.workspaceFileDiff, nil
 }
 
@@ -2099,6 +2105,38 @@ func TestSessionsAPI_WorkspaceFileDiff(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"kind":"del"`) || !strings.Contains(string(body), `"text":"gone"`) {
 		t.Fatalf("unexpected body: %s", body)
+	}
+	// No `base` on the query string means the branch level, unchanged.
+	if svc.workspaceFileDiffBase != "" {
+		t.Fatalf("service got base %q, want the empty default", svc.workspaceFileDiffBase)
+	}
+}
+
+// The `base` selector reaches the service verbatim, so the service - not the
+// controller - owns which values are legal and what an unknown one does.
+func TestSessionsAPI_WorkspaceFileDiff_PassesBaseThrough(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceFileDiff = sessionsvc.DiffContextResult{Available: true, Mode: "file", Path: "a.go"}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/file-diff?path=a.go&base=head", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceFileDiffBase != sessionsvc.DiffBaseHead {
+		t.Fatalf("service got base %q, want %q", svc.workspaceFileDiffBase, sessionsvc.DiffBaseHead)
+	}
+	if svc.workspaceFileDiffFull {
+		t.Fatal("fullContext must default to off, so the stacked view keeps its skip markers")
+	}
+
+	if _, status, _ = doRequest(
+		t, srv, "GET", "/api/v1/sessions/ao-1/workspace/file-diff?path=a.go&fullContext=true", "",
+	); status != http.StatusOK {
+		t.Fatalf("status %d", status)
+	}
+	if !svc.workspaceFileDiffFull {
+		t.Fatal("fullContext=true must reach the service")
 	}
 }
 

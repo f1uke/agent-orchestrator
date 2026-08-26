@@ -29,6 +29,32 @@ setApiBaseUrl("");
 const labelParam = new URLSearchParams(window.location.search).get("label");
 const SOURCE = labelParam ? fixtureWithLabel(labelParam) : SWIFT_FIXTURE;
 
+/**
+ * 🗝 Registered BEFORE fetch is patched, and it is the half that actually works
+ * now: under `dev:web` (VITE_NO_ELECTRON=1) the viewer serves mock data and
+ * never issues a request, so an interception-only stub would hand the gallery
+ * `lib/mock-data`'s generic fixture instead of the Swift one — no `// MARK:`
+ * sections, and every minimap assertion in `editor.spec.ts` timing out with
+ * nothing in the console. The fetch patch below stays for the non-preview build.
+ */
+(globalThis as { __aoMockWorkspaceFile?: unknown }).__aoMockWorkspaceFile = {
+	file(path: string) {
+		if (path !== GALLERY_PATH) return null;
+		return {
+			available: true,
+			path: GALLERY_PATH,
+			truncated: false,
+			trailingNewline: true,
+			contentHash: "sha256:gallery",
+			lines: SOURCE.split("\n").map((text, i) => ({ kind: "context", oldLine: 0, newLine: i + 1, text })),
+			changedLines: GALLERY_CHANGED_LINES,
+		};
+	},
+	// No branch-level diff: this harness measures the minimap, and a diff built
+	// from a DIFFERENT file's text would mark lanes on lines that do not match.
+	diff: () => ({ available: false, truncated: false, mode: "file", path: GALLERY_PATH, lines: [] }),
+};
+
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 	const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;

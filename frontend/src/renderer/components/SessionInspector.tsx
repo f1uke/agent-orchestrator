@@ -22,7 +22,7 @@ import { canonicalTrackerIssueId, formatNextTransition, sortedPRs, statusReasonL
 import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
-import { FilesPanel, type ChangedFileTarget } from "./FilesPanel";
+import { FilesPanel, type ChangedFileTarget, type WorktreeFile } from "./FilesPanel";
 import { SmokeTestView } from "./SmokeTestView";
 import { SimulatorPanel } from "./SimulatorPanel";
 import { JiraIssueSection } from "./JiraIssueSection";
@@ -128,6 +128,8 @@ export function SessionInspector({
 	onViewChange,
 	onOpenFile,
 	onOpenChangedFile,
+	onOpenWorktreeFile,
+	onReviewAllChanges,
 	selectedChangedPath,
 	revealInTree,
 }: {
@@ -158,6 +160,10 @@ export function SessionInspector({
 	onOpenFile?: (target: FileDiffTarget) => void;
 	/** Open a Changes-mode row in the center pane. */
 	onOpenChangedFile?: (target: ChangedFileTarget) => void;
+	/** A Browse-mode row: any file in the worktree, changed or not. */
+	onOpenWorktreeFile?: (file: WorktreeFile) => void;
+	/** The stacked, all-files review. */
+	onReviewAllChanges?: () => void;
 	/** Path of the Changes row currently open in the center pane. */
 	selectedChangedPath?: string;
 	/** A terminal ref to reveal in the Files tree (path + re-click nonce). */
@@ -252,6 +258,8 @@ export function SessionInspector({
 					<FilesPanel
 						sessionId={session.id}
 						onOpenFile={onOpenChangedFile}
+						onOpenWorktreeFile={onOpenWorktreeFile}
+						onReviewAll={onReviewAllChanges}
 						selectedPath={selectedChangedPath}
 						reveal={revealInTree}
 					/>
