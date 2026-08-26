@@ -14,13 +14,15 @@ const CONTENT_LENGTH = /content-length:\s*(\d+)/i;
 export function encodeMessage(message: JsonRpcMessage): Buffer {
 	const body = Buffer.from(JSON.stringify(message), "utf8");
 	// Byte length, not character length: the header describes octets on the wire.
-	return Buffer.concat([Buffer.from(`Content-Length: ${body.length}${SEPARATOR}`, "ascii"), body]);
+	return Buffer.concat([Buffer.from(`Content-Length: ${body.length}${SEPARATOR}`, "ascii"), body]) as Buffer;
 }
 
 export function createFrameDecoder() {
-	let buffer = Buffer.alloc(0);
+	// `Buffer.concat` widens to Buffer<ArrayBufferLike>, so the accumulator is
+	// annotated rather than inferred from `Buffer.alloc`'s narrower ArrayBuffer.
+	let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
 	return {
-		push(chunk: Buffer): JsonRpcMessage[] {
+		push(chunk: Buffer<ArrayBufferLike>): JsonRpcMessage[] {
 			buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk]);
 			const out: JsonRpcMessage[] = [];
 			for (;;) {

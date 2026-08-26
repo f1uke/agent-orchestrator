@@ -47,7 +47,7 @@ import {
 import { shouldReplacePortHolder } from "./shared/daemon-takeover";
 import { buildDaemonEnv, resolveShellEnv, type ShellRunner, withFallbackPath } from "./shared/shell-env";
 import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "./shared/posthog-config";
-import { buildTelemetryBootstrap } from "./shared/telemetry";
+import { buildTelemetryBootstrap, defaultDataDir } from "./shared/telemetry";
 import { createBrowserViewHost, type BrowserViewHost } from "./main/browser-view-host";
 import { createCompanionOverlay, type CompanionOverlay } from "./main/companion-window";
 import {
@@ -64,6 +64,7 @@ import { createNativeNotifier, type NativeNotificationInput } from "./main/nativ
 import { detectOpenTargets, openInAndroidStudio, openInEditor, openInTerminal, openInXcode } from "./main/open-in";
 import { runXcodegen, type RunXcodegenResult } from "./main/run-xcodegen";
 import { isAllowedTerminalLink } from "./main/open-terminal-link";
+import { createLspRegistry, type LspRegistry, type LspResultOutcome } from "./main/lsp/lsp-registry";
 import {
 	clampWindowState,
 	readWindowStateSync,
@@ -1136,6 +1137,60 @@ ipcMain.handle("app:getVersion", () => app.getVersion());
 ipcMain.handle("telemetry:getBootstrap", () =>
 	buildTelemetryBootstrap(process.env, app.getVersion(), process.platform),
 );
+
+// ---- language servers -----------------------------------------------------
+// The renderer is sandboxed (contextIsolation, no node) and can never spawn a
+// child, so every language server lives here. ONE registry for the whole app:
+// that is what makes "one server per workspace" mean anything across windows
+// and panes, and it is what the memory cap is enforced over.
+//
+// IPC rather than the spike's loopback WebSocket. The WebSocket was scaffolding
+// for a prototype with no main process; carrying it into the app would open an
+// unauthenticated listener on 127.0.0.1 that proxies to a process which reads
+// arbitrary files on request, plus a port to allocate and collide on.
+let lspRegistry: LspRegistry | null = null;
+
+// A language server's answers belong to whichever window asked. There is one
+// main-window renderer mounting editors today, and broadcasting to every live
+// webContents keeps a second window from silently receiving nothing.
+function broadcastToRenderers(channel: string, payload: unknown): void {
+	for (const win of BrowserWindow.getAllWindows()) {
+		if (!win.isDestroyed()) win.webContents.send(channel, payload);
+	}
+}
+
+async function ensureLspRegistry(): Promise<LspRegistry> {
+	if (lspRegistry) return lspRegistry;
+	// 🗝 THE PATH TRAP. Electron's PATH is not the login shell's, and gopls lives
+	// at ~/go/bin/gopls - in neither Electron's inherited PATH nor
+	// FALLBACK_PATH_DIRS. Without this the spawn fails ENOENT, every editor pane
+	// reports "no language server", and it looks like the slice was never built.
+	// daemonEnv() is the same login-shell-derived env the daemon spawn uses.
+	await ensureShellEnv();
+	lspRegistry = createLspRegistry({
+		// `defaultDataDir` is null only when there is no home dir at all; falling
+		// back to ~/.ao/data keeps the AO hard rule rather than letting a server
+		// write to its own OS default.
+		dataDir: defaultDataDir(process.platform, process.env, os.homedir()) ?? path.join(os.homedir(), ".ao", "data"),
+		env: () => daemonEnv(),
+		onState: (event) => broadcastToRenderers("lsp:state", event),
+		onMessage: (event) => broadcastToRenderers("lsp:message", event),
+	});
+	return lspRegistry;
+}
+
+ipcMain.handle("lsp:attach", async (_event, input: { root: string; languageId: string }) =>
+	(await ensureLspRegistry()).attach(input),
+);
+ipcMain.handle("lsp:health", async () => (lspRegistry ? lspRegistry.health() : []));
+// Per-message and hot, so fire-and-forget rather than invoke/await.
+ipcMain.on("lsp:detach", (_event, handleId: string) => lspRegistry?.detach(handleId));
+ipcMain.on("lsp:send", (_event, input: { handleId: string; message: Record<string, unknown> }) =>
+	lspRegistry?.send(input.handleId, input.message),
+);
+ipcMain.on("lsp:noteResult", (_event, input: { handleId: string; outcome: LspResultOutcome }) =>
+	lspRegistry?.noteResult(input.handleId, input.outcome),
+);
 async function chooseDirectory(title: string): Promise<string | null> {
 	const options: OpenDialogOptions = {
 		properties: ["openDirectory"],
@@ -1784,6 +1839,10 @@ function initCompanionOverlay(): void {
 // The supervisorLink fd is NOT explicitly closed on quit; the OS closes it when
 // the process exits for any reason (Cmd+Q, crash, SIGKILL). Sessions survive.
 app.on("before-quit", () => {
+	// A language server left running after the app quits is ~1 GB of orphaned
+	// resident memory that nothing will reap.
+	void lspRegistry?.disposeAll();
+	lspRegistry = null;
 	browserViewHost?.dispose();
 	browserViewHost = null;
 	companionOverlay?.dispose();
