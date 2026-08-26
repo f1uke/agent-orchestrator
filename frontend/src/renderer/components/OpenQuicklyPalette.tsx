@@ -319,35 +319,35 @@ export function OpenQuicklyPalette({
 							<p className="open-quickly__note">No files match &ldquo;{query.trim()}&rdquo;.</p>
 						) : null}
 						{trimmedQuery !== "" && workspaceRoot && server.state !== "unavailable" ? (
-						<div className="open-quickly__section" data-testid="open-quickly-symbols">
-							<div className="open-quickly__section-label">Symbols</div>
-							{server.state === "failed" ? (
-								<p className="open-quickly__note open-quickly__note--error">
-									The Go language server isn&rsquo;t running, so symbols aren&rsquo;t searchable.
-									{server.detail ? ` (${server.detail})` : ""}
-								</p>
-							) : server.state !== "ready" ? (
-								/* Gate on READINESS, not latency: an empty list here would be a
+							<div className="open-quickly__section" data-testid="open-quickly-symbols">
+								<div className="open-quickly__section-label">Symbols</div>
+								{server.state === "failed" ? (
+									<p className="open-quickly__note open-quickly__note--error">
+										The Go language server isn&rsquo;t running, so symbols aren&rsquo;t searchable.
+										{server.detail ? ` (${server.detail})` : ""}
+									</p>
+								) : server.state !== "ready" ? (
+									/* Gate on READINESS, not latency: an empty list here would be a
 								   lie told in exactly the seconds people use this most. */
-								<p className="open-quickly__note">Loading this workspace&rsquo;s Go packages&hellip;</p>
-							) : symbolAnswer?.query !== trimmedQuery ? (
-								<p className="open-quickly__note">Searching symbols&hellip;</p>
-							) : symbols.length === 0 ? (
-								<p className="open-quickly__note">No Go symbols match &ldquo;{trimmedQuery}&rdquo;.</p>
-							) : (
-								<div aria-label="Matching symbols" className="open-quickly__list" role="listbox">
-									{symbols.map((symbol) => (
-										<SymbolRow
-											key={`${symbol.uri}:${symbol.line}:${symbol.column}:${symbol.name}`}
-											match={symbol}
-											onPick={() => chooseSymbol(symbol)}
-										/>
-									))}
-								</div>
-							)}
-						</div>
-					) : null}
-					{results.length > 0 ? (
+									<p className="open-quickly__note">Loading this workspace&rsquo;s Go packages&hellip;</p>
+								) : symbolAnswer?.query !== trimmedQuery ? (
+									<p className="open-quickly__note">Searching symbols&hellip;</p>
+								) : symbols.length === 0 ? (
+									<p className="open-quickly__note">No Go symbols match &ldquo;{trimmedQuery}&rdquo;.</p>
+								) : (
+									<div aria-label="Matching symbols" className="open-quickly__list" role="listbox">
+										{symbols.map((symbol) => (
+											<SymbolRow
+												key={`${symbol.uri}:${symbol.line}:${symbol.column}:${symbol.name}`}
+												match={symbol}
+												onPick={() => chooseSymbol(symbol)}
+											/>
+										))}
+									</div>
+								)}
+							</div>
+						) : null}
+						{results.length > 0 ? (
 							<div
 								aria-label="Matching files"
 								className="open-quickly__list"

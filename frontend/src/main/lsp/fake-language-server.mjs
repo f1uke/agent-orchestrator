@@ -32,6 +32,18 @@ if (process.env.FAKE_LSP_ASK_CONFIG === "1") {
 	}, 10);
 }
 
+// The same probe for a request the client does NOT implement. A real client must
+// still ANSWER it (with an error); leaving it hanging stalls a real server.
+let unsupportedAnswered = false;
+if (process.env.FAKE_LSP_ASK_UNSUPPORTED === "1") {
+	setTimeout(() => {
+		send({ jsonrpc: "2.0", id: 9002, method: "window/showMessageRequest", params: { type: 3, message: "hi" } });
+		setTimeout(() => {
+			if (!unsupportedAnswered) process.exit(4);
+		}, 500);
+	}, 10);
+}
+
 process.stdin.on("data", (chunk) => {
 	buffer = Buffer.concat([buffer, chunk]);
 	for (;;) {
@@ -48,6 +60,10 @@ process.stdin.on("data", (chunk) => {
 function handle(msg) {
 	if (msg.id === 9001) {
 		configAnswered = true;
+		return;
+	}
+	if (msg.id === 9002) {
+		unsupportedAnswered = true;
 		return;
 	}
 	switch (msg.method) {

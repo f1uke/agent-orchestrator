@@ -211,6 +211,18 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 				case "workspace/workspaceFolders":
 					send({ jsonrpc: "2.0", id: message.id as number, result: [{ uri: rootUri, name: "workspace" }] });
 					return;
+				default:
+					// 🗝 EVERY server→client request gets an answer, including ones we do
+					// not implement. A request left hanging stalls the server silently -
+					// measured on gopls, whose `window/workDoneProgress/create` going
+					// unanswered left the workspace unloaded at 24 MB indefinitely, with
+					// no error anywhere. MethodNotFound is a real answer; silence is not.
+					send({
+						jsonrpc: "2.0",
+						id: message.id as number,
+						error: { code: -32601, message: `client does not implement ${method}` },
+					});
+					return;
 			}
 		}
 

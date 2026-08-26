@@ -46,7 +46,12 @@ describe("toMonacoDefinitions", () => {
 
 	test("a LocationLink with no selection range falls back to targetRange", () => {
 		const links = toMonacoDefinitions(
-			[{ targetUri: "file:///a/b.go", targetRange: { start: { line: 7, character: 0 }, end: { line: 9, character: 1 } } }],
+			[
+				{
+					targetUri: "file:///a/b.go",
+					targetRange: { start: { line: 7, character: 0 }, end: { line: 9, character: 1 } },
+				},
+			],
 			modelUri,
 			toModelUri,
 		);

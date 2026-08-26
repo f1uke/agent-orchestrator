@@ -122,6 +122,18 @@ describe("startLspProcess", () => {
 		await vi.waitFor(() => expect(messages.some((m) => m.id === 1)).toBe(true));
 	});
 
+	test("answers an UNSUPPORTED server request rather than leaving it hanging", async () => {
+		// 🗝 Measured against real gopls: a server→client request left unanswered
+		// stalls the server silently. Its workspace never loaded, it sat at 24 MB,
+		// and nothing anywhere reported a problem. MethodNotFound is a real answer.
+		// The fake exits 4 if its window/showMessageRequest goes unanswered, which
+		// would surface here as `failed`.
+		const { proc } = start(fakeSpec({ FAKE_LSP_ASK_UNSUPPORTED: "1" }));
+		await proc.initialized;
+		await new Promise((r) => setTimeout(r, 700));
+		expect(proc.state).toBe("ready");
+	});
+
 	test("rss() reports a positive number for a live process", async () => {
 		const { proc } = start(fakeSpec());
 		await proc.initialized;

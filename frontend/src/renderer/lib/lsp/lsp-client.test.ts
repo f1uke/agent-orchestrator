@@ -47,6 +47,31 @@ describe("request", () => {
 		expect(settled).toBe(false);
 	});
 
+	test("a server→client REQUEST never resolves a pending request that shares its id", async () => {
+		// 🗝 Client ids and server ids are separate id spaces in JSON-RPC and they
+		// overlap. Measured against real gopls: it sent
+		// `window/workDoneProgress/create` with id 2 while our id 2 was in flight;
+		// matching on id alone resolved our request with the server's request
+		// payload AND left gopls waiting for an answer, so the workspace never
+		// loaded and the server sat at 24 MB with no error anywhere.
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		const pending = client.request("workspace/symbol", { query: "x" });
+		const ourId = h.sent[0].message.id as number;
+		h.emit({ jsonrpc: "2.0", id: ourId, method: "window/workDoneProgress/create", params: { token: "load" } });
+		let settled = false;
+		void pending.then(() => {
+			settled = true;
+		});
+		await new Promise((r) => setTimeout(r, 20));
+		expect(settled).toBe(false);
+		expect(h.outcomes).toEqual([]);
+
+		// The real response still resolves it.
+		h.emit({ jsonrpc: "2.0", id: ourId, result: [{ name: "X" }] });
+		await expect(pending).resolves.toEqual([{ name: "X" }]);
+	});
+
 	test("rejects on a JSON-RPC error and reports it as `error`", async () => {
 		const h = harness();
 		const client = createLspClient("h1", h.transport);

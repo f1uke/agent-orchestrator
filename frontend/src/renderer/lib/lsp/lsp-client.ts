@@ -57,6 +57,13 @@ export function createLspClient(handleId: string, transport: LspTransport): LspC
 		// One IPC channel carries every server's traffic, so this filter is what
 		// stops another workspace's answer resolving this client's request.
 		if (from !== handleId) return;
+		// 🗝 A RESPONSE is a message with an id and NO method. A server→client
+		// REQUEST also carries an id, drawn from the SERVER's own id space, which
+		// overlaps ours - so matching on id alone resolves one of our pending
+		// requests with the server's request payload and leaves the server waiting
+		// forever. Measured: gopls sent `window/workDoneProgress/create` with id 2
+		// while our id 2 was in flight, and the workspace never loaded.
+		if (typeof message.method === "string") return;
 		const id = message.id;
 		if (typeof id !== "number") return;
 		const waiting = pending.get(id);
