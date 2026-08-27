@@ -13,12 +13,27 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
-const deleteSmokeCheck = `-- name: DeleteSmokeCheck :exec
+const deleteSmokeCheck = `-- name: DeleteSmokeCheck :execrows
 DELETE FROM smoke_check WHERE id = ?
 `
 
-func (q *Queries) DeleteSmokeCheck(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteSmokeCheck, id)
+func (q *Queries) DeleteSmokeCheck(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSmokeCheck, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteSmokeChecklistState = `-- name: DeleteSmokeChecklistState :exec
+DELETE FROM smoke_checklist_state WHERE session_id = ?
+`
+
+// Authoring a case retracts a stand-down: a case on the list contradicts "there
+// is nothing here for a person", so the claim goes rather than sitting beside
+// the thing that disproves it.
+func (q *Queries) DeleteSmokeChecklistState(ctx context.Context, sessionID domain.SessionID) error {
+	_, err := q.db.ExecContext(ctx, deleteSmokeChecklistState, sessionID)
 	return err
 }
 
@@ -46,7 +61,7 @@ func (q *Queries) DeleteUserSmokeEvidenceByCheck(ctx context.Context, checkID st
 }
 
 const getSmokeCheck = `-- name: GetSmokeCheck :one
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason, authored_by, authored_by_role, authored_at
 FROM smoke_check WHERE id = ?
 `
 
@@ -76,6 +91,29 @@ func (q *Queries) GetSmokeCheck(ctx context.Context, id string) (SmokeCheck, err
 		&i.AgentSha,
 		&i.RetiredAt,
 		&i.RetiredReason,
+		&i.AuthoredBy,
+		&i.AuthoredByRole,
+		&i.AuthoredAt,
+	)
+	return i, err
+}
+
+const getSmokeChecklistState = `-- name: GetSmokeChecklistState :one
+SELECT session_id, stood_down_at, stood_down_by, stood_down_by_role, reason, created_at, updated_at
+FROM smoke_checklist_state WHERE session_id = ?
+`
+
+func (q *Queries) GetSmokeChecklistState(ctx context.Context, sessionID domain.SessionID) (SmokeChecklistState, error) {
+	row := q.db.QueryRowContext(ctx, getSmokeChecklistState, sessionID)
+	var i SmokeChecklistState
+	err := row.Scan(
+		&i.SessionID,
+		&i.StoodDownAt,
+		&i.StoodDownBy,
+		&i.StoodDownByRole,
+		&i.Reason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -103,23 +141,26 @@ func (q *Queries) GetSmokeEvidence(ctx context.Context, id string) (SmokeEvidenc
 }
 
 const insertSmokeCheck = `-- name: InsertSmokeCheck :exec
-INSERT INTO smoke_check (id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', NULL, NULL, ?, ?)
+INSERT INTO smoke_check (id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, authored_by, authored_by_role, authored_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', NULL, NULL, ?, ?, ?, ?, ?)
 `
 
 type InsertSmokeCheckParams struct {
-	ID        string
-	SessionID domain.SessionID
-	ProjectID domain.ProjectID
-	Seq       int64
-	Name      string
-	Why       string
-	Steps     string
-	Expected  string
-	PRNum     int64
-	FileRef   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             string
+	SessionID      domain.SessionID
+	ProjectID      domain.ProjectID
+	Seq            int64
+	Name           string
+	Why            string
+	Steps          string
+	Expected       string
+	PRNum          int64
+	FileRef        string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	AuthoredBy     domain.SessionID
+	AuthoredByRole domain.CrewRole
+	AuthoredAt     sql.NullTime
 }
 
 // A fresh case starts with BOTH results empty: 'pending' is the user's default
@@ -138,6 +179,9 @@ func (q *Queries) InsertSmokeCheck(ctx context.Context, arg InsertSmokeCheckPara
 		arg.FileRef,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.AuthoredBy,
+		arg.AuthoredByRole,
+		arg.AuthoredAt,
 	)
 	return err
 }
@@ -175,7 +219,7 @@ func (q *Queries) InsertSmokeEvidence(ctx context.Context, arg InsertSmokeEviden
 }
 
 const listSmokeChecksBySession = `-- name: ListSmokeChecksBySession :many
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason, authored_by, authored_by_role, authored_at
 FROM smoke_check WHERE session_id = ? ORDER BY (retired_at IS NOT NULL), seq, created_at
 `
 
@@ -211,6 +255,9 @@ func (q *Queries) ListSmokeChecksBySession(ctx context.Context, sessionID domain
 			&i.AgentSha,
 			&i.RetiredAt,
 			&i.RetiredReason,
+			&i.AuthoredBy,
+			&i.AuthoredByRole,
+			&i.AuthoredAt,
 		); err != nil {
 			return nil, err
 		}
@@ -467,20 +514,24 @@ func (q *Queries) SetSmokeVerdict(ctx context.Context, arg SetSmokeVerdictParams
 }
 
 const updateSmokeCheckAuthored = `-- name: UpdateSmokeCheckAuthored :execrows
-UPDATE smoke_check SET seq = ?, name = ?, why = ?, steps = ?, expected = ?, pr_num = ?, file_ref = ?, updated_at = ?
+UPDATE smoke_check SET seq = ?, name = ?, why = ?, steps = ?, expected = ?, pr_num = ?, file_ref = ?, updated_at = ?,
+    authored_by = ?, authored_by_role = ?, authored_at = ?
 WHERE id = ?
 `
 
 type UpdateSmokeCheckAuthoredParams struct {
-	Seq       int64
-	Name      string
-	Why       string
-	Steps     string
-	Expected  string
-	PRNum     int64
-	FileRef   string
-	UpdatedAt time.Time
-	ID        string
+	Seq            int64
+	Name           string
+	Why            string
+	Steps          string
+	Expected       string
+	PRNum          int64
+	FileRef        string
+	UpdatedAt      time.Time
+	AuthoredBy     domain.SessionID
+	AuthoredByRole domain.CrewRole
+	AuthoredAt     sql.NullTime
+	ID             string
 }
 
 // Re-author keeps the user's play results: only the worker-authored fields are
@@ -496,10 +547,49 @@ func (q *Queries) UpdateSmokeCheckAuthored(ctx context.Context, arg UpdateSmokeC
 		arg.PRNum,
 		arg.FileRef,
 		arg.UpdatedAt,
+		arg.AuthoredBy,
+		arg.AuthoredByRole,
+		arg.AuthoredAt,
 		arg.ID,
 	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const upsertSmokeChecklistState = `-- name: UpsertSmokeChecklistState :exec
+INSERT INTO smoke_checklist_state (session_id, stood_down_at, stood_down_by, stood_down_by_role, reason, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (session_id) DO UPDATE SET
+    stood_down_at = excluded.stood_down_at,
+    stood_down_by = excluded.stood_down_by,
+    stood_down_by_role = excluded.stood_down_by_role,
+    reason = excluded.reason,
+    updated_at = excluded.updated_at
+`
+
+type UpsertSmokeChecklistStateParams struct {
+	SessionID       domain.SessionID
+	StoodDownAt     time.Time
+	StoodDownBy     domain.SessionID
+	StoodDownByRole domain.CrewRole
+	Reason          string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// Standing down twice re-states it: the later reason and author replace the
+// earlier ones, because the claim is about the checklist as it is NOW.
+func (q *Queries) UpsertSmokeChecklistState(ctx context.Context, arg UpsertSmokeChecklistStateParams) error {
+	_, err := q.db.ExecContext(ctx, upsertSmokeChecklistState,
+		arg.SessionID,
+		arg.StoodDownAt,
+		arg.StoodDownBy,
+		arg.StoodDownByRole,
+		arg.Reason,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }

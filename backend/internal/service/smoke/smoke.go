@@ -43,20 +43,6 @@ var (
 // instead, naming the cases and how to keep them. The controller maps it to 422.
 var ErrResultsAtRisk = errors.New("smoke: author would discard recorded results")
 
-// ErrQAOwnsChecklist refuses an Author call made BY a crew's dev while that task
-// has a qa. It is the one layer of the dev/qa split that a brief cannot argue
-// with: dev's prompt merely says the checklist is qa's, and both real crew runs
-// showed a brief asking dev for cases wins that argument every time - a prompt
-// that says nothing cannot contradict a brief, and a prompt that asks politely
-// is still only asking.
-//
-// The predicate is A QA EXISTS, deliberately not "the caller is a crew dev". A
-// task is dev-alone until a qa is created for it, and during that window dev
-// authoring the checklist is CORRECT: it is the only member there, and it is
-// still handed the smoke protocol. A solo worker - no crew, no qa - can never
-// reach this at all. The controller maps it to 409.
-var ErrQAOwnsChecklist = errors.New("smoke: qa owns this task's checklist")
-
 // ErrCaseRetired refuses any write to a retired case. Retiring one is how a
 // checklist shrinks AUDITABLY: the case stops being something the user is asked
 // to play, and the row - its name, its steps, the user's verdict, note and
@@ -68,6 +54,11 @@ var ErrQAOwnsChecklist = errors.New("smoke: qa owns this task's checklist")
 // back comes back under a NEW id, unplayed - which is right, because the old
 // results were recorded against the old steps. The controller maps it to 422.
 var ErrCaseRetired = errors.New("smoke: case is retired")
+
+// maxChecklistCases bounds one session's checklist. Shared by the whole-list and
+// the per-case write paths, so adding cases one at a time cannot walk past the
+// ceiling `set` enforces in a single call.
+const maxChecklistCases = 50
 
 // Evidence size caps (user decision 2026-07-11): 25 MB image / 200 MB video.
 const (
@@ -91,6 +82,10 @@ var evidenceKinds = map[string]string{
 type Manager interface {
 	List(ctx context.Context, sessionID domain.SessionID) (SessionSmoke, error)
 	Author(ctx context.Context, from, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error)
+	AddCases(ctx context.Context, from, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error)
+	EditCase(ctx context.Context, from, sessionID domain.SessionID, checkID string, patch domain.SmokeCasePatch) (domain.SmokeCheck, error)
+	RemoveCase(ctx context.Context, from, sessionID domain.SessionID, checkID string) (SessionSmoke, error)
+	StandDown(ctx context.Context, from, sessionID domain.SessionID, reason string) (SessionSmoke, error)
 	SetVerdict(ctx context.Context, sessionID domain.SessionID, checkID string, verdict domain.SmokeVerdict, note string) (domain.SmokeCheck, error)
 	RecordAgentResult(ctx context.Context, sessionID domain.SessionID, checkID string, res domain.SmokeAgentResult) (domain.SmokeCheck, error)
 	Retire(ctx context.Context, sessionID domain.SessionID, checkID, reason string) (domain.SmokeCheck, error)
@@ -111,7 +106,13 @@ type Manager interface {
 type Store interface {
 	ListSmokeChecksBySession(ctx context.Context, id domain.SessionID) ([]domain.SmokeCheck, error)
 	GetSmokeCheck(ctx context.Context, id string) (domain.SmokeCheck, bool, error)
-	ReplaceSmokeChecks(ctx context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, now time.Time) ([]domain.SmokeCheck, []string, error)
+	ReplaceSmokeChecks(ctx context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, author domain.SmokeAuthor, now time.Time) ([]domain.SmokeCheck, []string, error)
+	UpsertSmokeChecks(ctx context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, author domain.SmokeAuthor, now time.Time) ([]domain.SmokeCheck, error)
+	PatchSmokeCheckAuthored(ctx context.Context, id string, patch domain.SmokeCasePatch, author domain.SmokeAuthor, now time.Time) (bool, error)
+	DeleteSmokeCheck(ctx context.Context, id string) (bool, error)
+	GetSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID) (domain.SmokeStandDown, bool, error)
+	SetSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID, reason string, author domain.SmokeAuthor, now time.Time) error
+	ClearSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID) error
 	SetSmokeVerdict(ctx context.Context, id string, verdict domain.SmokeVerdict, note string, decidedAt, now time.Time) (bool, error)
 	SetSmokeAgentResult(ctx context.Context, id string, res domain.SmokeAgentResult, ranAt, now time.Time) (bool, error)
 	RetireSmokeCheck(ctx context.Context, id, reason string, retiredAt, now time.Time) (bool, error)
@@ -138,6 +139,12 @@ type SessionSmoke struct {
 	Worker     string              `json:"worker"`
 	ReportedAt *time.Time          `json:"reportedAt,omitempty"`
 	Checks     []domain.SmokeCheck `json:"checks"`
+	// StandDown is set when a member has recorded that this change needs no
+	// human verification. It is what stops an EMPTY checklist meaning two
+	// opposite things at once - nobody has decided yet, or it was decided and
+	// there is nothing worth a person's eyes - which is a distinction the screen
+	// could not previously draw.
+	StandDown *domain.SmokeStandDown `json:"standDown,omitempty"`
 }
 
 // EvidenceUpload is one attach request: the declared MIME + original filename
@@ -234,7 +241,15 @@ func (s *Service) List(ctx context.Context, sessionID domain.SessionID) (Session
 		return SessionSmoke{}, err
 	}
 	worker := s.workerLabel(ctx, sessionID)
-	return SessionSmoke{Worker: worker, ReportedAt: reportedAt(checks), Checks: checks}, nil
+	out := SessionSmoke{Worker: worker, ReportedAt: reportedAt(checks), Checks: checks}
+	stood, ok, err := s.store.GetSmokeChecklistStandDown(ctx, sessionID)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	if ok {
+		out.StandDown = &stood
+	}
+	return out, nil
 }
 
 // Author registers or replaces a session's whole checklist. Cases matched by
@@ -247,6 +262,13 @@ func (s *Service) List(ctx context.Context, sessionID domain.SessionID) (Session
 // (surviving one is what retiring a case means) and ReplaceSmokeChecks leaves
 // them alone, so a checklist that has shrunk stays shrunk. Naming a retired id
 // in the payload is refused with ErrCaseRetired rather than reviving it.
+//
+// Author sets the WHOLE list, so it is the one write path on which a second
+// author is destructive by construction: whoever calls it last decides what the
+// list contains. It stays because authoring an initial checklist in one call is
+// still the right shape - but it is no longer the only way to write. AddCases,
+// EditCase and RemoveCase touch one case each, and that is what two members
+// working at once should use.
 func (s *Service) Author(ctx context.Context, from, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error) {
 	if sessionID == "" {
 		return SessionSmoke{}, fmt.Errorf("%w: session id is required", ErrInvalid)
@@ -254,10 +276,11 @@ func (s *Service) Author(ctx context.Context, from, sessionID domain.SessionID, 
 	if len(cases) == 0 {
 		return SessionSmoke{}, fmt.Errorf("%w: at least one case is required", ErrInvalid)
 	}
-	if len(cases) > 50 {
-		return SessionSmoke{}, fmt.Errorf("%w: a checklist may have at most 50 cases", ErrInvalid)
+	if len(cases) > maxChecklistCases {
+		return SessionSmoke{}, fmt.Errorf("%w: a checklist may have at most %d cases", ErrInvalid, maxChecklistCases)
 	}
-	if err := s.checkChecklistOwner(ctx, from); err != nil {
+	author, err := s.resolveAuthor(ctx, from)
+	if err != nil {
 		return SessionSmoke{}, err
 	}
 	rec, ok, err := s.store.GetSession(ctx, sessionID)
@@ -292,7 +315,7 @@ func (s *Service) Author(ctx context.Context, from, sessionID domain.SessionID, 
 	if err := checkResultsAtRisk(existing, resolved); err != nil {
 		return SessionSmoke{}, err
 	}
-	_, removed, err := s.store.ReplaceSmokeChecks(ctx, sessionID, rec.ProjectID, resolved, s.now())
+	_, removed, err := s.store.ReplaceSmokeChecks(ctx, sessionID, rec.ProjectID, resolved, author, s.now())
 	if err != nil {
 		return SessionSmoke{}, err
 	}
@@ -302,45 +325,237 @@ func (s *Service) Author(ctx context.Context, from, sessionID domain.SessionID, 
 	return s.List(ctx, sessionID)
 }
 
-// checkChecklistOwner refuses an author call made by a crew's DEV while that
-// task has a live qa, naming the qa so dev hands the work over rather than
-// hunting for who owns it.
+// AddCases writes 1..N cases into the checklist without touching any case the
+// payload does not name. It is the write path SHARED AUTHORSHIP rests on.
 //
-// `from` is the CALLER, which is the only thing that can decide this: both
-// members author against the same target (`$AO_CREW_ID` is dev's session id, so
-// qa's own `ao smoke set` names dev's row too), and the path cannot tell them
-// apart. An empty or unknown `from` is NOT refused: the desktop app, a direct
-// API call and an older `ao` all send nothing, and refusing what AO cannot
-// identify would break authoring for every caller the rule is not about.
+// Both members own this list - dev knows what the change actually touched, qa
+// reconstructs it from the outside - and the reason this is a per-case verb
+// rather than a permission change on Author is mechanical, not stylistic. Author
+// sets the whole list, so lifting the old dev refusal on it alone would have
+// made the second author destructive: whoever wrote second would erase the
+// other's cases and, with them, the human's verdicts, notes and screenshots.
+// Here an author only ever reaches the cases they named, so two members adding
+// different cases at the same moment both survive - attribution records who
+// changed what, it does not prevent anyone destroying anything.
 //
-// Alive is "not terminated", matching how the crew refcounts its worktree: a
-// SUSPENDED qa is asleep on the task and still owns the checklist it will wake
-// up to, while a terminated one leaves rows behind that must not keep dev out.
-func (s *Service) checkChecklistOwner(ctx context.Context, from domain.SessionID) error {
+// A named id that already exists is EDITED in place, keeping the user's results.
+// A retired id is refused rather than revived, exactly as in Author.
+func (s *Service) AddCases(ctx context.Context, from, sessionID domain.SessionID, cases []domain.SmokeAuthoredCase) (SessionSmoke, error) {
+	if sessionID == "" {
+		return SessionSmoke{}, fmt.Errorf("%w: session id is required", ErrInvalid)
+	}
+	if len(cases) == 0 {
+		return SessionSmoke{}, fmt.Errorf("%w: at least one case is required", ErrInvalid)
+	}
+	author, err := s.resolveAuthor(ctx, from)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	rec, ok, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	if !ok {
+		return SessionSmoke{}, fmt.Errorf("%w: session %q", ErrNotFound, sessionID)
+	}
+	existing, err := s.store.ListSmokeChecksBySession(ctx, sessionID)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	// An id already on THIS checklist resolves to itself (that is the edit), so
+	// only ids other sessions hold force a fresh one.
+	resolved, err := resolveCases(sessionID, cases, func(id string) (bool, error) {
+		other, ok, err := s.store.GetSmokeCheck(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		return ok && other.SessionID != sessionID, nil
+	})
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	if len(existing)+len(resolved) > maxChecklistCases {
+		return SessionSmoke{}, fmt.Errorf("%w: a checklist may have at most %d cases", ErrInvalid, maxChecklistCases)
+	}
+	if err := checkRetiredInPayload(existing, resolved); err != nil {
+		return SessionSmoke{}, err
+	}
+	if _, err := s.store.UpsertSmokeChecks(ctx, sessionID, rec.ProjectID, resolved, author, s.now()); err != nil {
+		return SessionSmoke{}, err
+	}
+	return s.List(ctx, sessionID)
+}
+
+// EditCase rewrites only the authored fields the patch names on ONE case.
+//
+// The narrow edit is what keeps two authors out of each other's way. Without it,
+// changing a case's fileRef would mean re-sending the whole case, which
+// overwrites whatever the other member had improved about its wording in the
+// meantime - a silent loss that looks like nothing happened. Nothing here can
+// reach the user's verdict, note or evidence: the statement behind it does not
+// name those columns.
+func (s *Service) EditCase(ctx context.Context, from, sessionID domain.SessionID, checkID string, patch domain.SmokeCasePatch) (domain.SmokeCheck, error) {
+	check, err := s.requireActiveCheck(ctx, sessionID, checkID)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	if patch.Empty() {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: name at least one field to change", ErrInvalid)
+	}
+	normalized, err := normalizePatch(patch)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	author, err := s.resolveAuthor(ctx, from)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	ok, err := s.store.PatchSmokeCheckAuthored(ctx, check.ID, normalized, author, s.now())
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	if !ok {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
+	}
+	return s.getCheck(ctx, check.ID)
+}
+
+// RemoveCase drops ONE case off the checklist, and refuses the moment the user
+// has played it.
+//
+// That refusal is the one guard the human kept when they opened the list to both
+// members: a case they have already judged is RETIRED, with a reason, never
+// silently deleted. Their verdict, note and evidence are the single part of a
+// checklist AO cannot regenerate, and a judgement that vanishes unexplained is
+// worse than a list that stays one case too long. A case nobody has touched is
+// free to remove outright - that is exactly what was asked for.
+func (s *Service) RemoveCase(ctx context.Context, from, sessionID domain.SessionID, checkID string) (SessionSmoke, error) {
+	check, err := s.requireActiveCheck(ctx, sessionID, checkID)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	if played(check) {
+		return SessionSmoke{}, removeAtRiskError(check)
+	}
+	if _, err := s.resolveAuthor(ctx, from); err != nil {
+		return SessionSmoke{}, err
+	}
+	ok, err := s.store.DeleteSmokeCheck(ctx, check.ID)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	if ok {
+		_ = os.RemoveAll(s.checkDir(sessionID, check.ID))
+	}
+	return s.List(ctx, sessionID)
+}
+
+// StandDown records "I looked, and there is nothing here a human needs to
+// check".
+//
+// It exists because an empty Tests tab said two opposite things at once - nobody
+// has decided yet, or it was decided and there is nothing worth your eyes - and
+// rendered them identically, so the screen could not be read. Saying it in prose
+// was all a prompt could do; this is the surface that lets the screen tell them
+// apart.
+//
+// Refused while ACTIVE cases exist, because the claim and the cases contradict
+// each other, and a stand-down sitting above a list of things to play is worse
+// than none. An all-retired checklist counts as empty: nothing on it is
+// something the user is asked to play.
+func (s *Service) StandDown(ctx context.Context, from, sessionID domain.SessionID, reason string) (SessionSmoke, error) {
+	if sessionID == "" {
+		return SessionSmoke{}, fmt.Errorf("%w: session id is required", ErrInvalid)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return SessionSmoke{}, fmt.Errorf("%w: a reason is required - it is the whole content of standing down", ErrInvalid)
+	}
+	if _, ok, err := s.store.GetSession(ctx, sessionID); err != nil {
+		return SessionSmoke{}, err
+	} else if !ok {
+		return SessionSmoke{}, fmt.Errorf("%w: session %q", ErrNotFound, sessionID)
+	}
+	checks, err := s.store.ListSmokeChecksBySession(ctx, sessionID)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	var active []string
+	for _, c := range checks {
+		if !c.Retired() {
+			active = append(active, c.ID)
+		}
+	}
+	if len(active) > 0 {
+		return SessionSmoke{}, fmt.Errorf("%w: this checklist still has %d case(s) to play (%s), and \"nothing here needs a person\" cannot stand beside them. Remove the ones that no longer apply (`ao smoke remove`), or retire the ones the user already played (`ao smoke retire`), then stand down",
+			ErrInvalid, len(active), strings.Join(active, ", "))
+	}
+	author, err := s.resolveAuthor(ctx, from)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	if err := s.store.SetSmokeChecklistStandDown(ctx, sessionID, reason, author, s.now()); err != nil {
+		return SessionSmoke{}, err
+	}
+	return s.List(ctx, sessionID)
+}
+
+// resolveAuthor turns the CALLER's own session id into the attribution stamped
+// on the write. It is the caller and never the target: both crew members author
+// against the same target, because the checklist belongs to the task and
+// $AO_CREW_ID is dev's id, so the target cannot say which of them is writing.
+//
+// An empty or unknown `from` resolves to no author, and is never an error. The
+// desktop app, a direct API call and an older `ao` all send nothing, and a write
+// AO cannot attribute is still a legitimate write - it simply carries no name
+// rather than a guessed one.
+func (s *Service) resolveAuthor(ctx context.Context, from domain.SessionID) (domain.SmokeAuthor, error) {
 	if from == "" {
-		return nil
+		return domain.SmokeAuthor{}, nil
 	}
-	caller, ok, err := s.store.GetSession(ctx, from)
+	rec, ok, err := s.store.GetSession(ctx, from)
 	if err != nil {
-		return err
+		return domain.SmokeAuthor{}, err
 	}
-	if !ok || !caller.InCrew() || !caller.CrewRole.IsDev() {
-		return nil
+	if !ok {
+		return domain.SmokeAuthor{}, nil
 	}
-	members, err := s.store.ListSessions(ctx, caller.ProjectID)
-	if err != nil {
-		return err
+	author := domain.SmokeAuthor{ID: rec.ID}
+	if rec.InCrew() && rec.CrewRole.Valid() {
+		author.Role = rec.CrewRole
 	}
-	for _, other := range members {
-		if other.ID == caller.ID || other.CrewID != caller.CrewID {
-			continue
+	return author, nil
+}
+
+// normalizePatch trims what the caller sent the same way resolveCases trims a
+// whole case, so an edited field and an authored one are stored identically. A
+// name is the one field that may not be blanked: it is what the user reads.
+func normalizePatch(patch domain.SmokeCasePatch) (domain.SmokeCasePatch, error) {
+	out := patch
+	if patch.Name != nil {
+		name := strings.TrimSpace(*patch.Name)
+		if name == "" {
+			return domain.SmokeCasePatch{}, fmt.Errorf("%w: a case cannot be left without a name", ErrInvalid)
 		}
-		if other.CrewRole != domain.CrewRoleQA || other.IsTerminated {
-			continue
-		}
-		return fmt.Errorf("%w: qa @%s owns this task's checklist - it authors the cases, runs them and retires them. If a brief asked you for smoke cases, that brief predates the crew: say so, and hand it over with `ao send --crew qa --about <sha>`", ErrQAOwnsChecklist, other.ID)
+		out.Name = &name
 	}
-	return nil
+	if patch.Why != nil {
+		why := strings.TrimSpace(*patch.Why)
+		out.Why = &why
+	}
+	if patch.Expected != nil {
+		expected := strings.TrimSpace(*patch.Expected)
+		out.Expected = &expected
+	}
+	if patch.FileRef != nil {
+		ref := strings.TrimSpace(*patch.FileRef)
+		out.FileRef = &ref
+	}
+	if patch.Steps != nil {
+		steps := trimSteps(*patch.Steps)
+		out.Steps = &steps
+	}
+	return out, nil
 }
 
 // SetVerdict records the user's verdict + note for a case.
@@ -1000,6 +1215,16 @@ func resultsAtRiskError(atRisk []domain.SmokeCheck) error {
 	}
 	return fmt.Errorf("%w: %s missing from the payload: %s. A case id is derived from its name, so rewording a name drops the old case: re-send each one under the id it already has (e.g. add \"id\": \"%s\" to the case that replaces it); or retire it, which keeps the results and the reason it went (`ao smoke retire <session> --case %s --reason \"…\"`), and then it may be left out; or ask the user to Reset the case in the Tests tab before dropping it",
 		ErrResultsAtRisk, subject, strings.Join(listed, "; "), atRisk[0].ID, atRisk[0].ID)
+}
+
+// removeAtRiskError refuses an EXPLICIT removal of a played case and points at
+// retire, which keeps what the user recorded and the reason the case went. The
+// omission path (checkResultsAtRisk) has its own wording because its fix is
+// usually to re-send the case under the id it already has; here the caller meant
+// to remove it, so there is exactly one way forward.
+func removeAtRiskError(c domain.SmokeCheck) error {
+	return fmt.Errorf("%w: the user already played %q (id %q, %s), so it is retired rather than deleted - that keeps their verdict, note and evidence, and records why the case went: `ao smoke retire <session> --case %s --reason \"…\"`. If it should come off the list with nothing kept, ask the user to Reset it in the Tests tab first",
+		ErrResultsAtRisk, c.Name, c.ID, playedSummary(c), c.ID)
 }
 
 // playedSummary describes what the user recorded on a case, for the refusal.

@@ -22,14 +22,16 @@ type fakeStore struct {
 	evidence  map[string]domain.SmokeEvidence
 	lastCases []domain.SmokeAuthoredCase
 	reported  map[domain.SessionID]time.Time
+	standDown map[domain.SessionID]domain.SmokeStandDown
 }
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		checks:   map[string]domain.SmokeCheck{},
-		sessions: map[domain.SessionID]domain.SessionRecord{},
-		evidence: map[string]domain.SmokeEvidence{},
-		reported: map[domain.SessionID]time.Time{},
+		checks:    map[string]domain.SmokeCheck{},
+		sessions:  map[domain.SessionID]domain.SessionRecord{},
+		evidence:  map[string]domain.SmokeEvidence{},
+		reported:  map[domain.SessionID]time.Time{},
+		standDown: map[domain.SessionID]domain.SmokeStandDown{},
 	}
 }
 
@@ -88,7 +90,7 @@ func (f *fakeStore) evidenceFor(checkID string) []domain.SmokeEvidence {
 	return check.Evidence
 }
 
-func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, now time.Time) ([]domain.SmokeCheck, []string, error) {
+func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, author domain.SmokeAuthor, now time.Time) ([]domain.SmokeCheck, []string, error) {
 	f.lastCases = cases
 	out := make([]domain.SmokeCheck, 0, len(cases))
 	for _, c := range cases {
@@ -128,7 +130,10 @@ func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.Sessi
 	}
 	sort.Strings(removed)
 	for _, c := range cases {
-		check := domain.SmokeCheck{ID: c.ID, SessionID: sessionID, ProjectID: projectID, Seq: c.Seq, Name: c.Name, Steps: c.Steps, Verdict: domain.SmokePending, Evidence: []domain.SmokeEvidence{}, CreatedAt: now, UpdatedAt: now}
+		// Every authored field, not a subset: a fake that drops one lets a service
+		// test pass while the real path loses it (the same class of bug the CLI's
+		// response DTO carries a comment about).
+		check := domain.SmokeCheck{ID: c.ID, SessionID: sessionID, ProjectID: projectID, Seq: c.Seq, Name: c.Name, Why: c.Why, Steps: c.Steps, Expected: c.Expected, PRNum: c.PRNum, FileRef: c.FileRef, Verdict: domain.SmokePending, Evidence: []domain.SmokeEvidence{}, CreatedAt: now, UpdatedAt: now}
 		// An id already present keeps what the user recorded on it (its evidence
 		// rows are keyed to the id and joined on read, so they follow).
 		if prior, ok := f.checks[c.ID]; ok {
@@ -138,10 +143,115 @@ func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.Sessi
 			check.RetiredAt, check.RetiredReason = prior.RetiredAt, prior.RetiredReason
 			check.CreatedAt = prior.CreatedAt
 		}
+		stampAuthor(&check, author, now)
 		f.checks[c.ID] = check
 		out = append(out, check)
 	}
+	delete(f.standDown, sessionID)
 	return out, removed, nil
+}
+
+// UpsertSmokeChecks is the per-case write: it touches only the cases it names.
+// The fake models exactly that, because "an author cannot reach a case it did
+// not name" is the property the shared-checklist tests are asserting.
+func (f *fakeStore) UpsertSmokeChecks(_ context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, author domain.SmokeAuthor, now time.Time) ([]domain.SmokeCheck, error) {
+	f.lastCases = cases
+	nextSeq := 0
+	for _, prior := range f.checks {
+		if prior.SessionID == sessionID && prior.Seq > nextSeq {
+			nextSeq = prior.Seq
+		}
+	}
+	for _, c := range cases {
+		if prior, ok := f.checks[c.ID]; ok && prior.SessionID != sessionID {
+			return nil, fmt.Errorf("UNIQUE constraint failed: smoke_check.id (%s owned by %s)", c.ID, prior.SessionID)
+		}
+	}
+	for _, c := range cases {
+		check := domain.SmokeCheck{ID: c.ID, SessionID: sessionID, ProjectID: projectID, Name: c.Name, Why: c.Why, Steps: c.Steps, Expected: c.Expected, PRNum: c.PRNum, FileRef: c.FileRef, Verdict: domain.SmokePending, Evidence: []domain.SmokeEvidence{}, CreatedAt: now, UpdatedAt: now}
+		if prior, ok := f.checks[c.ID]; ok {
+			check.Seq = prior.Seq
+			check.Verdict, check.Note, check.DecidedAt = prior.Verdict, prior.Note, prior.DecidedAt
+			check.AgentVerdict, check.AgentNote = prior.AgentVerdict, prior.AgentNote
+			check.AgentRanAt, check.AgentSHA = prior.AgentRanAt, prior.AgentSHA
+			check.RetiredAt, check.RetiredReason = prior.RetiredAt, prior.RetiredReason
+			check.CreatedAt = prior.CreatedAt
+		} else {
+			nextSeq++
+			check.Seq = nextSeq
+		}
+		stampAuthor(&check, author, now)
+		f.checks[c.ID] = check
+	}
+	delete(f.standDown, sessionID)
+	return f.ListSmokeChecksBySession(context.Background(), sessionID)
+}
+
+func (f *fakeStore) PatchSmokeCheckAuthored(_ context.Context, id string, patch domain.SmokeCasePatch, author domain.SmokeAuthor, now time.Time) (bool, error) {
+	check, ok := f.checks[id]
+	if !ok {
+		return false, nil
+	}
+	if patch.Name != nil {
+		check.Name = *patch.Name
+	}
+	if patch.Why != nil {
+		check.Why = *patch.Why
+	}
+	if patch.Steps != nil {
+		check.Steps = *patch.Steps
+	}
+	if patch.Expected != nil {
+		check.Expected = *patch.Expected
+	}
+	if patch.PRNum != nil {
+		check.PRNum = *patch.PRNum
+	}
+	if patch.FileRef != nil {
+		check.FileRef = *patch.FileRef
+	}
+	check.UpdatedAt = now
+	stampAuthor(&check, author, now)
+	f.checks[id] = check
+	return true, nil
+}
+
+func (f *fakeStore) DeleteSmokeCheck(_ context.Context, id string) (bool, error) {
+	if _, ok := f.checks[id]; !ok {
+		return false, nil
+	}
+	delete(f.checks, id)
+	for evID, ev := range f.evidence {
+		if ev.CheckID == id {
+			delete(f.evidence, evID)
+		}
+	}
+	return true, nil
+}
+
+func (f *fakeStore) GetSmokeChecklistStandDown(_ context.Context, sessionID domain.SessionID) (domain.SmokeStandDown, bool, error) {
+	sd, ok := f.standDown[sessionID]
+	return sd, ok, nil
+}
+
+func (f *fakeStore) SetSmokeChecklistStandDown(_ context.Context, sessionID domain.SessionID, reason string, author domain.SmokeAuthor, now time.Time) error {
+	f.standDown[sessionID] = domain.SmokeStandDown{SessionID: sessionID, At: now, By: author.ID, ByRole: author.Role, Reason: reason, CreatedAt: now, UpdatedAt: now}
+	return nil
+}
+
+func (f *fakeStore) ClearSmokeChecklistStandDown(_ context.Context, sessionID domain.SessionID) error {
+	delete(f.standDown, sessionID)
+	return nil
+}
+
+// stampAuthor mirrors the store: a write AO cannot attribute leaves all three
+// fields empty rather than stamping a time with nobody's name on it.
+func stampAuthor(check *domain.SmokeCheck, author domain.SmokeAuthor, now time.Time) {
+	if author.ID == "" {
+		return
+	}
+	at := now
+	check.AuthoredBy, check.AuthoredByRole, check.AuthoredAt = author.ID, author.Role, &at
 }
 
 func (f *fakeStore) SetSmokeVerdict(_ context.Context, id string, verdict domain.SmokeVerdict, note string, decidedAt, now time.Time) (bool, error) {

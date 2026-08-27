@@ -38,16 +38,20 @@ function check(overrides: Record<string, unknown>) {
 }
 
 let checks: ReturnType<typeof check>[];
+// A member's recorded "I looked, there is nothing here for a person". Absent by
+// default, which is the state every existing test is written against.
+let standDown: Record<string, unknown> | null;
 // The tab reads the session's PR summaries too, for the staleness rule: a
 // machine result is stale when the commit it ran against is no longer head.
 let prs: { number: number; headSha: string }[];
 
 beforeEach(() => {
 	checks = [check({})];
+	standDown = null;
 	prs = [];
 	getMock.mockReset().mockImplementation(async (path: string) => {
 		if (path === "/api/v1/sessions/{sessionId}/pr") return { data: { prs }, error: undefined };
-		return { data: { worker: "fix gl note", checks }, error: undefined };
+		return { data: { worker: "fix gl note", checks, ...(standDown ? { standDown } : {}) }, error: undefined };
 	});
 	postMock
 		.mockReset()
@@ -684,5 +688,111 @@ describe("SmokeTestView", () => {
 			expect(screen.queryByText("No smoke checks yet")).not.toBeInTheDocument();
 			expect(screen.getByRole("button", { name: /1 retired from this checklist/ })).toBeInTheDocument();
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A SHARED checklist: who wrote each case, and the two things an empty tab used
+// to say at once.
+
+describe("SmokeTestView shared authorship", () => {
+	it("names the member who wrote each case, and leaves an unattributable one unnamed", async () => {
+		checks = [
+			check({
+				id: "c1",
+				seq: 1,
+				name: "From dev",
+				authoredBy: "mer-1",
+				authoredByRole: "dev",
+				authoredAt: "2026-07-11T09:00:00Z",
+			}),
+			check({
+				id: "c2",
+				seq: 2,
+				name: "From qa",
+				authoredBy: "mer-2",
+				authoredByRole: "qa",
+				authoredAt: "2026-07-11T09:30:00Z",
+			}),
+			check({ id: "c3", seq: 3, name: "From nobody AO knows" }),
+		];
+		renderView();
+
+		// The human's stated reason for wanting attribution: seeing which cases
+		// came from dev, who knows the call sites, and which from qa.
+		expect(await screen.findByText(/written by dev/)).toBeInTheDocument();
+		expect(screen.getByText(/written by qa/)).toBeInTheDocument();
+		// Three cases, two authors: the third shows no author rather than a
+		// guessed one.
+		expect(screen.queryAllByText(/written by/)).toHaveLength(2);
+	});
+
+	it("falls back to the session id when the author has no crew role", async () => {
+		checks = [check({ authoredBy: "solo-7", authoredByRole: "" })];
+		renderView();
+		expect(await screen.findByText(/written by @solo-7/)).toBeInTheDocument();
+	});
+
+	it("says nobody has decided yet when the checklist is empty", async () => {
+		checks = [];
+		renderView();
+		expect(await screen.findByText("No smoke checks yet")).toBeInTheDocument();
+		expect(screen.getByText(/Nobody has decided what a person should look at yet/)).toBeInTheDocument();
+	});
+
+	// THE DISTINCTION THIS FEATURE EXISTS FOR. The same empty list used to render
+	// identically whether nobody had decided or somebody had decided there was
+	// nothing worth looking at - opposite answers, one panel.
+	it("renders a stood-down checklist as an answer, not as an empty list", async () => {
+		checks = [];
+		standDown = {
+			sessionId: "s1",
+			at: "2026-07-11T10:00:00Z",
+			by: "mer-2",
+			byRole: "qa",
+			reason: "pure refactor; behaviour is covered by TestReplaceSmokeChecks",
+			createdAt: "2026-07-11T10:00:00Z",
+			updatedAt: "2026-07-11T10:00:00Z",
+		};
+		renderView();
+
+		expect(await screen.findByText("qa stood down")).toBeInTheDocument();
+		expect(screen.getByText(/pure refactor; behaviour is covered/)).toBeInTheDocument();
+		expect(screen.getByText(/this is an answer, not an empty list/)).toBeInTheDocument();
+		// And it must NOT fall back to the "nobody has decided" copy, which is the
+		// opposite claim.
+		expect(screen.queryByText("No smoke checks yet")).not.toBeInTheDocument();
+		expect(screen.queryByText(/Nobody has decided/)).not.toBeInTheDocument();
+	});
+
+	it("names the worker when AO could not identify who stood down", async () => {
+		checks = [];
+		standDown = {
+			sessionId: "s1",
+			at: "2026-07-11T10:00:00Z",
+			reason: "no runtime surface",
+			createdAt: "2026-07-11T10:00:00Z",
+			updatedAt: "2026-07-11T10:00:00Z",
+		};
+		renderView();
+		expect(await screen.findByText("the worker stood down")).toBeInTheDocument();
+	});
+
+	// A stand-down is a claim about the WHOLE list, so a case on the list wins:
+	// the daemon retracts it, but the tab must not render both even for the one
+	// poll where a stale cache could carry both.
+	it("shows the cases, not the stand-down, when both arrive together", async () => {
+		checks = [check({ name: "Actually, look at the header" })];
+		standDown = {
+			sessionId: "s1",
+			at: "2026-07-11T10:00:00Z",
+			byRole: "qa",
+			reason: "no runtime surface",
+			createdAt: "2026-07-11T10:00:00Z",
+			updatedAt: "2026-07-11T10:00:00Z",
+		};
+		renderView();
+		expect(await screen.findByText("Actually, look at the header")).toBeInTheDocument();
+		expect(screen.queryByText("qa stood down")).not.toBeInTheDocument();
 	});
 });

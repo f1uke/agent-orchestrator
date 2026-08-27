@@ -15,6 +15,7 @@ import { ACCENT, MONO, accentMix, tint } from "./comment-inbox";
 export { ACCENT, MONO, accentMix };
 
 export type SmokeCheck = components["schemas"]["SmokeCheck"];
+export type SmokeStandDown = components["schemas"]["DomainSmokeStandDown"];
 export type SmokeEvidence = components["schemas"]["SmokeEvidence"];
 export type SmokeVerdict = "pending" | "pass" | "fail" | "skip";
 
@@ -364,4 +365,53 @@ export function retiredChecks(checks: SmokeCheck[]): SmokeCheck[] {
 	return checks
 		.filter((c) => Boolean(c.retiredAt))
 		.sort((a, b) => Date.parse(b.retiredAt ?? "") - Date.parse(a.retiredAt ?? ""));
+}
+
+// ---------------------------------------------------------------------------
+// Who wrote a case.
+//
+// The checklist is authored by BOTH crew members - dev knows what the change
+// actually touched, qa sees it the way a user will - so which of them a case
+// came from is part of reading the list, not decoration. The human asked for it
+// in those words.
+//
+// It is deliberately low-emphasis, and it sits nowhere near the machine's lane:
+// a "qa" author chip beside a "qa · ran" machine chip would read as one fact
+// about qa when they are two different ones.
+
+/** "written by dev" / "written by qa" / "written by @mer-2", or "" when AO could
+ * not identify the author. An unattributed case shows no author rather than a
+ * guessed one. */
+export function authorLabel(check: SmokeCheck): string {
+	const role = (check.authoredByRole ?? "").trim();
+	if (role) return `written by ${role}`;
+	const by = (check.authoredBy ?? "").trim();
+	return by ? `written by @${by}` : "";
+}
+
+// ---------------------------------------------------------------------------
+// Empty, and stood down.
+//
+// An empty checklist used to say two opposite things at once - nobody has
+// decided what a person should look at, or somebody decided and there is nothing
+// worth your eyes - and the tab rendered both as the same grey panel. A member
+// can now record the second (`ao smoke stand-down`), so the two states are told
+// apart here rather than left to the reader.
+
+export type ChecklistState = "loading" | "cases" | "stood-down" | "all-retired" | "undecided";
+
+export function checklistState(checks: SmokeCheck[], standDown: SmokeStandDown | null | undefined): ChecklistState {
+	if (activeChecks(checks).length > 0) return "cases";
+	if (standDown) return "stood-down";
+	return checks.length > 0 ? "all-retired" : "undecided";
+}
+
+/** "qa stood down" / "dev stood down" / "the worker stood down" - the actor is
+ * named because "somebody decided this needs no human" is only useful if you can
+ * see who decided it. */
+export function standDownActor(standDown: SmokeStandDown): string {
+	const role = (standDown.byRole ?? "").trim();
+	if (role) return role;
+	const by = (standDown.by ?? "").trim();
+	return by ? `@${by}` : "the worker";
 }

@@ -728,38 +728,98 @@ func TestCrewProtocol_DevIsToldWhatSummonsItsQA(t *testing.T) {
 	}
 }
 
-// MISSING 3, layer 1 - dev's prompt was SILENT about the checklist, and silence
-// loses an argument it is not present for: every brief that asked dev for smoke
-// cases was obeyed. The block turns that override into a contradiction the human
-// can see in dev's own output.
+// The checklist is SHARED, and this test carries the reversal.
 //
-// Under lazy creation it is a WINDOW rather than a flat prohibition, and the
-// window is the one AO enforces: dev owns the list until a qa exists - which on a
-// task that never touches a runtime surface is for ever - and loses it the moment
-// one does.
-func TestCrewProtocol_DevIsToldTheChecklistIsQAs(t *testing.T) {
-	dev := CrewProtocol("dev")
-	for _, want := range []string{
-		"The checklist is yours only while you have no qa",
-		"From that moment do not author or edit the checklist",
-		// It names the enforcement, so dev knows this is not a preference.
-		"REFUSED by AO",
-		// The load-bearing clause: a brief asking for cases is named as stale,
-		// and dev is told to SAY SO rather than quietly comply.
-		"that brief predates the crew",
-		"say so in your own output",
-		"ao send --crew qa",
-	} {
-		if !strings.Contains(dev, want) {
-			t.Fatalf("crew dev is not told the checklist is qa's: missing %q:\n%s", want, dev)
+// It used to pin the opposite: dev was told "do not author or edit the
+// checklist" and that `ao smoke set` from it was REFUSED, and qa was checked for
+// the ABSENCE of that. The human reversed it after watching a real iOS task
+// where qa wrote two cases while several places needed checking - dev is the
+// member that knows what the change touched, and qa reconstructs it from
+// outside. The refusal is gone from the daemon, so a prompt asserting it would
+// now be a lie, and "hand the brief to qa" would send dev to refuse work it is
+// allowed to do.
+//
+// What replaces it is not a softer version of the same rule. It is a different
+// kind of instruction - a capability plus the ONE mechanical trap in it - so the
+// assertions below are about the trap, not about permission.
+func TestCrewProtocol_ChecklistIsSharedPerCase(t *testing.T) {
+	for _, role := range []string{"dev", "qa"} {
+		block := CrewProtocol(role)
+		for _, want := range []string{
+			// Both members are told the list is shared, because a rule about a
+			// shared artifact that only one member can read is the silence that
+			// lost the last argument: qa has to know dev writing cases is correct.
+			"The smoke checklist is SHARED",
+			// The per-case verbs, which are the whole safety mechanism.
+			"ao smoke add",
+			"edit --case <id>",
+			// And the trap: `set` replaces the list, so the second writer deletes
+			// the first. This is the sentence that has to survive being skimmed.
+			"Never `ao smoke set` once there are two of you",
+			"deletes the other's cases",
+		} {
+			if !strings.Contains(block, want) {
+				t.Fatalf("crew %s is not told the checklist is shared: missing %q:\n%s", role, want, block)
+			}
+		}
+		// The old refusal must not survive anywhere: a prompt that asserts an
+		// enforcement AO no longer performs is worse than one that says nothing.
+		for _, gone := range []string{
+			"do not author or edit the checklist",
+			"REFUSED by AO",
+			"that brief predates the crew",
+		} {
+			if strings.Contains(block, gone) {
+				t.Fatalf("crew %s still carries the reversed dev refusal %q:\n%s", role, gone, block)
+			}
 		}
 	}
-	// qa is the owner, so the negative must not reach it - and a SOLO worker is
-	// in no crew at all, so it renders nothing.
-	if strings.Contains(CrewProtocol("qa"), "The checklist is yours only while you have no qa") {
-		t.Fatal("qa was handed dev's negative about the checklist")
+}
+
+// Cases are shared; machine RESULTS are not, and only dev needs telling.
+//
+// This is the half of the old split that survived the reversal, and it survived
+// on its own reasoning rather than by inertia: the human opened CASES to both
+// members (who says what is worth checking), which is a different act from
+// recording that a run happened. The mechanical half is that a case has ONE
+// machine lane and it carries no author, so a second writer there produces a
+// result nobody can trace - the exact failure per-case attribution exists to
+// prevent on the cases themselves.
+//
+// The qa-side assertion is the descendant of the old "qa was not handed dev's
+// negative": a line telling qa to leave `ao smoke record` to qa is nonsense, and
+// a prompt that reads as nonsense is one an agent starts discounting.
+func TestCrewProtocol_OnlyDevIsToldToLeaveResultsToQA(t *testing.T) {
+	dev := CrewProtocol("dev")
+	for _, want := range []string{
+		"Cases are shared; RESULTS are not",
+		"ao smoke record",
+		// Says WHY, so it is not read as etiquette.
+		"carries no author",
+	} {
+		if !strings.Contains(dev, want) {
+			t.Fatalf("crew dev is not told to leave machine results to qa: missing %q:\n%s", want, dev)
+		}
+	}
+	if strings.Contains(CrewProtocol("qa"), "Cases are shared; RESULTS are not") {
+		t.Fatal("qa was handed dev's carve-out, which tells qa to leave the results to qa")
 	}
 	if CrewProtocol("") != "" {
 		t.Fatalf("a solo worker must render no crew block:\n%s", CrewProtocol(""))
+	}
+}
+
+// crewProtocolBudget caps the block EVERY crew member reads on every turn. It is
+// a deliberate number, not a fence around the current text: the shared-checklist
+// rewrite had to be shorter than the restriction it replaced, because describing
+// a capability takes fewer words than arguing for a prohibition. Raise it only
+// with a reason, the way the sim guidance budget is raised.
+const crewProtocolBudget = 4200
+
+func TestCrewProtocol_StaysWithinItsBudget(t *testing.T) {
+	for _, role := range []string{"dev", "qa"} {
+		if n := len(CrewProtocol(role)); n > crewProtocolBudget {
+			t.Errorf("the %s crew protocol is %d bytes, over its %d-byte budget: it is read on every turn by every crew member, so either cut something or raise the budget deliberately", role, n, crewProtocolBudget)
+		}
 	}
 }

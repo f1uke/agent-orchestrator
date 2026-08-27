@@ -1,7 +1,8 @@
 # ao smoke
 
-Author and read a session's manual smoke-test checklist, record a machine's
-result beside the user's, and retire a case out of the checklist.
+Author and read a session's manual smoke-test checklist, add/edit/remove
+individual cases, record a machine's result beside the user's, retire a case out
+of the checklist, and record that nothing here needs a person at all.
 
 The checklist is stored AO-private under `~/.ao`, keyed to the session. It is
 never written into your checkout, so pass JSON on stdin (`--from-file -`) rather
@@ -24,6 +25,27 @@ questions. A recorded pass moves a label; the person still plays the case.
 Evidence keeps its provenance for the same reason: files attached by a person and
 files captured by a machine live in **separate lists**, because evidence is
 exactly what you go back to when you distrust a verdict.
+
+## Both members write this list
+
+A task's checklist belongs to the TASK, and on a crew **both** members author it:
+dev knows what the change actually touched, qa sees it the way a user will. Every
+authoring write records **who made it and when**, and the Tests tab shows it.
+
+That is why the per-case verbs exist. `ao smoke set` replaces the whole list, so
+two members using it erase each other's cases - and, but for the guard below, the
+human's verdicts with them. Attribution records who destroyed something; it does
+not prevent it. **`add` / `edit` / `remove` touch only the case they name**, and
+that is what makes two authors safe.
+
+| you want to | use |
+|---|---|
+| author an initial checklist in one call | `ao smoke set` |
+| add cases, or replace a case wholesale | `ao smoke add` |
+| change one field of one case | `ao smoke edit` |
+| drop a case nobody has played | `ao smoke remove` |
+| drop a case the user HAS played | `ao smoke retire --reason "…"` |
+| say there is nothing here to check | `ao smoke stand-down --reason "…"` |
 
 ## The one destructive edge, and the way out
 
@@ -62,6 +84,9 @@ checklist on DEV's card, so a checklist qa writes against its own session id is
 one nobody ever sees. `$AO_CREW_ID` is dev's id on a crew and your own id when you
 are working alone, so it is right in both shapes.
 
+`ao` sends your OWN session id alongside every write, and that is what a case's
+author line shows. The target says which checklist; the sender says who wrote.
+
 ## Subcommands
 
 ---
@@ -74,13 +99,10 @@ ids absent from the payload are removed - subject to the refusal above. Retired
 cases are outside all of this: they are never dropped for being absent, and
 naming a retired id is refused rather than reviving it.
 
-**On a crew, the checklist is qa's.** `ao smoke set` from the **dev** member is
-refused (`SMOKE_QA_OWNS_CHECKLIST`, naming the qa) for as long as that task has a
-qa - qa authors the cases, runs them and retires them, and dev owns the branch,
-the implementation and the pull request. A task with no qa is unaffected: dev
-alone, and every solo worker, authors its own checklist exactly as before. If a
-brief asks dev for smoke cases, that brief predates the crew - say so, and hand
-it to qa with `ao send --crew qa --about <sha>`.
+**On a crew, prefer `ao smoke add`.** `set` is the right shape for the FIRST
+call, when there is no list yet. After that it is the wrong one: it replaces the
+whole list, so running it second deletes whatever your crewmate wrote. Nobody is
+refused for who they are - both members may write every one of these commands.
 
 **Flags:**
 
@@ -106,6 +128,87 @@ Each case:
 
 `name` is required; `id` is optional (derived from the name when omitted - supply
 it to keep results across a rename).
+
+---
+
+### ao smoke add
+
+Add cases, or replace named cases wholesale, **without touching any case the
+payload does not name**. Same JSON as `set`. An id already on the checklist is
+edited in place and keeps the user's verdict, note and evidence; a new id is
+appended after the last case; a retired id is refused rather than revived.
+
+Give every case an explicit, stable `"id"` - it is what makes a later `edit` land
+on that case instead of creating a second copy of it.
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--session string` | Session id (or pass it as the positional argument) | - |
+| `--from-file string` | Path to the cases JSON, or `-` for stdin | Required |
+
+---
+
+### ao smoke edit
+
+Change one case's authored fields. **A flag you do not pass is a field left
+alone**, which is the whole point: re-sending a whole case to fix its `fileRef`
+would silently overwrite the wording your crewmate sharpened in the meantime.
+
+Cannot reach the user's verdict, note or evidence. Refused on a retired case.
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--session string` | Session id (or pass it as the positional argument) | - |
+| `--case string` | Case id to edit (see `ao smoke list`) | Required |
+| `--name string` | One-line "what to verify" | - |
+| `--why string` | Why the case matters | - |
+| `--step string` | One play step; repeatable, and **replaces** the whole step list | - |
+| `--expected string` | The expected result | - |
+| `--pr int` | PR/MR number the case belongs to | - |
+| `--file-ref string` | `file:line` the change touched | - |
+
+---
+
+### ao smoke remove
+
+Remove one case outright. A case nobody has played comes straight off - that is
+the ordinary way a checklist that got it wrong is corrected.
+
+A case the user **has** played is refused (`SMOKE_RESULTS_AT_RISK`) and pointed at
+`ao smoke retire`. A judgement that disappears with no trace is worse than a list
+that stays one case too long.
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--session string` | Session id (or pass it as the positional argument) | - |
+| `--case string` | Case id to remove (see `ao smoke list`) | Required |
+
+---
+
+### ao smoke stand-down
+
+Record that this change needs **no** human verification, and why.
+
+An empty Tests tab says two opposite things at once: nobody has decided yet, or
+somebody looked and there is nothing worth your eyes. They rendered identically,
+so the screen could not be read. This is how you say the second one out loud, and
+the Tests tab renders it as "*dev stood down: <reason>*" instead of an empty list.
+
+Refused while the checklist still has cases to play - the claim cannot stand
+beside them - and retracted automatically the moment anyone adds a case.
+
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--session string` | Session id (or pass it as the positional argument) | - |
+| `--reason string` | What you looked at, and why none of it needs a person | Required |
 
 ---
 
@@ -205,6 +308,32 @@ ao smoke record "$AO_CREW_ID" --case tab-stays-live --evidence /tmp/shot.png
 ```
 
 ```bash
+# Add one more case without disturbing the ones already on the list
+cat <<'JSON' | ao smoke add "$AO_CREW_ID" --from-file -
+{ "cases": [ { "id": "drag-scroll", "name": "The list drags with one finger",
+               "why": "Drag-scroll has broken twice without a test noticing.",
+               "steps": ["Open the Reviews tab.", "Drag the list up."],
+               "expected": "The list follows the finger and settles.",
+               "prNum": 0, "fileRef": "ReviewsList.tsx:120" } ] }
+JSON
+```
+
+```bash
+# Backfill the PR number on a case, changing nothing else about it
+ao smoke edit "$AO_CREW_ID" --case drag-scroll --pr 264
+```
+
+```bash
+# Drop a case nobody has played
+ao smoke remove "$AO_CREW_ID" --case drag-scroll
+```
+
+```bash
 # Retire a case that a real test now covers
 ao smoke retire "$AO_CREW_ID" --case drag-scroll --reason "now covered by TestDragScroll"
+```
+
+```bash
+# Say there is nothing here for a person, rather than leaving the tab empty
+ao smoke stand-down "$AO_CREW_ID" --reason "pure refactor; behaviour covered by TestReplaceSmokeChecks"
 ```

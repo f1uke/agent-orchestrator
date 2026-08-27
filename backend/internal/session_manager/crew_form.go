@@ -71,9 +71,9 @@ func wantsCrew(project domain.ProjectRecord, dev domain.SessionRecord) bool {
 // upstream of BOTH consumers - the trigger that would create qa, and the prompt -
 // and the prompt is the one that would fail silently: a spawn composes it before
 // any crew exists, so a flag read further downstream would leave dev holding the
-// CREW prompt, which tells it the smoke checklist belongs to a qa this project
-// never creates and that `ao smoke set` from it is refused. Nobody would write a
-// checklist, and nothing would say so.
+// CREW prompt, which tells it the smoke checklist is shared with a crewmate this
+// project never creates - and points it at the per-case verbs for a list nobody
+// else is writing.
 //
 // What it deliberately does NOT gate is the MANUAL path. `ao crew add` and the
 // topbar's `+ qa` go through resolveCrewDev, which never calls this function, so
@@ -227,10 +227,9 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, reason do
 // work, because none is created until dev's work asks for one.
 //
 // The constant fact, whatever created it: DEV DID NOT KNOW IT WOULD GET A QA.
-// AO refuses `ao smoke set` from a crew's dev only once a qa EXISTS, so up to
-// this moment dev was free to author the checklist - and that checklist may
-// already carry the human's verdicts, which is exactly the artefact #226's id
-// trap destroys when a case is re-sent under a new name. Everything else a
+// dev has been authoring the checklist alone and goes on co-authoring it, so
+// that list may already carry the human's verdicts - exactly the artefact #226's
+// id trap destroys when a case is re-sent under a new name. Everything else a
 // joining member inherits it inherits the same way whatever created it - dev's
 // branch, dev's worktree, dev's brief, dev's id as AO_CREW_ID.
 //
@@ -251,7 +250,7 @@ func crewArrivalOpening(reason domain.CrewJoinReason) string {
 	}
 }
 
-const crewArrivalCommon = "dev has been working alone until now, so treat what is already there as work in progress rather than a blank page: read the PR and `ao smoke list \"$AO_CREW_ID\"` BEFORE you write anything. If a case is already on that checklist, re-send it under the id it already has - `ao smoke set` replaces the whole list, and a case whose name changes loses the human's verdict, note and screenshots. There may also be an open PR with CI and review history; read it rather than re-deriving it."
+const crewArrivalCommon = "dev has been working alone until now, so treat what is already there as work in progress rather than a blank page: read the PR and `ao smoke list \"$AO_CREW_ID\"` BEFORE you write anything. Add to that checklist with `ao smoke add`, and change a case that is already on it with `ao smoke edit --case <id>` - never `ao smoke set`, which replaces the whole list and would delete dev's cases along with the human's verdicts, notes and screenshots. There may also be an open PR with CI and review history; read it rather than re-deriving it."
 
 // CrewMember returns the session filling `role` on this session's task, if any.
 // It answers for either member (ask dev for its qa, or qa for its dev), so a

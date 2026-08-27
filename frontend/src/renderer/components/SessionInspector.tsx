@@ -350,7 +350,12 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 	// derived purely from the PR summaries + the smoke rollup + session activity.
 	// Skipped for prepared TODOs and orchestrator sessions (no merge pipeline).
 	const smokeQuery = useSessionSmokeChecks(session.id, session.title);
-	const readiness = deriveReadiness(session, prSummaries, progressFor(smokeQuery.data?.checks ?? []));
+	const readiness = deriveReadiness(
+		session,
+		prSummaries,
+		progressFor(smokeQuery.data?.checks ?? []),
+		smokeQuery.data?.standDown ?? null,
+	);
 	const showReadiness = session.kind !== "orchestrator" && !session.isTodo;
 	// Pin the still-actionable PRs/MRs (open, draft) to the top — they're what
 	// needs attention — and sink merged/closed ones into a de-emphasized "archive"

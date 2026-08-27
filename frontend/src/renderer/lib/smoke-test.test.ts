@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { activeChecks, agentState, isAgentStale, progressFor, retiredChecks, type SmokeCheck } from "./smoke-test";
+import {
+	activeChecks,
+	agentState,
+	authorLabel,
+	checklistState,
+	isAgentStale,
+	progressFor,
+	retiredChecks,
+	standDownActor,
+	type SmokeCheck,
+	type SmokeStandDown,
+} from "./smoke-test";
 
 const base = {
 	sessionId: "w1",
@@ -142,5 +153,60 @@ describe("activeChecks / retiredChecks", () => {
 		const a = check({ id: "a", retiredAt: "2026-08-10T00:00:00Z", retiredReason: "r" });
 		const b = check({ id: "b", retiredAt: "2026-08-19T00:00:00Z", retiredReason: "r" });
 		expect(retiredChecks([a, b]).map((c) => c.id)).toEqual(["b", "a"]);
+	});
+});
+
+const stood = (over: Partial<SmokeStandDown> = {}): SmokeStandDown =>
+	({
+		sessionId: "w1",
+		at: "2026-08-20T00:00:00Z",
+		reason: "pure refactor",
+		createdAt: "2026-08-20T00:00:00Z",
+		updatedAt: "2026-08-20T00:00:00Z",
+		...over,
+	}) as SmokeStandDown;
+
+describe("authorLabel", () => {
+	it("prefers the crew role, which is what a reader is actually asking", () => {
+		expect(authorLabel(check({ id: "a", authoredBy: "mer-1", authoredByRole: "dev" }))).toBe("written by dev");
+	});
+
+	it("falls back to the session id for an author with no role", () => {
+		expect(authorLabel(check({ id: "a", authoredBy: "solo-7" }))).toBe("written by @solo-7");
+	});
+
+	// A guessed author on a list whose whole point is telling two authors apart
+	// would be worse than none.
+	it("names nobody when AO could not identify the author", () => {
+		expect(authorLabel(check({ id: "a" }))).toBe("");
+	});
+});
+
+describe("checklistState", () => {
+	// The distinction the tab could not previously draw.
+	it("tells an undecided checklist from a stood-down one", () => {
+		expect(checklistState([], null)).toBe("undecided");
+		expect(checklistState([], stood())).toBe("stood-down");
+	});
+
+	it("shows the cases whenever there are any to play", () => {
+		expect(checklistState([check({ id: "a" })], null)).toBe("cases");
+		// Even alongside a stand-down: a case on the list disproves the claim, so
+		// the list wins for the one poll a stale cache could carry both.
+		expect(checklistState([check({ id: "a" })], stood())).toBe("cases");
+	});
+
+	// An all-retired checklist has nothing to play but is not an absence: the
+	// retired cases and their reasons are still listed below it.
+	it("keeps all-retired distinct from both", () => {
+		expect(checklistState([check({ id: "a", retiredAt: "2026-08-21T00:00:00Z" })], null)).toBe("all-retired");
+	});
+});
+
+describe("standDownActor", () => {
+	it("names the role, then the session, then falls back to the worker", () => {
+		expect(standDownActor(stood({ byRole: "qa", by: "mer-2" }))).toBe("qa");
+		expect(standDownActor(stood({ by: "solo-7" }))).toBe("@solo-7");
+		expect(standDownActor(stood())).toBe("the worker");
 	});
 });
