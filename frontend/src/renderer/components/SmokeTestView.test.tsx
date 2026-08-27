@@ -758,7 +758,7 @@ describe("SmokeTestView shared authorship", () => {
 
 		expect(await screen.findByText("qa stood down")).toBeInTheDocument();
 		expect(screen.getByText(/pure refactor; behaviour is covered/)).toBeInTheDocument();
-		expect(screen.getByText(/this is an answer, not an empty list/)).toBeInTheDocument();
+		expect(screen.getByText(/This is an answer, not an empty list/)).toBeInTheDocument();
 		// And it must NOT fall back to the "nobody has decided" copy, which is the
 		// opposite claim.
 		expect(screen.queryByText("No smoke checks yet")).not.toBeInTheDocument();

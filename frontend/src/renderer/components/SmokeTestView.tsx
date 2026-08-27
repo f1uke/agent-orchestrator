@@ -307,7 +307,7 @@ export function SmokeTestView({
 				color: P.text,
 			}}
 		>
-			<Header worker={workerLabel} progress={progress} />
+			<Header worker={workerLabel} progress={progress} stoodDown={state === "stood-down"} />
 
 			<div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 24px" }}>
 				{/* The machine's bracketed runs sit ABOVE the checklist: a run thrown
@@ -369,7 +369,7 @@ export function SmokeTestView({
 
 // ---------------------------------------------------------------------------
 
-function Header({ worker, progress }: { worker: string; progress: SmokeProgress }) {
+function Header({ worker, progress, stoodDown }: { worker: string; progress: SmokeProgress; stoodDown: boolean }) {
 	const segments = progressSegments(progress);
 	return (
 		<div style={{ flex: "none", padding: "16px 16px 13px", borderBottom: `1px solid ${P.divider}` }}>
@@ -410,38 +410,49 @@ function Header({ worker, progress }: { worker: string; progress: SmokeProgress 
 				>
 					◆
 				</span>
+				{/* "run these live" is an instruction, and it must not sit above a
+				    panel saying there is nothing to run - which is exactly the kind of
+				    contradiction that makes a screen unreadable. */}
 				<span style={{ fontSize: 12, color: P.secondary2, lineHeight: 1.4 }}>
-					Checklist from <b style={{ color: P.body, fontWeight: 600 }}>{worker}</b> · run these live &amp; attach
-					evidence
+					Checklist from <b style={{ color: P.body, fontWeight: 600 }}>{worker}</b>
+					{stoodDown ? " · nothing to run" : " · run these live & attach evidence"}
 				</span>
 			</div>
 
-			<div
-				style={{
-					marginTop: 12,
-					display: "flex",
-					height: 8,
-					borderRadius: 999,
-					overflow: "hidden",
-					background: P.trackBg,
-				}}
-			>
-				{progress.total > 0 &&
-					segments.map((seg, i) =>
-						seg.count > 0 ? (
-							<div key={i} style={{ width: `${(seg.count / progress.total) * 100}%`, background: seg.color }} />
-						) : null,
-					)}
-			</div>
+			{/* A track and a "0 of 0 verified" are chrome for progress that cannot
+			    exist. On an empty checklist they are noise; above a stand-down they
+			    read as a contradiction of the panel below. */}
+			{progress.total > 0 && (
+				<>
+					<div
+						style={{
+							marginTop: 12,
+							display: "flex",
+							height: 8,
+							borderRadius: 999,
+							overflow: "hidden",
+							background: P.trackBg,
+						}}
+					>
+						{segments.map((seg, i) =>
+							seg.count > 0 ? (
+								<div key={i} style={{ width: `${(seg.count / progress.total) * 100}%`, background: seg.color }} />
+							) : null,
+						)}
+					</div>
 
-			<div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 11.5 }}>
-				<span style={{ color: P.body }}>
-					<b style={{ color: P.textStrong, fontWeight: 700 }}>{progress.checked}</b> of {progress.total} verified
-				</span>
-				{progress.fail > 0 && <CountChip color={P.segFail} text={`${progress.fail} failed`} />}
-				{progress.skip > 0 && <CountChip color={P.muted2} text={`${progress.skip} skipped`} />}
-				{progress.pending > 0 && <CountChip color={P.segSkip} text={`${progress.pending} to check`} />}
-			</div>
+					<div
+						style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 11.5 }}
+					>
+						<span style={{ color: P.body }}>
+							<b style={{ color: P.textStrong, fontWeight: 700 }}>{progress.checked}</b> of {progress.total} verified
+						</span>
+						{progress.fail > 0 && <CountChip color={P.segFail} text={`${progress.fail} failed`} />}
+						{progress.skip > 0 && <CountChip color={P.muted2} text={`${progress.skip} skipped`} />}
+						{progress.pending > 0 && <CountChip color={P.segSkip} text={`${progress.pending} to check`} />}
+					</div>
+				</>
+			)}
 
 			<QaBanner progress={progress} />
 		</div>
@@ -1736,7 +1747,7 @@ function StoodDownPanel({ standDown, retired }: { standDown: SmokeStandDown; ret
 			</div>
 			<div style={{ fontSize: 12.5, lineHeight: 1.55, color: P.body }}>{standDown.reason}</div>
 			<div style={{ marginTop: 10, fontSize: 11.5, lineHeight: 1.5, color: P.muted2 }}>
-				Nothing here needs your eyes — this is an answer, not an empty list.
+				This is an answer, not an empty list.
 				{retired > 0 && (
 					<>
 						{" "}

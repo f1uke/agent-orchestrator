@@ -1235,10 +1235,33 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 					agentNote: "Image loads and is 2560x1600.",
 					agentRanAt: minutesAgo(12),
 					agentEvidence: [],
+					authoredBy: "agent-orchestrator-88",
+					authoredByRole: "qa",
+					authoredAt: minutesAgo(20),
 					createdAt: minutesAgo(20),
 					updatedAt: minutesAgo(12),
 				},
 			],
+		} as components["schemas"]["ListSmokeChecksResponse"];
+	}
+	// demo-stalled is the crew whose qa ran, found nothing a person has to play,
+	// and parked. That answer used to be invisible: its Tests tab rendered the
+	// same empty panel as a task nobody had triaged yet. A recorded stand-down is
+	// what lets the two be told apart.
+	if (sessionId === "demo-stalled") {
+		return {
+			worker: worker || "retry flag rename",
+			checks: [],
+			standDown: {
+				sessionId,
+				at: minutesAgo(70),
+				by: "demo-stalled-qa",
+				byRole: "qa",
+				reason:
+					"The rename is compile-time only - every call site is covered by TestExportRetryFlag, and no screen renders the flag's name. Nothing here needs your eyes.",
+				createdAt: minutesAgo(70),
+				updatedAt: minutesAgo(70),
+			},
 		} as components["schemas"]["ListSmokeChecksResponse"];
 	}
 	if (sessionId !== "demo-working") {
@@ -1267,6 +1290,9 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 				evidence: [],
 				agentEvidence: [],
 				decidedAt: now,
+				authoredBy: "agent-orchestrator-42",
+				authoredByRole: "qa",
+				authoredAt: now,
 				createdAt: now,
 				updatedAt: now,
 			},
@@ -1297,6 +1323,9 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 					},
 				],
 				agentEvidence: [],
+				authoredBy: "agent-orchestrator-42",
+				authoredByRole: "qa",
+				authoredAt: now,
 				decidedAt: now,
 				createdAt: now,
 				updatedAt: now,
@@ -1317,6 +1346,9 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 				evidence: [],
 				agentEvidence: [],
 				decidedAt: now,
+				authoredBy: "agent-orchestrator-41",
+				authoredByRole: "dev",
+				authoredAt: now,
 				createdAt: now,
 				updatedAt: now,
 			},
@@ -1335,6 +1367,9 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 				note: "",
 				evidence: [],
 				agentEvidence: [],
+				authoredBy: "agent-orchestrator-41",
+				authoredByRole: "dev",
+				authoredAt: now,
 				createdAt: now,
 				updatedAt: now,
 			},
