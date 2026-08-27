@@ -253,10 +253,10 @@ export function isVideoMime(mime: string): boolean {
  * What the machine did to a case.
  *
  * `captured` is the state this vocabulary exists for: `agentRanAt` set with an
- * EMPTY `agentVerdict` is deliberate, not missing data. qa walked to the screen
- * and photographed it but declined to judge, because paint / focus / timing /
- * feel are not machine-judgeable. Rendering that as an empty circle would read
- * "qa hasn't got to it yet" and send the person to fix the wrong thing.
+ * EMPTY `agentVerdict` is deliberate, not missing data. qa drove the case and
+ * photographed it, and concluded that what it captured does not settle the
+ * question the case asks - so the call is a person's. Rendering that as an empty
+ * circle would read "qa hasn't got to it yet" and send them to the wrong thing.
  */
 export type AgentState = "none" | "pass" | "fail" | "skip" | "captured";
 
@@ -303,7 +303,7 @@ export const AGENT_META: Record<Exclude<AgentState, "none">, AgentMeta> = {
 		label: "qa · evidence only",
 		headline: "qa captured the screen and left the judgement to you",
 		caption:
-			"A machine cannot judge paint, focus, timing or feel, so there is no agent verdict coming for this one. Judge it from what qa captured instead of driving the app yourself.",
+			"It recorded what it saw and said the capture does not settle this one, so the call is yours. Judge it from what qa captured instead of driving the app yourself.",
 		color: QA_FG,
 	},
 };
@@ -412,6 +412,21 @@ export function runTag(seq: number): string {
  * that HAS concluded is `captured`; one still open is `open`.
  */
 export type RunState = AgentState | "open";
+
+/**
+ * What ONE round concluded, in past tense and without the `qa ·` actor prefix -
+ * the chip's wording ("ran") is a sentence opener that reads as "it executed"
+ * when it stands alone in a history row, exactly where the verdict is the thing
+ * being read.
+ */
+export const RUN_LABEL: Record<RunState, string> = {
+	none: "",
+	pass: "passed",
+	fail: "failed",
+	skip: "skipped",
+	captured: "evidence only",
+	open: "never concluded",
+};
 
 export function runState(run: SmokeRun): RunState {
 	if (!run.recordedAt) return "open";

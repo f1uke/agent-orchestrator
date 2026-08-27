@@ -576,7 +576,7 @@ describe("SmokeTestView", () => {
 			renderView();
 			expect(await screen.findByText("qa · evidence only")).toBeInTheDocument();
 			expect(screen.getByText(/left the judgement to you/)).toBeInTheDocument();
-			expect(screen.getByText(/no agent verdict coming/)).toBeInTheDocument();
+			expect(screen.getByText(/does not settle this one/)).toBeInTheDocument();
 			// And it is never phrased as an absence.
 			expect(screen.queryByText(/qa · ran/)).not.toBeInTheDocument();
 		});
@@ -684,6 +684,18 @@ describe("SmokeTestView", () => {
 							sessionId: "s1",
 							seq: 2,
 							verdict: "pass",
+							note: "passed once already",
+							sha: "aaaaaaabbbbbbbcccccccdddddddeeeeeeefffffff",
+							recordedAt: "2026-07-10T12:00:00Z",
+							createdAt: "2026-07-10T12:00:00Z",
+							updatedAt: "2026-07-10T12:00:00Z",
+						},
+						{
+							id: "r3",
+							checkId: "c1",
+							sessionId: "s1",
+							seq: 3,
+							verdict: "pass",
 							note: "renders clean",
 							sha: HEAD,
 							recordedAt: RAN,
@@ -710,12 +722,16 @@ describe("SmokeTestView", () => {
 			renderView();
 			// The latest run is the headline, and it says which round it is.
 			expect(await screen.findByText("qa · ran")).toBeInTheDocument();
-			expect(screen.getByText(/run 2 of 2/)).toBeInTheDocument();
+			expect(screen.getByText(/run 3 of 3/)).toBeInTheDocument();
 			// The earlier round is there, with the verdict and commit that make the
 			// inversion readable at a glance.
 			expect(screen.getByText("EARLIER RUNS", { exact: false })).toBeInTheDocument();
 			expect(screen.getByText("RUN 1")).toBeInTheDocument();
 			expect(screen.getByText("failed")).toBeInTheDocument();
+			// An earlier PASS says "passed", not the chip's "ran": in a history row
+			// the verdict is the thing being read, and "ran" reads as "it executed".
+			expect(screen.getByText("RUN 2")).toBeInTheDocument();
+			expect(screen.getByText("passed")).toBeInTheDocument();
 			expect(screen.getByText(OLD.slice(0, 7))).toBeInTheDocument();
 			// Collapsed, its note and its capture are not shown under the pass.
 			expect(screen.queryByText("clipped at 320px")).not.toBeInTheDocument();

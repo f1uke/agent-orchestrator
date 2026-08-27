@@ -1507,7 +1507,7 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 						"settings-copy-validation",
 						1,
 						"fail",
-						"Save went through with an empty name; no message appeared.",
+						"Empty name saved without a word; the field stayed as it was.",
 						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
 						hoursAgo(6),
 					),

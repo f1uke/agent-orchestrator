@@ -27,6 +27,7 @@ import {
 	progressSegments,
 	relativeTime,
 	retiredChecks,
+	RUN_LABEL,
 	runState,
 	runTag,
 	runsNewestFirst,
@@ -515,8 +516,8 @@ function QaBanner({ progress }: { progress: SmokeProgress }) {
 					<b style={{ fontWeight: 600 }}>
 						qa captured the screen on {progress.agentCaptured} case{progress.agentCaptured === 1 ? "" : "s"}
 					</b>{" "}
-					it can&apos;t judge, so you can call {progress.agentCaptured === 1 ? "that one" : "those"} from the evidence
-					without driving the app yourself.
+					without settling {progress.agentCaptured === 1 ? "it" : "them"}, so you can call{" "}
+					{progress.agentCaptured === 1 ? "that one" : "those"} from the evidence without driving the app yourself.
 				</>
 			),
 		});
@@ -659,9 +660,10 @@ function CaseCard({
 								{authoredWhen && ` · ${authoredWhen}`}
 							</span>
 						)}
-						{/* qa's screenshots are worth advertising here: on a case a machine
-						    cannot judge, they are what lets the person decide without
-						    re-driving the app. Named as qa's, never merged into "yours". */}
+						{/* qa's screenshots are worth advertising here: on a case its own
+						    capture could not settle, they are what lets the person decide
+						    without re-driving the app. Named as qa's, never merged into
+						    "yours". */}
 						{qaShots > 0 && (
 							<span style={{ color: P.qaFg }}>
 								{" · "}
@@ -928,13 +930,20 @@ function QaRunRow({
 				<span style={{ fontSize: 11.5, fontWeight: 600, color: meta ? meta.color : P.muted }}>
 					{/* A round that never concluded says so, rather than borrowing the
 					    "evidence only" wording from one that deliberately did not judge. */}
-					{meta ? meta.label.replace(/^qa · /, "") : "never concluded"}
+					{RUN_LABEL[state]}
 				</span>
 				{run.sha && <span style={{ fontFamily: MONO, fontSize: 10.5, color: P.muted }}>{shortSha(run.sha)}</span>}
 				{when && <span style={{ fontSize: 10.5, color: P.muted }}>· {when}</span>}
 				{shots.length > 0 && (
 					<span style={{ fontSize: 10.5, color: P.muted }}>
 						· {shots.length} shot{shots.length === 1 ? "" : "s"}
+					</span>
+				)}
+				{/* The same chevron the case card uses, so a round with something to
+				    read looks openable rather than looking like a dead line. */}
+				{expandable && (
+					<span aria-hidden="true" style={{ marginLeft: "auto", fontSize: 12, color: P.secondary }}>
+						{open ? "▾" : "▸"}
 					</span>
 				)}
 			</button>
