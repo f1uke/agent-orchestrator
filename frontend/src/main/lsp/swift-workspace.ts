@@ -98,8 +98,16 @@ export function sourcekitConfigHome(dataDir: string): string {
 	return path.join(dataDir, SWIFT_SUBDIR, SKL_CONFIG_SUBDIR);
 }
 
+/**
+ * 🗝 "Find all references" is in this sentence because it is measured to be in
+ * it. `textDocument/references` is answered from the INDEX STORE, not from the
+ * open buffer: on this fixture, with background indexing off, hover answers in
+ * 6 ms and references answers 0 hits in 1 ms — no error, no diagnostic. Naming
+ * only symbol search here would leave a reader watching ⇧F12 do nothing and
+ * having been told it should work.
+ */
 export const SWIFTPM_NO_SYMBOLS =
-	"Symbol search is off for Swift packages: sourcekit-lsp only indexes them by building into the package itself, and AO does not write to your checkout. Go to definition works.";
+	"Symbol search and find all references are off for Swift packages: sourcekit-lsp only indexes them by building into the package itself, and AO does not write to your checkout. Go to definition, hover and completion work.";
 
 function shadowRootFor(dataDir: string, workspaceRoot: string): string {
 	// Hashed rather than path-mangled: an AO worktree path is long enough that
@@ -330,6 +338,6 @@ export function resolveSwiftWorkspace(options: SwiftWorkspaceOptions): SwiftWork
 		detail: `Xcode build settings from ${path.basename(buildRoot)}`,
 		warning: hasIndex
 			? undefined
-			: "This Xcode build produced no index, so symbol search will find nothing until the project is built again.",
+			: "This Xcode build produced no index, so symbol search and find all references will find nothing until the project is built again.",
 	};
 }

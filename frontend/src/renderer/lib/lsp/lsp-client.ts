@@ -33,6 +33,18 @@ export type SemanticTokensLegend = { tokenTypes: string[]; tokenModifiers: strin
  */
 export type CompletionCapability = { triggerCharacters?: string[]; resolveProvider?: boolean };
 
+/**
+ * The plain yes/no capabilities, from the server's `initialize` reply.
+ *
+ * 🗝 Carried for one reason: "the server is still starting" and "this server
+ * does not do hover" produce the SAME empty widget, and only the initialize
+ * reply can tell them apart. Defaults to false on a bridge that does not send
+ * them, which is the same thing as a server that never advertised them — the
+ * feature then says so instead of asking a question that comes back
+ * `MethodNotFound` on every pointer rest.
+ */
+export type ServerFeatures = { hover: boolean; references: boolean };
+
 export type LspTransport = {
 	send(handleId: string, message: JsonRpcMessage): void;
 	noteResult(handleId: string, outcome: LspResultOutcome): void;
@@ -51,8 +63,19 @@ export type LspClient = {
 	semanticTokensLegend(): SemanticTokensLegend | null;
 	/** Null when this server advertised no `completionProvider`. */
 	completionCapability(): CompletionCapability | null;
+	/** What the server said it can do about hover and references. */
+	features(): ServerFeatures;
 	request<T>(method: string, params: unknown): Promise<T>;
 	notify(method: string, params: unknown): void;
+	/**
+	 * Server→client NOTIFICATIONS, which until now were dropped on the floor.
+	 *
+	 * 🗝 `textDocument/publishDiagnostics` is UNSOLICITED - both servers send it
+	 * without being asked, and this app discarded every one of them. There is no
+	 * request to correlate, so a notification cannot be routed through `request`;
+	 * it needs its own door. Returns an unsubscribe.
+	 */
+	onNotification(method: string, listener: (params: unknown) => void): () => void;
 	didOpen(uri: string, languageId: string, text: string): void;
 	didClose(uri: string): void;
 	isOpen(uri: string): boolean;
@@ -75,6 +98,7 @@ export function createLspClient(
 	mapping: DocumentMapping & {
 		semanticTokens?: SemanticTokensLegend | null;
 		completion?: CompletionCapability | null;
+		features?: ServerFeatures | null;
 	},
 ): LspClient {
 	let nextId = 1;
@@ -90,6 +114,9 @@ export function createLspClient(
 	 */
 	const opened = new Set<string>();
 
+	/** Server→client notifications, by method. See `onNotification`. */
+	const notificationListeners = new Map<string, Set<(params: unknown) => void>>();
+
 	const unsubscribe = transport.onMessage(({ handleId: from, message }) => {
 		// One IPC channel carries every server's traffic, so this filter is what
 		// stops another workspace's answer resolving this client's request.
@@ -100,7 +127,25 @@ export function createLspClient(
 		// requests with the server's request payload and leaves the server waiting
 		// forever. Measured: gopls sent `window/workDoneProgress/create` with id 2
 		// while our id 2 was in flight, and the workspace never loaded.
-		if (typeof message.method === "string") return;
+		if (typeof message.method === "string") {
+			// A server→client REQUEST (a method AND an id) belongs to main, which
+			// answers every one of them - an unanswered request stalls a real server
+			// silently. Only NOTIFICATIONS are the renderer's business.
+			if (message.id !== undefined) return;
+			const listeners = notificationListeners.get(message.method);
+			if (!listeners) return;
+			for (const listener of listeners) {
+				try {
+					listener(message.params);
+				} catch (err) {
+					// One listener throwing must not stop the others being told, and
+					// must not take down the IPC callback that every server's traffic
+					// shares.
+					console.warn(`[lsp] ${message.method} listener failed`, err);
+				}
+			}
+			return;
+		}
 		const id = message.id;
 		if (typeof id !== "number") return;
 		const waiting = pending.get(id);
@@ -135,6 +180,9 @@ export function createLspClient(
 		completionCapability() {
 			return mapping.completion ?? null;
 		},
+		features() {
+			return mapping.features ?? { hover: false, references: false };
+		},
 		request<T>(method: string, params: unknown): Promise<T> {
 			if (disposed) return Promise.reject(new Error(`LSP client disposed (${method})`));
 			const id = nextId++;
@@ -147,6 +195,20 @@ export function createLspClient(
 		notify(method, params) {
 			if (disposed) return;
 			transport.send(handleId, { jsonrpc: "2.0", method, params });
+		},
+
+		onNotification(method, listener) {
+			let listeners = notificationListeners.get(method);
+			if (!listeners) {
+				listeners = new Set();
+				notificationListeners.set(method, listeners);
+			}
+			listeners.add(listener);
+			return () => {
+				const live = notificationListeners.get(method);
+				if (!live?.delete(listener)) return;
+				if (live.size === 0) notificationListeners.delete(method);
+			};
 		},
 
 		didOpen(uri, languageId, text) {
@@ -177,6 +239,7 @@ export function createLspClient(
 			for (const waiting of pending.values()) waiting.reject(new Error(`LSP client disposed (${waiting.method})`));
 			pending.clear();
 			opened.clear();
+			notificationListeners.clear();
 		},
 	};
 }

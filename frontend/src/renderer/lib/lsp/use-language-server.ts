@@ -6,6 +6,7 @@ import {
 	type LspResultOutcome,
 	type LspTransport,
 	type SemanticTokensLegend,
+	type ServerFeatures,
 } from "./lsp-client";
 
 /**
@@ -41,6 +42,7 @@ type Bridge = {
 		warning?: string;
 		semanticTokens?: SemanticTokensLegend | null;
 		completion?: CompletionCapability | null;
+		features?: ServerFeatures | null;
 	}>;
 	detach(handleId: string): void;
 	send(handleId: string, message: Record<string, unknown>): void;
@@ -138,6 +140,11 @@ export function useLanguageServer(workspaceRoot: string | undefined, languageId:
 					// which is the same thing as a server that advertised no completion
 					// provider: no provider is registered and nothing pretends to answer.
 					completion: attachment.completion ?? null,
+					// Absent from an older bridge and from the browser-preview stub,
+					// which is the same thing as a server that advertised neither: the
+					// providers then say so rather than asking a question that comes
+					// back `MethodNotFound` on every pointer rest.
+					features: attachment.features ?? null,
 				});
 				setHandle({ client, state: attachment.state, detail: attachment.detail, warning: attachment.warning });
 			})

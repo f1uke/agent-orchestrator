@@ -6,7 +6,13 @@ import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/
 import { revertEdit } from "../lib/editor/revert";
 import { registerCompletion } from "../lib/lsp/completion-provider";
 import { registerLspNavigation } from "../lib/lsp/definition";
+import { registerDiagnostics } from "../lib/lsp/diagnostics";
 import { type DocumentSync, openDocumentSync } from "../lib/lsp/document-sync";
+import { registerHover } from "../lib/lsp/hover-provider";
+import { peekFileReader } from "../lib/lsp/peek-file-reader";
+import { registerPaneModel } from "../lib/lsp/peek-sources";
+import { registerReferences } from "../lib/lsp/references";
+import { forgetLane } from "../lib/lsp/request-lane";
 import { registerSemanticTokens } from "../lib/lsp/semantic-provider";
 import { languageIdForLsp } from "../lib/lsp/language-ids";
 import { hasLanguageServers, type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
@@ -221,6 +227,14 @@ export type MonacoFileEditorProps = {
 	onOpenFile?: (file: WorkspaceFileOpen) => void;
 	/** Lets the chrome above report what the language server is doing. */
 	onServerState?: (state: { state: LanguageServerHandle["state"]; detail?: string }) => void;
+	/**
+	 * Errors and warnings currently on this file.
+	 *
+	 * 🗝 Reported as a COUNT and never as a verdict. gopls's first publish after
+	 * opening a file is empty and lands four seconds before the real one, so a
+	 * header that renders zero as "no problems" is lying for four seconds.
+	 */
+	onDiagnostics?: (counts: { errors: number; warnings: number }) => void;
 	onDirtyChange?: (dirty: boolean) => void;
 	/** ⌘S inside the editor. The chrome above owns what saving means. */
 	onSave?: () => void;
@@ -255,6 +269,7 @@ export default function MonacoFileEditor({
 	workspaceRoot,
 	onOpenFile,
 	onServerState,
+	onDiagnostics,
 	onDirtyChange,
 	onSave,
 	onHandle,
@@ -328,6 +343,11 @@ export default function MonacoFileEditor({
 	const textRef = useRef(text);
 	textRef.current = text;
 	const semanticRefreshRef = useRef<(() => void) | null>(null);
+	const onDiagnosticsRef = useRef(onDiagnostics);
+	onDiagnosticsRef.current = onDiagnostics;
+	// One reader per session, stable across a re-registration: the peek widgets
+	// need file TEXT, and the daemon's read route is the only path to it.
+	const readFile = useMemo(() => peekFileReader(sessionId), [sessionId]);
 	// What the language server has been told about this buffer. Read by BOTH
 	// providers: the semantic one answers only while the model and the server
 	// agree, and now that `didChange` exists the saved text is no longer what the
@@ -350,9 +370,21 @@ export default function MonacoFileEditor({
 			getWorkspaceRoot: () => workspaceRoot,
 			getAbsolutePath: () => absolutePathRef.current ?? null,
 			openFile: (file) => openFileRef.current?.(file),
+			readFile,
 		});
 		return () => registration.dispose();
-	}, [ready, lspLanguage, workspaceRoot]);
+	}, [ready, lspLanguage, workspaceRoot, readFile]);
+
+	// 🗝 The pane's own model, published so a PEEK at a target inside this very
+	// file previews the live buffer. Monaco resolves a preview by model URI, and
+	// this pane's URI (`ao-file:///<session>/<relative>`) is not the one a
+	// server's answer maps to (`ao-file://<absolute>`) — so without this the one
+	// case that obviously ought to work, peeking a definition in the file you are
+	// already reading, opens with a blank pane.
+	useEffect(() => {
+		if (!absolutePath || modelGeneration === 0) return;
+		return registerPaneModel(absolutePath, uri.toString());
+	}, [absolutePath, uri, modelGeneration]);
 
 	// Semantic tokens: the colours the grammar cannot know. Registered per MODEL
 	// as well as per language, because Monaco asks one provider about every model
@@ -405,14 +437,36 @@ export default function MonacoFileEditor({
 		if (!client || !absolutePath || !lspLanguage || modelGeneration === 0 || !model) return;
 		const sync = openDocumentSync({ client, model, absolutePath, languageId: lspLanguage });
 		syncRef.current = sync;
+		// 🗝 Diagnostics ride the SAME document: the server addresses its
+		// unsolicited publishes by the URI `openDocumentSync` opened, which on
+		// Swift is the shadow-root spelling and not the file's real path. Deriving
+		// it a second time here is how the two would drift apart and every publish
+		// would be dropped in silence.
+		const diagnostics = registerDiagnostics({
+			languageId: lspLanguage,
+			client,
+			model,
+			uri: sync.uri,
+			onCounts: (counts) => onDiagnosticsRef.current?.(counts),
+		});
 		// The colours were computed against the text the server had a moment ago;
 		// now that it has this buffer, Monaco has to be asked again.
 		semanticRefreshRef.current?.();
 		return () => {
 			if (syncRef.current === sync) syncRef.current = null;
+			diagnostics.dispose();
 			sync.dispose();
 		};
 	}, [server.client, absolutePath, lspLanguage, uri, modelGeneration]);
+
+	// The document is gone, so the one request slot kept for it is too. Owned
+	// here rather than in any one provider: hover, completion and references
+	// share that slot, and whichever happened to unmount last would otherwise
+	// clear it out from under the others.
+	useEffect(() => {
+		const modelUri = uri.toString();
+		return () => forgetLane(modelUri);
+	}, [uri]);
 
 	// Autocompletion.
 	useEffect(() => {
@@ -448,6 +502,43 @@ export default function MonacoFileEditor({
 		);
 		return () => registration.dispose();
 	}, [ready, lspLanguage, uri, modelGeneration, server.client]);
+
+	// Hover, and find-all-references. Both registered on the same terms as
+	// completion — `hasLanguageServers()` rather than the pane's state, so a
+	// server that failed to start still has a provider that can SAY so.
+	useEffect(() => {
+		if (!ready || !lspLanguage || modelGeneration === 0 || !hasLanguageServers()) return;
+		const shared = {
+			languageId: lspLanguage,
+			modelUri: uri.toString(),
+			getClient: () => serverRef.current.client,
+			getAbsolutePath: () => absolutePathRef.current ?? null,
+			getState: () => serverRef.current.state,
+		};
+		const hover = registerHover({
+			...shared,
+			// 🗝 What the server ACTUALLY has. A hover answered against the saved
+			// text names the type of a word that is no longer under the pointer,
+			// silently, because every offset is still in range.
+			getServerText: () => syncRef.current?.serverText() ?? null,
+		});
+		const references = registerReferences({
+			...shared,
+			readFile,
+			// ⇧F12 is a deliberate gesture, so a refusal answers where the reader is
+			// looking — the same widget Monaco uses for "no definition found".
+			onUnavailable: (reason) => {
+				const editor = codeEditorRef.current;
+				const position = editor?.getPosition();
+				if (!editor || !position) return;
+				editor.getContribution<MessageContribution>(MESSAGE_CONTRIBUTION)?.showMessage(reason, position);
+			},
+		});
+		return () => {
+			hover.dispose();
+			references.dispose();
+		};
+	}, [ready, lspLanguage, uri, modelGeneration, readFile]);
 
 	// The host's own width, which is what decides the diff layout: this pane sits
 	// between a sidebar and a rail, so it is routinely far narrower than the

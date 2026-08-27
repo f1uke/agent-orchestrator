@@ -170,3 +170,102 @@ describe("dispose", () => {
 		expect(unsubscribe).toHaveBeenCalled();
 	});
 });
+
+describe("onNotification", () => {
+	/**
+	 * 🗝 This door did not exist until the diagnostics slice, and its absence was
+	 * invisible: `textDocument/publishDiagnostics` is UNSOLICITED — there is no
+	 * pending request to leave hanging and no error to report — so every
+	 * diagnostic both servers have ever sent this app was dropped on the floor
+	 * while everything looked fine.
+	 */
+	test("a server notification reaches its listener", () => {
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		const seen: unknown[] = [];
+		client.onNotification("textDocument/publishDiagnostics", (params) => seen.push(params));
+		h.emit({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics", params: { uri: "file:///a.go" } });
+		expect(seen).toEqual([{ uri: "file:///a.go" }]);
+	});
+
+	test("only the method that was subscribed to", () => {
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		const seen: unknown[] = [];
+		client.onNotification("textDocument/publishDiagnostics", (p) => seen.push(p));
+		h.emit({ jsonrpc: "2.0", method: "window/logMessage", params: { message: "hi" } });
+		expect(seen).toEqual([]);
+	});
+
+	// One IPC channel carries every server's traffic. Without the filter, a Go
+	// workspace's diagnostics would be painted onto a Swift pane.
+	test("a notification from ANOTHER handle is not delivered", () => {
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		const seen: unknown[] = [];
+		client.onNotification("textDocument/publishDiagnostics", (p) => seen.push(p));
+		h.emit({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics", params: { uri: "x" } }, "h2");
+		expect(seen).toEqual([]);
+	});
+
+	// 🗝 A server→client REQUEST carries a method AND an id, and MAIN answers it —
+	// an unanswered one stalls a real server silently. Delivering it here as if it
+	// were a notification would leave the renderer thinking it had been handled.
+	test("a server→client REQUEST is not delivered as a notification", () => {
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		const seen: unknown[] = [];
+		client.onNotification("workspace/configuration", (p) => seen.push(p));
+		h.emit({ jsonrpc: "2.0", id: 7, method: "workspace/configuration", params: { items: [] } });
+		expect(seen).toEqual([]);
+	});
+
+	test("unsubscribing stops delivery, and only for that listener", () => {
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		const a: unknown[] = [];
+		const b: unknown[] = [];
+		const off = client.onNotification("m", (p) => a.push(p));
+		client.onNotification("m", (p) => b.push(p));
+		off();
+		h.emit({ jsonrpc: "2.0", method: "m", params: 1 });
+		expect(a).toEqual([]);
+		expect(b).toEqual([1]);
+	});
+
+	// The IPC callback is shared by every server in the window; one bad listener
+	// must not take the channel down with it.
+	test("one listener throwing still lets the others hear it", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		const seen: unknown[] = [];
+		client.onNotification("m", () => {
+			throw new Error("boom");
+		});
+		client.onNotification("m", (p) => seen.push(p));
+		expect(() => h.emit({ jsonrpc: "2.0", method: "m", params: 2 })).not.toThrow();
+		expect(seen).toEqual([2]);
+		warn.mockRestore();
+	});
+
+	// A notification is not a result. Counting one would put a number in the
+	// health panel's column that nobody asked a question to get.
+	test("a notification is never counted as a request outcome", () => {
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		client.onNotification("m", () => undefined);
+		h.emit({ jsonrpc: "2.0", method: "m", params: {} });
+		expect(h.outcomes).toEqual([]);
+	});
+
+	test("a disposed client delivers nothing further", () => {
+		const h = harness();
+		const client = createLspClient("h1", h.transport);
+		const seen: unknown[] = [];
+		client.onNotification("m", (p) => seen.push(p));
+		client.dispose();
+		h.emit({ jsonrpc: "2.0", method: "m", params: {} });
+		expect(seen).toEqual([]);
+	});
+});

@@ -20,6 +20,8 @@ function fakeClient(sent: Sent[]): LspClient {
 		documentUri: (absolute) => `file://${absolute}`,
 		semanticTokensLegend: () => null,
 		completionCapability: () => null,
+		onNotification: () => () => undefined,
+		features: () => ({ hover: true, references: true }),
 		request: vi.fn(),
 		notify: (method, params) => sent.push({ method, params: params as Record<string, unknown> }),
 		didOpen: (uri, languageId, text) =>

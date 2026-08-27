@@ -9,6 +9,7 @@ import {
 } from "./completion-mapping";
 import { languageServerName } from "./language-ids";
 import type { LspClient } from "./lsp-client";
+import { runInLane, withTimeout } from "./request-lane";
 
 /**
  * The Monaco half of autocompletion: one provider per LANGUAGE, one document per
@@ -78,15 +79,6 @@ export type CompletionDocument = {
 
 export type CompletionRegistration = monaco.IDisposable;
 
-/**
- * How long to wait for one completion before giving up on it.
- *
- * Well above the slowest thing measured (a cold global-scope completion on the
- * real iOS app, 1 367 ms) and well below "forever", because the failure this
- * whole feature is written against is a server that answers nothing at all.
- */
-const REQUEST_TIMEOUT_MS = 8_000;
-
 type LanguageEntry = {
 	documents: Map<string, CompletionDocument>;
 	/** Null until the server has said - and null for good if it offers none. */
@@ -117,18 +109,16 @@ function documentsFor(languageId: string): Map<string, CompletionDocument> {
 	return documents;
 }
 
-/** Per document: the request on the wire, and which provider call is the current one. */
-type DocumentState = { inFlight: Promise<unknown> | null; generation: number };
-const documentState = new Map<string, DocumentState>();
-
-function stateFor(modelUri: string): DocumentState {
-	let state = documentState.get(modelUri);
-	if (!state) {
-		state = { inFlight: null, generation: 0 };
-		documentState.set(modelUri, state);
-	}
-	return state;
-}
+/**
+ * Which provider call is the current one, per document.
+ *
+ * 🗝 The request on the wire is NOT here: it lives in `request-lane.ts`, one
+ * slot per document shared with hover and references, because all three wait on
+ * the same first type-check. Supersession stays here because it is per FEATURE —
+ * a newer keystroke supersedes an older completion, and must not drop a hover
+ * queued behind it.
+ */
+const generations = new Map<string, number>();
 
 /**
  * What "cannot answer" looks like to Monaco.
@@ -208,58 +198,27 @@ function provider(entry: LanguageEntry): monaco.languages.CompletionItemProvider
 			}
 			if (source.getServerText() === null) return refuse("this file has not reached the language server yet");
 
-			const state = stateFor(source.modelUri);
-			const generation = ++state.generation;
-
-			// 🗝 WAIT for whatever is on the wire; do not cancel it. On a cold file
-			// that request is doing the type-check this one would otherwise have to
-			// redo from scratch, and cancelling it measured 34x slower.
-			while (state.inFlight) {
-				try {
-					await state.inFlight;
-				} catch {
-					// Its own caller reports it. All this one needs is the slot. The
-					// loop repeats because another queued call may have taken the slot
-					// while this one was waiting.
-				}
-				// Superseded while queued - by Monaco cancelling this call for a newer
-				// keystroke, or by a newer call arriving. Either way this answer is for
-				// a prefix that is no longer on screen and must never reach the widget.
-				// Silently: a superseded call is the ordinary case while somebody
-				// types, and there is nothing wrong to report about it.
-				if (token.isCancellationRequested || state.generation !== generation) return NO_ANSWER;
-			}
-			// Nothing was in flight at all, so the check above never ran.
-			if (token.isCancellationRequested) return NO_ANSWER;
+			const generation = (generations.get(source.modelUri) ?? 0) + 1;
+			generations.set(source.modelUri, generation);
+			const stale = () => token.isCancellationRequested || generations.get(source.modelUri) !== generation;
 
 			const startedAt = performance.now();
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			const timeout = new Promise<never>((_, reject) => {
-				timer = setTimeout(() => reject(new Error("the language server did not answer")), REQUEST_TIMEOUT_MS);
-			});
-			const answer = Promise.race([
-				requestCompletion(client, client.documentUri(absolute), position, context),
-				timeout,
-			]);
-			// The slot is released by the timeout too: after eight seconds of silence
-			// the server is presumed wedged, and holding the slot for it would make
-			// every later keystroke wait on a request that is never coming back.
-			const slot = answer.catch(() => undefined);
-			state.inFlight = slot;
-
 			let list: LspCompletionList;
 			try {
-				list = await answer;
+				const outcome = await runInLane(source.modelUri, stale, () =>
+					withTimeout(() => requestCompletion(client, client.documentUri(absolute), position, context)),
+				);
+				if (!outcome.ok) return NO_ANSWER;
+				list = outcome.value;
 			} catch (err) {
 				return refuse(err instanceof Error ? err.message : "the request failed", true);
-			} finally {
-				clearTimeout(timer);
-				// Unconditionally, and only if it is still OURS: leaving a settled
-				// promise in the slot spins every waiter forever.
-				if (state.inFlight === slot) state.inFlight = null;
 			}
 
-			if (token.isCancellationRequested || state.generation !== generation) return NO_ANSWER;
+			// 🗝 Checked AGAIN after the answer, not only inside the lane. The lane's
+			// check only runs for a call that actually WAITED; a call that found the
+			// wire free and was cancelled while its own request was out would
+			// otherwise land a stale prefix's list on top of a newer one.
+			if (stale()) return NO_ANSWER;
 
 			if (list.items.length === 0) {
 				// Up, answering, and answering NOTHING. Logged with the timing and the
@@ -356,7 +315,7 @@ export function registerCompletion(
 			if (released) return;
 			released = true;
 			documents.delete(modelUri);
-			documentState.delete(modelUri);
+			generations.delete(modelUri);
 			if (documents.size > 0) return;
 			documentsByLanguage.delete(languageId);
 			const owner = registered.get(languageId);

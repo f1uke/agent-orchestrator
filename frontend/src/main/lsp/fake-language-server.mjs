@@ -98,6 +98,12 @@ function handle(msg) {
 										triggerCharacters: [".", "("],
 									},
 								}),
+						// Both are `boolean | { workDoneProgress }` on the wire. The object
+						// form is exercised deliberately: a client that tested `=== true`
+						// would decide a server offering hover offers none, and then report
+						// that to the reader as a fact.
+						...(process.env.FAKE_LSP_NO_HOVER === "1" ? {} : { hoverProvider: {} }),
+						...(process.env.FAKE_LSP_NO_REFERENCES === "1" ? {} : { referencesProvider: true }),
 						...(process.env.FAKE_LSP_NO_SEMANTIC_TOKENS === "1"
 							? {}
 							: {

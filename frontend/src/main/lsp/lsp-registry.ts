@@ -5,6 +5,7 @@ import {
 	type LspProcess,
 	type LspState,
 	type SemanticTokensLegend,
+	type ServerFeatures,
 	startLspProcess,
 } from "./lsp-process";
 
@@ -69,6 +70,8 @@ export type LspAttachment = {
 	 * characters once, at registration, so they cannot be discovered later.
 	 */
 	completion: CompletionCapability | null;
+	/** Plain yes/no for hover and references, so a refusal can say which silence it is. */
+	features: ServerFeatures;
 };
 
 /**
@@ -299,6 +302,7 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 				warning: entry.warning,
 				semanticTokens: entry.proc.semanticTokensLegend,
 				completion: entry.proc.completionCapability,
+				features: entry.proc.features,
 			};
 		},
 

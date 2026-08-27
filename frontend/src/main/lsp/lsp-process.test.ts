@@ -180,6 +180,25 @@ describe("startLspProcess", () => {
 		expect(proc.completionCapability).toBeNull();
 	});
 
+	test("carries hover and references through, including the object form", async () => {
+		// 🗝 `hoverProvider` and `referencesProvider` are each `boolean | object` on
+		// the wire. A client that tested `=== true` would report a server that DOES
+		// offer hover as one that does not - and this app says that to the reader
+		// as a fact, at the cursor. The fake advertises the object form for hover
+		// and the boolean for references, deliberately.
+		const { proc } = start(fakeSpec());
+		await proc.initialized;
+		expect(proc.features).toEqual({ hover: true, references: true });
+	});
+
+	test("a server that advertises neither reports false, so the reason can be stated", async () => {
+		// False and "not attached yet" produce the same empty widget, and only the
+		// initialize reply can tell them apart.
+		const { proc } = start(fakeSpec({ FAKE_LSP_NO_HOVER: "1", FAKE_LSP_NO_REFERENCES: "1" }));
+		await proc.initialized;
+		expect(proc.features).toEqual({ hover: false, references: false });
+	});
+
 	test("answers workspace/configuration itself so the server does not stall", async () => {
 		// The fake exits 3 if its configuration request goes unanswered.
 		const { proc } = start(fakeSpec({ FAKE_LSP_ASK_CONFIG: "1" }));

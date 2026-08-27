@@ -39,6 +39,8 @@ if (!CAN_RUN) {
 	);
 }
 
+type PublishParams = { uri?: string; version?: number; diagnostics?: unknown[] };
+
 /** A real cross-package reference in this repo, and where it is defined. */
 const CALL_SITE = "internal/httpd/controllers/sessions.go";
 const CALL_TEXT = "previewutil.ConfinedPath";
@@ -62,10 +64,18 @@ describe.skipIf(!CAN_RUN)("gopls, for real", () => {
 				if (typeof id === "number" && event.message.method === undefined) {
 					inbox.get(id)?.(event.message);
 					inbox.delete(id);
+					return;
+				}
+				// 🗝 UNSOLICITED. `publishDiagnostics` answers no request, so a client
+				// with no door for a notification drops every one and looks healthy
+				// doing it - which is what this app did until this slice.
+				if (event.message.method === "textDocument/publishDiagnostics") {
+					published.push({ at: Date.now(), params: event.message.params as PublishParams });
 				}
 			},
 		});
 		const inbox = new Map<number, (m: Record<string, unknown>) => void>();
+		const published: { at: number; params: PublishParams }[] = [];
 		let nextId = 1;
 		const attachment = await registry.attach({ root: BACKEND, languageId: "go" });
 		// `attach` resolving at all is the readiness contract: main withholds it
@@ -194,6 +204,86 @@ describe.skipIf(!CAN_RUN)("gopls, for real", () => {
 			"no members for `previewutil.Confined`",
 		).toContain(DEFINITION_SYMBOL);
 
+		// 🗝 Put the buffer back the way it started before asking anything about a
+		// POSITION. The completion probes above each inserted a line, so the call
+		// site the line/character below name has moved - and a hover at a stale
+		// position answers about whatever is there now, correctly and uselessly.
+		// This is the same class of bug `document-sync.ts` exists to prevent, met
+		// here in the harness rather than in the app.
+		registry.send(attachment.handleId, {
+			jsonrpc: "2.0",
+			method: "textDocument/didChange",
+			params: {
+				textDocument: { uri: pathToFileURL(callAbs).href, version: ++version },
+				contentChanges: [
+					{ range: { start: { line: 0, character: 0 }, end: { line: previousLines, character: 0 } }, text },
+				],
+			},
+		});
+		previousLines = lines.length - 1;
+
+		// ── Hover. The pacing decision this slice makes rests on ONE number: what
+		// the first hover in a file costs against what a warm one costs. Measured
+		// here through the shipping bridge rather than in a side harness.
+		const hoverAt = async (label: string, line: number, character: number) => {
+			const startedAt = Date.now();
+			const answer = await request("textDocument/hover", {
+				textDocument: { uri: pathToFileURL(callAbs).href },
+				position: { line, character },
+			});
+			const contents = (answer.result as { contents?: { value?: string } } | null)?.contents;
+			console.warn(`[measure] gopls hover ${label}: ${Date.now() - startedAt}ms`);
+			return contents?.value ?? "";
+		};
+		// On WHAT it said, never on the absence of an error. gopls answers with
+		// `MarkupContent` markdown whose first line is the declaration.
+		const hovered = await hoverAt(DEFINITION_SYMBOL, lineIndex, character);
+		expect(hovered, `hover over ${CALL_TEXT} said nothing`).toContain(DEFINITION_SYMBOL);
+		await hoverAt("warm repeat", lineIndex, character);
+
+		// ── References. The volume question the design turns on: 3-164 hits over
+		// 1-35 files measured on this module, in 7-51 ms. The request is never the
+		// expensive half; materialising a PREVIEW per file is.
+		const referencesStartedAt = Date.now();
+		const references = await request("textDocument/references", {
+			textDocument: { uri: pathToFileURL(callAbs).href },
+			position: { line: lineIndex, character },
+			context: { includeDeclaration: true },
+		});
+		const hitList = (references.result ?? []) as { uri?: string }[];
+		const files = new Set(hitList.map((h) => h.uri ?? ""));
+		console.warn(
+			`[measure] gopls references ${DEFINITION_SYMBOL}: ${Date.now() - referencesStartedAt}ms,` +
+				` ${hitList.length} hits in ${files.size} files`,
+		);
+		// The declaration AND the call site, which is the difference between a
+		// reference search and a definition jump.
+		expect(hitList.length, "references returned nothing").toBeGreaterThan(1);
+		expect(
+			[...files].some((uri) => uri.includes(DEFINITION_FILE)),
+			"references never reached the declaration",
+		).toBe(true);
+		expect([...files].some((uri) => uri.includes(CALL_SITE))).toBe(true);
+
+		// ── Diagnostics. 🗝 gopls publishes TWICE after a file opens: an EMPTY set
+		// at ~932 ms and the real one at ~5 010 ms. Which is why the app's header
+		// never renders zero as a verdict — for four seconds it would be a lie.
+		await new Promise((r) => setTimeout(r, 12_000));
+		for (const message of published) {
+			console.warn(
+				`[measure] gopls publishDiagnostics: ${message.params.diagnostics?.length ?? 0} items,` +
+					` version=${message.params.version}`,
+			);
+		}
+		expect(published.length, "gopls published no diagnostics at all").toBeGreaterThan(0);
+		// The version is what an out-of-order publish is judged on, and gopls is the
+		// server that supplies one — sourcekit-lsp never does.
+		expect(typeof published[published.length - 1].params.version).toBe("number");
+		// Every publish addresses a document by URI, and the app matches on it. A
+		// publish for a file nobody opened is normal; one for THIS file is what
+		// makes the feature work at all.
+		expect(published.some((m) => (m.params.uri ?? "").includes(CALL_SITE))).toBe(true);
+
 		registry.detach(attachment.handleId);
-	}, 180_000); // A cold GOPLSCACHE has to load this module's whole dependency closure.
+	}, 240_000); // A cold GOPLSCACHE has to load this module's whole dependency closure.
 });

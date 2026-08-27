@@ -90,18 +90,27 @@ describe.skipIf(!CAN_RUN)("sourcekit-lsp, for real", () => {
 				idleGraceMs: 1_000,
 				onState: () => {},
 				onMessage: (event) => {
-					const message = event.message as { id?: number; result?: unknown };
-					if (typeof message.id === "number") answers.get(message.id)?.(message.result);
+					const message = event.message as { id?: number; result?: unknown; method?: string; params?: unknown };
+					if (typeof message.id === "number" && message.method === undefined) {
+						answers.get(message.id)?.(message.result);
+						return;
+					}
+					// 🗝 UNSOLICITED. Nothing asks for these, so a client with no door
+					// for a notification drops every one and looks healthy doing it.
+					if (message.method === "textDocument/publishDiagnostics") {
+						published.push(message.params as { uri?: string; version?: number; diagnostics?: unknown[] });
+					}
 				},
 			});
 			const answers = new Map<number, (result: unknown) => void>();
+			const published: { uri?: string; version?: number; diagnostics?: unknown[] }[] = [];
 			let nextId = 1;
 
 			const attachment = await registry.attach({ root: pkg, languageId: "swift" });
 			// A SwiftPM package is served in place, so the mapping is the identity -
 			// but the renderer asks for it the same way either way, which is the point.
 			expect(attachment.documentRoot).toBe(pkg);
-			expect(attachment.warning).toMatch(/symbol search is off/i);
+			expect(attachment.warning).toMatch(/symbol search and find all references are off/i);
 
 			const request = (method: string, params: unknown) =>
 				new Promise<unknown>((resolve) => {
@@ -196,6 +205,78 @@ describe.skipIf(!CAN_RUN)("sourcekit-lsp, for real", () => {
 			// Resolve is what keeps 200 doc comments from being fetched to show one.
 			expect(resolved, "completionItem/resolve answered nothing").toBeTruthy();
 
+			// ── Hover and references, on the same connection. Both are answered
+			// against the EDITED buffer, which is the only version the server has
+			// been told about — a position resolved against the saved text would
+			// name a different symbol, silently, with every offset still in range.
+			const editedLines = edited.split("\n");
+			const greetingLine = editedLines.findIndex((l) => l.includes("Greeting(text:"));
+			const greetingColumn = editedLines[greetingLine].indexOf("Greeting") + 2;
+
+			const startedHover = Date.now();
+			const hover = (await request("textDocument/hover", {
+				textDocument: { uri },
+				position: { line: greetingLine, character: greetingColumn },
+			})) as { contents?: { value?: string } } | null;
+			console.warn(`[measure] sourcekit hover "Greeting" → ${Date.now() - startedHover}ms`);
+			// On WHAT it said. sourcekit-lsp answers with `MarkupContent` whose value
+			// is already a fenced Swift block carrying the declaration.
+			expect(hover?.contents?.value ?? "", "hover over `Greeting` said nothing").toContain("Greeting");
+
+			const startedWarm = Date.now();
+			await request("textDocument/hover", {
+				textDocument: { uri },
+				position: { line: greetingLine, character: greetingColumn },
+			});
+			console.warn(`[measure] sourcekit hover warm repeat → ${Date.now() - startedWarm}ms`);
+
+			const startedReferences = Date.now();
+			const references = ((await request("textDocument/references", {
+				textDocument: { uri },
+				position: { line: greetingLine, character: greetingColumn },
+				context: { includeDeclaration: true },
+			})) ?? []) as { uri?: string }[];
+			const referenceFiles = new Set(references.map((r) => r.uri ?? ""));
+			console.warn(
+				`[measure] sourcekit references "Greeting" → ${Date.now() - startedReferences}ms,` +
+					` ${references.length} hits in ${referenceFiles.size} files`,
+			);
+			/**
+			 * 🗝 ZERO, and that is the finding rather than a failure.
+			 *
+			 * `textDocument/references` is answered from the INDEX STORE. Slice 5
+			 * turned sourcekit-lsp's background indexing OFF for SwiftPM packages,
+			 * because the only way it indexes one is by building `.build/index-build`
+			 * INTO the checkout — which AO may not do. So on a package, hover answers
+			 * in 6 ms and references answers nothing in 1 ms, with no error anywhere:
+			 * this stack's characteristic failure, arriving in a new place.
+			 *
+			 * Asserted as zero on purpose. If a future toolchain starts answering
+			 * here, this test fails and somebody gets to delete half of
+			 * `SWIFTPM_NO_SYMBOLS`. Until then the warning above is the whole of the
+			 * user-facing answer, and it now names references as well as symbols.
+			 *
+			 * The Xcode branch below, against a project with a real DerivedData index
+			 * store, is where references is measured working: 69 hits in 32 files in
+			 * 67 ms.
+			 */
+			expect(references.length, "a SwiftPM package now answers references - update SWIFTPM_NO_SYMBOLS").toBe(0);
+			expect(referenceFiles.size).toBe(0);
+
+			// ── Diagnostics. 🗝 sourcekit-lsp publishes ONCE per open or change, a
+			// few seconds later, and carries NO `version` — measured on the real iOS
+			// app and true here. A client that gated on the version would drop every
+			// Swift diagnostic there has ever been, in silence.
+			await new Promise((r) => setTimeout(r, 10_000));
+			for (const message of published) {
+				console.warn(
+					`[measure] sourcekit publishDiagnostics: ${message.diagnostics?.length ?? 0} items, version=${message.version}`,
+				);
+			}
+			expect(published.length, "sourcekit-lsp published no diagnostics at all").toBeGreaterThan(0);
+			expect(published[published.length - 1].version, "sourcekit-lsp now sends a version").toBeUndefined();
+			expect(published.some((m) => (m.uri ?? "") === uri)).toBe(true);
+
 			// 🗝 And nothing was written into the package. sourcekit-lsp's background
 			// indexer writes `.build/index-build` straight into a SwiftPM checkout,
 			// ignoring both `--scratch-path` and `swiftPM.scratchPath`, so this
@@ -236,6 +317,8 @@ async function vi_waitForReady(registry: LspRegistry, key: string): Promise<void
  * build one itself: `xcodebuild` does not run under the agent sandbox, so every
  * Swift number this produces assumes a pre-existing build.
  */
+type PublishParams = { uri?: string; version?: number; diagnostics?: unknown[] };
+
 const SWIFT_PROJECT = process.env.AO_LSP_SWIFT_PROJECT;
 const DEFINITION_TARGETS = (process.env.AO_LSP_SWIFT_TARGETS ?? "").split(";").filter(Boolean);
 
@@ -249,6 +332,7 @@ describe.skipIf(!CAN_RUN || !SWIFT_PROJECT)("a real Xcode project", () => {
 			);
 		}
 		const answers = new Map<number, (result: unknown) => void>();
+		const published: { at: number; params: PublishParams }[] = [];
 		let nextId = 1;
 		const real = createLspRegistry({
 			dataDir: path.join(os.homedir(), ".ao", "lsp-measure"),
@@ -256,8 +340,14 @@ describe.skipIf(!CAN_RUN || !SWIFT_PROJECT)("a real Xcode project", () => {
 			idleGraceMs: 1_000,
 			onState: (e) => console.warn(`[measure] ${e.state}${e.detail ? ` — ${e.detail}` : ""}`),
 			onMessage: (event) => {
-				const message = event.message as { id?: number; result?: unknown };
-				if (typeof message.id === "number") answers.get(message.id)?.(message.result);
+				const message = event.message as { id?: number; result?: unknown; method?: string; params?: unknown };
+				if (typeof message.id === "number" && message.method === undefined) {
+					answers.get(message.id)?.(message.result);
+					return;
+				}
+				if (message.method === "textDocument/publishDiagnostics") {
+					published.push({ at: Date.now(), params: message.params as PublishParams });
+				}
 			},
 		});
 		registry = real;
@@ -373,6 +463,69 @@ describe.skipIf(!CAN_RUN || !SWIFT_PROJECT)("a real Xcode project", () => {
 				expect(list?.isIncomplete).toBe(true);
 			}
 		}
+
+		// ── Hover, references and diagnostics on the real project. These are the
+		// numbers the pacing decision rests on, produced by the code that ships.
+		//
+		// 🗝 The buffer is put BACK first. The completion ladder above inserted a
+		// line per step, so every position below has moved - and a hover at a
+		// stale position answers about whatever is there now, correctly and
+		// uselessly. Same class of bug `document-sync.ts` exists to prevent.
+		const restoreVersion = 10_000;
+		real.send(attachment.handleId, {
+			jsonrpc: "2.0",
+			method: "textDocument/didChange",
+			params: {
+				textDocument: { uri, version: restoreVersion },
+				contentChanges: [
+					{ range: { start: { line: 0, character: 0 }, end: { line: lines.length + 32, character: 0 } }, text },
+				],
+			},
+		});
+
+		const hoverSpec = process.env.AO_LSP_SWIFT_HOVER;
+		if (hoverSpec) {
+			const hoverLine = lines.findIndex((l) => l.includes(hoverSpec));
+			expect(hoverLine, `hover needle not found: ${hoverSpec}`).toBeGreaterThanOrEqual(0);
+			const position = { line: hoverLine, character: lines[hoverLine].indexOf(hoverSpec) + 1 };
+			for (const label of ["first in the file", "warm", "warm"]) {
+				const at = Date.now();
+				const hover = (await request("textDocument/hover", { textDocument: { uri }, position })) as {
+					contents?: { value?: string };
+				} | null;
+				console.warn(
+					`[measure] hover "${hoverSpec}" (${label}) → ${Date.now() - at}ms, ` +
+						`${(hover?.contents?.value ?? "").split("\n")[1] ?? "(nothing)"}`,
+				);
+				expect(hover?.contents?.value ?? "", `hover over ${hoverSpec} said nothing`).not.toBe("");
+			}
+
+			const refAt = Date.now();
+			const references = ((await request("textDocument/references", {
+				textDocument: { uri },
+				position,
+				context: { includeDeclaration: true },
+			})) ?? []) as { uri?: string }[];
+			const files = new Set(references.map((r) => r.uri ?? ""));
+			console.warn(
+				`[measure] references "${hoverSpec}" → ${Date.now() - refAt}ms, ${references.length} hits in ${files.size} files`,
+			);
+			expect(references.length, "references returned nothing on a project WITH an index store").toBeGreaterThan(0);
+		}
+
+		// 🗝 sourcekit-lsp publishes ONCE per open or change, seconds later, and
+		// carries NO version - measured, on open and on change alike. A client that
+		// gated on the version would drop every Swift diagnostic there has ever been.
+		await new Promise((r) => setTimeout(r, 12_000));
+		for (const message of published) {
+			console.warn(
+				`[measure] publishDiagnostics +${message.at - startedAt}ms: ` +
+					`${message.params.diagnostics?.length ?? 0} items, version=${message.params.version}`,
+			);
+		}
+		expect(published.length, "sourcekit-lsp published no diagnostics at all").toBeGreaterThan(0);
+		expect(published[published.length - 1].params.version, "sourcekit-lsp now sends a version").toBeUndefined();
+		expect(published.some((m) => (m.params.uri ?? "") === uri)).toBe(true);
 
 		const health = (await real.health()).find((h) => h.key === attachment.key);
 		// The whole cost, not the visible third of it: server + build server + the

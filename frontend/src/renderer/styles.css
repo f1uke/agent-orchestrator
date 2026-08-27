@@ -197,6 +197,13 @@
 	--inbox-green-bright: #8bdc75;
 	--inbox-amber: #e0a544;
 	--inbox-red: #ef6a63;
+	/* The editor's squiggles, its overview-ruler marks and its minimap marks,
+	   aliased onto the same two colours the file header's problem count uses.
+	   Monaco draws all three itself once `setModelMarkers` is called, but only in
+	   whatever colour the theme names - and the header and the line have to agree,
+	   or a reader counts one thing and looks at another. */
+	--diagnostic-error: var(--inbox-red);
+	--diagnostic-warning: var(--inbox-amber);
 	--inbox-code: #e0a86a;
 	--inbox-faint: #7c7c82;
 	--inbox-input-fg: #dcdce0;
@@ -379,6 +386,8 @@
 	--inbox-green-bright: #157f2e;
 	--inbox-amber: var(--amber);
 	--inbox-red: var(--red);
+	--diagnostic-error: var(--inbox-red);
+	--diagnostic-warning: var(--inbox-amber);
 	--inbox-code: #8a4f10;
 	--inbox-faint: #6b6b73;
 	--inbox-input-fg: #2a2a2e;

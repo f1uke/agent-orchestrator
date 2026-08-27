@@ -1,3 +1,4 @@
+import { GALLERY_OTHER_PATH, GALLERY_PATH } from "./editor-gallery-api-stub";
 import { SWIFT_FIXTURE } from "./editor-fixture";
 
 /**
@@ -179,8 +180,74 @@ const MEMBERS = [
 	{ label: "offersDeepCut", kind: 10, detail: "Bool", sortText: "4998.05-offersDeepCut", deepOnly: true },
 ];
 
+/**
+ * Where the fixture's own symbol is DECLARED and where it is USED, found by text
+ * so the fixture can be edited for other reasons without breaking a spec.
+ *
+ * `offers` is the right needle: it is declared once and read once in this file,
+ * which is what makes a two-file reference answer legible.
+ */
+function occurrencesOf(word: string): { line: number; character: number }[] {
+	const lines = SWIFT_FIXTURE.split("\n");
+	const found: { line: number; character: number }[] = [];
+	for (let line = 0; line < lines.length; line++) {
+		const pattern = new RegExp(`(?<![\\w$])${word}(?![\\w$])`, "g");
+		for (const match of lines[line].matchAll(pattern)) found.push({ line, character: match.index });
+	}
+	return found;
+}
+
+/** A range that covers `word` at `at`. */
+const rangeAt = (at: { line: number; character: number }, word: string) => ({
+	start: at,
+	end: { line: at.line, character: at.character + word.length },
+});
+
+/**
+ * The diagnostic the spec looks for, placed on the fixture's own `page`
+ * declaration by TEXT rather than by line number.
+ *
+ * Shaped exactly like a real sourcekit-lsp one, captured on the iOS app:
+ * `severity: 2`, `source: "SourceKit"`, and `tags: []`.
+ */
+function fixtureDiagnostics(): unknown[] {
+	const page = occurrencesOf("page")[0];
+	const reuse = occurrencesOf("reuseIdentifier")[0];
+	if (!page || !reuse) return [];
+	return [
+		{
+			range: rangeAt(page, "page"),
+			severity: 1,
+			source: "SourceKit",
+			tags: [],
+			message: "cannot find type 'Paginator' in scope",
+		},
+		{
+			range: rangeAt(reuse, "reuseIdentifier"),
+			severity: 2,
+			source: "SourceKit",
+			tags: [],
+			message: "variable 'reuseIdentifier' was never mutated",
+		},
+	];
+}
+
 /** Installs the bridge `useLanguageServer` looks for. Call before React mounts. */
-export function installFakeLspBridge(options: { completionDelayMs?: number; failAttach?: string } = {}): void {
+export function installFakeLspBridge(
+	options: {
+		completionDelayMs?: number;
+		failAttach?: string;
+		/**
+		 * How long after `didOpen` the first publish arrives. Real servers take
+		 * seconds — gopls publishes an EMPTY set at ~932 ms and the real one at
+		 * ~5 010 ms; sourcekit-lsp publishes once at ~3 325 ms — but a spec that
+		 * waited that long would be measuring the clock.
+		 */
+		diagnosticsDelayMs?: number;
+		/** Answer no hover / no references, so a spec can ask what is SAID about it. */
+		features?: { hover: boolean; references: boolean };
+	} = {},
+): void {
 	const listeners = new Set<(event: { handleId: string; message: Message }) => void>();
 	let handles = 0;
 	// Read by the spec: a request that was never made is a different failure from
@@ -201,20 +268,84 @@ export function installFakeLspBridge(options: { completionDelayMs?: number; fail
 		lsp: {
 			attach: async () => {
 				if (options.failAttach) throw new Error(options.failAttach);
+				const handleId = `fake-${++handles}`;
 				return {
-					handleId: `fake-${++handles}`,
+					handleId,
 					state: "ready" as const,
 					detail: "fake sourcekit-lsp",
 					documentRoot: GALLERY_WORKSPACE_ROOT,
 					semanticTokens: SOURCEKIT_LEGEND,
 					completion: SOURCEKIT_COMPLETION,
+					features: options.features ?? { hover: true, references: true },
 				};
 			},
 			detach: () => undefined,
 			send: (handleId: string, message: Message) => {
 				const method = message.method as string | undefined;
 				if (method) asked.push(method);
+				// 🗝 UNSOLICITED, exactly as both real servers do it: nothing asks for
+				// diagnostics, so a client with no door for a notification drops every
+				// one of them and looks perfectly healthy doing it.
+				if (method === "textDocument/didOpen") {
+					const uri = (message.params as { textDocument: { uri: string } }).textDocument.uri;
+					setTimeout(() => {
+						for (const listener of listeners) {
+							listener({
+								handleId,
+								message: {
+									jsonrpc: "2.0",
+									method: "textDocument/publishDiagnostics",
+									// No `version` — sourcekit-lsp sends none, ever.
+									params: { uri, diagnostics: fixtureDiagnostics() },
+								},
+							});
+						}
+					}, options.diagnosticsDelayMs ?? 40);
+					return;
+				}
 				if (message.id === undefined) return;
+				if (method === "textDocument/hover") {
+					const position = (message.params as { position: { line: number; character: number } }).position;
+					answer(handleId, message.id, hoverAt(position), 5);
+					return;
+				}
+				if (method === "textDocument/references") {
+					const uri = (message.params as { textDocument: { uri: string } }).textDocument.uri;
+					// Two files, deliberately: one hit in the file the reader is in, one
+					// in a file that has no model yet. The second is the only one that
+					// can prove the preview was materialised.
+					const other = uri.replace(GALLERY_PATH, GALLERY_OTHER_PATH);
+					answer(
+						handleId,
+						message.id,
+						[
+							...occurrencesOf("offers").map((at) => ({ uri, range: rangeAt(at, "offers") })),
+							{
+								uri: other,
+								range: { start: { line: 8, character: 21 }, end: { line: 8, character: 27 } },
+							},
+						],
+						5,
+					);
+					return;
+				}
+				if (method === "textDocument/definition") {
+					// Into the OTHER file, so the peek preview has something to show that
+					// the current pane could not have supplied.
+					const uri = (message.params as { textDocument: { uri: string } }).textDocument.uri;
+					answer(
+						handleId,
+						message.id,
+						[
+							{
+								uri: uri.replace(GALLERY_PATH, GALLERY_OTHER_PATH),
+								range: { start: { line: 2, character: 7 }, end: { line: 2, character: 12 } },
+							},
+						],
+						5,
+					);
+					return;
+				}
 				if (method === "textDocument/semanticTokens/full") {
 					// Asynchronously, like a real one: a synchronous answer would hide a
 					// provider that only works when the reply is already in hand.
@@ -269,6 +400,36 @@ export function installFakeLspBridge(options: { completionDelayMs?: number; fail
 				return () => listeners.delete(cb);
 			},
 			onState: () => () => undefined,
+		},
+	};
+}
+
+/**
+ * The type of the word at a position, read out of the LIVE model — so a hover
+ * asked about an EDITED buffer answers about the text the reader can see, which
+ * is what `document-sync.ts` exists to make true.
+ *
+ * Shaped like sourcekit-lsp's own reply: a `MarkupContent` whose value is
+ * already a fenced Swift block.
+ */
+function hoverAt(position: { line: number; character: number }): unknown {
+	const monaco = (globalThis as { __monaco?: { editor: { getModels(): { getLineContent(n: number): string }[] } } })
+		.__monaco;
+	const model = monaco?.editor.getModels()[0];
+	if (!model) return null;
+	const line = model.getLineContent(position.line + 1);
+	const before = /[A-Za-z0-9_]*$/.exec(line.slice(0, position.character))?.[0] ?? "";
+	const after = /^[A-Za-z0-9_]*/.exec(line.slice(position.character))?.[0] ?? "";
+	const word = `${before}${after}`;
+	// Nothing under the pointer is a legitimate answer, and the whole point of
+	// hover's "not lying" rule is that it looks the same as a server that is
+	// still starting.
+	if (word === "") return null;
+	return {
+		contents: { kind: "markdown", value: `\`\`\`swift\nlet ${word}: PromotionOffer\n\`\`\`` },
+		range: {
+			start: { line: position.line, character: position.character - before.length },
+			end: { line: position.line, character: position.character + after.length },
 		},
 	};
 }

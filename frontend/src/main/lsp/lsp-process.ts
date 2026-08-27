@@ -61,6 +61,17 @@ export type SemanticTokensLegend = { tokenTypes: string[]; tokenModifiers: strin
  */
 export type CompletionCapability = { triggerCharacters?: string[]; resolveProvider?: boolean };
 
+/**
+ * The plain yes/no capabilities, carried for one reason: so a feature that
+ * cannot answer can say WHICH of the two silences it is.
+ *
+ * "The server is still starting" and "this server does not do hover" produce the
+ * same empty widget, and only the `initialize` reply can tell them apart. Both
+ * of these are `boolean | { workDoneProgress }` on the wire, so presence is the
+ * signal and the object form is not a promise of anything extra.
+ */
+export type ServerFeatures = { hover: boolean; references: boolean };
+
 export type LspProcess = {
 	readonly pid: number | null;
 	readonly state: LspState;
@@ -68,6 +79,8 @@ export type LspProcess = {
 	readonly detail: string | undefined;
 	/** Null when the server advertised no `semanticTokensProvider`. */
 	readonly semanticTokensLegend: SemanticTokensLegend | null;
+	/** What the server said it can do about hover and references. */
+	readonly features: ServerFeatures;
 	/** Null when the server advertised no `completionProvider`. */
 	readonly completionCapability: CompletionCapability | null;
 	/** Resolves when the handshake completes; rejects on timeout or spawn failure. */
@@ -259,6 +272,7 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 	let stopping: Promise<void> | null = null;
 	let semanticTokensLegend: SemanticTokensLegend | null = null;
 	let completionCapability: CompletionCapability | null = null;
+	let features: ServerFeatures = { hover: false, references: false };
 
 	const setState = (next: LspState, why?: string) => {
 		state = next;
@@ -435,6 +449,8 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 				capabilities?: {
 					semanticTokensProvider?: { legend?: SemanticTokensLegend };
 					completionProvider?: CompletionCapability;
+					hoverProvider?: boolean | Record<string, unknown>;
+					referencesProvider?: boolean | Record<string, unknown>;
 				};
 			} | null;
 			const info = reply?.serverInfo;
@@ -455,6 +471,16 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 						resolveProvider: advertised.resolveProvider === true,
 					}
 				: null;
+			// `false`, `undefined` and a missing key all mean "no". Anything else —
+			// `true`, or the `{ workDoneProgress }` object form both servers are
+			// entitled to send — means yes. Measured: gopls and sourcekit-lsp both
+			// answer plain `true` for these two.
+			const advertises = (value: boolean | Record<string, unknown> | undefined) =>
+				value === true || (typeof value === "object" && value !== null);
+			features = {
+				hover: advertises(reply?.capabilities?.hoverProvider),
+				references: advertises(reply?.capabilities?.referencesProvider),
+			};
 			const legend = reply?.capabilities?.semanticTokensProvider?.legend;
 			semanticTokensLegend =
 				legend && Array.isArray(legend.tokenTypes) && Array.isArray(legend.tokenModifiers)
@@ -643,6 +669,9 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 		},
 		get semanticTokensLegend() {
 			return semanticTokensLegend;
+		},
+		get features() {
+			return features;
 		},
 		get completionCapability() {
 			return completionCapability;
