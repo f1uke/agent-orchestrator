@@ -111,6 +111,14 @@ jobs:
   # perfectly plausible widget, proving nothing. Only a browser can be asked
   # whether a squiggle was painted and whether the peek pane has source in it.
   #
+  # e2e/search-perf.spec.ts is the ninth, and it is files-perf's argument applied
+  # to the rail's third mode. "self" on a real 6,940-file iOS project matches
+  # 12,847 times; the server caps the payload at 2,000 matches over 500 files, so
+  # 2,500 rows is the worst list ⌘⇧F can ever hand the panel. Rendered eagerly
+  # that is the same shape that measured 91,295 nodes on the tree, and jsdom
+  # cannot tell a windowed list from a whole one because it renders both to the
+  # same markup and neither to a screen. Node COUNTS again, never timings.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -140,4 +148,4 @@ jobs:
           npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
           e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
           e2e/editor-completion.spec.ts e2e/editor-lsp-surface.spec.ts e2e/files-perf.spec.ts
-          e2e/files-state.spec.ts
+          e2e/files-state.spec.ts e2e/search-perf.spec.ts

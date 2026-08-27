@@ -4768,6 +4768,97 @@ paths:
       summary: Resolve a terminal file reference to candidate workspace paths
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/workspace/search:
+    get:
+      operationId: searchWorkspace
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Text to find in the CONTENTS of every file in the workspace.
+          Empty answers with an available, empty result - the search box starts empty,
+          which is not an error.
+        in: query
+        name: q
+        schema:
+          description: Text to find in the CONTENTS of every file in the workspace.
+            Empty answers with an available, empty result - the search box starts
+            empty, which is not an error.
+          type: string
+      - description: Match the query's case. Off by default.
+        in: query
+        name: matchCase
+        schema:
+          description: Match the query's case. Off by default.
+          type: boolean
+      - description: Match whole words only, so "ViewModel" does not match "LoginViewModel".
+        in: query
+        name: wholeWord
+        schema:
+          description: Match whole words only, so "ViewModel" does not match "LoginViewModel".
+          type: boolean
+      - description: Treat the query as a regular expression (Go's RE2 syntax, which
+          is linear-time and cannot backtrack catastrophically). A pattern that does
+          not compile answers with invalidRegex rather than an error.
+        in: query
+        name: regex
+        schema:
+          description: Treat the query as a regular expression (Go's RE2 syntax, which
+            is linear-time and cannot backtrack catastrophically). A pattern that
+            does not compile answers with invalidRegex rather than an error.
+          type: boolean
+      - description: Comma-separated globs a path must match. A pattern with no slash
+          matches any path SEGMENT ("*.swift" by basename, "Pods" as a directory);
+          one with a slash matches the whole workspace-relative path and everything
+          beneath it, with ** crossing separators.
+        in: query
+        name: include
+        schema:
+          description: Comma-separated globs a path must match. A pattern with no
+            slash matches any path SEGMENT ("*.swift" by basename, "Pods" as a directory);
+            one with a slash matches the whole workspace-relative path and everything
+            beneath it, with ** crossing separators.
+          type: string
+      - description: Comma-separated globs, same two forms as include, that remove
+          a path from the search.
+        in: query
+        name: exclude
+        schema:
+          description: Comma-separated globs, same two forms as include, that remove
+            a path from the search.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceSearchResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Search the contents of every file in the session's workspace
+      tags:
+      - sessions
   /api/v1/sessions/cleanup:
     post:
       operationId: cleanupSessions
@@ -8999,6 +9090,77 @@ components:
       required:
       - ref
       - candidates
+      type: object
+    WorkspaceSearchFileDTO:
+      properties:
+        matches:
+          items:
+            $ref: '#/components/schemas/WorkspaceSearchMatchDTO'
+          type: array
+        path:
+          type: string
+        total:
+          type: integer
+        truncated:
+          type: boolean
+      required:
+      - path
+      - matches
+      - total
+      - truncated
+      type: object
+    WorkspaceSearchMatchDTO:
+      properties:
+        column:
+          type: integer
+        endColumn:
+          type: integer
+        line:
+          type: integer
+        preview:
+          type: string
+        previewEnd:
+          type: integer
+        previewStart:
+          type: integer
+      required:
+      - line
+      - column
+      - endColumn
+      - preview
+      - previewStart
+      - previewEnd
+      type: object
+    WorkspaceSearchResponse:
+      properties:
+        available:
+          type: boolean
+        files:
+          items:
+            $ref: '#/components/schemas/WorkspaceSearchFileDTO'
+          type: array
+        filesSearched:
+          type: integer
+        invalidRegex:
+          type: string
+        query:
+          type: string
+        reason:
+          type: string
+        totalFiles:
+          type: integer
+        totalMatches:
+          type: integer
+        truncated:
+          type: boolean
+      required:
+      - available
+      - query
+      - files
+      - totalMatches
+      - totalFiles
+      - filesSearched
+      - truncated
       type: object
     WriteWorkspaceFileRequest:
       properties:

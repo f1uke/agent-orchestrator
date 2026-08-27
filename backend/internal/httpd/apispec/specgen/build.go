@@ -232,6 +232,9 @@ var schemaNames = map[string]string{
 	"ControllersWorkspaceFileParams":              "WorkspaceFileParams",
 	"ControllersWorkspaceFileResponse":            "WorkspaceFileResponse",
 	"ControllersWorkspaceFilesResponse":           "WorkspaceFilesResponse",
+	"ControllersWorkspaceSearchResponse":          "WorkspaceSearchResponse",
+	"ControllersWorkspaceSearchFileDTO":           "WorkspaceSearchFileDTO",
+	"ControllersWorkspaceSearchMatchDTO":          "WorkspaceSearchMatchDTO",
 	"ControllersWriteWorkspaceFileRequest":        "WriteWorkspaceFileRequest",
 	"ControllersWriteWorkspaceFileResponse":       "WriteWorkspaceFileResponse",
 	"ControllersLineChangeDTO":                    "LineChangeDTO",
@@ -1475,6 +1478,17 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.WorkspaceFilesResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/workspace/search", id: "searchWorkspace", tag: "sessions",
+			summary:    "Search the contents of every file in the session's workspace",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.WorkspaceSearchParams{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WorkspaceSearchResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

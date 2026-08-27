@@ -1888,6 +1888,9 @@ export function mockWorkspaceFiles(sessionId: string): WorkspaceFilesResponse {
 // ── The editor, in `ao preview` ─────────────────────────────────────────────
 
 type WorkspaceFileResponse = components["schemas"]["WorkspaceFileResponse"];
+type WorkspaceSearchResponse = components["schemas"]["WorkspaceSearchResponse"];
+type WorkspaceSearchFileDTO = components["schemas"]["WorkspaceSearchFileDTO"];
+type WorkspaceSearchMatchDTO = components["schemas"]["WorkspaceSearchMatchDTO"];
 type WriteWorkspaceFileResponse = components["schemas"]["WriteWorkspaceFileResponse"];
 
 /**
@@ -2035,6 +2038,8 @@ type MockFileOverride = {
 	diff?(path: string): DiffContextResponse | null;
 	/** The Files rail's Browse index — how `e2e/files-bench` supplies a 7k-file tree. */
 	files?(sessionId: string): WorkspaceFilesResponse | null;
+	/** ⌘⇧F results — how `e2e/search-bench` supplies a high-hit result set. */
+	search?(sessionId: string, query: string): WorkspaceSearchResponse | null;
 };
 
 function mockOverride(): MockFileOverride | undefined {
@@ -2138,4 +2143,106 @@ export function mockWorkspaceFileSave(path: string, content: string, baseHash?: 
 			],
 		},
 	};
+}
+
+/**
+ * ⌘⇧F results for the renderer harness (`VITE_NO_ELECTRON=1`).
+ *
+ * It really SEARCHES the mock file bodies rather than returning a canned list,
+ * so `ao preview` shows the panel's actual behaviour — matches in context, the
+ * highlight landing on the right characters, files with one hit beside files
+ * with many — instead of a still that would agree with any implementation.
+ * Mirrors the server's rules: the same three toggles, the same per-file and
+ * total caps, and the honest totals beside a capped payload.
+ */
+export function mockWorkspaceSearch(
+	sessionId: string,
+	query: string,
+	options: { matchCase: boolean; wholeWord: boolean; regex: boolean; include: string; exclude: string },
+): WorkspaceSearchResponse {
+	const supplied = mockOverride()?.search?.(sessionId, query);
+	if (supplied) return supplied;
+	const index = mockWorkspaceFiles(sessionId);
+	const empty: WorkspaceSearchResponse = {
+		available: index.available,
+		reason: index.reason,
+		query,
+		files: [],
+		totalMatches: 0,
+		totalFiles: 0,
+		filesSearched: 0,
+		truncated: false,
+	};
+	if (!index.available || query.trim() === "") return empty;
+
+	let re: RegExp;
+	try {
+		let pattern = options.regex ? `(?:${query})` : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		if (options.wholeWord) pattern = `\\b${pattern}\\b`;
+		re = new RegExp(pattern, options.matchCase ? "g" : "gi");
+	} catch (err) {
+		return { ...empty, invalidRegex: err instanceof Error ? err.message : "Invalid regular expression" };
+	}
+
+	const files: WorkspaceSearchFileDTO[] = [];
+	let totalMatches = 0;
+	let totalFiles = 0;
+	let filesSearched = 0;
+	let truncated = false;
+	for (const path of index.paths) {
+		// The same shapes the server skips: an image has no lines to match.
+		if (/\.(png|jpe?g|gif|svg|pdf|zip|ttf|otf)$/i.test(path)) continue;
+		if (options.include && !mockGlobHit(path, options.include)) continue;
+		if (options.exclude && mockGlobHit(path, options.exclude)) continue;
+		filesSearched++;
+		const matches: WorkspaceSearchMatchDTO[] = [];
+		let total = 0;
+		mockFileText(path)
+			.split("\n")
+			.forEach((text, i) => {
+				re.lastIndex = 0;
+				for (let hit = re.exec(text); hit; hit = re.exec(text)) {
+					if (hit[0] === "") break;
+					total++;
+					if (matches.length < 100) {
+						matches.push({
+							line: i + 1,
+							column: hit.index + 1,
+							endColumn: hit.index + hit[0].length + 1,
+							preview: text,
+							previewStart: hit.index,
+							previewEnd: hit.index + hit[0].length,
+						});
+					}
+				}
+			});
+		if (total === 0) continue;
+		totalFiles++;
+		totalMatches += total;
+		if (total > matches.length) truncated = true;
+		files.push({ path, matches, total, truncated: total > matches.length });
+	}
+	return { ...empty, files, totalMatches, totalFiles, filesSearched, truncated };
+}
+
+/** The server's two glob forms, close enough for the preview harness. */
+function mockGlobHit(path: string, spec: string): boolean {
+	return spec.split(",").some((raw) => {
+		const p = raw.trim().replace(/^\.\//, "").replace(/\/$/, "");
+		if (!p) return false;
+		const body = p
+			.split("**/")
+			.map((part) =>
+				part
+					.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+					.replace(/\*/g, "[^/]*")
+					.replace(/\?/g, "[^/]"),
+			)
+			.join("(?:.*/)?");
+		try {
+			return new RegExp(p.includes("/") ? `^${body}(?:/.*)?$` : `(?:^|/)${body}(?:/|$)`).test(path);
+		} catch {
+			return false;
+		}
+	});
 }

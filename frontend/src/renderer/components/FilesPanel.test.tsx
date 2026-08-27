@@ -614,6 +614,78 @@ describe("FilesPanel remembers its arrangement", () => {
 	});
 });
 
+// The rail's third narrowing of the same set — files whose CONTENT matches.
+describe("FilesPanel search mode", () => {
+	const respondToEverything = () => {
+		getMock.mockImplementation(async (url: string) => {
+			if (url.includes("/workspace/search")) {
+				return {
+					data: {
+						available: true,
+						query: "",
+						files: [],
+						totalMatches: 0,
+						totalFiles: 0,
+						filesSearched: 0,
+						truncated: false,
+					},
+				};
+			}
+			if (url.includes("/workspace/files")) {
+				return { data: { available: true, truncated: false, paths: ["App/Wallet.swift"] } };
+			}
+			return { data: { available: true, targetBranch: "main", truncated: false, files: [file()] } };
+		});
+	};
+
+	it("opens the search box when ⌘⇧F asks for it", async () => {
+		respondToEverything();
+		const { rerender } = render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+
+		rerender(<FilesPanel search={{ nonce: 1 }} sessionId="s1" taskKey="task-1" />);
+		expect(await screen.findByRole("searchbox", { name: "Search in project" })).toBeInTheDocument();
+		expect(screen.getByRole("tab", { name: /Search/ })).toHaveAttribute("aria-selected", "true");
+	});
+
+	it("carries the editor's selection into the box", async () => {
+		respondToEverything();
+		const { rerender } = render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+
+		rerender(<FilesPanel search={{ nonce: 1, seed: "ViewModel" }} sessionId="s1" taskKey="task-1" />);
+		expect(await screen.findByRole("searchbox", { name: "Search in project" })).toHaveValue("ViewModel");
+	});
+
+	// 🗝 Search is entered by a gesture and never restored. Remembering it would
+	// mean coming back to a task and finding an EMPTY box where the tree used to
+	// be — the query is deliberately not remembered either — and `writeGlobalMode`
+	// would then make every NEW task open that way too.
+	it("is never the mode a task is remembered in", async () => {
+		respondToEverything();
+		const first = render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+		await userEvent.click(await screen.findByRole("tab", { name: /Search/ }));
+		first.unmount();
+
+		expect(window.localStorage.getItem("ao.files.mode")).toBe("browse");
+		expect(window.localStorage.getItem("ao.files.state")).not.toContain('"mode":"search"');
+
+		render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		expect(await screen.findByRole("treeitem", { name: /^App$/ })).toBeInTheDocument();
+		expect(screen.queryByRole("searchbox", { name: "Search in project" })).not.toBeInTheDocument();
+	});
+
+	it("Escape hands the rail back to the mode it came from", async () => {
+		respondToEverything();
+		render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+		await userEvent.click(await screen.findByRole("tab", { name: /Search/ }));
+		await userEvent.type(await screen.findByRole("searchbox", { name: "Search in project" }), "{Escape}");
+		expect(await screen.findByRole("treeitem", { name: /^App$/ })).toBeInTheDocument();
+	});
+});
+
 // Item 3: the tree shows the file that is open, wherever it lives.
 describe("FilesPanel follows the open file", () => {
 	const browsePaths = ["README.md", "App/Wallet/Deep/Nested/View.swift", "App/Trading/Order.swift"];

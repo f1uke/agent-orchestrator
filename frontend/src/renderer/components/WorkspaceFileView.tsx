@@ -165,6 +165,7 @@ export function WorkspaceFileView({
 	onClose,
 	onOpenFile,
 	onCursorChange,
+	onSelectionChange,
 	back,
 	forward,
 }: {
@@ -185,6 +186,8 @@ export function WorkspaceFileView({
 	 * returns to the line the reader jumped FROM, not to the top of that file.
 	 */
 	onCursorChange?: (position: { line: number; column: number }) => void;
+	/** The editor's current short selection, so ⌘⇧F can open pre-filled with it. */
+	onSelectionChange?: (text: string) => void;
 	/**
 	 * Back/forward through the files this task has jumped between, or null when
 	 * there is nowhere to go that way. `to` is the file the button would open —
@@ -743,6 +746,7 @@ export function WorkspaceFileView({
 						onSave={doSave}
 						onHandle={handleEditorHandle}
 						onCursorChange={onCursorChange}
+						onSelectionChange={onSelectionChange}
 					/>
 				</Suspense>
 			)}

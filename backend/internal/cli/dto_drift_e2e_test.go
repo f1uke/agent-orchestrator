@@ -228,6 +228,10 @@ func (f *fakeSessionService) ListWorkspaceFiles(context.Context, domain.SessionI
 	return sessionsvc.WorkspaceFilesResult{}, nil
 }
 
+func (f *fakeSessionService) SearchWorkspace(context.Context, domain.SessionID, sessionsvc.SearchQuery) (sessionsvc.SearchResult, error) {
+	return sessionsvc.SearchResult{}, nil
+}
+
 func (f *fakeSessionService) WorkspaceFileDiff(
 	context.Context, domain.SessionID, sessionsvc.FileDiffQuery,
 ) (sessionsvc.DiffContextResult, error) {
