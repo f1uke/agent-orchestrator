@@ -146,24 +146,49 @@ export function orderedFileItems<T>(items: readonly T[], getPath: (item: T) => s
 }
 
 /**
- * The directory keys to CLOSE so a tree opens showing only its top level.
+ * The directory keys to CLOSE so that only `expanded` is open.
  *
- * The default a huge tree needs: 7,000 files flatten to ~8,500 rows, and a list
- * that deep is not navigable however fast it paints — the reader wants to walk
- * DOWN into it, not past it. A tree small enough to read whole gets nothing from
- * this, which is why Changes mode still opens fully expanded: it is a diff, and
- * every row in it is a row the reviewer came for.
+ * The inverse of what {@link flattenFileTree} consumes, and the reason it
+ * exists: Browse mode's DEFAULT is everything closed, so the small, stable set
+ * worth remembering across sessions is the handful of directories the reader
+ * OPENED — not the thousands they never touched. Changes mode is the mirror
+ * image (default open, remember what was closed) and needs no helper, because
+ * the closed set is already what the flattener takes.
+ *
+ * Keys absent from the tree are simply not in the answer, which is what lets a
+ * caller expand an ancestor chain by writing every path PREFIX without knowing
+ * where chain merging put the real row.
  */
-export function collapsedBelowTopLevel<T>(nodes: readonly FileTreeNode<T>[]): ReadonlySet<string> {
+export function collapsedExcept<T>(
+	nodes: readonly FileTreeNode<T>[],
+	expanded: ReadonlySet<string>,
+): ReadonlySet<string> {
 	const keys = new Set<string>();
 	const walk = (children: readonly FileTreeNode<T>[]) => {
 		for (const node of children) {
 			if (node.kind !== "dir") continue;
-			keys.add(node.key);
+			if (!expanded.has(node.key)) keys.add(node.key);
 			walk(node.children);
 		}
 	};
-	for (const node of nodes) if (node.kind === "dir") walk(node.children);
+	walk(nodes);
+	return keys;
+}
+
+/**
+ * Every path prefix of `path`, shortest first — the ancestor directories to open
+ * so a file's row exists.
+ *
+ * A SUPERSET on purpose. Directory keys are post-chain-merge (an only-child
+ * chain `a/b/c` is one row keyed `a/b/c`, and `a` names no row at all), so
+ * naming every prefix is the only form that always contains the real key; the
+ * prefixes that name nothing are inert in both {@link collapsedExcept} and a
+ * collapsed set they are deleted from.
+ */
+export function ancestorKeys(path: string): string[] {
+	const parts = path.split("/").filter(Boolean);
+	const keys: string[] = [];
+	for (let i = 1; i < parts.length; i++) keys.push(parts.slice(0, i).join("/"));
 	return keys;
 }
 

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+	ancestorKeys,
 	buildFileTree,
-	collapsedBelowTopLevel,
+	collapsedExcept,
 	flattenFileTree,
 	matchesFileQuery,
 	orderedFileItems,
@@ -167,7 +168,7 @@ describe("matchesFileQuery", () => {
 	});
 });
 
-describe("collapsedBelowTopLevel", () => {
+describe("collapsedExcept", () => {
 	const tree = () =>
 		build(
 			"README.md",
@@ -176,26 +177,59 @@ describe("collapsedBelowTopLevel", () => {
 			"Vendor/Thing.swift",
 		);
 
-	// Only the TOP level stays open: it is what makes a 7,000-file worktree
-	// something to walk down into rather than scroll past. "Top level" means the
-	// tree's own first row, which after chain merging is the first BRANCH point —
-	// `App/Features/Wallet`, not `App`.
-	it("closes every directory below the top level and none at it", () => {
-		const collapsed = collapsedBelowTopLevel(tree());
+	// Browse's default: nothing open. A 7,000-file worktree is something to walk
+	// down into, not to scroll past, and every folder the reader DOES open is
+	// remembered — so the strict default costs one click, once.
+	it("closes every directory when nothing is expanded", () => {
+		const collapsed = collapsedExcept(tree(), new Set());
+		expect(flattenFileTree(tree(), collapsed).map((r) => r.node.label)).toEqual([
+			"App/Features/Wallet",
+			"Vendor",
+			"README.md",
+		]);
+	});
+
+	// The keys are post-chain-merge: `App/Features/Wallet` is one row, and `App`
+	// names no row at all.
+	it("opens exactly the expanded directories", () => {
+		const collapsed = collapsedExcept(tree(), new Set(["App/Features/Wallet"]));
 		expect(flattenFileTree(tree(), collapsed).map((r) => r.node.label)).toEqual([
 			"App/Features/Wallet",
 			"Deep/Nested",
 			"View.swift",
 			"Vendor",
-			"Thing.swift",
 			"README.md",
 		]);
-		expect(collapsed.has("App/Features/Wallet")).toBe(false);
-		expect(collapsed.has("Vendor")).toBe(false);
-		expect(collapsed.has("App/Features/Wallet/Deep/Nested")).toBe(true);
+	});
+
+	it("ignores expanded keys that name no row", () => {
+		expect(collapsedExcept(tree(), new Set(["App", "nope/at/all"])).has("App/Features/Wallet")).toBe(true);
 	});
 
 	it("closes nothing in a tree that is only files", () => {
-		expect(collapsedBelowTopLevel(build("a.ts", "b.ts")).size).toBe(0);
+		expect(collapsedExcept(build("a.ts", "b.ts"), new Set()).size).toBe(0);
+	});
+});
+
+describe("ancestorKeys", () => {
+	it("names every prefix, shortest first, and never the file itself", () => {
+		expect(ancestorKeys("App/Features/Wallet/View.swift")).toEqual(["App", "App/Features", "App/Features/Wallet"]);
+	});
+
+	it("has no ancestors for a top-level file", () => {
+		expect(ancestorKeys("README.md")).toEqual([]);
+	});
+
+	// The superset is the point: expanding every prefix opens the merged chain
+	// row whatever segment it happens to be keyed by.
+	it("opens a merged chain when its prefixes are expanded", () => {
+		const tree = build("App/Features/Wallet/Deep/Nested/Cell.swift", "App/Features/Wallet/View.swift");
+		const expanded = new Set(ancestorKeys("App/Features/Wallet/Deep/Nested/Cell.swift"));
+		expect(flattenFileTree(tree, collapsedExcept(tree, expanded)).map((r) => r.node.label)).toEqual([
+			"App/Features/Wallet",
+			"Deep/Nested",
+			"Cell.swift",
+			"View.swift",
+		]);
 	});
 });

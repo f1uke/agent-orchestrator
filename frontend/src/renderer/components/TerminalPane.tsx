@@ -436,7 +436,7 @@ function AttachedTerminal({
 				onPick={(candidate) => {
 					const line = filePicker?.line;
 					setFilePicker(null);
-					onOpenWorkspaceFile?.({ path: candidate.path, line, inWorkspace: candidate.inWorkspace });
+					onOpenWorkspaceFile?.({ path: candidate.path, line, inWorkspace: candidate.inWorkspace, reveal: "focus" });
 				}}
 			/>
 			{fileToast && <Toast text={fileToast} />}

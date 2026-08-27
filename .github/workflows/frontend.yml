@@ -74,6 +74,13 @@ jobs:
   # neither to a screen. It asserts node COUNTS, never timings, so it is a real
   # regression guard rather than a flake on a shared runner.
   #
+  # e2e/files-state.spec.ts rides alongside it, for the one piece of the rail's
+  # remembered arrangement jsdom cannot be asked about at all: SCROLL. There is no
+  # layout there, so the tree's scroller measures zero, `scrollTop` never moves,
+  # and a restore that quietly does nothing passes every unit test. It also pins
+  # the collapsed-by-default row count and re-checks that a RESTORED scroll still
+  # renders a window rather than everything above it.
+  #
   # e2e/editor-semantic.spec.ts is the sixth. LSP semantic tokens fail by looking
   # like nothing happened: Monaco standalone has semantic highlighting off unless
   # an editor option turns it on, a provider can be registered and simply never
@@ -133,3 +140,4 @@ jobs:
           npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
           e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
           e2e/editor-completion.spec.ts e2e/editor-lsp-surface.spec.ts e2e/files-perf.spec.ts
+          e2e/files-state.spec.ts

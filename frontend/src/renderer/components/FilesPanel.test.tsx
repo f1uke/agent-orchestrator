@@ -255,6 +255,8 @@ describe("FilesPanel", () => {
 
 		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
 
+		// Browse opens with every folder shut, so the folder comes first.
+		await userEvent.click(await screen.findByRole("treeitem", { name: /^src\/app$/ }));
 		// An UNCHANGED file, which Changes mode by definition never lists.
 		await userEvent.click(await screen.findByRole("treeitem", { name: /main\.ts/ }));
 		expect(onOpenWorktreeFile).toHaveBeenCalledWith({ path: "src/app/main.ts" });
@@ -281,11 +283,14 @@ describe("FilesPanel", () => {
 		};
 
 		// A worktree tree is not a diff: 7,000 files is ~8,500 rows, and a list that
-		// long is not navigable however fast it paints.
-		it("opens showing only the top level", async () => {
+		// long is not navigable however fast it paints. Every folder is shut, not
+		// just the ones below the top — which is what "collapsed by default" says,
+		// and it costs nothing now that what the reader opens is remembered.
+		it("opens with every folder collapsed", async () => {
 			browseWith(browsePaths);
 			await openBrowse();
 			await screen.findByRole("treeitem", { name: /^App$/ });
+			expect(screen.queryByRole("treeitem", { name: /^Trading$/ })).not.toBeInTheDocument();
 			expect(screen.queryByRole("treeitem", { name: /Order\.swift/ })).not.toBeInTheDocument();
 		});
 
@@ -294,6 +299,7 @@ describe("FilesPanel", () => {
 		it("expands and re-folds a directory when its row is clicked", async () => {
 			browseWith(browsePaths);
 			await openBrowse();
+			await userEvent.click(await screen.findByRole("treeitem", { name: /^App$/ }));
 			await userEvent.click(await screen.findByRole("treeitem", { name: /^Trading$/ }));
 			expect(screen.getByRole("treeitem", { name: /Order\.swift/ })).toBeInTheDocument();
 
@@ -315,6 +321,7 @@ describe("FilesPanel", () => {
 			// tree blown open.
 			await userEvent.clear(screen.getByRole("searchbox"));
 			await waitFor(() => expect(screen.queryByRole("treeitem", { name: /Cell\.swift/ })).not.toBeInTheDocument());
+			expect(screen.getByRole("treeitem", { name: /^App$/ })).toBeInTheDocument();
 		});
 	});
 
@@ -457,6 +464,8 @@ describe("FilesPanel", () => {
 describe("FilesPanel reveal", () => {
 	const deep = "frontend/src/renderer/components/DiffRows.tsx";
 
+	// The RING is the loud form, and only a clicked terminal reference asks for
+	// it (`focus`). Every other jump follows quietly — see the follow tests below.
 	it("marks the revealed row, distinctly from the scroll-spy selection", async () => {
 		respondWith({
 			available: true,
@@ -467,7 +476,7 @@ describe("FilesPanel reveal", () => {
 		const { rerender } = render(<FilesPanel sessionId="s1" />, { wrapper });
 		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
 
-		rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />);
+		rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1, focus: true }} />);
 		const revealed = await waitFor(() => {
 			const el = document.querySelector(`[data-path="${deep}"]`);
 			expect(el?.className).toContain("is-revealed");
@@ -511,7 +520,7 @@ describe("FilesPanel reveal", () => {
 		await userEvent.type(screen.getByRole("searchbox"), "main.go");
 		await waitFor(() => expect(document.querySelector(`[data-path="${deep}"]`)).toBeNull());
 
-		rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />);
+		rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1, focus: true }} />);
 		await waitFor(() => expect(document.querySelector(`[data-path="${deep}"]`)).not.toBeNull());
 	});
 
@@ -519,7 +528,9 @@ describe("FilesPanel reveal", () => {
 		vi.useFakeTimers();
 		try {
 			respondWith({ available: true, targetBranch: "main", targetSource: "project", files: [file()] });
-			const { rerender } = render(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />, { wrapper });
+			const { rerender } = render(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1, focus: true }} />, {
+				wrapper,
+			});
 			await vi.waitFor(() => expect(document.querySelector(`[data-path="${deep}"]`)).not.toBeNull());
 			await vi.waitFor(() => expect(document.querySelector(".is-revealed")).not.toBeNull());
 			// The clear is a setTimeout -> setState, so the advance has to flush React.
@@ -527,9 +538,123 @@ describe("FilesPanel reveal", () => {
 				await vi.advanceTimersByTimeAsync(1500);
 			});
 			expect(document.querySelector(".is-revealed")).toBeNull();
-			rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1 }} />);
+			rerender(<FilesPanel sessionId="s1" reveal={{ path: deep, nonce: 1, focus: true }} />);
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+// Item 2: the rail remembers how each TASK was arranged, so switching away and
+// back does not reset it. The panel is mounted keyed by `taskKey`, so a remount
+// with the same key is exactly what leaving the tab and coming back does.
+describe("FilesPanel remembers its arrangement", () => {
+	const browsePaths = ["README.md", "App/Wallet/View.swift", "App/Trading/Order.swift"];
+	const browseWith = (paths: string[]) => {
+		getMock.mockImplementation(async (url: string) => {
+			if (url.includes("/workspace/files")) return { data: { available: true, truncated: false, paths } };
+			return { data: { available: true, targetBranch: "main", truncated: false, files: [file()] } };
+		});
+	};
+
+	it("comes back in the same mode with the same folders open", async () => {
+		browseWith(browsePaths);
+		const first = render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+		await userEvent.click(await screen.findByRole("treeitem", { name: /^App$/ }));
+		expect(await screen.findByRole("treeitem", { name: /^Wallet$/ })).toBeInTheDocument();
+		first.unmount();
+
+		render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		// Browse, not Changes — and App is still open.
+		expect(await screen.findByRole("treeitem", { name: /^Wallet$/ })).toBeInTheDocument();
+	});
+
+	// The bug this exists to not repeat: two caches keyed differently for the
+	// same thing. One task's arrangement must not leak into another's.
+	it("keeps each task's arrangement to itself", async () => {
+		browseWith(browsePaths);
+		const first = render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+		await userEvent.click(await screen.findByRole("treeitem", { name: /^App$/ }));
+		await screen.findByRole("treeitem", { name: /^Wallet$/ });
+		first.unmount();
+
+		render(<FilesPanel sessionId="s2" taskKey="task-2" />, { wrapper });
+		// A task nobody has arranged inherits the reader's HABIT (Browse, because
+		// that is where they were) but none of their folds.
+		await screen.findByRole("treeitem", { name: /^App$/ });
+		expect(screen.queryByRole("treeitem", { name: /^Wallet$/ })).not.toBeInTheDocument();
+	});
+
+	// Merely glancing at a worker's Files tab must not claim one of the 40
+	// remembered slots — or pin that task to whatever mode it happened to open in.
+	it("writes nothing for a task nobody arranged", async () => {
+		getMock.mockImplementation(async () => ({
+			data: { available: true, targetBranch: "main", truncated: false, files: [file()] },
+		}));
+		const view = render(<FilesPanel sessionId="s1" taskKey="task-untouched" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+		view.unmount();
+		expect(window.localStorage.getItem("ao.files.state")).toBeNull();
+	});
+
+	// Coming back to a rail that silently hides every file behind a query you do
+	// not remember typing is worse than coming back to a full tree.
+	it("deliberately forgets the search box", async () => {
+		browseWith(browsePaths);
+		const first = render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+		await userEvent.type(screen.getByRole("searchbox"), "Order");
+		await screen.findByRole("treeitem", { name: /Order\.swift/ });
+		first.unmount();
+
+		render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		expect(await screen.findByRole("searchbox")).toHaveValue("");
+	});
+});
+
+// Item 3: the tree shows the file that is open, wherever it lives.
+describe("FilesPanel follows the open file", () => {
+	const browsePaths = ["README.md", "App/Wallet/Deep/Nested/View.swift", "App/Trading/Order.swift"];
+	const deep = "App/Wallet/Deep/Nested/View.swift";
+	const browseWith = () => {
+		getMock.mockImplementation(async (url: string) => {
+			if (url.includes("/workspace/files")) return { data: { available: true, truncated: false, paths: browsePaths } };
+			return { data: { available: true, targetBranch: "main", truncated: false, files: [file()] } };
+		});
+	};
+
+	// Collapsed-by-default and reveal-the-open-file pull against each other, and
+	// this is the resolution: exactly the ancestors of the open file open, and
+	// nothing at all closes.
+	it("opens exactly the ancestors of the file, in a tree that starts shut", async () => {
+		browseWith();
+		const { rerender } = render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+		// Somewhere else the reader opened by hand, which must survive.
+		await userEvent.click(await screen.findByRole("treeitem", { name: /^App$/ }));
+		await userEvent.click(await screen.findByRole("treeitem", { name: /^Trading$/ }));
+
+		rerender(<FilesPanel sessionId="s1" taskKey="task-1" selectedPath={deep} reveal={{ path: deep, nonce: 1 }} />);
+
+		await waitFor(() => expect(document.querySelector(`[data-path="${deep}"]`)).not.toBeNull());
+		// The reader's own fold is untouched: nothing collapses behind them.
+		expect(screen.getByRole("treeitem", { name: /Order\.swift/ })).toBeInTheDocument();
+		// Quiet: following is not a terminal reference, so no ring.
+		expect(document.querySelector(".is-revealed")).toBeNull();
+		expect(document.querySelector(`[data-path="${deep}"]`)?.getAttribute("aria-current")).toBe("true");
+	});
+
+	// The reader typed that query. A quiet follow must not throw it away — it
+	// simply does not reveal, and the file is there when the query is cleared.
+	it("leaves the search box alone when it is only following", async () => {
+		browseWith();
+		const { rerender } = render(<FilesPanel sessionId="s1" taskKey="task-1" />, { wrapper });
+		await userEvent.click(await screen.findByRole("tab", { name: /Browse/ }));
+		await userEvent.type(screen.getByRole("searchbox"), "Order");
+
+		rerender(<FilesPanel sessionId="s1" taskKey="task-1" selectedPath={deep} reveal={{ path: deep, nonce: 1 }} />);
+		expect(screen.getByRole("searchbox")).toHaveValue("Order");
 	});
 });

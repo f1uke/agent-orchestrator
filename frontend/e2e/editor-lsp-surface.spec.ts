@@ -192,8 +192,22 @@ test.describe("hover", () => {
 		});
 		await page.goto(`${GALLERY}&lspNoHover=1`);
 		await expect(editor(page)).toBeVisible();
-		await hoverWord(page, REFERENCED_WORD);
-		await expect.poll(() => warnings.filter((w) => w.includes("offers no hover")).length).toBeGreaterThan(0);
+		// Re-hovering inside the poll, for the same reason `expectHover` does it:
+		// Monaco starts its 150 ms timer only on a move that CHANGES the target, so
+		// a single hover that lands while the tokenizer is still moving spans under
+		// the pointer asks nothing and is never retried. The sibling tests are
+		// covered by waiting on the widget; this one has no widget to wait for —
+		// the whole point is that nothing opens — so the retry has to be here.
+		await expect
+			.poll(
+				async () => {
+					await hoverWord(page, REFERENCED_WORD);
+					await page.waitForTimeout(400);
+					return warnings.filter((w) => w.includes("offers no hover")).length;
+				},
+				{ timeout: 15_000 },
+			)
+			.toBeGreaterThan(0);
 		const hovers = await page.evaluate(
 			() =>
 				((globalThis as { __aoLspAsked?: string[] }).__aoLspAsked ?? []).filter((m) => m === "textDocument/hover")

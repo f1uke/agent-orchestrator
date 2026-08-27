@@ -21,7 +21,9 @@ describe("openWorkspaceFileRef", () => {
 	it("opens directly when exactly one candidate resolves", async () => {
 		const h = harness(inWs(["pkg/a.go"]));
 		await openWorkspaceFileRef({ sessionId: "s1", ref: "a.go", line: 12, ...h });
-		expect(h.onOpen).toHaveBeenCalledWith({ path: "pkg/a.go", line: 12, inWorkspace: true });
+		// `reveal: "focus"` is what makes a clicked terminal reference — and only a
+		// clicked terminal reference — take the rail's Files tab.
+		expect(h.onOpen).toHaveBeenCalledWith({ path: "pkg/a.go", line: 12, inWorkspace: true, reveal: "focus" });
 		expect(h.onDisambiguate).not.toHaveBeenCalled();
 		expect(h.onNotFound).not.toHaveBeenCalled();
 	});
@@ -52,7 +54,7 @@ describe("openWorkspaceFileRef", () => {
 	it("carries the out-of-workspace verdict through to onOpen", async () => {
 		const h = harness([{ path: "/etc/hosts", inWorkspace: false }]);
 		await openWorkspaceFileRef({ sessionId: "s1", ref: "/etc/hosts", ...h });
-		expect(h.onOpen).toHaveBeenCalledWith({ path: "/etc/hosts", line: undefined, inWorkspace: false });
+		expect(h.onOpen).toHaveBeenCalledWith({ path: "/etc/hosts", line: undefined, inWorkspace: false, reveal: "focus" });
 	});
 
 	// The verdict is per candidate, not per request: a bare ref can match one file

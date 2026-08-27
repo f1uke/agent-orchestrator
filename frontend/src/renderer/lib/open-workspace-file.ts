@@ -53,6 +53,18 @@ export type WorkspaceFileOpen = {
 	focus?: "first-hunk";
 	/** Carried through so the caller can decide whether to reveal it in the tree. */
 	inWorkspace?: boolean;
+	/**
+	 * How hard to insist the rail shows this file.
+	 *
+	 * - "follow" (the default, and what every jump uses): the Files tree marks
+	 *   the file, opens its ancestor folders and scrolls it in — but only if the
+	 *   Files tab is already on screen. Chasing definitions must not keep
+	 *   yanking the rail out from under the reader.
+	 * - "focus": select the Files tab, open the rail if it is shut, and ring the
+	 *   row. Reserved for the gesture that is explicitly ABOUT the file's
+	 *   location — a clicked terminal reference.
+	 */
+	reveal?: "follow" | "focus";
 };
 
 export type OpenWorkspaceFileOptions = {
@@ -85,7 +97,9 @@ export async function openWorkspaceFileRef(opts: OpenWorkspaceFileOptions): Prom
 		return;
 	}
 	if (candidates.length === 1) {
-		onOpen({ path: candidates[0].path, line, inWorkspace: candidates[0].inWorkspace });
+		// A clicked terminal reference is the one gesture that is about WHERE the
+		// file is, so it is the one that takes the rail.
+		onOpen({ path: candidates[0].path, line, inWorkspace: candidates[0].inWorkspace, reveal: "focus" });
 		return;
 	}
 	onDisambiguate(candidates, line);
