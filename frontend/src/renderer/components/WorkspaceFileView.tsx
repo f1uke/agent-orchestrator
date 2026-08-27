@@ -39,8 +39,14 @@ const SAVED_FLASH_MS = 1400;
  * Below this the header sheds what it can afford to. This pane sits between a
  * sidebar and a rail, so it is routinely far narrower than the window — a media
  * query would be measuring the wrong box.
+ *
+ * Raised from 760 when the back/forward chevrons landed: they are 66px of
+ * PERMANENT header, and the threshold has to move with the content or the
+ * shedding starts too late to help. Measured, not guessed — a plain file's
+ * header now needs 676px with its path already at the 84px floor, and a file
+ * with a language server adds the status and problem chips on top of that.
  */
-const COMPACT_WIDTH = 760;
+const COMPACT_WIDTH = 820;
 
 type Mode = "browse" | "changes";
 
