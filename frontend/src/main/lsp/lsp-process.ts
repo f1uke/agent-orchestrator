@@ -50,6 +50,17 @@ export type LspProcessOptions = {
  */
 export type SemanticTokensLegend = { tokenTypes: string[]; tokenModifiers: string[] };
 
+/**
+ * What the server said it can do about completion, from its `initialize` reply.
+ *
+ * Carried rather than assumed for the same reason the legend is: the two servers
+ * this app runs answer differently, and Monaco reads `triggerCharacters` ONCE at
+ * registration - so a renderer that guesses `["."]` gets no argument-label
+ * completion on Swift, and one that assumes `resolveProvider` fetches nothing on
+ * Go while quietly swallowing a `MethodNotFound` per highlighted row.
+ */
+export type CompletionCapability = { triggerCharacters?: string[]; resolveProvider?: boolean };
+
 export type LspProcess = {
 	readonly pid: number | null;
 	readonly state: LspState;
@@ -57,6 +68,8 @@ export type LspProcess = {
 	readonly detail: string | undefined;
 	/** Null when the server advertised no `semanticTokensProvider`. */
 	readonly semanticTokensLegend: SemanticTokensLegend | null;
+	/** Null when the server advertised no `completionProvider`. */
+	readonly completionCapability: CompletionCapability | null;
 	/** Resolves when the handshake completes; rejects on timeout or spawn failure. */
 	readonly initialized: Promise<void>;
 	/** Client→server. Ids belong to the renderer; this only frames and writes. */
@@ -179,6 +192,31 @@ function clientCapabilities() {
 		textDocument: {
 			synchronization: { dynamicRegistration: false },
 			definition: { linkSupport: true },
+			/**
+			 * Declared in full because a server is entitled to withhold what was
+			 * never asked for, and every one of these changes what comes back.
+			 * Measured against both servers: `snippetSupport` is what turns
+			 * `configure(userDefaultManager:)` into a real snippet rather than a
+			 * bare name, `insertReplaceSupport` is why gopls answers with an
+			 * `InsertReplaceEdit`, `labelDetailsSupport` is what carries Swift's
+			 * signatures beside the label, and `resolveSupport` is what makes
+			 * sourcekit-lsp hold documentation back until a row is highlighted
+			 * instead of sending 200 doc comments to show one.
+			 */
+			completion: {
+				dynamicRegistration: false,
+				contextSupport: true,
+				completionItem: {
+					snippetSupport: true,
+					insertReplaceSupport: true,
+					labelDetailsSupport: true,
+					deprecatedSupport: true,
+					commitCharactersSupport: true,
+					documentationFormat: ["markdown", "plaintext"],
+					resolveSupport: { properties: ["documentation", "detail", "additionalTextEdits"] },
+				},
+				completionItemKind: { valueSet: Array.from({ length: 25 }, (_, i) => i + 1) },
+			},
 			documentSymbol: { hierarchicalDocumentSymbolSupport: true },
 			publishDiagnostics: {},
 			/**
@@ -220,6 +258,7 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 	let child: ChildProcessWithoutNullStreams | null = null;
 	let stopping: Promise<void> | null = null;
 	let semanticTokensLegend: SemanticTokensLegend | null = null;
+	let completionCapability: CompletionCapability | null = null;
 
 	const setState = (next: LspState, why?: string) => {
 		state = next;
@@ -393,12 +432,29 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 			}
 			const reply = message.result as {
 				serverInfo?: { name?: string; version?: string };
-				capabilities?: { semanticTokensProvider?: { legend?: SemanticTokensLegend } };
+				capabilities?: {
+					semanticTokensProvider?: { legend?: SemanticTokensLegend };
+					completionProvider?: CompletionCapability;
+				};
 			} | null;
 			const info = reply?.serverInfo;
 			// Kept whole. A legend is only meaningful as the exact list the server
 			// sent, in the exact order: the indices in its answers are offsets into
 			// it, so a reconstructed or reordered one silently mislabels every token.
+			// 🗝 The two servers disagree, and both halves matter to the renderer.
+			// gopls: `{ triggerCharacters: ["."] }` and NO resolveProvider - it ships
+			// detail and documentation inline on every item. sourcekit-lsp:
+			// `{ resolveProvider: true, triggerCharacters: [".", "("] }`. Monaco reads
+			// `triggerCharacters` once, at registration, so it has to travel.
+			const advertised = reply?.capabilities?.completionProvider;
+			completionCapability = advertised
+				? {
+						triggerCharacters: Array.isArray(advertised.triggerCharacters)
+							? [...advertised.triggerCharacters]
+							: undefined,
+						resolveProvider: advertised.resolveProvider === true,
+					}
+				: null;
 			const legend = reply?.capabilities?.semanticTokensProvider?.legend;
 			semanticTokensLegend =
 				legend && Array.isArray(legend.tokenTypes) && Array.isArray(legend.tokenModifiers)
@@ -587,6 +643,9 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 		},
 		get semanticTokensLegend() {
 			return semanticTokensLegend;
+		},
+		get completionCapability() {
+			return completionCapability;
 		},
 		startedAt,
 		initialized,

@@ -24,7 +24,16 @@ const line = Number(params.get("line") ?? 26);
 // `?lsp=1` gives the page a language server. Off by default so every other spec
 // keeps measuring the grammar alone, which is what they were written against.
 const withLsp = params.get("lsp") === "1";
-if (withLsp) installFakeLspBridge();
+// `?lspDelay=` makes the fake as slow as a cold sourcekit-lsp (measured 400 -
+// 1 333 ms for the first completion in a file), which is the only way to see
+// the serialisation policy from outside. `?lspFail=` makes attach reject, so a
+// spec can ask what ⌃Space says when there is no server at all.
+if (withLsp) {
+	installFakeLspBridge({
+		completionDelayMs: params.has("lspDelay") ? Number(params.get("lspDelay")) : undefined,
+		failAttach: params.get("lspFail") ?? undefined,
+	});
+}
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 

@@ -126,6 +126,74 @@ describe.skipIf(!CAN_RUN)("gopls, for real", () => {
 		expect(health.state).toBe("ready");
 		expect(health.rssMb ?? 0).toBeGreaterThan(200);
 
+		// ── Completion, on the same connection. Slice 6 adds no plumbing; what it
+		// adds is a policy, and the policy is only worth anything if the server
+		// really answers with members of the receiver under the cursor.
+		const completionAt = async (insert: string, label: string) => {
+			const edited = [...lines];
+			edited.splice(lineIndex, 0, insert);
+			// A whole-document replacement, as a RANGE - both servers advertise
+			// `textDocumentSync.change: 2`, so a full-text change event is not
+			// something either of them agreed to accept.
+			registry!.send(attachment.handleId, {
+				jsonrpc: "2.0",
+				method: "textDocument/didChange",
+				params: {
+					textDocument: { uri: pathToFileURL(callAbs).href, version: ++version },
+					contentChanges: [
+						{
+							range: { start: { line: 0, character: 0 }, end: { line: previousLines, character: 0 } },
+							text: edited.join("\n"),
+						},
+					],
+				},
+			});
+			previousLines = edited.length - 1;
+			const startedAt = Date.now();
+			const answer = await request("textDocument/completion", {
+				textDocument: { uri: pathToFileURL(callAbs).href },
+				position: { line: lineIndex, character: insert.length },
+				context: {
+					triggerKind: insert.endsWith(".") ? 2 : 1,
+					triggerCharacter: insert.endsWith(".") ? "." : undefined,
+				},
+			});
+			const list = answer.result as { isIncomplete?: boolean; items?: { label: string }[] } | null;
+			console.warn(
+				`[measure] gopls completion "${label}": ${Date.now() - startedAt}ms, ${list?.items?.length ?? 0} items`,
+			);
+			return list;
+		};
+		let version = 1;
+		let previousLines = lines.length - 1;
+
+		// 🗝 gopls advertises `.` and NO resolveProvider - it ships detail and
+		// documentation inline on every item. Asserted because Monaco reads the
+		// trigger characters once, at registration, and because registering a
+		// resolve handler against a server that has none swallows a MethodNotFound
+		// per highlighted row.
+		expect(attachment.completion?.triggerCharacters).toEqual(["."]);
+		expect(attachment.completion?.resolveProvider).toBe(false);
+
+		const members = await completionAt("\tstrings.", "strings.");
+		// On WHAT it answered, never on the absence of an error.
+		const names = (members?.items ?? []).map((i) => i.label);
+		expect(names, "no members for `strings.`").toContain("TrimSpace");
+		expect(names).toContain("Builder");
+		// Both servers set this on every response, which is why the provider
+		// re-requests per keystroke instead of filtering the previous list.
+		expect(members?.isIncomplete).toBe(true);
+
+		// The expensive shape on Go, and the one quick-suggestions fires on:
+		// unqualified identifier completion measured 54-102 ms here against 1-3 ms
+		// for a member, which is why the provider serialises rather than firing a
+		// request per keystroke and cancelling the last.
+		const qualified = await completionAt("\tpreviewutil.Confined", "previewutil.Confined");
+		expect(
+			(qualified?.items ?? []).map((i) => i.label),
+			"no members for `previewutil.Confined`",
+		).toContain(DEFINITION_SYMBOL);
+
 		registry.detach(attachment.handleId);
 	}, 180_000); // A cold GOPLSCACHE has to load this module's whole dependency closure.
 });
