@@ -283,3 +283,103 @@ func TestSpawn_MechanicalTaskLaunchesTheSoloPrompt(t *testing.T) {
 		}
 	}
 }
+
+// The lease rule has to reach BOTH members. dev clobbers qa's device exactly as
+// easily as qa clobbered dev's in the incident this came from, so the rule is
+// written symmetrically and injected with the catalog every worker on an iOS
+// project gets - and it names the tool that actually caused it, a raw
+// `xcodebuild -destination`, which never consults the lease at all.
+func TestBuildSystemPrompt_EveryMemberIsToldNotToDriveADeviceItDoesNotHold(t *testing.T) {
+	m := layeredManager(crewPromptStore(t), nil)
+
+	for _, role := range []domain.CrewRole{domain.CrewRoleDev, domain.CrewRoleQA, ""} {
+		got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, role)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"A lease guards the device, not the command",
+			"xcodebuild -destination",       // the hole: it never asks the lease
+			"dev and qa clobber each other", // symmetric; this is not a qa rule
+			"A refusal names the holder",    // wait or say so, do not take it
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("role %q was not told to leave a device it does not hold alone (%q):\n%s", role, want, got)
+			}
+		}
+	}
+
+	// A project with no simulator has no device to contend over, and an
+	// instruction an agent cannot follow is worse than none.
+	st := crewPromptStore(t)
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{HasIOSSimulator: false}}
+	plain, err := layeredManager(st, nil).buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain, "A lease guards the device, not the command") {
+		t.Fatalf("a project with no simulator was given a simulator lease rule:\n%s", plain)
+	}
+}
+
+// qa is created part-way through a task, so the always-injected protocol's
+// timing - author the list once the change is done, before the PR - leaves a
+// window where a qa is working and nothing says what it intends to verify. qa is
+// re-timed to publish its intent up front, and to SAY when the answer is that
+// nothing needs a human, so an empty Tests tab stops meaning "still thinking"
+// and "nothing to check" at the same time. dev and a solo worker keep the timing
+// they had: theirs is the last thing they do, and there is nobody to tell.
+func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
+	m := layeredManager(crewPromptStore(t), nil)
+
+	qa, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"### Publish what you will verify, before you verify it (AO)",
+		"before you start running things", // intent up front, not at the end
+		"nobody has decided yet",          // the two states an empty list conflates
+		"there is nothing worth a human's eyes",
+		"## Smoke-test checklist (AO)", // it re-times that block, never replaces it
+	} {
+		if !strings.Contains(qa, want) {
+			t.Fatalf("qa was not told to publish its intent early (%q):\n%s", want, qa)
+		}
+	}
+	// Ownership is untouched: the re-timing is about WHEN qa writes, not WHO owns
+	// the list, so dev must still be told the list is qa's.
+	dev, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dev, "The checklist is yours only while you have no qa") {
+		t.Fatalf("the ownership split was disturbed:\n%s", dev)
+	}
+
+	for _, role := range []domain.CrewRole{domain.CrewRoleDev, ""} {
+		got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, role)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, "### Publish what you will verify, before you verify it (AO)") {
+			t.Fatalf("role %q was re-timed for a qa it does not have:\n%s", role, got)
+		}
+		// And the rule it would have overridden is still there, unweakened.
+		if !strings.Contains(got, "BEFORE you open the PR/MR") {
+			t.Fatalf("role %q lost the before-the-PR timing it has always had:\n%s", role, got)
+		}
+	}
+
+	// A qa can be created by `ao preview` on a project with no simulator, and it
+	// owns the same checklist there - so this block is not gated on iOS.
+	st := crewPromptStore(t)
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{HasIOSSimulator: false}}
+	plain, err := layeredManager(st, nil).buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plain, "### Publish what you will verify, before you verify it (AO)") {
+		t.Fatalf("a qa on a non-iOS project lost the checklist timing it owns:\n%s", plain)
+	}
+}
