@@ -45,6 +45,19 @@ type fakeSmokeService struct {
 	removedEvidenceID string
 	removeErr         error
 
+	addedCases    []domain.SmokeAuthoredCase
+	addFrom       domain.SessionID
+	addErr        error
+	editedCaseID  string
+	editPatch     domain.SmokeCasePatch
+	editFrom      domain.SessionID
+	editErr       error
+	removedCaseID string
+	removeCaseErr error
+	standDown     string
+	standDownFrom domain.SessionID
+	standDownErr  error
+
 	exportPath       string
 	exportErr        error
 	exportedEvidence string
@@ -62,6 +75,42 @@ func (f *fakeSmokeService) Author(_ context.Context, from, _ domain.SessionID, c
 	}
 	f.authored = cases
 	f.authoredFrom = from
+	return f.list, nil
+}
+
+func (f *fakeSmokeService) AddCases(_ context.Context, from, _ domain.SessionID, cases []domain.SmokeAuthoredCase) (smokesvc.SessionSmoke, error) {
+	if f.addErr != nil {
+		return smokesvc.SessionSmoke{}, f.addErr
+	}
+	f.addedCases = cases
+	f.addFrom = from
+	return f.list, nil
+}
+
+func (f *fakeSmokeService) EditCase(_ context.Context, from, _ domain.SessionID, checkID string, patch domain.SmokeCasePatch) (domain.SmokeCheck, error) {
+	if f.editErr != nil {
+		return domain.SmokeCheck{}, f.editErr
+	}
+	f.editedCaseID, f.editPatch, f.editFrom = checkID, patch, from
+	if len(f.list.Checks) > 0 {
+		return f.list.Checks[0], nil
+	}
+	return domain.SmokeCheck{ID: checkID}, nil
+}
+
+func (f *fakeSmokeService) RemoveCase(_ context.Context, _, _ domain.SessionID, checkID string) (smokesvc.SessionSmoke, error) {
+	if f.removeCaseErr != nil {
+		return smokesvc.SessionSmoke{}, f.removeCaseErr
+	}
+	f.removedCaseID = checkID
+	return f.list, nil
+}
+
+func (f *fakeSmokeService) StandDown(_ context.Context, from, _ domain.SessionID, reason string) (smokesvc.SessionSmoke, error) {
+	if f.standDownErr != nil {
+		return smokesvc.SessionSmoke{}, f.standDownErr
+	}
+	f.standDown, f.standDownFrom = reason, from
 	return f.list, nil
 }
 
@@ -696,17 +745,80 @@ func TestSmokeAuthorPassesTheCallerThrough(t *testing.T) {
 	}
 }
 
-// A crew dev's checklist call is refused with a code of its own: nothing about
-// the payload is wrong, so it is a 409 rather than the 422 a bad payload gets,
-// and the message names the qa that owns the list.
-func TestSmokeAuthorQAOwnsChecklistIs409(t *testing.T) {
-	svc := &fakeSmokeService{authorErr: fmt.Errorf("%w: qa @mer-2 owns this task's checklist", smokesvc.ErrQAOwnsChecklist)}
+// The per-case routes are what make two authors safe, so each one has to reach
+// the service with what it was given - a wrong verb here would silently turn a
+// narrow write back into a wide one.
+func TestSmokePerCaseRoutesReachTheService(t *testing.T) {
+	svc := &fakeSmokeService{}
 	srv := newSmokeTestServer(t, svc)
-	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/mer-1/smoke-checks", `{"from":"mer-1","cases":[{"name":"Case one"}]}`)
-	if status != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", status, body)
+
+	if body, status, _ := doRequest(t, srv, "PATCH", "/api/v1/sessions/mer-1/smoke-checks", `{"from":"mer-2","cases":[{"id":"c1","name":"Case one"}]}`); status != http.StatusOK {
+		t.Fatalf("add: status = %d body=%s", status, body)
 	}
-	for _, want := range []string{"SMOKE_QA_OWNS_CHECKLIST", "@mer-2"} {
+	if len(svc.addedCases) != 1 || svc.addedCases[0].ID != "c1" || svc.addFrom != "mer-2" {
+		t.Fatalf("add did not reach the service: %+v from=%q", svc.addedCases, svc.addFrom)
+	}
+
+	if body, status, _ := doRequest(t, srv, "PATCH", "/api/v1/sessions/mer-1/smoke-checks/c1", `{"from":"mer-1","prNum":264}`); status != http.StatusOK {
+		t.Fatalf("edit: status = %d body=%s", status, body)
+	}
+	if svc.editedCaseID != "c1" || svc.editFrom != "mer-1" {
+		t.Fatalf("edit did not reach the service: id=%q from=%q", svc.editedCaseID, svc.editFrom)
+	}
+	// An omitted field must arrive as nil, not as a zero value: a patch that
+	// blanked every field it did not mention would be the wide write again.
+	if svc.editPatch.PRNum == nil || *svc.editPatch.PRNum != 264 {
+		t.Fatalf("prNum did not arrive: %+v", svc.editPatch.PRNum)
+	}
+	if svc.editPatch.Name != nil || svc.editPatch.Why != nil || svc.editPatch.Steps != nil ||
+		svc.editPatch.Expected != nil || svc.editPatch.FileRef != nil {
+		t.Fatalf("an omitted field arrived as a value: %+v", svc.editPatch)
+	}
+
+	if body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/mer-1/smoke-checks/c1", ""); status != http.StatusOK {
+		t.Fatalf("remove: status = %d body=%s", status, body)
+	}
+	if svc.removedCaseID != "c1" {
+		t.Fatalf("remove did not reach the service: %q", svc.removedCaseID)
+	}
+
+	if body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/mer-1/smoke-checks/stand-down", `{"from":"mer-2","reason":"pure refactor"}`); status != http.StatusOK {
+		t.Fatalf("stand-down: status = %d body=%s", status, body)
+	}
+	if svc.standDown != "pure refactor" || svc.standDownFrom != "mer-2" {
+		t.Fatalf("stand-down did not reach the service: %q from=%q", svc.standDown, svc.standDownFrom)
+	}
+}
+
+// "stand-down" is a static segment sitting where a {checkId} could match, so
+// this pins the routing: a request that fell through to the per-case route would
+// try to remove a case called "stand-down".
+func TestSmokeStandDownDoesNotCollideWithACaseID(t *testing.T) {
+	svc := &fakeSmokeService{}
+	srv := newSmokeTestServer(t, svc)
+	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/mer-1/smoke-checks/stand-down", `{"reason":"pure refactor"}`); status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+	if svc.removedCaseID != "" {
+		t.Fatalf("stand-down was routed as a case id: %q", svc.removedCaseID)
+	}
+}
+
+// An empty checklist and a stood-down one must be distinguishable on the wire:
+// they render identically today only because the response carried nothing to
+// tell them apart.
+func TestSmokeListCarriesTheStandDown(t *testing.T) {
+	at := time.Unix(1_700_000_000, 0).UTC()
+	svc := &fakeSmokeService{list: smokesvc.SessionSmoke{
+		Worker:    "dev",
+		StandDown: &domain.SmokeStandDown{SessionID: "mer-1", At: at, By: "mer-2", ByRole: domain.CrewRoleQA, Reason: "pure refactor"},
+	}}
+	srv := newSmokeTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/mer-1/smoke-checks", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	for _, want := range []string{`"standDown"`, `"byRole":"qa"`, "pure refactor"} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("body missing %s: %s", want, body)
 		}

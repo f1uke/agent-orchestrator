@@ -1,5 +1,5 @@
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
-import type { SmokeProgress } from "./smoke-test";
+import type { SmokeProgress, SmokeStandDown } from "./smoke-test";
 import { approvalLabel, approvalProgress, prTitleLabel } from "./pr-display";
 import type { SessionActivityState, SessionStatus, SessionTermination } from "../types/workspace";
 
@@ -191,10 +191,17 @@ function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
  *
  * Retired cases are excluded upstream (see progressFor) - a checklist that has
  * legitimately shrunk must not hold the gate open forever.
+ *
+ * An EMPTY checklist has two meanings and this strip could not tell them apart
+ * either: "not run" reads as an absence, and it was shown just as readily when a
+ * member had looked and concluded there was nothing here for a person. A
+ * recorded stand-down says which, so the label says which. The TONE is idle in
+ * both cases - a stand-down is a reason not to wait, never a reason to call
+ * something verified.
  */
-function smokeGate(smoke: SmokeProgress): ReadinessGate {
+function smokeGate(smoke: SmokeProgress, standDown?: SmokeStandDown | null): ReadinessGate {
 	if (smoke.fail > 0) return gate("smoke", "Smoke", "block", "failed");
-	if (smoke.total === 0) return gate("smoke", "Smoke", "idle", "not run");
+	if (smoke.total === 0) return gate("smoke", "Smoke", "idle", standDown ? "stood down" : "not run");
 	if (smoke.pending > 0) {
 		// A machine says the steps did not even run. That is real information and
 		// it is counted only over cases nobody has judged, so a person's verdict
@@ -320,7 +327,12 @@ function deriveVerdict(
 	return { hue: "review", word: "In Review", caption: "Waiting on the merge pipeline." };
 }
 
-export function deriveReadiness(session: SessionFacts, prs: SessionPRSummary[], smoke: SmokeProgress): Readiness {
+export function deriveReadiness(
+	session: SessionFacts,
+	prs: SessionPRSummary[],
+	smoke: SmokeProgress,
+	standDown?: SmokeStandDown | null,
+): Readiness {
 	const pr = primaryPR(prs);
 	const hasPR = pr?.state === "open" || pr?.state === "draft" || pr?.state === "merged";
 	const merged = pr?.state === "merged";
@@ -332,7 +344,7 @@ export function deriveReadiness(session: SessionFacts, prs: SessionPRSummary[], 
 	// lights Smoke — the earliest live gate — rather than an idle downstream one.
 	const list: ReadinessGate[] = [
 		workGate(session, hasPR, merged),
-		smokeGate(smoke),
+		smokeGate(smoke, standDown),
 		prGate(pr),
 		ciGate(pr),
 		reviewGate(pr),

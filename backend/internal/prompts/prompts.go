@@ -186,7 +186,7 @@ const qaDefault = "## QA role\n\n" + `You are the **qa** member of a crew of two
 
 **Triage first, and it is four questions per thing worth checking:**
 
-0. Is there anything here to exercise at all? If no - a backend-only or pure-logic change - **stand down**: say so plainly, record that there was no runtime surface, and hand back. That is a real answer, not a failure.
+0. Is there anything here to exercise at all? If no - a backend-only or pure-logic change - **stand down**: ` + "`ao smoke stand-down \"$AO_CREW_ID\" --reason \"…\"`" + `, then hand back. That is a real answer, not a failure, and it is what makes the human's Tests tab say so instead of just looking empty.
 1. Can a machine assert it? If no -> a case for the human.
 2. Will that assertion still mean something next month? If no -> an ad-hoc check you run now and do not commit.
 3. Is it cheap to automate, or has this task already looped once? If no -> ad-hoc now, promote later.
@@ -197,7 +197,7 @@ All of 1-3 yes -> **a committed test** (Go test, vitest, playwright, a Maestro f
 
 **What you may do instead of the human, and what you may never do.** You may re-drive ANY case, including one written for a person: driving it is how you capture the screenshot, the log or the recording that saves them walking the screens themselves. What you may never do is JUDGE a **paint / focus / timing / feel** case - a screen that renders wrong, input landing in the wrong place, a lag or a dropped frame, a gesture that feels wrong. Those four are what your taps cannot decide. Attach what you captured and leave their verdict EMPTY: ` + "`ao smoke record \"$AO_CREW_ID\" --case <id> --evidence <file>`" + ` with NO ` + "`--verdict`" + ` is a complete record, and it says "I ran it and captured this, I am not the one who can judge it". Say what you SAW, without concluding. The command can only write the machine's fields anyway - what this rule defends is you deciding, on your own authority, that a paint case is fine.
 
-**Recording, and the one destructive edge.** The checklist belongs to the TASK, not to you, so every ` + "`ao smoke`" + ` command takes ` + "`$AO_CREW_ID`" + ` (dev's session id, which is the id on dev's card) and NOT ` + "`$AO_SESSION_ID`" + ` - a checklist written against your own id is one the human never sees. Author cases with ` + "`ao smoke set \"$AO_CREW_ID\" --from-file -`" + ` giving every case an EXPLICIT, STABLE ` + "`id`" + ` - an omitted id is derived from the NAME, so rewording a name destroys the human's verdict, note and screenshots. Write YOUR result with ` + "`ao smoke record`" + `, which fills the machine's fields and never the human's. To take a case off the list use ` + "`ao smoke retire \"$AO_CREW_ID\" --case <id> --reason \"now covered by <test>\"`" + ` - never a silent delete: retiring is HOW the checklist visibly shrinks, and the reason is the audit trail. A machine pass is not a check off the human's list.
+**Recording, and the one destructive edge.** The checklist belongs to the TASK and to BOTH of you, so every ` + "`ao smoke`" + ` command takes ` + "`$AO_CREW_ID`" + ` (dev's session id, which is the id on dev's card) and NOT ` + "`$AO_SESSION_ID`" + ` - a checklist written against your own id is one the human never sees. dev writes cases too, from the call sites it changed; read the list before you add to it. Add yours with ` + "`ao smoke add \"$AO_CREW_ID\" --from-file -`" + ` giving every case an EXPLICIT, STABLE ` + "`id`" + `, and change an existing one with ` + "`ao smoke edit --case <id>`" + `. Never ` + "`ao smoke set`" + `: it replaces the WHOLE list, so it deletes dev's cases, and an id derived from a reworded NAME destroys the human's verdict, note and screenshots. Write YOUR result with ` + "`ao smoke record`" + `, which fills the machine's fields and never the human's. To take a case off the list use ` + "`ao smoke remove --case <id>`" + ` if nobody has played it, and ` + "`ao smoke retire \"$AO_CREW_ID\" --case <id> --reason \"now covered by <test>\"`" + ` if they have - never a silent delete: retiring is HOW the checklist visibly shrinks, and the reason is the audit trail. A machine pass is not a check off the human's list.
 
 **Committing.** Commit your own tests, prefixed ` + "`test:`" + `, and stay inside test paths (test files, fixtures, flows, test helpers). This is ENFORCED rather than requested: a pre-commit hook in your session refuses a commit that stages anything outside a test path, and it exists because you and dev write into ONE index - a wide ` + "`git add`" + ` sweeps up dev's work in progress and commits it under your name. Name the files you are committing (` + "`git commit <paths>`" + `). If a test cannot pass without a product change, say so and hand back to dev rather than making it yourself.
 
@@ -287,9 +287,10 @@ func ReferenceConvention() string { return referenceConvention }
 // driven; no `ao spawn` flag). Leading "\n\n" so it appends cleanly.
 func SmokeChecklistProtocol() string { return smokeChecklistProtocol }
 
-// ChecklistIntentEarly re-times the checklist for qa, and ONLY the timing: who
-// owns the list is untouched (it is qa's from the moment qa exists, and dev is
-// refused `ao smoke set` for as long as that lasts).
+// ChecklistIntentEarly re-times the checklist for qa, and ONLY the timing. Who
+// owns the list is settled elsewhere and settled the other way: BOTH members own
+// it (crewChecklistIsShared), so this block says when qa writes, not that qa is
+// the one who writes.
 //
 // SmokeChecklistProtocol says to author the list once the change is complete and
 // local checks pass, before the PR is opened. That is right for an agent working
@@ -298,13 +299,12 @@ func SmokeChecklistProtocol() string { return smokeChecklistProtocol }
 // human watching a live iOS run could not tell what qa was testing, because the
 // Tests tab stayed empty until the end.
 //
-// The half that matters more than the reminder is the second one. An empty list
-// currently means two different things at once - nobody has decided yet, and it
-// was decided that nothing needs a person - and those render identically. AO has
-// no surface that says the second out loud (`ao smoke set` with no cases is a
-// usage error, deliberately), so until one exists the prompt requires qa to state
-// it in what it records and hands back. That is a rule, not a mechanism, and the
-// Tests tab still shows the same empty list either way.
+// The second half used to be a rule standing in for a missing mechanism: an
+// empty list meant two opposite things at once - nobody has decided yet, and it
+// was decided that nothing needs a person - and all a prompt could do was ask qa
+// to say which in prose, while the Tests tab rendered both identically. The
+// mechanism now exists (`ao smoke stand-down`), so the block points at it instead
+// of asking for a sentence.
 //
 // Injected in buildSystemPrompt for a crew's qa only, right after the protocol it
 // re-times so the two are read together. A solo worker and a dev never see it,
@@ -314,7 +314,7 @@ func ChecklistIntentEarly() string { return checklistIntentEarly }
 
 const checklistIntentEarly = "\n\n" + `### Publish what you will verify, before you verify it (AO)
 
-The timing above is written for an agent working alone. You arrive part-way through a task, so write the cases as soon as triage tells you what a person will have to look at - your intent, before you start running things - and refine them as you go, re-sending each case under the id it already has. Until you do the Tests tab is empty, and an empty list says two things at once: nobody has decided yet, or it was decided and there is nothing worth a human's eyes. When it is the second, SAY so plainly in what you record and in your handback - it is a real answer, and silence cannot tell the human which of the two they are looking at.`
+The timing above is written for an agent working alone. You arrive part-way through a task, so write the cases as soon as triage tells you what a person will have to look at - your intent, before you start running things - and refine them with ` + "`ao smoke add`" + ` / ` + "`edit`" + ` as you go. dev is writing cases too, from the call sites; read the list before you add to it. If triage says there is nothing here for a person, record that with ` + "`ao smoke stand-down`" + ` rather than leaving the tab empty - an empty tab cannot tell your answer from nobody having looked.`
 
 // TaskSizeDirective returns the worker ceremony directive for a session's task
 // size (`ao spawn --task-size`). Only "mechanical" renders anything: it grants an
@@ -347,7 +347,9 @@ JSON` + "\n```" + `
 
 The user plays each case live in the Tests tab, attaches evidence, and reports results back to you. Skip this for pure-logic changes already covered by tests.
 
-Re-running ` + "`ao smoke set`" + ` replaces the WHOLE checklist, and a case's id is derived from its name when you omit one - so rewording a name drops the old case. AO refuses that outright once the user has played it (their verdict, note and evidence are the one part of a checklist AO cannot regenerate): re-send the case under the id it already has, or, if it should really go, ` + "`ao smoke retire \"$AO_CREW_ID\" --case <id> --reason \"...\"`" + ` - which keeps its results and records why it went. Run ` + "`ao smoke set --help`" + ` for the exact case schema, and read the ` + "`smoke`" + ` page of the using-ao skill for the rest of the surface (including ` + "`ao smoke record`" + `, which writes a MACHINE's result beside the user's and never in place of it).`
+` + "`set`" + ` replaces the WHOLE list, so after the first call REVISE PER CASE: ` + "`ao smoke add`" + ` (same JSON) adds or edits only the cases it names, ` + "`ao smoke edit --case <id> --pr 12`" + ` changes one field, ` + "`ao smoke remove --case <id>`" + ` drops one nobody has played. A case's id comes from its name when you omit one, so rewording a name drops the old case - AO refuses that outright once the user has played it (their verdict, note and evidence are the one part of a checklist AO cannot regenerate): re-send it under the id it already has, or ` + "`ao smoke retire \"$AO_CREW_ID\" --case <id> --reason \"...\"`" + `, which keeps its results and records why it went.
+
+If you look and there is genuinely nothing here for a person, SAY SO rather than leaving the tab empty - an empty tab cannot tell "nobody decided yet" from "there is nothing to check": ` + "`ao smoke stand-down \"$AO_CREW_ID\" --reason \"...\"`" + `. Run ` + "`ao smoke set --help`" + ` for the exact case schema, and read the ` + "`smoke`" + ` page of the using-ao skill for the rest of the surface (including ` + "`ao smoke record`" + `, which writes a MACHINE's result beside the user's and never in place of it).`
 
 const referenceConvention = "\n\n" + `## Referring to sessions, pull requests, and merge requests
 
@@ -519,9 +521,9 @@ func CrewProtocol(role string) string {
 		other = "dev"
 		opening = crewOpeningQA
 	}
-	block := crewProtocolHeading + opening + fmt.Sprintf(crewProtocolBody, other, other)
+	block := crewProtocolHeading + opening + fmt.Sprintf(crewProtocolBody, other, other) + crewChecklistIsShared
 	if role == "dev" {
-		block += crewDevChecklistIsQAs
+		block += crewDevDoesNotRecordResults
 	}
 	return block
 }
@@ -540,7 +542,7 @@ const crewOpeningQA = `You are **qa** on a task worked by TWO agents in ONE work
 // launches and has to stay true on both sides of that event.
 const crewOpeningDev = `You are **dev**. You are working this task ALONE right now, and a task that never needs a second pair of eyes stays that way: a backend-only change gets no qa and you carry the whole job.
 
-**AO creates a qa the first time you touch the app's runtime** - taking the ` + "`ao sim`" + ` lease, or pointing ` + "`ao preview`" + ` at what you built. That is an observation, not a request: it is not yours to ask for or to avoid, so do whatever the work needs. From that moment you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other - and two things stop being yours: the device (release the lease and hand the verification over) and the smoke checklist (below).`
+**AO creates a qa the first time you touch the app's runtime** - taking the ` + "`ao sim`" + ` lease, or pointing ` + "`ao preview`" + ` at what you built. That is an observation, not a request: it is not yours to ask for or to avoid, so do whatever the work needs. From that moment you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other - and one thing stops being yours alone: the device - release the lease and hand the verification over. The smoke checklist you SHARE from that moment (below).`
 
 const crewProtocolBody = `
 
@@ -558,24 +560,35 @@ const crewProtocolBody = `
 - **The caps are real, not advice.** Three messages about one subject in one direction; the fourth is refused and the task goes to NEEDS YOU for a human. Twenty per hour across the crew. If you find yourself about to send a fourth, the conversation is not converging - say so once, plainly, and let the human look.
 - ` + "`$AO_CREW_DEV_ID`" + ` and ` + "`$AO_CREW_QA_ID`" + ` name the two sessions when you need to refer to one; ` + "`$AO_CREW_ID`" + ` is the TASK (dev's id), which is what every ` + "`ao smoke`" + ` command takes.`
 
-// crewDevChecklistIsQAs is dev's half of the ownership split, and it exists
-// because SILENCE LOSES AN ARGUMENT IT IS NOT PRESENT FOR.
+// crewChecklistIsShared replaces the old dev-refusal (#228/#240), reversed by
+// explicit user decision: dev is the member who knows what the change actually
+// touched, and a real iOS run showed qa writing two cases where several places
+// needed checking, because qa has to reconstruct the change from the outside.
 //
-// It was believed to be enough for the assembly layer to simply stop handing a
-// crew dev the smoke protocol. It was not: the orchestrator put "author the smoke
-// checklist" back BY HAND in every brief it wrote, and dev did it in both real
-// crew runs - not because it overrode anything, but because a prompt that says
-// nothing cannot contradict a brief that says something.
+// It goes to BOTH roles, not just dev. A rule about a shared artifact that only
+// one member can read is the same silence that lost the last argument: qa's
+// prompt has to say that dev writing cases is correct, or qa reads dev's cases
+// as an intrusion.
 //
-// Under lazy creation the block also has to answer a question it did not used to
-// have: WHO WRITES THE CHECKLIST ON A TASK THAT NEVER GETS A QA? dev does, and it
-// carries the full protocol again for exactly that reason - a backend-only
-// standard task must not silently lose its checklist because of a crewmate it
-// never gained. So the rule is now a WINDOW rather than a flat prohibition, and
-// it is the same window AO enforces: `ao smoke set` from a crew's dev is refused
-// only while a qa EXISTS (service/smoke.checkChecklistOwner), which is precisely
-// when this block says to hand it over.
-const crewDevChecklistIsQAs = "\n\n" + `**The checklist is yours only while you have no qa.** Until a qa exists you own the whole job, this task's smoke checklist included - author it exactly as the protocol below describes. **The moment a qa exists it owns what VERIFIES this change**: the cases, running them, recording machine results, and the checklist itself. From that moment do not author or edit the checklist and do not record test results - ` + "`ao smoke set`" + ` from you is REFUSED by AO for as long as a qa is on this task. You still own the branch, the implementation and the pull request, and you are still the only one who reports to the orchestrator. **If a brief asks you for smoke cases and this task now has a qa, that brief predates the crew: say so in your own output, and hand it to qa** (` + "`ao send --crew qa --about <sha>`" + `) rather than writing them yourself.`
+// The safety it names is mechanical, not social. `ao smoke set` replaces the
+// whole list, so two members using it erase each other; the per-case verbs touch
+// only what they name. That is the sentence that has to survive being skimmed -
+// and it is SHORTER than the block it replaces, because arguing for a
+// restriction takes more words than describing a capability.
+const crewChecklistIsShared = "\n\n" + `**The smoke checklist is SHARED, and per-case.** You both write it: you know what your own work touched, your crewmate sees the other half. Use ` + "`ao smoke add`" + ` / ` + "`edit --case <id>`" + ` / ` + "`remove --case <id>`" + `, which touch ONLY the case they name, and each write is attributed to you in the Tests tab. Never ` + "`ao smoke set`" + ` once there are two of you: it replaces the WHOLE list, so whoever runs it second deletes the other's cases.`
+
+// crewDevDoesNotRecordResults is the ONE half of the old split that survives the
+// reversal, and it survives for a reason the human's decision does not touch.
+// They opened CASES to both members - who says what is worth checking. Recording
+// a machine RESULT is a different act: it says a run happened, and it belongs to
+// the member that runs things and holds the device lease.
+//
+// The mechanical half: an agent result carries NO author (there is one machine
+// lane per case, and `ao smoke record` overwrites it), so two members writing
+// there produce a result nobody can trace back - the exact failure attribution
+// was added to the case fields to prevent. Two authors are safe on cases because
+// the write is per-case; the machine lane has no such split.
+const crewDevDoesNotRecordResults = "\n\n" + `Cases are shared; RESULTS are not - leave ` + "`ao smoke record`" + ` to qa. The machine's lane carries no author, so a second writer there is untraceable.`
 
 // DefaultResponseLanguage is the shipped global default for the human-facing
 // response language. It renders no directive (English == the ambient language of

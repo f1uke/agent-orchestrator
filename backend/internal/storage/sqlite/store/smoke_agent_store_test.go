@@ -21,7 +21,7 @@ func TestSmokeAgentResultAndUserResultAreDisjointColumns(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID,
-		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a", Steps: []string{"s1"}}}, now); err != nil {
+		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a", Steps: []string{"s1"}}}, domain.SmokeAuthor{}, now); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestResetSmokeCheckKeepsAgentEvidence(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID,
-		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, now); err != nil {
+		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, domain.SmokeAuthor{}, now); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	for _, ev := range []domain.SmokeEvidence{
@@ -114,7 +114,7 @@ func TestEvidenceDefaultsToTheUser(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID,
-		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, now); err != nil {
+		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, domain.SmokeAuthor{}, now); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	if err := s.InsertSmokeEvidence(ctx, domain.SmokeEvidence{
@@ -147,7 +147,7 @@ func TestRetiredSmokeCheckSurvivesAReAuthor(t *testing.T) {
 	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID, []domain.SmokeAuthoredCase{
 		{ID: "a", Seq: 1, Name: "case a"},
 		{ID: "b", Seq: 2, Name: "case b"},
-	}, now); err != nil {
+	}, domain.SmokeAuthor{}, now); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokeFail, "flashed Unknown", now, now); err != nil || !ok {
@@ -169,7 +169,7 @@ func TestRetiredSmokeCheckSurvivesAReAuthor(t *testing.T) {
 
 	later := now.Add(time.Minute)
 	checks, removed, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID,
-		[]domain.SmokeAuthoredCase{{ID: "b", Seq: 1, Name: "case b"}}, later)
+		[]domain.SmokeAuthoredCase{{ID: "b", Seq: 1, Name: "case b"}}, domain.SmokeAuthor{}, later)
 	if err != nil {
 		t.Fatalf("re-author: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestSetSmokeAgentResultSkipsARetiredCase(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID,
-		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, now); err != nil {
+		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, domain.SmokeAuthor{}, now); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	if ok, err := s.RetireSmokeCheck(ctx, "a", "covered", now, now); err != nil || !ok {

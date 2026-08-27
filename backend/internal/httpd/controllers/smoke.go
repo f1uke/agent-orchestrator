@@ -43,10 +43,45 @@ type AuthorSmokeChecksInput struct {
 	Cases []SmokeAuthoredCaseInput `json:"cases" description:"The full 3–6 case checklist."`
 	// From is the CALLER's own session id (`ao` sends $AO_SESSION_ID), which is
 	// the only thing that can tell a crew's dev from its qa: both author against
-	// the same target, because $AO_CREW_ID is dev's session id. Omitted by the
-	// desktop app and by an older `ao`, and an unidentified caller is never
-	// refused.
-	From string `json:"from,omitempty" description:"The calling session's own id. A crew's dev is refused (409 SMOKE_QA_OWNS_CHECKLIST) while its task has a qa; omitted or unknown callers are never refused."`
+	// the same target, because $AO_CREW_ID is dev's session id. It is what the
+	// write is ATTRIBUTED to; it gates nothing. Omitted by the desktop app and by
+	// an older `ao`, and a write AO cannot attribute simply carries no author.
+	From string `json:"from,omitempty" description:"The calling session's own id, used to attribute the write. Omitted or unknown callers author anonymously; nobody is refused for who they are."`
+}
+
+// AddSmokeCasesInput is the body of PATCH .../smoke-checks: 1..N cases merged
+// into the checklist, leaving every case the payload does not name alone. This
+// is the write both crew members should use - it is what makes two authors safe,
+// because an author only ever reaches the cases they named.
+type AddSmokeCasesInput struct {
+	Cases []SmokeAuthoredCaseInput `json:"cases" description:"The cases to add or edit. An id already on the checklist is edited in place, keeping the user's verdict/note/evidence."`
+	From  string                   `json:"from,omitempty" description:"The calling session's own id, used to attribute the write."`
+}
+
+// EditSmokeCaseInput is the body of PATCH .../smoke-checks/{checkId}: a partial
+// edit of ONE case. A field left out is a field left alone - which is the point,
+// because re-sending a whole case to change one field would silently overwrite
+// whatever the other author improved in the meantime.
+type EditSmokeCaseInput struct {
+	Name     *string   `json:"name,omitempty" description:"One-line 'what to verify'. Omit to leave unchanged; may not be set empty."`
+	Why      *string   `json:"why,omitempty" description:"Why it matters. Omit to leave unchanged."`
+	Steps    *[]string `json:"steps,omitempty" description:"Ordered play steps, replacing the stored list. Omit to leave unchanged."`
+	Expected *string   `json:"expected,omitempty" description:"Expected result. Omit to leave unchanged."`
+	PRNum    *int      `json:"prNum,omitempty" description:"PR/MR number. Omit to leave unchanged."`
+	FileRef  *string   `json:"fileRef,omitempty" description:"file:line the change touched. Omit to leave unchanged."`
+	From     string    `json:"from,omitempty" description:"The calling session's own id, used to attribute the write."`
+}
+
+// RemoveSmokeCaseInput is the body of DELETE .../smoke-checks/{checkId}.
+type RemoveSmokeCaseInput struct {
+	From string `json:"from,omitempty" description:"The calling session's own id."`
+}
+
+// StandDownSmokeChecklistInput is the body of POST .../smoke-checks/stand-down:
+// the recorded conclusion that this change needs no human verification.
+type StandDownSmokeChecklistInput struct {
+	Reason string `json:"reason" description:"Why nothing here needs a person's eyes. Required - it is the whole content of standing down."`
+	From   string `json:"from,omitempty" description:"The calling session's own id, used to attribute the claim."`
 }
 
 // ListSmokeChecksResponse is the body of GET .../smoke-checks.
@@ -54,6 +89,10 @@ type ListSmokeChecksResponse struct {
 	Worker     string              `json:"worker" description:"Worker label for the tab subtitle."`
 	ReportedAt *time.Time          `json:"reportedAt,omitempty" description:"When this session's results were last reported back."`
 	Checks     []domain.SmokeCheck `json:"checks"`
+	// StandDown is what stops an empty checklist meaning two opposite things at
+	// once: absent, nobody has decided yet; present, a member looked and
+	// concluded there is nothing here for a person.
+	StandDown *domain.SmokeStandDown `json:"standDown,omitempty" description:"Set when a member recorded that this change needs no human verification."`
 }
 
 // SmokeCheckResponse is the { check } body returned by verdict/reset.
@@ -120,6 +159,10 @@ type SmokeController struct {
 func (c *SmokeController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/smoke-checks", c.list)
 	r.Put("/sessions/{sessionId}/smoke-checks", c.author)
+	r.Patch("/sessions/{sessionId}/smoke-checks", c.addCases)
+	r.Post("/sessions/{sessionId}/smoke-checks/stand-down", c.standDown)
+	r.Patch("/sessions/{sessionId}/smoke-checks/{checkId}", c.editCase)
+	r.Delete("/sessions/{sessionId}/smoke-checks/{checkId}", c.removeCase)
 	r.Post("/sessions/{sessionId}/smoke-checks/report", c.report)
 	r.Post("/sessions/{sessionId}/smoke-checks/jira", c.postJira)
 	r.Post("/sessions/{sessionId}/smoke-checks/{checkId}/verdict", c.verdict)
@@ -155,8 +198,18 @@ func (c *SmokeController) author(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
 		return
 	}
-	cases := make([]domain.SmokeAuthoredCase, 0, len(in.Cases))
-	for _, item := range in.Cases {
+	res, err := c.Svc.Author(r.Context(), domain.SessionID(strings.TrimSpace(in.From)), sessionID(r), authoredCases(in.Cases))
+	if err != nil {
+		writeSmokeError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, smokeListResponse(res))
+}
+
+// authoredCases maps the wire shape both authoring bodies share.
+func authoredCases(items []SmokeAuthoredCaseInput) []domain.SmokeAuthoredCase {
+	cases := make([]domain.SmokeAuthoredCase, 0, len(items))
+	for _, item := range items {
 		cases = append(cases, domain.SmokeAuthoredCase{
 			ID:       item.ID,
 			Name:     item.Name,
@@ -167,7 +220,80 @@ func (c *SmokeController) author(w http.ResponseWriter, r *http.Request) {
 			FileRef:  item.FileRef,
 		})
 	}
-	res, err := c.Svc.Author(r.Context(), domain.SessionID(strings.TrimSpace(in.From)), sessionID(r), cases)
+	return cases
+}
+
+func (c *SmokeController) addCases(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/sessions/{sessionId}/smoke-checks")
+		return
+	}
+	var in AddSmokeCasesInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	res, err := c.Svc.AddCases(r.Context(), domain.SessionID(strings.TrimSpace(in.From)), sessionID(r), authoredCases(in.Cases))
+	if err != nil {
+		writeSmokeError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, smokeListResponse(res))
+}
+
+func (c *SmokeController) editCase(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PATCH", "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}")
+		return
+	}
+	var in EditSmokeCaseInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	check, err := c.Svc.EditCase(r.Context(), domain.SessionID(strings.TrimSpace(in.From)), sessionID(r), chi.URLParam(r, "checkId"), domain.SmokeCasePatch{
+		Name:     in.Name,
+		Why:      in.Why,
+		Steps:    in.Steps,
+		Expected: in.Expected,
+		PRNum:    in.PRNum,
+		FileRef:  in.FileRef,
+	})
+	if err != nil {
+		writeSmokeError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SmokeCheckResponse{Check: check})
+}
+
+func (c *SmokeController) removeCase(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "DELETE", "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}")
+		return
+	}
+	// The body is optional: a DELETE with no payload is a legitimate call, it
+	// simply carries no author.
+	var in RemoveSmokeCaseInput
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	res, err := c.Svc.RemoveCase(r.Context(), domain.SessionID(strings.TrimSpace(in.From)), sessionID(r), chi.URLParam(r, "checkId"))
+	if err != nil {
+		writeSmokeError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, smokeListResponse(res))
+}
+
+func (c *SmokeController) standDown(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/smoke-checks/stand-down")
+		return
+	}
+	var in StandDownSmokeChecklistInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	res, err := c.Svc.StandDown(r.Context(), domain.SessionID(strings.TrimSpace(in.From)), sessionID(r), in.Reason)
 	if err != nil {
 		writeSmokeError(w, r, err)
 		return
@@ -401,7 +527,7 @@ func smokeListResponse(res smokesvc.SessionSmoke) ListSmokeChecksResponse {
 	if checks == nil {
 		checks = []domain.SmokeCheck{}
 	}
-	return ListSmokeChecksResponse{Worker: res.Worker, ReportedAt: res.ReportedAt, Checks: checks}
+	return ListSmokeChecksResponse{Worker: res.Worker, ReportedAt: res.ReportedAt, Checks: checks, StandDown: res.StandDown}
 }
 
 // sanitizeHeaderFilename drops quotes/newlines so a stored display filename
@@ -416,11 +542,9 @@ func sanitizeHeaderFilename(name string) string {
 }
 
 // smokeErrorResponses maps each service sentinel to the status and code the API
-// answers with. SMOKE_QA_OWNS_CHECKLIST is a 409 rather than a 422 because
-// nothing about the payload is wrong - the wrong member sent it. The two 422
-// refusals carry codes of their own rather than folding
-// into SMOKE_INVALID because a caller has to be able to tell them apart: "this
-// payload would destroy results the user recorded" and "this case is frozen, and
+// answers with. The two 422 refusals carry codes of their own rather than
+// folding into SMOKE_INVALID because a caller has to be able to tell them apart:
+// "this would destroy results the user recorded" and "this case is frozen, and
 // here is why it went" each have a different fix, and neither is a server fault.
 // First match wins; anything unlisted is a genuine 500.
 var smokeErrorResponses = []struct {
@@ -429,7 +553,6 @@ var smokeErrorResponses = []struct {
 	kind     string
 	code     string
 }{
-	{smokesvc.ErrQAOwnsChecklist, http.StatusConflict, "conflict", "SMOKE_QA_OWNS_CHECKLIST"},
 	{smokesvc.ErrResultsAtRisk, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_RESULTS_AT_RISK"},
 	{smokesvc.ErrCaseRetired, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_CASE_RETIRED"},
 	{smokesvc.ErrInvalid, http.StatusUnprocessableEntity, "unprocessable", "SMOKE_INVALID"},

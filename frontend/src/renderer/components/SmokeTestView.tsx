@@ -16,7 +16,9 @@ import {
 	activeChecks,
 	agentMeta,
 	agentState,
+	authorLabel,
 	checkTag,
+	checklistState,
 	headShaFor,
 	isAgentStale,
 	progressFor,
@@ -24,12 +26,15 @@ import {
 	relativeTime,
 	retiredChecks,
 	shortSha,
+	standDownActor,
 	verdictMeta,
 	type AgentState,
 	type HeadRef,
 	type SmokeCheck,
 	type SmokeEvidence,
 	type SmokeProgress,
+	type ChecklistState,
+	type SmokeStandDown,
 } from "../lib/smoke-test";
 import { CrewRunStrip } from "./CrewRunStrip";
 import { Toast } from "./inbox-ui";
@@ -276,6 +281,10 @@ export function SmokeTestView({
 	const checks = activeChecks(data?.checks ?? []);
 	const retired = retiredChecks(data?.checks ?? []);
 	const progress = progressFor(checks);
+	// An empty list and a stood-down one are DIFFERENT answers, so they are one
+	// decision made here rather than two conditions repeated at each use site.
+	const standDown = data?.standDown ?? null;
+	const state = checklistState(data?.checks ?? [], standDown);
 	const workerLabel = data?.worker || worker || "worker";
 
 	const decide = (check: SmokeCheck, verdict: "pass" | "fail" | "skip", note: string) => {
@@ -298,7 +307,7 @@ export function SmokeTestView({
 				color: P.text,
 			}}
 		>
-			<Header worker={workerLabel} progress={progress} />
+			<Header worker={workerLabel} progress={progress} stoodDown={state === "stood-down"} />
 
 			<div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 24px" }}>
 				{/* The machine's bracketed runs sit ABOVE the checklist: a run thrown
@@ -312,8 +321,8 @@ export function SmokeTestView({
 						{apiErrorMessage(query.error, "Unable to load smoke checks")}
 					</p>
 				)}
-				{!query.isLoading && !query.error && checks.length === 0 && (
-					<EmptyState allRetired={retired.length > 0} retired={retired.length} />
+				{!query.isLoading && !query.error && state !== "cases" && (
+					<EmptyState state={state} retired={retired.length} standDown={standDown} />
 				)}
 				{!query.isLoading &&
 					!query.error &&
@@ -360,7 +369,7 @@ export function SmokeTestView({
 
 // ---------------------------------------------------------------------------
 
-function Header({ worker, progress }: { worker: string; progress: SmokeProgress }) {
+function Header({ worker, progress, stoodDown }: { worker: string; progress: SmokeProgress; stoodDown: boolean }) {
 	const segments = progressSegments(progress);
 	return (
 		<div style={{ flex: "none", padding: "16px 16px 13px", borderBottom: `1px solid ${P.divider}` }}>
@@ -401,38 +410,49 @@ function Header({ worker, progress }: { worker: string; progress: SmokeProgress 
 				>
 					◆
 				</span>
+				{/* "run these live" is an instruction, and it must not sit above a
+				    panel saying there is nothing to run - which is exactly the kind of
+				    contradiction that makes a screen unreadable. */}
 				<span style={{ fontSize: 12, color: P.secondary2, lineHeight: 1.4 }}>
-					Checklist from <b style={{ color: P.body, fontWeight: 600 }}>{worker}</b> · run these live &amp; attach
-					evidence
+					Checklist from <b style={{ color: P.body, fontWeight: 600 }}>{worker}</b>
+					{stoodDown ? " · nothing to run" : " · run these live & attach evidence"}
 				</span>
 			</div>
 
-			<div
-				style={{
-					marginTop: 12,
-					display: "flex",
-					height: 8,
-					borderRadius: 999,
-					overflow: "hidden",
-					background: P.trackBg,
-				}}
-			>
-				{progress.total > 0 &&
-					segments.map((seg, i) =>
-						seg.count > 0 ? (
-							<div key={i} style={{ width: `${(seg.count / progress.total) * 100}%`, background: seg.color }} />
-						) : null,
-					)}
-			</div>
+			{/* A track and a "0 of 0 verified" are chrome for progress that cannot
+			    exist. On an empty checklist they are noise; above a stand-down they
+			    read as a contradiction of the panel below. */}
+			{progress.total > 0 && (
+				<>
+					<div
+						style={{
+							marginTop: 12,
+							display: "flex",
+							height: 8,
+							borderRadius: 999,
+							overflow: "hidden",
+							background: P.trackBg,
+						}}
+					>
+						{segments.map((seg, i) =>
+							seg.count > 0 ? (
+								<div key={i} style={{ width: `${(seg.count / progress.total) * 100}%`, background: seg.color }} />
+							) : null,
+						)}
+					</div>
 
-			<div style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 11.5 }}>
-				<span style={{ color: P.body }}>
-					<b style={{ color: P.textStrong, fontWeight: 700 }}>{progress.checked}</b> of {progress.total} verified
-				</span>
-				{progress.fail > 0 && <CountChip color={P.segFail} text={`${progress.fail} failed`} />}
-				{progress.skip > 0 && <CountChip color={P.muted2} text={`${progress.skip} skipped`} />}
-				{progress.pending > 0 && <CountChip color={P.segSkip} text={`${progress.pending} to check`} />}
-			</div>
+					<div
+						style={{ marginTop: 9, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 11.5 }}
+					>
+						<span style={{ color: P.body }}>
+							<b style={{ color: P.textStrong, fontWeight: 700 }}>{progress.checked}</b> of {progress.total} verified
+						</span>
+						{progress.fail > 0 && <CountChip color={P.segFail} text={`${progress.fail} failed`} />}
+						{progress.skip > 0 && <CountChip color={P.muted2} text={`${progress.skip} skipped`} />}
+						{progress.pending > 0 && <CountChip color={P.segSkip} text={`${progress.pending} to check`} />}
+					</div>
+				</>
+			)}
 
 			<QaBanner progress={progress} />
 		</div>
@@ -559,6 +579,8 @@ function CaseCard({
 	const qa = agentState(check);
 	const qaStale = isAgentStale(check, heads);
 	const qaShots = (check.agentEvidence ?? []).length;
+	const author = authorLabel(check);
+	const authoredWhen = relativeTime(check.authoredAt, Date.now());
 
 	return (
 		<div
@@ -616,6 +638,20 @@ function CaseCard({
 						<span style={{ color: hasEvidence ? P.evidenceOn : P.muted }}>
 							{hasEvidence ? "▣ evidence attached" : "□ no evidence yet"}
 						</span>
+						{/* Who WROTE the case. Both crew members author this list - dev from
+						    the call sites it changed, qa from what a user would do - so this
+						    is part of reading a case, not decoration. It sits here rather
+						    than in the pill row above on purpose: a "qa" author chip next to
+						    the "qa · ran" machine chip would read as one fact about qa when
+						    they are two different ones. A case AO could not attribute shows
+						    nothing rather than a guessed author. */}
+						{author && (
+							<span style={{ color: P.muted }} title={check.authoredBy ?? undefined}>
+								{" · "}
+								{author}
+								{authoredWhen && ` · ${authoredWhen}`}
+							</span>
+						)}
 						{/* qa's screenshots are worth advertising here: on a case a machine
 						    cannot judge, they are what lets the person decide without
 						    re-driving the app. Named as qa's, never merged into "yours". */}
@@ -1632,7 +1668,27 @@ function RetiredSection({
 	);
 }
 
-function EmptyState({ allRetired, retired }: { allRetired?: boolean; retired?: number }) {
+// The empty tab, which used to be ONE panel saying two opposite things.
+//
+// "No smoke checks yet" was rendered whether nobody had decided what a person
+// should look at, or somebody had looked and concluded there was nothing worth
+// their eyes. Those are opposite answers, and a reader could not tell which one
+// they were being shown - the whole reason `ao smoke stand-down` exists. So a
+// stood-down checklist gets its own panel, in the app's own voice rather than
+// the muted absence voice, and it names who decided and why.
+function EmptyState({
+	state,
+	retired,
+	standDown,
+}: {
+	state: ChecklistState;
+	retired: number;
+	standDown?: SmokeStandDown | null;
+}) {
+	if (state === "stood-down" && standDown) {
+		return <StoodDownPanel standDown={standDown} retired={retired} />;
+	}
+	const allRetired = state === "all-retired";
 	return (
 		<div
 			style={{
@@ -1657,8 +1713,45 @@ function EmptyState({ allRetired, retired }: { allRetired?: boolean; retired?: n
 					</>
 				) : (
 					<>
-						The worker hasn&apos;t authored a checklist for this session. When it finishes a change whose behavior needs
+						Nobody has decided what a person should look at yet. When the worker finishes a change whose behavior needs
 						a live look, cases will appear here to play.
+					</>
+				)}
+			</div>
+		</div>
+	);
+}
+
+// A DECISION, so it is drawn like one: a bordered card carrying the reason and
+// the member who reached it, not the grey "nothing here" wash an absence gets.
+// The distinction is the entire point of the panel - if it read as an absence it
+// would be the ambiguity again with extra words.
+function StoodDownPanel({ standDown, retired }: { standDown: SmokeStandDown; retired: number }) {
+	const when = relativeTime(standDown.at, Date.now());
+	return (
+		<div
+			style={{
+				border: `1px solid ${P.qaBorder}`,
+				background: P.qaBg,
+				borderRadius: 11,
+				padding: "18px 16px",
+				margin: "24px 2px 0",
+			}}
+		>
+			<div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+				<CircleSlash size={14} strokeWidth={2} color={P.qaFg} aria-hidden="true" />
+				<span style={{ fontSize: 13, fontWeight: 700, color: P.textStrong }}>
+					{standDownActor(standDown)} stood down
+				</span>
+				{when && <span style={{ fontSize: 11, color: P.muted }}>· {when}</span>}
+			</div>
+			<div style={{ fontSize: 12.5, lineHeight: 1.55, color: P.body }}>{standDown.reason}</div>
+			<div style={{ marginTop: 10, fontSize: 11.5, lineHeight: 1.5, color: P.muted2 }}>
+				This is an answer, not an empty list.
+				{retired > 0 && (
+					<>
+						{" "}
+						{retired} retired case{retired === 1 ? " is" : "s are"} listed below with the reason each one went.
 					</>
 				)}
 			</div>

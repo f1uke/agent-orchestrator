@@ -188,12 +188,12 @@ func TestBuildSystemPrompt_NoSimulatorMeansNoRecordedFlowLoop(t *testing.T) {
 	}
 }
 
-// LAYER 1 of the three-layer fix. dev's prompt used to say NOTHING about the
-// checklist, so a brief asking it to author one met no contradiction and was
-// simply obeyed - in both real crew runs. The block does not prevent that (the
-// `ao smoke set` refusal does); it makes the override visible in dev's own
-// output.
-func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsQAs(t *testing.T) {
+// The checklist block dev is assembled with, after the reversal. It used to be a
+// negative ("the checklist is yours only while you have no qa", and `ao smoke
+// set` from you is REFUSED); the human reversed that, so what dev now carries is
+// a capability plus the one mechanical trap in it - `set` replaces the whole
+// list, so two members using it erase each other.
+func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsShared(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
 	dev, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
@@ -206,12 +206,22 @@ func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsQAs(t *testing.T) {
 		t.Fatalf("crew dev cannot author a checklist for a task that may never get a qa:\n%s", dev)
 	}
 	for _, want := range []string{
-		"The checklist is yours only while you have no qa",
-		"REFUSED by AO for as long as a qa is on this task",
-		"that brief predates the crew",
+		"The smoke checklist is SHARED",
+		"Never `ao smoke set` once there are two of you",
+		// The half of the old split that survived: cases are shared, machine
+		// results are not.
+		"Cases are shared; RESULTS are not",
 	} {
 		if !strings.Contains(dev, want) {
-			t.Fatalf("crew dev prompt missing the checklist negative %q:\n%s", want, dev)
+			t.Fatalf("crew dev prompt missing the shared-checklist block %q:\n%s", want, dev)
+		}
+	}
+	// The reversed refusal must not survive anywhere in what dev is assembled
+	// with: a prompt asserting an enforcement AO no longer performs is worse than
+	// one that says nothing.
+	for _, gone := range []string{"REFUSED by AO", "that brief predates the crew"} {
+		if strings.Contains(dev, gone) {
+			t.Fatalf("crew dev still carries the reversed refusal %q:\n%s", gone, dev)
 		}
 	}
 
@@ -221,8 +231,8 @@ func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsQAs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(solo, "The checklist is yours only while you have no qa") {
-		t.Fatalf("a solo worker was told about a crew it can never have:\n%s", solo)
+	if strings.Contains(solo, "The smoke checklist is SHARED") {
+		t.Fatalf("a solo worker was told about a crewmate it can never have:\n%s", solo)
 	}
 	if !strings.Contains(solo, "## Smoke-test checklist (AO)") {
 		t.Fatalf("a solo worker lost the checklist protocol:\n%s", solo)
@@ -252,11 +262,11 @@ func TestSpawn_StandardTaskLaunchesDevWithTheCrewPrompt(t *testing.T) {
 	if !strings.Contains(launched, "AO creates a qa the first time you touch the app's runtime") {
 		t.Fatalf("dev was launched without being told what creates its qa:\n%s", launched)
 	}
-	if !strings.Contains(launched, "The checklist is yours only while you have no qa") {
-		t.Fatalf("dev was launched without the checklist window:\n%s", launched)
+	if !strings.Contains(launched, "The smoke checklist is SHARED") {
+		t.Fatalf("dev was launched without being told the checklist is shared:\n%s", launched)
 	}
 	if !strings.Contains(launched, "## Smoke-test checklist (AO)") {
-		t.Fatalf("dev was launched unable to author the checklist it owns until a qa exists:\n%s", launched)
+		t.Fatalf("dev was launched unable to author the checklist it co-owns:\n%s", launched)
 	}
 }
 
@@ -325,10 +335,11 @@ func TestBuildSystemPrompt_EveryMemberIsToldNotToDriveADeviceItDoesNotHold(t *te
 // qa is created part-way through a task, so the always-injected protocol's
 // timing - author the list once the change is done, before the PR - leaves a
 // window where a qa is working and nothing says what it intends to verify. qa is
-// re-timed to publish its intent up front, and to SAY when the answer is that
-// nothing needs a human, so an empty Tests tab stops meaning "still thinking"
-// and "nothing to check" at the same time. dev and a solo worker keep the timing
-// they had: theirs is the last thing they do, and there is nobody to tell.
+// re-timed to publish its intent up front, and pointed at `ao smoke stand-down`
+// when the answer is that nothing needs a human - which is the surface that now
+// stops an empty Tests tab meaning "still thinking" and "nothing to check" at
+// the same time. dev and a solo worker keep the timing they had: theirs is the
+// last thing they do, and there is nobody to tell.
 func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
@@ -339,22 +350,22 @@ func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
 	for _, want := range []string{
 		"### Publish what you will verify, before you verify it (AO)",
 		"before you start running things", // intent up front, not at the end
-		"nobody has decided yet",          // the two states an empty list conflates
-		"there is nothing worth a human's eyes",
+		"ao smoke stand-down",             // the surface, now that one exists
+		"cannot tell your answer from nobody having looked",
 		"## Smoke-test checklist (AO)", // it re-times that block, never replaces it
 	} {
 		if !strings.Contains(qa, want) {
 			t.Fatalf("qa was not told to publish its intent early (%q):\n%s", want, qa)
 		}
 	}
-	// Ownership is untouched: the re-timing is about WHEN qa writes, not WHO owns
-	// the list, so dev must still be told the list is qa's.
+	// The re-timing is about WHEN qa writes, not WHO writes: dev is still told the
+	// list is shared and still carries the per-case verbs.
 	dev, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(dev, "The checklist is yours only while you have no qa") {
-		t.Fatalf("the ownership split was disturbed:\n%s", dev)
+	if !strings.Contains(dev, "The smoke checklist is SHARED") {
+		t.Fatalf("dev lost the shared-checklist block:\n%s", dev)
 	}
 
 	for _, role := range []domain.CrewRole{domain.CrewRoleDev, ""} {

@@ -1,25 +1,26 @@
 -- name: ListSmokeChecksBySession :many
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason, authored_by, authored_by_role, authored_at
 FROM smoke_check WHERE session_id = ? ORDER BY (retired_at IS NOT NULL), seq, created_at;
 
 -- name: GetSmokeCheck :one
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason, authored_by, authored_by_role, authored_at
 FROM smoke_check WHERE id = ?;
 
 -- name: InsertSmokeCheck :exec
 -- A fresh case starts with BOTH results empty: 'pending' is the user's default
 -- (nobody has played it) and '' the machine's (nothing has run it).
-INSERT INTO smoke_check (id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', NULL, NULL, ?, ?);
+INSERT INTO smoke_check (id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, authored_by, authored_by_role, authored_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', NULL, NULL, ?, ?, ?, ?, ?);
 
 -- name: UpdateSmokeCheckAuthored :execrows
 -- Re-author keeps the user's play results: only the worker-authored fields are
 -- rewritten; verdict/note/decided_at/reported_at and the evidence rows are left
 -- untouched.
-UPDATE smoke_check SET seq = ?, name = ?, why = ?, steps = ?, expected = ?, pr_num = ?, file_ref = ?, updated_at = ?
+UPDATE smoke_check SET seq = ?, name = ?, why = ?, steps = ?, expected = ?, pr_num = ?, file_ref = ?, updated_at = ?,
+    authored_by = ?, authored_by_role = ?, authored_at = ?
 WHERE id = ?;
 
--- name: DeleteSmokeCheck :exec
+-- name: DeleteSmokeCheck :execrows
 DELETE FROM smoke_check WHERE id = ?;
 
 -- name: SetSmokeVerdict :execrows
@@ -78,3 +79,25 @@ WHERE id = ? AND retired_at IS NULL;
 -- overwriting the original reason and date.
 UPDATE smoke_check SET retired_at = ?, retired_reason = ?, updated_at = ?
 WHERE id = ? AND retired_at IS NULL;
+
+-- name: GetSmokeChecklistState :one
+SELECT session_id, stood_down_at, stood_down_by, stood_down_by_role, reason, created_at, updated_at
+FROM smoke_checklist_state WHERE session_id = ?;
+
+-- name: UpsertSmokeChecklistState :exec
+-- Standing down twice re-states it: the later reason and author replace the
+-- earlier ones, because the claim is about the checklist as it is NOW.
+INSERT INTO smoke_checklist_state (session_id, stood_down_at, stood_down_by, stood_down_by_role, reason, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (session_id) DO UPDATE SET
+    stood_down_at = excluded.stood_down_at,
+    stood_down_by = excluded.stood_down_by,
+    stood_down_by_role = excluded.stood_down_by_role,
+    reason = excluded.reason,
+    updated_at = excluded.updated_at;
+
+-- name: DeleteSmokeChecklistState :exec
+-- Authoring a case retracts a stand-down: a case on the list contradicts "there
+-- is nothing here for a person", so the claim goes rather than sitting beside
+-- the thing that disproves it.
+DELETE FROM smoke_checklist_state WHERE session_id = ?;

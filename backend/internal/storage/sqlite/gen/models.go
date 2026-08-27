@@ -314,28 +314,41 @@ type SimRecordingStep struct {
 }
 
 type SmokeCheck struct {
-	ID            string
-	SessionID     domain.SessionID
-	ProjectID     domain.ProjectID
-	Seq           int64
-	Name          string
-	Why           string
-	Steps         string
-	Expected      string
-	PRNum         int64
-	FileRef       string
-	Verdict       domain.SmokeVerdict
-	Note          string
-	DecidedAt     sql.NullTime
-	ReportedAt    sql.NullTime
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	AgentVerdict  domain.SmokeVerdict
-	AgentNote     string
-	AgentRanAt    sql.NullTime
-	AgentSha      string
-	RetiredAt     sql.NullTime
-	RetiredReason string
+	ID             string
+	SessionID      domain.SessionID
+	ProjectID      domain.ProjectID
+	Seq            int64
+	Name           string
+	Why            string
+	Steps          string
+	Expected       string
+	PRNum          int64
+	FileRef        string
+	Verdict        domain.SmokeVerdict
+	Note           string
+	DecidedAt      sql.NullTime
+	ReportedAt     sql.NullTime
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	AgentVerdict   domain.SmokeVerdict
+	AgentNote      string
+	AgentRanAt     sql.NullTime
+	AgentSha       string
+	RetiredAt      sql.NullTime
+	RetiredReason  string
+	AuthoredBy     domain.SessionID
+	AuthoredByRole domain.CrewRole
+	AuthoredAt     sql.NullTime
+}
+
+type SmokeChecklistState struct {
+	SessionID       domain.SessionID
+	StoodDownAt     time.Time
+	StoodDownBy     domain.SessionID
+	StoodDownByRole domain.CrewRole
+	Reason          string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type SmokeEvidence struct {

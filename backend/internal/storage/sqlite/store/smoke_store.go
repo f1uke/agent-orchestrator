@@ -66,7 +66,7 @@ func (s *Store) GetSmokeCheck(ctx context.Context, id string) (domain.SmokeCheck
 // absent from the payload (that absence is exactly what retiring one means) and
 // never rewritten. A retired case is frozen, so an agent that re-sends its whole
 // checklist every round can neither drop nor revive what it retired last round.
-func (s *Store) ReplaceSmokeChecks(ctx context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, now time.Time) ([]domain.SmokeCheck, []string, error) {
+func (s *Store) ReplaceSmokeChecks(ctx context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, author domain.SmokeAuthor, now time.Time) ([]domain.SmokeCheck, []string, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	var removed []string
@@ -88,7 +88,7 @@ func (s *Store) ReplaceSmokeChecks(ctx context.Context, sessionID domain.Session
 				continue
 			}
 			if _, ok := keep[row.ID]; !ok {
-				if err := q.DeleteSmokeCheck(ctx, row.ID); err != nil {
+				if _, err := q.DeleteSmokeCheck(ctx, row.ID); err != nil {
 					return err
 				}
 				removed = append(removed, row.ID)
@@ -100,39 +100,17 @@ func (s *Store) ReplaceSmokeChecks(ctx context.Context, sessionID domain.Session
 				return fmt.Errorf("encode steps for %s: %w", c.ID, err)
 			}
 			if _, ok := present[c.ID]; ok {
-				if _, err := q.UpdateSmokeCheckAuthored(ctx, gen.UpdateSmokeCheckAuthoredParams{
-					Seq:       int64(c.Seq),
-					Name:      c.Name,
-					Why:       c.Why,
-					Steps:     string(steps),
-					Expected:  c.Expected,
-					PRNum:     int64(c.PRNum),
-					FileRef:   c.FileRef,
-					UpdatedAt: now,
-					ID:        c.ID,
-				}); err != nil {
+				if _, err := q.UpdateSmokeCheckAuthored(ctx, smokeUpdateAuthoredParams(c, string(steps), c.Seq, author, now)); err != nil {
 					return err
 				}
 				continue
 			}
-			if err := q.InsertSmokeCheck(ctx, gen.InsertSmokeCheckParams{
-				ID:        c.ID,
-				SessionID: sessionID,
-				ProjectID: projectID,
-				Seq:       int64(c.Seq),
-				Name:      c.Name,
-				Why:       c.Why,
-				Steps:     string(steps),
-				Expected:  c.Expected,
-				PRNum:     int64(c.PRNum),
-				FileRef:   c.FileRef,
-				CreatedAt: now,
-				UpdatedAt: now,
-			}); err != nil {
+			if err := q.InsertSmokeCheck(ctx, smokeInsertParams(c, sessionID, projectID, string(steps), c.Seq, author, now)); err != nil {
 				return err
 			}
 		}
-		return nil
+		// A checklist with cases on it is not a checklist that stood down.
+		return q.DeleteSmokeChecklistState(ctx, sessionID)
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("replace smoke checks for session %s: %w", sessionID, err)
@@ -344,30 +322,33 @@ func smokeCheckFromRow(r gen.SmokeCheck) (domain.SmokeCheck, error) {
 		}
 	}
 	return domain.SmokeCheck{
-		ID:            r.ID,
-		SessionID:     r.SessionID,
-		ProjectID:     r.ProjectID,
-		Seq:           int(r.Seq),
-		Name:          r.Name,
-		Why:           r.Why,
-		Steps:         steps,
-		Expected:      r.Expected,
-		PRNum:         int(r.PRNum),
-		FileRef:       r.FileRef,
-		Verdict:       r.Verdict,
-		Note:          r.Note,
-		Evidence:      []domain.SmokeEvidence{},
-		DecidedAt:     nullTimePtr(r.DecidedAt),
-		AgentVerdict:  r.AgentVerdict,
-		AgentNote:     r.AgentNote,
-		AgentEvidence: []domain.SmokeEvidence{},
-		AgentRanAt:    nullTimePtr(r.AgentRanAt),
-		AgentSHA:      r.AgentSha,
-		RetiredAt:     nullTimePtr(r.RetiredAt),
-		RetiredReason: r.RetiredReason,
-		ReportedAt:    nullTimePtr(r.ReportedAt),
-		CreatedAt:     r.CreatedAt,
-		UpdatedAt:     r.UpdatedAt,
+		ID:             r.ID,
+		SessionID:      r.SessionID,
+		ProjectID:      r.ProjectID,
+		Seq:            int(r.Seq),
+		Name:           r.Name,
+		Why:            r.Why,
+		Steps:          steps,
+		Expected:       r.Expected,
+		PRNum:          int(r.PRNum),
+		FileRef:        r.FileRef,
+		Verdict:        r.Verdict,
+		Note:           r.Note,
+		Evidence:       []domain.SmokeEvidence{},
+		DecidedAt:      nullTimePtr(r.DecidedAt),
+		AgentVerdict:   r.AgentVerdict,
+		AgentNote:      r.AgentNote,
+		AgentEvidence:  []domain.SmokeEvidence{},
+		AgentRanAt:     nullTimePtr(r.AgentRanAt),
+		AgentSHA:       r.AgentSha,
+		RetiredAt:      nullTimePtr(r.RetiredAt),
+		RetiredReason:  r.RetiredReason,
+		AuthoredBy:     r.AuthoredBy,
+		AuthoredByRole: r.AuthoredByRole,
+		AuthoredAt:     nullTimePtr(r.AuthoredAt),
+		ReportedAt:     nullTimePtr(r.ReportedAt),
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
 	}, nil
 }
 
@@ -409,4 +390,263 @@ func stepsOrEmpty(steps []string) []string {
 		return []string{}
 	}
 	return steps
+}
+
+// UpsertSmokeChecks writes 1..N cases into a session's checklist WITHOUT
+// touching any case the payload does not name. It is the write path shared
+// authorship rests on: `ReplaceSmokeChecks` sets the list, so two members
+// writing it in turn erase each other's cases (and, but for the guard above it,
+// the human's verdicts); this one sets only what its caller named, so two
+// members adding different cases at the same moment both survive.
+//
+// A named id that already exists has its AUTHORED fields rewritten in place, so
+// the user's verdict, note and evidence ride through untouched. A new id is
+// appended after the highest seq in the checklist, retired cases included: a
+// "CHECK N" the user has already been shown must not come back meaning a
+// different case.
+func (s *Store) UpsertSmokeChecks(ctx context.Context, sessionID domain.SessionID, projectID domain.ProjectID, cases []domain.SmokeAuthoredCase, author domain.SmokeAuthor, now time.Time) ([]domain.SmokeCheck, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	err := s.inTx(ctx, "upsert smoke checks", func(q *gen.Queries) error {
+		existing, err := q.ListSmokeChecksBySession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		present := make(map[string]struct{}, len(existing))
+		nextSeq := 0
+		for _, row := range existing {
+			present[row.ID] = struct{}{}
+			if int(row.Seq) > nextSeq {
+				nextSeq = int(row.Seq)
+			}
+		}
+		for _, c := range cases {
+			steps, err := json.Marshal(stepsOrEmpty(c.Steps))
+			if err != nil {
+				return fmt.Errorf("encode steps for %s: %w", c.ID, err)
+			}
+			if _, ok := present[c.ID]; ok {
+				// Keep the case where the user already saw it: re-sending a case is
+				// editing it, not re-filing it under a new number.
+				seq, err := existingSeq(existing, c.ID)
+				if err != nil {
+					return err
+				}
+				if _, err := q.UpdateSmokeCheckAuthored(ctx, smokeUpdateAuthoredParams(c, string(steps), seq, author, now)); err != nil {
+					return err
+				}
+				continue
+			}
+			nextSeq++
+			if err := q.InsertSmokeCheck(ctx, smokeInsertParams(c, sessionID, projectID, string(steps), nextSeq, author, now)); err != nil {
+				return err
+			}
+			present[c.ID] = struct{}{}
+		}
+		// A checklist with cases on it is not a checklist that stood down.
+		return q.DeleteSmokeChecklistState(ctx, sessionID)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("upsert smoke checks for session %s: %w", sessionID, err)
+	}
+	return s.ListSmokeChecksBySession(ctx, sessionID)
+}
+
+// PatchSmokeCheckAuthored rewrites only the authored fields the patch names,
+// inside one transaction so a read-modify-write cannot lose a field to a
+// concurrent edit of a DIFFERENT field on the same case. ok=false when the case
+// does not exist.
+func (s *Store) PatchSmokeCheckAuthored(ctx context.Context, id string, patch domain.SmokeCasePatch, author domain.SmokeAuthor, now time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	var found bool
+	err := s.inTx(ctx, "patch smoke check", func(q *gen.Queries) error {
+		row, err := q.GetSmokeCheck(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		check, err := smokeCheckFromRow(row)
+		if err != nil {
+			return err
+		}
+		merged := applySmokePatch(check, patch)
+		steps, err := json.Marshal(stepsOrEmpty(merged.Steps))
+		if err != nil {
+			return fmt.Errorf("encode steps for %s: %w", id, err)
+		}
+		_, err = q.UpdateSmokeCheckAuthored(ctx, smokeUpdateAuthoredParams(merged, string(steps), check.Seq, author, now))
+		return err
+	})
+	if err != nil {
+		return false, fmt.Errorf("patch smoke check %s: %w", id, err)
+	}
+	return found, nil
+}
+
+// DeleteSmokeCheck removes ONE case outright, ok=false when no row matched. The
+// caller is responsible for refusing to call it on a case the user has played -
+// that one is retired, with a reason, never deleted.
+func (s *Store) DeleteSmokeCheck(ctx context.Context, id string) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.DeleteSmokeCheck(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("delete smoke check %s: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// GetSmokeChecklistStandDown returns a session's recorded "nothing here needs a
+// human" claim, ok=false when none stands.
+func (s *Store) GetSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID) (domain.SmokeStandDown, bool, error) {
+	row, err := s.qr.GetSmokeChecklistState(ctx, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.SmokeStandDown{}, false, nil
+	}
+	if err != nil {
+		return domain.SmokeStandDown{}, false, fmt.Errorf("get smoke checklist state for session %s: %w", sessionID, err)
+	}
+	return domain.SmokeStandDown{
+		SessionID: row.SessionID,
+		At:        row.StoodDownAt,
+		By:        row.StoodDownBy,
+		ByRole:    row.StoodDownByRole,
+		Reason:    row.Reason,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}, true, nil
+}
+
+// SetSmokeChecklistStandDown records (or re-states) the claim that this task's
+// change needs no human verification.
+func (s *Store) SetSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID, reason string, author domain.SmokeAuthor, now time.Time) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.qw.UpsertSmokeChecklistState(ctx, gen.UpsertSmokeChecklistStateParams{
+		SessionID:       sessionID,
+		StoodDownAt:     now,
+		StoodDownBy:     author.ID,
+		StoodDownByRole: smokeAuthorRole(author),
+		Reason:          reason,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}); err != nil {
+		return fmt.Errorf("set smoke checklist stand-down for session %s: %w", sessionID, err)
+	}
+	return nil
+}
+
+// ClearSmokeChecklistStandDown retracts the claim.
+func (s *Store) ClearSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.qw.DeleteSmokeChecklistState(ctx, sessionID); err != nil {
+		return fmt.Errorf("clear smoke checklist stand-down for session %s: %w", sessionID, err)
+	}
+	return nil
+}
+
+// applySmokePatch overlays the fields a patch names onto a stored case; a nil
+// field leaves the stored value exactly as it was.
+func applySmokePatch(check domain.SmokeCheck, patch domain.SmokeCasePatch) domain.SmokeAuthoredCase {
+	out := domain.SmokeAuthoredCase{
+		ID:       check.ID,
+		Seq:      check.Seq,
+		Name:     check.Name,
+		Why:      check.Why,
+		Steps:    check.Steps,
+		Expected: check.Expected,
+		PRNum:    check.PRNum,
+		FileRef:  check.FileRef,
+	}
+	if patch.Name != nil {
+		out.Name = *patch.Name
+	}
+	if patch.Why != nil {
+		out.Why = *patch.Why
+	}
+	if patch.Steps != nil {
+		out.Steps = *patch.Steps
+	}
+	if patch.Expected != nil {
+		out.Expected = *patch.Expected
+	}
+	if patch.PRNum != nil {
+		out.PRNum = *patch.PRNum
+	}
+	if patch.FileRef != nil {
+		out.FileRef = *patch.FileRef
+	}
+	return out
+}
+
+// existingSeq finds a case's stored position so an upsert keeps it.
+func existingSeq(rows []gen.SmokeCheck, id string) (int, error) {
+	for _, row := range rows {
+		if row.ID == id {
+			return int(row.Seq), nil
+		}
+	}
+	return 0, fmt.Errorf("smoke check %s vanished mid-transaction", id)
+}
+
+func smokeInsertParams(c domain.SmokeAuthoredCase, sessionID domain.SessionID, projectID domain.ProjectID, steps string, seq int, author domain.SmokeAuthor, now time.Time) gen.InsertSmokeCheckParams {
+	return gen.InsertSmokeCheckParams{
+		ID:             c.ID,
+		SessionID:      sessionID,
+		ProjectID:      projectID,
+		Seq:            int64(seq),
+		Name:           c.Name,
+		Why:            c.Why,
+		Steps:          steps,
+		Expected:       c.Expected,
+		PRNum:          int64(c.PRNum),
+		FileRef:        c.FileRef,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		AuthoredBy:     author.ID,
+		AuthoredByRole: smokeAuthorRole(author),
+		AuthoredAt:     smokeAuthoredAt(author, now),
+	}
+}
+
+func smokeUpdateAuthoredParams(c domain.SmokeAuthoredCase, steps string, seq int, author domain.SmokeAuthor, now time.Time) gen.UpdateSmokeCheckAuthoredParams {
+	return gen.UpdateSmokeCheckAuthoredParams{
+		Seq:            int64(seq),
+		Name:           c.Name,
+		Why:            c.Why,
+		Steps:          steps,
+		Expected:       c.Expected,
+		PRNum:          int64(c.PRNum),
+		FileRef:        c.FileRef,
+		UpdatedAt:      now,
+		ID:             c.ID,
+		AuthoredBy:     author.ID,
+		AuthoredByRole: smokeAuthorRole(author),
+		AuthoredAt:     smokeAuthoredAt(author, now),
+	}
+}
+
+// smokeAuthorRole stores only a role AO actually knows. A caller it cannot
+// identify - the desktop app, a direct API call, an older `ao` - is written as
+// no author at all, because a guessed one is worse than none on a list whose
+// whole point is telling two authors apart.
+func smokeAuthorRole(author domain.SmokeAuthor) domain.CrewRole {
+	if !author.Role.Valid() {
+		return ""
+	}
+	return author.Role
+}
+
+// smokeAuthoredAt stamps the write only when it can be attributed: an
+// authored_at with no author beside it would read as a fact about a person.
+func smokeAuthoredAt(author domain.SmokeAuthor, now time.Time) sql.NullTime {
+	if author.ID == "" {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: now, Valid: true}
 }

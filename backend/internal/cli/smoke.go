@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 // smokeAuthoredCaseInput mirrors controllers.SmokeAuthoredCaseInput.
@@ -71,6 +70,21 @@ type smokeCheckClient struct {
 	AgentSHA      string                `json:"agentSha"`
 	RetiredAt     *time.Time            `json:"retiredAt,omitempty"`
 	RetiredReason string                `json:"retiredReason"`
+	// Who last wrote this case's authored fields, and when. Empty when AO could
+	// not identify the caller.
+	AuthoredBy     string     `json:"authoredBy"`
+	AuthoredByRole string     `json:"authoredByRole"`
+	AuthoredAt     *time.Time `json:"authoredAt,omitempty"`
+}
+
+// smokeStandDownClient mirrors domain.SmokeStandDown: a member's recorded
+// conclusion that this change needs no human verification. Its absence and its
+// presence are the two things an empty checklist used to say at once.
+type smokeStandDownClient struct {
+	At     time.Time `json:"at"`
+	By     string    `json:"by"`
+	ByRole string    `json:"byRole"`
+	Reason string    `json:"reason"`
 }
 
 // smokeCheckResponse mirrors controllers.SmokeCheckResponse.
@@ -92,9 +106,10 @@ type retireSmokeCheckRequest struct {
 
 // listSmokeChecksResponse mirrors controllers.ListSmokeChecksResponse.
 type listSmokeChecksResponse struct {
-	Worker     string             `json:"worker"`
-	ReportedAt *time.Time         `json:"reportedAt,omitempty"`
-	Checks     []smokeCheckClient `json:"checks"`
+	Worker     string                `json:"worker"`
+	ReportedAt *time.Time            `json:"reportedAt,omitempty"`
+	Checks     []smokeCheckClient    `json:"checks"`
+	StandDown  *smokeStandDownClient `json:"standDown,omitempty"`
 }
 
 const smokeSetLong = `Register or replace a session's whole smoke-test checklist (typically 3–6 cases).
@@ -118,9 +133,12 @@ revise or drop freely.
 Naming a RETIRED case's id is refused rather than reviving it. If a retired case
 must come back, add it under a new id.
 
-On a crew the checklist belongs to QA: this command is refused for the dev member
-(naming the qa) for as long as that task has a qa. A task with no qa - dev alone,
-and every solo worker - authors its own checklist exactly as before.
+On a crew, BOTH members own this checklist - dev knows what the change actually
+touched, qa sees it the way a user will - which is exactly why this command is
+the wrong one for two authors: it sets the WHOLE list, so whoever runs it second
+takes the other member's cases with it. Use it to author an initial checklist,
+then reach for ` + "`ao smoke add`" + ` / ` + "`edit`" + ` / ` + "`remove`" + `, which touch one case each.
+Every write records who made it and when, and the Tests tab shows it.
 
 The JSON is { "cases": [ ... ] } (a bare [ ... ] array is also accepted). Each case:
 
@@ -147,6 +165,10 @@ func newSmokeCommand(ctx *commandContext) *cobra.Command {
 		Short: "Author and read a session's manual smoke-test checklist",
 	}
 	cmd.AddCommand(newSmokeSetCommand(ctx))
+	cmd.AddCommand(newSmokeAddCommand(ctx))
+	cmd.AddCommand(newSmokeEditCommand(ctx))
+	cmd.AddCommand(newSmokeRemoveCommand(ctx))
+	cmd.AddCommand(newSmokeStandDownCommand(ctx))
 	cmd.AddCommand(newSmokeListCommand(ctx))
 	cmd.AddCommand(newSmokeRecordCommand(ctx))
 	cmd.AddCommand(newSmokeRetireCommand(ctx))
@@ -165,9 +187,7 @@ func newSmokeSetCommand(ctx *commandContext) *cobra.Command {
 		},
 	}
 	// Agents routinely spell flags with underscores (--from_file); normalize both.
-	cmd.Flags().SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
-		return pflag.NormalizedName(strings.ReplaceAll(name, "_", "-"))
-	})
+	cmd.Flags().SetNormalizeFunc(underscoreFlagNames)
 	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
 	cmd.Flags().StringVar(&fromFile, "from-file", "", "Path to the checklist JSON, or - to read from stdin (required)")
 	return cmd
@@ -188,7 +208,7 @@ func (c *commandContext) setSmokeChecklist(cmd *cobra.Command, args []string, se
 	}
 	path := "sessions/" + url.PathEscape(session) + "/smoke-checks"
 	var res listSmokeChecksResponse
-	body := authorSmokeChecksRequest{Cases: cases, From: strings.TrimSpace(os.Getenv("AO_SESSION_ID"))}
+	body := authorSmokeChecksRequest{Cases: cases, From: callingSessionID()}
 	if err := c.putJSON(cmd.Context(), path, body, &res); err != nil {
 		return explainSmokeRefusal(err)
 	}
@@ -196,17 +216,17 @@ func (c *commandContext) setSmokeChecklist(cmd *cobra.Command, args []string, se
 	return err
 }
 
-// explainSmokeRefusal turns the daemon's two author refusals into a usage error
+// explainSmokeRefusal turns the daemon's authoring refusals into a usage error
 // (exit 2), because neither is a failure of the command: SMOKE_RESULTS_AT_RISK
-// means the payload has to change and already names which cases and how, and
-// SMOKE_QA_OWNS_CHECKLIST means the wrong crew member sent it and names the one
-// that owns it. Anything else passes through unchanged.
+// means the write would destroy results the user recorded and already names
+// which cases and the way out, and SMOKE_CASE_RETIRED means the case is frozen
+// and says when it went and why. Anything else passes through unchanged.
 func explainSmokeRefusal(err error) error {
 	var apiErr apiResponseError
 	if !errors.As(err, &apiErr) {
 		return err
 	}
-	if apiErr.ErrorBody.Code != "SMOKE_RESULTS_AT_RISK" && apiErr.ErrorBody.Code != "SMOKE_QA_OWNS_CHECKLIST" {
+	if apiErr.ErrorBody.Code != "SMOKE_RESULTS_AT_RISK" && apiErr.ErrorBody.Code != "SMOKE_CASE_RETIRED" {
 		return err
 	}
 	if strings.TrimSpace(apiErr.ErrorBody.Message) == "" {
@@ -305,7 +325,11 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 		return enc.Encode(res)
 	}
 	if len(res.Checks) == 0 {
-		_, err := fmt.Fprintf(out, "no smoke checks for %s\n", session)
+		if res.StandDown != nil {
+			_, err := fmt.Fprintf(out, "%s stood down on %s: %s\n", standDownActor(*res.StandDown), session, res.StandDown.Reason)
+			return err
+		}
+		_, err := fmt.Fprintf(out, "no smoke checks for %s - nobody has decided what a person should look at yet\n", session)
 		return err
 	}
 	lines := []string{fmt.Sprintf("smoke checklist for %s (worker: %s)", session, res.Worker)}
@@ -322,6 +346,9 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 		lines = append(lines,
 			fmt.Sprintf("  CHECK %d [%s] %s", check.Seq, smokeVerdictLabel(check.Verdict), check.Name),
 			"        id: "+check.ID)
+		if by := smokeAuthorLine(check); by != "" {
+			lines = append(lines, "        "+by)
+		}
 		if ref := smokeCaseRef(check); ref != "" {
 			lines = append(lines, "        "+ref)
 		}
@@ -341,6 +368,9 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 	}
 	if res.ReportedAt != nil {
 		lines = append(lines, "reported: "+res.ReportedAt.Format(time.RFC3339))
+	}
+	if res.StandDown != nil {
+		lines = append(lines, fmt.Sprintf("stood down by %s: %s", standDownActor(*res.StandDown), res.StandDown.Reason))
 	}
 	_, err := fmt.Fprintln(out, strings.Join(lines, "\n"))
 	return err
@@ -374,6 +404,39 @@ func smokeAgentLines(check smokeCheckClient) []string {
 		lines = append(lines, fmt.Sprintf("        agent evidence: %d captured", n))
 	}
 	return lines
+}
+
+// smokeAuthorLine names who last wrote a case's authored fields. Both crew
+// members write this list, so which of them a case came from is part of reading
+// it: dev writes from the call sites, qa from what a user would do. A case AO
+// could not attribute - written by the desktop app, a direct API call or an
+// older `ao` - prints no author rather than a guessed one.
+func smokeAuthorLine(check smokeCheckClient) string {
+	who := strings.TrimSpace(check.AuthoredBy)
+	if who == "" {
+		return ""
+	}
+	if role := strings.TrimSpace(check.AuthoredByRole); role != "" {
+		who = role + " @" + who
+	} else {
+		who = "@" + who
+	}
+	if check.AuthoredAt != nil {
+		return "by: " + who + " on " + check.AuthoredAt.Format(time.RFC3339)
+	}
+	return "by: " + who
+}
+
+// standDownActor names who concluded nothing here needs a person, falling back
+// to the neutral "the worker" when AO could not identify the caller.
+func standDownActor(sd smokeStandDownClient) string {
+	if role := strings.TrimSpace(sd.ByRole); role != "" {
+		return role
+	}
+	if by := strings.TrimSpace(sd.By); by != "" {
+		return "@" + by
+	}
+	return "the worker"
 }
 
 func evidenceSuffix(n int) string {
@@ -493,9 +556,7 @@ func newSmokeRecordCommand(ctx *commandContext) *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
-		return pflag.NormalizedName(strings.ReplaceAll(name, "_", "-"))
-	})
+	cmd.Flags().SetNormalizeFunc(underscoreFlagNames)
 	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
 	cmd.Flags().StringVar(&caseID, "case", "", "Case id to record against (required; see `ao smoke list`)")
 	cmd.Flags().StringVar(&verdict, "verdict", "", "pass | fail | skip. Omit for an evidence-only record.")

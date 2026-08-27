@@ -3701,6 +3701,56 @@ paths:
       summary: List a session's smoke-test checklist
       tags:
       - smoke
+    patch:
+      operationId: addSmokeCases
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersAddSmokeCasesInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSmokeChecksResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Add or edit cases without touching the rest of the checklist
+      tags:
+      - smoke
     put:
       operationId: authorSmokeChecks
       parameters:
@@ -3750,6 +3800,109 @@ paths:
           description: Not Implemented
       summary: Author/replace a session's smoke-test checklist (results preserved
         by case id)
+      tags:
+      - smoke
+  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}:
+    delete:
+      operationId: removeSmokeCase
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Smoke-check case identifier.
+        in: path
+        name: checkId
+        required: true
+        schema:
+          description: Smoke-check case identifier.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSmokeChecksResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Remove one case the user has not played (a played case is retired instead)
+      tags:
+      - smoke
+    patch:
+      operationId: editSmokeCase
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Smoke-check case identifier.
+        in: path
+        name: checkId
+        required: true
+        schema:
+          description: Smoke-check case identifier.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersEditSmokeCaseInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SmokeCheckResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Edit one case's authored fields; an omitted field is left alone
       tags:
       - smoke
   /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/agent-result:
@@ -4253,6 +4406,57 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Report a session's smoke-test results back to the worker
+      tags:
+      - smoke
+  /api/v1/sessions/{sessionId}/smoke-checks/stand-down:
+    post:
+      operationId: standDownSmokeChecklist
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersStandDownSmokeChecklistInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSmokeChecksResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Record that this change needs no human verification, with the reason
       tags:
       - smoke
   /api/v1/sessions/{sessionId}/spec:
@@ -5715,9 +5919,9 @@ components:
             $ref: '#/components/schemas/SmokeAuthoredCaseInput'
           type: array
         from:
-          description: The calling session's own id. A crew's dev is refused (409
-            SMOKE_QA_OWNS_CHECKLIST) while its task has a qa; omitted or unknown callers
-            are never refused.
+          description: The calling session's own id, used to attribute the write.
+            Omitted or unknown callers author anonymously; nobody is refused for who
+            they are.
           type: string
       required:
       - cases
@@ -5840,6 +6044,20 @@ components:
       - sessionId
       - session
       type: object
+    ControllersAddSmokeCasesInput:
+      properties:
+        cases:
+          description: The cases to add or edit. An id already on the checklist is
+            edited in place, keeping the user's verdict/note/evidence.
+          items:
+            $ref: '#/components/schemas/SmokeAuthoredCaseInput'
+          type: array
+        from:
+          description: The calling session's own id, used to attribute the write.
+          type: string
+      required:
+      - cases
+      type: object
     ControllersCrewSendRequest:
       properties:
         about:
@@ -5886,6 +6104,46 @@ components:
       - description
       - intervalMs
       - running
+      type: object
+    ControllersEditSmokeCaseInput:
+      properties:
+        expected:
+          description: Expected result. Omit to leave unchanged.
+          type:
+          - "null"
+          - string
+        fileRef:
+          description: file:line the change touched. Omit to leave unchanged.
+          type:
+          - "null"
+          - string
+        from:
+          description: The calling session's own id, used to attribute the write.
+          type: string
+        name:
+          description: One-line 'what to verify'. Omit to leave unchanged; may not
+            be set empty.
+          type:
+          - "null"
+          - string
+        prNum:
+          description: PR/MR number. Omit to leave unchanged.
+          type:
+          - "null"
+          - integer
+        steps:
+          description: Ordered play steps, replacing the stored list. Omit to leave
+            unchanged.
+          items:
+            type: string
+          type:
+          - "null"
+          - array
+        why:
+          description: Why it matters. Omit to leave unchanged.
+          type:
+          - "null"
+          - string
       type: object
     ControllersListDaemonLoopsResponse:
       properties:
@@ -6234,6 +6492,18 @@ components:
       - state
       - detail
       type: object
+    ControllersStandDownSmokeChecklistInput:
+      properties:
+        from:
+          description: The calling session's own id, used to attribute the claim.
+          type: string
+        reason:
+          description: Why nothing here needs a person's eyes. Required - it is the
+            whole content of standing down.
+          type: string
+      required:
+      - reason
+      type: object
     ControllersWorkspaceResolveCandidateDTO:
       properties:
         inWorkspace:
@@ -6416,6 +6686,32 @@ components:
           type: string
       required:
       - harness
+      type: object
+    DomainSmokeStandDown:
+      properties:
+        at:
+          format: date-time
+          type: string
+        by:
+          type: string
+        byRole:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        reason:
+          type: string
+        sessionId:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - sessionId
+      - at
+      - reason
+      - createdAt
+      - updatedAt
       type: object
     DomainSystemPromptAdditions:
       properties:
@@ -6962,6 +7258,10 @@ components:
           type:
           - "null"
           - string
+        standDown:
+          $ref: '#/components/schemas/DomainSmokeStandDown'
+          description: Set when a member recorded that this change needs no human
+            verification.
         worker:
           description: Worker label for the tab subtitle.
           type: string
@@ -8586,6 +8886,15 @@ components:
         agentSha:
           type: string
         agentVerdict:
+          type: string
+        authoredAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        authoredBy:
+          type: string
+        authoredByRole:
           type: string
         createdAt:
           format: date-time

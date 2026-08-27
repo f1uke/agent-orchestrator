@@ -328,21 +328,22 @@ func TestSmokeSetSendsTheCallersOwnSessionID(t *testing.T) {
 	}
 }
 
-// A crew dev refused by the daemon has nothing to fix in its payload - it sent
-// the wrong command entirely - so the refusal must arrive as the daemon wrote
-// it (naming the qa and how to hand over), at exit 2, not as "HTTP 409".
-func TestSmokeSetSurfacesTheQAOwnsChecklistRefusal(t *testing.T) {
+// A retired case named in a payload is refused, and the refusal is not a
+// failure of the command: it says when the case went and why, and the fix is in
+// the payload. So it arrives as the daemon wrote it, at exit 2, rather than as
+// "HTTP 422".
+func TestSmokeSetSurfacesTheRetiredCaseRefusal(t *testing.T) {
 	cfg := setConfigEnv(t)
-	const msg = "smoke: qa owns this task's checklist: qa @mer-2 owns this task's checklist - it authors the cases, runs them and retires them. If a brief asked you for smoke cases, that brief predates the crew: say so, and hand it over with `ao send --crew qa --about <sha>`"
-	body, err := json.Marshal(map[string]string{"message": msg, "code": "SMOKE_QA_OWNS_CHECKLIST"})
+	const msg = `smoke: case is retired: "Drag scrolls" (id "drag-scroll") was retired on 2026-08-01T00:00:00Z: now covered by TestDragScroll. A retired case is frozen`
+	body, err := json.Marshal(map[string]string{"message": msg, "code": "SMOKE_CASE_RETIRED"})
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	srv, _ := reviewServer(t, 409, string(body))
+	srv, _ := reviewServer(t, 422, string(body))
 	writeRunFileFor(t, cfg, srv)
 
 	deps := aliveDeps()
-	deps.In = strings.NewReader(`{"cases":[{"name":"A"}]}`)
+	deps.In = strings.NewReader(`{"cases":[{"id":"drag-scroll","name":"Drag scrolls"}]}`)
 
 	_, _, err = executeCLI(t, deps, "smoke", "set", "mer-1", "--from-file", "-")
 	if err == nil {
@@ -351,7 +352,7 @@ func TestSmokeSetSurfacesTheQAOwnsChecklistRefusal(t *testing.T) {
 	if code := ExitCode(err); code != 2 {
 		t.Errorf("exit code = %d, want 2 (usage)", code)
 	}
-	for _, want := range []string{"@mer-2", "ao send --crew qa"} {
+	for _, want := range []string{"drag-scroll", "now covered by TestDragScroll"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("message missing %s: %v", want, err)
 		}

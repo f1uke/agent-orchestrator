@@ -24,8 +24,11 @@ Natural-language-to-command mappings for common AO tasks.
 | Claim an existing PR for a session | `ao session claim-pr <id> <pr-ref>` |
 | Submit a code review verdict | `ao review submit <session-id> --run <run-id> --verdict approved` |
 | Author a smoke-test checklist | `cat <<'JSON' \| ao smoke set "$AO_SESSION_ID" --from-file -` |
+| Add or edit cases without touching the rest | `ao smoke add "$AO_SESSION_ID" --from-file -`, `ao smoke edit ... --case <id> --pr 12` (use these once a task has two agents; `set` replaces the whole list) |
 | See what the user played | `ao smoke list "$AO_SESSION_ID"` |
 | Record that a machine ran a case | `ao smoke record "$AO_SESSION_ID" --case <id> --verdict pass --note "..."` |
+| Drop a case nobody has played | `ao smoke remove "$AO_SESSION_ID" --case <id>` |
 | Drop a case the user already played | `ao smoke retire "$AO_SESSION_ID" --case <id> --reason "..."` (never by leaving it out of `ao smoke set`) |
+| Say there is nothing here for a person | `ao smoke stand-down "$AO_SESSION_ID" --reason "..."` (an empty Tests tab cannot say it) |
 | Configure a project's default branch or model | `ao project set-config <id> --default-branch <branch> --model <model>` |
 | Import projects from a legacy AO install | `ao import --dry-run` first, then `ao import -y` |

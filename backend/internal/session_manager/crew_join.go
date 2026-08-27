@@ -23,8 +23,8 @@ import (
 //     per-session local-commit observer (HEAD is read through the SCM providers,
 //     for PRs), so it would need new instrumentation - and it fires on EVERY
 //     task, which reinstates precisely the cost lazy creation exists to remove.
-//   - `ao smoke set` is a dead candidate: the checklist protocol belongs to qa,
-//     so nothing authors one before qa exists.
+//   - `ao smoke set` is a dead candidate: the protocol has dev author the list
+//     once the change is complete, which is after every trigger worth having.
 //
 // WHAT IT KILLS: a backend-only task never touches a runtime surface, so it never
 // gets a qa and never pays the turns a qa spends learning there is nothing to

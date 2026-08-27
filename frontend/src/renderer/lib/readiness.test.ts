@@ -614,3 +614,41 @@ describe("deriveReadiness - an agent result never opens the merge gate", () => {
 		expect(r.verdict.word).toBe("Ready to Merge");
 	});
 });
+
+// The Summary strip conflated the same two states the Tests tab did: "not run"
+// was shown whether nobody had decided or a member had decided there was
+// nothing here for a person.
+const smokeDetail = (r: ReturnType<typeof deriveReadiness>) => r.gates.find((g) => g.key === "smoke")?.state;
+
+describe("the smoke gate tells an untouched checklist from a stood-down one", () => {
+	const empty = smoke();
+	const stood = {
+		sessionId: "s1",
+		at: "2026-08-20T00:00:00Z",
+		byRole: "qa",
+		reason: "pure refactor",
+		createdAt: "2026-08-20T00:00:00Z",
+		updatedAt: "2026-08-20T00:00:00Z",
+	} as const;
+
+	it("says not run when nobody has decided", () => {
+		const r = deriveReadiness({}, [], empty);
+		expect(smokeDetail(r)).toBe("not run");
+	});
+
+	it("says stood down when a member recorded the decision", () => {
+		const r = deriveReadiness({}, [], empty, stood);
+		expect(smokeDetail(r)).toBe("stood down");
+		// A stand-down is a reason not to WAIT, never a claim that something was
+		// verified - so the tone is still idle, not pass.
+		expect(tones(r).smoke).toBe("idle");
+	});
+
+	// A stand-down never survives a case being authored (the daemon retracts it),
+	// but the gate must not read "stood down" over a live checklist even for the
+	// one poll a stale cache could carry both.
+	it("ignores a stand-down once there are cases to play", () => {
+		const r = deriveReadiness({}, [], smoke({ total: 1, pending: 1 }), stood);
+		expect(smokeDetail(r)).not.toBe("stood down");
+	});
+});

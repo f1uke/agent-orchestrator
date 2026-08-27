@@ -1173,7 +1173,26 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Add or edit cases without touching the rest of the checklist */
+        patch: operations["addSmokeCases"];
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove one case the user has not played (a played case is retired instead) */
+        delete: operations["removeSmokeCase"];
+        options?: never;
+        head?: never;
+        /** Edit one case's authored fields; an omitted field is left alone */
+        patch: operations["editSmokeCase"];
         trace?: never;
     };
     "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/agent-result": {
@@ -1324,6 +1343,23 @@ export interface paths {
         put?: never;
         /** Report a session's smoke-test results back to the worker */
         post: operations["reportSmokeChecks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/smoke-checks/stand-down": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that this change needs no human verification, with the reason */
+        post: operations["standDownSmokeChecklist"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1888,7 +1924,7 @@ export interface components {
         AuthorSmokeChecksInput: {
             /** @description The full 3–6 case checklist. */
             cases: components["schemas"]["SmokeAuthoredCaseInput"][];
-            /** @description The calling session's own id. A crew's dev is refused (409 SMOKE_QA_OWNS_CHECKLIST) while its task has a qa; omitted or unknown callers are never refused. */
+            /** @description The calling session's own id, used to attribute the write. Omitted or unknown callers author anonymously; nobody is refused for who they are. */
             from?: string;
         };
         AutoNudgeSettingsResponse: {
@@ -1934,6 +1970,12 @@ export interface components {
             session: components["schemas"]["ControllersSessionView"];
             sessionId: string;
         };
+        ControllersAddSmokeCasesInput: {
+            /** @description The cases to add or edit. An id already on the checklist is edited in place, keeping the user's verdict/note/evidence. */
+            cases: components["schemas"]["SmokeAuthoredCaseInput"][];
+            /** @description The calling session's own id, used to attribute the write. */
+            from?: string;
+        };
         ControllersCrewSendRequest: {
             about?: string;
             message: string;
@@ -1951,6 +1993,22 @@ export interface components {
             /** Format: date-time */
             nextRunAt?: null | string;
             running: boolean;
+        };
+        ControllersEditSmokeCaseInput: {
+            /** @description Expected result. Omit to leave unchanged. */
+            expected?: null | string;
+            /** @description file:line the change touched. Omit to leave unchanged. */
+            fileRef?: null | string;
+            /** @description The calling session's own id, used to attribute the write. */
+            from?: string;
+            /** @description One-line 'what to verify'. Omit to leave unchanged; may not be set empty. */
+            name?: null | string;
+            /** @description PR/MR number. Omit to leave unchanged. */
+            prNum?: null | number;
+            /** @description Ordered play steps, replacing the stored list. Omit to leave unchanged. */
+            steps?: null | string[];
+            /** @description Why it matters. Omit to leave unchanged. */
+            why?: null | string;
         };
         ControllersListDaemonLoopsResponse: {
             loops: components["schemas"]["ControllersDaemonLoop"][];
@@ -2095,6 +2153,12 @@ export interface components {
             state: string;
             udid: string;
         };
+        ControllersStandDownSmokeChecklistInput: {
+            /** @description The calling session's own id, used to attribute the claim. */
+            from?: string;
+            /** @description Why nothing here needs a person's eyes. Required - it is the whole content of standing down. */
+            reason: string;
+        };
         ControllersWorkspaceResolveCandidateDTO: {
             inWorkspace: boolean;
             path: string;
@@ -2166,6 +2230,18 @@ export interface components {
         };
         DomainReviewerConfig: {
             harness: string;
+        };
+        DomainSmokeStandDown: {
+            /** Format: date-time */
+            at: string;
+            by?: string;
+            byRole?: string;
+            /** Format: date-time */
+            createdAt: string;
+            reason: string;
+            sessionId: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         DomainSystemPromptAdditions: {
             orchestrator?: string;
@@ -2400,6 +2476,8 @@ export interface components {
              * @description When this session's results were last reported back.
              */
             reportedAt?: null | string;
+            /** @description Set when a member recorded that this change needs no human verification. */
+            standDown?: components["schemas"]["DomainSmokeStandDown"];
             /** @description Worker label for the tab subtitle. */
             worker: string;
         };
@@ -3066,6 +3144,10 @@ export interface components {
             agentRanAt?: null | string;
             agentSha?: string;
             agentVerdict?: string;
+            /** Format: date-time */
+            authoredAt?: null | string;
+            authoredBy?: string;
+            authoredByRole?: string;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -7859,6 +7941,186 @@ export interface operations {
             };
         };
     };
+    addSmokeCases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersAddSmokeCasesInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    removeSmokeCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    editSmokeCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Smoke-check case identifier. */
+                checkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersEditSmokeCaseInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SmokeCheckResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     recordSmokeAgentResult: {
         parameters: {
             query?: never;
@@ -8374,6 +8636,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReportSmokeResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    standDownSmokeChecklist: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersStandDownSmokeChecklistInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
