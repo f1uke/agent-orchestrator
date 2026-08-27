@@ -15,7 +15,7 @@ Every case carries **two** results, in two separate sets of fields:
 | | who writes it | answers | opens the merge gate? |
 |---|---|---|---|
 | verdict / note / evidence | the **user**, playing the case in the Tests tab | "does this actually work for a person?" | yes |
-| agent verdict / note / evidence / sha | **`ao smoke record`** | "did the steps run?" | **no, never** |
+| runs: agent verdict / note / evidence / sha | **`ao smoke record`**, one row per run | "did the steps run?" | **no, never** |
 
 They are not interchangeable. Recording latency, dead drag-scroll, keystrokes
 never arriving, a tab pausing when unfocused, control lost after a lease lapse -
@@ -234,8 +234,13 @@ reason they went.
 
 Record a **machine's** result for one case. Strictly additive: it cannot rewrite
 a case's authored content, cannot touch the user's verdict, note or evidence, and
-cannot remove a case. Running it again re-records the machine's result, which is
-what re-running a case means. It is refused on a retired case.
+cannot remove a case. It is refused on a retired case.
+
+**Each record is a RUN, and runs accumulate.** Running a case again does not
+overwrite the last result - it adds a round, with its own verdict, note and
+commit, and the screenshots you attach stay with the round that captured them.
+That is what makes "this failed at `d44ad43` and passes at `9f10c22`" visible in
+the Tests tab instead of being something you have to explain in a note.
 
 **Flags:**
 
@@ -252,8 +257,10 @@ what re-running a case means. It is refused on a retired case.
 current head, so let it default rather than omitting it.
 
 Omitting `--verdict` while attaching `--evidence` is a legitimate record: it says
-"I ran it and captured this, I am not the one who can judge it" - the permanent
-state of a case about paint, focus, timing or feel.
+"I ran it and captured this, I am not the one who can judge it". It is the right
+answer whenever what you captured does not actually answer the question the case
+asks, and it needs evidence **from this run** - an earlier round's screenshots
+are not what this one saw.
 
 ---
 

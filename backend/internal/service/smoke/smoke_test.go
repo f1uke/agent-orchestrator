@@ -20,6 +20,7 @@ type fakeStore struct {
 	checks    map[string]domain.SmokeCheck
 	sessions  map[domain.SessionID]domain.SessionRecord
 	evidence  map[string]domain.SmokeEvidence
+	runs      map[string]domain.SmokeRun
 	lastCases []domain.SmokeAuthoredCase
 	reported  map[domain.SessionID]time.Time
 	standDown map[domain.SessionID]domain.SmokeStandDown
@@ -30,6 +31,7 @@ func newFakeStore() *fakeStore {
 		checks:    map[string]domain.SmokeCheck{},
 		sessions:  map[domain.SessionID]domain.SessionRecord{},
 		evidence:  map[string]domain.SmokeEvidence{},
+		runs:      map[string]domain.SmokeRun{},
 		reported:  map[domain.SessionID]time.Time{},
 		standDown: map[domain.SessionID]domain.SmokeStandDown{},
 	}
@@ -39,7 +41,7 @@ func (f *fakeStore) ListSmokeChecksBySession(_ context.Context, id domain.Sessio
 	var out []domain.SmokeCheck
 	for _, c := range f.checks {
 		if c.SessionID == id {
-			f.loadEvidence(&c)
+			f.loadMachineLane(&c)
 			out = append(out, c)
 		}
 	}
@@ -55,7 +57,7 @@ func (f *fakeStore) ListSmokeChecksBySession(_ context.Context, id domain.Sessio
 func (f *fakeStore) GetSmokeCheck(_ context.Context, id string) (domain.SmokeCheck, bool, error) {
 	c, ok := f.checks[id]
 	if ok {
-		f.loadEvidence(&c)
+		f.loadMachineLane(&c)
 	}
 	return c, ok, nil
 }
@@ -81,6 +83,25 @@ func (f *fakeStore) loadEvidence(check *domain.SmokeCheck) {
 			continue
 		}
 		check.Evidence = append(check.Evidence, ev)
+	}
+}
+
+// loadMachineLane mirrors the real store: the run history is loaded with the
+// case and the four Agent* fields are DERIVED from the latest recorded run. A
+// fake that stored them on the case would let a service test pass while the real
+// read path showed something else.
+func (f *fakeStore) loadMachineLane(check *domain.SmokeCheck) {
+	f.loadEvidence(check)
+	check.Runs = []domain.SmokeRun{}
+	for _, run := range f.runs {
+		if run.CheckID == check.ID {
+			check.Runs = append(check.Runs, run)
+		}
+	}
+	sort.Slice(check.Runs, func(i, j int) bool { return check.Runs[i].Seq < check.Runs[j].Seq })
+	check.AgentVerdict, check.AgentNote, check.AgentSHA, check.AgentRanAt = "", "", "", nil
+	if run, ok := check.LatestRun(); ok {
+		check.AgentVerdict, check.AgentNote, check.AgentSHA, check.AgentRanAt = run.Verdict, run.Note, run.SHA, run.RecordedAt
 	}
 }
 
@@ -138,8 +159,6 @@ func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.Sessi
 		// rows are keyed to the id and joined on read, so they follow).
 		if prior, ok := f.checks[c.ID]; ok {
 			check.Verdict, check.Note, check.DecidedAt = prior.Verdict, prior.Note, prior.DecidedAt
-			check.AgentVerdict, check.AgentNote = prior.AgentVerdict, prior.AgentNote
-			check.AgentRanAt, check.AgentSHA = prior.AgentRanAt, prior.AgentSHA
 			check.RetiredAt, check.RetiredReason = prior.RetiredAt, prior.RetiredReason
 			check.CreatedAt = prior.CreatedAt
 		}
@@ -172,8 +191,6 @@ func (f *fakeStore) UpsertSmokeChecks(_ context.Context, sessionID domain.Sessio
 		if prior, ok := f.checks[c.ID]; ok {
 			check.Seq = prior.Seq
 			check.Verdict, check.Note, check.DecidedAt = prior.Verdict, prior.Note, prior.DecidedAt
-			check.AgentVerdict, check.AgentNote = prior.AgentVerdict, prior.AgentNote
-			check.AgentRanAt, check.AgentSHA = prior.AgentRanAt, prior.AgentSHA
 			check.RetiredAt, check.RetiredReason = prior.RetiredAt, prior.RetiredReason
 			check.CreatedAt = prior.CreatedAt
 		} else {
@@ -224,6 +241,11 @@ func (f *fakeStore) DeleteSmokeCheck(_ context.Context, id string) (bool, error)
 	for evID, ev := range f.evidence {
 		if ev.CheckID == id {
 			delete(f.evidence, evID)
+		}
+	}
+	for runID, run := range f.runs {
+		if run.CheckID == id {
+			delete(f.runs, runID)
 		}
 	}
 	return true, nil
@@ -280,14 +302,49 @@ func (f *fakeStore) ResetSmokeCheck(_ context.Context, id string, now time.Time)
 	return true, nil
 }
 
-func (f *fakeStore) SetSmokeAgentResult(_ context.Context, id string, res domain.SmokeAgentResult, ranAt, now time.Time) (bool, error) {
-	c, ok := f.checks[id]
-	if !ok || c.Retired() {
+// OpenSmokeRun mirrors the real store: at most one run per case is open at a
+// time, and a capture joins it rather than starting a second one.
+func (f *fakeStore) OpenSmokeRun(_ context.Context, checkID string, sessionID domain.SessionID, now time.Time) (domain.SmokeRun, bool, error) {
+	if c, ok := f.checks[checkID]; !ok || c.Retired() {
+		return domain.SmokeRun{}, false, nil
+	}
+	open := domain.SmokeRun{}
+	found := false
+	seq := 0
+	for _, run := range f.runs {
+		if run.CheckID != checkID {
+			continue
+		}
+		if run.Seq > seq {
+			seq = run.Seq
+		}
+		if !run.Recorded() && (!found || run.Seq > open.Seq) {
+			open, found = run, true
+		}
+	}
+	if found {
+		return open, true, nil
+	}
+	run := domain.SmokeRun{
+		ID:        fmt.Sprintf("run_%s_%d", checkID, seq+1),
+		CheckID:   checkID,
+		SessionID: sessionID,
+		Seq:       seq + 1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	f.runs[run.ID] = run
+	return run, true, nil
+}
+
+func (f *fakeStore) CloseSmokeRun(_ context.Context, runID string, res domain.SmokeAgentResult, recordedAt, now time.Time) (bool, error) {
+	run, ok := f.runs[runID]
+	if !ok || run.Recorded() {
 		return false, nil
 	}
-	c.AgentVerdict, c.AgentNote, c.AgentSHA = res.Verdict, res.Note, res.SHA
-	c.AgentRanAt, c.UpdatedAt = &ranAt, now
-	f.checks[id] = c
+	run.Verdict, run.Note, run.SHA = res.Verdict, res.Note, res.SHA
+	run.RecordedAt, run.UpdatedAt = &recordedAt, now
+	f.runs[runID] = run
 	return true, nil
 }
 

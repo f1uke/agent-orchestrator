@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite/gen"
 )
@@ -28,7 +30,7 @@ func (s *Store) ListSmokeChecksBySession(ctx context.Context, id domain.SessionI
 		if err != nil {
 			return nil, err
 		}
-		if err := s.loadSmokeEvidence(ctx, s.qr, &check); err != nil {
+		if err := s.loadSmokeMachineLane(ctx, s.qr, &check); err != nil {
 			return nil, err
 		}
 		checks = append(checks, check)
@@ -49,7 +51,7 @@ func (s *Store) GetSmokeCheck(ctx context.Context, id string) (domain.SmokeCheck
 	if err != nil {
 		return domain.SmokeCheck{}, false, err
 	}
-	if err := s.loadSmokeEvidence(ctx, s.qr, &check); err != nil {
+	if err := s.loadSmokeMachineLane(ctx, s.qr, &check); err != nil {
 		return domain.SmokeCheck{}, false, err
 	}
 	return check, true, nil
@@ -166,23 +168,78 @@ func (s *Store) ResetSmokeCheck(ctx context.Context, id string, now time.Time) (
 	return reset, nil
 }
 
-// SetSmokeAgentResult writes the MACHINE's result for a case - verdict, note,
-// when it ran and the commit it ran against - leaving every user-runtime field
-// alone. ok=false when the case does not exist OR is retired: a frozen case is
-// not one anything is asked to run.
-func (s *Store) SetSmokeAgentResult(ctx context.Context, id string, res domain.SmokeAgentResult, ranAt, now time.Time) (bool, error) {
+// OpenSmokeRun returns the case's open run - the round the machine is in the
+// middle of - creating one when there is none. It is what an agent evidence
+// upload calls, so a capture always has a run to belong to and no later sweep
+// has to guess which round an image came from.
+//
+// ok=false when the case does not exist OR is retired: a frozen case is not one
+// anything is asked to run, and the insert enforces that itself rather than
+// trusting the caller to have looked first.
+func (s *Store) OpenSmokeRun(ctx context.Context, checkID string, sessionID domain.SessionID, now time.Time) (domain.SmokeRun, bool, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	n, err := s.qw.SetSmokeAgentResult(ctx, gen.SetSmokeAgentResultParams{
-		AgentVerdict: res.Verdict,
-		AgentNote:    res.Note,
-		AgentRanAt:   sql.NullTime{Time: ranAt, Valid: true},
-		AgentSha:     res.SHA,
-		UpdatedAt:    now,
-		ID:           id,
+	var run domain.SmokeRun
+	opened := false
+	err := s.inTx(ctx, "open smoke run", func(q *gen.Queries) error {
+		row, err := q.GetOpenSmokeRun(ctx, checkID)
+		if err == nil {
+			run, opened = smokeRunFromRow(row), true
+			return nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		seq, err := q.NextSmokeRunSeq(ctx, checkID)
+		if err != nil {
+			return err
+		}
+		id := "run_" + uuid.NewString()
+		n, err := q.InsertSmokeRun(ctx, gen.InsertSmokeRunParams{
+			ID:        id,
+			CheckID:   checkID,
+			SessionID: sessionID,
+			Seq:       seq,
+			CreatedAt: now,
+			UpdatedAt: now,
+			ID_2:      checkID,
+		})
+		if err != nil || n == 0 {
+			return err
+		}
+		run, opened = domain.SmokeRun{
+			ID:        id,
+			CheckID:   checkID,
+			SessionID: sessionID,
+			Seq:       int(seq),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}, true
+		return nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("set smoke agent result %s: %w", id, err)
+		return domain.SmokeRun{}, false, err
+	}
+	return run, opened, nil
+}
+
+// CloseSmokeRun writes the MACHINE's result onto a run - verdict, note and the
+// commit it ran against - leaving every user-runtime field alone. It cannot
+// reach the case row at all. ok=false when the run does not exist or already
+// carries a result, so a recorded round is never rewritten.
+func (s *Store) CloseSmokeRun(ctx context.Context, runID string, res domain.SmokeAgentResult, recordedAt, now time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.CloseSmokeRun(ctx, gen.CloseSmokeRunParams{
+		Verdict:    res.Verdict,
+		Note:       res.Note,
+		Sha:        res.SHA,
+		RecordedAt: sql.NullTime{Time: recordedAt, Valid: true},
+		UpdatedAt:  now,
+		ID:         runID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("close smoke run %s: %w", runID, err)
 	}
 	return n > 0, nil
 }
@@ -250,6 +307,7 @@ func (s *Store) InsertSmokeEvidence(ctx context.Context, ev domain.SmokeEvidence
 		SizeBytes: ev.SizeBytes,
 		CreatedAt: ev.CreatedAt,
 		Source:    evidenceSourceOrUser(ev.Source),
+		RunID:     ev.RunID,
 	})
 }
 
@@ -275,6 +333,39 @@ func (s *Store) GetSmokeEvidence(ctx context.Context, id string) (domain.SmokeEv
 		return domain.SmokeEvidence{}, false, fmt.Errorf("get smoke evidence %s: %w", id, err)
 	}
 	return smokeEvidenceFromRow(row), true, nil
+}
+
+// loadSmokeMachineLane fills the machine's half of a case: its run history, the
+// derived "what does the machine say NOW" fields, and its evidence.
+func (s *Store) loadSmokeMachineLane(ctx context.Context, q *gen.Queries, check *domain.SmokeCheck) error {
+	if err := s.loadSmokeEvidence(ctx, q, check); err != nil {
+		return err
+	}
+	rows, err := q.ListSmokeRunsByCheck(ctx, check.ID)
+	if err != nil {
+		return fmt.Errorf("list smoke runs for check %s: %w", check.ID, err)
+	}
+	check.Runs = make([]domain.SmokeRun, 0, len(rows))
+	for _, row := range rows {
+		check.Runs = append(check.Runs, smokeRunFromRow(row))
+	}
+	applyLatestSmokeRun(check)
+	return nil
+}
+
+// applyLatestSmokeRun projects the case's current machine result out of its run
+// history. The four Agent* fields are DERIVED, never stored: keeping them on the
+// case row beside the runs would be a second source of truth for one fact, and
+// the two would drift the first time anything wrote one without the other.
+func applyLatestSmokeRun(check *domain.SmokeCheck) {
+	run, ok := check.LatestRun()
+	if !ok {
+		return
+	}
+	check.AgentVerdict = run.Verdict
+	check.AgentNote = run.Note
+	check.AgentSHA = run.SHA
+	check.AgentRanAt = run.RecordedAt
 }
 
 // loadSmokeEvidence fills a case's TWO evidence lists, split by provenance: what
@@ -336,11 +427,8 @@ func smokeCheckFromRow(r gen.SmokeCheck) (domain.SmokeCheck, error) {
 		Note:           r.Note,
 		Evidence:       []domain.SmokeEvidence{},
 		DecidedAt:      nullTimePtr(r.DecidedAt),
-		AgentVerdict:   r.AgentVerdict,
-		AgentNote:      r.AgentNote,
+		Runs:           []domain.SmokeRun{},
 		AgentEvidence:  []domain.SmokeEvidence{},
-		AgentRanAt:     nullTimePtr(r.AgentRanAt),
-		AgentSHA:       r.AgentSha,
 		RetiredAt:      nullTimePtr(r.RetiredAt),
 		RetiredReason:  r.RetiredReason,
 		AuthoredBy:     r.AuthoredBy,
@@ -363,6 +451,22 @@ func smokeEvidenceFromRow(r gen.SmokeEvidence) domain.SmokeEvidence {
 		SizeBytes: r.SizeBytes,
 		CreatedAt: r.CreatedAt,
 		Source:    evidenceSourceOrUser(r.Source),
+		RunID:     r.RunID,
+	}
+}
+
+func smokeRunFromRow(r gen.SmokeRun) domain.SmokeRun {
+	return domain.SmokeRun{
+		ID:         r.ID,
+		CheckID:    r.CheckID,
+		SessionID:  r.SessionID,
+		Seq:        int(r.Seq),
+		Verdict:    r.Verdict,
+		Note:       r.Note,
+		SHA:        r.Sha,
+		RecordedAt: nullTimePtr(r.RecordedAt),
+		CreatedAt:  r.CreatedAt,
+		UpdatedAt:  r.UpdatedAt,
 	}
 }
 

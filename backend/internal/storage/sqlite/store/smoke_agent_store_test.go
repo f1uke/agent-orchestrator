@@ -6,12 +6,35 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
-// TestSmokeAgentResultAndUserResultAreDisjointColumns exercises the migration
-// and the two write statements against real SQLite: writing one result must not
-// move a byte of the other, in either direction.
-func TestSmokeAgentResultAndUserResultAreDisjointColumns(t *testing.T) {
+// recordRun opens and closes a machine run in one call - what `ao smoke record`
+// does when it captured nothing - so a test that only cares about the result can
+// say so in one line.
+func recordRun(t *testing.T, s *sqlite.Store, checkID string, sessionID domain.SessionID, res domain.SmokeAgentResult, at time.Time) (domain.SmokeRun, bool) {
+	t.Helper()
+	ctx := context.Background()
+	run, opened, err := s.OpenSmokeRun(ctx, checkID, sessionID, at)
+	if err != nil {
+		t.Fatalf("open run: %v", err)
+	}
+	if !opened {
+		return domain.SmokeRun{}, false
+	}
+	closed, err := s.CloseSmokeRun(ctx, run.ID, res, at, at)
+	if err != nil {
+		t.Fatalf("close run: %v", err)
+	}
+	return run, closed
+}
+
+// TestSmokeAgentResultAndUserResultAreDisjoint exercises the migration and the
+// two write paths against real SQLite: writing one result must not move a byte
+// of the other, in either direction. The machine's now lives in its own TABLE,
+// so "disjoint" is structural - the statement that writes a run cannot name a
+// column on the case row at all.
+func TestSmokeAgentResultAndUserResultAreDisjoint(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	seedProject(t, s, "smk")
@@ -34,10 +57,10 @@ func TestSmokeAgentResultAndUserResultAreDisjointColumns(t *testing.T) {
 		t.Fatalf("fresh case = %q/%q/%v, want pending + no machine result", check.Verdict, check.AgentVerdict, check.AgentRanAt)
 	}
 
-	if ok, err := s.SetSmokeAgentResult(ctx, "a", domain.SmokeAgentResult{
+	if _, ok := recordRun(t, s, "a", rec.ID, domain.SmokeAgentResult{
 		Verdict: domain.SmokePass, Note: "ran clean", SHA: "abc123",
-	}, now, now); err != nil || !ok {
-		t.Fatalf("set agent result: ok=%v err=%v", ok, err)
+	}, now); !ok {
+		t.Fatal("recording a machine run on an active case failed")
 	}
 	check, _, _ = s.GetSmokeCheck(ctx, "a")
 	if check.Verdict != domain.SmokePending || check.Note != "" || check.DecidedAt != nil {
@@ -194,9 +217,9 @@ func TestRetiredSmokeCheckSurvivesAReAuthor(t *testing.T) {
 	}
 }
 
-// TestSetSmokeAgentResultSkipsARetiredCase: the frozen rule is enforced in the
-// statement itself, not only by the service's read-then-write.
-func TestSetSmokeAgentResultSkipsARetiredCase(t *testing.T) {
+// TestOpeningARunSkipsARetiredCase: the frozen rule is enforced in the statement
+// itself, not only by the service's read-then-write.
+func TestOpeningARunSkipsARetiredCase(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	seedProject(t, s, "smk")
@@ -212,15 +235,147 @@ func TestSetSmokeAgentResultSkipsARetiredCase(t *testing.T) {
 	if ok, err := s.RetireSmokeCheck(ctx, "a", "covered", now, now); err != nil || !ok {
 		t.Fatalf("retire: ok=%v err=%v", ok, err)
 	}
-	ok, err := s.SetSmokeAgentResult(ctx, "a", domain.SmokeAgentResult{Verdict: domain.SmokePass}, now, now)
-	if err != nil {
-		t.Fatalf("set agent result: %v", err)
-	}
-	if ok {
-		t.Fatal("a retired case accepted a machine result")
+	if _, ok := recordRun(t, s, "a", rec.ID, domain.SmokeAgentResult{Verdict: domain.SmokePass}, now); ok {
+		t.Fatal("a retired case accepted a machine run")
 	}
 	check, _, _ := s.GetSmokeCheck(ctx, "a")
-	if check.AgentVerdict != "" {
-		t.Errorf("agent verdict = %q, want empty", check.AgentVerdict)
+	if len(check.Runs) != 0 || check.AgentVerdict != "" {
+		t.Errorf("runs = %d, agent verdict = %q, want none/empty", len(check.Runs), check.AgentVerdict)
+	}
+}
+
+// TestMachineRunsAccumulateAndEvidenceStaysWithItsRun is the whole point of the
+// run table, against real SQLite: a case re-run on a newer commit keeps BOTH
+// rounds, and each round's captures stay under the verdict they belong to. The
+// shape this replaces destroyed the earlier verdict and pooled its screenshots
+// under the newer one, which is how a person came to read a stale image as
+// current evidence for a result that contradicted it.
+func TestMachineRunsAccumulateAndEvidenceStaysWithItsRun(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "smk")
+	rec, err := s.CreateSession(ctx, sampleRecord("smk"))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID,
+		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, domain.SmokeAuthor{}, now); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+
+	// Round 1 at the old commit: a capture opens the run, then it fails.
+	first, opened, err := s.OpenSmokeRun(ctx, "a", rec.ID, now)
+	if err != nil || !opened {
+		t.Fatalf("open run 1: opened=%v err=%v", opened, err)
+	}
+	seedRunEvidence(t, s, "ev1", "a", rec.ID, first.ID, now)
+	// A second capture in the same round joins the SAME run rather than starting
+	// another: one `ao smoke record` is one run, whatever it uploads.
+	again, _, err := s.OpenSmokeRun(ctx, "a", rec.ID, now)
+	if err != nil {
+		t.Fatalf("re-open run 1: %v", err)
+	}
+	if again.ID != first.ID {
+		t.Fatalf("a second capture opened run %s, want the round already open (%s)", again.ID, first.ID)
+	}
+	if ok, err := s.CloseSmokeRun(ctx, first.ID, domain.SmokeAgentResult{
+		Verdict: domain.SmokeFail, Note: "clipped at 320px", SHA: "d44ad432c",
+	}, now, now); err != nil || !ok {
+		t.Fatalf("close run 1: ok=%v err=%v", ok, err)
+	}
+
+	// Round 2 at the new commit: the opposite result.
+	later := now.Add(time.Hour)
+	second, opened, err := s.OpenSmokeRun(ctx, "a", rec.ID, later)
+	if err != nil || !opened {
+		t.Fatalf("open run 2: opened=%v err=%v", opened, err)
+	}
+	if second.ID == first.ID || second.Seq != 2 {
+		t.Fatalf("run 2 = %s seq %d, want a new row at seq 2 - a re-run must not overwrite the round before it", second.ID, second.Seq)
+	}
+	seedRunEvidence(t, s, "ev2", "a", rec.ID, second.ID, later)
+	if ok, err := s.CloseSmokeRun(ctx, second.ID, domain.SmokeAgentResult{
+		Verdict: domain.SmokePass, Note: "renders clean", SHA: "9f10c22a1",
+	}, later, later); err != nil || !ok {
+		t.Fatalf("close run 2: ok=%v err=%v", ok, err)
+	}
+
+	check, _, err := s.GetSmokeCheck(ctx, "a")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(check.Runs) != 2 {
+		t.Fatalf("runs = %d, want both rounds", len(check.Runs))
+	}
+	if check.Runs[0].Verdict != domain.SmokeFail || check.Runs[0].SHA != "d44ad432c" {
+		t.Errorf("run 1 = %q at %q, want the earlier failure preserved", check.Runs[0].Verdict, check.Runs[0].SHA)
+	}
+	if check.Runs[1].Verdict != domain.SmokePass || check.Runs[1].SHA != "9f10c22a1" {
+		t.Errorf("run 2 = %q at %q", check.Runs[1].Verdict, check.Runs[1].SHA)
+	}
+	// The four Agent* fields are the LATEST run, derived on read.
+	if check.AgentVerdict != domain.SmokePass || check.AgentNote != "renders clean" || check.AgentSHA != "9f10c22a1" || check.AgentRanAt == nil {
+		t.Errorf("derived machine result = %q/%q/%q, want the latest run's", check.AgentVerdict, check.AgentNote, check.AgentSHA)
+	}
+	if got := check.RunEvidence(first.ID); len(got) != 1 || got[0].ID != "ev1" {
+		t.Errorf("run 1 evidence = %+v, want only ev1 - the capture from the round that failed", got)
+	}
+	if got := check.RunEvidence(second.ID); len(got) != 1 || got[0].ID != "ev2" {
+		t.Errorf("run 2 evidence = %+v, want only ev2", got)
+	}
+	if got := check.UnknownRunEvidence(); len(got) != 0 {
+		t.Errorf("unknown-run evidence = %+v, want none: every capture here was taken inside a run", got)
+	}
+}
+
+// TestAnOpenRunIsNotAResult: a round the machine opened, captured into and never
+// concluded must not present itself as the case's machine result. It is what a
+// crashed or abandoned run leaves behind, and reading it as a verdict would put
+// an empty conclusion in front of a person as if it were one.
+func TestAnOpenRunIsNotAResult(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "smk")
+	rec, err := s.CreateSession(ctx, sampleRecord("smk"))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID,
+		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, domain.SmokeAuthor{}, now); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+	if _, ok := recordRun(t, s, "a", rec.ID, domain.SmokeAgentResult{Verdict: domain.SmokePass, SHA: "abc123"}, now); !ok {
+		t.Fatal("record a run: not opened")
+	}
+	// A later round that captured and never concluded.
+	open, opened, err := s.OpenSmokeRun(ctx, "a", rec.ID, now.Add(time.Hour))
+	if err != nil || !opened {
+		t.Fatalf("open run 2: opened=%v err=%v", opened, err)
+	}
+	seedRunEvidence(t, s, "ev1", "a", rec.ID, open.ID, now.Add(time.Hour))
+
+	check, _, _ := s.GetSmokeCheck(ctx, "a")
+	if len(check.Runs) != 2 {
+		t.Fatalf("runs = %d, want the recorded one plus the open one", len(check.Runs))
+	}
+	if check.Runs[1].Recorded() {
+		t.Error("the open run reads as recorded")
+	}
+	if check.AgentVerdict != domain.SmokePass || check.AgentSHA != "abc123" {
+		t.Errorf("derived result = %q at %q, want the last RECORDED run - an unfinished round is not a result", check.AgentVerdict, check.AgentSHA)
+	}
+}
+
+// seedRunEvidence records one machine capture inside a run.
+func seedRunEvidence(t *testing.T, s *sqlite.Store, id, checkID string, sessionID domain.SessionID, runID string, at time.Time) {
+	t.Helper()
+	if err := s.InsertSmokeEvidence(context.Background(), domain.SmokeEvidence{
+		ID: id, CheckID: checkID, SessionID: sessionID, Kind: "image",
+		Filename: id + ".png", Mime: "image/png", SizeBytes: 10,
+		CreatedAt: at, Source: domain.SmokeEvidenceAgent, RunID: runID,
+	}); err != nil {
+		t.Fatalf("seed evidence %s: %v", id, err)
 	}
 }

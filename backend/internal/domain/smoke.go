@@ -42,9 +42,10 @@ const (
 //
 // # Two results, never one
 //
-// A case carries a SECOND, independent result - the machine's
-// (AgentVerdict/AgentNote/AgentEvidence/AgentRanAt/AgentSHA, written only by
-// `ao smoke record`). The two are never merged because they answer different
+// A case carries a SECOND, independent result - the machine's: a run history
+// (Runs, one row per `ao smoke record`) whose latest entry is surfaced as
+// AgentVerdict/AgentNote/AgentRanAt/AgentSHA. The two are never merged because
+// they answer different
 // questions: a machine answers "did the steps run", a human answers "does this
 // actually work for a person". Recording latency, dead drag-scroll, keystrokes
 // never arriving, a tab pausing when unfocused, control lost after a lease lapse
@@ -71,14 +72,30 @@ type SmokeCheck struct {
 	Note      string          `json:"note"`
 	Evidence  []SmokeEvidence `json:"evidence"`
 	DecidedAt *time.Time      `json:"decidedAt,omitempty"`
-	// AgentVerdict..AgentSHA are the MACHINE's, written only by `ao smoke record`.
+	// Runs is the machine's history on this case, oldest first: one row per
+	// `ao smoke record`, each with its own verdict, note, commit and evidence.
+	// It is a list because it used to be four columns, and four columns meant
+	// every re-run destroyed the result before it - so "this used to fail and now
+	// passes" could only ever be reconstructed from prose in a note.
+	Runs []SmokeRun `json:"runs"`
+	// AgentVerdict..AgentSHA are the MACHINE's, DERIVED from the latest recorded
+	// run (LatestRun) rather than stored. They are the answer to "what does the
+	// machine say about this case NOW", which is what the gate, the progress
+	// counts and the collapsed chip all ask; the history behind that answer is
+	// Runs.
+	//
 	// AgentVerdict is "" (not "pending") when nothing has judged the case: the
 	// user's default means "not decided yet", while "" here also covers "no
-	// machine ever will" - a paint/focus/timing/feel case is the human's alone.
-	// AgentRanAt set with an empty AgentVerdict is the evidence-only state: the
-	// machine drove the app and captured what it saw without judging it.
-	AgentVerdict  SmokeVerdict    `json:"agentVerdict,omitempty"`
-	AgentNote     string          `json:"agentNote,omitempty"`
+	// machine ever will" - a case whose evidence cannot answer the question is
+	// the human's alone. AgentRanAt set with an empty AgentVerdict is the
+	// evidence-only state: the machine drove the app and captured what it saw
+	// without concluding.
+	AgentVerdict SmokeVerdict `json:"agentVerdict,omitempty"`
+	AgentNote    string       `json:"agentNote,omitempty"`
+	// AgentEvidence is every machine artifact on the case, across all runs and
+	// including any that belongs to no run. It stays FLAT because the report and
+	// the Jira post need it flat; which run captured a file is on the file
+	// (SmokeEvidence.RunID), so the two views never duplicate a row.
 	AgentEvidence []SmokeEvidence `json:"agentEvidence"`
 	AgentRanAt    *time.Time      `json:"agentRanAt,omitempty"`
 	// AgentSHA is the commit the machine ran the case against, so a recorded
@@ -120,6 +137,36 @@ type SmokeCheck struct {
 // Retired reports whether a case has been retired out of the active checklist.
 func (c SmokeCheck) Retired() bool { return c.RetiredAt != nil }
 
+// LatestRun returns the most recent RECORDED run - the case's current machine
+// result - and ok=false when no machine has concluded anything. A run still open
+// (captured, not yet concluded) is deliberately skipped: it is not a result, and
+// treating it as one would let a half-finished round replace a real verdict.
+func (c SmokeCheck) LatestRun() (SmokeRun, bool) {
+	for i := len(c.Runs) - 1; i >= 0; i-- {
+		if c.Runs[i].Recorded() {
+			return c.Runs[i], true
+		}
+	}
+	return SmokeRun{}, false
+}
+
+// RunEvidence returns the machine artifacts captured during one run.
+func (c SmokeCheck) RunEvidence(runID string) []SmokeEvidence {
+	out := []SmokeEvidence{}
+	for _, ev := range c.AgentEvidence {
+		if ev.RunID == runID {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// UnknownRunEvidence returns machine artifacts that belong to no run: captures
+// taken before AO kept run history, whose result was overwritten and is gone.
+// They are grouped apart rather than attributed to the newest run, because a
+// stale image read as current evidence is worse than an image with no verdict.
+func (c SmokeCheck) UnknownRunEvidence() []SmokeEvidence { return c.RunEvidence("") }
+
 // SmokeAuthoredCase is the worker-authored subset of a case, supplied by
 // `ao smoke set`. Seq is assigned from payload position (1-based) and ID is
 // resolved (derived from Name when the worker omits it) before it reaches the
@@ -137,7 +184,7 @@ type SmokeAuthoredCase struct {
 
 // SmokeAgentResult is the machine-produced half of a case's result, supplied by
 // `ao smoke record`. It is a separate input type from SmokeAuthoredCase for the
-// same reason the columns are separate: the writer of one must never be able to
+// same reason the tables are separate: the writer of one must never be able to
 // reach the fields of the other. Verdict may be empty, which records "ran it,
 // captured what I saw, did not judge it" - the evidence-only state.
 type SmokeAgentResult struct {
@@ -147,6 +194,39 @@ type SmokeAgentResult struct {
 	// not resolve one. Never parsed, only compared.
 	SHA string
 }
+
+// SmokeRun is ONE round of a machine running a case: what it concluded, what it
+// said, and which commit it ran against. One row per `ao smoke record`, so a
+// case accumulates its machine history instead of overwriting it.
+//
+// A run OPENS when the machine attaches its first artifact for the round and
+// CLOSES when the result lands. RecordedAt nil is therefore a real state, not
+// missing data: the machine captured this and never concluded - which is what a
+// crashed or abandoned round leaves behind, and used to look identical to
+// evidence pooled under someone else's verdict.
+type SmokeRun struct {
+	ID        string    `json:"id"`
+	CheckID   string    `json:"checkId"`
+	SessionID SessionID `json:"sessionId"`
+	Seq       int       `json:"seq"` // 1-based per case; drives "RUN N"
+	// Verdict is "" for a run that captured evidence without judging it, which
+	// is a complete record and not a weaker verdict.
+	Verdict SmokeVerdict `json:"verdict,omitempty"`
+	Note    string       `json:"note,omitempty"`
+	// SHA is the commit this round ran against. It is what makes an old run
+	// readable as OLD rather than as wrong when a later run contradicts it.
+	SHA string `json:"sha,omitempty"`
+	// RecordedAt is when the result landed; nil while the run is still open.
+	RecordedAt *time.Time `json:"recordedAt,omitempty"`
+	// CreatedAt is when the round opened - its first capture, or the record
+	// itself when it captured nothing.
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// Recorded reports whether the run has a result, as opposed to being a round
+// the machine opened, captured into and never concluded.
+func (r SmokeRun) Recorded() bool { return r.RecordedAt != nil }
 
 // SmokeEvidence is one screenshot or short clip attached to a case - by the user
 // while playing it, or by a machine while running it, told apart by Source. The
@@ -165,6 +245,14 @@ type SmokeEvidence struct {
 	// (`ao smoke record --evidence`). Rows written before provenance existed
 	// read "user", which is true - the Tests tab was the only writer.
 	Source SmokeEvidenceSource `json:"source"`
+	// RunID is the machine run that captured this file, and "" means the row
+	// belongs to no run. There are exactly two ways to be in that state: the user
+	// attached it (the user's lane has no runs), or it is machine evidence from
+	// before AO kept run history. The second reads as an UNKNOWN run and never as
+	// the newest one - the result it belonged to may have been overwritten by a
+	// later, contradicting one, and showing it under that verdict would make a
+	// stale capture look like current evidence.
+	RunID string `json:"runId,omitempty"`
 }
 
 // SmokeAuthor is who is making an authoring write: the calling session and the
