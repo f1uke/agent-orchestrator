@@ -27,6 +27,7 @@ vi.mock("../monaco-setup", () => ({
 }));
 
 const { registerCompletion } = await import("./completion-provider");
+const { resetLanes } = await import("./request-lane");
 import type { CompletionCapability, CompletionDocument } from "./completion-provider";
 import type { LspCompletionList } from "./completion-mapping";
 import type { LspClient } from "./lsp-client";
@@ -136,6 +137,10 @@ beforeEach(() => {
 });
 afterEach(() => {
 	for (const r of open.splice(0)) r.dispose();
+	// The request lane is process-global and shared with hover and references.
+	// A test that deliberately leaves a request unanswered would otherwise wedge
+	// every later one on the same document.
+	resetLanes();
 });
 function register(document: CompletionDocument, capability: CompletionCapability | null = SWIFT) {
 	const r = registerCompletion(document, capability);

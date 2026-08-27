@@ -60,6 +60,11 @@ export const EDITOR_THEME_TOKENS = {
 		"--scrollbar-thumb": "#ffffff29",
 		"--scrollbar-thumb-hover": "#ffffff47",
 		"--interactive-hover": "#ffffff0a",
+		// The squiggle and the ruler mark, kept in step with the header's own
+		// problem count (`--inbox-red` / `--inbox-amber` in `styles.css`) — one
+		// file, two places saying the same thing, and they have to agree.
+		"--diagnostic-error": "#ef6a63",
+		"--diagnostic-warning": "#e0a544",
 	},
 	light: {
 		"--code-plain": "#262626",
@@ -86,6 +91,8 @@ export const EDITOR_THEME_TOKENS = {
 		"--scrollbar-thumb": "#0000002e",
 		"--scrollbar-thumb-hover": "#0000004d",
 		"--interactive-hover": "#0000000a",
+		"--diagnostic-error": "#c0392b",
+		"--diagnostic-warning": "#9a6b00",
 	},
 } as const;
 
@@ -192,6 +199,20 @@ function buildTheme(name: EditorThemeName, type: "dark" | "light", t: Tokens) {
 			"editorWhitespace.foreground": t["--border-1"],
 			"editorBracketMatch.background": tint(accent, 0.16),
 			"editorBracketMatch.border": tint(accent, 0.45),
+			// Diagnostics. Monaco draws the squiggle, the overview-ruler mark and
+			// the minimap mark itself once `setModelMarkers` is called
+			// (`markerDecorationsService.js`) — but only in whatever colour the
+			// theme names, and a theme that names none leaves an error the same
+			// colour as an information hint.
+			"editorError.foreground": t["--diagnostic-error"],
+			"editorWarning.foreground": t["--diagnostic-warning"],
+			"editorInfo.foreground": accent,
+			"editorHint.foreground": t["--fg-passive"],
+			"editorOverviewRuler.errorForeground": tint(t["--diagnostic-error"], 0.8),
+			"editorOverviewRuler.warningForeground": tint(t["--diagnostic-warning"], 0.8),
+			"editorOverviewRuler.infoForeground": tint(accent, 0.8),
+			"minimap.errorHighlight": tint(t["--diagnostic-error"], 0.8),
+			"minimap.warningHighlight": tint(t["--diagnostic-warning"], 0.8),
 			"editorOverviewRuler.border": "#00000000",
 			"editorOverviewRuler.findMatchForeground": tint(accent, 0.6),
 			"minimap.background": t["--viewer-bg"],

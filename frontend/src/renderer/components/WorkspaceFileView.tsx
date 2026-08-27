@@ -124,6 +124,7 @@ export function WorkspaceFileView({
 	const [serverState, setServerState] = useState<{ state: LanguageServerHandle["state"]; detail?: string } | null>(
 		null,
 	);
+	const [problems, setProblems] = useState<{ errors: number; warnings: number }>({ errors: 0, warnings: 0 });
 	const [dirty, setDirty] = useState(false);
 	const [mode, setMode] = useState<Mode>("browse");
 	const [drift, setDrift] = useState<Drift | null>(null);
@@ -159,6 +160,7 @@ export function WorkspaceFileView({
 	const handleEditorHandle = useCallback((next: EditorHandle | null) => {
 		handleRef.current = next;
 	}, []);
+	const handleDiagnostics = useCallback((counts: { errors: number; warnings: number }) => setProblems(counts), []);
 
 	// A language server needs an on-disk path. Inside the workspace the viewer
 	// carries a relative one; outside it (a knowledge-store note, GOROOT) the path
@@ -207,7 +209,15 @@ export function WorkspaceFileView({
 				return {
 					text: `${language.toLowerCase()} ⌘click · ⌃space`,
 					tone: ACCENT,
-					title: serverState.detail || "Go to definition and completion are available.",
+					// The tooltip is where the rest of the surface is discoverable.
+					// ⌥F12 and ⇧F12 are Monaco's own bindings and need Fn on a Mac
+					// laptop, so the context menu is named first: it is the path that
+					// works on every keyboard.
+					title:
+						serverState.detail ||
+						"Go to definition (⌘click), completion (⌃space), the type under the pointer on hover, " +
+							"and — from the editor's right-click menu — Peek Definition (⌥F12) and " +
+							"Go to References (⇧F12).",
 				};
 			case "failed":
 				return {
@@ -277,6 +287,10 @@ export function WorkspaceFileView({
 		setSavedFlash(false);
 		setMode("browse");
 		setBaseHash(undefined);
+		// 🗝 Cleared per file, not per server. The previous file's squiggles are
+		// gone from the editor the moment its model is; a header that kept
+		// counting them would be the one thing on screen still claiming they exist.
+		setProblems({ errors: 0, warnings: 0 });
 	}, [sessionId, path]);
 
 	useEffect(() => {
@@ -485,6 +499,24 @@ export function WorkspaceFileView({
 						{changedCount} uncommitted
 					</span>
 				)}
+				{problems.errors + problems.warnings > 0 && (
+					<span
+						data-testid="lsp-problems"
+						title={`${problems.errors} error${problems.errors === 1 ? "" : "s"} and ${problems.warnings} warning${
+							problems.warnings === 1 ? "" : "s"
+						} reported by the language server. Hover a squiggle for the message.`}
+						style={{
+							fontFamily: MONO,
+							fontSize: 11.5,
+							flex: "none",
+							color: problems.errors > 0 ? P.red : P.amber,
+						}}
+					>
+						{problems.errors > 0 && `${problems.errors}⨯`}
+						{problems.errors > 0 && problems.warnings > 0 && " "}
+						{problems.warnings > 0 && `${problems.warnings}⚠`}
+					</span>
+				)}
 				{serverLabel && (
 					<span
 						data-testid="lsp-status"
@@ -612,6 +644,7 @@ export function WorkspaceFileView({
 						workspaceRoot={workspaceRoot}
 						onOpenFile={onOpenFile}
 						onServerState={handleServerState}
+						onDiagnostics={handleDiagnostics}
 						onDirtyChange={setDirty}
 						onSave={doSave}
 						onHandle={handleEditorHandle}

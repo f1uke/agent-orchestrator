@@ -183,7 +183,7 @@ describe("resolveSwiftWorkspace", () => {
 			});
 		});
 
-		test("says out loud that symbol search is off, and why", () => {
+		test("says out loud that symbol search AND references are off, and what still works", () => {
 			// 🗝 Not a limitation to leave implicit. sourcekit-lsp indexes a package by
 			// BUILDING it into `.build/index-build` inside the package - measured, and
 			// it ignores both `--scratch-path` and `swiftPM.scratchPath` while doing
@@ -192,7 +192,13 @@ describe("resolveSwiftWorkspace", () => {
 			const resolved = resolveSwiftWorkspace({ workspaceRoot: pkg, dataDir, env: {}, derivedDataDir });
 			if (resolved.kind !== "swiftpm") throw new Error("unreachable");
 			expect(resolved.warning).toBe(SWIFTPM_NO_SYMBOLS);
-			expect(resolved.warning).toMatch(/go to definition works/i);
+			// 🗝 References belongs in the same sentence, and it is measured to:
+			// `textDocument/references` is answered from the index store, so on a
+			// package with indexing off it returns 0 hits in 1 ms with no error,
+			// while hover answers in 6 ms. Naming only symbol search would leave a
+			// reader watching ⇧F12 do nothing after being told it should work.
+			expect(resolved.warning).toMatch(/find all references/i);
+			expect(resolved.warning).toMatch(/go to definition, hover and completion work/i);
 		});
 	});
 

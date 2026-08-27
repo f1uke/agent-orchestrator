@@ -93,6 +93,17 @@ jobs:
   # populated widget, just missing the item the reader was typing towards. All
   # three are silent, and only a real browser can be asked what it rendered.
   #
+  # e2e/editor-lsp-surface.spec.ts is the eighth: diagnostics, hover, find all
+  # references and peek definition, all of which fail by showing NOTHING. LSP
+  # numbers its severities 1..4 down in urgency and Monaco's MarkerSeverity is a
+  # bitmask counting up, so a cast type-checks and turns every error into a hint -
+  # which draws no squiggle at all, on a file that has genuine errors in it. And
+  # monaco 0.56's standalone `createModelReference` resolves a preview model by
+  # SYNCHRONOUS lookup and rejects when there is none, so a peek widget opens
+  # with a blank preview pane for every target outside the current file - a
+  # perfectly plausible widget, proving nothing. Only a browser can be asked
+  # whether a squiggle was painted and whether the peek pane has source in it.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -121,4 +132,4 @@ jobs:
         run: >-
           npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
           e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
-          e2e/editor-completion.spec.ts e2e/files-perf.spec.ts
+          e2e/editor-completion.spec.ts e2e/editor-lsp-surface.spec.ts e2e/files-perf.spec.ts

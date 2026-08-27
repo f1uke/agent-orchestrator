@@ -32,6 +32,17 @@ if (withLsp) {
 	installFakeLspBridge({
 		completionDelayMs: params.has("lspDelay") ? Number(params.get("lspDelay")) : undefined,
 		failAttach: params.get("lspFail") ?? undefined,
+		// `?lspDiagnosticsDelay=` reproduces the wait a reader actually sees — the
+		// real servers publish 0.9-5.0 s after a file opens, and what the editor
+		// looks like in that window is the whole point of the feature.
+		diagnosticsDelayMs: params.has("lspDiagnosticsDelay") ? Number(params.get("lspDiagnosticsDelay")) : undefined,
+		// `?lspNoHover=1` / `?lspNoReferences=1`: a server that advertises neither,
+		// so a spec can ask what is SAID about it rather than only that nothing
+		// happened.
+		features: {
+			hover: params.get("lspNoHover") !== "1",
+			references: params.get("lspNoReferences") !== "1",
+		},
 	});
 }
 

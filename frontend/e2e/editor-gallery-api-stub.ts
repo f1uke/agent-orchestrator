@@ -30,6 +30,42 @@ const labelParam = new URLSearchParams(window.location.search).get("label");
 const SOURCE = labelParam ? fixtureWithLabel(labelParam) : SWIFT_FIXTURE;
 
 /**
+ * A SECOND file, so a peek widget's preview pane can be told apart from the file
+ * the reader is already in.
+ *
+ * 🗝 Monaco's standalone `createModelReference` resolves a preview by
+ * synchronous model lookup and rejects when there is none — so peek definition
+ * and the references widget open EMPTY for every target outside the current
+ * file unless the app materialises a model first. That failure is invisible
+ * without a second file to look for.
+ */
+export const GALLERY_OTHER_PATH = "Sources/OfferStore.swift";
+export const GALLERY_OTHER_SOURCE = `import Foundation
+
+struct Offer {
+    let identifier: String
+    let title: String
+}
+
+final class OfferStore {
+    private(set) var offers: [Offer] = []
+
+    func reload() {
+        offers = []
+    }
+}
+`;
+
+function fileFor(path: string): { path: string; source: string } | null {
+	if (path === GALLERY_PATH) return { path, source: SOURCE };
+	// The peek preview asks for an ABSOLUTE path, which is what a language server
+	// answers with.
+	if (path.endsWith(GALLERY_OTHER_PATH)) return { path, source: GALLERY_OTHER_SOURCE };
+	if (path.endsWith(GALLERY_PATH)) return { path, source: SOURCE };
+	return null;
+}
+
+/**
  * 🗝 Registered BEFORE fetch is patched, and it is the half that actually works
  * now: under `dev:web` (VITE_NO_ELECTRON=1) the viewer serves mock data and
  * never issues a request, so an interception-only stub would hand the gallery
@@ -39,15 +75,16 @@ const SOURCE = labelParam ? fixtureWithLabel(labelParam) : SWIFT_FIXTURE;
  */
 (globalThis as { __aoMockWorkspaceFile?: unknown }).__aoMockWorkspaceFile = {
 	file(path: string) {
-		if (path !== GALLERY_PATH) return null;
+		const found = fileFor(path);
+		if (!found) return null;
 		return {
 			available: true,
-			path: GALLERY_PATH,
+			path: found.path,
 			truncated: false,
 			trailingNewline: true,
 			contentHash: "sha256:gallery",
-			lines: SOURCE.split("\n").map((text, i) => ({ kind: "context", oldLine: 0, newLine: i + 1, text })),
-			changedLines: GALLERY_CHANGED_LINES,
+			lines: found.source.split("\n").map((text, i) => ({ kind: "context", oldLine: 0, newLine: i + 1, text })),
+			changedLines: found.source === SOURCE ? GALLERY_CHANGED_LINES : [],
 		};
 	},
 	// No branch-level diff: this harness measures the minimap, and a diff built
@@ -59,14 +96,24 @@ const realFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 	const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 	if (!url.includes("/workspace/file")) return realFetch(input, init);
-	const lines = SOURCE.split("\n").map((text, i) => ({ kind: "context", oldLine: 0, newLine: i + 1, text }));
+	// The peek preview asks for a file BY PATH — a different one from the pane's —
+	// so the stub has to answer for more than one.
+	const asked = new URL(url, window.location.origin).searchParams.get("path") ?? GALLERY_PATH;
+	const found = fileFor(asked);
+	if (!found) {
+		return new Response(JSON.stringify({ available: false, path: asked, reason: "not_found", lines: [] }), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		});
+	}
+	const lines = found.source.split("\n").map((text, i) => ({ kind: "context", oldLine: 0, newLine: i + 1, text }));
 	return new Response(
 		JSON.stringify({
 			available: true,
-			path: GALLERY_PATH,
+			path: found.path,
 			truncated: false,
 			lines,
-			changedLines: GALLERY_CHANGED_LINES,
+			changedLines: found.source === SOURCE ? GALLERY_CHANGED_LINES : [],
 		}),
 		{ status: 200, headers: { "content-type": "application/json" } },
 	);

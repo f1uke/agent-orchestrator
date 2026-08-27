@@ -22,6 +22,16 @@ export type DocumentSync = {
 	readonly uri: string;
 	/** Exactly the text the server has been sent, reconstructed from what we sent it. */
 	serverText(): string;
+	/**
+	 * The `version` the server was last told, so an UNSOLICITED answer about this
+	 * document can say which revision it is about.
+	 *
+	 * 🗝 Only gopls fills it in. Measured on the real iOS app: every
+	 * `publishDiagnostics` from sourcekit-lsp carries `version: undefined`, on
+	 * open and on change alike - so a reader of this number must treat "absent"
+	 * as the ordinary case and never as a reason to withhold the answer.
+	 */
+	version(): number;
 	dispose(): void;
 };
 
@@ -101,6 +111,7 @@ export function openDocumentSync(input: {
 	return {
 		uri,
 		serverText: () => mirror,
+		version: () => version,
 		dispose() {
 			if (disposed) return;
 			disposed = true;
