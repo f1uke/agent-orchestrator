@@ -298,7 +298,14 @@ func newSimPinchCommand(ctx *commandContext) *cobra.Command {
 			"coordinates `ao sim ax` prints. <from> and <to> are how far APART the two fingers " +
 			"are at the start and at the end, as a fraction of the screen's width. A <to> " +
 			"larger than <from> spreads them (zoom in); smaller brings them together (zoom out), " +
-			"and the scale the app sees is <to> divided by <from>.\n\n" +
+			"and <to> divided by <from> is the scale the FINGERS describe.\n\n" +
+			"What the app makes of that is the app's business, and it is usually a little less. A " +
+			"pinch recognizer only starts scaling once it has latched both touches, and the frames " +
+			"it spends doing that are frames whose movement it never counts - so `0.2 0.6` on mobile " +
+			"Safari, which describes x3.00, arrived as x2.69 at the default duration and x2.93 over " +
+			"1.5s, measured off the page's own `visualViewport.scale`. A slower pinch therefore lands " +
+			"closer. Read the result rather than assuming the number: an app has its own zoom limits " +
+			"too, and one already at maximum zoom answers a perfect pinch with nothing.\n\n" +
 			"The fingers sit on the horizontal line through the centre. That is not a " +
 			"simplification a caller has to work around: a normalized coordinate is a fraction " +
 			"of its own axis and a phone screen is not square, so fingers placed diagonally " +

@@ -36,6 +36,20 @@ const (
 	swipeStep = 16 * time.Millisecond
 	// keyStep paces key events; the guest drops keystrokes sent faster.
 	keyStep = 4 * time.Millisecond
+	// pinchSettle is how long both fingers stay still after they land, before
+	// they start travelling.
+	//
+	// 🗝 Measured, not guessed. A pinch recognizer only starts scaling once it
+	// has latched BOTH touches, and the frames it spends doing that are frames
+	// whose movement it never counts - so a pinch that starts moving
+	// immediately arrives at a smaller scale than it asked for, and by a margin
+	// that grows with how fast it moves. On mobile Safari, `x3.00` over 400 ms
+	// delivered x2.20 with no settle and x2.69 with this one, measured off the
+	// page's own `visualViewport.scale`; twice this length bought another 0.07
+	// and four times bought nothing more, which is why it is 120 ms and not
+	// longer. It is not part of `duration`, which is how long the fingers
+	// TRAVEL; Duration counts it, so the hold still covers it.
+	pinchSettle = 120 * time.Millisecond
 	// MaxSwipeDuration bounds a gesture so it can never outlive the hold that
 	// makes it exclusive.
 	MaxSwipeDuration = 5 * time.Second
@@ -219,7 +233,10 @@ func Pinch(center Point, from, to float64, duration time.Duration) ([]Event, err
 		pause = 1
 	}
 
-	events := []Event{PinchGrip(center, from).Event("begin")}
+	events := []Event{
+		PinchGrip(center, from).Event("begin"),
+		{Kind: "sleep", MS: int(pinchSettle.Milliseconds())},
+	}
 	for i := 1; i <= steps; i++ {
 		grip := PinchGrip(center, from+(to-from)*float64(i)/float64(steps))
 		events = append(events, Event{Kind: "sleep", MS: pause}, grip.Event("move"))
