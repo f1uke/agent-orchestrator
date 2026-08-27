@@ -287,6 +287,35 @@ func ReferenceConvention() string { return referenceConvention }
 // driven; no `ao spawn` flag). Leading "\n\n" so it appends cleanly.
 func SmokeChecklistProtocol() string { return smokeChecklistProtocol }
 
+// ChecklistIntentEarly re-times the checklist for qa, and ONLY the timing: who
+// owns the list is untouched (it is qa's from the moment qa exists, and dev is
+// refused `ao smoke set` for as long as that lasts).
+//
+// SmokeChecklistProtocol says to author the list once the change is complete and
+// local checks pass, before the PR is opened. That is right for an agent working
+// alone - it is the last thing it does. It is wrong for qa, which is created
+// PART-WAY through a task and whose whole job is the thing the list describes: a
+// human watching a live iOS run could not tell what qa was testing, because the
+// Tests tab stayed empty until the end.
+//
+// The half that matters more than the reminder is the second one. An empty list
+// currently means two different things at once - nobody has decided yet, and it
+// was decided that nothing needs a person - and those render identically. AO has
+// no surface that says the second out loud (`ao smoke set` with no cases is a
+// usage error, deliberately), so until one exists the prompt requires qa to state
+// it in what it records and hands back. That is a rule, not a mechanism, and the
+// Tests tab still shows the same empty list either way.
+//
+// Injected in buildSystemPrompt for a crew's qa only, right after the protocol it
+// re-times so the two are read together. A solo worker and a dev never see it,
+// and their prompts stay byte-for-byte what they were. Not gated on iOS: a qa
+// created by `ao preview` owns the same list.
+func ChecklistIntentEarly() string { return checklistIntentEarly }
+
+const checklistIntentEarly = "\n\n" + `### Publish what you will verify, before you verify it (AO)
+
+The timing above is written for an agent working alone. You arrive part-way through a task, so write the cases as soon as triage tells you what a person will have to look at - your intent, before you start running things - and refine them as you go, re-sending each case under the id it already has. Until you do the Tests tab is empty, and an empty list says two things at once: nobody has decided yet, or it was decided and there is nothing worth a human's eyes. When it is the second, SAY so plainly in what you record and in your handback - it is a real answer, and silence cannot tell the human which of the two they are looking at.`
+
 // TaskSizeDirective returns the worker ceremony directive for a session's task
 // size (`ao spawn --task-size`). Only "mechanical" renders anything: it grants an
 // explicit, hook-overriding authorization to skip the heavyweight process skills
@@ -341,18 +370,27 @@ Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`
 // that an element can be named rather than measured, that half of a scrolling
 // screen's elements cannot be tapped from where they are, that one booted
 // device is picked without asking and may be the human's working device rather
-// than a scratch one, that an empty accessibility tree is a diagnosis about the
-// app rather than a fact about accessibility, and that the device is shared and
-// that no `ao sim` command can power it on or off. That last part is phrased as
-// a fact about the CLI rather than about AO, because it stopped being true of
-// AO: the desktop app's Device tab boots and shuts down devices. What must not
-// leak into the guidance is an invitation to ask a human to boot things - an
-// agent that cannot boot a device should say so and stop, not open a
-// negotiation.
+// than a scratch one, that the lease guards the DEVICE and not the command - a
+// raw `xcodebuild -destination` walks straight past it - that an empty
+// accessibility tree is a diagnosis about the app rather than a fact about
+// accessibility, and that the device is shared and that no `ao sim` command
+// can power it on or off. That last part is phrased as a fact about the CLI
+// rather than about AO, because it stopped being true of AO: the desktop app's
+// Device tab boots and shuts down devices. What must not leak into the
+// guidance is an invitation to ask a human to boot things - an agent that
+// cannot boot a device should say so and stop, not open a negotiation.
 //
 // Which `ao sim` commands belong here is a reviewed decision, not an accident:
 // cli.TestSimGuidance_DecidesEverySubcommand holds that list against the real
 // command tree, so a command added later cannot silently default to "omitted".
+//
+// The lease bullet is an INTERIM rule and nothing enforces it: `ao sim` refuses a
+// claim on a device another member holds, but `xcodebuild -destination` never
+// asks, and nothing yet tells an agent which device is supposed to be its own -
+// so with one device booted it reaches for the one its crewmate is driving. The
+// durable fix is a device per crew member with its udid in the agent's
+// environment, so both `ao sim` and a raw `xcodebuild` land on the right one by
+// default. Until that ships, this is a rule an agent can still walk past.
 func SimulatorGuidance() string { return simulatorGuidance }
 
 // SimulatorHandoverToQA is the short note a CREW-ELIGIBLE dev gets AFTER the full
@@ -391,6 +429,7 @@ ao sim release` + "\n```" + `
 
 - **The device is shared** with other AO sessions and with a human in Xcode. The claim excludes other AO sessions only, and **no ` + "`ao sim`" + ` command powers a device on or off** - there is no boot, shutdown, reboot or erase. A human can boot one from the desktop app; you cannot, so if none is booted, say so and stop rather than working blind.
 - **Not every booted device is yours to drive.** A working device holds the human's real app and state; a scratch device exists to be thrown away. ` + "`ao sim`" + ` - and Maestro without ` + "`--device`" + ` - takes the only booted device without asking, so anything that installs, launches or mutates belongs on a scratch device, named with ` + "`--udid`" + ` rather than left to that default pick; reading is safe anywhere. When ` + "`ao sim list`" + ` does not make clear which is which, ask rather than guess.
+- **A lease guards the device, not the command.** ` + "`xcodebuild -destination`" + ` and ` + "`xcrun simctl`" + ` never consult it, and a reinstall throws away the state its holder was building - dev and qa clobber each other just as easily. Claim first, then give the udid you were granted to every tool, not only to ` + "`ao sim`" + `. A refusal names the holder: wait, or say so - going round it takes someone's device, which is a decision and not a workaround.
 - **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap.
 - **An empty ` + "`ao sim ax`" + ` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so ` + "`ao sim tap`" + ` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.
 

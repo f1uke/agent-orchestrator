@@ -105,7 +105,13 @@ var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 // simGuidanceBudget caps the always-seen block. Brevity is the whole reason the
 // prompt layer works, so growing it has to be a deliberate act: if the text
 // genuinely needs more room, raise this and say why in the commit.
-const simGuidanceBudget = 3000
+//
+// Raised 3000 -> 3300 for the lease bullet: a crewmate reinstalled the app on the
+// device another member was mid-way through driving, via a raw
+// `xcodebuild -destination` that never asks the lease. The rule costs every iOS
+// worker a few hundred bytes a turn; a discarded run of manual verification
+// costs more.
+const simGuidanceBudget = 3300
 
 func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 	guidance := prompts.SimulatorGuidance()

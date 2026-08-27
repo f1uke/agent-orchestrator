@@ -2854,6 +2854,14 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 		// block (CrewProtocol) carries the handover instead, in the same window AO
 		// enforces: `ao smoke set` from a crew's dev is refused once a qa exists.
 		base += prompts.SmokeChecklistProtocol()
+		// qa is created part-way through a task, so the protocol above times the
+		// list at the END - right for an agent working alone, wrong for the member
+		// whose job the list describes. qa publishes its intent instead, and says
+		// out loud when the answer is that nothing needs a human's eyes: an empty
+		// list otherwise means "still thinking" and "nothing to check" at once.
+		if crewRole == domain.CrewRoleQA {
+			base += prompts.ChecklistIntentEarly()
+		}
 		// A project that targets iOS has a device its workers can look at. Only
 		// they are told: the orchestrator dispatches rather than drives. A crew's
 		// dev keeps the whole catalog - it is alone until it claims, and CLAIMING
