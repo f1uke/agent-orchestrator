@@ -24,7 +24,10 @@ import {
 	writeGlobalView,
 } from "../lib/files-panel-state";
 import { cn } from "../lib/utils";
+import { EmptyState } from "./FilesEmptyState";
 import { FileTree } from "./FileTree";
+import { SearchPanel } from "./SearchPanel";
+import type { SearchHit } from "./SearchResultsList";
 import { Skeleton } from "./ui/skeleton";
 import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
 
@@ -51,6 +54,12 @@ export type ChangedFileTarget = {
 
 /** A row in Browse mode: any file in the worktree, changed or not. */
 export type WorktreeFile = { path: string };
+
+/**
+ * What the rail is showing. The two REMEMBERED modes plus Search, which is
+ * entered by a gesture and never restored — see the note at `mode` below.
+ */
+type PanelMode = FilesMode | "search";
 
 /**
  * How long a scroll rests before it is written down. Scrolling fires per frame;
@@ -90,8 +99,11 @@ export function FilesPanel({
 	taskKey = sessionId,
 	onOpenFile,
 	onOpenWorktreeFile,
+	onOpenSearchHit,
+	search: searchRequest,
 	onReviewAll,
 	selectedPath,
+	selectedLine,
 	reveal,
 }: {
 	sessionId: string;
@@ -105,9 +117,19 @@ export function FilesPanel({
 	onOpenFile?: (target: ChangedFileTarget) => void;
 	/** A Browse row. Separate from onOpenFile because it is not a CHANGED file. */
 	onOpenWorktreeFile?: (file: WorktreeFile) => void;
+	/** A ⌘⇧F hit: a file AND the line and column the match sits at. */
+	onOpenSearchHit?: (hit: SearchHit) => void;
+	/**
+	 * A ⌘⇧F press. The nonce is what makes pressing it again while search is
+	 * already up re-focus and re-select the box; `seed` is the editor's current
+	 * selection, when there was one.
+	 */
+	search?: { nonce: number; seed?: string } | null;
 	/** The stacked, all-files review. */
 	onReviewAll?: () => void;
 	selectedPath?: string;
+	/** The line the open file is sitting on, so the matching result row is marked. */
+	selectedLine?: number;
 	/**
 	 * A file to reveal: expand to it and scroll it in.
 	 *
@@ -121,7 +143,16 @@ export function FilesPanel({
 	// Read once. The owner keys this panel by `taskKey`, so a different task is a
 	// different mount rather than a mid-life prop change.
 	const [restored] = useState(() => readFilesPanelState(taskKey));
-	const [mode, setMode] = useState<FilesMode>(restored.mode);
+	// 🗝 SEARCH IS A TRANSIENT MODE, not a remembered one. `FilesMode` is what the
+	// arrangement stores; `PanelMode` is what is on screen. Restoring "search"
+	// would mean coming back to a task and finding an EMPTY search box where the
+	// tree used to be — the search text is deliberately not remembered either
+	// (see `files-panel-state.ts`), so there would be nothing in it. Worse,
+	// `writeGlobalMode` would then make every new task open that way. So entering
+	// search leaves the remembered mode alone, and leaving search returns to it.
+	const [mode, setMode] = useState<PanelMode>(restored.mode);
+	// Which of the two REMEMBERED modes to write down, and to come back to.
+	const [lastPersistentMode, setLastPersistentMode] = useState<FilesMode>(restored.mode);
 	const query = useWorkspaceChanges(sessionId);
 	const data = query.data;
 	// The worktree index is fetched only once Browse is actually chosen: it is a
@@ -149,8 +180,10 @@ export function FilesPanel({
 		writeGlobalView(next);
 	};
 
-	const chooseMode = (next: FilesMode) => {
+	const chooseMode = (next: PanelMode) => {
 		setMode(next);
+		if (next === "search") return;
+		setLastPersistentMode(next);
 		writeGlobalMode(next);
 	};
 
@@ -233,7 +266,7 @@ export function FilesPanel({
 	const persist = useRef<() => void>(() => {});
 	persist.current = () => {
 		const state = {
-			mode,
+			mode: lastPersistentMode,
 			view,
 			browseExpanded: [...browseExpanded],
 			changesCollapsed: [...collapsedDirs],
@@ -246,7 +279,7 @@ export function FilesPanel({
 	};
 	useEffect(() => {
 		persist.current();
-	}, [mode, view, browseExpanded, collapsedDirs]);
+	}, [lastPersistentMode, view, browseExpanded, collapsedDirs]);
 	// Once more on the way out, for the scroll offsets — they move per frame and
 	// are never a reason to write on their own.
 	useEffect(() => () => persist.current(), []);
@@ -309,6 +342,15 @@ export function FilesPanel({
 		if (revealFocus) setRevealedPath(revealPath);
 	}, [revealPath, revealNonce, revealFocus]);
 
+	// ⌘⇧F. The panel is only mounted while the Files tab is up, so the owner also
+	// selects that tab and opens the rail before bumping this — by the time the
+	// nonce lands here the panel exists to receive it.
+	const searchNonce = searchRequest?.nonce;
+	useEffect(() => {
+		if (searchNonce === undefined) return;
+		setMode("search");
+	}, [searchNonce]);
+
 	// Switching mode or view re-asks for the same row: the tree that just mounted
 	// has never been told where the reader was going.
 	useEffect(() => {
@@ -366,8 +408,33 @@ export function FilesPanel({
 							<FolderOpen aria-hidden="true" className="h-3 w-3 shrink-0" />
 							<span className="files-panel__seg-label">Browse</span>
 						</button>
+						{/* The rail's third narrowing of the same set: files whose CONTENT
+						    matches. It sits beside the other two rather than in an overlay
+						    because its results open the same way theirs do. */}
+						<button
+							type="button"
+							role="tab"
+							aria-selected={mode === "search"}
+							className={cn("files-panel__seg-btn", mode === "search" && "is-active")}
+							onClick={() => chooseMode("search")}
+						>
+							<Search aria-hidden="true" className="h-3 w-3 shrink-0" />
+							<span className="files-panel__seg-label">Search</span>
+						</button>
 					</div>
 				</div>
+
+				{mode === "search" ? (
+					<SearchPanel
+						active
+						focusNonce={searchNonce}
+						onExit={() => chooseMode(lastPersistentMode)}
+						onOpenHit={(hit) => onOpenSearchHit?.(hit)}
+						seed={searchRequest?.seed}
+						selected={selectedPath ? { path: selectedPath, line: selectedLine } : null}
+						sessionId={sessionId}
+					/>
+				) : null}
 
 				{mode === "browse" ? (
 					<BrowsePanel
@@ -794,16 +861,6 @@ function UnavailableState({ reason, branch }: { reason?: string; branch?: string
 					: "This session has no PR and the project has no default branch set, so there is nothing to diff against."
 			}
 		/>
-	);
-}
-
-function EmptyState({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
-	return (
-		<div className="files-panel__empty">
-			<span className="files-panel__empty-icon">{icon}</span>
-			<span className="files-panel__empty-title">{title}</span>
-			<span className="files-panel__empty-text">{detail}</span>
-		</div>
 	);
 }
 

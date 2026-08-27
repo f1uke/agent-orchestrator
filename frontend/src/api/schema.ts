@@ -1484,6 +1484,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/workspace/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search the contents of every file in the session's workspace */
+        get: operations["searchWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/cleanup": {
         parameters: {
             query?: never;
@@ -3233,6 +3250,31 @@ export interface components {
         WorkspaceResolveResponse: {
             candidates: components["schemas"]["ControllersWorkspaceResolveCandidateDTO"][];
             ref: string;
+        };
+        WorkspaceSearchFileDTO: {
+            matches: components["schemas"]["WorkspaceSearchMatchDTO"][];
+            path: string;
+            total: number;
+            truncated: boolean;
+        };
+        WorkspaceSearchMatchDTO: {
+            column: number;
+            endColumn: number;
+            line: number;
+            preview: string;
+            previewEnd: number;
+            previewStart: number;
+        };
+        WorkspaceSearchResponse: {
+            available: boolean;
+            files: components["schemas"]["WorkspaceSearchFileDTO"][];
+            filesSearched: number;
+            invalidRegex?: string;
+            query: string;
+            reason?: string;
+            totalFiles: number;
+            totalMatches: number;
+            truncated: boolean;
         };
         WriteWorkspaceFileRequest: {
             /** @description The contentHash the file was read with. A mismatch is a 409 conflict; omitting it is a 400. */
@@ -8938,6 +8980,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceResolveResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    searchWorkspace: {
+        parameters: {
+            query?: {
+                /** @description Text to find in the CONTENTS of every file in the workspace. Empty answers with an available, empty result - the search box starts empty, which is not an error. */
+                q?: string;
+                /** @description Match the query's case. Off by default. */
+                matchCase?: boolean;
+                /** @description Match whole words only, so "ViewModel" does not match "LoginViewModel". */
+                wholeWord?: boolean;
+                /** @description Treat the query as a regular expression (Go's RE2 syntax, which is linear-time and cannot backtrack catastrophically). A pattern that does not compile answers with invalidRegex rather than an error. */
+                regex?: boolean;
+                /** @description Comma-separated globs a path must match. A pattern with no slash matches any path SEGMENT ("*.swift" by basename, "Pods" as a directory); one with a slash matches the whole workspace-relative path and everything beneath it, with ** crossing separators. */
+                include?: string;
+                /** @description Comma-separated globs, same two forms as include, that remove a path from the search. */
+                exclude?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSearchResponse"];
                 };
             };
             /** @description Not Found */

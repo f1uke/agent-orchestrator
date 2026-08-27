@@ -68,6 +68,8 @@ type fakeSessionService struct {
 	workspaceWriteErr     error
 	workspaceChanges      sessionsvc.WorkspaceChangesResult
 	workspaceFiles        sessionsvc.WorkspaceFilesResult
+	workspaceSearch       sessionsvc.SearchResult
+	workspaceSearchQuery  sessionsvc.SearchQuery
 	workspaceFilesErr     error
 	workspaceFileDiff     sessionsvc.DiffContextResult
 	workspaceFileDiffPath string
@@ -498,6 +500,13 @@ func (f *fakeSessionService) WorkspaceChanges(_ context.Context, _ domain.Sessio
 
 func (f *fakeSessionService) ListWorkspaceFiles(_ context.Context, _ domain.SessionID) (sessionsvc.WorkspaceFilesResult, error) {
 	return f.workspaceFiles, f.workspaceFilesErr
+}
+
+func (f *fakeSessionService) SearchWorkspace(
+	_ context.Context, _ domain.SessionID, q sessionsvc.SearchQuery,
+) (sessionsvc.SearchResult, error) {
+	f.workspaceSearchQuery = q
+	return f.workspaceSearch, nil
 }
 
 func (f *fakeSessionService) WorkspaceFileDiff(
@@ -2089,6 +2098,88 @@ func TestSessionsAPI_ListWorkspaceFilesUnavailable(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"reason":"no_workspace"`) ||
 		!strings.Contains(string(body), `"paths":[]`) {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+// TestSessionsAPI_SearchWorkspace pins the ⌘⇧F wire shape: matches grouped by
+// file, honest totals beside a capped payload, and BOTH coordinate pairs — the
+// file's UTF-16 column and the preview's own highlight offsets.
+func TestSessionsAPI_SearchWorkspace(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceSearch = sessionsvc.SearchResult{
+		Available: true,
+		Query:     "ViewModel",
+		Files: []sessionsvc.SearchFile{{
+			Path:      "App/Login.swift",
+			Total:     9,
+			Truncated: true,
+			Matches: []sessionsvc.SearchMatch{{
+				Line: 12, Column: 11, EndColumn: 20,
+				Preview: "class LoginViewModel {", PreviewStart: 10, PreviewEnd: 19,
+			}},
+		}},
+		TotalMatches:  9,
+		TotalFiles:    1,
+		FilesSearched: 4488,
+		Truncated:     true,
+	}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET",
+		"/api/v1/sessions/ao-1/workspace/search?q=ViewModel&matchCase=true&wholeWord=true&regex=true&include=*.swift&exclude=Pods", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	for _, want := range []string{
+		`"available":true`, `"query":"ViewModel"`, `"App/Login.swift"`,
+		`"line":12`, `"column":11`, `"endColumn":20`, `"previewStart":10`, `"previewEnd":19`,
+		`"total":9`, `"totalMatches":9`, `"totalFiles":1`, `"filesSearched":4488`, `"truncated":true`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body missing %s:\n%s", want, body)
+		}
+	}
+	// Every toggle has to reach the service; a dropped flag would silently
+	// answer a different question from the one the panel asked.
+	got := svc.workspaceSearchQuery
+	want := sessionsvc.SearchQuery{
+		Query: "ViewModel", MatchCase: true, WholeWord: true, Regex: true,
+		Include: "*.swift", Exclude: "Pods",
+	}
+	if got != want {
+		t.Fatalf("query = %+v, want %+v", got, want)
+	}
+}
+
+// TestSessionsAPI_SearchWorkspaceUnavailable pins the same degraded contract the
+// other workspace routes have: a cleaned-up worktree is a 200 carrying a reason
+// and an empty list, never an error status and never a null.
+func TestSessionsAPI_SearchWorkspaceUnavailable(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceSearch = sessionsvc.SearchResult{Reason: sessionsvc.ChangesNoWorkspace}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/search?q=x", "")
+	if status != http.StatusOK {
+		t.Fatalf("a degraded session must still be 200, got %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"reason":"no_workspace"`) ||
+		!strings.Contains(string(body), `"files":[]`) {
+		t.Fatalf("unexpected body: %s", body)
+	}
+}
+
+// TestSessionsAPI_SearchWorkspaceInvalidRegex pins that a half-typed pattern is
+// a STATE, not a 400: the reader is still typing, and an error status would make
+// the panel flash a failure between two working keystrokes.
+func TestSessionsAPI_SearchWorkspaceInvalidRegex(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceSearch = sessionsvc.SearchResult{Available: true, Query: "class (", InvalidRegex: "missing closing )"}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/search?q=class+%28&regex=true", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if !strings.Contains(string(body), `"invalidRegex":"missing closing )"`) {
 		t.Fatalf("unexpected body: %s", body)
 	}
 }

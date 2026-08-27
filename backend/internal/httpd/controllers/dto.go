@@ -1264,6 +1264,103 @@ func workspaceFilesResponse(res sessionsvc.WorkspaceFilesResult) WorkspaceFilesR
 	}
 }
 
+// WorkspaceSearchParams is the query string accepted by
+// GET /api/v1/sessions/{sessionId}/workspace/search.
+type WorkspaceSearchParams struct {
+	Q         string `query:"q" description:"Text to find in the CONTENTS of every file in the workspace. Empty answers with an available, empty result - the search box starts empty, which is not an error."`
+	MatchCase bool   `query:"matchCase" description:"Match the query's case. Off by default."`
+	WholeWord bool   `query:"wholeWord" description:"Match whole words only, so \"ViewModel\" does not match \"LoginViewModel\"."`
+	Regex     bool   `query:"regex" description:"Treat the query as a regular expression (Go's RE2 syntax, which is linear-time and cannot backtrack catastrophically). A pattern that does not compile answers with invalidRegex rather than an error."`
+	Include   string `query:"include" description:"Comma-separated globs a path must match. A pattern with no slash matches any path SEGMENT (\"*.swift\" by basename, \"Pods\" as a directory); one with a slash matches the whole workspace-relative path and everything beneath it, with ** crossing separators."`
+	Exclude   string `query:"exclude" description:"Comma-separated globs, same two forms as include, that remove a path from the search."`
+}
+
+// WorkspaceSearchMatchDTO is one matching line.
+//
+// It carries TWO coordinate pairs on purpose. column/endColumn address the real
+// file, in the 1-based UTF-16 units Monaco counts, so opening the hit lands the
+// caret on it. previewStart/previewEnd address `preview`, in 0-based UTF-16
+// units, so the rail can highlight the match in the string it actually draws.
+// The two differ whenever a long line was windowed.
+type WorkspaceSearchMatchDTO struct {
+	Line         int    `json:"line"`
+	Column       int    `json:"column"`
+	EndColumn    int    `json:"endColumn"`
+	Preview      string `json:"preview"`
+	PreviewStart int    `json:"previewStart"`
+	PreviewEnd   int    `json:"previewEnd"`
+}
+
+// WorkspaceSearchFileDTO is one file's matches.
+type WorkspaceSearchFileDTO struct {
+	// Path is workspace-relative and slash-separated.
+	Path    string                    `json:"path"`
+	Matches []WorkspaceSearchMatchDTO `json:"matches"`
+	// Total is how many times the file matched, which is >= len(matches).
+	Total int `json:"total"`
+	// Truncated reports that matches is a prefix of total.
+	Truncated bool `json:"truncated"`
+}
+
+// WorkspaceSearchResponse is the body of the workspace/search route: every line
+// in the session's workspace whose CONTENT matches, grouped by file.
+//
+// The whole tree is always scanned, so totalMatches/totalFiles are honest; what
+// is bounded is what travels back. Whenever a bound bites, truncated says so —
+// a silently shortened list reads as "that is all there is".
+type WorkspaceSearchResponse struct {
+	Available bool `json:"available"`
+	// Reason explains an available=false response: "no_workspace" (the worktree
+	// is gone from disk). Empty when the search ran.
+	Reason string `json:"reason,omitempty"`
+	// Query is echoed so a response that arrives after the reader has typed on
+	// can be recognised as stale rather than painted.
+	Query string                   `json:"query"`
+	Files []WorkspaceSearchFileDTO `json:"files"`
+	// TotalMatches and TotalFiles count the whole tree, not the returned prefix.
+	TotalMatches int `json:"totalMatches"`
+	TotalFiles   int `json:"totalFiles"`
+	// FilesSearched is how many files were actually read, after the globs, the
+	// size cap and the binary sniff.
+	FilesSearched int `json:"filesSearched"`
+	// Truncated reports that files is a prefix - of the matches, of the files, or
+	// of both - or that the search was cut short.
+	Truncated bool `json:"truncated"`
+	// InvalidRegex carries the compile error for a regex the reader has not
+	// finished typing. A normal state of the input box, not a failed request.
+	InvalidRegex string `json:"invalidRegex,omitempty"`
+}
+
+// workspaceSearchResponse maps the service result to the wire DTO.
+func workspaceSearchResponse(res sessionsvc.SearchResult) WorkspaceSearchResponse {
+	files := make([]WorkspaceSearchFileDTO, 0, len(res.Files))
+	for _, f := range res.Files {
+		matches := make([]WorkspaceSearchMatchDTO, 0, len(f.Matches))
+		for _, m := range f.Matches {
+			matches = append(matches, WorkspaceSearchMatchDTO{
+				Line:         m.Line,
+				Column:       m.Column,
+				EndColumn:    m.EndColumn,
+				Preview:      m.Preview,
+				PreviewStart: m.PreviewStart,
+				PreviewEnd:   m.PreviewEnd,
+			})
+		}
+		files = append(files, WorkspaceSearchFileDTO{Path: f.Path, Matches: matches, Total: f.Total, Truncated: f.Truncated})
+	}
+	return WorkspaceSearchResponse{
+		Available:     res.Available,
+		Reason:        res.Reason,
+		Query:         res.Query,
+		Files:         files,
+		TotalMatches:  res.TotalMatches,
+		TotalFiles:    res.TotalFiles,
+		FilesSearched: res.FilesSearched,
+		Truncated:     res.Truncated,
+		InvalidRegex:  res.InvalidRegex,
+	}
+}
+
 // WorkspaceChangesResponse is the body of the workspace/changes route: the
 // files differing between the session's branch (working tree included) and its
 // resolved target branch.

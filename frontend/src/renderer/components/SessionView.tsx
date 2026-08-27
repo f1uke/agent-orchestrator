@@ -18,6 +18,7 @@ import { type ChangesFocus, WorkspaceChangesView } from "./WorkspaceChangesView"
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { type HistoryEntry, entryToOpen } from "../lib/editor/file-history";
 import { useFileHistory } from "../hooks/useFileHistory";
+import { useProjectSearchShortcut } from "../hooks/useProjectSearchShortcut";
 import { taskKeyOf } from "../lib/task-key";
 import { isMacPlatform } from "../lib/platform";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
@@ -112,6 +113,15 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// lets the same file be asked for twice and still re-reveal, exactly like
 	// changesFocus. Cleared on session switch.
 	const [revealInTree, setRevealInTree] = useState<{ path: string; nonce: number; focus: boolean } | null>(null);
+	// ⌘⇧F. The nonce is what makes pressing it again — while the rail is already
+	// showing search — re-focus and re-select the box instead of doing nothing.
+	// `seed` is whatever short selection the editor had, so the shortcut behaves
+	// the way it does in every editor the reader already uses.
+	const [searchRequest, setSearchRequest] = useState<{ nonce: number; seed?: string } | null>(null);
+	// The editor's current selection, written on every selection change. A REF,
+	// never state: it moves on every drag frame and re-rendering the session view
+	// for it would be absurd. Only ⌘⇧F ever reads it.
+	const editorSelection = useRef("");
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
 	// The terminal's "Open in…" menu opens the session's worktree; when the daemon
@@ -230,6 +240,8 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		setChangesFocus(null);
 		setActiveChangedPath(null);
 		setRevealInTree(null);
+		setSearchRequest(null);
+		editorSelection.current = "";
 	}, [sessionId]);
 
 	// THE RAIL DOES NOT MOVE WHEN YOU SWITCH MEMBERS — which is what makes the
@@ -552,6 +564,17 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [hasInspector, toggleInspector]);
 
+	// ⌘⇧F opens the rail, selects the Files tab and asks that tab for its Search
+	// mode, because that is where the results live: the rail is already the app's
+	// files surface and a hit opens exactly the way a Browse row does.
+	// `hasInspector` is the "this session has a worktree" test; an orchestrator
+	// has none to search.
+	useProjectSearchShortcut(hasInspector, () => {
+		setInspectorView("files");
+		if (!useUiStore.getState().isInspectorOpen) toggleInspector();
+		setSearchRequest((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, seed: editorSelection.current || undefined }));
+	});
+
 	// Back/forward through the files this task has jumped between.
 	//
 	// ⌃⌘← / ⌃⌘→ is Xcode's own binding, works on a Mac keyboard without Fn, and
@@ -689,6 +712,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					onCursorChange={(position) =>
 						history.setPosition({ path: workspaceFile.path, line: position.line, column: position.column })
 					}
+					onSelectionChange={(text) => {
+						editorSelection.current = text;
+					}}
 					back={history.canBack ? { to: history.back?.path ?? "", go: () => navigateHistory(history.goBack) } : null}
 					forward={
 						history.canForward
@@ -835,6 +861,17 @@ export function SessionView({ sessionId }: SessionViewProps) {
 										openWorkspaceFile({ path, focus: "first-hunk", inWorkspace: true });
 									}}
 									onOpenWorktreeFile={({ path }) => openWorkspaceFile({ path, inWorkspace: true })}
+									// A ⌘⇧F hit opens at its LINE AND COLUMN, and goes through the
+									// same seam as everything else — which is what puts it in
+									// #260's back/forward stack. A search result you cannot come
+									// back from would be the one jump kind that behaves
+									// differently. Default reveal (`follow`), never `focus`: the
+									// click came FROM the rail, and taking the Files tab would
+									// throw away the very results being clicked.
+									onOpenSearchHit={({ path, line, column }) =>
+										openWorkspaceFile({ path, line, column, inWorkspace: true })
+									}
+									searchRequest={searchRequest}
 									onReviewAllChanges={() => {
 										setWorkspaceFile(null);
 										setChangesFocus((prev) => ({ path: prev?.path ?? "", nonce: (prev?.nonce ?? 0) + 1 }));
@@ -843,6 +880,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 									// "show me where the file I am looking at lives", and the
 									// stacked-diff position only means anything while that view is up.
 									selectedFilePath={workspaceFile?.path ?? activeChangedPath ?? undefined}
+									selectedFileLine={workspaceFile?.line}
 									revealInTree={revealInTree}
 									view={inspectorView}
 									browserView={browserView}

@@ -39,6 +39,9 @@ type MessageContribution = monaco.editor.IEditorContribution & {
 	showMessage(message: string, position: monaco.IPosition): void;
 };
 
+/** Longest selection ⌘⇧F will carry into the search box as its seed. */
+const MAX_SEED_LENGTH = 200;
+
 /**
  * Xcode's `// MARK:` bands in the minimap. Monaco finds these itself
  * (`minimap.showMarkSectionHeaders`) and already drops any hit whose first token
@@ -241,6 +244,16 @@ export type MonacoFileEditorProps = {
 	onHandle?: (handle: EditorHandle | null) => void;
 	/** The caret's 1-based position, reported as it moves. */
 	onCursorChange?: (position: { line: number; column: number }) => void;
+	/**
+	 * The selected text, reported as the selection moves, so ⌘⇧F can arrive
+	 * pre-filled with whatever the reader had highlighted.
+	 *
+	 * Only a SHORT, SINGLE-LINE selection is reported; anything else comes back
+	 * empty. That is not a limitation, it is the definition of a useful seed —
+	 * and it keeps the handler from calling `getValueInRange` on a select-all in
+	 * a 10,000-line file every time the selection moves.
+	 */
+	onSelectionChange?: (text: string) => void;
 };
 
 /**
@@ -276,6 +289,7 @@ export default function MonacoFileEditor({
 	onSave,
 	onHandle,
 	onCursorChange,
+	onSelectionChange,
 }: MonacoFileEditorProps) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | monaco.editor.IStandaloneDiffEditor | null>(null);
@@ -772,6 +786,29 @@ export default function MonacoFileEditor({
 		if (!codeEditor) return;
 		const subscription = codeEditor.onDidChangeCursorPosition((event) => {
 			onCursorRef.current?.({ line: event.position.lineNumber, column: event.position.column });
+		});
+		return () => subscription.dispose();
+	}, [editorGeneration]);
+
+	// The selection, for ⌘⇧F's seed. Same ref treatment as the cursor above, and
+	// for the same reason: it fires on every drag frame and must never re-render.
+	const onSelectionRef = useRef(onSelectionChange);
+	onSelectionRef.current = onSelectionChange;
+	useEffect(() => {
+		if (editorGeneration === 0) return;
+		const codeEditor = codeEditorRef.current;
+		if (!codeEditor) return;
+		const subscription = codeEditor.onDidChangeCursorSelection((event) => {
+			const selection = event.selection;
+			if (selection.isEmpty() || selection.startLineNumber !== selection.endLineNumber) {
+				onSelectionRef.current?.("");
+				return;
+			}
+			if (selection.endColumn - selection.startColumn > MAX_SEED_LENGTH) {
+				onSelectionRef.current?.("");
+				return;
+			}
+			onSelectionRef.current?.(codeEditor.getModel()?.getValueInRange(selection) ?? "");
 		});
 		return () => subscription.dispose();
 	}, [editorGeneration]);

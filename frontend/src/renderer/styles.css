@@ -1786,6 +1786,281 @@ body.is-resizing-x [data-slot="sidebar-container"] {
    could never fire. The one container query that IS reachable is the 360px
    tab-strip rule above. */
 
+/* ── Files panel, Search mode (⌘⇧F) ──────────────────────────────────────── */
+/* The rail's third narrowing of the same set: files whose CONTENT matches. It
+   reuses the toolbar and the field the other two modes use, so the eye lands in
+   the same place when the reader switches modes. */
+.files-search {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+/* The three option toggles live INSIDE the field, VS Code's shape, so the
+   controls sit where the query is rather than on a second line the reader has
+   to scan. The input reserves their width as padding. */
+.files-search__field {
+	position: relative;
+}
+
+.files-search__input {
+	padding-right: 74px;
+}
+
+.files-search__toggles {
+	position: absolute;
+	right: 3px;
+	display: flex;
+	gap: 1px;
+}
+
+.files-search__toggle {
+	display: inline-flex;
+	height: 20px;
+	width: 22px;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	border-radius: 4px;
+	color: var(--fg-passive);
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
+}
+
+.files-search__toggle:hover:not(.is-active) {
+	color: var(--fg);
+	background: var(--interactive-hover);
+}
+
+/* An engaged toggle changes what the search MEANS, so it is marked with the
+   accent rather than with the neutral fill the view switcher uses: mistaking a
+   live "regex" for an off one turns every result into a puzzle. */
+.files-search__toggle.is-active {
+	background: var(--accent-weak);
+	color: var(--accent);
+}
+
+.files-search__filters {
+	display: flex;
+	flex: none;
+	flex-direction: column;
+	gap: 6px;
+	padding: 0 11px 8px;
+}
+
+.files-search__glob {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	gap: 7px;
+}
+
+.files-search__glob-label {
+	flex: none;
+	width: 88px;
+	font-size: 11px;
+	color: var(--fg-muted);
+}
+
+.files-search__glob-input {
+	padding-left: 7px;
+}
+
+.files-search__summary {
+	gap: 6px;
+}
+
+.files-search__hint,
+.files-search__count-line {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.files-search__error {
+	overflow: hidden;
+	color: var(--red);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* A search is in flight. A pulsing dot rather than a spinner: results stay on
+   screen underneath while the next set is fetched, so this says "still moving",
+   not "loading instead of that". */
+.files-search__pulse {
+	height: 5px;
+	width: 5px;
+	flex: none;
+	border-radius: 50%;
+	background: var(--accent);
+	animation: files-search-pulse 1s ease-in-out infinite;
+}
+
+@keyframes files-search-pulse {
+	0%,
+	100% {
+		opacity: 0.25;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.files-search__pulse {
+		animation: none;
+		opacity: 0.6;
+	}
+}
+
+/* Scrolls itself, like the tree: SearchResultsList is virtualised and a
+   virtualiser needs to own the scrolling element. */
+.files-search__list {
+	min-height: 0;
+	flex: 1;
+	overflow-y: auto;
+	padding-bottom: 10px;
+}
+
+.files-search__canvas {
+	position: relative;
+	width: 100%;
+}
+
+/* Rows are placed by the virtualiser, so `top` — not source order — is what puts
+   them in sequence, and both `top` and `height` come from SearchResultsList as
+   inline styles. No padding-block here: the row height has to have ONE source or
+   the scrollbar lies (the lesson #254 paid for on the tree). */
+.files-search__row {
+	position: absolute;
+	left: 0;
+	display: flex;
+	width: 100%;
+	min-width: 0;
+	align-items: center;
+	border-left: 2px solid transparent;
+	text-align: left;
+	cursor: pointer;
+	transition: background 0.1s ease;
+}
+
+.files-search__row:hover {
+	background: var(--interactive-hover);
+}
+
+.files-search__file {
+	gap: 5px;
+	padding-right: 11px;
+	padding-left: 6px;
+}
+
+.files-search__chevron {
+	height: 13px;
+	width: 13px;
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.files-search__icon {
+	height: 14px;
+	width: 14px;
+	flex: none;
+	color: var(--accent);
+}
+
+.files-search__name {
+	overflow: hidden;
+	flex: none;
+	max-width: 55%;
+	font-size: 11.5px;
+	font-weight: 500;
+	color: var(--fg);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* The directory is the part that gets sacrificed when the rail is narrow: the
+   filename is what the reader is scanning for, the folder is the tiebreak. */
+.files-search__dir {
+	overflow: hidden;
+	min-width: 0;
+	flex: 1;
+	font-size: 10.5px;
+	color: var(--fg-passive);
+	text-align: left;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	direction: rtl;
+}
+
+.files-search__dir bdi {
+	direction: ltr;
+	unicode-bidi: isolate;
+}
+
+.files-search__count {
+	flex: none;
+	padding-left: 6px;
+	font-size: 10.5px;
+	font-variant-numeric: tabular-nums;
+	color: var(--fg-muted);
+}
+
+/* A match row is the one the reader scans by the thousand, so it is denser than
+   its header and spends its width on the code rather than on chrome. */
+.files-search__match {
+	gap: 7px;
+	padding-right: 11px;
+	padding-left: 6px;
+}
+
+.files-search__match.is-selected {
+	border-left-color: var(--accent);
+	background: var(--interactive-active);
+}
+
+/* Right-aligned and tabular so the line numbers form a clean column the eye can
+   run down, exactly as they do in the editor's own gutter. */
+.files-search__line {
+	flex: none;
+	width: 34px;
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-variant-numeric: tabular-nums;
+	color: var(--fg-passive);
+	text-align: right;
+}
+
+/* One line, never wrapped: a wrapped match row would change height, and the
+   virtualiser's row height must stay exact. */
+.files-search__preview {
+	overflow: hidden;
+	min-width: 0;
+	flex: 1;
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--fg-muted);
+	text-overflow: ellipsis;
+	white-space: pre;
+}
+
+/* The match itself. `mark` defaults to a black-on-yellow browser style that
+   belongs to a different app; this is the accent tint the rest of the rail uses
+   for "this is the thing you asked about". */
+.files-search__hit {
+	border-radius: 2px;
+	background: var(--accent-weak);
+	color: var(--fg);
+	font-weight: 600;
+}
+
+.files-search__match.is-selected .files-search__preview {
+	color: var(--fg);
+}
+
 /* Inspector resize handle (shadcn resizable separator, AO visual): a 7px
  * transparent grab strip whose centered 1px line lights accent on hover, drag
  * (rrp sets data-separator="active"), and keyboard focus. */

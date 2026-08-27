@@ -23,6 +23,7 @@ import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { FilesPanel, type ChangedFileTarget, type WorktreeFile } from "./FilesPanel";
+import type { SearchHit } from "./SearchResultsList";
 import { taskKeyOf } from "../lib/task-key";
 import { SmokeTestView } from "./SmokeTestView";
 import { SimulatorPanel } from "./SimulatorPanel";
@@ -130,8 +131,11 @@ export function SessionInspector({
 	onOpenFile,
 	onOpenChangedFile,
 	onOpenWorktreeFile,
+	onOpenSearchHit,
 	onReviewAllChanges,
 	selectedFilePath,
+	selectedFileLine,
+	searchRequest,
 	revealInTree,
 }: {
 	session?: WorkspaceSession;
@@ -163,11 +167,17 @@ export function SessionInspector({
 	onOpenChangedFile?: (target: ChangedFileTarget) => void;
 	/** A Browse-mode row: any file in the worktree, changed or not. */
 	onOpenWorktreeFile?: (file: WorktreeFile) => void;
+	/** A ⌘⇧F hit: a file plus the line and column its match sits at. */
+	onOpenSearchHit?: (hit: SearchHit) => void;
 	/** The stacked, all-files review. */
 	onReviewAllChanges?: () => void;
 	/** Path of the Changes row currently open in the center pane. */
 	/** The file the tree marks as current: the one open in the viewer, else the one the stacked diffs are scrolled to. */
 	selectedFilePath?: string;
+	/** The line that file is open at, so the matching ⌘⇧F result row is marked. */
+	selectedFileLine?: number;
+	/** A ⌘⇧F press (re-press nonce + the editor's selection to seed the box). */
+	searchRequest?: { nonce: number; seed?: string } | null;
 	/** A terminal ref to reveal in the Files tree (path + re-click nonce). */
 	revealInTree?: { path: string; nonce: number; focus?: boolean } | null;
 }) {
@@ -270,6 +280,9 @@ export function SessionInspector({
 						onOpenWorktreeFile={onOpenWorktreeFile}
 						onReviewAll={onReviewAllChanges}
 						selectedPath={selectedFilePath}
+						selectedLine={selectedFileLine}
+						onOpenSearchHit={onOpenSearchHit}
+						search={searchRequest}
 						reveal={revealInTree}
 					/>
 				) : null}

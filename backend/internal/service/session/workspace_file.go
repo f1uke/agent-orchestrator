@@ -322,6 +322,14 @@ func workspaceFileIndex(ctx context.Context, workspace string) []string {
 		}
 		return files
 	}
+	// A git that failed because the CALLER went away — an aborted ⌘⇧F, a search
+	// that hit its deadline — is not the same as "this is not a repository", and
+	// answering it by walking the whole tree spends more work than the request
+	// that was cancelled would have. Without this, cancelling a search during its
+	// index phase measured SLOWER than letting it run.
+	if ctx.Err() != nil {
+		return nil
+	}
 	return walkWorkspaceFiles(workspace)
 }
 
