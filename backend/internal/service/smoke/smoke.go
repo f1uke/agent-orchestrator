@@ -429,16 +429,18 @@ func (s *Service) EditCase(ctx context.Context, from, sessionID domain.SessionID
 // checklist AO cannot regenerate, and a judgement that vanishes unexplained is
 // worse than a list that stays one case too long. A case nobody has touched is
 // free to remove outright - that is exactly what was asked for.
-func (s *Service) RemoveCase(ctx context.Context, from, sessionID domain.SessionID, checkID string) (SessionSmoke, error) {
+//
+// `from` is accepted for symmetry with the other write verbs and is not read:
+// removal leaves no row to attribute it on, and inventing an audit log for it
+// would be a second store for one fact. What the caller is told instead is which
+// removals are refused, which is the part that protects anything.
+func (s *Service) RemoveCase(ctx context.Context, _, sessionID domain.SessionID, checkID string) (SessionSmoke, error) {
 	check, err := s.requireActiveCheck(ctx, sessionID, checkID)
 	if err != nil {
 		return SessionSmoke{}, err
 	}
 	if played(check) {
 		return SessionSmoke{}, removeAtRiskError(check)
-	}
-	if _, err := s.resolveAuthor(ctx, from); err != nil {
-		return SessionSmoke{}, err
 	}
 	ok, err := s.store.DeleteSmokeCheck(ctx, check.ID)
 	if err != nil {
