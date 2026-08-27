@@ -1,6 +1,9 @@
 package simbridge
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // Grip is what is touching the screen right now: one finger, or the two of a
 // pinch.
@@ -87,8 +90,13 @@ func (g Grip) Validate(what string) error {
 		}
 	}
 	if g.pair {
-		if gap := g.b.X - g.a.X; gap < MinPinchSpan && gap > -MinPinchSpan {
-			return fmt.Errorf("%s puts the two fingers %g apart, which is closer than %g of the screen's width: "+
+		// The distance between the contacts, not their horizontal gap: a grip
+		// handed in from the held path may put two fingers anywhere, and one
+		// that separates them vertically is just as landable as `Pinch`'s own
+		// horizontal pair. Measuring only X would refuse it for being "on the
+		// same spot" when the fingers are half a screen apart.
+		if gap := math.Hypot(g.b.X-g.a.X, g.b.Y-g.a.Y); gap < MinPinchSpan {
+			return fmt.Errorf("%s puts the two fingers %g apart, which is closer than %g of the screen: "+
 				"any closer and they land as one touch, which no app reads as two", what, gap, MinPinchSpan)
 		}
 	}

@@ -108,3 +108,17 @@ func TestGrip_ReleaseIsClampedOntoTheScreen(t *testing.T) {
 		t.Fatalf("release = %+v, want both contacts pulled onto the screen", release)
 	}
 }
+
+// The held path may hand in a pair separated any way at all, so "are these two
+// contacts effectively one touch" is a DISTANCE, not a horizontal gap. Measuring
+// only X refuses a vertical pair that is half a screen apart.
+func TestGrip_TooCloseIsMeasuredAsADistance(t *testing.T) {
+	vertical := TwoFingers(Point{X: 0.5, Y: 0.2}, Point{X: 0.5, Y: 0.8})
+	if err := vertical.Validate("grip"); err != nil {
+		t.Fatalf("two fingers 0.6 apart vertically must be accepted: %v", err)
+	}
+	diagonal := TwoFingers(Point{X: 0.500, Y: 0.500}, Point{X: 0.505, Y: 0.505})
+	if err := diagonal.Validate("grip"); err == nil {
+		t.Fatal("two contacts a hair apart on a diagonal still land as one touch and must be refused")
+	}
+}
