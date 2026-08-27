@@ -17,6 +17,7 @@ export { ACCENT, MONO, accentMix };
 export type SmokeCheck = components["schemas"]["SmokeCheck"];
 export type SmokeStandDown = components["schemas"]["DomainSmokeStandDown"];
 export type SmokeEvidence = components["schemas"]["SmokeEvidence"];
+export type SmokeRun = components["schemas"]["DomainSmokeRun"];
 export type SmokeVerdict = "pending" | "pass" | "fail" | "skip";
 
 /** Design palette, by role. Each value is a themed token, not a literal. */
@@ -352,6 +353,71 @@ export function isAgentStale(check: SmokeCheck, heads: HeadRef[]): boolean {
 	const head = headShaFor(check, heads);
 	if (!ran || !head) return false;
 	return !shaMatches(ran, head);
+}
+
+// ---------------------------------------------------------------------------
+// The machine's run history.
+//
+// A case's machine result used to be four fields that the next `ao smoke record`
+// overwrote, so a re-run destroyed the round before it and its screenshots were
+// left pooled under whatever verdict was newest. The runs below are what that
+// became: one entry per round, each owning the captures it took.
+
+/**
+ * A case's machine rounds, NEWEST FIRST - the order the tab reads them in. The
+ * API sends them chronologically because that is how they happened; the screen
+ * puts the current result on top because that is the one being asked about.
+ */
+export function runsNewestFirst(check: SmokeCheck): SmokeRun[] {
+	return [...(check.runs ?? [])].reverse();
+}
+
+/**
+ * The run whose result the case currently carries: the latest RECORDED one.
+ *
+ * A run with no `recordedAt` is skipped deliberately. It is a round the machine
+ * opened, captured into and never concluded - what a crashed or abandoned run
+ * leaves behind - and showing it as the headline result would put an empty
+ * conclusion where a real one used to be.
+ */
+export function latestRun(check: SmokeCheck): SmokeRun | null {
+	return runsNewestFirst(check).find((r) => Boolean(r.recordedAt)) ?? null;
+}
+
+/** The machine artifacts captured during one run. */
+export function evidenceForRun(check: SmokeCheck, runId: string): SmokeEvidence[] {
+	return (check.agentEvidence ?? []).filter((ev) => (ev.runId ?? "") === runId);
+}
+
+/**
+ * Machine captures that belong to NO run: taken before AO kept run history, when
+ * the result they were taken for could be overwritten out of existence - and
+ * often was. They are shown apart and labelled, never folded into the newest
+ * run: the verdict they were captured for may be the opposite of the one showing
+ * now, and a stale image read as current evidence is the failure this whole
+ * shape exists to remove.
+ */
+export function unknownRunEvidence(check: SmokeCheck): SmokeEvidence[] {
+	return evidenceForRun(check, "");
+}
+
+/** "RUN 3" tag from a run's 1-based seq, mirroring `checkTag`. */
+export function runTag(seq: number): string {
+	return `RUN ${seq}`;
+}
+
+/**
+ * What one run concluded, in the same vocabulary as the case-level lane so the
+ * history reads with the headline rather than beside it. A run with no verdict
+ * that HAS concluded is `captured`; one still open is `open`.
+ */
+export type RunState = AgentState | "open";
+
+export function runState(run: SmokeRun): RunState {
+	if (!run.recordedAt) return "open";
+	const v = run.verdict ?? "";
+	if (v === "pass" || v === "fail" || v === "skip") return v;
+	return "captured";
 }
 
 /** The cases the user is asked to play: retired ones are out of the checklist. */

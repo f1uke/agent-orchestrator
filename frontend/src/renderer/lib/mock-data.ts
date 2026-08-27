@@ -1235,6 +1235,7 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 					agentNote: "Image loads and is 2560x1600.",
 					agentRanAt: minutesAgo(12),
 					agentEvidence: [],
+				runs: [],
 					authoredBy: "agent-orchestrator-88",
 					authoredByRole: "qa",
 					authoredAt: minutesAgo(20),
@@ -1289,6 +1290,7 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 				note: "Appeared after ~55s, statuses correct.",
 				evidence: [],
 				agentEvidence: [],
+				runs: [],
 				decidedAt: now,
 				authoredBy: "agent-orchestrator-42",
 				authoredByRole: "qa",
@@ -1323,6 +1325,7 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 					},
 				],
 				agentEvidence: [],
+				runs: [],
 				authoredBy: "agent-orchestrator-42",
 				authoredByRole: "qa",
 				authoredAt: now,
@@ -1345,6 +1348,7 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 				note: "No GitHub project handy right now.",
 				evidence: [],
 				agentEvidence: [],
+				runs: [],
 				decidedAt: now,
 				authoredBy: "agent-orchestrator-41",
 				authoredByRole: "dev",
@@ -1367,6 +1371,7 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 				note: "",
 				evidence: [],
 				agentEvidence: [],
+				runs: [],
 				authoredBy: "agent-orchestrator-41",
 				authoredByRole: "dev",
 				authoredAt: now,
@@ -1383,10 +1388,13 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
  * reads honestly and only looking at it can:
  *
  *  1. human-only, no machine run at all (renders exactly as it always has)
- *  2. machine ran and judged pass, human hasn't played it
- *  3. machine ran and judged fail
- *  4. machine ran and DECLINED to judge (`agentRanAt` set, verdict empty):
- *     evidence captured, judgement left to a person
+ *  2. ONE machine run, judged pass, human hasn't played it
+ *  3. THREE machine runs whose verdict INVERTED - the case failed at one commit
+ *     and passes at another, with each round's captures under its own verdict.
+ *     This is what a single overwritten result could never show.
+ *  4. machine ran and DECLINED to judge: evidence captured, judgement left to a
+ *     person, plus captures from BEFORE run history existed - grouped as an
+ *     unknown run rather than filed under the verdict showing now
  *  5. stale, ran against a commit that is no longer head
  *  6. retired, out of the checklist, kept with its reason
  */
@@ -1397,10 +1405,14 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 		note: "",
 		evidence: [],
 		agentEvidence: [],
+		runs: [],
 		createdAt: now,
 		updatedAt: now,
 	};
-	const shot = (checkId: string, id: string, filename: string) => ({
+	// runId "" is a capture that belongs to no run: taken before AO kept a run
+	// history, when the result it was taken for could be overwritten out of
+	// existence. The tab has to say so rather than file it under the newest one.
+	const shot = (checkId: string, id: string, filename: string, runId = "") => ({
 		id,
 		checkId,
 		sessionId,
@@ -1410,6 +1422,19 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 		sizeBytes: 71204,
 		createdAt: now,
 		source: "agent",
+		runId,
+	});
+	const run = (checkId: string, seq: number, verdict: string, note: string, sha: string, at: string) => ({
+		id: `run_${checkId}_${seq}`,
+		checkId,
+		sessionId,
+		seq,
+		verdict,
+		note,
+		sha,
+		recordedAt: at,
+		createdAt: at,
+		updatedAt: at,
 	});
 	return {
 		worker: worker || "settings copy",
@@ -1441,6 +1466,16 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 				agentNote: "Typed a new name, reopened the pane twice; the value came back both times.",
 				agentRanAt: minutesAgo(24),
 				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+				runs: [
+					run(
+						"settings-copy-saves",
+						1,
+						"pass",
+						"Typed a new name, reopened the pane twice; the value came back both times.",
+						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+						minutesAgo(24),
+					),
+				],
 			},
 			{
 				...base,
@@ -1457,7 +1492,37 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 				agentNote: "Save went through with an empty name; no message appeared.",
 				agentRanAt: minutesAgo(24),
 				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				agentEvidence: [shot("settings-copy-validation", "ev_agent_val", "empty-name-saved.png")],
+				agentEvidence: [
+					shot("settings-copy-validation", "ev_agent_val1", "empty-name-saved.png", "run_settings-copy-validation_1"),
+					shot("settings-copy-validation", "ev_agent_val2", "refusal-message.png", "run_settings-copy-validation_2"),
+					shot("settings-copy-validation", "ev_agent_val3", "empty-name-saved-again.png", "run_settings-copy-validation_3"),
+				],
+				runs: [
+					run(
+						"settings-copy-validation",
+						1,
+						"fail",
+						"Save went through with an empty name; no message appeared.",
+						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
+						hoursAgo(6),
+					),
+					run(
+						"settings-copy-validation",
+						2,
+						"pass",
+						"Refused with \u201cName cannot be empty\u201d after the fix.",
+						"c30f1b8e5a2947d6b1e08c73f5a2d914b6e70c8a",
+						hoursAgo(3),
+					),
+					run(
+						"settings-copy-validation",
+						3,
+						"fail",
+						"Save went through with an empty name; no message appeared.",
+						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+						minutesAgo(24),
+					),
+				],
 			},
 			{
 				...base,
@@ -1473,8 +1538,21 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 				agentRanAt: minutesAgo(23),
 				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
 				agentEvidence: [
-					shot("settings-copy-focus", "ev_agent_focus", "settings-open-focus.png"),
-					shot("settings-copy-focus", "ev_agent_focus2", "settings-open-tabbed.png"),
+					shot("settings-copy-focus", "ev_agent_focus", "settings-open-focus.png", "run_settings-copy-focus_2"),
+					// No run: captured before AO kept a history, and the result it was
+					// taken for is gone. It must NOT read as evidence for the run above.
+					shot("settings-copy-focus", "ev_agent_focus_old", "settings-open-old.png"),
+				],
+				runs: [
+					run(
+						"settings-copy-focus",
+						1,
+						"pass",
+						"Tabbed to the field and read document.activeElement; it was the input.",
+						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
+						hoursAgo(7),
+					),
+					run("settings-copy-focus", 2, "", "", "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118", minutesAgo(23)),
 				],
 			},
 			{
@@ -1492,6 +1570,16 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 				agentNote: "Scrolled the container to the end programmatically; no error, all rows rendered.",
 				agentRanAt: hoursAgo(6),
 				agentSha: "9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
+				runs: [
+					run(
+						"settings-copy-scroll",
+						1,
+						"pass",
+						"Scrolled the container to the end programmatically; no error, all rows rendered.",
+						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
+						hoursAgo(6),
+					),
+				],
 			},
 			{
 				...base,
