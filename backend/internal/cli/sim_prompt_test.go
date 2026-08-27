@@ -68,7 +68,8 @@ var simPromptDecisions = map[string]bool{
 	// hazard, which is the only thing the always-seen layer buys. What it DID
 	// need was to be findable: an agent that could not find a pinch concluded a
 	// zoom criterion was unverifiable and reported a blocker, so the closing
-	// pointer names zooming among the things the skill page covers.
+	// pointer names zooming among the things the skill page covers - one word,
+	// paid for out of the existing budget rather than by raising it.
 	"pinch": false,
 	// `flow` and `record` are multi-step surfaces (start/status/stop,
 	// check/run, entry points, Maestro) reached only when a task asks for a

@@ -437,7 +437,7 @@ ao sim release` + "\n```" + `
 - **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap.
 - **An empty ` + "`ao sim ax`" + ` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so ` + "`ao sim tap`" + ` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.
 
-Everything else - naming an element by its identifier, typing, buttons, zooming with a two-finger pinch, recording what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
+Everything else - naming an element by its identifier, typing, buttons, zooming, recording what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
 
 // RecordedFlowLoop is the record -> flow -> retire loop, and it is qa's alone.
 //
