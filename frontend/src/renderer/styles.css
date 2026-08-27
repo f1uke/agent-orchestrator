@@ -4664,6 +4664,72 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	transform: translateY(-3px);
 }
 
+/* ===========================================================================
+   Monaco file editor — the whole-line diagnostic band.
+
+   Xcode tints the entire line an error or warning sits on; Monaco's markers
+   only ever paint the offending token, so the band is a separate decoration
+   (`lib/editor/diagnostic-lines.ts`) laid alongside the markers rather than in
+   place of them. The colours are `--diagnostic-error` / `--diagnostic-warning`,
+   the same two the squiggle, the overview ruler, the minimap mark and the file
+   header's problem count already use — the human asked explicitly for the line
+   and the minimap to agree.
+   =========================================================================== */
+
+/*
+ * 🗝 Errors and warnings do NOT carry the same weight, and that is the whole
+ * design decision here rather than an aesthetic preference. The human's own
+ * Xcode screenshot shows 3 284 warnings: a file where every warning paints a
+ * full-strength band is a wall of colour that is harder to read than no
+ * highlight at all, which is the opposite of what was asked for. So an error is
+ * loud - a tint plus a solid edge at the start of the code - and a warning is
+ * quiet enough to read straight through.
+ *
+ * Alphas differ per theme because the tokens do: dark's `--diagnostic-error` is
+ * a light coral that has to build up over a near-black surface, light's is a
+ * deep brick that reaches a pale pink much sooner.
+ *
+ * 🗝 Every alpha here is a CONTRAST BUDGET, not a taste, and
+ * `monaco-theme.test.ts` holds them to it. A band in a dark theme can only
+ * LIGHTEN a near-black surface, so all thirteen `--code-*` roles lose contrast
+ * by the same proportion the band adds luminance. Twelve of them clear 4.5:1 on
+ * every band below with room to spare - dark could carry 16.5% on the error and
+ * 13.5% on the warning before the first of them fell under.
+ *
+ * The thirteenth is `--code-comment`, and it is worth saying out loud rather
+ * than rounding away: Xcode's dark comment grey sits at 4.55:1 on the bare
+ * editor surface - a margin of 0.05 - so ANY visible band in the DARK theme
+ * takes it under AA. 13% and 9% are what hold it at 4.01 and 4.10 while the
+ * band still reads as a colour; the alternative is no band in dark at all.
+ * Light has real headroom and clears 4.5:1 on both bands, comments included.
+ *
+ * Which is also why the error's weight is carried by its EDGE rather than by a
+ * heavier fill: an inset stripe is beside the code, not under it, so it costs
+ * no contrast at all.
+ */
+.monaco-editor .ao-diagnostic-line {
+	/* The band is drawn in the line-backgrounds layer, under the selection and
+	   the find highlight; translucent so the current-line highlight still reads
+	   through it on the line the caret is on. */
+	background: color-mix(in oklab, var(--diagnostic-warning) 9%, transparent);
+}
+
+.monaco-editor .ao-diagnostic-line--error {
+	background: color-mix(in oklab, var(--diagnostic-error) 13%, transparent);
+	/* The edge is what makes an error findable in a file full of warnings
+	   without making every warning shout. Inset rather than a border: a border
+	   would change the line's box and shift the code by a pixel. */
+	box-shadow: inset 2px 0 0 color-mix(in oklab, var(--diagnostic-error) 85%, transparent);
+}
+
+:root[data-theme="light"] .monaco-editor .ao-diagnostic-line {
+	background: color-mix(in oklab, var(--diagnostic-warning) 11%, transparent);
+}
+
+:root[data-theme="light"] .monaco-editor .ao-diagnostic-line--error {
+	background: color-mix(in oklab, var(--diagnostic-error) 10%, transparent);
+}
+
 /* ── Open Quickly (⌘⇧O) ─────────────────────────────────────────────────── */
 
 .open-quickly__overlay {

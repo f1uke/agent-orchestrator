@@ -1,3 +1,4 @@
+import { diagnosticLineDecorations } from "../editor/diagnostic-lines";
 import { monaco } from "../monaco-setup";
 import { countMarkers, type PublishDiagnosticsParams, toMonacoMarkers } from "./diagnostics-mapping";
 import type { LspClient } from "./lsp-client";
@@ -46,6 +47,19 @@ import { modelUriForPath } from "./peek-sources";
  * `markerHoverParticipant.js` puts the message inside the same hover widget the
  * type information uses. None of that was written here, and none of it needed
  * to be.
+ *
+ * ## …except the whole-line band, which is a DECORATION
+ *
+ * A marker's every rendering is bounded by the marker's own range, so the
+ * line-wide tint Xcode draws is the one thing `setModelMarkers` does not give.
+ * It is added ALONGSIDE the markers, never instead of them - replacing one with
+ * the other is how the ruler and minimap marks would silently disappear.
+ * `diagnostic-lines.ts` owns the collapse rules; this file owns the lifetime.
+ *
+ * 🗝 On the MODEL, not on an editor. `ITextModel.deltaDecorations` applies to
+ * every editor attached to the model, which is what keeps this whole feature out
+ * of `MonacoFileEditor.tsx` - and means a file open in a pane and in the diff
+ * view cannot disagree about which lines are in trouble.
  */
 
 export type DiagnosticsDocument = {
@@ -76,6 +90,8 @@ type ClientEntry = {
 	unsubscribe: () => void;
 	/** The last version acted on, per document. Only gopls ever supplies one. */
 	applied: Map<string, number>;
+	/** The band's decoration ids, per document, so each publish replaces its predecessor. */
+	bands: Map<string, string[]>;
 };
 
 /**
@@ -148,6 +164,7 @@ function dispatch(client: LspClient, entry: ClientEntry, params: unknown): void 
 	});
 	if (document.model.isDisposed()) return;
 	monaco.editor.setModelMarkers(document.model, ownerFor(document.languageId), markers);
+	entry.bands.set(key, document.model.deltaDecorations(entry.bands.get(key) ?? [], diagnosticLineDecorations(markers)));
 	document.onCounts?.(countMarkers(markers));
 }
 
@@ -156,7 +173,12 @@ export function registerDiagnostics(document: DiagnosticsDocument): monaco.IDisp
 	const key = keyOf(uri);
 	let entry = clients.get(client);
 	if (!entry) {
-		const created: ClientEntry = { documents: new Map(), applied: new Map(), unsubscribe: () => undefined };
+		const created: ClientEntry = {
+			documents: new Map(),
+			applied: new Map(),
+			bands: new Map(),
+			unsubscribe: () => undefined,
+		};
 		created.unsubscribe = client.onNotification("textDocument/publishDiagnostics", (params) =>
 			dispatch(client, created, params),
 		);
@@ -171,9 +193,11 @@ export function registerDiagnostics(document: DiagnosticsDocument): monaco.IDisp
 			if (released) return;
 			released = true;
 			const owner = clients.get(client);
+			const band = owner?.bands.get(key) ?? [];
 			if (owner) {
 				owner.documents.delete(key);
 				owner.applied.delete(key);
+				owner.bands.delete(key);
 				if (owner.documents.size === 0) {
 					owner.unsubscribe();
 					clients.delete(client);
@@ -183,7 +207,13 @@ export function registerDiagnostics(document: DiagnosticsDocument): monaco.IDisp
 			// so it is torn down when the server stops, is evicted or fails — and
 			// squiggles from a server that is no longer running are the most
 			// confident kind of wrong answer this app could give.
-			if (!model.isDisposed()) monaco.editor.setModelMarkers(model, ownerFor(languageId), []);
+			if (!model.isDisposed()) {
+				monaco.editor.setModelMarkers(model, ownerFor(languageId), []);
+				// The band is a decoration and NOT a marker, so clearing the markers
+				// does not clear it. A tinted line left behind by a server that is no
+				// longer running is the most confident kind of wrong answer.
+				if (band.length > 0) model.deltaDecorations(band, []);
+			}
 			document.onCounts?.({ errors: 0, warnings: 0 });
 		},
 	};

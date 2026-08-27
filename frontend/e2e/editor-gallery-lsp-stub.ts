@@ -210,11 +210,11 @@ const rangeAt = (at: { line: number; character: number }, word: string) => ({
  * Shaped exactly like a real sourcekit-lsp one, captured on the iOS app:
  * `severity: 2`, `source: "SourceKit"`, and `tags: []`.
  */
-function fixtureDiagnostics(): unknown[] {
+function fixtureDiagnostics(warnEvery = 0): unknown[] {
 	const page = occurrencesOf("page")[0];
 	const reuse = occurrencesOf("reuseIdentifier")[0];
 	if (!page || !reuse) return [];
-	return [
+	const out: unknown[] = [
 		{
 			range: rangeAt(page, "page"),
 			severity: 1,
@@ -230,6 +230,29 @@ function fixtureDiagnostics(): unknown[] {
 			message: "variable 'reuseIdentifier' was never mutated",
 		},
 	];
+	// `?lspWarnEvery=N` publishes a warning on every Nth line that has code.
+	//
+	// 🗝 This is not decoration: the human's own Xcode screenshot shows 3 284
+	// warnings, and the question the whole-line band has to survive is what a
+	// file where a large fraction of lines carry one actually looks like. A
+	// fixture with two diagnostics answers a different, easier question.
+	if (warnEvery > 0) {
+		const lines = SWIFT_FIXTURE.split("\n");
+		for (let line = 0; line < lines.length; line++) {
+			if (line % warnEvery !== 0) continue;
+			const text = lines[line];
+			const character = text.search(/\S/);
+			if (character < 0) continue;
+			out.push({
+				range: { start: { line, character }, end: { line, character: text.length } },
+				severity: 2,
+				source: "SourceKit",
+				tags: [],
+				message: "initialization of immutable value was never used",
+			});
+		}
+	}
+	return out;
 }
 
 /** Installs the bridge `useLanguageServer` looks for. Call before React mounts. */
@@ -237,6 +260,8 @@ export function installFakeLspBridge(
 	options: {
 		completionDelayMs?: number;
 		failAttach?: string;
+		/** Publish a warning on every Nth code line — a warning-HEAVY file. */
+		warnEvery?: number;
 		/**
 		 * How long after `didOpen` the first publish arrives. Real servers take
 		 * seconds — gopls publishes an EMPTY set at ~932 ms and the real one at
@@ -296,7 +321,7 @@ export function installFakeLspBridge(
 									jsonrpc: "2.0",
 									method: "textDocument/publishDiagnostics",
 									// No `version` — sourcekit-lsp sends none, ever.
-									params: { uri, diagnostics: fixtureDiagnostics() },
+									params: { uri, diagnostics: fixtureDiagnostics(options.warnEvery ?? 0) },
 								},
 							});
 						}

@@ -32,6 +32,9 @@ if (withLsp) {
 	installFakeLspBridge({
 		completionDelayMs: params.has("lspDelay") ? Number(params.get("lspDelay")) : undefined,
 		failAttach: params.get("lspFail") ?? undefined,
+		// `?lspWarnEvery=N`: a warning on every Nth code line, which is the only
+		// way to see whether the whole-line band survives a warning-heavy file.
+		warnEvery: params.has("lspWarnEvery") ? Number(params.get("lspWarnEvery")) : undefined,
 		// `?lspDiagnosticsDelay=` reproduces the wait a reader actually sees — the
 		// real servers publish 0.9-5.0 s after a file opens, and what the editor
 		// looks like in that window is the whole point of the feature.

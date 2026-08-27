@@ -130,6 +130,58 @@ test.describe("diagnostics", () => {
 		await expect(page.locator(".decorationsOverviewRuler")).toBeVisible();
 	});
 
+	/**
+	 * The band Xcode draws, and the one thing `setModelMarkers` does NOT give:
+	 * every marker rendering is bounded by the marker's own range, so a reader
+	 * asking for a tinted LINE gets a tinted TOKEN unless a decoration is laid
+	 * beside the marker.
+	 */
+	test("the whole line is tinted, not just the token under the squiggle", async ({ page }) => {
+		await page.goto(GALLERY);
+		await expect(page.locator(".squiggly-error").first()).toBeVisible();
+
+		const band = page.locator(".ao-diagnostic-line--error").first();
+		await expect(band).toBeVisible();
+		await expect(page.locator(".ao-diagnostic-line--warning").first()).toBeVisible();
+
+		// 🗝 On the WIDTH, because the failure mode is a band that renders and is
+		// merely the size of the squiggle - which looks deliberate and answers a
+		// different request. The band has to be several times the token it covers.
+		const squiggle = await page.locator(".squiggly-error").first().boundingBox();
+		const tinted = await band.boundingBox();
+		expect(squiggle, "no squiggle to compare against").not.toBeNull();
+		expect(tinted, "no band to measure").not.toBeNull();
+		expect(tinted!.width).toBeGreaterThan((squiggle?.width ?? 0) * 4);
+
+		// …and on the same line as the squiggle, not merely somewhere in the file.
+		expect(Math.abs(tinted!.y - (squiggle?.y ?? 0))).toBeLessThan(tinted!.height);
+	});
+
+	/**
+	 * 🗝 The density rule, through the real editor rather than through the mapper
+	 * alone. `?lspWarnEvery=1` puts a warning on EVERY code line - including the
+	 * one that already carries the error - which is the shape the human's own
+	 * 3 284-warning screenshot has. Two things have to hold: translucent bands
+	 * must not stack into an opaque slab, and the error must still read as an
+	 * error on the line it shares with a warning.
+	 */
+	test("a warning-heavy file draws one band per line, and the error still wins its own", async ({ page }) => {
+		await page.goto(`${GALLERY}&lspWarnEvery=1`);
+		await expect(page.locator(".squiggly-error").first()).toBeVisible();
+		await expect(page.locator(".ao-diagnostic-line").first()).toBeVisible();
+
+		// Exactly one band on the error's line, and it is the error's.
+		await expect(page.locator(".ao-diagnostic-line--error")).toHaveCount(1);
+
+		// No two bands share a line. Measured off the rendered tops, because that
+		// is what "stacked" would actually look like.
+		const tops = await page
+			.locator(".ao-diagnostic-line")
+			.evaluateAll((nodes) => nodes.map((node) => Math.round((node as HTMLElement).getBoundingClientRect().top)));
+		expect(tops.length).toBeGreaterThan(5);
+		expect(new Set(tops).size).toBe(tops.length);
+	});
+
 	test("the message is in the hover, with the server's own source name", async ({ page }) => {
 		await page.goto(GALLERY);
 		await expect(page.locator(".squiggly-error").first()).toBeVisible();
