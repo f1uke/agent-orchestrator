@@ -18,12 +18,16 @@
 // Go. This file only transports.
 //
 // The one piece of real logic here is the stuck-finger guard. The simulator's
-// HID layer has a single finger and no caller identity: a gesture that sends
-// `begin` and never sends `end` leaves the guest with a finger held down, which
-// wedges input until the device is rebooted. So a touch-down is always followed
-// by a lift - on the happy path, on a thrown error, on stdin closing, and on a
-// signal. A resident process makes that guard matter more, not less: it now has
-// to hold across requests as well as within one.
+// HID layer has no caller identity: a gesture that sends `begin` and never sends
+// `end` leaves the guest with a finger held down, which wedges input until the
+// device is rebooted. So a touch-down is always followed by a lift - on the
+// happy path, on a thrown error, on stdin closing, and on a signal. A resident
+// process makes that guard matter more, not less: it now has to hold across
+// requests as well as within one.
+//
+// A pinch holds TWO contacts (one `multiTouch` frame carries both), so the guard
+// tracks what is touching rather than "the finger", and releases a pair as a
+// pair - see Touching.
 
 import { createRequire } from "node:module";
 import { createWriteStream } from "node:fs";
@@ -52,9 +56,9 @@ function fail(code, message) {
 }
 
 // Requests arrive one per line and are answered in order: the device has one
-// finger, so there is nothing to gain from overlapping them and a great deal to
-// lose - two gestures interleaved on one finger is the hazard the whole lease
-// exists to prevent.
+// screen and no caller identity, so there is nothing to gain from overlapping
+// them and a great deal to lose - two gestures interleaved on one digitizer is
+// the hazard the whole lease exists to prevent.
 async function* requests() {
   let buffered = "";
   for await (const chunk of process.stdin) {
@@ -82,32 +86,55 @@ function loadAddon(path) {
   }
 }
 
-// A gesture, guarded. The finger is tracked here rather than by the caller
-// because this process is the only thing that can still lift it once something
-// has gone wrong.
-class Finger {
+// A gesture, guarded. What is touching the screen is tracked here rather than by
+// the caller because this process is the only thing that can still lift it once
+// something has gone wrong.
+//
+// It holds one contact, or two: the addon's `multiTouch` carries both points in
+// a single HID frame, which is what makes `ao sim pinch` two SIMULTANEOUS
+// touches rather than two touches in a row. The guard has to know which, because
+// releasing one contact of a pair leaves the other held - the same wedge as a
+// stuck finger, arrived at by being half-right.
+class Touching {
   constructor(hid) {
     this.hid = hid;
     this.down = false;
     this.x = 0.5;
     this.y = 0.5;
+    // second is the other contact's point while two are down, else null.
+    this.second = null;
     this.lifted = false;
   }
 
   async touch(type, x, y) {
+    // A one-finger event while two are down would leave the second contact
+    // held. Release the pair as a pair first, rather than stranding half of it.
+    if (this.second) await this.lift("a one-finger touch arrived while two were down");
     this.x = x;
     this.y = y;
     await this.hid.touch(type, x, y, 0, 0, 0);
     this.down = type !== "end";
   }
 
+  async multiTouch(type, x, y, x2, y2) {
+    this.x = x;
+    this.y = y;
+    this.second = type === "end" ? null : { x: x2, y: y2 };
+    await this.hid.multiTouch(type, x, y, x2, y2, 0, 0);
+    this.down = type !== "end";
+  }
+
   // lift is safe to call any number of times, including when nothing is down.
+  // It releases whatever is actually touching, the way it went down.
   async lift(reason) {
     if (!this.down) return;
+    const second = this.second;
     this.down = false;
+    this.second = null;
     this.lifted = true;
     this.liftReason = reason;
-    await this.hid.touch("end", this.x, this.y, 0, 0, 0);
+    if (second) await this.hid.multiTouch("end", this.x, this.y, second.x, second.y, 0, 0);
+    else await this.hid.touch("end", this.x, this.y, 0, 0, 0);
   }
 }
 
@@ -120,7 +147,7 @@ function injectorFor(addon, udid) {
   let entry = injectors.get(udid);
   if (!entry) {
     const hid = new addon.SimHID(udid);
-    entry = { hid, finger: new Finger(hid) };
+    entry = { hid, touching: new Touching(hid) };
     injectors.set(udid, entry);
   }
   return entry;
@@ -129,9 +156,9 @@ function injectorFor(addon, udid) {
 // The finger has to come up however this process ends, including paths a
 // `finally` cannot reach: a signal, or the parent going away.
 async function liftEverything(reason) {
-  for (const { finger } of injectors.values()) {
+  for (const { touching } of injectors.values()) {
     try {
-      await finger.lift(reason);
+      await touching.lift(reason);
     } catch {
       // A lift that fails still must not stop the other devices being lifted.
     }
@@ -144,13 +171,16 @@ async function liftEverything(reason) {
 // and lifts on a watchdog if the far end goes quiet. The process-level lifts
 // (signal, stdin closing, reply channel gone) still cover this process dying.
 async function perform(addon, udid, events, keepDown = false) {
-  const { hid, finger } = injectorFor(addon, udid);
+  const { hid, touching } = injectorFor(addon, udid);
 
   try {
     for (const event of events) {
       switch (event.kind) {
         case "touch":
-          await finger.touch(event.type, event.x, event.y);
+          await touching.touch(event.type, event.x, event.y);
+          break;
+        case "multitouch":
+          await touching.multiTouch(event.type, event.x, event.y, event.x2, event.y2);
           break;
         case "key":
           await hid.key(event.type, event.usage);
@@ -166,13 +196,13 @@ async function perform(addon, udid, events, keepDown = false) {
       }
     }
   } finally {
-    if (!keepDown) await finger.lift("gesture ended without a lift");
+    if (!keepDown) await touching.lift("gesture ended without a lift");
   }
-  const result = { lifted: finger.lifted, liftReason: finger.liftReason };
+  const result = { lifted: touching.lifted, liftReason: touching.liftReason };
   // The flags describe this gesture, not the process: a resident bridge that
   // reported a lift from three gestures ago would be lying about this one.
-  finger.lifted = false;
-  finger.liftReason = undefined;
+  touching.lifted = false;
+  touching.liftReason = undefined;
   return result;
 }
 

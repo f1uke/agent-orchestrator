@@ -66,7 +66,8 @@ type Gesture struct {
 	Detail string
 	Events []simbridge.Event
 	// Last is where the finger would be if the gesture died in flight, and so
-	// where a recovery lift has to land.
+	// where a recovery lift has to land. A gesture that holds two fingers says
+	// where they are in its own events instead - see simbridge.Recover.
 	Last simbridge.Point
 }
 
@@ -155,27 +156,19 @@ func run(
 	}
 
 	failed := &FailedError{Action: gesture.Action, Cause: performErr}
-	if !touches(gesture.Events) {
-		// Nothing was pressed, so there is nothing to release - and sending a
-		// stray touch to recover from a keyboard gesture would be worse than the
-		// failure it is recovering from.
+	// What to release is a question about the gesture, not about this sequence:
+	// a keyboard gesture pressed nothing, and a pinch left TWO fingers down, so
+	// simbridge composes the release from what the events actually did.
+	release := simbridge.Recover(gesture.Events, gesture.Last)
+	if len(release) == 0 {
 		return gesture, simbridge.PerformResult{}, failed
 	}
 	// A release with nothing held is harmless; a finger left down wedges the
 	// device until it is rebooted, so the lift is always attempted and its
 	// outcome is always reported.
 	failed.Lifted = true
-	if _, liftErr := driver.Perform(ctx, udid, simbridge.Lift(gesture.Last)); liftErr != nil {
+	if _, liftErr := driver.Perform(ctx, udid, release); liftErr != nil {
 		failed.LiftErr = liftErr
 	}
 	return gesture, simbridge.PerformResult{}, failed
-}
-
-func touches(events []simbridge.Event) bool {
-	for _, e := range events {
-		if e.Kind == "touch" {
-			return true
-		}
-	}
-	return false
 }

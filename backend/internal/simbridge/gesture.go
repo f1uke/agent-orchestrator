@@ -36,6 +36,20 @@ const (
 	swipeStep = 16 * time.Millisecond
 	// keyStep paces key events; the guest drops keystrokes sent faster.
 	keyStep = 4 * time.Millisecond
+	// pinchSettle is how long both fingers stay still after they land, before
+	// they start travelling.
+	//
+	// 🗝 Measured, not guessed. A pinch recognizer only starts scaling once it
+	// has latched BOTH touches, and the frames it spends doing that are frames
+	// whose movement it never counts - so a pinch that starts moving
+	// immediately arrives at a smaller scale than it asked for, and by a margin
+	// that grows with how fast it moves. On mobile Safari, `x3.00` over 400 ms
+	// delivered x2.20 with no settle and x2.69 with this one, measured off the
+	// page's own `visualViewport.scale`; twice this length bought another 0.07
+	// and four times bought nothing more, which is why it is 120 ms and not
+	// longer. It is not part of `duration`, which is how long the fingers
+	// TRAVEL; Duration counts it, so the hold still covers it.
+	pinchSettle = 120 * time.Millisecond
 	// MaxSwipeDuration bounds a gesture so it can never outlive the hold that
 	// makes it exclusive.
 	MaxSwipeDuration = 5 * time.Second
@@ -143,6 +157,125 @@ func Path(points []Point, duration time.Duration) ([]Event, error) {
 	last := points[len(points)-1]
 	return append(events, Event{Kind: "touch", Type: "end", X: last.X, Y: last.Y}), nil
 }
+
+// MinPinchSpan is the smallest gap allowed between the two fingers of a pinch,
+// as a fraction of the screen's width.
+//
+// Below it the two contacts are close enough to be one touch, and a gesture
+// that lands as a single finger is the failure this package exists to refuse:
+// it sends events, it changes nothing, and it reads exactly like a pinch that
+// worked. Two percent of a 393-point phone is about 8 points - already tight,
+// and the floor rather than a recommendation.
+const MinPinchSpan = 0.02
+
+// Pinch moves two fingers along the horizontal line through center, from `from`
+// apart to `to` apart, over duration. `to` greater than `from` spreads the
+// fingers (zoom in); smaller pinches them together (zoom out).
+//
+// 🗝 It is composed FROM the held two-finger primitive rather than beside it:
+// every event here is Grip.Event on a TwoFingers grip, the same call a live
+// pinch tracking a human's fingers would make. That is deliberate. A one-shot
+// pinch with its own idea of what a two-finger frame looks like would be a
+// second definition to drift from the first, and the drift would show up as a
+// contact left down on a device somebody else is using.
+//
+// The reason two fingers are possible at all is that the vendored addon carries
+// BOTH contacts in a single HID frame (`multiTouch`) rather than making us
+// interleave two touches that have no identity to tell them apart.
+//
+// Where the fingers sit for a given gap is PinchGrip, which says why one axis.
+func Pinch(center Point, from, to float64, duration time.Duration) ([]Event, error) {
+	if err := validatePoint("pinch centre", center); err != nil {
+		return nil, err
+	}
+	for _, span := range []struct {
+		what string
+		v    float64
+	}{{"start", from}, {"end", to}} {
+		if span.v < MinPinchSpan {
+			return nil, fmt.Errorf("the %s gap between the fingers must be at least %g of the screen's width, got %g: "+
+				"any closer and the two touches land as one, which no app reads as a pinch",
+				span.what, MinPinchSpan, span.v)
+		}
+		if half := span.v / 2; center.X-half < 0 || center.X+half > 1 {
+			return nil, fmt.Errorf("a %s gap of %g does not fit around x=%g: the fingers would leave the screen. "+
+				"The widest gap that fits there is %g",
+				span.what, span.v, center.X, widestPinchSpan(center.X))
+		}
+	}
+	// The advice above is about the ARGUMENTS - a span, a centre - which is why
+	// it can name the gap that would have fitted. The grip's own rule is still
+	// the authority on whether two contacts land, so it is asked as well: a
+	// pinch that skipped it would be the one path composing a grip nothing
+	// checked.
+	for _, span := range []float64{from, to} {
+		if err := PinchGrip(center, span).Validate("pinch"); err != nil {
+			return nil, err
+		}
+	}
+	if from == to {
+		return nil, fmt.Errorf("a pinch from %g to %g never changes the distance between the fingers, "+
+			"so nothing would zoom: give a different end gap", from, to)
+	}
+	if duration <= 0 || duration > MaxSwipeDuration {
+		return nil, fmt.Errorf("pinch duration must be above zero and at most %s, got %s", MaxSwipeDuration, duration)
+	}
+
+	steps := int(duration / swipeStep)
+	if steps < 3 {
+		steps = 3
+	}
+	if steps > maxSwipeSteps {
+		steps = maxSwipeSteps
+	}
+	pause := int((duration / time.Duration(steps)).Milliseconds())
+	if pause < 1 {
+		pause = 1
+	}
+
+	events := []Event{
+		PinchGrip(center, from).Event("begin"),
+		{Kind: "sleep", MS: int(pinchSettle.Milliseconds())},
+	}
+	for i := 1; i <= steps; i++ {
+		grip := PinchGrip(center, from+(to-from)*float64(i)/float64(steps))
+		events = append(events, Event{Kind: "sleep", MS: pause}, grip.Event("move"))
+	}
+	return append(events, PinchGrip(center, to).Event("end")), nil
+}
+
+// PinchGrip is where two fingers sit when they are `span` apart about center.
+//
+// It is exported because it is what a CONTINUOUS pinch needs: a caller tracking
+// a human's fingers - or an agent stepping a zoom in stages - turns each span it
+// learns into a grip here and hands it to the held path, and gets the same
+// geometry `Pinch` composes in advance rather than a second version of it.
+//
+// The fingers stay on ONE AXIS. A normalized coordinate is a fraction of its own
+// axis and a phone screen is not square, so a diagonal pair would travel a
+// different number of POINTS sideways than up, and the scale an app computed
+// would not be the scale that was asked for. On one axis the normalization
+// cancels and the ratio of the spans IS the scale the recognizer sees.
+func PinchGrip(center Point, span float64) Grip {
+	half := span / 2
+	return TwoFingers(
+		Point{X: center.X - half, Y: center.Y},
+		Point{X: center.X + half, Y: center.Y},
+	)
+}
+
+// widestPinchSpan is the largest gap that still fits both fingers on screen
+// around x. It is in the refusal rather than silently clamped: a pinch quietly
+// narrowed to fit is a smaller scale than the caller asked for, reported as the
+// one they asked for.
+func widestPinchSpan(x float64) float64 {
+	return 2 * math.Min(x, 1-x)
+}
+
+// PinchScale is what a pinch from one gap to another asks an app to scale by.
+// Reported rather than taken as input, so the number on screen is derived from
+// the fingers that actually moved.
+func PinchScale(from, to float64) float64 { return to / from }
 
 // shareSteps splits a step budget between the legs of a route by how far each
 // one travels, so the finger moves at one speed rather than crawling across a
@@ -608,8 +741,40 @@ func Button(name string) ([]Event, error) {
 // Lift is the recovery gesture: a bare release at a point, sent when a gesture
 // died in a way that may have left the finger down. A release with nothing held
 // is harmless; a finger left down wedges the device.
-func Lift(at Point) []Event {
-	return []Event{{Kind: "touch", Type: "end", X: clamp01(at.X), Y: clamp01(at.Y)}}
+func Lift(at Point) []Event { return Release(OneFinger(at)) }
+
+// Release is the recovery gesture for a grip: whatever is touching the screen,
+// let go of it the way it went down. Releasing ONE contact of a pair leaves the
+// other held, which is the same wedge as a stuck finger reached by being
+// half-right, so a pair is always released as a pair.
+func Release(grip Grip) []Event {
+	return []Event{grip.Clamped().Event("end")}
+}
+
+// Recover is the release to send when a gesture died in flight: whatever these
+// events left touching the screen, released the way it went down.
+//
+// It exists because "lift the finger" stopped being a complete description the
+// moment a gesture could hold two. Releasing ONE contact of a pinch leaves the
+// other held, which is the wedge this package spends its whole guard budget
+// avoiding - so the pair is released as a pair, in one frame, at the points the
+// last multitouch event put them.
+//
+// at is where the caller believes the finger ended, and is used for the
+// one-finger case because a drag's end is only known to the caller (see
+// simgesture.Gesture.Last). Nothing is returned when the gesture never touched
+// the screen: sending a stray touch to recover from a keyboard gesture would be
+// worse than the failure it is recovering from.
+func Recover(events []Event, at Point) []Event {
+	for i := len(events) - 1; i >= 0; i-- {
+		switch e := events[i]; e.Kind {
+		case "multitouch":
+			return Release(TwoFingers(Point{X: e.X, Y: e.Y}, Point{X: e.X2, Y: e.Y2}))
+		case "touch":
+			return Lift(at)
+		}
+	}
+	return nil
 }
 
 // ButtonNames lists what Button accepts, in a stable order.

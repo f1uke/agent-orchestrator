@@ -10,7 +10,9 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 )
 
-func at(x, y float64) simbridge.Point { return simbridge.Point{X: x, Y: y} }
+// at is one finger, which is what the Device tab's pointer is and what every
+// test below drags with. A pinch's two-finger grip has its own tests.
+func at(x, y float64) simbridge.Grip { return simbridge.OneFinger(simbridge.Point{X: x, Y: y}) }
 
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
@@ -57,7 +59,7 @@ func TestDrags_FollowTheFingerUnderOneHold(t *testing.T) {
 	if !ok || outcome.End == nil {
 		t.Fatalf("a drag must report where it ended when its hold is released: %+v", outcome)
 	}
-	if *outcome.End != at(0.5, 0.5) {
+	if *outcome.End != at(0.5, 0.5).At() {
 		t.Fatalf("released end = %+v, want the point the drag ended at (0.5,0.5)", *outcome.End)
 	}
 }
@@ -289,5 +291,112 @@ func TestDrags_ANewDragRecoversOneWhoseEndNeverArrived(t *testing.T) {
 	}
 	if err := drags.End(ctx, "UDID-A", "p-1", at(0.2, 0.2)); err != nil {
 		t.Fatalf("end: %v", err)
+	}
+}
+
+// --- two fingers, held ------------------------------------------------------
+
+// pinchAt is the two-finger grip a live pinch holds: the same one
+// `simbridge.Pinch` composes in advance, so the held path and the one-shot
+// command cannot disagree about where two fingers are.
+func pinchAt(x, y, span float64) simbridge.Grip {
+	return simbridge.PinchGrip(simbridge.Point{X: x, Y: y}, span)
+}
+
+// The capability the whole two-touch protocol buys: a pinch that follows a
+// human's fingers rather than being replayed after they let go. Down once, moved
+// as the gap is learned, up once - and both contacts throughout.
+func TestDrags_HoldTwoFingersThroughAContinuousPinch(t *testing.T) {
+	rec := &recorder{}
+	drags := simgesture.NewDragsForTest(time.Second, time.Minute)
+	ctx := context.Background()
+
+	if err := drags.Begin(ctx, rec, rec, "UDID-A", "p-1", pinchAt(0.5, 0.5, 0.2)); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	for _, span := range []float64{0.3, 0.45, 0.6} {
+		if err := drags.Move(ctx, rec, "UDID-A", "p-1", pinchAt(0.5, 0.5, span)); err != nil {
+			t.Fatalf("move: %v", err)
+		}
+	}
+	if err := drags.End(ctx, "UDID-A", "p-1", pinchAt(0.5, 0.5, 0.6)); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+
+	if got := rec.order(); got != "acquire,hold,hold,hold,hold,lift,release" {
+		t.Fatalf("order = %q; want one hold, the fingers followed, then one lift and one release", got)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	for i, events := range rec.performed {
+		if len(events) != 1 || events[0].Kind != "multitouch" {
+			t.Fatalf("step %d sent %+v, want a single two-finger frame: one contact per step would "+
+				"leave the other down", i, events)
+		}
+	}
+	// The lift is the last call, and it releases BOTH contacts.
+	last := rec.performed[len(rec.performed)-1][0]
+	if last.Type != "end" || last.X == last.X2 {
+		t.Fatalf("the drag was released as %+v, want both contacts up at the points they held", last)
+	}
+}
+
+// A held touch that changes how many fingers are down is a caller bug with a
+// physical consequence: the contact that vanished was never lifted. It is
+// refused, and the device is left clean rather than half-held.
+func TestDrags_AHeldTouchCannotChangeItsFingerCount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		step func(*simgesture.Drags, *recorder) error
+	}{
+		{"a move with one finger", func(d *simgesture.Drags, rec *recorder) error {
+			return d.Move(context.Background(), rec, "UDID-A", "p-1", at(0.5, 0.5))
+		}},
+		{"an end with one finger", func(d *simgesture.Drags, rec *recorder) error {
+			return d.End(context.Background(), "UDID-A", "p-1", at(0.5, 0.5))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &recorder{}
+			drags := simgesture.NewDragsForTest(time.Second, time.Minute)
+			if err := drags.Begin(context.Background(), rec, rec, "UDID-A", "p-1", pinchAt(0.5, 0.5, 0.2)); err != nil {
+				t.Fatalf("begin: %v", err)
+			}
+			if err := tc.step(drags, rec); !errors.Is(err, simgesture.ErrGripChanged) {
+				t.Fatalf("err = %v, want ErrGripChanged", err)
+			}
+			if got := rec.order(); got != "acquire,hold,lift,release" {
+				t.Fatalf("order = %q; the refused step must still leave the screen released", got)
+			}
+			rec.mu.Lock()
+			lift := rec.performed[len(rec.performed)-1][0]
+			rec.mu.Unlock()
+			if lift.Kind != "multitouch" || lift.X == lift.X2 {
+				t.Fatalf("lift = %+v, want both contacts released where they were last seen", lift)
+			}
+			if performed, ok := rec.lastReleasePerformed(); !ok || performed {
+				t.Fatal("a drag cut off by a step that did not describe it was not performed")
+			}
+		})
+	}
+}
+
+// The watchdog's whole job is that a client which vanished costs seconds rather
+// than a reboot. Two contacts must not be the case where it only lifts one.
+func TestDrags_AQuietPinchIsLiftedAsAPair(t *testing.T) {
+	rec := &recorder{}
+	drags := simgesture.NewDragsForTest(20*time.Millisecond, time.Minute)
+
+	if err := drags.Begin(context.Background(), rec, rec, "UDID-A", "p-1", pinchAt(0.5, 0.5, 0.3)); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	eventually(t, "the watchdog to lift both fingers", func() bool {
+		return rec.order() == "acquire,hold,lift,release"
+	})
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	lift := rec.performed[len(rec.performed)-1][0]
+	if lift.Kind != "multitouch" || lift.Type != "end" || lift.X == lift.X2 {
+		t.Fatalf("watchdog lift = %+v, want both contacts up in one frame", lift)
 	}
 }

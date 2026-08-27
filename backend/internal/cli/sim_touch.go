@@ -286,6 +286,79 @@ func newSimDragCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
+func newSimPinchCommand(ctx *commandContext) *cobra.Command {
+	opts := simTouchOptions{}
+	var duration time.Duration
+	cmd := &cobra.Command{
+		Use:   "pinch <x> <y> <from> <to>",
+		Short: "Pinch or spread two fingers about a point on a claimed simulator",
+		Long: "Put TWO fingers on the screen either side of a point and move them together or " +
+			"apart - how you zoom a map, a photo or a web view.\n\n" +
+			"<x> <y> is the point the pinch is centred on, in the same normalized 0..1 " +
+			"coordinates `ao sim ax` prints. <from> and <to> are how far APART the two fingers " +
+			"are at the start and at the end, as a fraction of the screen's width. A <to> " +
+			"larger than <from> spreads them (zoom in); smaller brings them together (zoom out), " +
+			"and <to> divided by <from> is the scale the FINGERS describe.\n\n" +
+			"What the app makes of that is the app's business, and it is usually a little less. A " +
+			"pinch recognizer only starts scaling once it has latched both touches, and the frames " +
+			"it spends doing that are frames whose movement it never counts - so `0.2 0.6` on mobile " +
+			"Safari, which describes x3.00, arrived as x2.69 at the default duration and x2.93 over " +
+			"1.5s, measured off the page's own `visualViewport.scale`. A slower pinch therefore lands " +
+			"closer. Read the result rather than assuming the number: an app has its own zoom limits " +
+			"too, and one already at maximum zoom answers a perfect pinch with nothing.\n\n" +
+			"The fingers sit on the horizontal line through the centre. That is not a " +
+			"simplification a caller has to work around: a normalized coordinate is a fraction " +
+			"of its own axis and a phone screen is not square, so fingers placed diagonally " +
+			"would travel a different number of points sideways than up, and the app would " +
+			"scale by something other than the ratio asked for. On one axis the ratio is exact.\n\n" +
+			"Both gaps have to keep the fingers on screen and at least " + strconv.FormatFloat(simbridge.MinPinchSpan, 'g', -1, 64) +
+			" apart - two touches closer than that land as one, which nothing reads as a pinch. " +
+			"A pinch is refused rather than quietly narrowed to fit, because a smaller scale " +
+			"reported as the one that was asked for is indistinguishable from a pinch that worked.\n\n" +
+			"Maestro has no pinch, so a recording that contains one cannot be exported as a " +
+			"flow: `ao sim flow` will refuse that step by name rather than drop it.\n\n" +
+			"The device must be claimed by this session (`ao sim claim`) first.",
+		Example: `  ao sim pinch 0.5 0.5 0.2 0.6            # spread to 3x, about the middle of the screen
+  ao sim pinch 0.5 0.5 0.6 0.2            # pinch back down to a third
+  ao sim pinch 0.5 0.4 0.2 0.5 --duration 800ms`,
+		Args: cobra.ExactArgs(4),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			center, err := parseSimPoint(args[0], args[1])
+			if err != nil {
+				return err
+			}
+			from, err := parseSimSpan("from", args[2])
+			if err != nil {
+				return err
+			}
+			to, err := parseSimSpan("to", args[3])
+			if err != nil {
+				return err
+			}
+			events, err := simbridge.Pinch(center, from, to, duration)
+			if err != nil {
+				return usageError{err}
+			}
+			return ctx.runSimGesture(cmd, opts, simGesture{
+				action: "pinch",
+				detail: fmt.Sprintf("about (%.3f, %.3f), fingers %.3f to %.3f apart (x%.2f) over %s",
+					center.X, center.Y, from, to, simbridge.PinchScale(from, to), duration),
+				events: events,
+				// Both ends of the pinch are the centre: it is where the gesture
+				// is aimed, and the recovery release comes from the events
+				// themselves because two fingers cannot be described by one
+				// point - see simbridge.Recover.
+				first:      center,
+				last:       center,
+				durationMS: int(duration.Milliseconds()),
+			})
+		},
+	}
+	cmd.Flags().DurationVar(&duration, "duration", 400*time.Millisecond, "How long the fingers take to travel")
+	opts.bind(cmd)
+	return cmd
+}
+
 func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 	opts := simTouchOptions{}
 	var rawKeys, forcePaste bool
@@ -707,6 +780,18 @@ func parseSimPoint(rawX, rawY string) (simbridge.Point, error) {
 	return simbridge.Point{X: x, Y: y}, nil
 }
 
+// parseSimSpan reads how far apart a pinch's two fingers are. It is a distance
+// rather than a coordinate, so it is refused by its own rule: simbridge.Pinch
+// owns what a usable gap is, and this only owns "that was not a number".
+func parseSimSpan(what, raw string) (float64, error) {
+	span, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil {
+		return 0, usageError{fmt.Errorf("invalid %s gap %q: use a number - how far apart the two fingers are, "+
+			"as a fraction of the screen's width", what, raw)}
+	}
+	return span, nil
+}
+
 // writeSimPaste reports a paste. It says PASTED rather than typed, and says why
 // that route was taken: an app that reacts to each keystroke behaves differently
 // when it receives one paste instead, and a caller who is debugging that needs
@@ -734,6 +819,8 @@ func writeSimGesture(out io.Writer, result simGestureResult) error {
 	verb := map[string]string{
 		"tap":    "Tapped",
 		"swipe":  "Swiped",
+		"drag":   "Dragged",
+		"pinch":  "Pinched",
 		"type":   "Typed",
 		"button": "Pressed",
 	}[result.Action]

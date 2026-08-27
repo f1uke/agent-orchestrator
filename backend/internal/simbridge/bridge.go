@@ -20,13 +20,23 @@ import (
 // simulator, and keeps the bridge script free of policy.
 type Event struct {
 	Kind string `json:"kind"`
-	// Touch: Type is begin|move|end and X/Y are normalized 0..1 of the screen.
-	// Normalized coordinates are what the HID layer takes directly, and what
-	// `ao sim ax` hands out per element, so nothing in between has to know the
-	// device's pixel size.
+	// Touch and multitouch: Type is begin|move|end and X/Y are normalized 0..1
+	// of the screen. Normalized coordinates are what the HID layer takes
+	// directly, and what `ao sim ax` hands out per element, so nothing in
+	// between has to know the device's pixel size.
+	//
+	// ⚠ The coordinates are deliberately NOT `omitempty`: 0 is the left and top
+	// EDGE of the screen, a coordinate `ao sim tap` accepts, and omitting it
+	// would reach the bridge as `undefined` and fail the conversion rather than
+	// touching the edge.
 	Type string  `json:"type,omitempty"`
-	X    float64 `json:"x,omitempty"`
-	Y    float64 `json:"y,omitempty"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	// X2/Y2 are the SECOND contact, and only a multitouch event has them: the
+	// addon's `multiTouch` carries both points in one HID frame, which is what
+	// makes a pinch two simultaneous touches rather than two touches in a row.
+	X2 float64 `json:"x2"`
+	Y2 float64 `json:"y2"`
 	// Key: Usage is a USB HID keyboard usage id.
 	Usage int `json:"usage,omitempty"`
 	// Button: a name the addon knows (see gesture.go for why the list is short).

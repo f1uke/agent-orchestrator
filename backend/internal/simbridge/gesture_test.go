@@ -650,3 +650,165 @@ func TestPlanText_WithoutKeysIsUnchanged(t *testing.T) {
 		t.Fatal("text with no keys behind it must still be planned from the guest's input mode")
 	}
 }
+
+// A pinch is the one gesture here that is not one finger, so what the tests owe
+// it is different: not "did the finger land" but "were there two of them, at
+// once, and did the gap between them end up where it was asked to".
+
+func multiTouchEvents(events []Event) []Event {
+	var out []Event
+	for _, e := range events {
+		if e.Kind == "multitouch" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func multiTouchTypes(events []Event) string {
+	var parts []string
+	for _, e := range multiTouchEvents(events) {
+		parts = append(parts, e.Type)
+	}
+	return strings.Join(parts, ",")
+}
+
+func TestPinch_MovesTwoFingersToTheGapItWasAskedFor(t *testing.T) {
+	center := Point{X: 0.5, Y: 0.4}
+	events, err := Pinch(center, 0.2, 0.6, 400*time.Millisecond)
+	if err != nil {
+		t.Fatalf("pinch: %v", err)
+	}
+	if len(touchEvents(events)) != 0 {
+		t.Fatal("a pinch that emits a one-finger touch would leave a contact behind when the pair is released")
+	}
+	types := multiTouchTypes(events)
+	if !strings.HasPrefix(types, "begin,move") || !strings.HasSuffix(types, "end") {
+		t.Fatalf("pinch sequence = %q, want begin, moves, end", types)
+	}
+	if strings.Count(types, "move") < 2 {
+		t.Fatalf("a pinch with no intermediate moves gives a recognizer nothing to scale from: %q", types)
+	}
+
+	contacts := multiTouchEvents(events)
+	first, last := contacts[0], contacts[len(contacts)-1]
+	if math.Abs((first.X2-first.X)-0.2) > 1e-9 {
+		t.Fatalf("fingers start %g apart, want 0.2", first.X2-first.X)
+	}
+	if math.Abs((last.X2-last.X)-0.6) > 1e-9 {
+		t.Fatalf("fingers end %g apart, want 0.6", last.X2-last.X)
+	}
+	for i, e := range contacts {
+		if e.Y != center.Y || e.Y2 != center.Y {
+			t.Fatalf("event %d left the horizontal line through the centre: %+v", i, e)
+		}
+		// Symmetric about the centre, or the pinch also drags the content.
+		if mid := (e.X + e.X2) / 2; math.Abs(mid-center.X) > 1e-9 {
+			t.Fatalf("event %d is centred on %g, want %g", i, mid, center.X)
+		}
+		if e.X > e.X2 {
+			t.Fatalf("event %d crossed the fingers over: %+v", i, e)
+		}
+	}
+}
+
+func TestPinch_ClosingIsTheSameGestureBackwards(t *testing.T) {
+	events, err := Pinch(Point{X: 0.5, Y: 0.5}, 0.6, 0.2, 400*time.Millisecond)
+	if err != nil {
+		t.Fatalf("pinch: %v", err)
+	}
+	contacts := multiTouchEvents(events)
+	first, last := contacts[0], contacts[len(contacts)-1]
+	if first.X2-first.X <= last.X2-last.X {
+		t.Fatal("a pinch from a wide gap to a narrow one must bring the fingers together")
+	}
+	if got := PinchScale(0.6, 0.2); math.Abs(got-(1.0/3.0)) > 1e-9 {
+		t.Fatalf("scale = %g, want a third", got)
+	}
+}
+
+func TestPinch_RefusesWhatWouldNotBeAPinch(t *testing.T) {
+	center := Point{X: 0.5, Y: 0.5}
+	for _, tc := range []struct {
+		name       string
+		center     Point
+		from, to   float64
+		duration   time.Duration
+		wantSubstr string
+	}{
+		{"a gap too small to be two touches", center, 0.005, 0.4, 400 * time.Millisecond, "land as one"},
+		{"a gap that runs off the screen", Point{X: 0.2, Y: 0.5}, 0.2, 0.9, 400 * time.Millisecond, "leave the screen"},
+		{"no change in the gap at all", center, 0.3, 0.3, 400 * time.Millisecond, "nothing would zoom"},
+		{"a centre off the screen", Point{X: 1.4, Y: 0.5}, 0.2, 0.4, 400 * time.Millisecond, "normalized 0..1"},
+		{"no duration", center, 0.2, 0.4, 0, "duration"},
+		{"a duration past the hold", center, 0.2, 0.4, MaxSwipeDuration + time.Second, "duration"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Pinch(tc.center, tc.from, tc.to, tc.duration)
+			if err == nil {
+				t.Fatal("must be refused: a pinch that sends events and changes nothing reads exactly like one that worked")
+			}
+			if !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("error %q does not say %q", err, tc.wantSubstr)
+			}
+		})
+	}
+}
+
+func TestPinch_RefusalNamesTheGapThatWouldFit(t *testing.T) {
+	_, err := Pinch(Point{X: 0.2, Y: 0.5}, 0.2, 0.9, 400*time.Millisecond)
+	if err == nil {
+		t.Fatal("a gap that does not fit must be refused, not narrowed")
+	}
+	// 0.2 from the left edge leaves 0.4 for the whole gap.
+	if !strings.Contains(err.Error(), "0.4") {
+		t.Fatalf("error %q does not say the widest gap that fits", err)
+	}
+}
+
+func TestDuration_CoversAPinch(t *testing.T) {
+	const want = 400 * time.Millisecond
+	events, err := Pinch(Point{X: 0.5, Y: 0.5}, 0.2, 0.6, want)
+	if err != nil {
+		t.Fatalf("pinch: %v", err)
+	}
+	// The hold is sized from this, and a hold that lapses mid-pinch is the
+	// window another caller needs to take the screen with two fingers on it.
+	if got := Duration(events); got < want {
+		t.Fatalf("duration = %s, want at least the %s the pinch takes", got, want)
+	}
+}
+
+func TestRecover_ReleasesWhatTheGestureActuallyHeld(t *testing.T) {
+	pinch, err := Pinch(Point{X: 0.5, Y: 0.5}, 0.2, 0.6, 400*time.Millisecond)
+	if err != nil {
+		t.Fatalf("pinch: %v", err)
+	}
+	release := Recover(pinch, Point{X: 0.5, Y: 0.5})
+	if len(release) != 1 || release[0].Kind != "multitouch" || release[0].Type != "end" {
+		t.Fatalf("a pinch must be recovered as a pair, not a finger: %+v", release)
+	}
+	// At the points the pinch actually left them, or the release lands
+	// somewhere the fingers never were.
+	last := multiTouchEvents(pinch)[len(multiTouchEvents(pinch))-1]
+	if release[0].X != last.X || release[0].X2 != last.X2 {
+		t.Fatalf("release at %g/%g, want the last contact points %g/%g", release[0].X, release[0].X2, last.X, last.X2)
+	}
+
+	swipe, err := Swipe(Point{X: 0.5, Y: 0.8}, Point{X: 0.5, Y: 0.2}, 300*time.Millisecond)
+	if err != nil {
+		t.Fatalf("swipe: %v", err)
+	}
+	at := Point{X: 0.5, Y: 0.2}
+	if got := Recover(swipe, at); !reflect.DeepEqual(got, Lift(at)) {
+		t.Fatalf("a one-finger gesture must still be recovered with a bare lift: %+v", got)
+	}
+
+	keys, err := TypeRaw("hi")
+	if err != nil {
+		t.Fatalf("type: %v", err)
+	}
+	if got := Recover(keys, at); got != nil {
+		t.Fatalf("nothing touched the screen, so nothing may be sent to recover it: %+v", got)
+	}
+}
