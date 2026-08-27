@@ -257,6 +257,51 @@ func TestSmokeListPrintsBothResults(t *testing.T) {
 	}
 }
 
+// TestSmokeListPrintsTheRunHistory: `ao smoke list` is how an agent reads the
+// checklist back, so it has to show that a case's machine result CHANGED - the
+// thing a single overwritten column could never say. The current result heads
+// the block; every other round is printed under it with its own verdict and
+// commit, newest first, and a round that never concluded says so rather than
+// borrowing the wording of one that deliberately declined to judge.
+func TestSmokeListPrintsTheRunHistory(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, _ := smokeMultiServer(t, `{"worker":"settings copy","checks":[
+		{"id":"a","seq":1,"name":"Empty name refused","verdict":"pending",
+		 "agentVerdict":"pass","agentNote":"refused with a message","agentSha":"9f10c22a1bbbb","agentRanAt":"2026-08-22T10:00:00Z",
+		 "agentEvidence":[{"id":"e1","kind":"image","runId":"r1"},{"id":"e2","kind":"image","runId":""}],
+		 "runs":[
+		   {"id":"r1","seq":1,"verdict":"fail","note":"saved with an empty name","sha":"d44ad432cffff","recordedAt":"2026-08-21T10:00:00Z"},
+		   {"id":"r2","seq":2,"verdict":"pass","note":"refused with a message","sha":"9f10c22a1bbbb","recordedAt":"2026-08-22T10:00:00Z"},
+		   {"id":"r3","seq":3,"note":"","sha":""}
+		 ]}
+	]}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, aliveDeps(), "smoke", "list", "w1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	for _, want := range []string{
+		// The current result is run 2, not the newest ROW (run 3 never concluded).
+		"agent: PASS at 9f10c22a1bbb on 2026-08-22T10:00:00Z (run 2 of 3)",
+		// An unfinished round is named as one.
+		"run 3: never concluded",
+		// The earlier verdict survives, with the commit that makes it readable as
+		// earlier rather than as wrong, and its own capture.
+		"run 1: FAIL at d44ad432cfff on 2026-08-21T10:00:00Z, 1 captured - saved with an empty name",
+		// Captures from before AO kept a history are counted apart, not folded in.
+		"agent evidence: 2 captured (1 from an unknown run)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	// The run whose result heads the block is not repeated underneath it.
+	if strings.Contains(out, "run 2:") {
+		t.Errorf("the current run was printed twice:\n%s", out)
+	}
+}
+
 // TestSmokeRecordIgnoresNonSHAGitOutput: the commit is read from a combined
 // stdout+stderr capture, so anything that is not a bare object name is dropped -
 // a plausible-looking wrong sha would be read as a real staleness signal.

@@ -413,8 +413,10 @@ func smokeAgentLines(check smokeCheckClient) []string {
 	if check.AgentRanAt != nil {
 		head += " on " + check.AgentRanAt.Format(time.RFC3339)
 	}
-	if n := len(check.Runs); n > 1 {
-		head += fmt.Sprintf(" (run %d of %d)", check.Runs[n-1].Seq, n)
+	// The CURRENT result's round, not the newest row: a round the machine opened
+	// and never concluded is not the result being printed above it.
+	if current, ok := latestRecordedRun(check); ok && len(check.Runs) > 1 {
+		head += fmt.Sprintf(" (run %d of %d)", current.Seq, len(check.Runs))
 	}
 	lines := []string{head}
 	if note := strings.TrimSpace(check.AgentNote); note != "" {
@@ -433,20 +435,39 @@ func smokeAgentLines(check smokeCheckClient) []string {
 	return append(lines, smokeEarlierRunLines(check)...)
 }
 
-// smokeEarlierRunLines prints the rounds BEFORE the latest one, newest first.
-// They are what a single overwritten result could never show: that a case used
-// to fail at one commit and passes at another.
+// latestRecordedRun is the case's current machine result: the last round that
+// actually concluded. A round still open carries no result, and treating it as
+// one would let a crashed run stand in for a real verdict.
+func latestRecordedRun(check smokeCheckClient) (smokeRunClient, bool) {
+	for i := len(check.Runs) - 1; i >= 0; i-- {
+		if check.Runs[i].RecordedAt != nil {
+			return check.Runs[i], true
+		}
+	}
+	return smokeRunClient{}, false
+}
+
+// smokeEarlierRunLines prints every round EXCEPT the one whose result is printed
+// above, newest first. They are what a single overwritten result could never
+// show: that a case used to fail at one commit and passes at another.
 func smokeEarlierRunLines(check smokeCheckClient) []string {
 	if len(check.Runs) < 2 {
 		return nil
 	}
+	current, _ := latestRecordedRun(check)
 	var lines []string
-	for i := len(check.Runs) - 2; i >= 0; i-- {
+	for i := len(check.Runs) - 1; i >= 0; i-- {
 		run := check.Runs[i]
+		if run.ID == current.ID {
+			continue
+		}
 		line := fmt.Sprintf("        run %d: ", run.Seq)
-		if run.Verdict == "" {
+		switch {
+		case run.RecordedAt == nil:
+			line += "never concluded"
+		case run.Verdict == "":
 			line += "ran, did not judge"
-		} else {
+		default:
 			line += smokeVerdictLabel(run.Verdict)
 		}
 		if run.SHA != "" {
