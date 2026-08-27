@@ -63,6 +63,13 @@ var simPromptDecisions = map[string]bool{
 	// nothing) are reported by the commands themselves at the moment of use.
 	"type":   false,
 	"button": false,
+	// `pinch` is the only gesture that is not one finger, and it is reached
+	// only when a task asks about zooming - a task instruction, not a standing
+	// hazard, which is the only thing the always-seen layer buys. What it DID
+	// need was to be findable: an agent that could not find a pinch concluded a
+	// zoom criterion was unverifiable and reported a blocker, so the closing
+	// pointer names zooming among the things the skill page covers.
+	"pinch": false,
 	// `flow` and `record` are multi-step surfaces (start/status/stop,
 	// check/run, entry points, Maestro) reached only when a task asks for a
 	// replayable flow. That is a task instruction, not a standing hazard, and

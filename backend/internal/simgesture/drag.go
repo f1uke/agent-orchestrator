@@ -26,9 +26,15 @@ import (
 // makes the arbitration *stronger* than a per-gesture hold, not weaker: for as
 // long as a finger is down on a device, no other session can take it.
 //
-// The whole risk of that is a finger left down: the simulator's HID layer has
-// one finger and no caller identity, so a drag that never ends wedges input
-// until the device is rebooted. Three things stop it:
+// What is held is a simbridge.Grip - one finger, or the two of a pinch - rather
+// than a point, because the held path is the same path either way: down, a move
+// whenever the caller learns where the fingers went, up. Only the HID frame each
+// step becomes differs, and the grip composes that itself. Two registries, one
+// per finger count, would be two watchdogs and two places to forget the lift.
+//
+// The whole risk of that is a contact left down: the simulator's HID layer has
+// no caller identity, so a drag that never ends wedges input until the device is
+// rebooted. Three things stop it:
 //
 //   - a watchdog. A drag with no movement for DragIdleTimeout is lifted and its
 //     hold given back, so a browser tab that closed mid-drag costs two seconds.
@@ -60,6 +66,16 @@ var ErrNoDrag = errors.New("no drag is in progress on this device")
 // allowed; taking the finger out from under someone is not.
 var ErrDragHeldByOther = errors.New("another session is mid-drag on this device")
 
+// ErrGripChanged is a step that puts a different number of fingers on the screen
+// than the one that is already down - a two-finger drag continued with one
+// point, or the other way round.
+//
+// It is refused rather than adapted to, because there is no honest adaptation:
+// the contact that disappeared was never lifted, and the one that appeared never
+// landed. The drag it interrupted is cut off and released, so the device is left
+// clean rather than half-held.
+var ErrGripChanged = errors.New("a held touch cannot change how many fingers are on the screen")
+
 // key normalizes a udid so a drag can be found without asking the machine what
 // devices it has. A move belongs to a touch that is already down, and that
 // touch was opened against a device this daemon resolved moments ago - asking
@@ -81,7 +97,7 @@ type drag struct {
 	holder    Holder
 	driver    simbridge.Driver
 	udid      string
-	at        simbridge.Point
+	grip      simbridge.Grip
 	started   time.Time
 	watchdog  *time.Timer
 	// done is set by whichever of the end, the watchdog and the shutdown gets
@@ -102,7 +118,7 @@ func NewDragsForTest(idle, ceiling time.Duration) *Drags {
 // Begin puts the finger down and keeps it there.
 func (d *Drags) Begin(
 	ctx context.Context, holder Holder, driver simbridge.Driver,
-	udid, sessionID string, at simbridge.Point,
+	udid, sessionID string, grip simbridge.Grip,
 ) error {
 	d.mu.Lock()
 	existing := d.open[key(udid)]
@@ -117,16 +133,14 @@ func (d *Drags) Begin(
 	// same instinct as lifting a finger a failed gesture left down. It was
 	// abandoned, not completed, so it is not performed.
 	if existing != nil {
-		_ = d.finish(ctx, existing, existing.at, false)
+		_ = d.finish(ctx, existing, existing.grip, false)
 	}
 
 	token, err := holder.Acquire(ctx, udid, DragHoldTTL)
 	if err != nil {
 		return err
 	}
-	if err := driver.Hold(ctx, udid, []simbridge.Event{
-		{Kind: "touch", Type: "begin", X: at.X, Y: at.Y},
-	}); err != nil {
+	if err := driver.Hold(ctx, udid, []simbridge.Event{grip.Event("begin")}); err != nil {
 		// The touch never landed, so there is nothing to lift - but the hold was
 		// granted and must not be kept. Nothing reached the device, so this was
 		// not performed, and a drag that never started has no end to report.
@@ -136,7 +150,7 @@ func (d *Drags) Begin(
 
 	held := &drag{
 		token: token, sessionID: sessionID, holder: holder, driver: driver,
-		udid: udid, at: at, started: time.Now(),
+		udid: udid, grip: grip, started: time.Now(),
 	}
 	d.mu.Lock()
 	d.open[key(udid)] = held
@@ -148,7 +162,7 @@ func (d *Drags) Begin(
 // Move follows the finger. It is the only call in this package that touches a
 // device without taking a hold, because the hold it runs under was taken by
 // Begin and has not been given back.
-func (d *Drags) Move(ctx context.Context, driver simbridge.Driver, udid, sessionID string, at simbridge.Point) error {
+func (d *Drags) Move(ctx context.Context, driver simbridge.Driver, udid, sessionID string, grip simbridge.Grip) error {
 	d.mu.Lock()
 	held := d.open[key(udid)]
 	switch {
@@ -160,26 +174,32 @@ func (d *Drags) Move(ctx context.Context, driver simbridge.Driver, udid, session
 		return fmt.Errorf("%w: %s", ErrDragHeldByOther, udid)
 	}
 	overrun := time.Since(held.started) > d.ceiling
+	changed := held.grip.Pair() != grip.Pair()
+	lastGrip := held.grip
 	d.mu.Unlock()
 
+	if changed {
+		// Lifted at the grip that is actually down, not the one the caller
+		// described: the point of the refusal is that they disagree.
+		_ = d.finish(ctx, held, lastGrip, false)
+		return fmt.Errorf("%w: %s", ErrGripChanged, udid)
+	}
 	if overrun {
 		// Cut off at the ceiling rather than let go by the caller: abandoned, not
 		// completed.
-		_ = d.finish(ctx, held, at, false)
+		_ = d.finish(ctx, held, grip, false)
 		return fmt.Errorf("%w: %s", ErrNoDrag, udid)
 	}
 
-	if err := driver.Hold(ctx, udid, []simbridge.Event{
-		{Kind: "touch", Type: "move", X: at.X, Y: at.Y},
-	}); err != nil {
-		// A move that failed leaves a finger down that only this side can lift.
+	if err := driver.Hold(ctx, udid, []simbridge.Event{grip.Event("move")}); err != nil {
+		// A move that failed leaves a contact down that only this side can lift.
 		// The drag did not complete, so it is not performed.
-		_ = d.finish(ctx, held, at, false)
+		_ = d.finish(ctx, held, grip, false)
 		return &FailedError{Action: "drag", Cause: err, Lifted: true}
 	}
 
 	d.mu.Lock()
-	held.at = at
+	held.grip = grip
 	d.mu.Unlock()
 	d.arm(held)
 	return nil
@@ -190,14 +210,25 @@ func (d *Drags) Move(ctx context.Context, driver simbridge.Driver, udid, session
 // An end with no drag open is not an error: the watchdog may have lifted it
 // already, and that race is ordinary rather than a bug. Reporting it would turn
 // a touch that completed into a failure the human has to read.
-func (d *Drags) End(ctx context.Context, udid, sessionID string, at simbridge.Point) error {
+func (d *Drags) End(ctx context.Context, udid, sessionID string, grip simbridge.Grip) error {
 	d.mu.Lock()
 	held := d.open[key(udid)]
 	if held == nil || held.sessionID != sessionID {
 		d.mu.Unlock()
 		return nil
 	}
+	changed := held.grip.Pair() != grip.Pair()
+	lastGrip := held.grip
 	d.mu.Unlock()
+
+	if changed {
+		// An end that describes a different number of fingers cannot say where
+		// the ones that ARE down came up, so they are lifted where they were
+		// last seen. Nothing is left holding the screen, and the drag is not
+		// performed: what the caller described is not what happened.
+		_ = d.finish(ctx, held, lastGrip, false)
+		return fmt.Errorf("%w: %s", ErrGripChanged, udid)
+	}
 	// This is the caller's own deliberate end - the only path a drag counts as
 	// performed. It reached the device, which is all "performed" answers: the
 	// app under test saw it and moved. Whether the final lift itself lands is a
@@ -205,7 +236,7 @@ func (d *Drags) End(ctx context.Context, udid, sessionID string, at simbridge.Po
 	// its own loud reporting path (a failed recovery lift warns the finger may
 	// still be down) - folding it into "performed" would silently drop a step
 	// the human actually did.
-	return d.finish(ctx, held, at, true)
+	return d.finish(ctx, held, grip, true)
 }
 
 // Shutdown lifts every finger. The daemon calls it on the way out: a touch left
@@ -219,7 +250,7 @@ func (d *Drags) Shutdown() {
 	}
 	d.mu.Unlock()
 	for _, held := range open {
-		_ = d.finish(context.Background(), held, held.at, false)
+		_ = d.finish(context.Background(), held, held.grip, false)
 	}
 }
 
@@ -236,7 +267,10 @@ func (d *Drags) arm(held *drag) {
 	}
 	held.watchdog = time.AfterFunc(d.idle, func() {
 		// Silence, not a caller ending it - abandoned, not completed.
-		_ = d.finish(context.Background(), held, held.at, false)
+		d.mu.Lock()
+		grip := held.grip
+		d.mu.Unlock()
+		_ = d.finish(context.Background(), held, grip, false)
 	})
 }
 
@@ -252,7 +286,7 @@ func (d *Drags) arm(held *drag) {
 // the device", and a completed drag already did, moving whatever app was
 // under it. Whether the finger also came back up afterwards is a separate,
 // loudly-reported fact (see the FailedError below), not this one.
-func (d *Drags) finish(ctx context.Context, held *drag, at simbridge.Point, completed bool) error {
+func (d *Drags) finish(ctx context.Context, held *drag, grip simbridge.Grip, completed bool) error {
 	d.mu.Lock()
 	if held.done {
 		d.mu.Unlock()
@@ -268,22 +302,23 @@ func (d *Drags) finish(ctx context.Context, held *drag, at simbridge.Point, comp
 	d.mu.Unlock()
 
 	// The lift goes through Perform, not Hold: Perform's own rule is to leave no
-	// finger down, so a lift that half-worked is still followed by one.
-	_, err := held.driver.Perform(ctx, held.udid, []simbridge.Event{
-		{Kind: "touch", Type: "end", X: at.X, Y: at.Y},
-	})
+	// contact down, so a lift that half-worked is still followed by one. Release
+	// composes it from the grip, so a pinch comes up as a pair rather than
+	// leaving its second contact on the screen.
+	_, err := held.driver.Perform(ctx, held.udid, simbridge.Release(grip))
 	// The hold is given back whether or not the lift worked. A hold kept because
 	// the lift failed would leave the device unusable by anyone, on top of a
 	// finger that is already down.
 	//
-	// at is where the finger actually came up, and it is carried back with the
-	// release because this is the first moment anybody knows it: the hold was
+	// The end point is where the grip actually came up - the finger, or the
+	// midpoint between two - and it is carried back with the release because this is the first moment anybody knows it: the hold was
 	// taken on the finger going down, so a recording holds a step with a start
 	// and no end until here. For a completed drag it is the end the caller
 	// asked for; for an abandoned one the release is not performed and the
 	// stashed step is dropped rather than written, so the point is never used
 	// to describe a gesture nobody finished.
-	held.holder.Release(ctx, held.udid, held.token, Outcome{Performed: completed, End: &at})
+	end := grip.At()
+	held.holder.Release(ctx, held.udid, held.token, Outcome{Performed: completed, End: &end})
 	if err != nil {
 		return &FailedError{Action: "drag", Cause: err, LiftErr: err}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -886,5 +887,79 @@ func TestSimDrag_RefusesArgumentsThatAreNotPoints(t *testing.T) {
 	}
 	if len(driver.calls()) != 0 {
 		t.Fatalf("a rejected drag must never reach the device: %+v", driver.calls())
+	}
+}
+
+// --- ao sim pinch ----------------------------------------------------------
+
+// A pinch is two fingers or it is nothing: one contact moving is a drag, which
+// zooms exactly no app while reporting the same success.
+func TestSimPinch_SendsTwoContactsThatEndTheGapApart(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, daemon := touchDeps(t, driver)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "pinch", "0.5", "0.4", "0.2", "0.6"); err != nil {
+		t.Fatalf("sim pinch failed: %v\nstderr=%s", err, errOut)
+	}
+	events := driver.calls()[0]
+	if touchTypesOf(events) != "" {
+		t.Fatalf("a pinch must not send one-finger touches: %+v", events)
+	}
+	var pair []simbridge.Event
+	for _, e := range events {
+		if e.Kind == "multitouch" {
+			pair = append(pair, e)
+		}
+	}
+	if len(pair) < 3 {
+		t.Fatalf("pinch sent %d multitouch events, want a begin, moves and an end", len(pair))
+	}
+	if pair[0].Type != "begin" || pair[len(pair)-1].Type != "end" {
+		t.Fatalf("pinch = %+v, want it to start down and finish up", pair)
+	}
+	if got := pair[len(pair)-1].X2 - pair[len(pair)-1].X; math.Abs(got-0.6) > 1e-9 {
+		t.Fatalf("fingers ended %g apart, want the 0.6 that was asked for", got)
+	}
+	assertHoldTakenAndReleased(t, daemon)
+}
+
+// The scale is what an acceptance criterion is written in, so it is printed
+// rather than left for the reader to divide out.
+func TestSimPinch_ReportsTheScaleItAskedFor(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+
+	out, errOut, err := executeCLI(t, deps, "sim", "pinch", "0.5", "0.5", "0.2", "0.6")
+	if err != nil {
+		t.Fatalf("sim pinch failed: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "Pinched") {
+		t.Fatalf("output does not say what happened: %s", out)
+	}
+	if !strings.Contains(out, "x3.00") {
+		t.Fatalf("output does not name the scale: %s", out)
+	}
+}
+
+func TestSimPinch_RefusesWhatWouldNotZoom(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+
+	for _, args := range [][]string{
+		{"sim", "pinch", "0.5", "0.5", "0.3", "0.3"},   // nothing changes
+		{"sim", "pinch", "0.5", "0.5", "0.005", "0.4"}, // the two touches land as one
+		{"sim", "pinch", "0.1", "0.5", "0.2", "0.8"},   // the fingers leave the screen
+		{"sim", "pinch", "0.5", "0.5", "wide", "0.4"},  // not a number
+	} {
+		_, _, err := executeCLI(t, deps, args...)
+		if err == nil {
+			t.Fatalf("%v must be refused", args)
+		}
+		if !errors.As(err, &usageError{}) {
+			t.Fatalf("%v: err = %v, want a usage error (exit 2)", args, err)
+		}
+	}
+	if len(driver.calls()) != 0 {
+		t.Fatalf("a refused pinch must never reach the device: %+v", driver.calls())
 	}
 }

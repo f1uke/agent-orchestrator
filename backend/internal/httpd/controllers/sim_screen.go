@@ -534,14 +534,18 @@ func (c *SimScreenController) drag(
 		return
 	}
 
+	// One finger: the Device tab draws a pointer, and a pointer is one contact.
+	// The registry holds a grip rather than a point so a two-finger drag needs no
+	// second registry when there is a caller for one - see simbridge.Grip.
+	grip := simbridge.OneFinger(point)
 	var err error
 	switch in.Kind {
 	case "drag-begin":
-		err = c.Drags.Begin(r.Context(), holder, driver, udid, sessionID, point)
+		err = c.Drags.Begin(r.Context(), holder, driver, udid, sessionID, grip)
 	case "drag-move":
-		err = c.Drags.Move(r.Context(), driver, udid, sessionID, point)
+		err = c.Drags.Move(r.Context(), driver, udid, sessionID, grip)
 	default:
-		err = c.Drags.End(r.Context(), udid, sessionID, point)
+		err = c.Drags.End(r.Context(), udid, sessionID, grip)
 	}
 	if err != nil {
 		writeSimDragError(w, r, err)

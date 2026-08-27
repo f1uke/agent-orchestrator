@@ -77,7 +77,10 @@ func (r *recorder) Perform(_ context.Context, _ string, events []simbridge.Event
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.performed = append(r.performed, events)
-	if len(events) == 1 && events[0].Kind == "touch" && events[0].Type == "end" {
+	// A recovery release is a lone `end`, one finger or two: a pinch is
+	// released as a pair, so a fake that only recognized the one-finger shape
+	// would score the rescue as another gesture.
+	if len(events) == 1 && (events[0].Kind == "touch" || events[0].Kind == "multitouch") && events[0].Type == "end" {
 		r.steps = append(r.steps, step{"lift", ""})
 		if r.liftErr != nil {
 			return simbridge.PerformResult{}, r.liftErr
@@ -260,4 +263,37 @@ type lifter struct{ recorder }
 
 func (l *lifter) Perform(context.Context, string, []simbridge.Event) (simbridge.PerformResult, error) {
 	return simbridge.PerformResult{Lifted: true, LiftReason: "gesture ended without a lift"}, nil
+}
+
+// A pinch holds TWO fingers, so recovering it with one release would leave the
+// other contact down - the same wedge as a stuck finger, reached by being
+// half-right.
+func TestRun_FailedPinchIsRecoveredAsAPair(t *testing.T) {
+	events, err := simbridge.Pinch(simbridge.Point{X: 0.5, Y: 0.5}, 0.2, 0.6, 400*time.Millisecond)
+	if err != nil {
+		t.Fatalf("Pinch: %v", err)
+	}
+	rec := &recorder{performErr: errors.New("bridge exploded")}
+	_, runErr := simgesture.Run(context.Background(), rec, rec, "UDID-A",
+		simgesture.Gesture{Action: "pinch", Detail: "0.2 to 0.6", Events: events,
+			Last: simbridge.Point{X: 0.5, Y: 0.5}})
+	var failed *simgesture.FailedError
+	if !errors.As(runErr, &failed) {
+		t.Fatalf("want *FailedError, got %v", runErr)
+	}
+	if !failed.Lifted {
+		t.Fatal("a pinch that died in flight must be recovered, not left holding the screen")
+	}
+	if got := rec.order(); got != "acquire,perform,lift,release" {
+		t.Fatalf("order was %q", got)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	release := rec.performed[len(rec.performed)-1]
+	if len(release) != 1 || release[0].Kind != "multitouch" || release[0].Type != "end" {
+		t.Fatalf("the recovery release must lift both contacts in one frame: %+v", release)
+	}
+	if release[0].X == release[0].X2 {
+		t.Fatalf("the release names one point twice, so one finger is still down: %+v", release[0])
+	}
 }
