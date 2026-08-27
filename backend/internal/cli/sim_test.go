@@ -435,9 +435,18 @@ func TestSimShot_NoBootedSimulatorRefusesAndDoesNotBoot(t *testing.T) {
 	if !strings.Contains(err.Error(), "booted") {
 		t.Errorf("error %q does not say nothing is booted", err)
 	}
+	// This used to be a dead end - the refusal said AO never boots and left the
+	// caller there. It now names the command that unblocks it, which is the
+	// whole reason `ao sim boot` exists.
+	if !strings.Contains(err.Error(), "ao sim boot") {
+		t.Errorf("error %q does not say how to get a booted device", err)
+	}
+	// `ao sim shot` still must not boot one ITSELF: capturing is read-only, and
+	// starting a multi-gigabyte device as a side effect of a screenshot is not
+	// something a caller asked for.
 	for _, c := range *calls {
 		for _, arg := range c {
-			if arg == "boot" {
+			if arg == "boot" || arg == "bootstatus" {
 				t.Fatalf("sim shot tried to boot a simulator: %v", c)
 			}
 		}

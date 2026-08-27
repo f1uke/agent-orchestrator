@@ -102,7 +102,7 @@ func newSimClaimCommand(ctx *commandContext) *cobra.Command {
 			"rebooted. A claim is what keeps that from happening.\n\n" +
 			"The claim lapses on its own after --ttl (10 minutes by default) and is " +
 			"released automatically when this session ends, so a crashed holder can " +
-			"never keep a device forever. Claiming again renews it. " + simNeverBootsNote,
+			"never keep a device forever. Claiming again renews it. " + simPowerNote,
 		Example: `  ao sim claim
   ao sim claim --ttl 30m
   ao sim claim --udid 00000000-0000-0000-0000-000000000000 --json`,

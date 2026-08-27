@@ -44,6 +44,13 @@ var simPromptDecisions = map[string]bool{
 	// which the screen often cannot give, and because the blocked-main-thread
 	// diagnosis sends an agent straight to it.
 	"log": true,
+	// `boot` is here because its absence was a DEAD END: the prompt used to
+	// tell an agent that nothing booted meant "say so and stop", and a task
+	// that stops there never takes a lease - which is the event that gives the
+	// task its qa. It is also the one command that can spend gigabytes, so the
+	// always-seen layer is where the "boot the one you need and no more" half
+	// of it belongs.
+	"boot": true,
 
 	// Skill page only. Not "less useful" - just not what an agent gets WRONG
 	// without being told, which is the only thing the always-seen layer buys.
@@ -90,8 +97,12 @@ var simPromptDecisions = map[string]bool{
 	"log --follow":    false,
 	"log --grep":      false,
 	"log --max-lines": false,
-	"log --process":   false,
-	"log --since":     false,
+	// `boot --timeout` only moves a deadline that is already right: the default
+	// is the daemon's own boot timeout plus a margin, so the only caller who
+	// needs it is one who knows this machine is slower than that.
+	"boot --timeout": false,
+	"log --process":  false,
+	"log --since":    false,
 }
 
 // ambientSimFlags are the two flags nearly every `ao sim` command carries, so
@@ -111,7 +122,7 @@ var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 // `xcodebuild -destination` that never asks the lease. The rule costs every iOS
 // worker a few hundred bytes a turn; a discarded run of manual verification
 // costs more.
-const simGuidanceBudget = 3300
+const simGuidanceBudget = 3400
 
 func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 	guidance := prompts.SimulatorGuidance()

@@ -80,7 +80,7 @@ func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
 			"is whichever one a human is using.\n\n" +
 			"A claim is required. A flow relaunches the app under test and resets its " +
 			"privacy permissions; that is what a regression test wants on a device set " +
-			"aside for it, and damage anywhere else. " + simNeverBootsNote,
+			"aside for it, and damage anywhere else. " + simPowerNote,
 		Example: `  ao sim claim --udid <test-device>
   ao sim flow run flow.yaml --udid <test-device>`,
 		Args: cobra.ExactArgs(1),

@@ -1,6 +1,5 @@
 // Package simpower is the one place in AO that can change a local iOS
-// Simulator's power state, and it is reachable from exactly one surface: the
-// desktop app's Device tab.
+// Simulator's power state.
 //
 // It is a package of its own rather than three functions in internal/simctl on
 // purpose. simctl documents itself as read-only against the machine, and that
@@ -9,12 +8,22 @@
 // what exists. Powering a device on and off is the opposite kind of operation,
 // so it lives behind its own door.
 //
-// ⚠ Nothing here is wired to the `ao` CLI, and that is a decision rather than
-// an omission. Booting is a HUMAN capability exercised through the app: an
-// agent that could boot devices would quietly accumulate 4 GB virtual machines
-// while nobody was watching, and this machine has already hit a true OOM from
-// three booted at once. The daemon needs the route because the renderer talks
-// to the daemon rather than to simctl; it must never become a CLI verb.
+// ⚠ Boot is reachable from an agent; taking a device DOWN is not, and the
+// asymmetry is deliberate.
+//
+// Booting was human-only at first, on the grounds that an agent able to boot
+// would quietly accumulate 4 GB virtual machines while nobody was watching -
+// this machine has hit a true OOM from three booted at once. That held until it
+// deadlocked something: a task gains its qa on its first simulator LEASE, a
+// lease needs a booted device, so on a machine where nobody had left one running
+// a qa could never appear at all. `ao sim boot` (backend/internal/cli/sim_boot.go)
+// is the reversal, and it carries the memory argument with it rather than
+// dropping it: the CLI refuses to make the third booted simulator, so the number
+// that caused the OOM stays out of an agent's reach.
+//
+// Shutdown keeps the original answer, because none of that applies to it: a
+// shutdown takes a device out from under whoever is on it, and it unblocks
+// nothing. It stays behind the Device tab, where a human presses the button.
 package simpower
 
 import (
@@ -33,7 +42,7 @@ type Op string
 
 // The two operations that exist. Reboot and erase are deliberately absent:
 // neither is something the Device tab offers, and an operation nothing calls
-// is an operation nothing guards.
+// is an operation nothing guards. Only Boot is reachable from the CLI.
 const (
 	Boot     Op = "boot"
 	Shutdown Op = "shutdown"
