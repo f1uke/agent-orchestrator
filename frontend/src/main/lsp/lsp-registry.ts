@@ -1,6 +1,12 @@
 import { serverForLanguage } from "./language-servers";
 import type { JsonRpcMessage } from "./lsp-framing";
-import { type LspProcess, type LspState, type SemanticTokensLegend, startLspProcess } from "./lsp-process";
+import {
+	type CompletionCapability,
+	type LspProcess,
+	type LspState,
+	type SemanticTokensLegend,
+	startLspProcess,
+} from "./lsp-process";
 
 /**
  * Every language server this app has alive, and the policy that keeps them from
@@ -57,9 +63,21 @@ export type LspAttachment = {
 	 * answer are offsets into whichever one arrived.
 	 */
 	semanticTokens: SemanticTokensLegend | null;
+	/**
+	 * What the server can do about completion, or null where it advertised no
+	 * `completionProvider`. See `CompletionCapability`: Monaco reads the trigger
+	 * characters once, at registration, so they cannot be discovered later.
+	 */
+	completion: CompletionCapability | null;
 };
 
-export type LspResultOutcome = "ok" | "empty" | "error";
+/**
+ * `cancelled` counts as a request and as neither a fault nor an empty answer:
+ * `-32800 RequestCancelled` is what a server replies when the CLIENT changed its
+ * mind, and letting it reach `errors` or `emptyWhileReady` would make the two
+ * numbers this app watches for silent failure stop meaning anything.
+ */
+export type LspResultOutcome = "ok" | "empty" | "error" | "cancelled";
 
 export type LspRegistryOptions = {
 	dataDir: string;
@@ -280,6 +298,7 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 				documentRoot: entry.documentRoot,
 				warning: entry.warning,
 				semanticTokens: entry.proc.semanticTokensLegend,
+				completion: entry.proc.completionCapability,
 			};
 		},
 

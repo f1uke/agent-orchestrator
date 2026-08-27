@@ -359,6 +359,45 @@ describe("WorkspaceFileView conflicts", () => {
 		expect(putMock.mock.calls[1][1].body.baseHash).toBe("sha256:theirs");
 	});
 
+	/**
+	 * 🗝 The non-negotiable, in the smallest form that can hold it: not-ready,
+	 * ready and failed must be THREE different sentences, and none of them may be
+	 * silence. Six silent failures have been paid for on this feature; every one
+	 * of them would have passed a test that only checked the pill exists.
+	 */
+	it("says three different things for starting, ready and failed", async () => {
+		renderView();
+		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
+		const report = editorProps.current?.onServerState as (s: { state: string; detail?: string }) => void;
+
+		const titleFor = async (state: { state: string; detail?: string }) => {
+			act(() => report(state));
+			const pill = await screen.findByTestId("lsp-status");
+			return { text: pill.textContent ?? "", title: pill.getAttribute("title") ?? "" };
+		};
+
+		const starting = await titleFor({ state: "starting" });
+		expect(starting.text).toMatch(/starting gopls/i);
+
+		const indexing = await titleFor({ state: "indexing" });
+		// Completion does NOT wait for the index - measured, the readiness gate
+		// costs ~6 s on Swift and does not make completion any faster. Saying
+		// otherwise would send a reader off to wait for nothing.
+		expect(indexing.title).toMatch(/completion already works/i);
+
+		const ready = await titleFor({ state: "ready" });
+		expect(ready.text).toMatch(/⌘click/);
+		expect(ready.text).toMatch(/⌃space/);
+
+		const failed = await titleFor({ state: "failed", detail: "gopls is not on PATH" });
+		expect(failed.text).toMatch(/no language server/i);
+		// The reason VERBATIM: on Swift it is the actionable half.
+		expect(failed.title).toBe("gopls is not on PATH");
+
+		const texts = [starting.text, indexing.text, ready.text, failed.text];
+		expect(new Set(texts).size, `the pill said the same thing twice: ${texts.join(" | ")}`).toBe(4);
+	});
+
 	it("asks twice before discarding the reader's edits", async () => {
 		await conflictOnSave();
 

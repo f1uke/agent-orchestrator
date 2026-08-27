@@ -137,6 +137,65 @@ describe.skipIf(!CAN_RUN)("sourcekit-lsp, for real", () => {
 			expect(locations.every((l) => l.endsWith("/Greeting.swift"))).toBe(true);
 			expect(result?.[0]?.range?.start?.line).toBe(0);
 
+			// ── Completion, on the same connection. Slice 6 adds no plumbing to
+			// this seam; what it adds is a policy, and the policy is worth nothing
+			// unless the server really answers with members of the receiver.
+			expect(attachment.completion?.resolveProvider, "sourcekit-lsp advertises resolve").toBe(true);
+			expect(attachment.completion?.triggerCharacters).toContain(".");
+			// `(` as well as `.`, which is what gives Swift argument-label
+			// completion. A renderer that guessed `["."]` would silently lose it.
+			expect(attachment.completion?.triggerCharacters).toContain("(");
+
+			const edited = GREETER.replace(
+				'return Greeting(text: "hi")',
+				'        Greeter.\n        return Greeting(text: "hi")',
+			);
+			registry.send(attachment.handleId, {
+				jsonrpc: "2.0",
+				method: "textDocument/didChange",
+				params: {
+					textDocument: { uri, version: 2 },
+					// A whole-document replacement expressed as a RANGE: sourcekit-lsp
+					// advertises `textDocumentSync.change: 2`, so a full-text change
+					// event is not something it ever agreed to accept.
+					contentChanges: [
+						{
+							range: {
+								start: { line: 0, character: 0 },
+								end: { line: GREETER.split("\n").length - 1, character: 0 },
+							},
+							text: edited,
+						},
+					],
+				},
+			});
+			const dotLine = edited.split("\n").findIndex((l) => l.trim() === "Greeter.");
+			const startedCompletion = Date.now();
+			const completion = (await request("textDocument/completion", {
+				textDocument: { uri },
+				position: { line: dotLine, character: edited.split("\n")[dotLine].length },
+				context: { triggerKind: 2, triggerCharacter: "." },
+			})) as { isIncomplete?: boolean; items?: { label: string; data?: unknown }[] } | null;
+			console.warn(
+				`[measure] sourcekit completion "Greeter." → ${Date.now() - startedCompletion}ms, ${completion?.items?.length ?? 0} items`,
+			);
+			// On WHAT it answered. A misconfigured sourcekit-lsp returns an empty
+			// list in 60 ms and logs nothing, which is what success looks like to
+			// any assertion weaker than this one.
+			expect(
+				(completion?.items ?? []).map((i) => i.label),
+				"no members for `Greeter.`",
+			).toContain("make()");
+			// Both servers set this on every response. The provider honours it and
+			// re-requests, because a longer prefix really does return items the
+			// shorter one omitted - measured, 6 of 9 on the real iOS app.
+			expect(completion?.isIncomplete).toBe(true);
+
+			const item = (completion?.items ?? []).find((i) => i.label === "make()");
+			const resolved = (await request("completionItem/resolve", item)) as { detail?: string } | null;
+			// Resolve is what keeps 200 doc comments from being fetched to show one.
+			expect(resolved, "completionItem/resolve answered nothing").toBeTruthy();
+
 			// 🗝 And nothing was written into the package. sourcekit-lsp's background
 			// indexer writes `.build/index-build` straight into a SwiftPM checkout,
 			// ignoring both `--scratch-path` and `swiftPM.scratchPath`, so this
@@ -260,6 +319,59 @@ describe.skipIf(!CAN_RUN || !SWIFT_PROJECT)("a real Xcode project", () => {
 					hits.map((h) => `${h.name}@${(h.location?.uri ?? "").split("/").pop()}`).join(" | "),
 			);
 			expect(hits.length).toBeGreaterThan(0);
+		}
+
+		// ── Completion on the real project: the numbers this slice's whole design
+		// rests on. `AO_LSP_SWIFT_COMPLETE='<line needle>=><member prefix ladder>'`,
+		// e.g. `super.viewDidLoad()=>emailLabel.:n:nu:num:numb`.
+		const completeSpec = process.env.AO_LSP_SWIFT_COMPLETE;
+		if (completeSpec) {
+			const [anchor, ladder] = completeSpec.split("=>");
+			const anchorLine = lines.findIndex((l) => l.includes(anchor));
+			expect(anchorLine, `completion anchor not found: ${anchor}`).toBeGreaterThanOrEqual(0);
+			const [base, ...steps] = ladder.split(":");
+			let version = 1;
+			let previousLines = lines.length - 1;
+			const firstList: string[] = [];
+
+			for (const [index, suffix] of ["", ...steps].entries()) {
+				const insert = `        ${base}${suffix}`;
+				const edited = [...lines];
+				edited.splice(anchorLine + 1, 0, insert);
+				real.send(attachment.handleId, {
+					jsonrpc: "2.0",
+					method: "textDocument/didChange",
+					params: {
+						textDocument: { uri, version: ++version },
+						contentChanges: [
+							{
+								range: { start: { line: 0, character: 0 }, end: { line: previousLines, character: 0 } },
+								text: edited.join("\n"),
+							},
+						],
+					},
+				});
+				previousLines = edited.length - 1;
+				const at = Date.now();
+				const list = (await request("textDocument/completion", {
+					textDocument: { uri },
+					position: { line: anchorLine + 1, character: insert.length },
+					context: index === 0 ? { triggerKind: 2, triggerCharacter: "." } : { triggerKind: 1 },
+				})) as { isIncomplete?: boolean; items?: { label: string; filterText?: string }[] } | null;
+				const labels = (list?.items ?? []).map((i) => i.filterText ?? i.label);
+				if (index === 0) firstList.push(...labels);
+				// 🗝 THE measurement this slice turns on: how many of the items the
+				// server returns for a LONGER prefix were absent from the list it
+				// gave for the shorter one - i.e. how many a local filter over the
+				// previous answer would have thrown away.
+				const absent = labels.filter((l) => !firstList.includes(l)).length;
+				console.warn(
+					`[measure] completion "${base}${suffix}" → ${Date.now() - at}ms, ${labels.length} items` +
+						(index === 0 ? "" : `, ${absent} of them absent from the first list`),
+				);
+				expect(labels.length, `completion "${base}${suffix}" answered nothing`).toBeGreaterThan(0);
+				expect(list?.isIncomplete).toBe(true);
+			}
 		}
 
 		const health = (await real.health()).find((h) => h.key === attachment.key);

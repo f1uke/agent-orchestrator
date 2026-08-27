@@ -16,7 +16,7 @@ import { type DocumentMapping, documentUriForPath } from "./lsp-uri";
 
 export type JsonRpcMessage = Record<string, unknown>;
 
-export type LspResultOutcome = "ok" | "empty" | "error";
+export type LspResultOutcome = "ok" | "empty" | "error" | "cancelled";
 
 /**
  * The server's own token vocabulary, from its `initialize` reply. Every index in
@@ -25,6 +25,13 @@ export type LspResultOutcome = "ok" | "empty" | "error";
  * types and 21 modifiers, gopls 14 and 15, and neither is a prefix of the other.
  */
 export type SemanticTokensLegend = { tokenTypes: string[]; tokenModifiers: string[] };
+
+/**
+ * What the server said it can do about completion. Travels with the client for
+ * the same reason the legend does - Monaco reads `triggerCharacters` once, at
+ * registration, and the two servers do not agree on them.
+ */
+export type CompletionCapability = { triggerCharacters?: string[]; resolveProvider?: boolean };
 
 export type LspTransport = {
 	send(handleId: string, message: JsonRpcMessage): void;
@@ -42,6 +49,8 @@ export type LspClient = {
 	documentUri(absolutePath: string): string;
 	/** Null when this server advertised no `semanticTokensProvider`. */
 	semanticTokensLegend(): SemanticTokensLegend | null;
+	/** Null when this server advertised no `completionProvider`. */
+	completionCapability(): CompletionCapability | null;
 	request<T>(method: string, params: unknown): Promise<T>;
 	notify(method: string, params: unknown): void;
 	didOpen(uri: string, languageId: string, text: string): void;
@@ -49,6 +58,9 @@ export type LspClient = {
 	isOpen(uri: string): boolean;
 	dispose(): void;
 };
+
+/** LSP's own code for "you asked me to stop", which is not a failure. */
+const REQUEST_CANCELLED = -32800;
 
 /** A result that means "the server answered, and it had nothing to say". */
 function isEmptyResult(result: unknown): boolean {
@@ -60,7 +72,10 @@ function isEmptyResult(result: unknown): boolean {
 export function createLspClient(
 	handleId: string,
 	transport: LspTransport,
-	mapping: DocumentMapping & { semanticTokens?: SemanticTokensLegend | null },
+	mapping: DocumentMapping & {
+		semanticTokens?: SemanticTokensLegend | null;
+		completion?: CompletionCapability | null;
+	},
 ): LspClient {
 	let nextId = 1;
 	let disposed = false;
@@ -93,7 +108,13 @@ export function createLspClient(
 		pending.delete(id);
 		if (message.error) {
 			const err = message.error as { message?: string; code?: number };
-			transport.noteResult(handleId, "error");
+			// 🗝 `-32800 RequestCancelled` is a NORMAL outcome, not a fault: it is what
+			// a server replies to `$/cancelRequest`. Counting it would put a number in
+			// the health panel's error column that says the server is misbehaving when
+			// the client is the one that changed its mind. (Measured: sourcekit-lsp
+			// answers exactly this, seven times over an eight-keystroke burst, under
+			// the cancel-per-keystroke policy this slice measured and rejected.)
+			transport.noteResult(handleId, err.code === REQUEST_CANCELLED ? "cancelled" : "error");
 			waiting.reject(new Error(err.message ?? `LSP error ${err.code ?? "?"}`));
 			return;
 		}
@@ -110,6 +131,9 @@ export function createLspClient(
 		},
 		semanticTokensLegend() {
 			return mapping.semanticTokens ?? null;
+		},
+		completionCapability() {
+			return mapping.completion ?? null;
 		},
 		request<T>(method: string, params: unknown): Promise<T> {
 			if (disposed) return Promise.reject(new Error(`LSP client disposed (${method})`));

@@ -82,6 +82,17 @@ jobs:
   # The only assertion that separates those from success is the colour a browser
   # computed for a span, so it belongs here rather than in jsdom.
   #
+  # e2e/editor-completion.spec.ts is the seventh, and the same argument applies
+  # one level up. Monaco reads a completion provider's `triggerCharacters` ONCE,
+  # at registration, and they only exist in the server's `initialize` reply - so a
+  # provider registered a moment too early never fires on `.` and is
+  # indistinguishable from code nobody wired up. LSP's `CompletionItemKind` and
+  # Monaco's are different enums, so a cast renders a full, plausible widget with
+  # the wrong icon on every row. And `isIncomplete: true` means the client must
+  # re-ask: a client that filtered its previous list instead would still show a
+  # populated widget, just missing the item the reader was typing towards. All
+  # three are silent, and only a real browser can be asked what it rendered.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -110,4 +121,4 @@ jobs:
         run: >-
           npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
           e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
-          e2e/files-perf.spec.ts
+          e2e/editor-completion.spec.ts e2e/files-perf.spec.ts

@@ -153,6 +153,33 @@ describe("startLspProcess", () => {
 		expect(proc.semanticTokensLegend).toBeNull();
 	});
 
+	test("carries the server's completion capability through, both halves", async () => {
+		// Monaco reads `triggerCharacters` ONCE, at registration. A renderer that
+		// guessed `["."]` would get no argument-label completion on Swift, and one
+		// that assumed `resolveProvider` would swallow a MethodNotFound per
+		// highlighted row on Go, which advertises none.
+		const { proc } = start(fakeSpec());
+		await proc.initialized;
+		expect(proc.completionCapability).toEqual({ resolveProvider: true, triggerCharacters: [".", "("] });
+	});
+
+	test("a server that advertises no resolve reports false, not undefined", async () => {
+		// gopls: it ships detail and documentation inline on every item, so asking
+		// it to resolve one is a request it will refuse.
+		const { proc } = start(fakeSpec({ FAKE_LSP_NO_RESOLVE: "1" }));
+		await proc.initialized;
+		expect(proc.completionCapability).toEqual({ resolveProvider: false, triggerCharacters: [".", "("] });
+	});
+
+	test("a server that offers no completion at all reports null, rather than an empty capability", async () => {
+		// Null and `{}` are different answers: the renderer registers no provider
+		// on the first, and on the second would register one with no trigger
+		// characters that never fires - which looks exactly like dead code.
+		const { proc } = start(fakeSpec({ FAKE_LSP_NO_COMPLETION: "1" }));
+		await proc.initialized;
+		expect(proc.completionCapability).toBeNull();
+	});
+
 	test("answers workspace/configuration itself so the server does not stall", async () => {
 		// The fake exits 3 if its configuration request goes unanswered.
 		const { proc } = start(fakeSpec({ FAKE_LSP_ASK_CONFIG: "1" }));

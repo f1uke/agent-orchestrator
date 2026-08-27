@@ -4,7 +4,9 @@ import { MONO } from "../lib/comment-inbox";
 import type { Hunk } from "../lib/editor/change-lanes";
 import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/gutter-lanes";
 import { revertEdit } from "../lib/editor/revert";
+import { registerCompletion } from "../lib/lsp/completion-provider";
 import { registerLspNavigation } from "../lib/lsp/definition";
+import { type DocumentSync, openDocumentSync } from "../lib/lsp/document-sync";
 import { registerSemanticTokens } from "../lib/lsp/semantic-provider";
 import { languageIdForLsp } from "../lib/lsp/language-ids";
 import { hasLanguageServers, type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
@@ -14,6 +16,22 @@ import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { DiscardHunkPopover } from "./DiscardHunkPopover";
 
 type LineChange = components["schemas"]["LineChangeDTO"];
+
+/**
+ * Monaco's own floating message at the cursor - the widget it uses itself to say
+ * "no definition found for 'x'" (`gotoSymbol/browser/goToCommands.js:114`).
+ *
+ * 🗝 Reused rather than reinvented, because slice 3's whole point is that this
+ * stack fails by ANSWERING NOTHING: an explicit ⌃Space against a server that is
+ * still starting is otherwise indistinguishable from a type that genuinely has
+ * no members, since Monaco renders "No suggestions" for both. It is not in the
+ * public `.d.ts`, but the contribution is in the barrel build (⌘click pulls it
+ * in), and the shape used here is one method.
+ */
+const MESSAGE_CONTRIBUTION = "editor.contrib.messageController";
+type MessageContribution = monaco.editor.IEditorContribution & {
+	showMessage(message: string, position: monaco.IPosition): void;
+};
 
 /**
  * Xcode's `// MARK:` bands in the minimap. Monaco finds these itself
@@ -310,6 +328,11 @@ export default function MonacoFileEditor({
 	const textRef = useRef(text);
 	textRef.current = text;
 	const semanticRefreshRef = useRef<(() => void) | null>(null);
+	// What the language server has been told about this buffer. Read by BOTH
+	// providers: the semantic one answers only while the model and the server
+	// agree, and now that `didChange` exists the saved text is no longer what the
+	// server has.
+	const syncRef = useRef<DocumentSync | null>(null);
 
 	useEffect(() => {
 		onServerState?.({ state: server.state, detail: server.detail });
@@ -345,8 +368,12 @@ export default function MonacoFileEditor({
 			modelUri: uri.toString(),
 			getClient: () => serverRef.current.client,
 			getAbsolutePath: () => absolutePathRef.current ?? null,
-			// The SAVED text, which is what the server was handed by `didOpen`.
-			getServerText: () => textRef.current,
+			// 🗝 What the server ACTUALLY has, not the saved text. Since slice 6 the
+			// buffer is streamed as it is edited, so "saved" and "what the server
+			// holds" are different strings - and answering against the wrong one
+			// puts real tokens on the wrong columns with every offset still in
+			// range, which is to say silently.
+			getServerText: () => syncRef.current?.serverText() ?? textRef.current,
 			getState: () => serverRef.current.state,
 		});
 		semanticRefreshRef.current = registration.refresh;
@@ -362,18 +389,65 @@ export default function MonacoFileEditor({
 		semanticRefreshRef.current?.();
 	}, [server.client, server.state, text]);
 
-	// Tell the server about this buffer. Keyed on the CLIENT, so a re-attached
-	// server learns about the file that is on screen - the spike's prototype
-	// short-circuited here and left the pane with no intelligence and no error.
+	// Tell the server about this buffer, and KEEP TELLING IT. Keyed on the CLIENT,
+	// so a re-attached server learns about the file that is on screen - the
+	// spike's prototype short-circuited here and left the pane with no
+	// intelligence and no error.
+	//
+	// 🗝 Deliberately NOT keyed on `text`. Until slice 6 the server was handed the
+	// saved text and re-handed it on every refetch; now the MODEL is the source of
+	// truth and `openDocumentSync` streams each edit as an incremental
+	// `didChange`. Re-running this effect on a refetch would close and re-open the
+	// document underneath a half-typed word.
 	useEffect(() => {
 		const client = server.client;
-		if (!client || !absolutePath || !lspLanguage || modelGeneration === 0) return;
-		// 🗝 The server's OWN address for this file, which on Swift is not its real
-		// path: sourcekit-lsp refuses documents outside its (shadow) root, silently.
-		const fileUri = client.documentUri(absolutePath);
-		client.didOpen(fileUri, lspLanguage, text);
-		return () => client.didClose(fileUri);
-	}, [server.client, absolutePath, lspLanguage, text, modelGeneration]);
+		const model = monaco.editor.getModel(uri);
+		if (!client || !absolutePath || !lspLanguage || modelGeneration === 0 || !model) return;
+		const sync = openDocumentSync({ client, model, absolutePath, languageId: lspLanguage });
+		syncRef.current = sync;
+		// The colours were computed against the text the server had a moment ago;
+		// now that it has this buffer, Monaco has to be asked again.
+		semanticRefreshRef.current?.();
+		return () => {
+			if (syncRef.current === sync) syncRef.current = null;
+			sync.dispose();
+		};
+	}, [server.client, absolutePath, lspLanguage, uri, modelGeneration]);
+
+	// Autocompletion.
+	useEffect(() => {
+		// 🗝 `hasLanguageServers()` and not the pane's state, for the same reason
+		// the semantic provider uses it: it is a property of the ENVIRONMENT. A
+		// registration gated on the attachment would leave a server that failed to
+		// start with no provider at all, and ⌃Space against it would then be
+		// silent - which is the one thing this feature must never be.
+		if (!ready || !lspLanguage || modelGeneration === 0 || !hasLanguageServers()) return;
+		const registration = registerCompletion(
+			{
+				languageId: lspLanguage,
+				modelUri: uri.toString(),
+				getClient: () => serverRef.current.client,
+				getAbsolutePath: () => absolutePathRef.current ?? null,
+				getServerText: () => syncRef.current?.serverText() ?? null,
+				getState: () => serverRef.current.state,
+				getDetail: () => serverRef.current.detail,
+				// 🗝 Only ever called for an EXPLICIT ⌃Space. This is Monaco's own
+				// "no definition found" widget - the one thing on screen that can say
+				// WHY the list is empty, at the place the reader is looking. Firing it
+				// while somebody types would be a nag.
+				onUnavailable: (reason) => {
+					const editor = codeEditorRef.current;
+					const position = editor?.getPosition();
+					if (!editor || !position) return;
+					editor.getContribution<MessageContribution>(MESSAGE_CONTRIBUTION)?.showMessage(reason, position);
+				},
+			},
+			// Null until the server has answered `initialize`, and null for good if
+			// it named no completion provider. The provider says which.
+			server.client?.completionCapability() ?? null,
+		);
+		return () => registration.dispose();
+	}, [ready, lspLanguage, uri, modelGeneration, server.client]);
 
 	// The host's own width, which is what decides the diff layout: this pane sits
 	// between a sidebar and a rail, so it is routinely far narrower than the

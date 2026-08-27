@@ -83,6 +83,21 @@ function handle(msg) {
 						// order, so the supervisor has to carry it through to the renderer
 						// untouched. FAKE_LSP_NO_SEMANTIC_TOKENS covers the other case: a
 						// server that advertises none at all.
+						// The two real servers disagree here and BOTH halves matter:
+						// gopls advertises `{triggerCharacters: ["."]}` and no
+						// resolveProvider, sourcekit-lsp `{resolveProvider: true,
+						// triggerCharacters: [".", "("]}`. Monaco reads the trigger
+						// characters once, at registration, so they cannot be
+						// discovered later. FAKE_LSP_NO_COMPLETION covers the third
+						// case: a server that offers completion at all.
+						...(process.env.FAKE_LSP_NO_COMPLETION === "1"
+							? {}
+							: {
+									completionProvider: {
+										resolveProvider: process.env.FAKE_LSP_NO_RESOLVE !== "1",
+										triggerCharacters: [".", "("],
+									},
+								}),
 						...(process.env.FAKE_LSP_NO_SEMANTIC_TOKENS === "1"
 							? {}
 							: {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+	type CompletionCapability,
 	createLspClient,
 	type LspClient,
 	type LspResultOutcome,
@@ -39,6 +40,7 @@ type Bridge = {
 		documentRoot?: string;
 		warning?: string;
 		semanticTokens?: SemanticTokensLegend | null;
+		completion?: CompletionCapability | null;
 	}>;
 	detach(handleId: string): void;
 	send(handleId: string, message: Record<string, unknown>): void;
@@ -132,6 +134,10 @@ export function useLanguageServer(workspaceRoot: string | undefined, languageId:
 					// is the same thing as a server that advertised no legend: the
 					// provider then has nothing to decode against and stays quiet.
 					semanticTokens: attachment.semanticTokens ?? null,
+					// Absent from an older bridge and from the browser-preview stub,
+					// which is the same thing as a server that advertised no completion
+					// provider: no provider is registered and nothing pretends to answer.
+					completion: attachment.completion ?? null,
 				});
 				setHandle({ client, state: attachment.state, detail: attachment.detail, warning: attachment.warning });
 			})

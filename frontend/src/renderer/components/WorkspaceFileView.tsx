@@ -194,13 +194,20 @@ export function WorkspaceFileView({
 					tone: P.muted2,
 					title:
 						serverState.detail ||
-						`The ${language} language server is still loading its index. Go to definition and symbol search settle once it finishes.`,
+						// 🗝 Completion is deliberately NOT in this sentence's caveat.
+						// Measured on the real iOS app: `workspace/synchronize` costs
+						// ~6 s and does not help completion at all (1 019 ms to a first
+						// answer without the gate, 1 333 ms with it), because completion
+						// needs compile arguments rather than an index. So it works
+						// while this pill is showing, and saying otherwise would send a
+						// reader off to wait for nothing.
+						`The ${language} language server is still loading its index. Completion already works; go to definition and symbol search settle once it finishes.`,
 				};
 			case "ready":
 				return {
-					text: `${language.toLowerCase()} ⌘click`,
+					text: `${language.toLowerCase()} ⌘click · ⌃space`,
 					tone: ACCENT,
-					title: serverState.detail || "Go to definition is available.",
+					title: serverState.detail || "Go to definition and completion are available.",
 				};
 			case "failed":
 				return {
