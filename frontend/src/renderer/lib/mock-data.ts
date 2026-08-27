@@ -1235,7 +1235,7 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
 					agentNote: "Image loads and is 2560x1600.",
 					agentRanAt: minutesAgo(12),
 					agentEvidence: [],
-				runs: [],
+					runs: [],
 					authoredBy: "agent-orchestrator-88",
 					authoredByRole: "qa",
 					authoredAt: minutesAgo(20),
@@ -1495,7 +1495,12 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 				agentEvidence: [
 					shot("settings-copy-validation", "ev_agent_val1", "empty-name-saved.png", "run_settings-copy-validation_1"),
 					shot("settings-copy-validation", "ev_agent_val2", "refusal-message.png", "run_settings-copy-validation_2"),
-					shot("settings-copy-validation", "ev_agent_val3", "empty-name-saved-again.png", "run_settings-copy-validation_3"),
+					shot(
+						"settings-copy-validation",
+						"ev_agent_val3",
+						"empty-name-saved-again.png",
+						"run_settings-copy-validation_3",
+					),
 				],
 				runs: [
 					run(

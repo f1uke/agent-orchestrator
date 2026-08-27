@@ -930,9 +930,7 @@ function QaRunRow({
 					    "evidence only" wording from one that deliberately did not judge. */}
 					{meta ? meta.label.replace(/^qa · /, "") : "never concluded"}
 				</span>
-				{run.sha && (
-					<span style={{ fontFamily: MONO, fontSize: 10.5, color: P.muted }}>{shortSha(run.sha)}</span>
-				)}
+				{run.sha && <span style={{ fontFamily: MONO, fontSize: 10.5, color: P.muted }}>{shortSha(run.sha)}</span>}
 				{when && <span style={{ fontSize: 10.5, color: P.muted }}>· {when}</span>}
 				{shots.length > 0 && (
 					<span style={{ fontSize: 10.5, color: P.muted }}>
@@ -942,9 +940,7 @@ function QaRunRow({
 			</button>
 			{open && (
 				<div style={{ paddingBottom: 8 }}>
-					{run.note && (
-						<div style={{ fontSize: 12, lineHeight: 1.5, color: P.qaFg }}>{run.note}</div>
-					)}
+					{run.note && <div style={{ fontSize: 12, lineHeight: 1.5, color: P.qaFg }}>{run.note}</div>}
 					<QaShotStrip
 						sessionId={sessionId}
 						checkId={check.id}

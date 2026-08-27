@@ -218,7 +218,6 @@ describe("standDownActor", () => {
 	});
 });
 
-
 // ---------------------------------------------------------------------------
 // The run history.
 
@@ -263,10 +262,7 @@ describe("the machine's run history", () => {
 		// empty conclusion the moment a run crashed.
 		const c = check({
 			id: "a",
-			runs: [
-				run({ id: "r1", seq: 1, verdict: "fail", recordedAt: "2026-08-20T01:00:00Z" }),
-				run({ id: "r2", seq: 2 }),
-			],
+			runs: [run({ id: "r1", seq: 1, verdict: "fail", recordedAt: "2026-08-20T01:00:00Z" }), run({ id: "r2", seq: 2 })],
 		});
 		expect(latestRun(c)?.id).toBe("r1");
 		expect(runState(c.runs[1])).toBe("open");
