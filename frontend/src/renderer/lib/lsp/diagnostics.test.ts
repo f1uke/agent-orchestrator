@@ -56,15 +56,35 @@ function fakeClient(): LspClient & { publish: (params: unknown) => void; listene
 	} as never;
 }
 
+/**
+ * The band lives on the MODEL, not on an editor, so the fake model owns a real
+ * enough `deltaDecorations`: it hands back ids, forgets the ones it was given
+ * and remembers what is currently drawn. Handing back a constant would let a
+ * leak - a publish that stacks a second band on a line rather than replacing the
+ * first - pass every assertion below.
+ */
 function fakeModel(uri = "ao-file:///s/main.go") {
 	let disposed = false;
+	let next = 0;
+	const drawn = new Map<string, editor.IModelDeltaDecoration>();
 	return {
 		uri: { toString: () => uri },
 		isDisposed: () => disposed,
+		deltaDecorations: (oldIds: string[], decorations: editor.IModelDeltaDecoration[]) => {
+			for (const id of oldIds) drawn.delete(id);
+			return decorations.map((decoration) => {
+				const id = `d${next++}`;
+				drawn.set(id, decoration);
+				return id;
+			});
+		},
+		/** Every band currently on the model, as `[line, className]`. */
+		bands: () =>
+			[...drawn.values()].map((d) => [d.range.startLineNumber, String(d.options.className)] as [number, string]),
 		kill: () => {
 			disposed = true;
 		},
-	} as unknown as editor.ITextModel & { kill: () => void };
+	} as unknown as editor.ITextModel & { kill: () => void; bands: () => [number, string][] };
 }
 
 const diagnostic = (line: number, severity: number, message: string) => ({
@@ -198,6 +218,64 @@ describe("versions", () => {
 		client.publish({ uri: URI, version: 9, diagnostics: [] });
 		client.publish({ uri: URI, diagnostics: [diagnostic(0, 2, "swift-style")] });
 		expect(markers[1].data[0].message).toBe("swift-style");
+	});
+});
+
+describe("the whole-line band", () => {
+	// The markers give the squiggle, the ruler mark and the minimap mark; the
+	// band is a DECORATION laid beside them. Both, never one instead of the
+	// other.
+	test("a publish draws a band beside the markers it also sets", () => {
+		const { client, model } = setup();
+		client.publish({ uri: URI, diagnostics: [diagnostic(4, 1, "undefined: Foo"), diagnostic(9, 2, "unused")] });
+		expect(markers).toHaveLength(1);
+		expect(model.bands()).toEqual([
+			[5, "ao-diagnostic-line ao-diagnostic-line--error"],
+			[10, "ao-diagnostic-line ao-diagnostic-line--warning"],
+		]);
+	});
+
+	// 🗝 The failure this guards is invisible: a band that is added rather than
+	// replaced renders exactly like one that was replaced, until the tenth
+	// publish has stacked ten translucent bands into an opaque slab.
+	test("the next publish REPLACES the band rather than stacking on it", () => {
+		const { client, model } = setup();
+		client.publish({ uri: URI, diagnostics: [diagnostic(4, 1, "a")] });
+		client.publish({ uri: URI, diagnostics: [diagnostic(4, 1, "a")] });
+		client.publish({ uri: URI, diagnostics: [diagnostic(4, 1, "a")] });
+		expect(model.bands()).toEqual([[5, "ao-diagnostic-line ao-diagnostic-line--error"]]);
+	});
+
+	test("a publish that retracts everything takes the band with it", () => {
+		const { client, model } = setup();
+		client.publish({ uri: URI, diagnostics: [diagnostic(4, 1, "a")] });
+		client.publish({ uri: URI, diagnostics: [] });
+		expect(model.bands()).toEqual([]);
+	});
+
+	// The band is a decoration, so `setModelMarkers(model, owner, [])` does not
+	// clear it. A tinted line left behind by a server that is no longer running
+	// is the same wrong answer a stale squiggle would be.
+	test("dispose clears the band, not only the markers", () => {
+		const client = fakeClient();
+		const model = fakeModel();
+		const registration = registerDiagnostics({ languageId: "go", client, model, uri: URI });
+		client.publish({ uri: URI, diagnostics: [diagnostic(4, 1, "a")] });
+		expect(model.bands()).toHaveLength(1);
+		registration.dispose();
+		expect(model.bands()).toEqual([]);
+	});
+
+	test("two documents on one client keep their own bands", () => {
+		const client = fakeClient();
+		const a = fakeModel("ao-file:///s/a.go");
+		const b = fakeModel("ao-file:///s/b.go");
+		register({ languageId: "go", client, model: a, uri: "file:///w/a.go" });
+		register({ languageId: "go", client, model: b, uri: "file:///w/b.go" });
+		client.publish({ uri: "file:///w/a.go", diagnostics: [diagnostic(0, 1, "a")] });
+		client.publish({ uri: "file:///w/b.go", diagnostics: [diagnostic(6, 2, "b")] });
+		expect(a.bands()).toEqual([[1, "ao-diagnostic-line ao-diagnostic-line--error"]]);
+		expect(b.bands()).toEqual([[7, "ao-diagnostic-line ao-diagnostic-line--warning"]]);
 	});
 });
 

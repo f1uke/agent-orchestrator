@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { contrastRatio } from "../../companion/palette";
 import {
 	AO_DARK_THEME,
 	AO_LIGHT_THEME,
@@ -221,5 +222,119 @@ describe("semantic token rules", () => {
 		expect(grammarRole("keyword.operator")).toBe("--code-plain");
 		expect(grammarRole("")).toBe("--code-plain");
 		expect(grammarRole("no.such.scope")).toBe("--code-plain");
+	});
+});
+
+/**
+ * The whole-line diagnostic band (`lib/editor/diagnostic-lines.ts`) is CSS, not
+ * a Monaco theme colour, so nothing above would notice it drifting. It is
+ * nonetheless the one decoration this editor paints UNDER the code a reader is
+ * trying to read, and its alpha is therefore a contrast budget rather than a
+ * taste.
+ *
+ * 🗝 A band in a dark theme can only LIGHTEN a near-black surface, so every one
+ * of the thirteen `--code-*` roles loses contrast by the same proportion the
+ * band adds luminance. Twelve of them have to survive it; the thirteenth,
+ * `--code-comment`, sits at 4.55:1 on the bare surface in Xcode's dark palette -
+ * a margin of 0.05 - so ANY visible band takes it under AA, and pretending
+ * otherwise would mean shipping no band in dark at all. It is held to its own,
+ * measured floor rather than waved through.
+ */
+describe("the whole-line diagnostic band", () => {
+	/** The alpha out of `color-mix(in oklab, var(--token) N%, transparent)`. */
+	function bandAlpha(selector: string): number {
+		const block = blockOf(selector);
+		const found = block.match(/background:\s*color-mix\(in oklab,\s*var\(--[\w-]+\)\s*([\d.]+)%,\s*transparent\)/);
+		expect(found?.[1], `${selector} declares no color-mix band background`).toBeTruthy();
+		return Number(found?.[1]) / 100;
+	}
+
+	/** `over` in sRGB, which is what the compositor does with a translucent fill. */
+	function composite(fill: string, alpha: number, under: string): string {
+		const channels = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+		const [f, u] = [channels(fill), channels(under)];
+		return `#${f
+			.map((c, i) => Math.round(c * alpha + u[i] * (1 - alpha)))
+			.map((c) => c.toString(16).padStart(2, "0"))
+			.join("")}`;
+	}
+
+	const BANDS = [
+		{
+			theme: "dark",
+			kind: "error",
+			selector: ".monaco-editor .ao-diagnostic-line--error",
+			token: "--diagnostic-error",
+		},
+		{ theme: "dark", kind: "warning", selector: ".monaco-editor .ao-diagnostic-line", token: "--diagnostic-warning" },
+		{
+			theme: "light",
+			kind: "error",
+			selector: ':root[data-theme="light"] .monaco-editor .ao-diagnostic-line--error',
+			token: "--diagnostic-error",
+		},
+		{
+			theme: "light",
+			kind: "warning",
+			selector: ':root[data-theme="light"] .monaco-editor .ao-diagnostic-line',
+			token: "--diagnostic-warning",
+		},
+	] as const;
+
+	for (const band of BANDS) {
+		const tokens = EDITOR_THEME_TOKENS[band.theme];
+		const roles = SYNTAX_ROLES.filter((role) => role !== "--code-comment");
+
+		it(`${band.theme}/${band.kind}: every syntax role but the comment clears 4.5:1 on the band`, () => {
+			const under = composite(resolve(band.theme, band.token), bandAlpha(band.selector), tokens["--viewer-bg"]);
+			for (const role of roles) {
+				expect(contrastRatio(tokens[role], under), `${role} on the ${band.kind} band`).toBeGreaterThanOrEqual(4.5);
+			}
+		});
+
+		/**
+		 * The comment role's own floor. Dark cannot reach 4.5 (see above); light
+		 * can and must, so the two are asserted at what each actually achieves
+		 * rather than at one number that would be a lie in one of them.
+		 */
+		it(`${band.theme}/${band.kind}: the comment role holds its measured floor`, () => {
+			const under = composite(resolve(band.theme, band.token), bandAlpha(band.selector), tokens["--viewer-bg"]);
+			const floor = band.theme === "light" ? 4.5 : 4.0;
+			expect(contrastRatio(tokens["--code-comment"], under)).toBeGreaterThanOrEqual(floor);
+		});
+
+		/**
+		 * A band is a hint, not a highlight. Beyond roughly a fifth it stops
+		 * reading as a tint under the code and starts reading as a selection - and
+		 * with dozens of warnings in a file, as a wall.
+		 */
+		it(`${band.theme}/${band.kind}: the band stays a tint`, () => {
+			expect(bandAlpha(band.selector)).toBeLessThanOrEqual(0.2);
+		});
+	}
+
+	/**
+	 * The weighting the human was shown and asked to overrule. Errors are rare
+	 * and must be unmissable; warnings are common - their own Xcode screenshot
+	 * showed 3 284 of them - and must stay readable underneath the code.
+	 */
+	it("dark: an error is louder than a warning", () => {
+		expect(bandAlpha(".monaco-editor .ao-diagnostic-line--error")).toBeGreaterThan(
+			bandAlpha(".monaco-editor .ao-diagnostic-line"),
+		);
+	});
+
+	/**
+	 * The edge is what makes ONE error findable in a file full of warnings
+	 * without making every warning shout, so it belongs to the error alone.
+	 */
+	it("only the error carries the leading edge", () => {
+		expect(blockOf(".monaco-editor .ao-diagnostic-line--error")).toContain("box-shadow: inset");
+		expect(blockOf(".monaco-editor .ao-diagnostic-line")).not.toContain("box-shadow");
+	});
+
+	/** The colours the human asked to be the same as the minimap's, named once. */
+	it("takes its colours from the same two tokens the minimap marks use", () => {
+		for (const band of BANDS) expect(blockOf(band.selector)).toContain(`var(${band.token})`);
 	});
 });
