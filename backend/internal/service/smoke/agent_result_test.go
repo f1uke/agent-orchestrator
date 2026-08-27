@@ -209,3 +209,102 @@ func findCheck(t *testing.T, res SessionSmoke, id string) domain.SmokeCheck {
 	t.Fatalf("case %q missing from %+v", id, res.Checks)
 	return domain.SmokeCheck{}
 }
+
+// TestReRunningACaseAddsARunInsteadOfDestroyingTheLastOne is the behaviour this
+// whole shape exists for. The human hit the failure it fixes: a case re-run on a
+// newer commit gave the OPPOSITE result, the earlier verdict was overwritten out
+// of existence, and both rounds' screenshots ended up in one strip under the
+// newer verdict - so the only surviving trace of the inversion was a sentence
+// qa wrote in a note, because the structure had nowhere to put it.
+func TestReRunningACaseAddsARunInsteadOfDestroyingTheLastOne(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := seedPlayedCase(ctx, t)
+
+	// Round 1 at the old commit: a capture, then a failure.
+	if _, err := svc.AttachEvidence(ctx, "w1", "played", EvidenceUpload{
+		Filename: "clipped.png", Mime: "image/png", Reader: strings.NewReader("PNG"),
+		Source: domain.SmokeEvidenceAgent,
+	}); err != nil {
+		t.Fatalf("attach round 1 evidence: %v", err)
+	}
+	if _, err := svc.RecordAgentResult(ctx, "w1", "played", domain.SmokeAgentResult{
+		Verdict: domain.SmokeFail, Note: "clipped at 320px", SHA: "d44ad432c",
+	}); err != nil {
+		t.Fatalf("record round 1: %v", err)
+	}
+
+	// Round 2 at the new commit: a capture, then the opposite result.
+	if _, err := svc.AttachEvidence(ctx, "w1", "played", EvidenceUpload{
+		Filename: "clean.png", Mime: "image/png", Reader: strings.NewReader("PNG"),
+		Source: domain.SmokeEvidenceAgent,
+	}); err != nil {
+		t.Fatalf("attach round 2 evidence: %v", err)
+	}
+	check, err := svc.RecordAgentResult(ctx, "w1", "played", domain.SmokeAgentResult{
+		Verdict: domain.SmokePass, Note: "renders clean", SHA: "9f10c22a1",
+	})
+	if err != nil {
+		t.Fatalf("record round 2: %v", err)
+	}
+
+	if len(check.Runs) != 2 {
+		t.Fatalf("runs = %d, want both rounds - a re-run must not destroy the result before it", len(check.Runs))
+	}
+	if check.Runs[0].Verdict != domain.SmokeFail || check.Runs[0].SHA != "d44ad432c" {
+		t.Errorf("run 1 = %q at %q, want the earlier failure with its own commit", check.Runs[0].Verdict, check.Runs[0].SHA)
+	}
+	if check.Runs[1].Verdict != domain.SmokePass || check.Runs[1].SHA != "9f10c22a1" {
+		t.Errorf("run 2 = %q at %q", check.Runs[1].Verdict, check.Runs[1].SHA)
+	}
+	if check.AgentVerdict != domain.SmokePass {
+		t.Errorf("the case's current machine result = %q, want the latest run's pass", check.AgentVerdict)
+	}
+
+	// Each round's capture stayed with the verdict it belonged to.
+	round1 := check.RunEvidence(check.Runs[0].ID)
+	round2 := check.RunEvidence(check.Runs[1].ID)
+	if len(round1) != 1 || round1[0].Filename != "clipped.png" {
+		t.Errorf("run 1 evidence = %+v, want the capture from the round that failed", round1)
+	}
+	if len(round2) != 1 || round2[0].Filename != "clean.png" {
+		t.Errorf("run 2 evidence = %+v, want the capture from the round that passed", round2)
+	}
+	// And the user's own screenshot is in neither: the user's lane has no runs.
+	if len(check.UnknownRunEvidence()) != 0 {
+		t.Errorf("unknown-run evidence = %+v, want none", check.UnknownRunEvidence())
+	}
+	if len(check.Evidence) != 1 || check.Evidence[0].Filename != "human.png" {
+		t.Errorf("user evidence = %+v, want only the file the user attached", check.Evidence)
+	}
+}
+
+// TestAnEvidenceOnlyRecordNeedsEvidenceFromTHISRun: "I ran it and captured this,
+// I am not the one who can judge it" is a complete record, and it is a claim
+// about what THIS round saw. An earlier round's screenshots cannot stand in for
+// it - they are not what this run looked at, and letting them count would make
+// an empty record say nothing at all while looking like it said something.
+func TestAnEvidenceOnlyRecordNeedsEvidenceFromTHISRun(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := seedPlayedCase(ctx, t)
+
+	if _, err := svc.AttachEvidence(ctx, "w1", "played", EvidenceUpload{
+		Filename: "round1.png", Mime: "image/png", Reader: strings.NewReader("PNG"),
+		Source: domain.SmokeEvidenceAgent,
+	}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if _, err := svc.RecordAgentResult(ctx, "w1", "played", domain.SmokeAgentResult{
+		Note: "the header renders at 320px, see the shot",
+	}); err != nil {
+		t.Fatalf("evidence-only record with this run's evidence: %v", err)
+	}
+
+	// A second record with no verdict and nothing captured this time.
+	_, err := svc.RecordAgentResult(ctx, "w1", "played", domain.SmokeAgentResult{Note: "still fine"})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v, want ErrInvalid: an empty record leaning on an earlier round's captures says nothing about this one", err)
+	}
+	if !strings.Contains(err.Error(), "this run") {
+		t.Errorf("error %q does not say the evidence has to come from this run", err)
+	}
+}

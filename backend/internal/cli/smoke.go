@@ -39,10 +39,25 @@ type authorSmokeChecksRequest struct {
 	From string `json:"from,omitempty"`
 }
 
-// smokeEvidenceClient mirrors domain.SmokeEvidence (display subset).
+// smokeEvidenceClient mirrors domain.SmokeEvidence (display subset). RunID says
+// which machine run captured it; empty means it belongs to no run - a capture
+// from before AO kept run history, whose result is gone.
 type smokeEvidenceClient struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+	RunID string `json:"runId"`
+}
+
+// smokeRunClient mirrors domain.SmokeRun: one round of a machine running a case.
+// A case accumulates these instead of overwriting one result, so `ao smoke list`
+// can show that a case used to fail and now passes.
+type smokeRunClient struct {
+	ID         string     `json:"id"`
+	Seq        int        `json:"seq"`
+	Verdict    string     `json:"verdict"`
+	Note       string     `json:"note"`
+	SHA        string     `json:"sha"`
+	RecordedAt *time.Time `json:"recordedAt,omitempty"`
 }
 
 // smokeCheckClient mirrors domain.SmokeCheck (display subset). It must carry
@@ -62,7 +77,9 @@ type smokeCheckClient struct {
 	FileRef   string                `json:"fileRef"`
 	Evidence  []smokeEvidenceClient `json:"evidence"`
 	DecidedAt *time.Time            `json:"decidedAt,omitempty"`
-	// The machine's result, printed beside the user's and never merged into it.
+	// The machine's run history, oldest first, and the latest recorded run's
+	// result surfaced beside the user's - never merged into it.
+	Runs          []smokeRunClient      `json:"runs"`
 	AgentVerdict  string                `json:"agentVerdict"`
 	AgentNote     string                `json:"agentNote"`
 	AgentEvidence []smokeEvidenceClient `json:"agentEvidence"`
@@ -381,7 +398,7 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 // reader must be able to see at a glance that a machine ran the steps and that a
 // person still has not confirmed the case works.
 func smokeAgentLines(check smokeCheckClient) []string {
-	if check.AgentVerdict == "" && check.AgentRanAt == nil && len(check.AgentEvidence) == 0 {
+	if check.AgentVerdict == "" && check.AgentRanAt == nil && len(check.AgentEvidence) == 0 && len(check.Runs) == 0 {
 		return nil
 	}
 	head := "        agent: "
@@ -396,15 +413,91 @@ func smokeAgentLines(check smokeCheckClient) []string {
 	if check.AgentRanAt != nil {
 		head += " on " + check.AgentRanAt.Format(time.RFC3339)
 	}
+	// The CURRENT result's round, not the newest row: a round the machine opened
+	// and never concluded is not the result being printed above it.
+	if current, ok := latestRecordedRun(check); ok && len(check.Runs) > 1 {
+		head += fmt.Sprintf(" (run %d of %d)", current.Seq, len(check.Runs))
+	}
 	lines := []string{head}
 	if note := strings.TrimSpace(check.AgentNote); note != "" {
 		lines = append(lines, "        agent note: "+note)
 	}
 	if n := len(check.AgentEvidence); n > 0 {
-		lines = append(lines, fmt.Sprintf("        agent evidence: %d captured", n))
+		line := fmt.Sprintf("        agent evidence: %d captured", n)
+		// Captures from before AO kept run history belong to no run, and the
+		// result they were taken for is gone. Saying so is the point: reading
+		// them as evidence for the current verdict is the mistake this avoids.
+		if unknown := smokeUnknownRunEvidence(check); unknown > 0 {
+			line += fmt.Sprintf(" (%d from an unknown run)", unknown)
+		}
+		lines = append(lines, line)
+	}
+	return append(lines, smokeEarlierRunLines(check)...)
+}
+
+// latestRecordedRun is the case's current machine result: the last round that
+// actually concluded. A round still open carries no result, and treating it as
+// one would let a crashed run stand in for a real verdict.
+func latestRecordedRun(check smokeCheckClient) (smokeRunClient, bool) {
+	for i := len(check.Runs) - 1; i >= 0; i-- {
+		if check.Runs[i].RecordedAt != nil {
+			return check.Runs[i], true
+		}
+	}
+	return smokeRunClient{}, false
+}
+
+// smokeEarlierRunLines prints every round EXCEPT the one whose result is printed
+// above, newest first. They are what a single overwritten result could never
+// show: that a case used to fail at one commit and passes at another.
+func smokeEarlierRunLines(check smokeCheckClient) []string {
+	if len(check.Runs) < 2 {
+		return nil
+	}
+	current, _ := latestRecordedRun(check)
+	var lines []string
+	for i := len(check.Runs) - 1; i >= 0; i-- {
+		run := check.Runs[i]
+		if run.ID == current.ID {
+			continue
+		}
+		line := fmt.Sprintf("        run %d: ", run.Seq)
+		switch {
+		case run.RecordedAt == nil:
+			line += "never concluded"
+		case run.Verdict == "":
+			line += "ran, did not judge"
+		default:
+			line += smokeVerdictLabel(run.Verdict)
+		}
+		if run.SHA != "" {
+			line += " at " + shortSHA(run.SHA)
+		}
+		if run.RecordedAt != nil {
+			line += " on " + run.RecordedAt.Format(time.RFC3339)
+		}
+		if n := smokeRunEvidence(check, run.ID); n > 0 {
+			line += fmt.Sprintf(", %d captured", n)
+		}
+		if note := strings.TrimSpace(run.Note); note != "" {
+			line += " - " + note
+		}
+		lines = append(lines, line)
 	}
 	return lines
 }
+
+func smokeRunEvidence(check smokeCheckClient, runID string) int {
+	n := 0
+	for _, ev := range check.AgentEvidence {
+		if ev.RunID == runID {
+			n++
+		}
+	}
+	return n
+}
+
+func smokeUnknownRunEvidence(check smokeCheckClient) int { return smokeRunEvidence(check, "") }
 
 // smokeAuthorLine names who last wrote a case's authored fields. Both crew
 // members write this list, so which of them a case came from is part of reading

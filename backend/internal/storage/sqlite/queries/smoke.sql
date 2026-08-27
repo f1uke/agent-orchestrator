@@ -1,9 +1,9 @@
 -- name: ListSmokeChecksBySession :many
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason, authored_by, authored_by_role, authored_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at
 FROM smoke_check WHERE session_id = ? ORDER BY (retired_at IS NOT NULL), seq, created_at;
 
 -- name: GetSmokeCheck :one
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason, authored_by, authored_by_role, authored_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at
 FROM smoke_check WHERE id = ?;
 
 -- name: InsertSmokeCheck :exec
@@ -33,22 +33,22 @@ UPDATE smoke_check SET verdict = 'pending', note = '', decided_at = NULL, update
 UPDATE smoke_check SET reported_at = ?, updated_at = ? WHERE session_id = ?;
 
 -- name: InsertSmokeEvidence :exec
-INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSmokeEvidence :one
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
 FROM smoke_evidence WHERE id = ?;
 
 -- name: ListSmokeEvidenceByCheck :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
 FROM smoke_evidence WHERE check_id = ? ORDER BY created_at;
 
 -- name: ListSmokeEvidenceCreatedBefore :many
 -- Age-based retention sweep: every evidence row whose created_at predates the
 -- TTL cutoff, across all sessions. Ordered oldest-first so a batch purge is
 -- deterministic.
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
 FROM smoke_evidence WHERE created_at < ? ORDER BY created_at;
 
 -- name: DeleteUserSmokeEvidenceByCheck :exec
@@ -59,18 +59,50 @@ DELETE FROM smoke_evidence WHERE check_id = ? AND source = 'user';
 -- name: ListUserSmokeEvidenceByCheck :many
 -- The rows Reset is about to delete, so the service can remove exactly those
 -- blobs instead of wiping the case's whole evidence directory.
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
 FROM smoke_evidence WHERE check_id = ? AND source = 'user' ORDER BY created_at;
 
 -- name: DeleteSmokeEvidence :execrows
 DELETE FROM smoke_evidence WHERE id = ?;
 
--- name: SetSmokeAgentResult :execrows
+-- name: ListSmokeRunsByCheck :many
+-- A case's machine runs, oldest first, so the caller reads them the way they
+-- happened and the last one is the current result.
+SELECT id, check_id, session_id, seq, verdict, note, sha, recorded_at, created_at, updated_at
+FROM smoke_run WHERE check_id = ? ORDER BY seq, created_at;
+
+-- name: GetOpenSmokeRun :one
+-- The round the machine is in the middle of: opened by its first capture and not
+-- yet concluded. At most one is open per case, because opening only ever happens
+-- when this returns nothing.
+SELECT id, check_id, session_id, seq, verdict, note, sha, recorded_at, created_at, updated_at
+FROM smoke_run WHERE check_id = ? AND recorded_at IS NULL ORDER BY seq DESC LIMIT 1;
+
+-- name: NextSmokeRunSeq :one
+-- 1-based position of the run about to be inserted, so "RUN 3" keeps meaning the
+-- third round even after an earlier one is read back out of order.
+SELECT COALESCE(MAX(seq), 0) + 1 FROM smoke_run WHERE check_id = ?;
+
+-- name: InsertSmokeRun :execrows
+-- A run opens with no result: verdict/note/sha stay empty and recorded_at NULL
+-- until the record lands. Inserting it is what gives the round's evidence
+-- something to point at.
+--
+-- Guarded on the case being ACTIVE, so the frozen rule holds in the statement
+-- and not only in the service's read-then-write: a retired case is not one
+-- anything is asked to run, and nothing may open a round against it.
+INSERT INTO smoke_run (id, check_id, session_id, seq, verdict, note, sha, recorded_at, created_at, updated_at)
+SELECT ?, ?, ?, ?, '', '', '', NULL, ?, ?
+WHERE EXISTS (SELECT 1 FROM smoke_check c WHERE c.id = ? AND c.retired_at IS NULL);
+
+-- name: CloseSmokeRun :execrows
 -- The machine's result, written only by `ao smoke record`. Disjoint from the
 -- user-runtime fields by construction: this statement cannot reach verdict,
--- note, decided_at or the user's evidence rows.
-UPDATE smoke_check SET agent_verdict = ?, agent_note = ?, agent_ran_at = ?, agent_sha = ?, updated_at = ?
-WHERE id = ? AND retired_at IS NULL;
+-- note, decided_at or the user's evidence rows - it cannot even reach the case
+-- row. Guarded on recorded_at IS NULL so a result lands once and a later record
+-- opens its own run rather than rewriting this one.
+UPDATE smoke_run SET verdict = ?, note = ?, sha = ?, recorded_at = ?, updated_at = ?
+WHERE id = ? AND recorded_at IS NULL;
 
 -- name: RetireSmokeCheck :execrows
 -- Retire is not delete: nothing on the row is cleared. The case simply stops

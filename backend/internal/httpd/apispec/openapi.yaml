@@ -6687,6 +6687,41 @@ components:
       required:
       - harness
       type: object
+    DomainSmokeRun:
+      properties:
+        checkId:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        note:
+          type: string
+        recordedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        seq:
+          type: integer
+        sessionId:
+          type: string
+        sha:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        verdict:
+          type: string
+      required:
+      - id
+      - checkId
+      - sessionId
+      - seq
+      - createdAt
+      - updatedAt
+      type: object
     DomainSmokeStandDown:
       properties:
         at:
@@ -8934,6 +8969,10 @@ components:
           - string
         retiredReason:
           type: string
+        runs:
+          items:
+            $ref: '#/components/schemas/DomainSmokeRun'
+          type: array
         seq:
           type: integer
         sessionId:
@@ -8963,6 +9002,7 @@ components:
       - verdict
       - note
       - evidence
+      - runs
       - agentEvidence
       - createdAt
       - updatedAt
@@ -8988,6 +9028,8 @@ components:
         kind:
           type: string
         mime:
+          type: string
+        runId:
           type: string
         sessionId:
           type: string

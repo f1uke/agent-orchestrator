@@ -2231,6 +2231,21 @@ export interface components {
         DomainReviewerConfig: {
             harness: string;
         };
+        DomainSmokeRun: {
+            checkId: string;
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+            note?: string;
+            /** Format: date-time */
+            recordedAt?: null | string;
+            seq: number;
+            sessionId: string;
+            sha?: string;
+            /** Format: date-time */
+            updatedAt: string;
+            verdict?: string;
+        };
         DomainSmokeStandDown: {
             /** Format: date-time */
             at: string;
@@ -3165,6 +3180,7 @@ export interface components {
             /** Format: date-time */
             retiredAt?: null | string;
             retiredReason?: string;
+            runs: components["schemas"]["DomainSmokeRun"][];
             seq: number;
             sessionId: string;
             steps: string[];
@@ -3184,6 +3200,7 @@ export interface components {
             id: string;
             kind: string;
             mime: string;
+            runId?: string;
             sessionId: string;
             /** Format: int64 */
             sizeBytes: number;

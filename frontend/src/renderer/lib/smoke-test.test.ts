@@ -4,11 +4,17 @@ import {
 	agentState,
 	authorLabel,
 	checklistState,
+	evidenceForRun,
 	isAgentStale,
+	latestRun,
 	progressFor,
 	retiredChecks,
+	runState,
+	runsNewestFirst,
 	standDownActor,
+	unknownRunEvidence,
 	type SmokeCheck,
+	type SmokeRun,
 	type SmokeStandDown,
 } from "./smoke-test";
 
@@ -23,6 +29,7 @@ const base = {
 	note: "",
 	evidence: [],
 	agentEvidence: [],
+	runs: [],
 	createdAt: "2026-08-20T00:00:00Z",
 	updatedAt: "2026-08-20T00:00:00Z",
 };
@@ -208,5 +215,89 @@ describe("standDownActor", () => {
 		expect(standDownActor(stood({ byRole: "qa", by: "mer-2" }))).toBe("qa");
 		expect(standDownActor(stood({ by: "solo-7" }))).toBe("@solo-7");
 		expect(standDownActor(stood())).toBe("the worker");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The run history.
+
+const run = (over: Partial<SmokeRun> & { id: string; seq: number }): SmokeRun =>
+	({
+		checkId: "a",
+		sessionId: "w1",
+		verdict: "",
+		note: "",
+		sha: "",
+		createdAt: "2026-08-20T00:00:00Z",
+		updatedAt: "2026-08-20T00:00:00Z",
+		...over,
+	}) as SmokeRun;
+
+const shot = (id: string, runId: string) =>
+	({
+		id,
+		checkId: "a",
+		sessionId: "w1",
+		kind: "image",
+		filename: `${id}.png`,
+		mime: "image/png",
+		sizeBytes: 1,
+		createdAt: "2026-08-20T00:00:00Z",
+		source: "agent",
+		runId,
+	}) as SmokeCheck["agentEvidence"][number];
+
+describe("the machine's run history", () => {
+	it("reads newest first, because the current result is the one being asked about", () => {
+		const c = check({
+			id: "a",
+			runs: [run({ id: "r1", seq: 1 }), run({ id: "r2", seq: 2 }), run({ id: "r3", seq: 3 })],
+		});
+		expect(runsNewestFirst(c).map((r) => r.seq)).toEqual([3, 2, 1]);
+	});
+
+	it("takes the latest RECORDED run as the current result, never an open one", () => {
+		// A round the machine opened, captured into and never concluded is not a
+		// result. Letting it stand as one would replace a real verdict with an
+		// empty conclusion the moment a run crashed.
+		const c = check({
+			id: "a",
+			runs: [run({ id: "r1", seq: 1, verdict: "fail", recordedAt: "2026-08-20T01:00:00Z" }), run({ id: "r2", seq: 2 })],
+		});
+		expect(latestRun(c)?.id).toBe("r1");
+		expect(runState(c.runs[1])).toBe("open");
+	});
+
+	it("has no current result when nothing has concluded", () => {
+		expect(latestRun(check({ id: "a", runs: [run({ id: "r1", seq: 1 })] }))).toBeNull();
+		expect(latestRun(check({ id: "a" }))).toBeNull();
+	});
+
+	it("keeps each round's captures with the round that took them", () => {
+		const c = check({ id: "a", agentEvidence: [shot("ev1", "r1"), shot("ev2", "r2"), shot("ev3", "r2")] });
+		expect(evidenceForRun(c, "r1").map((e) => e.id)).toEqual(["ev1"]);
+		expect(evidenceForRun(c, "r2").map((e) => e.id)).toEqual(["ev2", "ev3"]);
+	});
+
+	it("groups captures with no run apart instead of under the newest verdict", () => {
+		// These are from before AO kept a history: the result they were taken for
+		// may have been overwritten by a later, contradicting one. Filing them
+		// under the current verdict is what made a person read a stale image as
+		// current evidence.
+		const c = check({
+			id: "a",
+			runs: [run({ id: "r1", seq: 1, verdict: "pass", recordedAt: "2026-08-20T01:00:00Z" })],
+			agentEvidence: [shot("old", ""), shot("new", "r1")],
+		});
+		expect(unknownRunEvidence(c).map((e) => e.id)).toEqual(["old"]);
+		expect(evidenceForRun(c, "r1").map((e) => e.id)).toEqual(["new"]);
+	});
+
+	it("names what a recorded run concluded, including a deliberate non-judgement", () => {
+		const at = "2026-08-20T01:00:00Z";
+		expect(runState(run({ id: "r", seq: 1, verdict: "pass", recordedAt: at }))).toBe("pass");
+		expect(runState(run({ id: "r", seq: 1, verdict: "fail", recordedAt: at }))).toBe("fail");
+		expect(runState(run({ id: "r", seq: 1, verdict: "skip", recordedAt: at }))).toBe("skip");
+		expect(runState(run({ id: "r", seq: 1, recordedAt: at }))).toBe("captured");
 	});
 });

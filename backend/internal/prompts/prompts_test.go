@@ -673,26 +673,44 @@ func TestRecordedFlowLoop_IsQAsAndTeachesTheWholeLoop(t *testing.T) {
 	}
 }
 
-// MISSING 2 - qa can read the paint/focus/timing/feel SHAPE two opposite wrong
-// ways ("not my business" / "I ran it, so it passed"). The rule is: drive
-// anything, judge nothing.
-func TestQADefault_MayDriveAnyCaseAndJudgeNoHumanOne(t *testing.T) {
+// qa can read the paint/focus/timing/feel SHAPE two opposite wrong ways ("not my
+// business" / "I ran it, so it passed"), and the rule that used to settle it -
+// judge nothing in those four categories - was too broad: if qa photographed the
+// layout and the content is visibly clipped, forbidding it to say so throws away
+// what it saw and makes the human re-derive it (explicit user decision).
+//
+// So the test is now about the SUFFICIENCY OF THE EVIDENCE, not the category of
+// the case, and this pins the three parts that keep that latitude from drifting
+// back into "looks fine to me": the same bar for pass and fail (an asymmetric
+// one was proposed and rejected), a citation requirement, and leaving the case
+// to the human as a first-class outcome rather than a failure to decide.
+func TestQADefault_JudgesBySufficiencyOfEvidenceNotByCategory(t *testing.T) {
 	base := DefaultBase(KindQA)
 	for _, want := range []string{
 		// Driving a human's case is ALLOWED - it is how the evidence gets captured.
 		"re-drive ANY case",
-		// Judging one is not.
-		"never do is JUDGE",
-		// And here is the shape of the record that says exactly that.
+		// The test that replaced the blanket prohibition.
+		"not the case's category",
+		"does this evidence actually answer what the case asks?",
+		// Symmetric, deliberately.
+		"pass and fail carry the SAME bar",
+		// The guard that has to come with the latitude.
+		"a verdict must cite what in the evidence supports it",
+		"on your own authority",
+		// And the shape of the record that leaves it to the human.
 		"--evidence <file>",
 		"NO `--verdict`",
 		"without concluding",
-		// The restriction the code cannot enforce: qa deciding a paint case is fine.
-		"on your own authority",
+		"not a failure to decide",
 	} {
 		if !strings.Contains(base, want) {
-			t.Fatalf("the qa base does not state drive-yes/judge-no: missing %q:\n%s", want, base)
+			t.Fatalf("the qa base does not state judge-when-the-evidence-answers-it: missing %q:\n%s", want, base)
 		}
+	}
+	// The blanket category prohibition must be GONE, not merely contradicted
+	// somewhere else in the block: two rules that disagree leave qa to pick.
+	if strings.Contains(base, "never do is JUDGE") {
+		t.Error("the qa base still carries the blanket judge-nothing rule beside its replacement")
 	}
 }
 

@@ -330,10 +330,6 @@ type SmokeCheck struct {
 	ReportedAt     sql.NullTime
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	AgentVerdict   domain.SmokeVerdict
-	AgentNote      string
-	AgentRanAt     sql.NullTime
-	AgentSha       string
 	RetiredAt      sql.NullTime
 	RetiredReason  string
 	AuthoredBy     domain.SessionID
@@ -361,6 +357,20 @@ type SmokeEvidence struct {
 	SizeBytes int64
 	CreatedAt time.Time
 	Source    domain.SmokeEvidenceSource
+	RunID     string
+}
+
+type SmokeRun struct {
+	ID         string
+	CheckID    string
+	SessionID  domain.SessionID
+	Seq        int64
+	Verdict    domain.SmokeVerdict
+	Note       string
+	Sha        string
+	RecordedAt sql.NullTime
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type TelemetryEvent struct {

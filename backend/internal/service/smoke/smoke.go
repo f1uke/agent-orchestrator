@@ -114,7 +114,8 @@ type Store interface {
 	SetSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID, reason string, author domain.SmokeAuthor, now time.Time) error
 	ClearSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID) error
 	SetSmokeVerdict(ctx context.Context, id string, verdict domain.SmokeVerdict, note string, decidedAt, now time.Time) (bool, error)
-	SetSmokeAgentResult(ctx context.Context, id string, res domain.SmokeAgentResult, ranAt, now time.Time) (bool, error)
+	OpenSmokeRun(ctx context.Context, checkID string, sessionID domain.SessionID, now time.Time) (domain.SmokeRun, bool, error)
+	CloseSmokeRun(ctx context.Context, runID string, res domain.SmokeAgentResult, recordedAt, now time.Time) (bool, error)
 	RetireSmokeCheck(ctx context.Context, id, reason string, retiredAt, now time.Time) (bool, error)
 	ListUserSmokeEvidence(ctx context.Context, checkID string) ([]domain.SmokeEvidence, error)
 	ResetSmokeCheck(ctx context.Context, id string, now time.Time) (bool, error)
@@ -579,18 +580,21 @@ func (s *Service) SetVerdict(ctx context.Context, sessionID domain.SessionID, ch
 	return s.getCheck(ctx, checkID)
 }
 
-// RecordAgentResult writes the MACHINE's result for a case: its verdict, what it
-// saw, when it ran and the commit it ran against. Strictly additive - it cannot
-// reach a single authored field (name/why/steps/expected/prNum/fileRef), cannot
-// reach a single user-runtime field (verdict/note/evidence/decidedAt), and
-// cannot remove a case. The worst a wrong call can do is overwrite the PREVIOUS
-// machine result, which is what re-running a case is supposed to do.
+// RecordAgentResult closes the machine's current RUN on a case with its verdict,
+// what it saw and the commit it ran against. Strictly additive - it cannot reach
+// a single authored field (name/why/steps/expected/prNum/fileRef), cannot reach
+// a single user-runtime field (verdict/note/evidence/decidedAt), cannot remove a
+// case, and - since a run is a row - cannot destroy the result of an earlier
+// round either. Running a case again adds to its history instead of replacing
+// it, which is what makes "this used to fail and now passes" readable.
 //
 // An empty verdict is allowed and means "ran it, captured what I saw, did not
-// judge it" - the state a paint/focus/timing/feel case stays in forever, since
-// no machine can answer "does this work for a person". It is accepted only when
-// the case actually carries machine evidence, so an empty record still says
-// something. Refused on a retired case.
+// judge it" - the right record whenever the capture does not actually answer the
+// question the case asks. It is accepted only when THIS RUN carries evidence, so
+// an empty record still says something; an earlier round's screenshots do not
+// count, because they are not what this one saw.
+//
+// Refused on a retired case.
 func (s *Service) RecordAgentResult(ctx context.Context, sessionID domain.SessionID, checkID string, res domain.SmokeAgentResult) (domain.SmokeCheck, error) {
 	check, err := s.requireActiveCheck(ctx, sessionID, checkID)
 	if err != nil {
@@ -600,11 +604,20 @@ func (s *Service) RecordAgentResult(ctx context.Context, sessionID domain.Sessio
 	if verdict != "" && !verdict.Valid() {
 		return domain.SmokeCheck{}, fmt.Errorf("%w: agent verdict must be pass, fail, or skip (or omitted, for an evidence-only run)", ErrInvalid)
 	}
-	if verdict == "" && len(check.AgentEvidence) == 0 {
-		return domain.SmokeCheck{}, fmt.Errorf("%w: a record with no verdict must carry evidence - attach a screenshot or clip, or say pass/fail/skip", ErrInvalid)
-	}
 	now := s.now()
-	updated, err := s.store.SetSmokeAgentResult(ctx, checkID, domain.SmokeAgentResult{
+	// The run the machine's captures went into, or a fresh one when it recorded a
+	// verdict without capturing anything.
+	run, opened, err := s.store.OpenSmokeRun(ctx, checkID, sessionID, now)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	if !opened {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
+	}
+	if verdict == "" && len(check.RunEvidence(run.ID)) == 0 {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: a record with no verdict must carry evidence from this run - attach a screenshot or clip, or say pass/fail/skip", ErrInvalid)
+	}
+	closed, err := s.store.CloseSmokeRun(ctx, run.ID, domain.SmokeAgentResult{
 		Verdict: verdict,
 		Note:    strings.TrimSpace(res.Note),
 		SHA:     strings.TrimSpace(res.SHA),
@@ -612,8 +625,8 @@ func (s *Service) RecordAgentResult(ctx context.Context, sessionID domain.Sessio
 	if err != nil {
 		return domain.SmokeCheck{}, err
 	}
-	if !updated {
-		return domain.SmokeCheck{}, fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
+	if !closed {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: smoke run %q", ErrNotFound, run.ID)
 	}
 	return s.getCheck(ctx, checkID)
 }
@@ -681,6 +694,14 @@ func (s *Service) Reset(ctx context.Context, sessionID domain.SessionID, checkID
 // stream to <dataDir>/evidence/<session>/<check>/<evidenceId> under a per-kind
 // size cap, and a metadata row is recorded. The client filename is display-only
 // and never used for the on-disk path.
+//
+// A MACHINE capture also OPENS the case's run if one is not already open, and
+// the row records which run it belongs to. That is the whole ordering trick:
+// `ao smoke record --evidence` uploads before it posts its result, so the run
+// has to be created by the capture rather than adopted afterwards. An adoption
+// sweep would have to pick up every unattached machine artifact on the case -
+// including captures from before AO kept run history, whose result was
+// overwritten - and file them under a verdict they may contradict.
 func (s *Service) AttachEvidence(ctx context.Context, sessionID domain.SessionID, checkID string, upload EvidenceUpload) (domain.SmokeEvidence, error) {
 	if _, err := s.requireActiveCheck(ctx, sessionID, checkID); err != nil {
 		return domain.SmokeEvidence{}, err
@@ -695,6 +716,18 @@ func (s *Service) AttachEvidence(ctx context.Context, sessionID domain.SessionID
 		limit = maxVideoBytes
 	}
 	now := s.now()
+	source := evidenceSource(upload.Source)
+	runID := ""
+	if source == domain.SmokeEvidenceAgent {
+		run, opened, err := s.store.OpenSmokeRun(ctx, checkID, sessionID, now)
+		if err != nil {
+			return domain.SmokeEvidence{}, err
+		}
+		if !opened {
+			return domain.SmokeEvidence{}, fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
+		}
+		runID = run.ID
+	}
 	evidenceID := "ev_" + uuid.NewString()
 	dir := s.checkDir(sessionID, checkID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -715,7 +748,8 @@ func (s *Service) AttachEvidence(ctx context.Context, sessionID domain.SessionID
 		Mime:      normMime,
 		SizeBytes: size,
 		CreatedAt: now,
-		Source:    evidenceSource(upload.Source),
+		Source:    source,
+		RunID:     runID,
 	}
 	if err := s.store.InsertSmokeEvidence(ctx, ev); err != nil {
 		_ = os.Remove(path)

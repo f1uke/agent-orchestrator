@@ -13,6 +13,40 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
+const closeSmokeRun = `-- name: CloseSmokeRun :execrows
+UPDATE smoke_run SET verdict = ?, note = ?, sha = ?, recorded_at = ?, updated_at = ?
+WHERE id = ? AND recorded_at IS NULL
+`
+
+type CloseSmokeRunParams struct {
+	Verdict    domain.SmokeVerdict
+	Note       string
+	Sha        string
+	RecordedAt sql.NullTime
+	UpdatedAt  time.Time
+	ID         string
+}
+
+// The machine's result, written only by `ao smoke record`. Disjoint from the
+// user-runtime fields by construction: this statement cannot reach verdict,
+// note, decided_at or the user's evidence rows - it cannot even reach the case
+// row. Guarded on recorded_at IS NULL so a result lands once and a later record
+// opens its own run rather than rewriting this one.
+func (q *Queries) CloseSmokeRun(ctx context.Context, arg CloseSmokeRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, closeSmokeRun,
+		arg.Verdict,
+		arg.Note,
+		arg.Sha,
+		arg.RecordedAt,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSmokeCheck = `-- name: DeleteSmokeCheck :execrows
 DELETE FROM smoke_check WHERE id = ?
 `
@@ -60,8 +94,34 @@ func (q *Queries) DeleteUserSmokeEvidenceByCheck(ctx context.Context, checkID st
 	return err
 }
 
+const getOpenSmokeRun = `-- name: GetOpenSmokeRun :one
+SELECT id, check_id, session_id, seq, verdict, note, sha, recorded_at, created_at, updated_at
+FROM smoke_run WHERE check_id = ? AND recorded_at IS NULL ORDER BY seq DESC LIMIT 1
+`
+
+// The round the machine is in the middle of: opened by its first capture and not
+// yet concluded. At most one is open per case, because opening only ever happens
+// when this returns nothing.
+func (q *Queries) GetOpenSmokeRun(ctx context.Context, checkID string) (SmokeRun, error) {
+	row := q.db.QueryRowContext(ctx, getOpenSmokeRun, checkID)
+	var i SmokeRun
+	err := row.Scan(
+		&i.ID,
+		&i.CheckID,
+		&i.SessionID,
+		&i.Seq,
+		&i.Verdict,
+		&i.Note,
+		&i.Sha,
+		&i.RecordedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSmokeCheck = `-- name: GetSmokeCheck :one
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason, authored_by, authored_by_role, authored_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at
 FROM smoke_check WHERE id = ?
 `
 
@@ -85,10 +145,6 @@ func (q *Queries) GetSmokeCheck(ctx context.Context, id string) (SmokeCheck, err
 		&i.ReportedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.AgentVerdict,
-		&i.AgentNote,
-		&i.AgentRanAt,
-		&i.AgentSha,
 		&i.RetiredAt,
 		&i.RetiredReason,
 		&i.AuthoredBy,
@@ -119,7 +175,7 @@ func (q *Queries) GetSmokeChecklistState(ctx context.Context, sessionID domain.S
 }
 
 const getSmokeEvidence = `-- name: GetSmokeEvidence :one
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
 FROM smoke_evidence WHERE id = ?
 `
 
@@ -136,6 +192,7 @@ func (q *Queries) GetSmokeEvidence(ctx context.Context, id string) (SmokeEvidenc
 		&i.SizeBytes,
 		&i.CreatedAt,
 		&i.Source,
+		&i.RunID,
 	)
 	return i, err
 }
@@ -187,8 +244,8 @@ func (q *Queries) InsertSmokeCheck(ctx context.Context, arg InsertSmokeCheckPara
 }
 
 const insertSmokeEvidence = `-- name: InsertSmokeEvidence :exec
-INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSmokeEvidenceParams struct {
@@ -201,6 +258,7 @@ type InsertSmokeEvidenceParams struct {
 	SizeBytes int64
 	CreatedAt time.Time
 	Source    domain.SmokeEvidenceSource
+	RunID     string
 }
 
 func (q *Queries) InsertSmokeEvidence(ctx context.Context, arg InsertSmokeEvidenceParams) error {
@@ -214,12 +272,52 @@ func (q *Queries) InsertSmokeEvidence(ctx context.Context, arg InsertSmokeEviden
 		arg.SizeBytes,
 		arg.CreatedAt,
 		arg.Source,
+		arg.RunID,
 	)
 	return err
 }
 
+const insertSmokeRun = `-- name: InsertSmokeRun :execrows
+INSERT INTO smoke_run (id, check_id, session_id, seq, verdict, note, sha, recorded_at, created_at, updated_at)
+SELECT ?, ?, ?, ?, '', '', '', NULL, ?, ?
+WHERE EXISTS (SELECT 1 FROM smoke_check c WHERE c.id = ? AND c.retired_at IS NULL)
+`
+
+type InsertSmokeRunParams struct {
+	ID        string
+	CheckID   string
+	SessionID domain.SessionID
+	Seq       int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ID_2      string
+}
+
+// A run opens with no result: verdict/note/sha stay empty and recorded_at NULL
+// until the record lands. Inserting it is what gives the round's evidence
+// something to point at.
+//
+// Guarded on the case being ACTIVE, so the frozen rule holds in the statement
+// and not only in the service's read-then-write: a retired case is not one
+// anything is asked to run, and nothing may open a round against it.
+func (q *Queries) InsertSmokeRun(ctx context.Context, arg InsertSmokeRunParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertSmokeRun,
+		arg.ID,
+		arg.CheckID,
+		arg.SessionID,
+		arg.Seq,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.ID_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const listSmokeChecksBySession = `-- name: ListSmokeChecksBySession :many
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, agent_verdict, agent_note, agent_ran_at, agent_sha, retired_at, retired_reason, authored_by, authored_by_role, authored_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at
 FROM smoke_check WHERE session_id = ? ORDER BY (retired_at IS NOT NULL), seq, created_at
 `
 
@@ -249,10 +347,6 @@ func (q *Queries) ListSmokeChecksBySession(ctx context.Context, sessionID domain
 			&i.ReportedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.AgentVerdict,
-			&i.AgentNote,
-			&i.AgentRanAt,
-			&i.AgentSha,
 			&i.RetiredAt,
 			&i.RetiredReason,
 			&i.AuthoredBy,
@@ -273,7 +367,7 @@ func (q *Queries) ListSmokeChecksBySession(ctx context.Context, sessionID domain
 }
 
 const listSmokeEvidenceByCheck = `-- name: ListSmokeEvidenceByCheck :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
 FROM smoke_evidence WHERE check_id = ? ORDER BY created_at
 `
 
@@ -296,6 +390,7 @@ func (q *Queries) ListSmokeEvidenceByCheck(ctx context.Context, checkID string) 
 			&i.SizeBytes,
 			&i.CreatedAt,
 			&i.Source,
+			&i.RunID,
 		); err != nil {
 			return nil, err
 		}
@@ -311,7 +406,7 @@ func (q *Queries) ListSmokeEvidenceByCheck(ctx context.Context, checkID string) 
 }
 
 const listSmokeEvidenceCreatedBefore = `-- name: ListSmokeEvidenceCreatedBefore :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
 FROM smoke_evidence WHERE created_at < ? ORDER BY created_at
 `
 
@@ -337,6 +432,48 @@ func (q *Queries) ListSmokeEvidenceCreatedBefore(ctx context.Context, createdAt 
 			&i.SizeBytes,
 			&i.CreatedAt,
 			&i.Source,
+			&i.RunID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSmokeRunsByCheck = `-- name: ListSmokeRunsByCheck :many
+SELECT id, check_id, session_id, seq, verdict, note, sha, recorded_at, created_at, updated_at
+FROM smoke_run WHERE check_id = ? ORDER BY seq, created_at
+`
+
+// A case's machine runs, oldest first, so the caller reads them the way they
+// happened and the last one is the current result.
+func (q *Queries) ListSmokeRunsByCheck(ctx context.Context, checkID string) ([]SmokeRun, error) {
+	rows, err := q.db.QueryContext(ctx, listSmokeRunsByCheck, checkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SmokeRun{}
+	for rows.Next() {
+		var i SmokeRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.CheckID,
+			&i.SessionID,
+			&i.Seq,
+			&i.Verdict,
+			&i.Note,
+			&i.Sha,
+			&i.RecordedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -352,7 +489,7 @@ func (q *Queries) ListSmokeEvidenceCreatedBefore(ctx context.Context, createdAt 
 }
 
 const listUserSmokeEvidenceByCheck = `-- name: ListUserSmokeEvidenceByCheck :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
 FROM smoke_evidence WHERE check_id = ? AND source = 'user' ORDER BY created_at
 `
 
@@ -377,6 +514,7 @@ func (q *Queries) ListUserSmokeEvidenceByCheck(ctx context.Context, checkID stri
 			&i.SizeBytes,
 			&i.CreatedAt,
 			&i.Source,
+			&i.RunID,
 		); err != nil {
 			return nil, err
 		}
@@ -407,6 +545,19 @@ func (q *Queries) MarkSmokeReported(ctx context.Context, arg MarkSmokeReportedPa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const nextSmokeRunSeq = `-- name: NextSmokeRunSeq :one
+SELECT COALESCE(MAX(seq), 0) + 1 FROM smoke_run WHERE check_id = ?
+`
+
+// 1-based position of the run about to be inserted, so "RUN 3" keeps meaning the
+// third round even after an earlier one is read back out of order.
+func (q *Queries) NextSmokeRunSeq(ctx context.Context, checkID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, nextSmokeRunSeq, checkID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const resetSmokeCheck = `-- name: ResetSmokeCheck :execrows
@@ -446,38 +597,6 @@ func (q *Queries) RetireSmokeCheck(ctx context.Context, arg RetireSmokeCheckPara
 	result, err := q.db.ExecContext(ctx, retireSmokeCheck,
 		arg.RetiredAt,
 		arg.RetiredReason,
-		arg.UpdatedAt,
-		arg.ID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const setSmokeAgentResult = `-- name: SetSmokeAgentResult :execrows
-UPDATE smoke_check SET agent_verdict = ?, agent_note = ?, agent_ran_at = ?, agent_sha = ?, updated_at = ?
-WHERE id = ? AND retired_at IS NULL
-`
-
-type SetSmokeAgentResultParams struct {
-	AgentVerdict domain.SmokeVerdict
-	AgentNote    string
-	AgentRanAt   sql.NullTime
-	AgentSha     string
-	UpdatedAt    time.Time
-	ID           string
-}
-
-// The machine's result, written only by `ao smoke record`. Disjoint from the
-// user-runtime fields by construction: this statement cannot reach verdict,
-// note, decided_at or the user's evidence rows.
-func (q *Queries) SetSmokeAgentResult(ctx context.Context, arg SetSmokeAgentResultParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, setSmokeAgentResult,
-		arg.AgentVerdict,
-		arg.AgentNote,
-		arg.AgentRanAt,
-		arg.AgentSha,
 		arg.UpdatedAt,
 		arg.ID,
 	)

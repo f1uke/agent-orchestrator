@@ -17,6 +17,7 @@ export { ACCENT, MONO, accentMix };
 export type SmokeCheck = components["schemas"]["SmokeCheck"];
 export type SmokeStandDown = components["schemas"]["DomainSmokeStandDown"];
 export type SmokeEvidence = components["schemas"]["SmokeEvidence"];
+export type SmokeRun = components["schemas"]["DomainSmokeRun"];
 export type SmokeVerdict = "pending" | "pass" | "fail" | "skip";
 
 /** Design palette, by role. Each value is a themed token, not a literal. */
@@ -252,10 +253,10 @@ export function isVideoMime(mime: string): boolean {
  * What the machine did to a case.
  *
  * `captured` is the state this vocabulary exists for: `agentRanAt` set with an
- * EMPTY `agentVerdict` is deliberate, not missing data. qa walked to the screen
- * and photographed it but declined to judge, because paint / focus / timing /
- * feel are not machine-judgeable. Rendering that as an empty circle would read
- * "qa hasn't got to it yet" and send the person to fix the wrong thing.
+ * EMPTY `agentVerdict` is deliberate, not missing data. qa drove the case and
+ * photographed it, and concluded that what it captured does not settle the
+ * question the case asks - so the call is a person's. Rendering that as an empty
+ * circle would read "qa hasn't got to it yet" and send them to the wrong thing.
  */
 export type AgentState = "none" | "pass" | "fail" | "skip" | "captured";
 
@@ -302,7 +303,7 @@ export const AGENT_META: Record<Exclude<AgentState, "none">, AgentMeta> = {
 		label: "qa · evidence only",
 		headline: "qa captured the screen and left the judgement to you",
 		caption:
-			"A machine cannot judge paint, focus, timing or feel, so there is no agent verdict coming for this one. Judge it from what qa captured instead of driving the app yourself.",
+			"It recorded what it saw and said the capture does not settle this one, so the call is yours. Judge it from what qa captured instead of driving the app yourself.",
 		color: QA_FG,
 	},
 };
@@ -352,6 +353,86 @@ export function isAgentStale(check: SmokeCheck, heads: HeadRef[]): boolean {
 	const head = headShaFor(check, heads);
 	if (!ran || !head) return false;
 	return !shaMatches(ran, head);
+}
+
+// ---------------------------------------------------------------------------
+// The machine's run history.
+//
+// A case's machine result used to be four fields that the next `ao smoke record`
+// overwrote, so a re-run destroyed the round before it and its screenshots were
+// left pooled under whatever verdict was newest. The runs below are what that
+// became: one entry per round, each owning the captures it took.
+
+/**
+ * A case's machine rounds, NEWEST FIRST - the order the tab reads them in. The
+ * API sends them chronologically because that is how they happened; the screen
+ * puts the current result on top because that is the one being asked about.
+ */
+export function runsNewestFirst(check: SmokeCheck): SmokeRun[] {
+	return [...(check.runs ?? [])].reverse();
+}
+
+/**
+ * The run whose result the case currently carries: the latest RECORDED one.
+ *
+ * A run with no `recordedAt` is skipped deliberately. It is a round the machine
+ * opened, captured into and never concluded - what a crashed or abandoned run
+ * leaves behind - and showing it as the headline result would put an empty
+ * conclusion where a real one used to be.
+ */
+export function latestRun(check: SmokeCheck): SmokeRun | null {
+	return runsNewestFirst(check).find((r) => Boolean(r.recordedAt)) ?? null;
+}
+
+/** The machine artifacts captured during one run. */
+export function evidenceForRun(check: SmokeCheck, runId: string): SmokeEvidence[] {
+	return (check.agentEvidence ?? []).filter((ev) => (ev.runId ?? "") === runId);
+}
+
+/**
+ * Machine captures that belong to NO run: taken before AO kept run history, when
+ * the result they were taken for could be overwritten out of existence - and
+ * often was. They are shown apart and labelled, never folded into the newest
+ * run: the verdict they were captured for may be the opposite of the one showing
+ * now, and a stale image read as current evidence is the failure this whole
+ * shape exists to remove.
+ */
+export function unknownRunEvidence(check: SmokeCheck): SmokeEvidence[] {
+	return evidenceForRun(check, "");
+}
+
+/** "RUN 3" tag from a run's 1-based seq, mirroring `checkTag`. */
+export function runTag(seq: number): string {
+	return `RUN ${seq}`;
+}
+
+/**
+ * What one run concluded, in the same vocabulary as the case-level lane so the
+ * history reads with the headline rather than beside it. A run with no verdict
+ * that HAS concluded is `captured`; one still open is `open`.
+ */
+export type RunState = AgentState | "open";
+
+/**
+ * What ONE round concluded, in past tense and without the `qa ·` actor prefix -
+ * the chip's wording ("ran") is a sentence opener that reads as "it executed"
+ * when it stands alone in a history row, exactly where the verdict is the thing
+ * being read.
+ */
+export const RUN_LABEL: Record<RunState, string> = {
+	none: "",
+	pass: "passed",
+	fail: "failed",
+	skip: "skipped",
+	captured: "evidence only",
+	open: "never concluded",
+};
+
+export function runState(run: SmokeRun): RunState {
+	if (!run.recordedAt) return "open";
+	const v = run.verdict ?? "";
+	if (v === "pass" || v === "fail" || v === "skip") return v;
+	return "captured";
 }
 
 /** The cases the user is asked to play: retired ones are out of the checklist. */

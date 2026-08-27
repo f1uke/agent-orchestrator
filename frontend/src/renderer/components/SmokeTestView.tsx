@@ -19,20 +19,28 @@ import {
 	authorLabel,
 	checkTag,
 	checklistState,
+	evidenceForRun,
 	headShaFor,
 	isAgentStale,
+	latestRun,
 	progressFor,
 	progressSegments,
 	relativeTime,
 	retiredChecks,
+	RUN_LABEL,
+	runState,
+	runTag,
+	runsNewestFirst,
 	shortSha,
 	standDownActor,
+	unknownRunEvidence,
 	verdictMeta,
 	type AgentState,
 	type HeadRef,
 	type SmokeCheck,
 	type SmokeEvidence,
 	type SmokeProgress,
+	type SmokeRun,
 	type ChecklistState,
 	type SmokeStandDown,
 } from "../lib/smoke-test";
@@ -508,8 +516,8 @@ function QaBanner({ progress }: { progress: SmokeProgress }) {
 					<b style={{ fontWeight: 600 }}>
 						qa captured the screen on {progress.agentCaptured} case{progress.agentCaptured === 1 ? "" : "s"}
 					</b>{" "}
-					it can&apos;t judge, so you can call {progress.agentCaptured === 1 ? "that one" : "those"} from the evidence
-					without driving the app yourself.
+					without settling {progress.agentCaptured === 1 ? "it" : "them"}, so you can call{" "}
+					{progress.agentCaptured === 1 ? "that one" : "those"} from the evidence without driving the app yourself.
 				</>
 			),
 		});
@@ -652,9 +660,10 @@ function CaseCard({
 								{authoredWhen && ` · ${authoredWhen}`}
 							</span>
 						)}
-						{/* qa's screenshots are worth advertising here: on a case a machine
-						    cannot judge, they are what lets the person decide without
-						    re-driving the app. Named as qa's, never merged into "yours". */}
+						{/* qa's screenshots are worth advertising here: on a case its own
+						    capture could not settle, they are what lets the person decide
+						    without re-driving the app. Named as qa's, never merged into
+						    "yours". */}
 						{qaShots > 0 && (
 							<span style={{ color: P.qaFg }}>
 								{" · "}
@@ -803,9 +812,166 @@ function QaChip({ state, stale }: { state: AgentState; stale: boolean }) {
 }
 
 /**
+ * One strip of machine captures, under its own label, with its own lightbox.
+ *
+ * Read-only: no × and no dropzone. Merging these into "your evidence" would
+ * destroy the provenance you go back to when you distrust a verdict.
+ */
+function QaShotStrip({
+	sessionId,
+	checkId,
+	label,
+	caption,
+	shots,
+	onReveal,
+}: {
+	sessionId: string;
+	checkId: string;
+	label: string;
+	caption?: string;
+	shots: SmokeEvidence[];
+	onReveal: (evidenceId: string, mode: "reveal" | "open") => void;
+}) {
+	const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+	const triggerRef = useRef<HTMLElement | null>(null);
+	if (shots.length === 0) return null;
+	return (
+		<>
+			<div style={{ marginTop: 9, fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.qaFg }}>
+				{label}
+				{caption && <span style={{ fontWeight: 500, color: P.muted, letterSpacing: 0 }}> · {caption}</span>}
+			</div>
+			<div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+				{shots.map((ev, i) => (
+					<EvidenceThumb
+						key={ev.id}
+						sessionId={sessionId}
+						checkId={checkId}
+						evidence={ev}
+						onOpen={(trigger) => {
+							triggerRef.current = trigger;
+							setLightboxIndex(i);
+						}}
+						onReveal={() => onReveal(ev.id, "reveal")}
+						onOpenFile={() => onReveal(ev.id, "open")}
+					/>
+				))}
+			</div>
+			{lightboxIndex !== null && (
+				<MediaLightbox
+					items={shots.map((e) => ({
+						id: e.id,
+						filename: e.filename,
+						mime: e.mime,
+						src: evidenceUrl(sessionId, checkId, e.id),
+					}))}
+					index={lightboxIndex}
+					onIndexChange={setLightboxIndex}
+					onClose={() => setLightboxIndex(null)}
+					triggerRef={triggerRef}
+				/>
+			)}
+		</>
+	);
+}
+
+/** One EARLIER round, collapsed to a line and expandable to what it saw.
+ *
+ * Collapsed it carries the three facts that make a history worth having - which
+ * round, what it concluded, and against which commit - so "this failed at
+ * d44ad43 and passes at 9f10c22" is legible without opening anything. */
+function QaRunRow({
+	sessionId,
+	check,
+	run,
+	now,
+	onReveal,
+}: {
+	sessionId: string;
+	check: SmokeCheck;
+	run: SmokeRun;
+	now: number;
+	onReveal: (evidenceId: string, mode: "reveal" | "open") => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const state = runState(run);
+	const meta = state === "open" ? null : agentMeta(state);
+	const Icon = state === "open" ? Eye : QA_ICON[state as Exclude<AgentState, "none">];
+	const shots = evidenceForRun(check, run.id);
+	const when = relativeTime(run.recordedAt ?? run.createdAt, now);
+	const expandable = Boolean(run.note) || shots.length > 0;
+
+	return (
+		<div style={{ borderTop: `1px solid ${P.qaBorder}` }}>
+			<button
+				type="button"
+				data-testid={`qa-run-${run.id}`}
+				onClick={() => expandable && setOpen((o) => !o)}
+				disabled={!expandable}
+				style={{
+					width: "100%",
+					display: "flex",
+					alignItems: "center",
+					gap: 7,
+					flexWrap: "wrap",
+					rowGap: 3,
+					padding: "6px 0",
+					background: "none",
+					border: "none",
+					textAlign: "left",
+					cursor: expandable ? "pointer" : "default",
+					font: "inherit",
+				}}
+			>
+				<span style={{ fontFamily: MONO, fontSize: 9.5, fontWeight: 700, letterSpacing: ".05em", color: P.muted }}>
+					{runTag(run.seq)}
+				</span>
+				<Icon size={11} strokeWidth={2.2} color={meta ? meta.color : P.muted} aria-hidden="true" />
+				<span style={{ fontSize: 11.5, fontWeight: 600, color: meta ? meta.color : P.muted }}>
+					{/* A round that never concluded says so, rather than borrowing the
+					    "evidence only" wording from one that deliberately did not judge. */}
+					{RUN_LABEL[state]}
+				</span>
+				{run.sha && <span style={{ fontFamily: MONO, fontSize: 10.5, color: P.muted }}>{shortSha(run.sha)}</span>}
+				{when && <span style={{ fontSize: 10.5, color: P.muted }}>· {when}</span>}
+				{shots.length > 0 && (
+					<span style={{ fontSize: 10.5, color: P.muted }}>
+						· {shots.length} shot{shots.length === 1 ? "" : "s"}
+					</span>
+				)}
+				{/* The same chevron the case card uses, so a round with something to
+				    read looks openable rather than looking like a dead line. */}
+				{expandable && (
+					<span aria-hidden="true" style={{ marginLeft: "auto", fontSize: 12, color: P.secondary }}>
+						{open ? "▾" : "▸"}
+					</span>
+				)}
+			</button>
+			{open && (
+				<div style={{ paddingBottom: 8 }}>
+					{run.note && <div style={{ fontSize: 12, lineHeight: 1.5, color: P.qaFg }}>{run.note}</div>}
+					<QaShotStrip
+						sessionId={sessionId}
+						checkId={check.id}
+						label={`CAPTURED IN ${runTag(run.seq)}`}
+						shots={shots}
+						onReveal={onReveal}
+					/>
+				</div>
+			)}
+		</div>
+	);
+}
+
+/**
  * The machine's result, in full, inside an expanded case: what it did, what it
- * said, what it captured, and against which commit. Flat and neutral - the
- * verdict hues on this tab belong to the person.
+ * said, what it captured, and against which commit - plus every EARLIER round it
+ * ran, collapsed underneath.
+ *
+ * The history is the point. One overwritten result could not say that a case
+ * failed at one commit and passes at another, so a person had to reconstruct it
+ * from a sentence in a note. Flat and neutral - the verdict hues on this tab
+ * belong to the person.
  */
 function QaBlock({
 	sessionId,
@@ -819,17 +985,24 @@ function QaBlock({
 	onReveal: (evidenceId: string, mode: "reveal" | "open") => void;
 }) {
 	const [now] = useState(() => Date.now());
-	const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-	const triggerRef = useRef<HTMLElement | null>(null);
 	const state = agentState(check);
 	const meta = agentMeta(state);
-	if (!meta) return null;
+	const runs = runsNewestFirst(check);
+	const current = latestRun(check);
+	const orphans = unknownRunEvidence(check);
+	// Nothing from a machine at all - no result, no run, no capture - renders
+	// nothing. An empty machine lane on a case no machine has touched reads as
+	// "qa hasn't got to it yet" on cases where nothing is coming.
+	if (state === "none" && runs.length === 0 && (check.agentEvidence ?? []).length === 0) return null;
 
-	const Icon = QA_ICON[state as Exclude<AgentState, "none">];
+	const Icon = meta ? QA_ICON[state as Exclude<AgentState, "none">] : Eye;
 	const stale = isAgentStale(check, heads);
 	const head = headShaFor(check, heads);
-	const shots = check.agentEvidence ?? [];
+	// The headline shows what THIS run captured. An earlier round's screenshots
+	// under this verdict is exactly the mix-up the run history removes.
+	const shots = current ? evidenceForRun(check, current.id) : [];
 	const ran = relativeTime(check.agentRanAt, now);
+	const earlier = runs.filter((r) => r.id !== current?.id);
 
 	return (
 		<div
@@ -848,70 +1021,49 @@ function QaBlock({
 					{ran ? `ran ${ran}` : "ran"}
 					{check.agentSha ? " · " : ""}
 					{check.agentSha && <span style={{ fontFamily: MONO }}>{shortSha(check.agentSha)}</span>}
+					{runs.length > 1 && current ? ` · run ${current.seq} of ${runs.length}` : ""}
 				</span>
 			</div>
 
-			<div style={{ marginTop: 7, display: "flex", alignItems: "flex-start", gap: 8 }}>
-				<Icon
-					size={13}
-					strokeWidth={2.2}
-					color={stale ? P.muted : meta.color}
-					aria-hidden="true"
-					style={{ flex: "none", marginTop: 2 }}
-				/>
-				<div style={{ minWidth: 0 }}>
-					<div style={{ fontSize: 12.5, fontWeight: 600, color: stale ? P.muted : meta.color, lineHeight: 1.45 }}>
-						{meta.headline}
-					</div>
-					<div style={{ marginTop: 3, fontSize: 11.5, lineHeight: 1.5, color: P.secondary2 }}>{meta.caption}</div>
-				</div>
-			</div>
-
-			{check.agentNote && (
-				<div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.5, color: P.qaFg }}>{check.agentNote}</div>
-			)}
-
-			{/* qa's own artefacts, kept in their own list. Merging them into "your
-			    evidence" would destroy the provenance you go back to when you distrust
-			    a verdict - so these are read-only here: no × and no dropzone. */}
-			{shots.length > 0 && (
+			{meta ? (
 				<>
-					<div style={{ marginTop: 9, fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.qaFg }}>
-						CAPTURED BY QA{" "}
-						<span style={{ fontWeight: 500, color: P.muted, letterSpacing: 0 }}>· not yours, and not deletable</span>
-					</div>
-					<div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-						{shots.map((ev, i) => (
-							<EvidenceThumb
-								key={ev.id}
-								sessionId={sessionId}
-								checkId={check.id}
-								evidence={ev}
-								onOpen={(trigger) => {
-									triggerRef.current = trigger;
-									setLightboxIndex(i);
-								}}
-								onReveal={() => onReveal(ev.id, "reveal")}
-								onOpenFile={() => onReveal(ev.id, "open")}
-							/>
-						))}
-					</div>
-					{lightboxIndex !== null && (
-						<MediaLightbox
-							items={shots.map((e) => ({
-								id: e.id,
-								filename: e.filename,
-								mime: e.mime,
-								src: evidenceUrl(sessionId, check.id, e.id),
-							}))}
-							index={lightboxIndex}
-							onIndexChange={setLightboxIndex}
-							onClose={() => setLightboxIndex(null)}
-							triggerRef={triggerRef}
+					<div style={{ marginTop: 7, display: "flex", alignItems: "flex-start", gap: 8 }}>
+						<Icon
+							size={13}
+							strokeWidth={2.2}
+							color={stale ? P.muted : meta.color}
+							aria-hidden="true"
+							style={{ flex: "none", marginTop: 2 }}
 						/>
+						<div style={{ minWidth: 0 }}>
+							<div style={{ fontSize: 12.5, fontWeight: 600, color: stale ? P.muted : meta.color, lineHeight: 1.45 }}>
+								{meta.headline}
+							</div>
+							<div style={{ marginTop: 3, fontSize: 11.5, lineHeight: 1.5, color: P.secondary2 }}>{meta.caption}</div>
+						</div>
+					</div>
+
+					{check.agentNote && (
+						<div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.5, color: P.qaFg }}>{check.agentNote}</div>
 					)}
 				</>
+			) : (
+				/* Runs exist but none concluded: the machine opened a round, captured
+				   into it and stopped. Saying so beats showing the captures under no
+				   heading at all, which is how they used to arrive. */
+				<div style={{ marginTop: 7, fontSize: 12, lineHeight: 1.5, color: P.muted }}>
+					qa captured this and never recorded a result.
+				</div>
 			)}
+
+			<QaShotStrip
+				sessionId={sessionId}
+				checkId={check.id}
+				label="CAPTURED BY QA"
+				caption="not yours, and not deletable"
+				shots={shots}
+				onReveal={onReveal}
+			/>
 
 			{stale && (
 				<div
@@ -927,6 +1079,43 @@ function QaBlock({
 					<b style={{ fontWeight: 600 }}>Stale.</b> Ran against{" "}
 					<span style={{ fontFamily: MONO }}>{shortSha(check.agentSha)}</span>; head is now{" "}
 					<span style={{ fontFamily: MONO }}>{shortSha(head)}</span>. The code moved after this ran.
+				</div>
+			)}
+
+			{earlier.length > 0 && (
+				<div style={{ marginTop: 10 }} data-testid={`qa-earlier-runs-${check.id}`}>
+					<div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.qaFg, marginBottom: 2 }}>
+						{/* "EARLIER" is only true relative to a result shown above. With
+						    nothing concluded, these rounds are all there is. */}
+						{current ? "EARLIER RUNS" : "RUNS"}{" "}
+						{current && (
+							<span style={{ fontWeight: 500, color: P.muted, letterSpacing: 0 }}>· what it said before</span>
+						)}
+					</div>
+					{earlier.map((run) => (
+						<QaRunRow key={run.id} sessionId={sessionId} check={check} run={run} now={now} onReveal={onReveal} />
+					))}
+				</div>
+			)}
+
+			{orphans.length > 0 && (
+				<div
+					style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${P.qaBorder}` }}
+					data-testid={`qa-unknown-run-${check.id}`}
+				>
+					<div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.qaFg }}>UNKNOWN RUN</div>
+					<div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.5, color: P.muted }}>
+						Captured before AO kept a run history, so which result these belong to is not recorded - and it may not be
+						the one above. Read them on their own.
+					</div>
+					<QaShotStrip
+						sessionId={sessionId}
+						checkId={check.id}
+						label="CAPTURED BY QA"
+						caption="run unknown"
+						shots={orphans}
+						onReveal={onReveal}
+					/>
 				</div>
 			)}
 		</div>

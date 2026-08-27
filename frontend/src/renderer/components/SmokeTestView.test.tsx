@@ -16,8 +16,13 @@ vi.mock("../lib/api-client", () => ({
 
 import { SmokeTestView } from "./SmokeTestView";
 
+// check builds a case in the shape the daemon actually sends. The four agent*
+// fields are DERIVED there from the latest recorded run, so a fixture that set
+// them without a run would be a shape production never produces - and the run
+// history is exactly what the tab now reads. Give `runs` explicitly to model a
+// case that ran more than once.
 function check(overrides: Record<string, unknown>) {
-	return {
+	const base = {
 		id: "c1",
 		sessionId: "s1",
 		projectId: "p",
@@ -34,7 +39,31 @@ function check(overrides: Record<string, unknown>) {
 		createdAt: "2026-07-11T10:00:00Z",
 		updatedAt: "2026-07-11T10:00:00Z",
 		...overrides,
-	};
+	} as Record<string, unknown>;
+	if (!base.runs && base.agentRanAt) {
+		base.runs = [
+			{
+				id: "run_c1_1",
+				checkId: base.id,
+				sessionId: base.sessionId,
+				seq: 1,
+				verdict: base.agentVerdict ?? "",
+				note: base.agentNote ?? "",
+				sha: base.agentSha ?? "",
+				recordedAt: base.agentRanAt,
+				createdAt: base.agentRanAt,
+				updatedAt: base.agentRanAt,
+			},
+		];
+		// A capture with no run of its own belongs to the run that recorded it,
+		// which is what the upload path does; leaving it unattached here would
+		// make every fixture read as pre-history evidence.
+		base.agentEvidence = ((base.agentEvidence as Record<string, unknown>[]) ?? []).map((ev) => ({
+			runId: "run_c1_1",
+			...ev,
+		}));
+	}
+	return base;
 }
 
 let checks: ReturnType<typeof check>[];
@@ -547,7 +576,7 @@ describe("SmokeTestView", () => {
 			renderView();
 			expect(await screen.findByText("qa · evidence only")).toBeInTheDocument();
 			expect(screen.getByText(/left the judgement to you/)).toBeInTheDocument();
-			expect(screen.getByText(/no agent verdict coming/)).toBeInTheDocument();
+			expect(screen.getByText(/does not settle this one/)).toBeInTheDocument();
 			// And it is never phrased as an absence.
 			expect(screen.queryByText(/qa · ran/)).not.toBeInTheDocument();
 		});
@@ -623,6 +652,185 @@ describe("SmokeTestView", () => {
 			renderView();
 			expect(await screen.findByText("qa · ran")).toBeInTheDocument();
 			expect(screen.queryByText("Stale.")).not.toBeInTheDocument();
+		});
+
+		it("shows the earlier runs collapsed under the latest one, each with its own verdict and commit", async () => {
+			// The failure this whole shape fixes: a case re-run on a newer commit
+			// gave the OPPOSITE result, the earlier verdict was overwritten out of
+			// existence, and the only surviving trace of the inversion was a
+			// sentence someone wrote in a note.
+			checks = [
+				check({
+					agentRanAt: RAN,
+					agentVerdict: "pass",
+					agentSha: HEAD,
+					agentNote: "renders clean",
+					runs: [
+						{
+							id: "r1",
+							checkId: "c1",
+							sessionId: "s1",
+							seq: 1,
+							verdict: "fail",
+							note: "clipped at 320px",
+							sha: OLD,
+							recordedAt: "2026-07-10T09:00:00Z",
+							createdAt: "2026-07-10T09:00:00Z",
+							updatedAt: "2026-07-10T09:00:00Z",
+						},
+						{
+							id: "r2",
+							checkId: "c1",
+							sessionId: "s1",
+							seq: 2,
+							verdict: "pass",
+							note: "passed once already",
+							sha: "aaaaaaabbbbbbbcccccccdddddddeeeeeeefffffff",
+							recordedAt: "2026-07-10T12:00:00Z",
+							createdAt: "2026-07-10T12:00:00Z",
+							updatedAt: "2026-07-10T12:00:00Z",
+						},
+						{
+							id: "r3",
+							checkId: "c1",
+							sessionId: "s1",
+							seq: 3,
+							verdict: "pass",
+							note: "renders clean",
+							sha: HEAD,
+							recordedAt: RAN,
+							createdAt: RAN,
+							updatedAt: RAN,
+						},
+					],
+					agentEvidence: [
+						{
+							id: "ag1",
+							checkId: "c1",
+							sessionId: "s1",
+							kind: "image",
+							filename: "clipped.png",
+							mime: "image/png",
+							sizeBytes: 3,
+							createdAt: RAN,
+							source: "agent",
+							runId: "r1",
+						},
+					],
+				}),
+			];
+			renderView();
+			// The latest run is the headline, and it says which round it is.
+			expect(await screen.findByText("qa · ran")).toBeInTheDocument();
+			expect(screen.getByText(/run 3 of 3/)).toBeInTheDocument();
+			// The earlier round is there, with the verdict and commit that make the
+			// inversion readable at a glance.
+			expect(screen.getByText("EARLIER RUNS", { exact: false })).toBeInTheDocument();
+			expect(screen.getByText("RUN 1")).toBeInTheDocument();
+			expect(screen.getByText("failed")).toBeInTheDocument();
+			// An earlier PASS says "passed", not the chip's "ran": in a history row
+			// the verdict is the thing being read, and "ran" reads as "it executed".
+			expect(screen.getByText("RUN 2")).toBeInTheDocument();
+			expect(screen.getByText("passed")).toBeInTheDocument();
+			expect(screen.getByText(OLD.slice(0, 7))).toBeInTheDocument();
+			// Collapsed, its note and its capture are not shown under the pass.
+			expect(screen.queryByText("clipped at 320px")).not.toBeInTheDocument();
+			expect(screen.queryByLabelText(/clipped.png/)).not.toBeInTheDocument();
+			// Opening it shows what THAT round saw.
+			await userEvent.click(screen.getByTestId("qa-run-r1"));
+			expect(screen.getByText("clipped at 320px")).toBeInTheDocument();
+			expect(screen.getByText(/CAPTURED IN RUN 1/)).toBeInTheDocument();
+		});
+
+		it("says nothing about earlier runs when there has only been one", async () => {
+			checks = [check({ agentRanAt: RAN, agentVerdict: "pass", agentSha: HEAD })];
+			renderView();
+			expect(await screen.findByText("qa · ran")).toBeInTheDocument();
+			expect(screen.queryByText("EARLIER RUNS", { exact: false })).not.toBeInTheDocument();
+			// And no "run 1 of 1" - a count is only worth reading when it counts.
+			expect(screen.queryByText(/run 1 of 1/)).not.toBeInTheDocument();
+		});
+
+		it("does not call the rounds EARLIER when none of them concluded", async () => {
+			// A round the machine opened, captured into and abandoned. There is no
+			// result above it for it to be "earlier" than, and the block must say
+			// what happened rather than showing captures under no heading at all.
+			checks = [
+				check({
+					runs: [
+						{
+							id: "r1",
+							checkId: "c1",
+							sessionId: "s1",
+							seq: 1,
+							verdict: "",
+							note: "",
+							sha: HEAD,
+							createdAt: RAN,
+							updatedAt: RAN,
+						},
+					],
+					agentEvidence: [
+						{
+							id: "ag1",
+							checkId: "c1",
+							sessionId: "s1",
+							kind: "image",
+							filename: "half-done.png",
+							mime: "image/png",
+							sizeBytes: 3,
+							createdAt: RAN,
+							source: "agent",
+							runId: "r1",
+						},
+					],
+				}),
+			];
+			renderView();
+			expect(await screen.findByText(/never recorded a result/)).toBeInTheDocument();
+			expect(screen.getByText("RUNS", { exact: false })).toBeInTheDocument();
+			expect(screen.queryByText(/EARLIER RUNS/)).not.toBeInTheDocument();
+			expect(screen.getByText("never concluded")).toBeInTheDocument();
+			// And it is not mistaken for pre-history evidence: it has a run.
+			expect(screen.queryByTestId("qa-unknown-run-c1")).not.toBeInTheDocument();
+		});
+
+		it("groups captures with no run apart, and says why, instead of filing them under the current verdict", async () => {
+			// The legacy shape: the result these were captured for was overwritten
+			// and is gone. Showing them under the verdict that happens to be newest
+			// is how a person came to read a stale image as current evidence.
+			checks = [
+				check({
+					agentRanAt: RAN,
+					agentVerdict: "pass",
+					agentSha: HEAD,
+					agentEvidence: [
+						{
+							id: "ag_old",
+							checkId: "c1",
+							sessionId: "s1",
+							kind: "image",
+							filename: "from-before.png",
+							mime: "image/png",
+							sizeBytes: 3,
+							createdAt: "2026-07-01T09:00:00Z",
+							source: "agent",
+							runId: "",
+						},
+					],
+				}),
+			];
+			renderView();
+			expect(await screen.findByText("qa · ran")).toBeInTheDocument();
+			expect(screen.getByTestId("qa-unknown-run-c1")).toBeInTheDocument();
+			expect(screen.getByText("UNKNOWN RUN")).toBeInTheDocument();
+			expect(screen.getByText(/Captured before AO kept a run history/)).toBeInTheDocument();
+			// The capture is inside that group, not in the current run's strip - and
+			// the current run shows NO strip at all, because it captured nothing.
+			const group = screen.getByTestId("qa-unknown-run-c1");
+			expect(group.textContent).toMatch(/run unknown/);
+			expect(screen.queryByText(/not yours, and not deletable/)).not.toBeInTheDocument();
+			expect(screen.getAllByText(/CAPTURED BY QA/)).toHaveLength(1);
 		});
 
 		it("leaves the human's flow exactly as it was when a machine result is present", async () => {
