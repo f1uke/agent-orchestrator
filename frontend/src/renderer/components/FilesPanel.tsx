@@ -9,11 +9,20 @@ import {
 	Search,
 	TriangleAlert,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { apiErrorMessage } from "../lib/api-client";
-import { buildFileTree, collapsedBelowTopLevel, matchesFileQuery, orderedFileItems } from "../lib/file-tree";
+import { ancestorKeys, buildFileTree, collapsedExcept, matchesFileQuery, orderedFileItems } from "../lib/file-tree";
+import {
+	type FilesMode,
+	type FilesPanelState,
+	type FilesView,
+	readFilesPanelState,
+	writeFilesPanelState,
+	writeGlobalMode,
+	writeGlobalView,
+} from "../lib/files-panel-state";
 import { cn } from "../lib/utils";
 import { FileTree } from "./FileTree";
 import { Skeleton } from "./ui/skeleton";
@@ -43,30 +52,12 @@ export type ChangedFileTarget = {
 /** A row in Browse mode: any file in the worktree, changed or not. */
 export type WorktreeFile = { path: string };
 
-type FilesView = "tree" | "list";
-type FilesMode = "changes" | "browse";
-
-const VIEW_STORAGE_KEY = "ao.files.view";
-const MODE_STORAGE_KEY = "ao.files.mode";
-
-function storedView(): FilesView {
-	try {
-		return window.localStorage?.getItem(VIEW_STORAGE_KEY) === "list" ? "list" : "tree";
-	} catch {
-		// Private-mode / disabled storage must not take the panel down with it.
-		return "tree";
-	}
-}
-
-// Changes stays the default: a worker's rail is opened to see what the agent
-// did far more often than to go looking for a file by name.
-function storedMode(): FilesMode {
-	try {
-		return window.localStorage?.getItem(MODE_STORAGE_KEY) === "browse" ? "browse" : "changes";
-	} catch {
-		return "changes";
-	}
-}
+/**
+ * How long a scroll rests before it is written down. Scrolling fires per frame;
+ * the arrangement is also written on the way out, so this only decides how much
+ * of the last scroll survives an app that is killed rather than closed.
+ */
+const SCROLL_PERSIST_MS = 500;
 
 /**
  * How long the reveal ring stays before clearing. Long enough to find the row
@@ -96,6 +87,7 @@ const REVEAL_RING_MS = 1400;
  */
 export function FilesPanel({
 	sessionId,
+	taskKey = sessionId,
 	onOpenFile,
 	onOpenWorktreeFile,
 	onReviewAll,
@@ -103,16 +95,33 @@ export function FilesPanel({
 	reveal,
 }: {
 	sessionId: string;
+	/**
+	 * What the arrangement is remembered under — `taskKeyOf(session)`, so dev and
+	 * qa, who share one worktree and therefore one tree, share one memory of how
+	 * it was left. The owner also mounts this panel KEYED by it, so it never
+	 * changes within a mount and the state below can be read once.
+	 */
+	taskKey?: string;
 	onOpenFile?: (target: ChangedFileTarget) => void;
 	/** A Browse row. Separate from onOpenFile because it is not a CHANGED file. */
 	onOpenWorktreeFile?: (file: WorktreeFile) => void;
 	/** The stacked, all-files review. */
 	onReviewAll?: () => void;
 	selectedPath?: string;
-	/** A terminal reference to reveal: expand to it, scroll it in, ring it briefly. */
-	reveal?: { path: string; nonce: number } | null;
+	/**
+	 * A file to reveal: expand to it and scroll it in.
+	 *
+	 * `focus` is the louder form — a clicked terminal reference, which also drops
+	 * a search that would hide the row and rings it briefly. Everything else
+	 * (`focus` false) FOLLOWS the open file quietly: it never clears what the
+	 * reader typed and never rings.
+	 */
+	reveal?: { path: string; nonce: number; focus?: boolean } | null;
 }) {
-	const [mode, setMode] = useState<FilesMode>(storedMode);
+	// Read once. The owner keys this panel by `taskKey`, so a different task is a
+	// different mount rather than a mid-life prop change.
+	const [restored] = useState(() => readFilesPanelState(taskKey));
+	const [mode, setMode] = useState<FilesMode>(restored.mode);
 	const query = useWorkspaceChanges(sessionId);
 	const data = query.data;
 	// The worktree index is fetched only once Browse is actually chosen: it is a
@@ -120,28 +129,29 @@ export function FilesPanel({
 	// pay for it.
 	const browse = useWorkspaceFiles(sessionId, mode === "browse");
 
-	const [view, setView] = useState<FilesView>(storedView);
+	const [view, setView] = useState<FilesView>(restored.view);
+	// The search box is deliberately NOT restored — see `files-panel-state.ts`.
 	const [search, setSearch] = useState("");
-	const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
+	const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set(restored.changesCollapsed));
 	const [revealedPath, setRevealedPath] = useState<string | null>(null);
+	/** The row the tree should bring into view. Bumped, so asking twice scrolls twice. */
+	const [scrollTo, setScrollTo] = useState<{ key: string; nonce: number } | null>(null);
+	const scrollNonce = useRef(0);
 	const listRef = useRef<HTMLDivElement | null>(null);
+	// Scroll is kept per MODE: one offset restored into the other mode's tree
+	// lands nowhere in particular. A ref, because a scroll must not re-render the
+	// list it is scrolling.
+	const offsets = useRef({ browse: restored.browseScroll, changes: restored.changesScroll });
 
 	const chooseView = (next: FilesView) => {
 		setView(next);
-		try {
-			window.localStorage?.setItem(VIEW_STORAGE_KEY, next);
-		} catch {
-			// Preference is a nicety; failing to persist it must not break the view.
-		}
+		// Also the habit a task nobody has arranged yet inherits.
+		writeGlobalView(next);
 	};
 
 	const chooseMode = (next: FilesMode) => {
 		setMode(next);
-		try {
-			window.localStorage?.setItem(MODE_STORAGE_KEY, next);
-		} catch {
-			// Preference is a nicety; failing to persist it must not break the view.
-		}
+		writeGlobalMode(next);
 	};
 
 	const searching = search.trim() !== "";
@@ -167,11 +177,14 @@ export function FilesPanel({
 	// rows without resequencing them — and both match the stacked diffs.
 	const ordered = useMemo(() => (view === "list" ? orderedFileItems(visible, (f) => f.path) : []), [visible, view]);
 
-	// Browse's folds. Unlike Changes — a diff, where every row is a row the reviewer
-	// came for — a worktree tree opens showing only its top level, because 7,000
-	// files is ~8,500 rows and an unfoldable list that long is not navigable however
-	// fast it paints. `null` means "the reader has not touched the folds yet".
-	const [browseFolds, setBrowseFolds] = useState<ReadonlySet<string> | null>(null);
+	// Browse's folds, as the set the reader OPENED — the inverse of what Changes
+	// keeps, and for the same reason in reverse. Browse opens with everything
+	// shut (7,000 files is ~8,500 rows, and a list that long is not navigable
+	// however fast it paints), so the small set worth remembering is the handful
+	// of folders that were opened. Changes opens fully expanded — it is a diff,
+	// every row is a row the reviewer came for — so there it is the handful that
+	// were closed.
+	const [browseExpanded, setBrowseExpanded] = useState<ReadonlySet<string>>(() => new Set(restored.browseExpanded));
 	// Folds made while a search is running live only as long as that query: the
 	// results are a different tree each keystroke, and carrying folds across them
 	// would hide matches behind directories the reader never closed. Keyed rather
@@ -180,20 +193,24 @@ export function FilesPanel({
 		query: "",
 		folds: EMPTY_COLLAPSED,
 	});
-	const browseDefaultFolds = useMemo(
-		() => (searching ? EMPTY_COLLAPSED : collapsedBelowTopLevel(browseTree)),
-		[browseTree, searching],
-	);
+	const browseFolds = useMemo(() => collapsedExcept(browseTree, browseExpanded), [browseTree, browseExpanded]);
 	const browseCollapsed = searching
 		? searchFolds.query === search
 			? searchFolds.folds
 			: EMPTY_COLLAPSED
-		: (browseFolds ?? browseDefaultFolds);
+		: browseFolds;
 	const toggleBrowseDir = (key: string) => {
-		const next = new Set(browseCollapsed);
-		if (!next.delete(key)) next.add(key);
-		if (searching) setSearchFolds({ query: search, folds: next });
-		else setBrowseFolds(next);
+		if (searching) {
+			const next = new Set(browseCollapsed);
+			if (!next.delete(key)) next.add(key);
+			setSearchFolds({ query: search, folds: next });
+			return;
+		}
+		setBrowseExpanded((prev) => {
+			const next = new Set(prev);
+			if (!next.delete(key)) next.add(key);
+			return next;
+		});
 	};
 
 	const toggleDir = (key: string) =>
@@ -203,43 +220,117 @@ export function FilesPanel({
 			return next;
 		});
 
-	// Reveal, step 1: make the row EXIST. Two sharp edges of this panel's state
-	// have to be undone first, or the row the next effect scrolls to is not
+	// The arrangement, written down. `persist` always closes over the CURRENT
+	// render's values, which is what makes the unmount cleanup below correct
+	// without listing every piece of state as a dependency.
+	//
+	// Nothing is written until something actually MOVES: merely glancing at a
+	// worker's Files tab would otherwise claim one of the 40 remembered slots and
+	// pin that task to whatever mode it happened to open in. Once a task has been
+	// written, every later change is written too — including a fold undone back
+	// to where it started, which must not leave the stored copy stale.
+	const written = useRef(false);
+	const persist = useRef<() => void>(() => {});
+	persist.current = () => {
+		const state = {
+			mode,
+			view,
+			browseExpanded: [...browseExpanded],
+			changesCollapsed: [...collapsedDirs],
+			browseScroll: offsets.current.browse,
+			changesScroll: offsets.current.changes,
+		};
+		if (!written.current && !arrangementDiffers(state, restored)) return;
+		written.current = true;
+		writeFilesPanelState(taskKey, state);
+	};
+	useEffect(() => {
+		persist.current();
+	}, [mode, view, browseExpanded, collapsedDirs]);
+	// Once more on the way out, for the scroll offsets — they move per frame and
+	// are never a reason to write on their own.
+	useEffect(() => () => persist.current(), []);
+
+	const noteScroll = useCallback((of: "browse" | "changes") => {
+		let timer = 0;
+		return (offset: number) => {
+			offsets.current[of] = offset;
+			window.clearTimeout(timer);
+			timer = window.setTimeout(() => persist.current(), SCROLL_PERSIST_MS);
+		};
+	}, []);
+	const noteBrowseScroll = useMemo(() => noteScroll("browse"), [noteScroll]);
+	const noteChangesScroll = useMemo(() => noteScroll("changes"), [noteScroll]);
+
+	// Reveal, step 1: make the row EXIST. Sharp edges of this panel's state have
+	// to be undone first, or the row the tree is asked to scroll to is not
 	// rendered at all.
+	//
+	// 🗝 Ancestors are OPENED and nothing is closed. Revealing a file six levels
+	// down means expanding six folders; collapsing the path the reader opened
+	// last to "keep the tree tidy" would make it jump under them and throw away
+	// the shape they built by hand. Opening a second file elsewhere leaves the
+	// first path open — the tree accumulates the shape of the work, and folding
+	// is one click. (Xcode's "Reveal in Project Navigator" behaves the same way.)
+	//
+	// Both fold models are updated, whichever mode is on screen, so switching
+	// modes lands on an already-open path rather than a shut one.
 	const revealNonce = reveal?.nonce;
 	const revealPath = reveal?.path;
+	const revealFocus = reveal?.focus ?? false;
 	useEffect(() => {
 		if (!revealPath) return;
+		const ancestors = ancestorKeys(revealPath);
 		// The search box filters BEFORE the tree is built, so a target the current
-		// query excludes has no row. Clear the query rather than fail silently.
-		setSearch((prev) => (prev.trim() === "" || matchesFileQuery(revealPath, prev) ? prev : ""));
+		// query excludes has no row. A terminal reference is explicitly ABOUT where
+		// the file is, so it drops the query rather than failing silently; a
+		// quiet follow leaves what the reader typed alone and simply does not
+		// reveal.
+		if (revealFocus) setSearch((prev) => (prev.trim() === "" || matchesFileQuery(revealPath, prev) ? prev : ""));
 		// `collapsedDirs` names the CLOSED directories, so OPENING the ancestors
-		// means DELETING their keys. Directory keys are post-chain-merge — an
-		// only-child chain a/b/c collapses to a single row keyed "a/b/c", not "a" —
-		// so deleting every path prefix is a superset that always contains the real
-		// key, and the prefixes that name no row are harmless no-ops.
+		// means DELETING their keys; `browseExpanded` names the OPEN ones, so it
+		// means adding them. Either way the key list is every path PREFIX — see
+		// `ancestorKeys` for why that superset is the only form that always
+		// contains the real, chain-merged key.
 		setCollapsedDirs((prev) => {
 			if (prev.size === 0) return prev;
-			const parts = revealPath.split("/");
 			const next = new Set(prev);
-			for (let i = 1; i < parts.length; i++) next.delete(parts.slice(0, i).join("/"));
+			for (const key of ancestors) next.delete(key);
 			return next.size === prev.size ? prev : next;
 		});
-		setRevealedPath(revealPath);
-	}, [revealPath, revealNonce]);
+		setBrowseExpanded((prev) => {
+			if (ancestors.every((key) => prev.has(key))) return prev;
+			const next = new Set(prev);
+			for (const key of ancestors) next.add(key);
+			return next;
+		});
+		scrollNonce.current += 1;
+		setScrollTo({ key: revealPath, nonce: scrollNonce.current });
+		if (revealFocus) setRevealedPath(revealPath);
+	}, [revealPath, revealNonce, revealFocus]);
 
-	// Reveal, step 2: scroll to the row, now that step 1's state has rendered.
-	// Keyed on the nonce too, so clicking the same reference twice re-scrolls.
-	// `block: "nearest"` leaves an already-visible row where it is instead of
-	// yanking the list. jsdom has no scrollIntoView (test/setup.ts stubs it), so
-	// this is guarded exactly like the center pane's viewers.
+	// Switching mode or view re-asks for the same row: the tree that just mounted
+	// has never been told where the reader was going.
 	useEffect(() => {
-		if (!revealedPath) return;
-		const row = listRef.current?.querySelector(`[data-path="${CSS.escape(revealedPath)}"]`);
+		if (!revealPath) return;
+		scrollNonce.current += 1;
+		setScrollTo({ key: revealPath, nonce: scrollNonce.current });
+	}, [mode, view, revealPath]);
+
+	// Reveal, step 2, for the FLAT LIST only: the tree scrolls itself by index,
+	// because a virtualised row thousands of rows away is not in the DOM to be
+	// found. `block: "nearest"` leaves an already-visible row where it is instead
+	// of yanking the list. jsdom has no scrollIntoView (test/setup.ts stubs it),
+	// so this is guarded exactly like the center pane's viewers.
+	const scrollToKey = scrollTo?.key;
+	const scrollToNonce = scrollTo?.nonce;
+	useEffect(() => {
+		if (!scrollToKey || view !== "list") return;
+		const row = listRef.current?.querySelector(`[data-path="${CSS.escape(scrollToKey)}"]`);
 		if (row instanceof HTMLElement && typeof row.scrollIntoView === "function") {
 			row.scrollIntoView({ block: "nearest" });
 		}
-	}, [revealedPath, revealNonce, view]);
+	}, [scrollToKey, scrollToNonce, view]);
 
 	// The ring is a "look here" cue, not a state: it says where the tree just
 	// jumped, then gets out of the way. Holding it would leave a second
@@ -285,6 +376,11 @@ export function FilesPanel({
 						ordered={browseOrdered}
 						collapsed={browseCollapsed}
 						onToggleDir={toggleBrowseDir}
+						revealedKey={revealedPath}
+						scrollTo={scrollTo}
+						initialScrollOffset={offsets.current.browse}
+						onScrollOffsetChange={noteBrowseScroll}
+						listRef={listRef}
 						total={worktreePaths.length}
 						view={view}
 						search={search}
@@ -347,6 +443,9 @@ export function FilesPanel({
 												onSelectFile={(f) => onOpenFile?.({ path: f.path, status: f.status, binary: f.binary })}
 												selectedKey={selectedPath}
 												revealedKey={revealedPath}
+												scrollTo={scrollTo}
+												initialScrollOffset={offsets.current.changes}
+												onScrollOffsetChange={noteChangesScroll}
 												label="Changed files"
 												getTitle={(f) => f.path}
 												getFileLabel={displayName}
@@ -750,6 +849,11 @@ function BrowsePanel({
 	ordered,
 	collapsed,
 	onToggleDir,
+	revealedKey,
+	scrollTo,
+	initialScrollOffset,
+	onScrollOffsetChange,
+	listRef,
 	total,
 	view,
 	search,
@@ -767,6 +871,12 @@ function BrowsePanel({
 	ordered: readonly WorktreeFile[];
 	collapsed: ReadonlySet<string>;
 	onToggleDir: (key: string) => void;
+	revealedKey?: string | null;
+	scrollTo?: { key: string; nonce: number } | null;
+	initialScrollOffset?: number;
+	onScrollOffsetChange?: (offset: number) => void;
+	/** The flat list's scroller, so the owner's reveal can find a row in it. */
+	listRef?: React.RefObject<HTMLDivElement | null>;
 	total: number;
 	view: FilesView;
 	search: string;
@@ -804,7 +914,7 @@ function BrowsePanel({
 			{files.length === 0 ? (
 				<p className="files-panel__truncated">No files match “{search.trim()}”.</p>
 			) : (
-				<div className="files-panel__list">
+				<div className="files-panel__list" ref={listRef}>
 					{view === "tree" ? (
 						<FileTree
 							nodes={tree}
@@ -812,6 +922,10 @@ function BrowsePanel({
 							onToggleDir={onToggleDir}
 							onSelectFile={(f) => onOpen?.(f)}
 							selectedKey={selectedPath}
+							revealedKey={revealedKey}
+							scrollTo={scrollTo}
+							initialScrollOffset={initialScrollOffset}
+							onScrollOffsetChange={onScrollOffsetChange}
 							label="Workspace files"
 							getTitle={(f) => f.path}
 						/>
@@ -824,7 +938,11 @@ function BrowsePanel({
 									role="option"
 									aria-selected={file.path === selectedPath}
 									data-path={file.path}
-									className={cn("files-panel__row", file.path === selectedPath && "is-selected")}
+									className={cn(
+										"files-panel__row",
+										file.path === selectedPath && "is-selected",
+										file.path === revealedKey && "is-revealed",
+									)}
 									onClick={() => onOpen?.(file)}
 									title={file.path}
 								>
@@ -849,3 +967,15 @@ function BrowsePanel({
 
 /** Nothing folded — what a searching tree passes, so no match can hide. */
 const EMPTY_COLLAPSED: ReadonlySet<string> = new Set();
+
+/** Has anything about the arrangement moved since it was restored? */
+function arrangementDiffers(next: FilesPanelState, restored: FilesPanelState): boolean {
+	return (
+		next.mode !== restored.mode ||
+		next.view !== restored.view ||
+		next.browseScroll !== restored.browseScroll ||
+		next.changesScroll !== restored.changesScroll ||
+		next.browseExpanded.join("\n") !== restored.browseExpanded.join("\n") ||
+		next.changesCollapsed.join("\n") !== restored.changesCollapsed.join("\n")
+	);
+}

@@ -37,11 +37,16 @@ function Bench() {
 		<QueryClientProvider client={client}>
 			<div style={{ display: "flex", height: "100vh", background: "var(--bg)" }}>
 				<div style={{ width: 330, flex: "none", display: "flex", flexDirection: "column", minHeight: 0 }}>
-					{mounted ? <FilesPanel sessionId="bench" /> : null}
+					{mounted ? <FilesPanel sessionId="bench" taskKey="bench-task" /> : null}
 				</div>
 				<div style={{ flex: 1 }}>
 					<button type="button" data-testid="bench-mount" onClick={() => setMounted(true)}>
 						mount ({paths.length} files)
+					</button>
+					{/* Leaving the Files tab and coming back is an UNMOUNT — which is
+					    what makes the rail's remembered arrangement observable at all. */}
+					<button type="button" data-testid="bench-unmount" onClick={() => setMounted(false)}>
+						unmount
 					</button>
 					<span data-testid="bench-count">{paths.length}</span>
 				</div>

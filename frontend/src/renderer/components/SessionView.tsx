@@ -16,6 +16,10 @@ import { OpenQuicklyPalette } from "./OpenQuicklyPalette";
 import { WorkspaceFileView } from "./WorkspaceFileView";
 import { type ChangesFocus, WorkspaceChangesView } from "./WorkspaceChangesView";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
+import { type HistoryEntry, entryToOpen } from "../lib/editor/file-history";
+import { useFileHistory } from "../hooks/useFileHistory";
+import { taskKeyOf } from "../lib/task-key";
+import { isMacPlatform } from "../lib/platform";
 import { SessionInspector, type InspectorView } from "./SessionInspector";
 import { SplitSessionPicker } from "./SplitSessionPicker";
 import { SplitTreeView } from "./SplitTreeView";
@@ -25,7 +29,6 @@ import { useUiStore } from "../stores/ui-store";
 import { useShell } from "../lib/shell-context";
 import { useBrowserView } from "../hooks/useBrowserView";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { apiClient } from "../lib/api-client";
 import {
 	addPane,
@@ -100,11 +103,15 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// reports what the reader has scrolled to, so the rail's tree can follow.
 	const [changesFocus, setChangesFocus] = useState<ChangesFocus | null>(null);
 	const [activeChangedPath, setActiveChangedPath] = useState<string | null>(null);
-	// A file clicked in the terminal that lives INSIDE the project is also
-	// revealed in the rail's Files tab — the tab is selected, the tree expands to
-	// it and scrolls it into view. The nonce lets the same ref be clicked twice
-	// and still re-reveal, exactly like changesFocus. Cleared on session switch.
-	const [revealInTree, setRevealInTree] = useState<ChangesFocus | null>(null);
+	// The file the rail's tree should show. Two strengths, and the difference
+	// matters: a clicked terminal REFERENCE is a gesture about where a file is,
+	// so it takes the Files tab and rings the row (`focus`); every other jump —
+	// ⌘click, ⌘⇧O, a rail row, back/forward — quietly FOLLOWS, expanding the
+	// file's ancestors and scrolling it in only where the tree is already on
+	// screen. Chasing definitions must not keep yanking the rail open. The nonce
+	// lets the same file be asked for twice and still re-reveal, exactly like
+	// changesFocus. Cleared on session switch.
+	const [revealInTree, setRevealInTree] = useState<{ path: string; nonce: number; focus: boolean } | null>(null);
 
 	const session = workspaces.flatMap((workspace) => workspace.sessions).find((s) => s.id === sessionId);
 	// The terminal's "Open in…" menu opens the session's worktree; when the daemon
@@ -141,22 +148,19 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// session, keyed by sessionId. Only a change against this baseline counts as a
 	// live `ao preview` (see the reveal effect below).
 	const previewRevealRef = useRef<{ sessionId: string; revision: number; url: string } | null>(null);
-	// Reveal needs this because the Files tab is CHANGES-only: a file that does not
-	// differ from the target branch has no row to scroll to, and switching the rail
-	// to a tab that cannot show the clicked file is worse than not switching.
-	//
-	// Cost, stated honestly: this shares the Files tab's cache entry (same query
-	// key), so it is free whenever that tab or the stacked diff view is already
-	// open — but on a worker session where neither is ever opened it does add one
-	// `workspace/changes` call (a `git merge-base` + three `git diff`s + a
-	// `git status`) per session-view mount. It is deliberate: the alternative is
-	// deciding reveal from the path's shape, and the answer would be wrong exactly
-	// when a repo is unusual.
-	const workspaceChanges = useWorkspaceChanges(sessionId, hasInspector);
-	const changedPaths = useMemo(
-		() => new Set((workspaceChanges.data?.files ?? []).map((f) => f.path)),
-		[workspaceChanges.data],
-	);
+	// 🗝 There is deliberately no `workspace/changes` query here any more. It used
+	// to exist for one reason: the Files tab was CHANGES-only, so reveal had to
+	// ask whether a clicked file differed from the target branch before switching
+	// to a tab that might not be able to show it — at the cost of a
+	// `git merge-base` + three `git diff`s + a `git status` per session-view
+	// mount on every worker whose rail was never opened. The rail now has a
+	// BROWSE tree over the whole worktree, so every file inside the workspace has
+	// a row and the question no longer needs asking.
+
+	// One identity for everything task-scoped: the selected rail tab (below), the
+	// Files tree's remembered arrangement, and the back/forward stack.
+	const taskId = session ? taskKeyOf(session) : undefined;
+	const history = useFileHistory(taskId);
 
 	// THE ONE PLACE A FILE IS OPENED. Every entry point — a clicked terminal
 	// reference, the ⌘⇧O palette, and later a go-to-definition jump — describes
@@ -169,17 +173,44 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// The viewer is deliberately kept for both: it shows the whole file and
 	// honours the ref's `:line`, whereas the Changes view shows only diff hunks
 	// and could not scroll to a line that is not part of one.
-	const openWorkspaceFile = useCallback(
+	const showInTree = useCallback(
 		(file: WorkspaceFileOpen) => {
 			setWorkspaceFile(file);
-			// inWorkspace is the SERVER's containment verdict; never re-derive it
-			// from the path's shape here.
-			if (!file.inWorkspace || !changedPaths.has(file.path)) return;
-			setInspectorView("files");
-			if (!useUiStore.getState().isInspectorOpen) toggleInspector();
-			setRevealInTree((prev) => ({ path: file.path, nonce: (prev?.nonce ?? 0) + 1 }));
+			// inWorkspace is the SERVER's containment verdict; never re-derive it from
+			// the path's shape here. A file outside the worktree has no row to reveal.
+			if (!file.inWorkspace) return;
+			const focus = file.reveal === "focus";
+			if (focus) {
+				setInspectorView("files");
+				if (!useUiStore.getState().isInspectorOpen) toggleInspector();
+			}
+			// Follow is issued whether or not the Files tab is up: the panel is only
+			// mounted while that tab is selected, so an unwatched follow costs nothing
+			// and a tab switched to later reveals the open file on arrival.
+			setRevealInTree((prev) => ({ path: file.path, nonce: (prev?.nonce ?? 0) + 1, focus }));
 		},
-		[changedPaths, toggleInspector],
+		[toggleInspector],
+	);
+
+	// THE ONE PLACE A FILE IS OPENED, and therefore the one place navigation
+	// history is recorded — which is what makes back/forward cover EVERY kind of
+	// jump rather than the one it was built for. Back that works after a ⌘click
+	// but not after a ⌘⇧O is worse than no back at all.
+	const openWorkspaceFile = useCallback(
+		(file: WorkspaceFileOpen) => {
+			history.record(file);
+			showInTree(file);
+		},
+		[history, showInTree],
+	);
+
+	/** Back/forward: the same landing, without recording it as a new jump. */
+	const navigateHistory = useCallback(
+		(step: () => HistoryEntry | null) => {
+			const entry = step();
+			if (entry) showInTree(entryToOpen(entry));
+		},
+		[showInTree],
 	);
 
 	const browserView = useBrowserView({
@@ -212,7 +243,9 @@ export function SessionView({ sessionId }: SessionViewProps) {
 	// relies on, so this is a no-op for every task with one agent. Resetting on
 	// every session change would throw a reader off Tests every time they glanced
 	// at their crewmate's terminal, which is exactly the churn the design rejects.
-	const taskId = session ? (session.crew?.id ?? session.id) : undefined;
+	//
+	// `taskId` is declared above the file-open seam, because the rail's tree state
+	// and the back/forward stack are keyed by the same identity — see `taskKeyOf`.
 	useEffect(() => {
 		if (!taskId) return;
 		setInspectorView("summary");
@@ -519,6 +552,33 @@ export function SessionView({ sessionId }: SessionViewProps) {
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [hasInspector, toggleInspector]);
 
+	// Back/forward through the files this task has jumped between.
+	//
+	// ⌃⌘← / ⌃⌘→ is Xcode's own binding, works on a Mac keyboard without Fn, and
+	// collides with nothing this app holds (⌘B, ⌘⇧B, ⌘1–9, ⌘⌥arrows, ⌘⇧O, ⌘S).
+	// ⌥←/→ is deliberately NOT used: inside the editor that is word-left/right.
+	// Elsewhere the browser convention, Alt+←/→, applies instead.
+	//
+	// CAPTURE phase, because the focused Monaco (and xterm) swallow keys before
+	// they ever bubble to the window. Only live while a file is open: with the
+	// viewer closed there is nothing for the stack to move.
+	useEffect(() => {
+		if (!workspaceFile) return undefined;
+		const handleKeyDown = (event: KeyboardEvent) => {
+			if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+			const mac = isMacPlatform();
+			const chord = mac
+				? event.metaKey && event.ctrlKey && !event.altKey
+				: event.altKey && !event.metaKey && !event.ctrlKey;
+			if (!chord || event.shiftKey) return;
+			event.preventDefault();
+			event.stopPropagation();
+			navigateHistory(event.key === "ArrowLeft" ? history.goBack : history.goForward);
+		};
+		window.addEventListener("keydown", handleKeyDown, true);
+		return () => window.removeEventListener("keydown", handleKeyDown, true);
+	}, [workspaceFile, navigateHistory, history.goBack, history.goForward]);
+
 	// Drive the collapsible panel from the store so the topbar button, ⌘⇧B, and
 	// drag-to-collapse all stay in sync. hasInspector must NOT be a dep: when
 	// the inspector panel mounts into the already-live group (orchestrator →
@@ -624,6 +684,17 @@ export function SessionView({ sessionId }: SessionViewProps) {
 					workspaceRoot={directory}
 					onClose={() => setWorkspaceFile(null)}
 					onOpenFile={openWorkspaceFile}
+					// Where the cursor actually sits, so Back returns to the line the
+					// reader jumped FROM rather than to the top of that file.
+					onCursorChange={(position) =>
+						history.setPosition({ path: workspaceFile.path, line: position.line, column: position.column })
+					}
+					back={history.canBack ? { to: history.back?.path ?? "", go: () => navigateHistory(history.goBack) } : null}
+					forward={
+						history.canForward
+							? { to: history.forward?.path ?? "", go: () => navigateHistory(history.goForward) }
+							: null
+					}
 				/>
 			);
 		}
@@ -768,7 +839,10 @@ export function SessionView({ sessionId }: SessionViewProps) {
 										setWorkspaceFile(null);
 										setChangesFocus((prev) => ({ path: prev?.path ?? "", nonce: (prev?.nonce ?? 0) + 1 }));
 									}}
-									selectedChangedPath={activeChangedPath ?? undefined}
+									// The OPEN file wins over the scroll-spy position: item 3 is
+									// "show me where the file I am looking at lives", and the
+									// stacked-diff position only means anything while that view is up.
+									selectedFilePath={workspaceFile?.path ?? activeChangedPath ?? undefined}
 									revealInTree={revealInTree}
 									view={inspectorView}
 									browserView={browserView}

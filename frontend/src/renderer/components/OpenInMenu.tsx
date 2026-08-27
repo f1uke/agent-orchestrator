@@ -2,6 +2,7 @@ import { Code2, FolderOpen, Hammer, Share, Smartphone, SquareTerminal, Wrench } 
 import { useEffect, useRef, useState } from "react";
 import type { OpenInTargets } from "../../main/open-in-targets";
 import { aoBridge } from "../lib/bridge";
+import { isMacPlatform } from "../lib/platform";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -19,9 +20,6 @@ type OpenInMenuProps = {
 // The launchers shell out to macOS-only tools (`open`, Ghostty/Terminal, Xcode),
 // so the menu is macOS-only; off-mac the trigger is hidden and the main-process
 // handlers no-op defensively.
-function isMacPlatform(): boolean {
-	return typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
-}
 
 const TOAST_DISMISS_MS = 4000;
 

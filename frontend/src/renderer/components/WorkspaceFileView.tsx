@@ -1,6 +1,6 @@
 import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, FolderOpen, GitCompare } from "lucide-react";
+import { ChevronLeft, ChevronRight, FolderOpen, GitCompare } from "lucide-react";
 import { useSaveWorkspaceFile } from "../hooks/useSaveWorkspaceFile";
 import { useWorkspaceFile, workspaceFileQueryKey } from "../hooks/useWorkspaceFile";
 import { useWorkspaceFileDiff } from "../hooks/useWorkspaceFileDiff";
@@ -13,6 +13,7 @@ import type { SaveFailure } from "../lib/editor/save-errors";
 import { languageDisplayName, languageServerName, lspLanguageForPath } from "../lib/lsp/language-ids";
 import type { LanguageServerHandle } from "../lib/lsp/use-language-server";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
+import { isMacPlatform } from "../lib/platform";
 import { useUiStore } from "../stores/ui-store";
 import { type Drift, FileDriftBanner } from "./FileDriftBanner";
 import type { EditorHandle } from "./MonacoFileEditor";
@@ -77,6 +78,57 @@ function PathLabel({ path, style }: { path: string; style?: CSSProperties }) {
 }
 
 /**
+ * One of the two history chevrons.
+ *
+ * Disabled rather than hidden when there is nowhere to go: a control that
+ * appears and disappears as you navigate makes the header twitch and moves the
+ * other one under your cursor.
+ */
+function NavButton({
+	direction,
+	target,
+	shortcut,
+	chromeFg,
+	border,
+	muted,
+}: {
+	direction: "back" | "forward";
+	target: { to: string; go: () => void } | null;
+	shortcut: string;
+	chromeFg: string;
+	border: string;
+	muted: string;
+}) {
+	const label = direction === "back" ? "Back" : "Forward";
+	const Icon = direction === "back" ? ChevronLeft : ChevronRight;
+	return (
+		<button
+			type="button"
+			data-testid={`file-history-${direction}`}
+			aria-label={label}
+			disabled={!target}
+			onClick={() => target?.go()}
+			title={target ? `${label} to ${target.to} (${shortcut})` : `No file to go ${direction} to`}
+			style={{
+				display: "inline-flex",
+				alignItems: "center",
+				justifyContent: "center",
+				width: 26,
+				height: 26,
+				background: "transparent",
+				border: `1px solid ${border}`,
+				borderRadius: 7,
+				color: target ? chromeFg : muted,
+				opacity: target ? 1 : 0.45,
+				cursor: target ? "pointer" : "default",
+			}}
+		>
+			<Icon aria-hidden="true" style={{ width: 14, height: 14 }} />
+		</button>
+	);
+}
+
+/**
  * A workspace file, open in the center pane in place of the terminal — the same
  * placement the Reviews "Expand full file" view uses. The surface is Monaco:
  * real syntax highlighting (shiki grammars, the app's own `--code-*` palette),
@@ -106,6 +158,9 @@ export function WorkspaceFileView({
 	workspaceRoot,
 	onClose,
 	onOpenFile,
+	onCursorChange,
+	back,
+	forward,
 }: {
 	sessionId: string;
 	path: string;
@@ -119,6 +174,19 @@ export function WorkspaceFileView({
 	onClose: () => void;
 	/** The file-open seam, so a ⌘click target opens the way every other file does. */
 	onOpenFile?: (file: WorkspaceFileOpen) => void;
+	/**
+	 * Where the caret is, reported as it moves. The owner keeps it so that Back
+	 * returns to the line the reader jumped FROM, not to the top of that file.
+	 */
+	onCursorChange?: (position: { line: number; column: number }) => void;
+	/**
+	 * Back/forward through the files this task has jumped between, or null when
+	 * there is nowhere to go that way. `to` is the file the button would open —
+	 * it goes in the title, because a chevron that does not say where it leads is
+	 * a guess.
+	 */
+	back?: { to: string; go: () => void } | null;
+	forward?: { to: string; go: () => void } | null;
 }) {
 	const theme = useUiStore((s) => s.theme);
 	const [serverState, setServerState] = useState<{ state: LanguageServerHandle["state"]; detail?: string } | null>(
@@ -450,6 +518,26 @@ export function WorkspaceFileView({
 					<ChevronLeft aria-hidden="true" style={{ width: 14, height: 14 }} />
 					agent
 				</button>
+				{/* Back / forward, where Xcode puts them: immediately after the way
+				    out, before anything about the file itself. */}
+				<span style={{ display: "inline-flex", flex: "none", gap: 2 }}>
+					<NavButton
+						direction="back"
+						target={back ?? null}
+						shortcut={isMacPlatform() ? "⌃⌘←" : "Alt+←"}
+						chromeFg={V.chromeFg}
+						border={P.connector}
+						muted={P.muted2}
+					/>
+					<NavButton
+						direction="forward"
+						target={forward ?? null}
+						shortcut={isMacPlatform() ? "⌃⌘→" : "Alt+→"}
+						chromeFg={V.chromeFg}
+						border={P.connector}
+						muted={P.muted2}
+					/>
+				</span>
 				{!compact && (
 					<span
 						style={{
@@ -648,6 +736,7 @@ export function WorkspaceFileView({
 						onDirtyChange={setDirty}
 						onSave={doSave}
 						onHandle={handleEditorHandle}
+						onCursorChange={onCursorChange}
 					/>
 				</Suspense>
 			)}

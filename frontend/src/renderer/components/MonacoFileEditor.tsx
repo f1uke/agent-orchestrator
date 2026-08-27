@@ -239,6 +239,8 @@ export type MonacoFileEditorProps = {
 	/** ⌘S inside the editor. The chrome above owns what saving means. */
 	onSave?: () => void;
 	onHandle?: (handle: EditorHandle | null) => void;
+	/** The caret's 1-based position, reported as it moves. */
+	onCursorChange?: (position: { line: number; column: number }) => void;
 };
 
 /**
@@ -273,6 +275,7 @@ export default function MonacoFileEditor({
 	onDirtyChange,
 	onSave,
 	onHandle,
+	onCursorChange,
 }: MonacoFileEditorProps) {
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | monaco.editor.IStandaloneDiffEditor | null>(null);
@@ -756,6 +759,22 @@ export default function MonacoFileEditor({
 		if (editorGeneration === 0) return;
 		codeEditorRef.current?.updateOptions({ readOnly, domReadOnly: readOnly });
 	}, [editorGeneration, readOnly]);
+
+	// Where the caret is, reported as it moves — the owner needs it so that going
+	// BACK returns to the line the reader jumped from rather than to line 1. It
+	// fires on every arrow key, so the listener is read from a ref and the
+	// subscription is never rebuilt for a new callback identity.
+	const onCursorRef = useRef(onCursorChange);
+	onCursorRef.current = onCursorChange;
+	useEffect(() => {
+		if (editorGeneration === 0) return;
+		const codeEditor = codeEditorRef.current;
+		if (!codeEditor) return;
+		const subscription = codeEditor.onDidChangeCursorPosition((event) => {
+			onCursorRef.current?.({ line: event.position.lineNumber, column: event.position.column });
+		});
+		return () => subscription.dispose();
+	}, [editorGeneration]);
 
 	// Expose the buffer to the chrome above, which owns what saving means.
 	useEffect(() => {

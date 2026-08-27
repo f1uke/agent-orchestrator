@@ -1,6 +1,6 @@
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual";
 import { File, FileCode2, FileCog, FileImage, FileJson2, FileText, FileType2, Folder, FolderOpen } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { type FileKind, fileKindFor } from "../lib/file-kind";
 import { type FileTreeNode, flattenFileTree } from "../lib/file-tree";
 import { cn } from "../lib/utils";
@@ -95,6 +95,9 @@ export function FileTree<T>({
 	onSelectFile,
 	selectedKey,
 	revealedKey,
+	scrollTo,
+	initialScrollOffset,
+	onScrollOffsetChange,
 	label,
 	renderLead,
 	renderMeta,
@@ -110,6 +113,23 @@ export function FileTree<T>({
 	 * scroll-spy position and owns the accent left bar + fill.
 	 */
 	revealedKey?: string | null;
+	/**
+	 * A row to bring into view. The nonce is what makes asking twice for the same
+	 * row scroll twice — clicking a terminal reference again, or re-selecting the
+	 * file that is already open.
+	 *
+	 * Separate from `revealedKey` because scrolling and RINGING are different
+	 * jobs: following the open file scrolls silently, while a terminal reference
+	 * rings as well.
+	 */
+	scrollTo?: { key: string; nonce: number } | null;
+	/**
+	 * Where this tree was scrolled to last time it was on screen. Applied once,
+	 * on mount, before any `scrollTo` — so a reveal always wins over a restore.
+	 */
+	initialScrollOffset?: number;
+	/** Reports the scroll offset so the owner can remember it. */
+	onScrollOffsetChange?: (offset: number) => void;
 	/** Keys of the directories that are CLOSED; everything else is open. */
 	collapsed: ReadonlySet<string>;
 	onToggleDir: (key: string) => void;
@@ -140,17 +160,35 @@ export function FileTree<T>({
 		observeElementRect: measuredOrFallbackRect,
 	});
 
-	// A revealed row can be thousands of rows outside the rendered window, where
-	// the owner's `scrollIntoView` has no element to find — so the tree scrolls to
-	// it by INDEX instead. `scrollToIndex` is also what makes reveal work at all
-	// once windowing is on, which is the reason this is not hand-rolled.
-	const revealIndex = revealedKey == null ? -1 : rows.findIndex((r) => rowKey(r.node, getFileKey) === revealedKey);
+	// Restoring where this tree was left, before anything asks it to scroll
+	// somewhere else. A layout effect so the rows never paint at the top and then
+	// jump, and mount-only: later scrolling is the reader's.
+	const restoreRef = useRef(initialScrollOffset ?? 0);
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (el && restoreRef.current > 0) el.scrollTop = restoreRef.current;
+	}, []);
+
+	// A row asked for can be thousands of rows outside the rendered WINDOW, where
+	// a `scrollIntoView` on a looked-up node has no element to find — so the tree
+	// scrolls to it by INDEX instead. `scrollToIndex` is what makes reveal work at
+	// all once windowing is on, which is the reason this is not hand-rolled.
+	const scrollKey = scrollTo?.key;
+	const scrollNonce = scrollTo?.nonce;
+	const scrollIndex = scrollKey == null ? -1 : rows.findIndex((r) => rowKey(r.node, getFileKey) === scrollKey);
 	useEffect(() => {
-		if (revealIndex >= 0) virtualizer.scrollToIndex(revealIndex, { align: "auto" });
-	}, [revealIndex, virtualizer]);
+		if (scrollIndex >= 0) virtualizer.scrollToIndex(scrollIndex, { align: "auto" });
+		// `scrollNonce` is a dep so asking twice for the same row scrolls twice.
+	}, [scrollIndex, scrollNonce, virtualizer]);
 
 	return (
-		<div className="file-tree" role="tree" aria-label={label} ref={scrollRef}>
+		<div
+			className="file-tree"
+			role="tree"
+			aria-label={label}
+			ref={scrollRef}
+			onScroll={onScrollOffsetChange ? (e) => onScrollOffsetChange(e.currentTarget.scrollTop) : undefined}
+		>
 			<div className="file-tree__canvas" style={{ height: virtualizer.getTotalSize() }}>
 				{virtualizer.getVirtualItems().map((virtualRow) => {
 					const { node, depth, expanded } = rows[virtualRow.index];

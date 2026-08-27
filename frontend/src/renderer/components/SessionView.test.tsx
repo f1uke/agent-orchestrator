@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { SessionView } from "./SessionView";
 import { useUiStore } from "../stores/ui-store";
+import { __resetFileHistories } from "../hooks/useFileHistory";
 import { leaf, paneSessionIds, splitPane, type SplitNode } from "../lib/split-layout";
 import { startSplitDrag } from "../lib/split-drag";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
@@ -173,6 +174,11 @@ vi.mock("./SessionInspector", () => ({
 		</button>
 	),
 }));
+// jsdom is not a Mac, and the back/forward chord differs by platform: ⌃⌘←/→
+// (Xcode's, and free of ⌥←/→ which is word-left inside the editor) on macOS,
+// Alt+←/→ (the browser convention) elsewhere. Both branches are exercised.
+const { macPlatform } = vi.hoisted(() => ({ macPlatform: { current: true } }));
+vi.mock("../lib/platform", () => ({ isMacPlatform: () => macPlatform.current }));
 vi.mock("../lib/shell-context", () => ({
 	useShell: () => ({ daemonStatus: { state: "ready" } }),
 }));
@@ -268,6 +274,12 @@ vi.mock("./ui/resizable", () => ({
 function panelSizes(id: string): unknown[] {
 	return JSON.parse(screen.getByTestId(`panel-${id}-sizes`).textContent ?? "[]") as unknown[];
 }
+
+// The back/forward stacks live at MODULE level, so they outlive a render tree on
+// purpose — which means every test has to start from an empty one.
+beforeEach(() => {
+	__resetFileHistories();
+});
 
 describe("SessionView", () => {
 	beforeEach(() => {
@@ -586,9 +598,23 @@ describe("SessionView terminal file reference routing", () => {
 		});
 	};
 
-	it("reveals the Files tab for an in-project file that the tab can show", async () => {
+	// A clicked terminal reference is the one gesture that is explicitly ABOUT
+	// where a file is, and it is the only one that takes the rail.
+	it("reveals the Files tab for an in-project file", async () => {
 		changesData.current = { files: [{ path: "src/a.ts" }] };
-		openFileArg.current = { path: "src/a.ts", line: 12, inWorkspace: true };
+		openFileArg.current = { path: "src/a.ts", line: 12, inWorkspace: true, reveal: "focus" };
+		render(<SessionView sessionId="sess-1" />);
+
+		await clickOpen();
+		await waitFor(() => expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "files"));
+	});
+
+	// The rail is no longer CHANGES-only: Browse lists the whole worktree, so a
+	// file that does not differ from the target branch still has a row to land
+	// on. This used to be the case the reveal refused.
+	it("reveals a file that is in the workspace but not in the diff", async () => {
+		changesData.current = { files: [{ path: "src/other.ts" }] };
+		openFileArg.current = { path: "src/unchanged.ts", inWorkspace: true, reveal: "focus" };
 		render(<SessionView sessionId="sess-1" />);
 
 		await clickOpen();
@@ -599,19 +625,19 @@ describe("SessionView terminal file reference routing", () => {
 	// enough, and a file outside the project must not touch the rail at all.
 	it("leaves the rail alone for a file outside the project", async () => {
 		changesData.current = { files: [{ path: "src/a.ts" }] };
-		openFileArg.current = { path: "/etc/hosts", inWorkspace: false };
+		openFileArg.current = { path: "/etc/hosts", inWorkspace: false, reveal: "focus" };
 		render(<SessionView sessionId="sess-1" />);
 
 		await clickOpen();
 		expect(screen.getByText("pop browser")).toHaveAttribute("data-view", "summary");
 	});
 
-	// The Files tab is CHANGES-only. An in-project file that does not differ from
-	// the target branch has no row, so switching to the tab would strand the user
-	// on a list that does not contain what they clicked.
-	it("leaves the rail alone for an in-project file with no row in the tab", async () => {
-		changesData.current = { files: [{ path: "src/other.ts" }] };
-		openFileArg.current = { path: "src/unchanged.ts", inWorkspace: true };
+	// Everything that is not a terminal reference — ⌘⇧O, ⌘click, a rail row,
+	// back/forward — FOLLOWS quietly. Chasing definitions must not keep yanking
+	// the rail open over the file you are reading.
+	it("does not take the rail for an ordinary jump", async () => {
+		changesData.current = { files: [{ path: "src/a.ts" }] };
+		openFileArg.current = { path: "src/a.ts", inWorkspace: true };
 		render(<SessionView sessionId="sess-1" />);
 
 		await clickOpen();
@@ -628,7 +654,7 @@ describe("SessionView terminal file reference routing", () => {
 describe("SessionView reveal precedence", () => {
 	it("refuses to reveal a file the server says is outside, even if a row matches", async () => {
 		changesData.current = { files: [{ path: "src/a.ts" }] };
-		openFileArg.current = { path: "src/a.ts", inWorkspace: false };
+		openFileArg.current = { path: "src/a.ts", inWorkspace: false, reveal: "focus" };
 		render(<SessionView sessionId="sess-1" />);
 
 		await act(async () => {
@@ -940,5 +966,145 @@ describe("SessionView — the rail does not move when you switch MEMBERS", () =>
 
 		await waitFor(() => expect(railView()).toBe("tests"));
 		expect(useUiStore.getState().inspectorViewRequest).toBeNull();
+	});
+});
+
+// Item 4: back/forward over the files this task has jumped between. Every jump
+// goes through the ONE file-open seam, so recording it there is what makes back
+// work after a ⌘click, a ⌘⇧O, a rail row and a terminal reference alike.
+describe("SessionView file history", () => {
+	// Every open goes through the ONE seam, so a test only needs the one entry
+	// point. Closing the viewer first is how the terminal's button comes back —
+	// and it doubles as the check that CLOSING does not clear the stack.
+	const openFile = async (file: unknown) => {
+		if (screen.queryByText("open workspace file") === null) {
+			await act(async () => {
+				fireEvent.click(screen.getByRole("button", { name: /agent/ }));
+			});
+		}
+		openFileArg.current = file;
+		await act(async () => {
+			fireEvent.click(screen.getByText("open workspace file"));
+		});
+	};
+	const back = () => screen.getByTestId("file-history-back");
+	const forward = () => screen.getByTestId("file-history-forward");
+	const press = async (init: KeyboardEventInit) => {
+		await act(async () => {
+			fireEvent.keyDown(window, init);
+		});
+	};
+
+	beforeEach(() => {
+		macPlatform.current = true;
+	});
+
+	it("has nowhere to go on the first file opened", async () => {
+		render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/a.ts", inWorkspace: true });
+		expect(back()).toBeDisabled();
+		expect(forward()).toBeDisabled();
+	});
+
+	it("goes back to the previous file and forward again", async () => {
+		render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/a.ts", inWorkspace: true });
+		await openFile({ path: "src/b.ts", inWorkspace: true });
+		expect(screen.getByTitle("src/b.ts")).toBeInTheDocument();
+
+		expect(back()).toBeEnabled();
+		await act(async () => {
+			fireEvent.click(back());
+		});
+		expect(screen.getByTitle("src/a.ts")).toBeInTheDocument();
+		expect(back()).toBeDisabled();
+
+		await act(async () => {
+			fireEvent.click(forward());
+		});
+		expect(screen.getByTitle("src/b.ts")).toBeInTheDocument();
+	});
+
+	// A chevron that does not say where it leads is a guess.
+	it("names the file each chevron would open", async () => {
+		render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/a.ts", inWorkspace: true });
+		await openFile({ path: "src/b.ts", inWorkspace: true });
+		expect(back().getAttribute("title")).toContain("src/a.ts");
+	});
+
+	// ⌃⌘←/→ is Xcode's binding and needs no Fn. The listener is captured, because
+	// the focused Monaco swallows keys long before they reach the window.
+	it("moves on ⌃⌘← and ⌃⌘→", async () => {
+		render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/a.ts", inWorkspace: true });
+		await openFile({ path: "src/b.ts", inWorkspace: true });
+
+		await press({ key: "ArrowLeft", metaKey: true, ctrlKey: true });
+		expect(screen.getByTitle("src/a.ts")).toBeInTheDocument();
+
+		await press({ key: "ArrowRight", metaKey: true, ctrlKey: true });
+		expect(screen.getByTitle("src/b.ts")).toBeInTheDocument();
+	});
+
+	// ⌥←/→ is word-left/right inside the editor and a plain arrow moves the
+	// caret. Neither may navigate.
+	it("ignores an arrow without the full chord", async () => {
+		render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/a.ts", inWorkspace: true });
+		await openFile({ path: "src/b.ts", inWorkspace: true });
+
+		await press({ key: "ArrowLeft" });
+		await press({ key: "ArrowLeft", altKey: true });
+		await press({ key: "ArrowLeft", metaKey: true });
+		expect(screen.getByTitle("src/b.ts")).toBeInTheDocument();
+	});
+
+	it("uses the browser's Alt+←/→ off a Mac", async () => {
+		macPlatform.current = false;
+		render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/a.ts", inWorkspace: true });
+		await openFile({ path: "src/b.ts", inWorkspace: true });
+
+		await press({ key: "ArrowLeft", metaKey: true, ctrlKey: true });
+		expect(screen.getByTitle("src/b.ts")).toBeInTheDocument();
+		await press({ key: "ArrowLeft", altKey: true });
+		expect(screen.getByTitle("src/a.ts")).toBeInTheDocument();
+	});
+
+	// Jumping from the middle of the stack throws away what was ahead — browser
+	// semantics, because they are the ones everybody already has.
+	it("truncates forward when you jump from the middle", async () => {
+		render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/a.ts", inWorkspace: true });
+		await openFile({ path: "src/b.ts", inWorkspace: true });
+		await act(async () => {
+			fireEvent.click(back());
+		});
+		await openFile({ path: "src/c.ts", inWorkspace: true });
+
+		expect(screen.getByTitle("src/c.ts")).toBeInTheDocument();
+		expect(forward()).toBeDisabled();
+		await act(async () => {
+			fireEvent.click(back());
+		});
+		expect(screen.getByTitle("src/a.ts")).toBeInTheDocument();
+	});
+
+	// The stack is per TASK and lives at module level, so leaving the session
+	// view and coming back to it does not throw away where you had been.
+	it("survives leaving the session view and returning", async () => {
+		const first = render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/a.ts", inWorkspace: true });
+		await openFile({ path: "src/b.ts", inWorkspace: true });
+		first.unmount();
+
+		render(<SessionView sessionId="sess-1" />);
+		await openFile({ path: "src/b.ts", inWorkspace: true });
+		expect(back()).toBeEnabled();
+		await act(async () => {
+			fireEvent.click(back());
+		});
+		expect(screen.getByTitle("src/a.ts")).toBeInTheDocument();
 	});
 });

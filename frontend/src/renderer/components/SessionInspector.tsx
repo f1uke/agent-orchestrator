@@ -23,6 +23,7 @@ import { BrowserPanelView } from "./BrowserPanel";
 import type { BrowserViewModel } from "../hooks/useBrowserView";
 import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { FilesPanel, type ChangedFileTarget, type WorktreeFile } from "./FilesPanel";
+import { taskKeyOf } from "../lib/task-key";
 import { SmokeTestView } from "./SmokeTestView";
 import { SimulatorPanel } from "./SimulatorPanel";
 import { JiraIssueSection } from "./JiraIssueSection";
@@ -130,7 +131,7 @@ export function SessionInspector({
 	onOpenChangedFile,
 	onOpenWorktreeFile,
 	onReviewAllChanges,
-	selectedChangedPath,
+	selectedFilePath,
 	revealInTree,
 }: {
 	session?: WorkspaceSession;
@@ -165,9 +166,10 @@ export function SessionInspector({
 	/** The stacked, all-files review. */
 	onReviewAllChanges?: () => void;
 	/** Path of the Changes row currently open in the center pane. */
-	selectedChangedPath?: string;
+	/** The file the tree marks as current: the one open in the viewer, else the one the stacked diffs are scrolled to. */
+	selectedFilePath?: string;
 	/** A terminal ref to reveal in the Files tree (path + re-click nonce). */
-	revealInTree?: { path: string; nonce: number } | null;
+	revealInTree?: { path: string; nonce: number; focus?: boolean } | null;
 }) {
 	const [internalView, setInternalView] = useState<InspectorView>("summary");
 	const requestedView = viewProp ?? internalView;
@@ -255,12 +257,19 @@ export function SessionInspector({
 					<ReviewsView onOpenReviewerTerminal={onOpenReviewerTerminal} onOpenFile={onOpenFile} session={session} />
 				) : null}
 				{view === "files" && showFiles ? (
+					// KEYED by the task, not the session: dev and qa share one worktree,
+					// so switching between them keeps the same panel — and therefore the
+					// same folds, scroll and mode — over the same files. A different task
+					// is a different mount, which is how the panel gets to read its
+					// remembered arrangement once.
 					<FilesPanel
+						key={taskKeyOf(session)}
 						sessionId={session.id}
+						taskKey={taskKeyOf(session)}
 						onOpenFile={onOpenChangedFile}
 						onOpenWorktreeFile={onOpenWorktreeFile}
 						onReviewAll={onReviewAllChanges}
-						selectedPath={selectedChangedPath}
+						selectedPath={selectedFilePath}
 						reveal={revealInTree}
 					/>
 				) : null}
