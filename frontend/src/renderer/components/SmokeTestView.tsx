@@ -1085,8 +1085,12 @@ function QaBlock({
 			{earlier.length > 0 && (
 				<div style={{ marginTop: 10 }} data-testid={`qa-earlier-runs-${check.id}`}>
 					<div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".06em", color: P.qaFg, marginBottom: 2 }}>
-						EARLIER RUNS{" "}
-						<span style={{ fontWeight: 500, color: P.muted, letterSpacing: 0 }}>· what it said before</span>
+						{/* "EARLIER" is only true relative to a result shown above. With
+						    nothing concluded, these rounds are all there is. */}
+						{current ? "EARLIER RUNS" : "RUNS"}{" "}
+						{current && (
+							<span style={{ fontWeight: 500, color: P.muted, letterSpacing: 0 }}>· what it said before</span>
+						)}
 					</div>
 					{earlier.map((run) => (
 						<QaRunRow key={run.id} sessionId={sessionId} check={check} run={run} now={now} onReveal={onReveal} />

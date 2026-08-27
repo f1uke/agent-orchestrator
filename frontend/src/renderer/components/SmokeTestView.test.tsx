@@ -751,6 +751,50 @@ describe("SmokeTestView", () => {
 			expect(screen.queryByText(/run 1 of 1/)).not.toBeInTheDocument();
 		});
 
+		it("does not call the rounds EARLIER when none of them concluded", async () => {
+			// A round the machine opened, captured into and abandoned. There is no
+			// result above it for it to be "earlier" than, and the block must say
+			// what happened rather than showing captures under no heading at all.
+			checks = [
+				check({
+					runs: [
+						{
+							id: "r1",
+							checkId: "c1",
+							sessionId: "s1",
+							seq: 1,
+							verdict: "",
+							note: "",
+							sha: HEAD,
+							createdAt: RAN,
+							updatedAt: RAN,
+						},
+					],
+					agentEvidence: [
+						{
+							id: "ag1",
+							checkId: "c1",
+							sessionId: "s1",
+							kind: "image",
+							filename: "half-done.png",
+							mime: "image/png",
+							sizeBytes: 3,
+							createdAt: RAN,
+							source: "agent",
+							runId: "r1",
+						},
+					],
+				}),
+			];
+			renderView();
+			expect(await screen.findByText(/never recorded a result/)).toBeInTheDocument();
+			expect(screen.getByText("RUNS", { exact: false })).toBeInTheDocument();
+			expect(screen.queryByText(/EARLIER RUNS/)).not.toBeInTheDocument();
+			expect(screen.getByText("never concluded")).toBeInTheDocument();
+			// And it is not mistaken for pre-history evidence: it has a run.
+			expect(screen.queryByTestId("qa-unknown-run-c1")).not.toBeInTheDocument();
+		});
+
 		it("groups captures with no run apart, and says why, instead of filing them under the current verdict", async () => {
 			// The legacy shape: the result these were captured for was overwritten
 			// and is gone. Showing them under the verdict that happens to be newest
