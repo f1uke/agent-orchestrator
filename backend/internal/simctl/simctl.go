@@ -10,8 +10,9 @@
 //
 // Everything here is read-only against the machine: it runs
 // `xcrun simctl list devices --json` and nothing else. Nothing in this package
-// can boot, shut down, reboot or erase a device - that lives behind its own
-// door in internal/simpower, so a caller of this package can still be sure
+// can boot, shut down, reboot or erase a device - powering one lives behind its
+// own door in internal/simpower (which `ao sim boot` and the desktop app's
+// Device tab both go through), so a caller of this package can still be sure
 // that asking what exists cannot change what exists.
 package simctl
 
@@ -44,7 +45,7 @@ var (
 	// ErrNoDevices: the machine has no simulators.
 	ErrNoDevices = errors.New("simctl: no simulators")
 	// ErrNoBooted: simulators exist but none is booted. Nothing in this
-	// package, and no `ao sim` command, boots one.
+	// package boots one; `ao sim boot` does, through internal/simpower.
 	ErrNoBooted = errors.New("simctl: no booted simulator")
 	// ErrUnknownUDID: the requested udid is not on this machine.
 	ErrUnknownUDID = errors.New("simctl: unknown udid")

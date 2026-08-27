@@ -373,12 +373,15 @@ Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`
 // than a scratch one, that the lease guards the DEVICE and not the command - a
 // raw `xcodebuild -destination` walks straight past it - that an empty
 // accessibility tree is a diagnosis about the app rather than a fact about
-// accessibility, and that the device is shared and that no `ao sim` command
-// can power it on or off. That last part is phrased as a fact about the CLI
-// rather than about AO, because it stopped being true of AO: the desktop app's
-// Device tab boots and shuts down devices. What must not leak into the
-// guidance is an invitation to ask a human to boot things - an agent that
-// cannot boot a device should say so and stop, not open a negotiation.
+// accessibility, and what an agent may do about the device's POWER.
+//
+// That last part used to read "you cannot boot one, so say so and stop". It is
+// now the opposite instruction, and the reversal is the point rather than an
+// edit: `ao sim boot` exists, and until it did, an iOS task on a machine with
+// nothing booted could not take a lease - which is the event that creates the
+// task's qa - so qa could never appear by itself. The asymmetry is what has to
+// survive: an agent may bring a device UP, and nothing more. Shutdown, reboot
+// and erase stay the human's, in the desktop app's Device tab.
 //
 // Which `ao sim` commands belong here is a reviewed decision, not an accident:
 // cli.TestSimGuidance_DecidesEverySubcommand holds that list against the real
@@ -417,7 +420,8 @@ const simulatorGuidance = "\n\n" + `## Driving the iOS Simulator (AO)
 
 This project targets iOS, so a booted simulator on this machine is something you can read and drive yourself rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
 
-` + "```bash\n" + `ao sim list                     # what is booted
+` + "```bash\n" + `ao sim list                     # what exists, and what is booted
+ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
 ao sim claim                    # required before ANY touch; reading never needs it
 ao sim ax                       # the screen as elements: name, state, box, tap point
 ao sim tap --label "Continue"   # tap what ` + "`ao sim ax`" + ` NAMED; it reads the screen itself, so this replaces a read you would have run
@@ -427,7 +431,7 @@ ao sim shot                     # a PNG to actually look at, for what the tree c
 ao sim log                      # what the app itself printed, when the screen does not explain it
 ao sim release` + "\n```" + `
 
-- **The device is shared** with other AO sessions and with a human in Xcode. The claim excludes other AO sessions only, and **no ` + "`ao sim`" + ` command powers a device on or off** - there is no boot, shutdown, reboot or erase. A human can boot one from the desktop app; you cannot, so if none is booted, say so and stop rather than working blind.
+- **The device is shared** with other AO sessions and with a human in Xcode; the claim excludes other AO sessions only. You may power a device **on and nothing else** - no shutdown, reboot or erase, because those wipe a device or take one from whoever is on it. So when nothing is booted, boot one and carry on; a simulator is a multi-gigabyte VM, so boot the one you need and no more.
 - **Not every booted device is yours to drive.** A working device holds the human's real app and state; a scratch device exists to be thrown away. ` + "`ao sim`" + ` - and Maestro without ` + "`--device`" + ` - takes the only booted device without asking, so anything that installs, launches or mutates belongs on a scratch device, named with ` + "`--udid`" + ` rather than left to that default pick; reading is safe anywhere. When ` + "`ao sim list`" + ` does not make clear which is which, ask rather than guess.
 - **A lease guards the device, not the command.** ` + "`xcodebuild -destination`" + ` and ` + "`xcrun simctl`" + ` never consult it, and a reinstall throws away the state its holder was building - dev and qa clobber each other just as easily. Claim first, then give the udid you were granted to every tool, not only to ` + "`ao sim`" + `. A refusal names the holder: wait, or say so - going round it takes someone's device, which is a decision and not a workaround.
 - **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap.

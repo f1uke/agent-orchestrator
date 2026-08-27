@@ -723,7 +723,7 @@ func writeSimResolveError(w http.ResponseWriter, r *http.Request, err error) {
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SIM_NOT_FOUND", err.Error(), nil)
 	case errors.As(err, &notBooted):
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_NOT_BOOTED",
-			notBooted.Error()+". Boot it from the Device tab's simulator picker.", nil)
+			notBooted.Error()+". Boot it from the Device tab's simulator picker, or with `ao sim boot`.", nil)
 	case errors.Is(err, simctl.ErrNoDevices), errors.Is(err, simctl.ErrNoBooted):
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SIM_NOT_FOUND", err.Error(), nil)
 	default:

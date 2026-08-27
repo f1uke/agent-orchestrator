@@ -103,7 +103,7 @@ function targetUDID(): { udid: string | null; reason: string | null } {
 		}
 		return { udid: booted.find((udid) => udid.toLowerCase() === pinned.toLowerCase()) ?? null, reason: null };
 	}
-	if (booted.length === 0) return { udid: null, reason: "no simulator is booted (AO never boots one)" };
+	if (booted.length === 0) return { udid: null, reason: "no simulator is booted (this harness never boots one)" };
 	if (booted.length > 1) {
 		return {
 			udid: null,

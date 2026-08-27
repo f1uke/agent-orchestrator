@@ -88,7 +88,7 @@ func newSimAXCommand(ctx *commandContext) *cobra.Command {
 			"reads are of a screen that is already still, and every agent interaction would " +
 			"otherwise pay for the extra read.\n\n" +
 			"This is a read: it needs no claim on the device and is never blocked by one, " +
-			"but it always reports who holds it. " + simNeverBootsNote,
+			"but it always reports who holds it. " + simPowerNote,
 		Example: `  ao sim ax
   ao sim ax --json
   ao sim ax --format maestro

@@ -18,14 +18,17 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simrecord"
 )
 
-// `ao sim` gives a session a cheap, strictly read-only way to see an iOS
-// Simulator screen. It shells out to `xcrun simctl` on demand and nothing else:
-// no helper process, no private frameworks, no HID synthesis, no polling, and
-// no command that could boot, shut down, reboot or erase a device - powering a
-// device on and off is a human capability, exercised through the desktop app's
-// Device tab and deliberately absent from this CLI. A human or
-// another AO session may be driving the same simulator, so every capture says
-// so rather than pretending the frame is ours alone.
+// `ao sim` gives a session a cheap way to see an iOS Simulator screen. It
+// shells out to `xcrun simctl` on demand and nothing else: no helper process,
+// no private frameworks, no HID synthesis and no polling.
+//
+// One command here changes a device's power state, and exactly one: `ao sim
+// boot`, in sim_boot.go, which exists because lazily-created qa deadlocked
+// without it. Taking a device DOWN - shutdown, reboot, erase - stays a human
+// capability exercised through the desktop app's Device tab, because those are
+// the operations that destroy data or take a device away from whoever is on it.
+// A human or another AO session may be driving the same simulator, so every
+// capture says so rather than pretending the frame is ours alone.
 //
 // Device leases live alongside these commands in sim_lease.go: `ao sim claim`
 // and `ao sim release` are the write half, and both read-only commands here
@@ -38,9 +41,10 @@ const (
 	// interaction: a human in Xcode or another AO session shares the device.
 	simSharedDeviceNote = "This simulator is shared - a human driving Xcode, or another AO session, " +
 		"may have been mid-interaction when this frame was captured."
-	// simNeverBootsNote is repeated in every refusal so an agent does not go
-	// looking for a flag that boots a device. There is none, on purpose.
-	simNeverBootsNote = "No `ao sim` command boots, shuts down or erases a simulator; the desktop app's Device tab is where a human does that."
+	// simPowerNote is repeated wherever power comes up, because the asymmetry
+	// is the part an agent has to be told: it may bring a device UP, and
+	// nothing here takes one down.
+	simPowerNote = "`ao sim boot` powers a simulator on; no `ao sim` command shuts one down, reboots or erases one - the desktop app's Device tab is where a human does that."
 	// simShotStampLayout keeps millisecond precision so two captures from one
 	// session cannot collide on a filename.
 	simShotStampLayout = "20060102-150405.000"
@@ -81,17 +85,18 @@ type simShotResult struct {
 func newSimCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sim",
-		Short: "Read-only access to local iOS Simulators",
-		Long: "Inspect local iOS Simulators and capture their screen.\n\n" +
-			"Every subcommand is read-only against the device: it shells out to " +
-			"`xcrun simctl` on demand and never powers a simulator on or off - there " +
-			"is no boot, shutdown, reboot or erase here. A human boots a device from " +
-			"the desktop app's Device tab. Simulators are shared with other AO " +
-			"sessions and with any human using Xcode, so a captured frame may be " +
-			"mid-interaction.",
+		Short: "Read, drive and boot local iOS Simulators",
+		Long: "Inspect local iOS Simulators, capture their screen, drive them, and boot one.\n\n" +
+			"It shells out to `xcrun simctl` on demand. `ao sim boot` is the only " +
+			"subcommand that changes a device's power state, and it only ever powers " +
+			"one ON: there is no shutdown, reboot or erase here, because those " +
+			"destroy data or take a device away from whoever is using it - a human " +
+			"does them from the desktop app's Device tab. Simulators are shared with " +
+			"other AO sessions and with any human using Xcode, so a captured frame " +
+			"may be mid-interaction.",
 	}
 	cmd.AddCommand(
-		newSimListCommand(ctx), newSimShotCommand(ctx),
+		newSimListCommand(ctx), newSimShotCommand(ctx), newSimBootCommand(ctx),
 		newSimClaimCommand(ctx), newSimReleaseCommand(ctx),
 		newSimAXCommand(ctx), newSimLogCommand(ctx),
 		newSimTapCommand(ctx), newSimSwipeCommand(ctx), newSimDragCommand(ctx),
@@ -138,7 +143,7 @@ func newSimShotCommand(ctx *commandContext) *cobra.Command {
 		Long: "Capture the screen of a booted iOS Simulator and print the PNG's path.\n\n" +
 			"With no --udid the booted simulator is used, but only when exactly one is " +
 			"booted: with none, or with several, the command fails and says so rather " +
-			"than guessing. " + simNeverBootsNote + "\n\n" +
+			"than guessing; `ao sim boot` is how one is started.\n\n" +
 			"The PNG lands under this session's own artifact directory " +
 			"(<AO data dir>/sim/<session id>/), outside any repository, so it can never " +
 			"be committed by accident. Use --output to write somewhere else.",
@@ -203,22 +208,24 @@ func resolveSimDevice(devices []simDevice, udid string) (simDevice, error) {
 }
 
 // explainSimResolve turns a resolution outcome into the sentence that says what
-// to do about it. Every branch repeats that AO does not boot devices, because
-// that is the flag an agent goes looking for next.
+// to do about it. Every branch that CAN be unblocked by booting says so with the
+// command that does it: "nothing is booted" used to be a dead end an agent had
+// to stop at, and naming the way out is the whole point of the change that gave
+// this CLI a boot in the first place.
 func explainSimResolve(err error, udid string) error {
 	var notBooted *simctl.NotBootedError
 	var ambiguous *simctl.AmbiguousError
 	switch {
 	case errors.As(err, &notBooted):
-		return fmt.Errorf("simulator %s is not booted (state: %s). %s Boot it yourself (Xcode, or Simulator.app) and retry",
-			notBooted.Device.Label(), notBooted.Device.State, simNeverBootsNote)
+		return fmt.Errorf("simulator %s is not booted (state: %s). Boot it with `ao sim boot --udid %s` and retry",
+			notBooted.Device.Label(), notBooted.Device.State, notBooted.Device.UDID)
 	case errors.Is(err, simctl.ErrUnknownUDID):
 		return fmt.Errorf("no simulator with udid %q; run `ao sim list` to see what this machine has", udid)
 	case errors.Is(err, simctl.ErrNoDevices):
-		return fmt.Errorf("no simulators found on this machine. %s", simNeverBootsNote)
+		return errors.New("no simulators found on this machine; `ao sim` needs Xcode's simulator runtimes installed")
 	case errors.Is(err, simctl.ErrNoBooted):
-		return fmt.Errorf("%s. %s Boot one (Xcode, or Simulator.app) and retry, or run `ao sim list`",
-			strings.TrimPrefix(err.Error(), "simctl: "), simNeverBootsNote)
+		return fmt.Errorf("%s. Boot one with `ao sim boot --udid <udid>` and retry",
+			strings.TrimPrefix(err.Error(), "simctl: "))
 	case errors.As(err, &ambiguous):
 		var b strings.Builder
 		fmt.Fprintf(&b, "%d simulators are booted, so there is no unambiguous default. Re-run with one of:", len(ambiguous.Booted))

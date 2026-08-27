@@ -104,7 +104,7 @@ func newSimLogCommand(ctx *commandContext) *cobra.Command {
 			"whose failure wedges the app under test. This command cannot: the unified log never blocks the " +
 			"process that wrote to it.\n\n" +
 			"This is a read: it needs no claim on the device and is never blocked by one, but it always reports " +
-			"who holds it. " + simNeverBootsNote,
+			"who holds it. " + simPowerNote,
 		Example: `  ao sim log --process Nimbus
   ao sim log --since 10m --grep "checkout|payment"
   ao sim log --follow --process Nimbus`,

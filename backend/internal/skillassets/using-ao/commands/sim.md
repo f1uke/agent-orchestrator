@@ -1,8 +1,8 @@
 # ao sim
 
-Local iOS Simulators on this machine: list them, read what is on a booted one's screen (as an accessibility tree or a PNG), read what an app on it SAYS (its unified log), drive it with taps, swipes, typing and hardware buttons, and claim one so other AO sessions keep off it while you work.
+Local iOS Simulators on this machine: list them, boot one, read what is on a booted one's screen (as an accessibility tree or a PNG), read what an app on it SAYS (its unified log), drive it with taps, swipes, typing and hardware buttons, and claim one so other AO sessions keep off it while you work.
 
-`ao sim` never powers a simulator on or off: there is no boot, shutdown, reboot or erase subcommand, and nothing you can run here changes a device's power state. It runs no background process, opens no port and polls nothing: each command runs, does its one job, and exits. Claiming a device changes nothing about the device itself - a lease is bookkeeping the AO daemon holds, not an operation on the simulator. The desktop app's Device tab can boot a simulator and shut one down; that is a human pressing a button, and it is deliberately not reachable from here.
+**You can power a simulator ON, and nothing else.** `ao sim boot` is the only subcommand that changes a device's power state; there is no shutdown, reboot or erase, because those wipe a device's data or take a device out from under whoever is using it. A human does those from the desktop app's Device tab. Everything else here runs no background process, opens no port and polls nothing: each command runs, does its one job, and exits. Claiming a device changes nothing about the device itself - a lease is bookkeeping the AO daemon holds, not an operation on the simulator.
 
 Simulators are shared: another AO session, or a human working in Xcode, may be driving the same device. A captured frame can therefore be mid-interaction and is not proof that you put the app in that state.
 
@@ -18,6 +18,7 @@ Requires macOS with the Xcode command line tools (`xcrun` on PATH). The interact
 
 ```
 ao sim list    [flags]
+ao sim boot    [flags]
 ao sim shot    [flags]
 ao sim ax      [flags]
 ao sim log     [flags]
@@ -102,6 +103,56 @@ JSON shape:
 
 ---
 
+### ao sim boot
+
+Power a simulator on and wait until it can actually be driven. This is what you run when `ao sim list` shows devices but nothing booted - the state in which every other command here fails.
+
+**Flags:**
+
+| Flag                 | Description                                                          |
+| -------------------- | -------------------------------------------------------------------- |
+| `--udid <udid>`      | Boot this simulator instead of the machine's only one                |
+| `--timeout <dur>`    | How long to wait for it to come up (default 2m30s; e.g. `90s`, `5m`) |
+| `--json`             | Output the result as JSON                                            |
+
+**Which device gets booted**
+
+| Situation                                       | Result                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------ |
+| `--udid` given, device shut down                | that device is booted                                              |
+| `--udid` given, device already booted           | **succeeds, exit 0**, nothing is started                           |
+| `--udid` given, device not found or unavailable | fails, exit 1                                                      |
+| no `--udid`, exactly one simulator installed    | that device is booted                                              |
+| no `--udid`, exactly one already booted         | **succeeds, exit 0** - the state you asked for is already true     |
+| no `--udid`, several installed and none booted  | fails, exit 1, listing an `ao sim boot --udid` line per device     |
+| no `--udid`, several booted                     | fails, exit 1, naming each; it never guesses                       |
+
+**It returns when the device is DRIVABLE, not when `simctl` first says `Booted`.** A simulator is listed as booted several seconds before SpringBoard is up, and a device in that window answers no accessibility query and takes no touch. So `ao sim boot` blocks, and when it returns, `ao sim claim` and `ao sim ax` work.
+
+**Booting an already-booted device is a no-op, so retrying is always safe.** So is racing: if another session is booting the same device, this waits for their boot instead of failing.
+
+**It stops at two booted simulators.** Each is a virtual machine of several GB, and three at once has run this kind of machine out of memory. Past two, `ao sim boot` refuses and names what is already up - drive one of those, or ask the human, who can boot another from the desktop app's Device tab.
+
+**It needs a running daemon and an AO session** (`AO_SESSION_ID`), unlike `ao sim list` and `ao sim shot`. So does `ao sim claim`, which is what you run next.
+
+**Examples:**
+
+```bash
+# Nothing is booted and this machine has several devices: name the one you want
+ao sim boot --udid 00000000-0000-0000-0000-000000000000
+```
+
+```bash
+# The whole opening sequence on an iOS task
+ao sim boot --udid 00000000-0000-0000-0000-000000000000
+ao sim claim --udid 00000000-0000-0000-0000-000000000000
+ao sim ax
+```
+
+Nothing is claimed by booting. A device you booted is as shared as any other, and the next session to claim it owns it.
+
+---
+
 ### ao sim shot
 
 Capture a booted simulator's screen to a PNG and print its path. Read that path to actually look at the screen.
@@ -121,7 +172,7 @@ Capture a booted simulator's screen to a PNG and print its path. Read that path 
 | `--udid` given, device booted                  | that device                                                         |
 | `--udid` given, device not found or not booted | fails, exit 1                                                       |
 | no `--udid`, exactly one booted                | that device                                                         |
-| no `--udid`, none booted                       | fails, exit 1 - boot one yourself in Xcode or Simulator.app         |
+| no `--udid`, none booted                       | fails, exit 1 - run `ao sim boot --udid <udid>` first               |
 | no `--udid`, several booted                    | fails, exit 1, listing a `--udid` line per device; it never guesses |
 
 **Where the PNG goes**
@@ -361,7 +412,7 @@ ao sim ax                              # confirm what actually happened
 | `... is mid-gesture`                  | Another command holds the finger right now. Nothing was sent. Retry in a moment - it never queues, because two overlapping gestures merge into one touch. |
 | `node was not found on PATH`          | The interaction commands need Node.js 20+. `ao sim shot` and `ao sim list` still work.                                                                    |
 | `the simulator bridge could not load` | The native bridge calls private Apple frameworks and an Xcode/macOS upgrade broke it. Report it with your Xcode version; screenshots still work.          |
-| `... is not booted`                   | Ask the human to boot it from the desktop app's Device tab, or boot it yourself in Xcode or Simulator.app. No `ao sim` command powers a device on.                                                                                      |
+| `... is not booted`                   | Boot it: `ao sim boot --udid <udid>`. It waits until the device can actually be driven.                                                                                                                                                |
 | exit 2                                | Bad arguments (a coordinate outside 0..1, an unknown button, `--paste` and `--raw-keys` together). Nothing reached the device.                            |
 
 - **`ao sim tap` can take the NAME of the element instead of its point.** `--label` matches the name `ao sim ax` prints for an element (its label, or its value when it has none); `--id` matches its accessibility identifier. This reads the screen first, so it costs one accessibility read - and it replaces the `ao sim ax` you would have run anyway, so the loop is shorter, not longer. The coordinate form reads nothing and is unchanged.

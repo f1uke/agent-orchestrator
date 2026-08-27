@@ -4681,11 +4681,13 @@ func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
 		"ao sim claim",
 		"ao sim ax",
 		// The two rules that keep a shared device usable: claim before driving,
-		// and know that powering the device is not yours to do. The second is
-		// phrased about the CLI rather than about AO, because the desktop app's
-		// Device tab DOES boot devices - the guidance has to stay true about
-		// which of them the agent is.
-		"no `ao sim` command powers a device on or off",
+		// and know EXACTLY how far the agent's power over the device goes. The
+		// second one used to be "you cannot boot", which was the dead end that
+		// stopped an iOS task from ever taking a lease - and a lease is what
+		// creates the task's qa. What is asserted now is the asymmetry that
+		// replaced it: boot is the agent's, taking a device down is not.
+		"ao sim boot",
+		"no shutdown, reboot or erase",
 		// The defect an agent would otherwise walk into: an element the tree
 		// lists but cannot be touched from here.
 		"off screen",
