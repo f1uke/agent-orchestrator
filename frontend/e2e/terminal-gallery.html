@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Terminal link gallery</title>
+	</head>
+	<body>
+		<!--
+			Dev-only harness for e2e/terminal-links.spec.ts. Served by the Vite dev
+			server (root = frontend/) and deliberately NOT one of the build's rollup
+			inputs, so it never ships in the packaged renderer.
+
+			It exists because every clickable the terminal makes — Claude Code's OSC 8
+			hyperlinks, the #/!/Jira external refs, session refs, file refs — fails in
+			exactly one way: the text still renders, still looks like a link, and the
+			click does nothing. That failure is invisible to jsdom, which gives xterm
+			no cell box to hit-test against, so its Linkifier can never resolve a
+			pointer position to a buffer cell and no link is ever "hovered". Only a
+			real browser can be asked whether a click on those pixels opened anything.
+
+			The bridge is stubbed here, ahead of the module script, so lib/bridge.ts
+			binds to it at import time exactly as it binds to Electron's preload in the
+			packaged app; window.open is recorded the same way, since that is the path
+			an http(s) terminal link takes to the OS browser.
+		-->
+		<script>
+			window.__aoOpened = [];
+			window.__aoCopied = [];
+			window.ao = {
+				shell: {
+					openExternal: async (url) => {
+						window.__aoOpened.push({ via: "shell.openExternal", url });
+					},
+					showItemInFolder: async () => undefined,
+					openPath: async () => undefined,
+				},
+				clipboard: {
+					writeText: async (text) => {
+						window.__aoCopied.push(text);
+					},
+					readText: async () => "",
+				},
+			};
+			const nativeOpen = window.open.bind(window);
+			window.open = (url, target, features) => {
+				window.__aoOpened.push({ via: "window.open", url: String(url) });
+				// Never actually navigate: the packaged app denies every window.open in
+				// the main process and only forwards the URL, so a recorded call is the
+				// whole of what the renderer is responsible for.
+				return null;
+			};
+			void nativeOpen;
+		</script>
+		<div id="root"></div>
+		<script type="module" src="./terminal-gallery.tsx"></script>
+	</body>
+</html>
