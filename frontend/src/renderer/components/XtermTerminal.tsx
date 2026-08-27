@@ -20,7 +20,7 @@
 //    fits don't spam the PTY.
 
 import { useEffect, useRef } from "react";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ILink } from "@xterm/xterm";
 import { CanvasAddon } from "@xterm/addon-canvas";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -159,6 +159,22 @@ function openTerminalLink(uri: string): void {
 	});
 }
 
+// A link's cell span. xterm hands 1-based buffer ranges to link providers and
+// viewport ranges to WebLinksAddon's hover callback; both have this shape, and a
+// key is only ever compared against another key from the SAME source, so one
+// structural type serves both.
+type LinkRange = { start: { x: number; y: number }; end: { x: number; y: number } };
+
+/** The link under the pointer, kept by the sticky-activation record (see below). */
+type HoveredLink = { text: string; key: string; activate: () => void };
+
+// Identifies a link by VALUE — where it sits and what it says — so a link that
+// was destroyed and rebuilt identically under the pointer still counts as the
+// same link. This is the comparison xterm 6 makes internally (`linkEquals`).
+function linkKey(text: string, range: LinkRange): string {
+	return `${range.start.y}:${range.start.x}-${range.end.y}:${range.end.x}:${text}`;
+}
+
 function preparePastedText(text: string): string {
 	return text.replace(/\r?\n/g, "\r");
 }
@@ -278,6 +294,49 @@ export function XtermTerminal(props: XtermTerminalProps) {
 		const host = hostRef.current;
 		if (!host) return undefined;
 
+		// --- Sticky link activation ------------------------------------------
+		// xterm 5.5 activates a link on mouseup only when the link object it
+		// captured on mousedown is still the CURRENT one (Linkifier compares the
+		// two by identity). Any re-render of the link's own line between press and
+		// release replaces that object — the Linkifier clears the link and
+		// immediately re-asks the providers for the same one — so in a pane whose
+		// agent repaints, which every Claude Code pane does several times a second,
+		// the press and the release hold different objects and the click is dropped.
+		// The pointer never moved and the link never changed; only its identity did.
+		// Upstream fixed this in xterm 6 by comparing links by VALUE instead
+		// (`linkEquals`); until this app is on 6, we finish the click ourselves.
+		//
+		// Every mechanism that linkifies terminal text reports hover and leave
+		// through a PUBLIC hook — OSC 8 hyperlinks through `options.linkHandler`,
+		// auto-detected URLs through WebLinksAddon's options, our own three
+		// providers through the links they build — so one record of "the link under
+		// the pointer" covers all of them, with no reach into xterm's internals.
+		let hoveredLink: HoveredLink | null = null;
+		let pressedLink: HoveredLink | null = null;
+		let linkActivations = 0;
+		let linkActivationsAtPress = 0;
+		const noteLinkHover = (text: string, range: LinkRange, activate: () => void) => {
+			hoveredLink = { text, key: linkKey(text, range), activate };
+		};
+		const noteLinkLeave = (text: string) => {
+			if (hoveredLink?.text === text) hoveredLink = null;
+		};
+		// EVERY activation runs through here — xterm's own and the fallback's — so
+		// the fallback can tell whether xterm already opened this click's link and
+		// never opens it twice. Once this app moves to xterm 6, xterm activates on
+		// its own and the fallback below simply stops finding anything to do.
+		const activateLink = (activate: () => void) => {
+			linkActivations += 1;
+			activate();
+		};
+		const terminalLink = (text: string, range: LinkRange, activate: () => void): ILink => ({
+			text,
+			range,
+			activate: () => activateLink(activate),
+			hover: () => noteLinkHover(text, range, activate),
+			leave: () => noteLinkLeave(text),
+		});
+
 		let term: Terminal;
 		try {
 			term = new Terminal({
@@ -318,7 +377,11 @@ export function XtermTerminal(props: XtermTerminalProps) {
 				// default handler — whose confirm() dialog would freeze the renderer.
 				linkHandler: {
 					allowNonHttpProtocols: true,
-					activate: (_event, uri) => openTerminalLink(uri),
+					activate: (_event, uri) => activateLink(() => openTerminalLink(uri)),
+					// Hover/leave feed the sticky-activation record above; they draw
+					// nothing (xterm underlines an OSC 8 link on its own).
+					hover: (_event, uri, range) => noteLinkHover(uri, range, () => openTerminalLink(uri)),
+					leave: (_event, uri) => noteLinkLeave(uri),
 				},
 			});
 		} catch (error) {
@@ -339,9 +402,13 @@ export function XtermTerminal(props: XtermTerminalProps) {
 		// passed to it (main.ts setWindowOpenHandler), so the default handler's
 		// empty open is dropped and clicks silently no-op. Pass the matched URL to
 		// window.open directly so the main process routes it to shell.openExternal.
+		const openWebLink = (uri: string) => {
+			window.open(uri, "_blank", "noopener");
+		};
 		term.loadAddon(
-			new WebLinksAddon((_event, uri) => {
-				window.open(uri, "_blank", "noopener");
+			new WebLinksAddon((_event, uri) => activateLink(() => openWebLink(uri)), {
+				hover: (_event, uri, range) => noteLinkHover(uri, range, () => openWebLink(uri)),
+				leave: (_event, uri) => noteLinkLeave(uri),
 			}),
 		);
 		term.loadAddon(new SearchAddon());
@@ -455,6 +522,27 @@ export function XtermTerminal(props: XtermTerminalProps) {
 		// preventDefaults, so drag-to-select is untouched.
 		const focusTerminal = () => term.focus();
 		host.addEventListener("mousedown", focusTerminal);
+		// Sticky link activation (see the note at the top of this effect). Both
+		// listeners sit on the host, an ANCESTOR of the element xterm's own
+		// Linkifier listens on, so xterm has already had its say by the time these
+		// run: if it activated the link, the counter moved and this does nothing.
+		const pressLink = () => {
+			pressedLink = hoveredLink;
+			linkActivationsAtPress = linkActivations;
+		};
+		const releaseLink = (event: MouseEvent) => {
+			const pressed = pressedLink;
+			pressedLink = null;
+			if (event.button !== 0 || !pressed) return;
+			// xterm opened it itself — the link survived the press unreplaced.
+			if (linkActivations > linkActivationsAtPress) return;
+			// The pointer must still be on the SAME link it was pressed on: a press
+			// that ends somewhere else is a drag, not a click on a link.
+			if (hoveredLink?.key !== pressed.key) return;
+			activateLink(pressed.activate);
+		};
+		host.addEventListener("mousedown", pressLink);
+		host.addEventListener("mouseup", releaseLink);
 		// Register as the active terminal so anything that dismisses a transient
 		// surface (the New task dialog, a toolbar overlay) can hand the caret back
 		// here; and, when this pane is the one being switched to, grab focus on
@@ -598,14 +686,16 @@ export function XtermTerminal(props: XtermTerminalProps) {
 					return;
 				}
 				callback(
-					matches.map((match) => ({
-						text: text.slice(match.startIndex, match.endIndex),
-						range: {
-							start: { x: match.startIndex + 1, y: bufferLineNumber },
-							end: { x: match.endIndex, y: bufferLineNumber },
-						},
-						activate: () => callbacksRef.current.onSessionLinkActivate?.(match.sessionId),
-					})),
+					matches.map((match) =>
+						terminalLink(
+							text.slice(match.startIndex, match.endIndex),
+							{
+								start: { x: match.startIndex + 1, y: bufferLineNumber },
+								end: { x: match.endIndex, y: bufferLineNumber },
+							},
+							() => callbacksRef.current.onSessionLinkActivate?.(match.sessionId),
+						),
+					),
 				);
 			},
 		});
@@ -639,14 +729,16 @@ export function XtermTerminal(props: XtermTerminalProps) {
 					return;
 				}
 				callback(
-					matches.map((match) => ({
-						text: text.slice(match.startIndex, match.endIndex),
-						range: {
-							start: { x: match.startIndex + 1, y: bufferLineNumber },
-							end: { x: match.endIndex, y: bufferLineNumber },
-						},
-						activate: () => openTerminalLink(match.url),
-					})),
+					matches.map((match) =>
+						terminalLink(
+							text.slice(match.startIndex, match.endIndex),
+							{
+								start: { x: match.startIndex + 1, y: bufferLineNumber },
+								end: { x: match.endIndex, y: bufferLineNumber },
+							},
+							() => openTerminalLink(match.url),
+						),
+					),
 				);
 			},
 		});
@@ -678,14 +770,16 @@ export function XtermTerminal(props: XtermTerminalProps) {
 					return;
 				}
 				callback(
-					matches.map((match) => ({
-						text: text.slice(match.startIndex, match.endIndex),
-						range: {
-							start: { x: match.startIndex + 1, y: bufferLineNumber },
-							end: { x: match.endIndex, y: bufferLineNumber },
-						},
-						activate: () => callbacksRef.current.onFileLinkActivate?.(match),
-					})),
+					matches.map((match) =>
+						terminalLink(
+							text.slice(match.startIndex, match.endIndex),
+							{
+								start: { x: match.startIndex + 1, y: bufferLineNumber },
+								end: { x: match.endIndex, y: bufferLineNumber },
+							},
+							() => callbacksRef.current.onFileLinkActivate?.(match),
+						),
+					),
 				);
 			},
 		});
@@ -746,6 +840,8 @@ export function XtermTerminal(props: XtermTerminalProps) {
 			stabilizer.dispose();
 			window.removeEventListener("resize", fitTerminal);
 			host.removeEventListener("mousedown", focusTerminal);
+			host.removeEventListener("mousedown", pressLink);
+			host.removeEventListener("mouseup", releaseLink);
 			host.removeEventListener("copy", copyInput);
 			window.removeEventListener("keydown", copyShortcut, true);
 			selectionChange.dispose();
