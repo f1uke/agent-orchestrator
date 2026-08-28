@@ -6406,6 +6406,16 @@ components:
         op:
           description: boot or shutdown.
           type: string
+        phase:
+          description: booting or slimming, while a boot is in flight.
+          type: string
+        profile:
+          description: applied, already, skipped or failed. skipped and failed mean
+            the device is stock.
+          type: string
+        profileReason:
+          description: Why the device is stock, in the tool's own words.
+          type: string
         reason:
           description: Why it failed, in the machine's own words where there are any.
           type: string
@@ -6414,7 +6424,7 @@ components:
           type: string
         state:
           description: running while the operation is in flight; failed when it did
-            not work.
+            not work; warned when it worked but left the device unslimmed.
           type: string
       required:
       - op

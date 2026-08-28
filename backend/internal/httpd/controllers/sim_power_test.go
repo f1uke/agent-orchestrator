@@ -324,6 +324,114 @@ func TestSimDevices_ReportAFailureThatStillStands(t *testing.T) {
 	}
 }
 
+func TestSimDevices_ReportABootedDeviceThatCameUpStock(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted(), powerStatus: map[string]simpower.Status{
+		testSimUDID: {
+			Op:      simpower.Boot,
+			State:   simpower.Warned,
+			Profile: &simslim.Result{Outcome: simslim.Skipped, Reason: "simslim is not on PATH, so this device is stock"},
+		},
+	}}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	var out struct {
+		Devices []struct {
+			UDID  string `json:"udid"`
+			Power *struct {
+				State         string `json:"state"`
+				Phase         string `json:"phase"`
+				Profile       string `json:"profile"`
+				ProfileReason string `json:"profileReason"`
+			} `json:"power"`
+		} `json:"devices"`
+	}
+	if code := getJSON(t, srv.URL+"/api/v1/sim/devices", &out); code != http.StatusOK {
+		t.Fatalf("status %d, want 200", code)
+	}
+
+	var found bool
+	for _, d := range out.Devices {
+		if d.UDID != testSimUDID {
+			continue
+		}
+		found = true
+		if d.Power == nil {
+			t.Fatal("a stock device produced no power view, so the pane says nothing")
+		}
+		if d.Power.State != "warned" {
+			t.Fatalf("state = %q, want warned - the boot itself worked", d.Power.State)
+		}
+		if d.Power.Profile != "skipped" {
+			t.Fatalf("profile = %q, want skipped", d.Power.Profile)
+		}
+		if d.Power.ProfileReason == "" {
+			t.Fatal("no reason reached the pane")
+		}
+	}
+	if !found {
+		t.Fatalf("%s missing from the listing", testSimUDID)
+	}
+}
+
+func TestSimDevices_CarryTheSlimmingPhase(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted(), powerStatus: map[string]simpower.Status{
+		testSimUDID: {Op: simpower.Boot, State: simpower.Running, Phase: simpower.PhaseSlimming},
+	}}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	var out struct {
+		Devices []struct {
+			UDID  string `json:"udid"`
+			Power *struct {
+				Phase string `json:"phase"`
+			} `json:"power"`
+		} `json:"devices"`
+	}
+	if code := getJSON(t, srv.URL+"/api/v1/sim/devices", &out); code != http.StatusOK {
+		t.Fatalf("status %d, want 200", code)
+	}
+	for _, d := range out.Devices {
+		if d.UDID == testSimUDID {
+			if d.Power == nil || d.Power.Phase != "slimming" {
+				t.Fatalf("power = %+v, want phase slimming", d.Power)
+			}
+		}
+	}
+}
+
+// A Warned entry is ABOUT a device that is booted. The rule that drops a stale
+// failure once the device reached the goal anyway must not touch it, or the
+// warning is deleted the instant it becomes true.
+func TestSimDevices_KeepAStockWarningOnABootedDevice(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted(), powerStatus: map[string]simpower.Status{
+		testSimUDID: {Op: simpower.Boot, State: simpower.Warned,
+			Profile: &simslim.Result{Outcome: simslim.Failed, Reason: "it refused"}},
+	}}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	var out struct {
+		Devices []struct {
+			UDID  string          `json:"udid"`
+			Power *map[string]any `json:"power"`
+		} `json:"devices"`
+	}
+	if code := getJSON(t, srv.URL+"/api/v1/sim/devices", &out); code != http.StatusOK {
+		t.Fatalf("status %d, want 200", code)
+	}
+	for _, d := range out.Devices {
+		if d.UDID == testSimUDID && d.Power == nil {
+			t.Fatal("the warning was cleared because the device reached Booted")
+		}
+	}
+
+	screen.mu.Lock()
+	cleared := len(screen.cleared)
+	screen.mu.Unlock()
+	if cleared != 0 {
+		t.Fatalf("ClearPower was called %d times on a Warned entry", cleared)
+	}
+}
+
 // errorCode digs the machine-readable code out of the locked error envelope.
 func errorCode(body map[string]any) string {
 	code, _ := body["code"].(string)

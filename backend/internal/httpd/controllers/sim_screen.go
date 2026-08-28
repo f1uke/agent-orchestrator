@@ -102,9 +102,17 @@ type SimDeviceFrameView struct {
 // second field repeating it is a second field to be wrong.
 type SimDevicePowerView struct {
 	Op        simpower.Op    `json:"op" description:"boot or shutdown."`
-	State     simpower.State `json:"state" description:"running while the operation is in flight; failed when it did not work."`
+	State     simpower.State `json:"state" description:"running while the operation is in flight; failed when it did not work; warned when it worked but left the device unslimmed."`
 	StartedAt time.Time      `json:"startedAt"`
 	Reason    string         `json:"reason,omitempty" description:"Why it failed, in the machine's own words where there are any."`
+	// Phase is which part of a boot is running: booting, then slimming. The
+	// second takes tens of seconds, and without this the pane looks frozen for
+	// all of them.
+	Phase string `json:"phase,omitempty" description:"booting or slimming, while a boot is in flight."`
+	// Profile and ProfileReason are what happened to the device's daemon
+	// profile. skipped and failed both mean the device is stock.
+	Profile       string `json:"profile,omitempty" description:"applied, already, skipped or failed. skipped and failed mean the device is stock."`
+	ProfileReason string `json:"profileReason,omitempty" description:"Why the device is stock, in the tool's own words."`
 }
 
 // SimDeviceView is one simulator plus its lease state.
@@ -391,9 +399,15 @@ func (c *SimScreenController) powerView(d simctl.Device, status simpower.Status,
 		c.Screen.ClearPower(d.UDID)
 		return nil
 	}
-	return &SimDevicePowerView{
+	v := &SimDevicePowerView{
 		Op: status.Op, State: status.State, StartedAt: status.StartedAt.UTC(), Reason: status.Reason,
+		Phase: status.Phase,
 	}
+	if status.Profile != nil {
+		v.Profile = string(status.Profile.Outcome)
+		v.ProfileReason = status.Profile.Reason
+	}
+	return v
 }
 
 // reachedGoal says whether the device is now in the state the operation was

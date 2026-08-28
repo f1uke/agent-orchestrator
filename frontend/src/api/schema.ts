@@ -2112,11 +2112,17 @@ export interface components {
         ControllersSimDevicePowerView: {
             /** @description boot or shutdown. */
             op: string;
+            /** @description booting or slimming, while a boot is in flight. */
+            phase?: string;
+            /** @description applied, already, skipped or failed. skipped and failed mean the device is stock. */
+            profile?: string;
+            /** @description Why the device is stock, in the tool's own words. */
+            profileReason?: string;
             /** @description Why it failed, in the machine's own words where there are any. */
             reason?: string;
             /** Format: date-time */
             startedAt: string;
-            /** @description running while the operation is in flight; failed when it did not work. */
+            /** @description running while the operation is in flight; failed when it did not work; warned when it worked but left the device unslimmed. */
             state: string;
         };
         ControllersSimFlowResponse: {
