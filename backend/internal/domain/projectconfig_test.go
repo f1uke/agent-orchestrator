@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -224,5 +225,71 @@ func TestProjectConfig_HasIOSSimulator_OptInRoundTrip(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("hasIOSSimulator is a plain toggle and must validate: %v", err)
+	}
+}
+
+func TestProjectConfig_SimProfileAbsentIsNotSlimming(t *testing.T) {
+	var c ProjectConfig
+	if c.SimProfile != nil {
+		t.Fatal("a project that says nothing must not slim")
+	}
+}
+
+// nil and an empty Keep are different instructions, which is why the field is
+// a pointer: nil means do not slim, present-and-empty means slim everything.
+func TestProjectConfig_EmptyKeepIsAValidFullSlim(t *testing.T) {
+	c := ProjectConfig{SimProfile: &SimProfileConfig{}}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestProjectConfig_ValidatesDaemonLabels(t *testing.T) {
+	for name, keep := range map[string][]string{
+		"empty":      {""},
+		"whitespace": {"com.apple.apsd "},
+		"foreign":    {"org.example.daemon"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := ProjectConfig{SimProfile: &SimProfileConfig{Keep: keep}}
+			if err := c.Validate(); err == nil {
+				t.Fatalf("Validate accepted %q; a typo here is a daemon silently not kept", keep)
+			}
+		})
+	}
+}
+
+func TestProjectConfig_AcceptsARealKeepList(t *testing.T) {
+	c := ProjectConfig{SimProfile: &SimProfileConfig{Keep: []string{
+		"com.apple.apsd",
+		"com.apple.swcd",
+		"com.apple.assetsd",
+		"com.apple.telephonyutilities.callservicesd",
+	}}}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestProjectConfig_SimProfileRoundTripsThroughJSON(t *testing.T) {
+	in := ProjectConfig{SimProfile: &SimProfileConfig{Keep: []string{"com.apple.apsd"}}}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out ProjectConfig
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.SimProfile == nil || len(out.SimProfile.Keep) != 1 || out.SimProfile.Keep[0] != "com.apple.apsd" {
+		t.Fatalf("round trip lost the profile: %+v", out.SimProfile)
+	}
+	var bare ProjectConfig
+	b2, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(b2), "simProfile") {
+		t.Fatalf("an unset profile was serialised: %s", b2)
 	}
 }
