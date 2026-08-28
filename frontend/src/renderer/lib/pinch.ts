@@ -39,20 +39,34 @@ export const PINCH_ANCHOR: DragPoint = { x: 0.5, y: 0.5 };
  * ⚠ This is `simbridge.MinPinchSpan` (backend/internal/simbridge/gesture.go),
  * copied because the pane has to know it and the API does not publish it. If
  * that constant moves, this one has to move with it - and the symptom of it not
- * moving is a refusal a human sees rather than anything a test fails on. It is
+ * moving is a refusal a human sees, which no test here fails on. It is
  * duplicated rather than approximated on purpose: the two are compared against
  * the same doubles, so an equal value is exactly safe and a nearby one is not.
  *
- * What it is FOR here: the anchor starts at the middle of the screen, so a press
- * ON the middle puts both fingers on the same spot. The daemon refuses that -
- * correctly, because a pinch that lands as one touch sends events, changes
- * nothing and reads exactly like one that worked - but "you pressed too close to
- * the middle" is a poor thing to say to somebody who has simply started a zoom
- * where a zoom naturally starts. So the touch waits, by the same instinct the
- * one-finger path waits to tell a tap from a drag: it goes down the moment there
- * are two contacts to put down, which for every press but a bullseye is at once.
+ * What it is FOR: the anchor starts at the middle of the screen, so the two
+ * contacts meet when the pointer reaches the middle - on a press that lands
+ * there, and again on a pinch dragged all the way closed through it. The daemon
+ * refuses a pair that close, correctly, because a pinch landing as one touch
+ * sends events, changes nothing and reads exactly like one that worked. But a
+ * refusal there is a red message and a device that answers nothing until the
+ * watchdog lifts it, for a human who was simply zooming out as far as it goes.
+ *
+ * So this is a floor on the gesture rather than a gate on it: the fingers stop
+ * coming together, which is what real fingers do, and the overlay draws them
+ * where they actually are - so what stops is visible rather than silent.
  */
 export const MIN_PINCH_SPAN = 0.02;
+
+/**
+ * Half the span the contacts are held at once the pointer has closed them.
+ *
+ * It is a fifth over half of MIN_PINCH_SPAN rather than exactly half, and the
+ * margin is the point: the daemon refuses a pair whose distance comes out below
+ * MIN_PINCH_SPAN, and a pair placed at exactly the threshold along a diagonal
+ * can round to either side of it. A tenth of a percent of the screen buys
+ * immunity from that and is not a distance anybody can see.
+ */
+const HELD_APART_RADIUS = MIN_PINCH_SPAN * 0.6;
 
 /** How far apart a grip's contacts are, in the units MIN_PINCH_SPAN is in. */
 export function pinchSpan(grip: DragGrip): number {
@@ -71,7 +85,30 @@ export function pinchSpan(grip: DragGrip): number {
  * keeps its fingers on one axis and this has no rotation at all.)
  */
 export function pinchGrip(at: DragPoint, anchor: DragPoint): DragGrip {
-	return { a: at, b: mirror(at, anchor) };
+	const a = heldApartFrom(anchor, at);
+	return { a, b: mirror(a, anchor) };
+}
+
+/**
+ * heldApartFrom is the pointer's own contact, held out to HELD_APART_RADIUS from
+ * the anchor once it comes closer than that - which, since the other contact is
+ * the same distance the other way, is what keeps the pair far enough apart to
+ * land as two. See MIN_PINCH_SPAN for why the fingers stop rather than the
+ * gesture being refused.
+ *
+ * With the pointer exactly ON the anchor there is no direction to hold it out
+ * along, so it picks one. Vertical, because a phone is taller than it is wide
+ * and the fingers of a pinch that has closed to nothing still have to point
+ * somewhere.
+ */
+function heldApartFrom(anchor: DragPoint, at: DragPoint): DragPoint {
+	const dx = at.x - anchor.x;
+	const dy = at.y - anchor.y;
+	const away = Math.hypot(dx, dy);
+	if (away >= HELD_APART_RADIUS) return at;
+	if (away === 0) return { x: anchor.x, y: anchor.y + HELD_APART_RADIUS };
+	const out = HELD_APART_RADIUS / away;
+	return { x: anchor.x + dx * out, y: anchor.y + dy * out };
 }
 
 /**
@@ -95,9 +132,24 @@ function mirror(at: DragPoint, anchor: DragPoint): DragPoint {
  * pinch is what asks for it.
  */
 export function pannedAnchor(anchor: DragPoint, from: DragPoint, to: DragPoint): DragPoint {
-	return { x: clamp01(anchor.x + (to.x - from.x)), y: clamp01(anchor.y + (to.y - from.y)) };
+	return { x: onScreenAnchor(anchor.x + (to.x - from.x)), y: onScreenAnchor(anchor.y + (to.y - from.y)) };
 }
 
 function clamp01(n: number): number {
 	return Math.min(1, Math.max(0, n));
+}
+
+/**
+ * onScreenAnchor keeps the anchor far enough in from every edge for the held
+ * pair to fit, which is what makes the floor above safe: the contacts sit
+ * HELD_APART_RADIUS either side of the anchor, so an anchor closer to an edge
+ * than that would push one of them off the screen - and an off-screen contact is
+ * a coordinate the daemon refuses, which drops the pinch mid-gesture.
+ *
+ * It costs nothing anybody can see: that radius is a little over one percent of
+ * the screen, and a pinch centred inside the outermost one percent of it is not
+ * a gesture anybody was making.
+ */
+function onScreenAnchor(n: number): number {
+	return Math.min(1 - HELD_APART_RADIUS, Math.max(HELD_APART_RADIUS, n));
 }

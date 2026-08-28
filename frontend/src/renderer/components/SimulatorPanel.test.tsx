@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MIN_PINCH_SPAN } from "../lib/pinch";
 import { SimulatorPanel } from "./SimulatorPanel";
 
 const { getMock, postMock, deleteMock, sessionTask } = vi.hoisted(() => ({
@@ -1536,10 +1537,11 @@ describe("SimulatorPanel pinch", () => {
 });
 
 // 🗝 The anchor starts at the middle of the screen, so a press ON the middle puts
-// both fingers on the same spot. The daemon refuses that - a pinch that lands as
-// one touch sends events and changes nothing - and being told off for starting a
-// zoom where a zoom naturally starts is a poor answer. So the contacts are drawn
-// and the touch waits until there are two of them to put down.
+// both fingers on the same spot - and the daemon refuses a pair that close,
+// because a pinch landing as one touch sends events and changes nothing. Being
+// told off for starting a zoom where a zoom naturally starts is a poor answer,
+// and the refusal costs a red message plus a device that answers nothing until
+// the watchdog lifts it. So the fingers stop coming together instead.
 //
 // ⚠ Found on a real device, not in a test: the first Option-drag driven through
 // the packaged app started at 0.5,0.5 and was refused before anything landed.
@@ -1558,46 +1560,62 @@ describe("SimulatorPanel pinch from the exact middle", () => {
 		);
 	});
 
-	it("waits for the fingers to be two before putting them down", async () => {
+	async function drivable() {
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await waitFor(() => expect(openSockets()).toHaveLength(1));
 		makeLive();
 		await turnDrivingOn();
 		const canvas = await screen.findByTestId("sim-canvas");
 		stubCanvasBox(canvas);
+		return canvas;
+	}
 
-		// clientY 200 of a 400-tall box is the exact middle of the screen, where
-		// the two contacts coincide.
-		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 200, altKey: true });
-		// Nothing is sent, and nothing is refused: there is no gesture yet.
-		expect(
-			postMock.mock.calls.filter(([path]) => String(path).endsWith("/gesture")),
-			"a pinch with both fingers on one spot was sent to the device",
-		).toHaveLength(0);
-		// The dots are drawn all the same, so the human can see where the fingers
-		// are and that they are on top of each other.
-		expect(await screen.findByTestId("sim-pinch-dots")).toBeInTheDocument();
+	/** clientY 200 of a 400-tall box is the exact middle of the screen. */
+	const MIDDLE = { clientX: 100, clientY: 200 };
 
-		// Moving off the middle separates them, and that is when the touch lands.
-		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+	it("lands two fingers the minimum apart rather than two on one spot", async () => {
+		const canvas = await drivable();
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, altKey: true, ...MIDDLE });
 		await waitFor(() => expect(gestureKinds()).toEqual(["pinch-begin"]));
-		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+
+		const body = postMock.mock.calls
+			.filter(([path]) => String(path).endsWith("/gesture"))
+			.map(([, options]) => (options as { body: Record<string, number> }).body)[0];
+		// Both contacts on the centre line, held apart along it.
+		expect(Number(body.x)).toBeCloseTo(0.5, 6);
+		expect(Number(body.x2)).toBeCloseTo(0.5, 6);
+		expect(Math.hypot(Number(body.x2) - Number(body.x), Number(body.y2) - Number(body.y))).toBeGreaterThan(
+			MIN_PINCH_SPAN,
+		);
+
+		fireEvent.pointerUp(canvas, { pointerId: 1, altKey: true, ...MIDDLE });
 		await waitFor(() => expect(gestureKinds()).toEqual(["pinch-begin", "pinch-end"]));
 	});
 
-	// And a press that never leaves the middle sends nothing at all - not a
-	// pinch, and not a tap either.
-	it("sends nothing for a press that never leaves the middle", async () => {
-		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
-		await waitFor(() => expect(openSockets()).toHaveLength(1));
-		makeLive();
-		await turnDrivingOn();
-		const canvas = await screen.findByTestId("sim-canvas");
-		stubCanvasBox(canvas);
+	// And dragging the pointer THROUGH the middle - a pinch closed as far as it
+	// goes - keeps sending moves rather than being refused at the crossing.
+	it("keeps the pinch alive when the pointer is dragged through the middle", async () => {
+		const canvas = await drivable();
 
-		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 200, altKey: true });
-		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 200, altKey: true });
-		await new Promise((resolve) => setTimeout(resolve, 20));
-		expect(gestureKinds()).toEqual([]);
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 340, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toEqual(["pinch-begin"]));
+		for (const clientY of [280, 220, 200, 180, 140]) {
+			fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY, altKey: true });
+			await waitFor(() => expect(postMock.mock.calls.length).toBeGreaterThan(0));
+		}
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 140, altKey: true });
+
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-end"));
+		// Every step is a pinch, and every one of them describes two contacts far
+		// enough apart for the device to read them as two.
+		for (const body of postMock.mock.calls
+			.filter(([path]) => String(path).endsWith("/gesture"))
+			.map(([, options]) => (options as { body: Record<string, number> }).body)) {
+			expect(String(body.kind)).toMatch(/^pinch-/);
+			expect(Math.hypot(Number(body.x2) - Number(body.x), Number(body.y2) - Number(body.y))).toBeGreaterThanOrEqual(
+				MIN_PINCH_SPAN - 1e-9,
+			);
+		}
 	});
 });

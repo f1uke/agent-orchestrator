@@ -153,9 +153,10 @@ test("holding Option puts two fingers on the device, and takes both off again", 
 
 	const gesture = `/api/v1/sessions/${sandbox.sessionId}/sim-devices/${sandbox.udid}/gesture`;
 	// Spreading about the middle: the pointer walks away from the centre, so the
-	// contact opposite it walks the other way. It STARTS clear of the centre
-	// because a press on the exact middle puts both contacts on one spot, and
-	// the pane holds the touch back until there are two of them to put down.
+	// contact opposite it walks the other way. It starts clear of the centre
+	// because that is where a person starts a spread from - a press ON the middle
+	// is where the two contacts meet, and is its own case in
+	// SimulatorPanel.test.tsx.
 	const route = [0.6, 0.65, 0.7, 0.75, 0.8, 0.85].map((y) => ({ x: 0.5, y }));
 	let dots = 0;
 	let midPinch: { status: number; code?: string } = { status: 0 };

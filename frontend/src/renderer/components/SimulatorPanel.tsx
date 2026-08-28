@@ -11,7 +11,7 @@ import { usePageVisible, useSimulatorStream, type SimStreamStatus } from "../hoo
 import { type ForwardedKey, useDeviceKeyboard } from "../hooks/useDeviceKeyboard";
 import type { DragGrip, DragPoint } from "../lib/drag-stream";
 import { DragStream } from "../lib/drag-stream";
-import { MIN_PINCH_SPAN, PINCH_ANCHOR, pannedAnchor, pinchGrip, pinchSpan } from "../lib/pinch";
+import { PINCH_ANCHOR, pannedAnchor, pinchGrip } from "../lib/pinch";
 import { SimPinchDots } from "./SimPinchDots";
 import { devicePoint, fitDevice } from "../lib/screen-fit";
 import { cn } from "../lib/utils";
@@ -592,31 +592,23 @@ export function SimulatorPanel({
 		// started once the pointer had travelled eight pixels would throw the
 		// first eight pixels of every zoom away.
 		//
-		// The one thing it does wait for is having two contacts to put down at
-		// all - see pinchDown, and MIN_PINCH_SPAN for why.
+		// ⚠ A press on the exact middle of the screen puts both contacts on one
+		// spot, because the middle is where they start out from. pinchGrip holds
+		// them the minimum apart rather than letting that happen - see
+		// MIN_PINCH_SPAN. Found on a real device, not in a test.
 		const anchor = PINCH_ANCHOR;
 		pinch.current = { anchor, at: point };
 		setPinching(true);
 		pinchDown(pinchGrip(point, anchor), anchor);
 	};
 
-	/**
-	 * pinchDown paints the contacts and puts them on the device - or paints them
-	 * and waits, while they are still too close together to land as two.
-	 *
-	 * The wait is invisible for every press but one on the exact middle of the
-	 * screen, which is where the fingers start on top of each other. See
-	 * MIN_PINCH_SPAN.
-	 */
+	/** pinchDown paints the contacts where they are and puts them on the device. */
 	const pinchDown = (grip: DragGrip, anchor: DragPoint) => {
 		paintDots(grip, anchor);
 		const held = drag.current;
 		if (!held) return;
-		if (held.isDragging) {
-			held.move(grip);
-		} else if (pinchSpan(grip) >= MIN_PINCH_SPAN) {
-			held.begin(grip);
-		}
+		if (held.isDragging) held.move(grip);
+		else held.begin(grip);
 	};
 
 	// A pointer capture the browser takes back - a window switch, a gesture the
