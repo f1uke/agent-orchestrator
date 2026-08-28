@@ -6407,6 +6407,18 @@ components:
         op:
           description: boot or shutdown.
           type: string
+        phase:
+          description: booting or slimming, while a boot is in flight. Empty for a
+            shutdown, which has only one part.
+          type: string
+        profile:
+          description: skipped or failed - the two outcomes that mean the device is
+            stock. A profile that applied leaves no power entry at all, so nothing
+            else reaches the wire.
+          type: string
+        profileReason:
+          description: Why the device is stock, in the tool's own words.
+          type: string
         reason:
           description: Why it failed, in the machine's own words where there are any.
           type: string
@@ -6415,7 +6427,7 @@ components:
           type: string
         state:
           description: running while the operation is in flight; failed when it did
-            not work.
+            not work; warned when it worked but left the device unslimmed.
           type: string
       required:
       - op
@@ -6703,6 +6715,13 @@ components:
           type: string
       required:
       - harness
+      type: object
+    DomainSimProfileConfig:
+      properties:
+        keep:
+          items:
+            type: string
+          type: array
       type: object
     DomainSmokeRun:
       properties:
@@ -7615,6 +7634,8 @@ components:
           type: array
         sessionPrefix:
           type: string
+        simProfile:
+          $ref: '#/components/schemas/DomainSimProfileConfig'
         symlinks:
           items:
             type: string

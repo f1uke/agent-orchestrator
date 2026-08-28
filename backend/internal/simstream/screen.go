@@ -13,6 +13,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 )
 
 // Screen is the daemon's machine-local simulator surface: what simulators exist,
@@ -144,8 +145,12 @@ func (s *Screen) forgetListing() {
 // StartPower boots or shuts down a device, returning as soon as the work is
 // under way. See internal/simpower for why this exists in the daemon and
 // nowhere else - in particular, why there is no `ao sim boot`.
-func (s *Screen) StartPower(ctx context.Context, udid string, op simpower.Op, done func()) error {
-	return s.power.Start(ctx, udid, op, done)
+//
+// req is passed straight through and never inspected: a Screen is a
+// device-level surface with no idea what a project is, and keeping it that way
+// is what lets it be tested over a bare fake runner.
+func (s *Screen) StartPower(ctx context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error {
+	return s.power.Start(ctx, udid, op, req, done)
 }
 
 // PowerStatus is every device with a power operation in flight or a failure to

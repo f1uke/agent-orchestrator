@@ -2112,11 +2112,17 @@ export interface components {
         ControllersSimDevicePowerView: {
             /** @description boot or shutdown. */
             op: string;
+            /** @description booting or slimming, while a boot is in flight. Empty for a shutdown, which has only one part. */
+            phase?: string;
+            /** @description skipped or failed - the two outcomes that mean the device is stock. A profile that applied leaves no power entry at all, so nothing else reaches the wire. */
+            profile?: string;
+            /** @description Why the device is stock, in the tool's own words. */
+            profileReason?: string;
             /** @description Why it failed, in the machine's own words where there are any. */
             reason?: string;
             /** Format: date-time */
             startedAt: string;
-            /** @description running while the operation is in flight; failed when it did not work. */
+            /** @description running while the operation is in flight; failed when it did not work; warned when it worked but left the device unslimmed. */
             state: string;
         };
         ControllersSimFlowResponse: {
@@ -2236,6 +2242,9 @@ export interface components {
         };
         DomainReviewerConfig: {
             harness: string;
+        };
+        DomainSimProfileConfig: {
+            keep?: string[];
         };
         DomainSmokeRun: {
             checkId: string;
@@ -2618,6 +2627,7 @@ export interface components {
             responseLanguage?: string;
             reviewers?: components["schemas"]["DomainReviewerConfig"][];
             sessionPrefix?: string;
+            simProfile?: components["schemas"]["DomainSimProfileConfig"];
             symlinks?: string[];
             systemPromptAdditions?: components["schemas"]["DomainSystemPromptAdditions"];
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];

@@ -8,6 +8,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 )
 
 const testUDID = "11111111-2222-3333-4444-555555555555"
@@ -43,6 +46,27 @@ func (r *recorder) calls() [][]string {
 
 func found(string) (string, error) { return "/usr/bin/xcrun", nil }
 
+func missingSimslim(name string) (string, error) {
+	if name == simslim.Binary {
+		return "", errors.New("executable file not found in $PATH")
+	}
+	return "/usr/bin/xcrun", nil
+}
+
+// waitFor polls a condition instead of sleeping on it, so the test is quick
+// when it passes and still fails rather than hanging when it does not.
+func waitFor(t *testing.T, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal(msg)
+}
+
 func newTestPower(t *testing.T, rec *recorder) *Power {
 	t.Helper()
 	p := New(found, rec.run)
@@ -54,7 +78,7 @@ func TestBoot_RunsBootstatusAndClearsWhenDone(t *testing.T) {
 	rec := &recorder{}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -80,7 +104,7 @@ func TestShutdown_RunsShutdown(t *testing.T) {
 	rec := &recorder{}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), testUDID, Shutdown, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Shutdown, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -103,7 +127,7 @@ func TestStart_ReportsRunningWhileItWorks(t *testing.T) {
 	}}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	status, ok := p.Status(testUDID)
@@ -128,10 +152,10 @@ func TestStart_RefusesASecondOpOnTheSameDevice(t *testing.T) {
 	}}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("first Start: %v", err)
 	}
-	err := p.Start(context.Background(), testUDID, Shutdown, nil)
+	err := p.Start(context.Background(), testUDID, Shutdown, nil, nil)
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("second Start = %v, want ErrBusy", err)
 	}
@@ -148,7 +172,7 @@ func TestStart_KeepsTheFailureAndItsReason(t *testing.T) {
 	}}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -176,7 +200,7 @@ func TestStart_TimesOutAndSaysSo(t *testing.T) {
 	p.bootTimeout = 20 * time.Millisecond
 	t.Cleanup(p.wait)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -205,7 +229,7 @@ func TestStart_TimeoutNeverShutsTheDeviceDown(t *testing.T) {
 	p.bootTimeout = 20 * time.Millisecond
 	t.Cleanup(p.wait)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -221,7 +245,7 @@ func TestStart_UnavailableWithoutXcrun(t *testing.T) {
 	rec := &recorder{}
 	p := New(func(string) (string, error) { return "", errors.New("not found") }, rec.run)
 
-	err := p.Start(context.Background(), testUDID, Boot, nil)
+	err := p.Start(context.Background(), testUDID, Boot, nil, nil)
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("Start = %v, want ErrUnavailable", err)
 	}
@@ -234,7 +258,7 @@ func TestStart_RejectsAnUnknownOp(t *testing.T) {
 	rec := &recorder{}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), testUDID, Op("reboot"), nil); err == nil {
+	if err := p.Start(context.Background(), testUDID, Op("reboot"), nil, nil); err == nil {
 		t.Fatal("an op nobody implements was accepted")
 	}
 	if len(rec.calls()) != 0 {
@@ -253,13 +277,13 @@ func TestStart_MatchesUDIDCaseInsensitively(t *testing.T) {
 	}}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), strings.ToLower(testUDID), Boot, nil); err != nil {
+	if err := p.Start(context.Background(), strings.ToLower(testUDID), Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if _, ok := p.Status(strings.ToUpper(testUDID)); !ok {
 		t.Error("the same device read as two different ones depending on case")
 	}
-	if err := p.Start(context.Background(), strings.ToUpper(testUDID), Boot, nil); !errors.Is(err, ErrBusy) {
+	if err := p.Start(context.Background(), strings.ToUpper(testUDID), Boot, nil, nil); !errors.Is(err, ErrBusy) {
 		t.Errorf("a second op on the same device in another case = %v, want ErrBusy", err)
 	}
 	close(release)
@@ -277,14 +301,14 @@ func TestStart_RetryingClearsTheOldFailure(t *testing.T) {
 	}}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
 	if status, _ := p.Status(testUDID); status.State != Failed {
 		t.Fatalf("first attempt did not fail: %+v", status)
 	}
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("retry: %v", err)
 	}
 	p.wait()
@@ -306,7 +330,7 @@ func TestClear_DropsAFailureAndLeavesARunningOpAlone(t *testing.T) {
 	}}
 	p := newTestPower(t, rec)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -315,7 +339,7 @@ func TestClear_DropsAFailureAndLeavesARunningOpAlone(t *testing.T) {
 		t.Error("Clear left the failure behind")
 	}
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("second Start: %v", err)
 	}
 	p.Clear(testUDID)
@@ -336,7 +360,7 @@ func TestAll_ReportsEveryDeviceWithSomethingInFlight(t *testing.T) {
 
 	other := "99999999-8888-7777-6666-555555555555"
 	for _, udid := range []string{testUDID, other} {
-		if err := p.Start(context.Background(), udid, Boot, nil); err != nil {
+		if err := p.Start(context.Background(), udid, Boot, nil, nil); err != nil {
 			t.Fatalf("Start %s: %v", udid, err)
 		}
 	}
@@ -363,7 +387,7 @@ func TestStart_NotifiesWhenAnOpSettles(t *testing.T) {
 	p.OnSettled(func() { settled <- struct{}{} })
 	t.Cleanup(p.wait)
 
-	if err := p.Start(context.Background(), testUDID, Boot, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	select {
@@ -390,7 +414,7 @@ func TestStart_SurvivesTheRequestThatAskedForIt(t *testing.T) {
 	p := newTestPower(t, rec)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := p.Start(ctx, testUDID, Boot, nil); err != nil {
+	if err := p.Start(ctx, testUDID, Boot, nil, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	<-started
@@ -400,4 +424,190 @@ func TestStart_SurvivesTheRequestThatAskedForIt(t *testing.T) {
 	if status, ok := p.Status(testUDID); ok {
 		t.Fatalf("the boot died with the request that asked for it: %+v", status)
 	}
+}
+
+// The regression guard for every project that has not opted in: a nil request
+// must leave the boot byte-for-byte as it was before this feature existed.
+func TestBoot_NilRequestRunsNoSimslimCommand(t *testing.T) {
+	rec := &recorder{}
+	p := newTestPower(t, rec)
+
+	if err := p.Start(context.Background(), testUDID, Boot, nil, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	p.wait()
+
+	for _, c := range rec.calls() {
+		if c[0] == simslim.Binary {
+			t.Fatalf("nil request still ran simslim: %v", rec.calls())
+		}
+	}
+	if _, ok := p.Status(testUDID); ok {
+		t.Fatal("a clean boot left an entry behind")
+	}
+}
+
+// Order, not just presence: slimming a device that is not up yet is slimming
+// nothing.
+func TestBoot_SlimsOnlyAfterTheDeviceIsUp(t *testing.T) {
+	rec := &recorder{}
+	p := newTestPower(t, rec)
+	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
+
+	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	p.wait()
+
+	calls := rec.calls()
+	if len(calls) < 2 {
+		t.Fatalf("want bootstatus then simslim, got %v", calls)
+	}
+	if calls[0][0] != simctl.Binary || calls[0][1] != "simctl" {
+		t.Fatalf("first call was not simctl: %v", calls[0])
+	}
+	if calls[1][0] != simslim.Binary {
+		t.Fatalf("second call was not simslim: %v", calls[1])
+	}
+}
+
+// A device that came up stock is not a failed boot, but it is not silence
+// either.
+func TestBoot_KeepsAWarningWhenTheDeviceIsStock(t *testing.T) {
+	rec := &recorder{}
+	p := New(missingSimslim, rec.run)
+	t.Cleanup(p.wait)
+	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
+
+	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	p.wait()
+
+	st, ok := p.Status(testUDID)
+	if !ok {
+		t.Fatal("a stock device left no entry, so nobody is ever told")
+	}
+	if st.State != Warned {
+		t.Fatalf("state = %q, want %q - the boot itself worked", st.State, Warned)
+	}
+	if st.Profile == nil || st.Profile.Outcome != simslim.Skipped {
+		t.Fatalf("profile = %+v, want outcome %q", st.Profile, simslim.Skipped)
+	}
+}
+
+func TestBoot_ClearsTheEntryWhenTheProfileLanded(t *testing.T) {
+	rec := &recorder{}
+	p := newTestPower(t, rec)
+	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
+
+	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	p.wait()
+
+	if st, ok := p.Status(testUDID); ok {
+		t.Fatalf("a device that reached its profile left an entry: %+v", st)
+	}
+}
+
+// A profile we could not work out must not read as a project that does not slim.
+func TestBoot_ReportsAProfileItCouldNotResolve(t *testing.T) {
+	rec := &recorder{}
+	p := newTestPower(t, rec)
+	req := &simslim.Request{Err: errors.New("project 7 is degraded")}
+
+	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	p.wait()
+
+	st, ok := p.Status(testUDID)
+	if !ok || st.State != Warned {
+		t.Fatalf("status = %+v ok=%v, want a Warned entry", st, ok)
+	}
+	if st.Profile == nil || st.Profile.Outcome != simslim.Failed {
+		t.Fatalf("profile = %+v, want outcome %q", st.Profile, simslim.Failed)
+	}
+	if !strings.Contains(st.Profile.Reason, "degraded") {
+		t.Fatalf("reason = %q, want the resolver's own words", st.Profile.Reason)
+	}
+	for _, c := range rec.calls() {
+		if c[0] == simslim.Binary {
+			t.Fatalf("ran simslim despite an unresolved profile: %v", rec.calls())
+		}
+	}
+}
+
+// Shutdown has no profile step, whatever it is handed.
+func TestShutdown_NeverSlims(t *testing.T) {
+	rec := &recorder{}
+	p := newTestPower(t, rec)
+	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
+
+	if err := p.Start(context.Background(), testUDID, Shutdown, req, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	p.wait()
+
+	for _, c := range rec.calls() {
+		if c[0] == simslim.Binary {
+			t.Fatalf("shutdown ran simslim: %v", rec.calls())
+		}
+	}
+}
+
+// Status.Phase says which part of a boot is running, and a shutdown has no
+// parts. Announcing one as "booting" puts a word on the wire that contradicts
+// the field's own contract, and the pane would draw a device going down as one
+// coming up.
+func TestShutdown_HasNoPhase(t *testing.T) {
+	release := make(chan struct{})
+	rec := &recorder{reply: func(context.Context, []string) ([]byte, error) {
+		<-release
+		return nil, nil
+	}}
+	p := newTestPower(t, rec)
+
+	if err := p.Start(context.Background(), testUDID, Shutdown, nil, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitFor(t, func() bool {
+		st, ok := p.Status(testUDID)
+		return ok && st.State == Running
+	}, "shutdown never showed as running")
+
+	st, _ := p.Status(testUDID)
+	if st.Phase != "" {
+		t.Fatalf("phase = %q on a shutdown, want empty - a shutdown has only one part", st.Phase)
+	}
+
+	close(release)
+	p.wait()
+}
+
+// The Device tab renders this; without it a boot looks frozen for the tens of
+// seconds the reboot takes.
+func TestBoot_ReportsTheSlimmingPhaseWhileItRuns(t *testing.T) {
+	release := make(chan struct{})
+	rec := &recorder{reply: func(_ context.Context, args []string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "verify" {
+			<-release
+		}
+		return nil, nil
+	}}
+	p := newTestPower(t, rec)
+	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
+
+	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	waitFor(t, func() bool {
+		st, ok := p.Status(testUDID)
+		return ok && st.Phase == PhaseSlimming
+	}, "phase never reached "+PhaseSlimming)
+
+	close(release)
+	p.wait()
 }

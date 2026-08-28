@@ -214,6 +214,78 @@ describe("SimDevicePicker", () => {
 		expect(screen.getByRole("button", { name: /^boot$/i })).toBeInTheDocument();
 	});
 
+	// The slimming phase takes tens of seconds. Without a label the pane just looks
+	// stuck on a device that is already up.
+	it("names the slimming phase instead of looking frozen", async () => {
+		open([
+			device({
+				state: "Booted",
+				power: { op: "boot", state: "running", phase: "slimming", startedAt: "2026-08-20T09:00:00Z" },
+			} as Partial<SimDevice>),
+		]);
+		await openPicker();
+
+		expect(screen.getByTestId("sim-power-running")).toHaveTextContent(/slimming/i);
+	});
+
+	// The boot worked. The device is stock. Saying nothing is how an agent ends up
+	// trusting a push that was never delivered.
+	it("warns that a booted device came up stock", async () => {
+		open([
+			device({
+				state: "Booted",
+				power: {
+					op: "boot",
+					state: "warned",
+					startedAt: "2026-08-20T09:00:00Z",
+					profile: "skipped",
+					profileReason: "simslim is not on PATH",
+				},
+			} as Partial<SimDevice>),
+		]);
+		await openPicker();
+
+		const stock = screen.getByTestId("sim-power-stock");
+		expect(stock).toHaveTextContent(/stock/i);
+		expect(stock).toHaveTextContent(/not on PATH/i);
+		// The reason is somebody else's words, dropped mid-paragraph, so the row
+		// has to punctuate it. Without this the row reads "...not on PATH
+		// Features this project expects...".
+		expect(stock).toHaveTextContent(/not on PATH\. Features/);
+	});
+
+	// The machine sometimes punctuates its own reason - a shell's stderr often
+	// ends in a full stop - and a second one appended blind reads as a typo.
+	it("does not double a full stop the reason already has", async () => {
+		open([
+			device({
+				state: "Booted",
+				power: {
+					op: "boot",
+					state: "warned",
+					startedAt: "2026-08-20T09:00:00Z",
+					profile: "failed",
+					profileReason: "simslim: unknown daemon com.apple.nope.",
+				},
+			} as Partial<SimDevice>),
+		]);
+		await openPicker();
+
+		expect(screen.getByTestId("sim-power-stock")).toHaveTextContent(/com\.apple\.nope\. Features/);
+	});
+
+	it("says nothing extra when the profile landed", async () => {
+		open([
+			device({
+				state: "Booted",
+				power: { op: "boot", state: "running", phase: "booting", startedAt: "2026-08-20T09:00:00Z" },
+			} as Partial<SimDevice>),
+		]);
+		await openPicker();
+
+		expect(screen.queryByTestId("sim-power-stock")).not.toBeInTheDocument();
+	});
+
 	it("says so when the machine has no simulators at all", async () => {
 		open([]);
 		await openPicker();

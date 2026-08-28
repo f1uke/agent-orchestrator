@@ -18,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
@@ -25,6 +26,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -65,16 +67,17 @@ type fakeScreen struct {
 type powerCall struct {
 	UDID string
 	Op   simpower.Op
+	Req  *simslim.Request
 	Done func()
 }
 
-func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, done func()) error {
+func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.powerErr != nil {
 		return f.powerErr
 	}
-	f.powerOps = append(f.powerOps, powerCall{UDID: udid, Op: op, Done: done})
+	f.powerOps = append(f.powerOps, powerCall{UDID: udid, Op: op, Req: req, Done: done})
 	return nil
 }
 
@@ -262,9 +265,15 @@ func oneBooted() simctl.Listing {
 
 func newScreenTestServer(t *testing.T, svc simsvc.Manager, screen httpd.SimScreen) *httptest.Server {
 	t.Helper()
+	return newScreenTestServerWithProfiles(t, svc, screen, nil)
+}
+
+func newScreenTestServerWithProfiles(t *testing.T, svc simsvc.Manager, screen httpd.SimScreen, profiles controllers.SimProfileResolver) *httptest.Server {
+	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil,
-		httpd.APIDeps{Sim: svc, SimScreen: screen, SimDrags: simgesture.NewDrags()}, httpd.ControlDeps{}))
+		httpd.APIDeps{Sim: svc, SimScreen: screen, SimDrags: simgesture.NewDrags(), SimProfiles: profiles},
+		httpd.ControlDeps{}))
 	t.Cleanup(srv.Close)
 	return srv
 }

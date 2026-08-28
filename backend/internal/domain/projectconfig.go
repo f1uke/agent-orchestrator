@@ -84,6 +84,19 @@ type ProjectConfig struct {
 	// harder to reason about than a switch, and gets monorepos wrong.
 	HasIOSSimulator bool `json:"hasIOSSimulator,omitempty"`
 
+	// SimProfile is the set of background daemons this project's simulators
+	// keep running. AO applies it when it boots a device.
+	//
+	// It is a POINTER because nil and present-but-empty are different
+	// instructions: nil means AO does not slim this project's devices at all,
+	// and an empty Keep means a fully slim device. A value type could not tell
+	// those apart, and the second is a real request.
+	//
+	// It is opt-in (nil) for the same reason HasWebUI and HasIOSSimulator are:
+	// a project that says nothing must behave exactly as it did before this
+	// existed.
+	SimProfile *SimProfileConfig `json:"simProfile,omitempty"`
+
 	// DisableAutoCrew turns off AUTOMATIC crew formation for this project, and
 	// nothing else.
 	//
@@ -216,6 +229,11 @@ func (c ProjectConfig) Validate() error {
 	if err := c.GitConvention.Validate(); err != nil {
 		return err
 	}
+	if c.SimProfile != nil {
+		if err := c.SimProfile.Validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -271,4 +289,33 @@ type SystemPromptAdditions struct {
 	Orchestrator string `json:"orchestrator,omitempty"`
 	Worker       string `json:"worker,omitempty"`
 	Reviewer     string `json:"reviewer,omitempty"`
+}
+
+// SimProfileConfig is which daemons a slimmed simulator keeps.
+type SimProfileConfig struct {
+	// Keep names the daemons that stay enabled; everything the slimming tool
+	// manages and is not named here is disabled. Empty means a fully slim
+	// device.
+	Keep []string `json:"keep,omitempty"`
+}
+
+// Validate rejects a label that cannot be a daemon.
+//
+// A typo here does not fail loudly on its own: it is simply a daemon that is
+// not kept, on a device that boots and looks fine, whose feature then quietly
+// does nothing. That is the exact failure this whole area is shaped around, so
+// it is worth catching at the config boundary as well as in the tool.
+func (c SimProfileConfig) Validate() error {
+	for i, label := range c.Keep {
+		if label == "" {
+			return fmt.Errorf("simProfile.keep[%d]: empty daemon label", i)
+		}
+		if strings.TrimSpace(label) != label {
+			return fmt.Errorf("simProfile.keep[%d]: %q has surrounding whitespace", i, label)
+		}
+		if !strings.HasPrefix(label, "com.apple.") {
+			return fmt.Errorf("simProfile.keep[%d]: %q is not a com.apple.* daemon label", i, label)
+		}
+	}
+	return nil
 }

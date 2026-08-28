@@ -25,6 +25,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -52,7 +53,11 @@ type APIDeps struct {
 	// SimDrags is the touches currently held down by the desktop pane. It is
 	// per-daemon because one drag spans several requests, and the daemon owns
 	// its lifetime so no finger is left down when the process goes away.
-	SimDrags           *simgesture.Drags
+	SimDrags *simgesture.Drags
+	// SimProfiles resolves a boot's slimming profile. Left nil, the router
+	// builds one over Sessions and Projects; a test sets it to control the
+	// answer without standing up either service.
+	SimProfiles        controllers.SimProfileResolver
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
@@ -101,6 +106,10 @@ type API struct {
 // per-request timeout so the REST group can apply it without re-reading the
 // environment.
 func NewAPI(cfg config.Config, deps APIDeps) *API {
+	simProfileResolver := deps.SimProfiles
+	if simProfileResolver == nil && deps.Sessions != nil && deps.Projects != nil {
+		simProfileResolver = simProfiles{sessions: deps.Sessions, projects: deps.Projects}
+	}
 	return &API{
 		cfg: cfg,
 		agents: &controllers.AgentsController{
@@ -121,7 +130,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		crewRuns:      &controllers.CrewRunsController{Svc: deps.CrewRuns},
 		sim:           &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen)},
 		simFlows:      &controllers.SimFlowsController{DataDir: cfg.DataDir},
-		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags},
+		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
@@ -214,7 +223,7 @@ type SimScreen interface {
 	Driver(ctx context.Context) (simbridge.Driver, error)
 	Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error)
 	Pasteboard() simpaste.Pasteboard
-	StartPower(ctx context.Context, udid string, op simpower.Op, done func()) error
+	StartPower(ctx context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error
 	PowerStatus() map[string]simpower.Status
 	ClearPower(udid string)
 }

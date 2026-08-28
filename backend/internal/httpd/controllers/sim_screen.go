@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -55,12 +56,23 @@ type SimScreenProvider interface {
 	// boot takes tens of seconds and the request cannot be held open for it.
 	// See internal/simpower for why this is reachable from the desktop app and
 	// from no `ao` subcommand.
-	StartPower(ctx context.Context, udid string, op simpower.Op, done func()) error
+	StartPower(ctx context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error
 	// PowerStatus is what is in flight, keyed by normalized udid, so the
 	// listing the pane already polls carries the progress too.
 	PowerStatus() map[string]simpower.Status
 	// ClearPower drops a remembered failure the machine has since made moot.
 	ClearPower(udid string)
+}
+
+// SimProfileResolver answers which daemon profile a session's project wants its
+// simulators slimmed to. (nil, nil) means the project does not slim.
+//
+// It is a narrow interface on the controller, injected the way Leases is,
+// because the alternative is teaching Screen and Power what a project is - and
+// they are device-level surfaces whose testability rests on knowing nothing of
+// the sort.
+type SimProfileResolver interface {
+	SimProfileFor(ctx context.Context, id domain.SessionID) (*simslim.Profile, error)
 }
 
 // SimDeviceLeaseView is what AO knows about who is driving one device. The
@@ -90,9 +102,21 @@ type SimDeviceFrameView struct {
 // second field repeating it is a second field to be wrong.
 type SimDevicePowerView struct {
 	Op        simpower.Op    `json:"op" description:"boot or shutdown."`
-	State     simpower.State `json:"state" description:"running while the operation is in flight; failed when it did not work."`
+	State     simpower.State `json:"state" description:"running while the operation is in flight; failed when it did not work; warned when it worked but left the device unslimmed."`
 	StartedAt time.Time      `json:"startedAt"`
 	Reason    string         `json:"reason,omitempty" description:"Why it failed, in the machine's own words where there are any."`
+	// Phase is which part of a boot is running: booting, then slimming. The
+	// second takes tens of seconds, and without this the pane looks frozen for
+	// all of them.
+	Phase string `json:"phase,omitempty" description:"booting or slimming, while a boot is in flight. Empty for a shutdown, which has only one part."`
+	// Profile and ProfileReason are what happened to the device's daemon
+	// profile, and in practice only ever say skipped or failed - the two
+	// outcomes that leave the device stock. A profile that applied cleanly is
+	// deleted along with the rest of the entry (simpower.execute), for the same
+	// reason there is no "booted successfully" above, so applied and already
+	// never reach a reader here.
+	Profile       string `json:"profile,omitempty" description:"skipped or failed - the two outcomes that mean the device is stock. A profile that applied leaves no power entry at all, so nothing else reaches the wire."`
+	ProfileReason string `json:"profileReason,omitempty" description:"Why the device is stock, in the tool's own words."`
 }
 
 // SimDeviceView is one simulator plus its lease state.
@@ -224,6 +248,9 @@ type SimScreenController struct {
 	// Drags is the touches currently held down. It is per-daemon rather than
 	// per-request because a drag is one touch spanning several requests.
 	Drags *simgesture.Drags
+	// Profiles resolves the slimming profile for a boot. nil means this daemon
+	// slims nothing, which is what every deployment did before it existed.
+	Profiles SimProfileResolver
 }
 
 // Register mounts the routes. The live frame stream is not here: it is a
@@ -376,9 +403,15 @@ func (c *SimScreenController) powerView(d simctl.Device, status simpower.Status,
 		c.Screen.ClearPower(d.UDID)
 		return nil
 	}
-	return &SimDevicePowerView{
+	v := &SimDevicePowerView{
 		Op: status.Op, State: status.State, StartedAt: status.StartedAt.UTC(), Reason: status.Reason,
+		Phase: status.Phase,
 	}
+	if status.Profile != nil {
+		v.Profile = string(status.Profile.Outcome)
+		v.ProfileReason = status.Profile.Reason
+	}
+	return v
 }
 
 // reachedGoal says whether the device is now in the state the operation was
@@ -906,7 +939,7 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 		done = release
 	}
 
-	if err := c.Screen.StartPower(r.Context(), device.UDID, op, done); err != nil {
+	if err := c.Screen.StartPower(r.Context(), device.UDID, op, c.profileFor(r.Context(), op, sessionID), done); err != nil {
 		done()
 		writePowerStartError(w, r, err)
 		return
@@ -915,6 +948,26 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 		UDID: device.UDID, State: in.State,
 		Detail: fmt.Sprintf("%s %s", op, device.Label()),
 	})
+}
+
+// profileFor works out what this boot should do about slimming.
+//
+// A resolver error is carried rather than swallowed: the boot goes ahead - it
+// has to, because `ao sim boot` is what lets a qa be created at all - but
+// "we could not work out this project's profile" must not end up looking
+// identical to "this project does not slim".
+func (c *SimScreenController) profileFor(ctx context.Context, op simpower.Op, id domain.SessionID) *simslim.Request {
+	if op != simpower.Boot || c.Profiles == nil {
+		return nil
+	}
+	prof, err := c.Profiles.SimProfileFor(ctx, id)
+	if err != nil {
+		return &simslim.Request{Err: err}
+	}
+	if prof == nil {
+		return nil
+	}
+	return &simslim.Request{Profile: prof}
 }
 
 // arbitrateShutdown decides whether this device may be powered off, and takes

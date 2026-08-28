@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +10,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 )
 
 // The boot half of `ao sim`. It is the only command here that changes a
@@ -526,5 +532,261 @@ func TestSimBoot_TimesOutWithSomethingToDoNext(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ao sim list") {
 		t.Errorf("error = %q, want it to say how to check where the device got to", err)
+	}
+}
+
+// A Warned boot means the boot itself worked and the device only ended up
+// stock - it is simpower's entire mechanism for reporting that, and the wait
+// loop must recognise it as done rather than polling it out to a timeout.
+func TestWaitForSimBoot_WarnedBootIsASuccessNotATimeout(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	device := bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted")
+	device.Power = &simDevicePowerListing{
+		Op:            "boot",
+		State:         "warned",
+		Profile:       "skipped",
+		ProfileReason: "simslim is not on PATH",
+	}
+	newSimPowerDaemon(t, cfg, device)
+	deps := simBootDeps(t, simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"))
+	// No real waiting: if the fix is missing this still returns (with an
+	// error) well inside the test timeout, it just returns the WRONG thing.
+	deps.Sleep = func(time.Duration) {}
+	c := &commandContext{deps: deps.withDefaults()}
+
+	target := simDevice{Device: simctl.Device{
+		UDID: simUDIDProMax, Name: "iPhone 17 Pro Max", Runtime: "iOS 26.3",
+	}}
+	listing, err := c.waitForSimBoot(context.Background(), target, 3*time.Second)
+	if err != nil {
+		t.Fatalf("waitForSimBoot returned %v, want nil - the boot itself succeeded", err)
+	}
+	if listing.Power == nil || listing.Power.Profile != "skipped" {
+		t.Fatalf("listing = %+v, want the warned boot's profile fields carried back", listing)
+	}
+}
+
+func TestWriteSimBoot_SaysPlainlyWhenTheDeviceIsStock(t *testing.T) {
+	var out bytes.Buffer
+	result := simBootResult{
+		UDID: "4754DB41-86C8-4326-81A7-172DDD41D5DA", Name: "AO scratch",
+		Runtime: "iOS 26.3", State: "Booted", Note: simBootedDeviceNote,
+		Profile:       "skipped",
+		ProfileReason: "simslim is not on PATH",
+	}
+
+	if err := writeSimBoot(&out, result); err != nil {
+		t.Fatalf("writeSimBoot: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "STOCK") {
+		t.Fatalf("output never says the device is stock:\n%s", got)
+	}
+	if !strings.Contains(got, "simslim is not on PATH") {
+		t.Fatalf("output dropped the reason:\n%s", got)
+	}
+}
+
+func TestWriteSimBoot_SaysNothingExtraWhenTheProfileLanded(t *testing.T) {
+	var out bytes.Buffer
+	result := simBootResult{
+		UDID: "4754DB41-86C8-4326-81A7-172DDD41D5DA", Name: "AO scratch",
+		Runtime: "iOS 26.3", State: "Booted", Note: simBootedDeviceNote,
+		Profile: "applied",
+	}
+
+	if err := writeSimBoot(&out, result); err != nil {
+		t.Fatalf("writeSimBoot: %v", err)
+	}
+
+	if strings.Contains(out.String(), "STOCK") {
+		t.Fatalf("a slimmed device was reported as stock:\n%s", out.String())
+	}
+}
+
+func TestWriteSimBoot_SaysNothingExtraForAProjectThatDoesNotSlim(t *testing.T) {
+	var out bytes.Buffer
+	result := simBootResult{
+		UDID: "4754DB41-86C8-4326-81A7-172DDD41D5DA", Name: "AO scratch",
+		Runtime: "iOS 26.3", State: "Booted", Note: simBootedDeviceNote,
+	}
+
+	if err := writeSimBoot(&out, result); err != nil {
+		t.Fatalf("writeSimBoot: %v", err)
+	}
+
+	if strings.Contains(out.String(), "STOCK") {
+		t.Fatalf("a project with no profile was warned at:\n%s", out.String())
+	}
+}
+
+// The CLI's default wait has to outlast the DAEMON's whole operation, not just
+// the boot half of it. The daemon boots the device and then, inside the same
+// `POST .../power`, brings it to the project's profile - and `simslim on`
+// reboots the device, so that second half is minutes, not seconds.
+//
+// Two things break when the sum is wrong, and the second is the worse one: a
+// boot that actually succeeded is reported as "did not finish booting", and
+// because writeSimBoot is never reached, a device that came up STOCK says
+// nothing at all - which is precisely the silence this feature exists to end.
+//
+// ⚠ This test fails if simpower.ProfileTimeout is raised and the CLI's wait is
+// not. That is what it is for.
+func TestParseSimBootTimeout_DefaultOutlastsTheDaemonsWholeOperation(t *testing.T) {
+	got, err := parseSimBootTimeout("")
+	if err != nil {
+		t.Fatalf("parseSimBootTimeout(\"\"): %v", err)
+	}
+	if want := simpower.BootTimeout + simpower.ProfileTimeout + simBootGrace; got != want {
+		t.Fatalf("default wait = %s, want %s - every phase the daemon spends inside one power "+
+			"request, plus the grace that makes the daemon's reason win", got, want)
+	}
+	// Stated separately from the sum above so the invariant survives a
+	// refactor of how the sum is spelled: whatever the formula becomes, the
+	// CLI must still be waiting after the daemon has given up.
+	if got <= simpower.BootTimeout+simpower.ProfileTimeout {
+		t.Fatalf("default wait %s does not outlast the daemon's own worst case %s; a boot that "+
+			"succeeded slowly would fail here with our timeout and its STOCK warning would never print",
+			got, simpower.BootTimeout+simpower.ProfileTimeout)
+	}
+}
+
+// The cap counts a device the daemon is still booting, and this is the case it
+// was blind to: `simslim on` REBOOTS the device, so through the slimming phase
+// an AO-booted simulator is not Booted while its several GB are allocated. A
+// crewmate booting in that window would be waved through to a third device -
+// the OOM the cap exists to prevent, in the dev-and-qa case slimming is for.
+func TestSimBoot_CapCountsADeviceTheDaemonIsStillBooting(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	inFlight := bootListing(simUDIDPro, "iPhone 17 Pro", "Shutdown")
+	inFlight.Power = &simDevicePowerListing{Op: "boot", State: "running", Phase: "slimming"}
+	daemon := newSimPowerDaemon(t, cfg,
+		bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
+		inFlight,
+		bootListing(simUDIDAir, "iPhone Air", "Shutdown"),
+	)
+	daemon.bootsAfter = -1 // the in-flight boot is still slimming, not landing
+	deps := simBootDeps(t,
+		simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
+		// simctl says Shutdown for the device that is mid-reboot, which is
+		// exactly why counting simctl alone undercounts.
+		simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
+		simDeviceFixture(simUDIDAir, "iPhone Air", "Shutdown"),
+	)
+
+	_, _, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDAir)
+	if err == nil {
+		t.Fatal("a device mid-boot is a device holding several GB; booting a third must be refused")
+	}
+	if !strings.Contains(err.Error(), "iPhone 17 Pro Max") || !strings.Contains(err.Error(), "iPhone 17 Pro") {
+		t.Errorf("error = %q, want both the booted and the still-coming-up device named", err)
+	}
+	if !strings.Contains(err.Error(), "coming up") {
+		t.Errorf("error = %q, want it to say one of them is not up yet", err)
+	}
+	if reqs := daemon.powerRequests(); len(reqs) != 0 {
+		t.Errorf("the cap must refuse before anything is started: %v", reqs)
+	}
+}
+
+// The warning a device carries is not tied to the boot that raised it. AO's own
+// earlier boot leaves a Warned entry that is never cleared, so the SECOND
+// crewmate to run `ao sim boot` - the one who takes the already-booted no-op,
+// and typically the one who records the FAIL - has to be told too.
+func TestSimBoot_AlreadyBootedDeviceStillReportsItIsStock(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	device := bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted")
+	device.Power = &simDevicePowerListing{
+		Op: "boot", State: "warned", Profile: "skipped", ProfileReason: "simslim is not on PATH",
+	}
+	daemon := newSimPowerDaemon(t, cfg, device)
+	daemon.bootsAfter = -1
+	deps := simBootDeps(t, simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"))
+
+	out, errOut, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDProMax)
+	if err != nil {
+		t.Fatalf("an already-booted device is a no-op, not a failure: %v\nstderr=%s", err, errOut)
+	}
+	if reqs := daemon.powerRequests(); len(reqs) != 0 {
+		t.Errorf("nothing should have been started: %v", reqs)
+	}
+	if !strings.Contains(out, "STOCK") {
+		t.Fatalf("the no-op path said nothing about a device AO knows is stock:\n%s", out)
+	}
+	if !strings.Contains(out, "simslim is not on PATH") {
+		t.Fatalf("the warning dropped the daemon's reason:\n%s", out)
+	}
+}
+
+// The same news on the other no-op path: the device came up between our listing
+// and our request, the daemon answers 409 SIM_POWER_ALREADY, and whatever it
+// knows about that device's profile still has to reach the caller.
+func TestSimBoot_DaemonSayingAlreadyBootedStillReportsItIsStock(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	device := bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted")
+	device.Power = &simDevicePowerListing{
+		Op: "boot", State: "warned", Profile: "failed", ProfileReason: "simslim: unknown daemon com.apple.nope",
+	}
+	daemon := newSimPowerDaemon(t, cfg, device)
+	daemon.bootsAfter = -1
+	daemon.powerStatus = http.StatusConflict
+	daemon.powerBody = `{"code":"SIM_POWER_ALREADY","message":"simulator iPhone 17 Pro Max is already booted"}`
+	// simctl has not caught up, so the CLI does ask and does get the 409.
+	deps := simBootDeps(t, simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Shutdown"))
+
+	out, errOut, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDProMax)
+	if err != nil {
+		t.Fatalf("SIM_POWER_ALREADY is the state we asked for, not a failure: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "STOCK") || !strings.Contains(out, "com.apple.nope") {
+		t.Fatalf("the 409 path dropped what the daemon knows about this device:\n%s", out)
+	}
+}
+
+// The rendered sentence, not just its parts: "stock" twice in one line, or a
+// reason that runs straight into the sentence after it, is how a warning stops
+// being read.
+func TestWriteSimBoot_StockWarningReadsAsOneSentence(t *testing.T) {
+	var out bytes.Buffer
+	result := simBootResult{
+		UDID: "4754DB41-86C8-4326-81A7-172DDD41D5DA", Name: "AO scratch",
+		Runtime: "iOS 26.3", State: "Booted", Note: simBootedDeviceNote,
+		Profile:       "skipped",
+		ProfileReason: "simslim is not on PATH",
+	}
+
+	if err := writeSimBoot(&out, result); err != nil {
+		t.Fatalf("writeSimBoot: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "simslim is not on PATH.\nFeatures") {
+		t.Fatalf("the reason runs into the next sentence:\n%s", got)
+	}
+	if n := strings.Count(strings.ToLower(got), "stock"); n != 1 {
+		t.Fatalf("the word stock appears %d times in one warning:\n%s", n, got)
+	}
+}
+
+func TestWriteSimBoot_DoesNotDoubleAFullStopTheMachineWrote(t *testing.T) {
+	var out bytes.Buffer
+	result := simBootResult{
+		UDID: "4754DB41-86C8-4326-81A7-172DDD41D5DA", Name: "AO scratch",
+		Runtime: "iOS 26.3", State: "Booted", Note: simBootedDeviceNote,
+		Profile:       "failed",
+		ProfileReason: "simslim: unknown daemon com.apple.nope.",
+	}
+
+	if err := writeSimBoot(&out, result); err != nil {
+		t.Fatalf("writeSimBoot: %v", err)
+	}
+
+	if strings.Contains(out.String(), "nope..") {
+		t.Fatalf("appended a full stop the machine had already written:\n%s", out.String())
 	}
 }
