@@ -1396,7 +1396,10 @@ export function mockSmokeChecks(sessionId: string, worker?: string): components[
  *     person, plus captures from BEFORE run history existed - grouped as an
  *     unknown run rather than filed under the verdict showing now
  *  5. stale, ran against a commit that is no longer head
- *  6. retired, out of the checklist, kept with its reason
+ *  6. DECLARED UNDRIVEABLE: qa tried, could not run it, and said why. It is the
+ *     state that tells "nothing could reach this" apart from case 1's "nobody
+ *     looked" - which used to be the same blank row.
+ *  7. retired, out of the checklist, kept with its reason
  */
 function mockAgentSmokeChecks(sessionId: string, worker?: string): components["schemas"]["ListSmokeChecksResponse"] {
 	const base = {
@@ -1588,8 +1591,35 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 			},
 			{
 				...base,
-				id: "settings-copy-legacy-toggle",
+				id: "settings-copy-press-hold",
 				seq: 6,
+				name: "Press and hold on a row opens the context menu",
+				why: "The gesture handler moved with the copy refactor.",
+				steps: ["Press and hold a settings row for a second.", "Read the menu that opens."],
+				expected: "The context menu opens under the finger.",
+				prNum: 322,
+				fileRef: "ProjectSettings.tsx:355",
+				verdict: "pending",
+				agentVerdict: "skip",
+				agentNote:
+					"Tried a 1.2s ao sim drag with no movement, twice; the menu never opened and the row took the tap instead, so nothing here was exercised.",
+				agentRanAt: minutesAgo(20),
+				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+				runs: [
+					run(
+						"settings-copy-press-hold",
+						1,
+						"skip",
+						"Tried a 1.2s ao sim drag with no movement, twice; the menu never opened and the row took the tap instead, so nothing here was exercised.",
+						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+						minutesAgo(20),
+					),
+				],
+			},
+			{
+				...base,
+				id: "settings-copy-legacy-toggle",
+				seq: 7,
 				name: "The legacy settings toggle still writes the old key",
 				why: "Kept while the old key was read anywhere.",
 				steps: ["Flip the legacy toggle.", "Read the config file."],

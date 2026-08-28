@@ -601,6 +601,47 @@ describe("SmokeTestView", () => {
 			expect(screen.getByRole("button", { name: /Works — Pass/ })).toBeInTheDocument();
 		});
 
+		// WHAT QA LEFT BEHIND, at the top of the tab.
+		//
+		// "not driven yet" and "cannot be driven" were the same blank row, so the
+		// person could not tell a run that neglected cases from one that ran into
+		// something no machine can reach. The banner is where that distinction is
+		// finally said out loud - the prompt tells qa the same rule, and a rule
+		// stated in one place and echoed in the other has to agree in both.
+		it("says a declared skip and an untouched case are different things", async () => {
+			checks = [
+				check({
+					id: "c1",
+					seq: 1,
+					name: "Press and hold",
+					agentRanAt: RAN,
+					agentVerdict: "skip",
+					agentSha: HEAD,
+					agentNote: "tried a 1.2s drag; the menu never opened",
+				}),
+				check({ id: "c2", seq: 2, name: "Tab stays live" }),
+				check({ id: "c3", seq: 3, name: "Drag scroll" }),
+			];
+			renderView();
+			expect(await screen.findByText(/qa could not drive 1 case/)).toBeInTheDocument();
+			expect(screen.getByText(/yours to play from scratch/)).toBeInTheDocument();
+			expect(screen.getByText(/qa has not driven 2 of the 3 still open/)).toBeInTheDocument();
+			expect(screen.getByText(/nobody looked/)).toBeInTheDocument();
+			// A machine skip is not the person's Skip, and must not read as progress.
+			expect(screen.getByText(/of 3 verified/)).toBeInTheDocument();
+			expect(screen.getByText("3 to check")).toBeInTheDocument();
+			expect(screen.queryByText("1 skipped")).not.toBeInTheDocument();
+		});
+
+		it("does not accuse a qa that does not exist", async () => {
+			// Every solo worker's checklist looks like this: cases, no machine. A
+			// line about what qa left undriven would be about nobody.
+			checks = [check({ id: "c1", seq: 1 }), check({ id: "c2", seq: 2, name: "Second case" })];
+			renderView();
+			expect(await screen.findByText("A fresh MR shows up")).toBeInTheDocument();
+			expect(screen.queryByText(/qa has not driven/)).not.toBeInTheDocument();
+		});
+
 		it("keeps the machine's note and evidence in their own lane, not the human's", async () => {
 			checks = [
 				check({

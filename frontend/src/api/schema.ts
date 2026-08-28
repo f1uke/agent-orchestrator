@@ -1981,6 +1981,8 @@ export interface components {
             message: string;
             /** @enum {string} */
             role: "dev" | "qa";
+            /** @description qa only: this message is a mid-run update, not the end of the run, so the handback completeness check does not apply. */
+            stillWorking?: boolean;
         };
         ControllersDaemonLoop: {
             description: string;
@@ -2009,6 +2011,10 @@ export interface components {
             steps?: null | string[];
             /** @description Why it matters. Omit to leave unchanged. */
             why?: null | string;
+        };
+        ControllersHandbackCompletenessView: {
+            cases: number;
+            notDriven: string[];
         };
         ControllersListDaemonLoopsResponse: {
             loops: components["schemas"]["ControllersDaemonLoop"][];
@@ -2757,6 +2763,7 @@ export interface components {
             message: string;
         };
         SendSessionMessageResponse: {
+            handback?: components["schemas"]["ControllersHandbackCompletenessView"];
             message: string;
             ok: boolean;
             pendingMessages?: number;
