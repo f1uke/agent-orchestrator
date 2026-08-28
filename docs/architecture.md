@@ -42,7 +42,14 @@ The only persistent session state is:
   the dialog and its trailing Enter could answer it); `parked` means the turn ended
   and the agent is sitting at an ordinary prompt, listening. Messages for a session
   that cannot receive one are HELD by the message queue, never dropped.
-- `is_terminated` — Whether the session should be treated as over
+- `is_terminated` — Whether the session should be treated as over. An agent that ends
+  its OWN session does NOT always land here: a worker holding a materialized worktree
+  from which no pull request was ever opened has delivered nothing, so it is PARKED
+  instead and the board reads `needs_input` rather than filing the task as finished.
+  A park is `activity_state = 'parked'` plus `is_suspended` with `sleep_reason` of
+  `undelivered`, and it keeps the worktree. An ending that does terminate runs the
+  same crew fan-out `session_manager.Teardown` runs, so a crew's dev can never
+  terminate out from under a live member.
 - `termination_*` — How the session ended: `source` (`agent` — the harness reported its
   own exit; `ao` — a teardown AO initiated; `runtime_gone` — the reaper inferred it from a
   missing runtime), `reason` (the harness's own end reason, or the named AO cause such as

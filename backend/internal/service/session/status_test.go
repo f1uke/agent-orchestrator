@@ -756,3 +756,24 @@ func TestDeriveStatusIsUnchangedWithoutCrewRuns(t *testing.T) {
 		}
 	}
 }
+
+// An agent that ended its own session while its work had reached nobody is
+// PARKED and asleep rather than terminated. The board is the whole point of
+// parking it, so the derived status has to say "waiting for you" - not the
+// terminated that would archive the task to Done, and not the no_signal that a
+// row with no process could otherwise read as.
+func TestDeriveStatus_UndeliveredParkReadsAsNeedsInput(t *testing.T) {
+	rec := statusRec(domain.ActivityParked, false)
+	rec.IsSuspended = true
+	rec.SleepReason = domain.SleepReasonUndelivered
+	rec.Metadata = domain.SessionMetadata{Branch: "feature/task", WorkspacePath: "/ws/feature/task"}
+
+	got := deriveStatusDetail(rec, nil, statusNow, true, domain.ApprovalRule{}, crewRunFacts{})
+	if got.Status != domain.StatusNeedsInput {
+		t.Fatalf("status = %q, want %q: a parked undelivered session is waiting for the human",
+			got.Status, domain.StatusNeedsInput)
+	}
+	if got.Reason != domain.ReasonIdleAged {
+		t.Fatalf("reason = %q, want %q", got.Reason, domain.ReasonIdleAged)
+	}
+}

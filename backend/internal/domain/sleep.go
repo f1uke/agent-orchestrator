@@ -44,6 +44,13 @@ const (
 	// the "Merged - open to continue" affordance. Opening it resumes it, which is
 	// what that affordance promises.
 	SleepReasonMerged SleepReason = "merged"
+	// SleepReasonUndelivered: an agent ended its OWN session while holding work
+	// that had reached nobody - no pull request had ever been opened from the
+	// worktree it still owns. Terminating there would file the task as finished,
+	// so the row is parked instead: the card stays on the board reading
+	// needs_input, the worktree is kept, and opening it resumes the agent into
+	// the tree its work is still sitting in.
+	SleepReasonUndelivered SleepReason = "undelivered"
 )
 
 // WokenBy names what brought a suspended session's runtime back. It exists

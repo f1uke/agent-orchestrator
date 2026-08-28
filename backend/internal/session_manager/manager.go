@@ -2629,8 +2629,9 @@ type CleanupResult struct {
 }
 
 // Cleanup reclaims the workspaces of terminal sessions in a project. A workspace
-// whose teardown is refused (uncommitted work) is never forced; it is reported
-// in Skipped with the reason so the refusal is visible instead of silent.
+// whose teardown is refused - uncommitted work, or a CREW worktree another member
+// is still alive in - is never forced; it is reported in Skipped with the reason
+// so the refusal is visible instead of silent.
 func (m *Manager) Cleanup(ctx context.Context, project domain.ProjectID) (CleanupResult, error) {
 	recs, err := m.cleanupRecords(ctx, project)
 	if err != nil {
@@ -2662,6 +2663,21 @@ func (m *Manager) Cleanup(ctx context.Context, project domain.ProjectID) (Cleanu
 				continue
 			}
 			_ = m.runtime.Destroy(ctx, h) // best effort; usually already gone
+		}
+		// The crew refcount, the same one Teardown consults. Cleanup walks TERMINAL
+		// rows, and a crew reaches "dev ended, member still live" by routes that
+		// never went through Teardown - a merged PR, an agent ending its own
+		// session - so without this the sweep deletes the tree the live member is
+		// standing in. It also stops the shared tree being destroyed once per row
+		// when the whole crew has ended: the subordinate defers to dev by
+		// ownership, so exactly one pass frees it.
+		if held, err := m.crewKeepsWorkspace(ctx, rec); err != nil {
+			m.logger.Warn("cleanup: crew refcount failed", "sessionID", rec.ID, "error", err)
+			result.Skipped = append(result.Skipped, CleanupSkip{SessionID: rec.ID, Reason: "workspace teardown failed"})
+			continue
+		} else if held {
+			result.Skipped = append(result.Skipped, CleanupSkip{SessionID: rec.ID, Reason: ReasonWorkspaceShared})
+			continue
 		}
 		if rows, ok, rowErr := m.workspaceProjectRows(ctx, rec); rowErr != nil {
 			m.logger.Warn("cleanup: workspace rows failed", "sessionID", rec.ID, "error", rowErr)

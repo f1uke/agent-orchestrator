@@ -422,3 +422,79 @@ func TestTeardownCrewSubordinates_MissingSessionIsBenign(t *testing.T) {
 		t.Fatalf("a vanished session must not fail the fan-out: %v", err)
 	}
 }
+
+// Cleanup walks the project's TERMINAL rows and frees their worktrees. That walk
+// is the one workspace-freeing path that never consulted the crew refcount, so a
+// crew whose dev row had ended while its qa kept working - which an agent's own
+// exit produced, and a merged PR still can - had the ground removed from under
+// the live member. The invariant is not Teardown's: a tree with a live member in
+// it is never freed, whichever path is asking.
+func TestCleanup_LeavesATreeALiveCrewMemberIsStandingIn(t *testing.T) {
+	m, st, _, ws := newManager()
+	dev, qa := seedCrew(st)
+	dev.IsTerminated = true
+	dev.Metadata.RuntimeHandleID = ""
+	st.sessions[dev.ID] = dev
+
+	res, err := m.Cleanup(ctx, "mer")
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if ws.destroyed != 0 {
+		t.Fatalf("cleanup freed the worktree %s is still working in", qa.ID)
+	}
+	if len(res.Cleaned) != 0 {
+		t.Fatalf("cleaned = %v, want none: the tree is shared with a live member", res.Cleaned)
+	}
+	if len(res.Skipped) != 1 || res.Skipped[0].SessionID != dev.ID || res.Skipped[0].Reason != ReasonWorkspaceShared {
+		t.Fatalf("skipped = %v, want one %s/%s: a refusal must be visible, not silent",
+			res.Skipped, dev.ID, ReasonWorkspaceShared)
+	}
+}
+
+// The other side of the same guard: once the member has ended too, the tree is
+// nobody's and cleanup frees it exactly as it did before.
+func TestCleanup_FreesTheTreeOnceTheWholeCrewHasEnded(t *testing.T) {
+	m, st, _, ws := newManager()
+	dev, qa := seedCrew(st)
+	for _, rec := range []domain.SessionRecord{dev, qa} {
+		rec.IsTerminated = true
+		rec.Metadata.RuntimeHandleID = ""
+		st.sessions[rec.ID] = rec
+	}
+
+	if _, err := m.Cleanup(ctx, "mer"); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if ws.destroyed != 1 {
+		t.Fatalf("workspace destroyed %d time(s), want exactly 1 once the crew is gone", ws.destroyed)
+	}
+}
+
+// The incident's end state, from the disk's point of view. dev's agent ended
+// itself with its work undelivered, so the lifecycle reducer PARKED the row
+// (suspended, not terminated) instead of filing the task as finished. Nothing
+// may free that tree: dev is not terminal, so it is not a reclaim candidate at
+// all, and qa is still standing in it.
+func TestCleanup_ParkedDevKeepsTheCrewsWorktree(t *testing.T) {
+	m, st, _, ws := newManager()
+	dev, qa := seedCrew(st)
+	dev.IsSuspended = true
+	dev.SleepReason = domain.SleepReasonUndelivered
+	dev.Activity = domain.Activity{State: domain.ActivityParked}
+	st.sessions[dev.ID] = dev
+
+	res, err := m.Cleanup(ctx, "mer")
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	if ws.destroyed != 0 {
+		t.Fatal("a parked dev's worktree was freed; its qa is still working in it")
+	}
+	if len(res.Cleaned) != 0 {
+		t.Fatalf("cleaned = %v, want none", res.Cleaned)
+	}
+	if st.sessions[qa.ID].IsTerminated {
+		t.Fatal("a parked dev must leave its crew member running")
+	}
+}
