@@ -98,6 +98,11 @@ type simBootResult struct {
 	// and nothing was started. A retry is a success, not a conflict.
 	AlreadyBooted bool   `json:"alreadyBooted"`
 	Note          string `json:"note"`
+	// Profile is what happened to the device's daemon profile: applied,
+	// already, skipped or failed. Empty when the project does not slim.
+	Profile string `json:"profile,omitempty"`
+	// ProfileReason says why the device is stock, when it is.
+	ProfileReason string `json:"profileReason,omitempty"`
 }
 
 // simPowerRequest mirrors controllers.SimPowerInput. Only the state is sent:
@@ -112,6 +117,12 @@ type simDevicePowerListing struct {
 	State     string    `json:"state"`
 	StartedAt time.Time `json:"startedAt"`
 	Reason    string    `json:"reason,omitempty"`
+	// Phase is which part of a boot is running now: booting, then slimming.
+	Phase string `json:"phase,omitempty"`
+	// Profile and ProfileReason are what happened to the device's daemon
+	// profile - see SimDevicePowerView, which this mirrors.
+	Profile       string `json:"profile,omitempty"`
+	ProfileReason string `json:"profileReason,omitempty"`
 }
 
 // simDeviceListing mirrors controllers.SimDeviceView - the daemon's own view of
@@ -225,10 +236,16 @@ func (c *commandContext) bootSimDevice(ctx context.Context, udid string, timeout
 		return simBootResult{}, err
 	}
 
-	if err := c.waitForSimBoot(ctx, device, timeout); err != nil {
+	listing, err := c.waitForSimBoot(ctx, device, timeout)
+	if err != nil {
 		return simBootResult{}, err
 	}
-	return simBootedResult(device, false), nil
+	result := simBootedResult(device, false)
+	if listing.Power != nil {
+		result.Profile = listing.Power.Profile
+		result.ProfileReason = listing.Power.ProfileReason
+	}
+	return result, nil
 }
 
 // resolveSimBootTarget decides which device an unqualified `ao sim boot` means.
@@ -329,7 +346,7 @@ func checkSimBootBudget(devices []simDevice, target simDevice) error {
 // listing is the only one that carries the in-flight operation: simctl flips a
 // device to Booted seconds before it can be driven, and reporting success there
 // would hand `ao sim claim` a device that answers nothing.
-func (c *commandContext) waitForSimBoot(ctx context.Context, device simDevice, timeout time.Duration) error {
+func (c *commandContext) waitForSimBoot(ctx context.Context, device simDevice, timeout time.Duration) (simDeviceListing, error) {
 	attempts := int(timeout / simBootPollInterval)
 	if attempts < 1 {
 		attempts = 1
@@ -337,26 +354,32 @@ func (c *commandContext) waitForSimBoot(ctx context.Context, device simDevice, t
 	for i := 0; i < attempts; i++ {
 		view, err := c.fetchSimDeviceListing(ctx, device.UDID)
 		if err != nil {
-			return err
+			return simDeviceListing{}, err
 		}
 		switch power := view.Power; {
 		case power == nil:
 			if strings.EqualFold(view.State, simctl.BootedState) {
-				return nil
+				return view, nil
 			}
+		case power.Op == string(simpower.Boot) && power.State == string(simpower.Warned):
+			// The boot itself worked - Warned is simpower's entire mechanism
+			// for saying the device only came up stock, not a failure. Reporting
+			// that is writeSimBoot's job, from the profile fields on view.Power,
+			// not this loop's: a boot never fails because of a profile.
+			return view, nil
 		case power.Op == string(simpower.Shutdown) && power.State == string(simpower.Running):
 			// Not a race to wait out: somebody deliberately asked for this
 			// device to go down, and booting it back up under them is the
 			// shutdown-shaped harm `ao sim boot` is not allowed to do.
-			return fmt.Errorf("%s is being shut down right now, so it was not booted. "+
+			return simDeviceListing{}, fmt.Errorf("%s is being shut down right now, so it was not booted. "+
 				"Wait for that to finish and run `ao sim boot --udid %s` again, or boot a different device",
 				device.Label(), device.UDID)
 		case power.Op == string(simpower.Boot) && power.State == string(simpower.Failed):
-			return fmt.Errorf("booting %s failed: %s", device.Label(), power.Reason)
+			return simDeviceListing{}, fmt.Errorf("booting %s failed: %s", device.Label(), power.Reason)
 		}
 		c.deps.Sleep(simBootPollInterval)
 	}
-	return fmt.Errorf("%s did not finish booting within %s. It may still be coming up - "+
+	return simDeviceListing{}, fmt.Errorf("%s did not finish booting within %s. It may still be coming up - "+
 		"run `ao sim list` to see where it got to", device.Label(), timeout)
 }
 
@@ -412,6 +435,19 @@ func writeSimBoot(out io.Writer, result simBootResult) error {
 	if _, err := fmt.Fprintf(out, "Claim it before you drive it: ao sim claim --udid %s\n", result.UDID); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(out, "Note: %s\n", result.Note)
-	return err
+	if _, err := fmt.Fprintf(out, "Note: %s\n", result.Note); err != nil {
+		return err
+	}
+	// A device that came up stock is the failure this whole feature is shaped
+	// around: `xcrun simctl push` returns exit 0 and prints "Notification sent"
+	// on a device whose apsd is disabled, so an agent that is not told here
+	// will believe a notification landed when nothing was delivered.
+	if result.Profile == "skipped" || result.Profile == "failed" {
+		_, err := fmt.Fprintf(out,
+			"Warning: this simulator is STOCK, not slimmed - %s\n"+
+				"Features this project expects may silently do nothing.\n",
+			result.ProfileReason)
+		return err
+	}
+	return nil
 }

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 )
 
 // The boot half of `ao sim`. It is the only command here that changes a
@@ -526,5 +531,92 @@ func TestSimBoot_TimesOutWithSomethingToDoNext(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ao sim list") {
 		t.Errorf("error = %q, want it to say how to check where the device got to", err)
+	}
+}
+
+// A Warned boot means the boot itself worked and the device only ended up
+// stock - it is simpower's entire mechanism for reporting that, and the wait
+// loop must recognise it as done rather than polling it out to a timeout.
+func TestWaitForSimBoot_WarnedBootIsASuccessNotATimeout(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	device := bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted")
+	device.Power = &simDevicePowerListing{
+		Op:            "boot",
+		State:         "warned",
+		Profile:       "skipped",
+		ProfileReason: "simslim is not on PATH, so this device is stock",
+	}
+	newSimPowerDaemon(t, cfg, device)
+	deps := simBootDeps(t, simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"))
+	// No real waiting: if the fix is missing this still returns (with an
+	// error) well inside the test timeout, it just returns the WRONG thing.
+	deps.Sleep = func(time.Duration) {}
+	c := &commandContext{deps: deps.withDefaults()}
+
+	target := simDevice{Device: simctl.Device{
+		UDID: simUDIDProMax, Name: "iPhone 17 Pro Max", Runtime: "iOS 26.3",
+	}}
+	listing, err := c.waitForSimBoot(context.Background(), target, 3*time.Second)
+	if err != nil {
+		t.Fatalf("waitForSimBoot returned %v, want nil - the boot itself succeeded", err)
+	}
+	if listing.Power == nil || listing.Power.Profile != "skipped" {
+		t.Fatalf("listing = %+v, want the warned boot's profile fields carried back", listing)
+	}
+}
+
+func TestWriteSimBoot_SaysPlainlyWhenTheDeviceIsStock(t *testing.T) {
+	var out bytes.Buffer
+	result := simBootResult{
+		UDID: "4754DB41-86C8-4326-81A7-172DDD41D5DA", Name: "AO scratch",
+		Runtime: "iOS 26.3", State: "Booted", Note: simBootedDeviceNote,
+		Profile:       "skipped",
+		ProfileReason: "simslim is not on PATH, so this device is stock",
+	}
+
+	if err := writeSimBoot(&out, result); err != nil {
+		t.Fatalf("writeSimBoot: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "STOCK") {
+		t.Fatalf("output never says the device is stock:\n%s", got)
+	}
+	if !strings.Contains(got, "simslim is not on PATH") {
+		t.Fatalf("output dropped the reason:\n%s", got)
+	}
+}
+
+func TestWriteSimBoot_SaysNothingExtraWhenTheProfileLanded(t *testing.T) {
+	var out bytes.Buffer
+	result := simBootResult{
+		UDID: "4754DB41-86C8-4326-81A7-172DDD41D5DA", Name: "AO scratch",
+		Runtime: "iOS 26.3", State: "Booted", Note: simBootedDeviceNote,
+		Profile: "applied",
+	}
+
+	if err := writeSimBoot(&out, result); err != nil {
+		t.Fatalf("writeSimBoot: %v", err)
+	}
+
+	if strings.Contains(out.String(), "STOCK") {
+		t.Fatalf("a slimmed device was reported as stock:\n%s", out.String())
+	}
+}
+
+func TestWriteSimBoot_SaysNothingExtraForAProjectThatDoesNotSlim(t *testing.T) {
+	var out bytes.Buffer
+	result := simBootResult{
+		UDID: "4754DB41-86C8-4326-81A7-172DDD41D5DA", Name: "AO scratch",
+		Runtime: "iOS 26.3", State: "Booted", Note: simBootedDeviceNote,
+	}
+
+	if err := writeSimBoot(&out, result); err != nil {
+		t.Fatalf("writeSimBoot: %v", err)
+	}
+
+	if strings.Contains(out.String(), "STOCK") {
+		t.Fatalf("a project with no profile was warned at:\n%s", out.String())
 	}
 }
