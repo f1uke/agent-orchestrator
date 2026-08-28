@@ -145,7 +145,7 @@ func (s *Screen) forgetListing() {
 // under way. See internal/simpower for why this exists in the daemon and
 // nowhere else - in particular, why there is no `ao sim boot`.
 func (s *Screen) StartPower(ctx context.Context, udid string, op simpower.Op, done func()) error {
-	return s.power.Start(ctx, udid, op, done)
+	return s.power.Start(ctx, udid, op, nil, done)
 }
 
 // PowerStatus is every device with a power operation in flight or a failure to

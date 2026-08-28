@@ -35,6 +35,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 )
 
 // Op is what is being done to a device.
@@ -59,6 +60,17 @@ const (
 	// failure is kept rather than dropped, because the alternative is a
 	// control that spins for ever and never says why.
 	Failed State = "failed"
+	// Warned: the operation itself worked, but something about the device the
+	// caller should know did not. Today that is only a boot whose profile step
+	// left the device stock.
+	//
+	// It is not Failed. The boot succeeded and is reported as succeeding - a
+	// missing optional tool must never fail a boot, because `ao sim boot` is
+	// what breaks the deadlock in which qa can never be created. Warned exists
+	// so that "this device is not slim" cannot be silent, which is the whole
+	// failure mode this feature is shaped around: `xcrun simctl push` returns
+	// exit 0 and prints "Notification sent" on a device whose apsd is disabled.
+	Warned State = "warned"
 )
 
 // Sentinel refusals, as values because two surfaces phrase them: an HTTP
@@ -86,6 +98,19 @@ const BootTimeout = 2 * time.Minute
 // rather than a machine coming up, and so is a different order of wait.
 const ShutdownTimeout = 30 * time.Second
 
+// Phases of a boot. A boot that has to slim spends tens of seconds past the
+// point simctl calls it up, and without a phase the pane looks frozen for all
+// of them.
+const (
+	PhaseBooting  = "booting"
+	PhaseSlimming = "slimming"
+)
+
+// ProfileTimeout bounds the profile step. `simslim on` measured 19-27s on the
+// machine this was built for, but it disables ~170 services one launchctl call
+// at a time and simslim's own docs warn that shared CI runners are far slower.
+const ProfileTimeout = 10 * time.Minute
+
 // Status is one device's in-flight or failed operation. There is deliberately
 // no "succeeded": once a boot works, the device's own state is the report, and
 // a second place saying the same thing is a second place to be wrong.
@@ -94,6 +119,12 @@ type Status struct {
 	State     State     `json:"state"`
 	StartedAt time.Time `json:"startedAt"`
 	Reason    string    `json:"reason,omitempty"`
+	// Phase is which part of the operation is running now. Empty for shutdown,
+	// which has only one.
+	Phase string `json:"phase,omitempty"`
+	// Profile is what happened to the device's daemon profile. Set only on a
+	// boot that had one to apply.
+	Profile *simslim.Result `json:"profile,omitempty"`
 }
 
 // Power runs the operations and remembers what is in flight.
@@ -113,6 +144,7 @@ type Power struct {
 	// timeout path without waiting two minutes for it.
 	bootTimeout     time.Duration
 	shutdownTimeout time.Duration
+	profileTimeout  time.Duration
 
 	mu        sync.Mutex
 	entries   map[string]Status
@@ -132,6 +164,7 @@ func New(lookPath simctl.LookPath, run simctl.Runner) *Power {
 		now:             time.Now,
 		bootTimeout:     BootTimeout,
 		shutdownTimeout: ShutdownTimeout,
+		profileTimeout:  ProfileTimeout,
 		entries:         map[string]Status{},
 	}
 }
@@ -154,7 +187,7 @@ func (p *Power) OnSettled(fn func()) {
 // shutdown path uses it to give back the lease it took to arbitrate the
 // shutdown, so the device is arbitrated for exactly as long as it is being
 // powered off and not a moment longer.
-func (p *Power) Start(ctx context.Context, udid string, op Op, done func()) error {
+func (p *Power) Start(ctx context.Context, udid string, op Op, req *simslim.Request, done func()) error {
 	timeout, args, err := p.plan(op, domain.NormalizeSimUDID(udid))
 	if err != nil {
 		return err
@@ -169,13 +202,13 @@ func (p *Power) Start(ctx context.Context, udid string, op Op, done func()) erro
 		p.mu.Unlock()
 		return fmt.Errorf("%w: %s is already in flight", ErrBusy, current.Op)
 	}
-	p.entries[key] = Status{Op: op, State: Running, StartedAt: p.now()}
+	p.entries[key] = Status{Op: op, State: Running, StartedAt: p.now(), Phase: PhaseBooting}
 	p.mu.Unlock()
 
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-		p.execute(context.WithoutCancel(ctx), key, op, timeout, args)
+		p.execute(context.WithoutCancel(ctx), key, op, timeout, args, req)
 		if done != nil {
 			done()
 		}
@@ -202,24 +235,46 @@ func (p *Power) plan(op Op, udid string) (time.Duration, []string, error) {
 	}
 }
 
-// execute runs the command and records what happened.
-func (p *Power) execute(ctx context.Context, key string, op Op, timeout time.Duration, args []string) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+// execute runs the command, then - for a boot with a profile - brings the
+// device to that profile, and records what happened.
+//
+// The profile step runs INSIDE the operation rather than after it, and the
+// operation does not settle until it is done. That is the same decision plan()
+// documents for choosing `bootstatus -b` over `boot`: there has to be exactly
+// one definition of "this device is ready". `simslim on` reboots the device, so
+// a boot that reported success before this step would hand `ao sim claim` a
+// device that is on its way down.
+func (p *Power) execute(ctx context.Context, key string, op Op, timeout time.Duration, args []string, req *simslim.Request) {
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	out, err := p.run(runCtx, simctl.Binary, args...)
+	cancel()
 
-	out, err := p.run(ctx, simctl.Binary, args...)
+	var profile *simslim.Result
+	if err == nil && op == Boot && req != nil {
+		profile = p.applyProfile(ctx, key, *req)
+	}
 
 	p.mu.Lock()
-	if err == nil {
-		// No "succeeded" entry: the device's own state is the answer now.
-		delete(p.entries, key)
-	} else {
+	switch {
+	case err != nil:
 		p.entries[key] = Status{
 			Op:        op,
 			State:     Failed,
 			StartedAt: p.entries[key].StartedAt,
-			Reason:    reason(ctx, op, timeout, out, err),
+			Reason:    reason(runCtx, op, timeout, out, err),
 		}
+	case profile != nil && profile.Stock():
+		// The boot worked. The device is not slim, and saying so is the whole
+		// point - see the Warned constant.
+		p.entries[key] = Status{
+			Op:        op,
+			State:     Warned,
+			StartedAt: p.entries[key].StartedAt,
+			Profile:   profile,
+		}
+	default:
+		// No "succeeded" entry: the device's own state is the answer now.
+		delete(p.entries, key)
 	}
 	settled := p.onSettled
 	p.mu.Unlock()
@@ -227,6 +282,32 @@ func (p *Power) execute(ctx context.Context, key string, op Op, timeout time.Dur
 	if settled != nil {
 		settled()
 	}
+}
+
+// applyProfile runs the profile step, reporting the phase while it does.
+//
+// A request that could not be resolved never reaches simslim: there is nothing
+// to apply, and the point is only that "we could not work out this project's
+// profile" does not read the same as "this project does not slim".
+func (p *Power) applyProfile(ctx context.Context, key string, req simslim.Request) *simslim.Result {
+	if req.Err != nil {
+		return &simslim.Result{Outcome: simslim.Failed, Reason: req.Err.Error()}
+	}
+	if req.Profile == nil {
+		return nil
+	}
+
+	p.mu.Lock()
+	if st, ok := p.entries[key]; ok {
+		st.Phase = PhaseSlimming
+		p.entries[key] = st
+	}
+	p.mu.Unlock()
+
+	profCtx, cancel := context.WithTimeout(ctx, p.profileTimeout)
+	defer cancel()
+	r := simslim.Apply(profCtx, p.lookPath, p.run, key, *req.Profile)
+	return &r
 }
 
 // reason says why an operation failed, in the machine's own words wherever
