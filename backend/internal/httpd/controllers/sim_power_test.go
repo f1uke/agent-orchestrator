@@ -1,6 +1,8 @@
 package controllers_test
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -8,6 +10,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 )
 
 func powerURL(base, session, udid string) string {
@@ -325,4 +328,93 @@ func TestSimDevices_ReportAFailureThatStillStands(t *testing.T) {
 func errorCode(body map[string]any) string {
 	code, _ := body["code"].(string)
 	return code
+}
+
+type fakeProfiles struct {
+	profile *simslim.Profile
+	err     error
+	asked   domain.SessionID
+}
+
+func (f *fakeProfiles) SimProfileFor(_ context.Context, id domain.SessionID) (*simslim.Profile, error) {
+	f.asked = id
+	return f.profile, f.err
+}
+
+func TestSimPower_BootCarriesTheProjectsProfile(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted()}
+	profiles := &fakeProfiles{profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
+	srv := newScreenTestServerWithProfiles(t, &fakeSimService{}, screen, profiles)
+
+	code, _ := postJSON(t, powerURL(srv.URL, "p-1", otherSimUDID), map[string]any{"state": "booted"})
+	if code != http.StatusAccepted {
+		t.Fatalf("status %d, want 202", code)
+	}
+
+	ops := screen.powered()
+	if len(ops) != 1 || ops[0].Req == nil || ops[0].Req.Profile == nil {
+		t.Fatalf("powered %+v, want a boot carrying the project's profile", ops)
+	}
+	if ops[0].Req.Profile.Keep[0] != "com.apple.apsd" {
+		t.Fatalf("keep = %v", ops[0].Req.Profile.Keep)
+	}
+	if profiles.asked != domain.SessionID("p-1") {
+		t.Fatalf("resolved for %q, want the session named in the route", profiles.asked)
+	}
+}
+
+func TestSimPower_BootWithoutAConfiguredProfileSlimsNothing(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted()}
+	srv := newScreenTestServerWithProfiles(t, &fakeSimService{}, screen, &fakeProfiles{})
+
+	postJSON(t, powerURL(srv.URL, "p-1", otherSimUDID), map[string]any{"state": "booted"})
+
+	ops := screen.powered()
+	if len(ops) != 1 || ops[0].Req != nil {
+		t.Fatalf("powered %+v, want a nil request for a project that does not slim", ops)
+	}
+}
+
+// A resolver that failed must not end up looking like a project that does not
+// slim, and must not fail the boot either.
+func TestSimPower_BootCarriesAResolverFailure(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted()}
+	srv := newScreenTestServerWithProfiles(t, &fakeSimService{}, screen,
+		&fakeProfiles{err: errors.New("project 7 is degraded")})
+
+	code, _ := postJSON(t, powerURL(srv.URL, "p-1", otherSimUDID), map[string]any{"state": "booted"})
+	if code != http.StatusAccepted {
+		t.Fatalf("status %d, want 202: a boot must not fail over a profile", code)
+	}
+
+	ops := screen.powered()
+	if len(ops) != 1 || ops[0].Req == nil || ops[0].Req.Err == nil {
+		t.Fatalf("powered %+v, want the resolver error carried through", ops)
+	}
+}
+
+// A daemon with no resolver behaves exactly as it did before this feature.
+func TestSimPower_BootWithoutAResolverSlimsNothing(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted()}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	postJSON(t, powerURL(srv.URL, "p-1", otherSimUDID), map[string]any{"state": "booted"})
+
+	ops := screen.powered()
+	if len(ops) != 1 || ops[0].Req != nil {
+		t.Fatalf("powered %+v, want a nil request with no resolver", ops)
+	}
+}
+
+// Shutdown never resolves a profile; there is nothing to slim on the way down.
+func TestSimPower_ShutdownNeverResolvesAProfile(t *testing.T) {
+	screen := &fakeScreen{listing: oneBooted()}
+	profiles := &fakeProfiles{profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
+	srv := newScreenTestServerWithProfiles(t, &fakeSimService{}, screen, profiles)
+
+	postJSON(t, powerURL(srv.URL, "p-1", testSimUDID), map[string]any{"state": "shutdown"})
+
+	if profiles.asked != "" {
+		t.Fatalf("shutdown resolved a profile for %q", profiles.asked)
+	}
 }

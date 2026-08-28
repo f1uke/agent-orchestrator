@@ -64,6 +64,17 @@ type SimScreenProvider interface {
 	ClearPower(udid string)
 }
 
+// SimProfileResolver answers which daemon profile a session's project wants its
+// simulators slimmed to. (nil, nil) means the project does not slim.
+//
+// It is a narrow interface on the controller, injected the way Leases is,
+// because the alternative is teaching Screen and Power what a project is - and
+// they are device-level surfaces whose testability rests on knowing nothing of
+// the sort.
+type SimProfileResolver interface {
+	SimProfileFor(ctx context.Context, id domain.SessionID) (*simslim.Profile, error)
+}
+
 // SimDeviceLeaseView is what AO knows about who is driving one device. The
 // state is only ever "held" or "unknown"; there is no "free", because AO cannot
 // see a human driving the same simulator from Xcode.
@@ -225,6 +236,9 @@ type SimScreenController struct {
 	// Drags is the touches currently held down. It is per-daemon rather than
 	// per-request because a drag is one touch spanning several requests.
 	Drags *simgesture.Drags
+	// Profiles resolves the slimming profile for a boot. nil means this daemon
+	// slims nothing, which is what every deployment did before it existed.
+	Profiles SimProfileResolver
 }
 
 // Register mounts the routes. The live frame stream is not here: it is a
@@ -862,6 +876,26 @@ type SimPowerResponse struct {
 // reporting - and progress that lived in the request would die with the
 // popover being closed or the renderer being reloaded, both of which somebody
 // does while waiting a minute for a device.
+// profileFor works out what this boot should do about slimming.
+//
+// A resolver error is carried rather than swallowed: the boot goes ahead - it
+// has to, because `ao sim boot` is what lets a qa be created at all - but
+// "we could not work out this project's profile" must not end up looking
+// identical to "this project does not slim".
+func (c *SimScreenController) profileFor(ctx context.Context, op simpower.Op, id domain.SessionID) *simslim.Request {
+	if op != simpower.Boot || c.Profiles == nil {
+		return nil
+	}
+	prof, err := c.Profiles.SimProfileFor(ctx, id)
+	if err != nil {
+		return &simslim.Request{Err: err}
+	}
+	if prof == nil {
+		return nil
+	}
+	return &simslim.Request{Profile: prof}
+}
+
 func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 	const route = "/api/v1/sessions/{sessionId}/sim-devices/{udid}/power"
 	if c.Screen == nil || c.Leases == nil {
@@ -907,7 +941,7 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 		done = release
 	}
 
-	if err := c.Screen.StartPower(r.Context(), device.UDID, op, nil, done); err != nil {
+	if err := c.Screen.StartPower(r.Context(), device.UDID, op, c.profileFor(r.Context(), op, sessionID), done); err != nil {
 		done()
 		writePowerStartError(w, r, err)
 		return
