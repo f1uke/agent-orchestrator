@@ -77,6 +77,10 @@ type smokeCheckClient struct {
 	FileRef   string                `json:"fileRef"`
 	Evidence  []smokeEvidenceClient `json:"evidence"`
 	DecidedAt *time.Time            `json:"decidedAt,omitempty"`
+	// The machine run the user CONFIRMED, when they reached their verdict by
+	// agreeing with one rather than deriving it. Still entirely the user's
+	// verdict; this only says how they got there.
+	AgreedRunID string `json:"agreedRunId"`
 	// The machine's run history, oldest first, and the latest recorded run's
 	// result surfaced beside the user's - never merged into it.
 	Runs          []smokeRunClient      `json:"runs"`
@@ -378,6 +382,9 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 		if n := len(check.Evidence); n > 0 {
 			lines = append(lines, fmt.Sprintf("        evidence: %d attached", n))
 		}
+		if agreed := smokeAgreedRunLine(check); agreed != "" {
+			lines = append(lines, "        "+agreed)
+		}
 		lines = append(lines, smokeAgentLines(check)...)
 	}
 	if retired > 0 {
@@ -391,6 +398,23 @@ func (c *commandContext) listSmokeChecklist(cmd *cobra.Command, args []string, s
 	}
 	_, err := fmt.Fprintln(out, strings.Join(lines, "\n"))
 	return err
+}
+
+// smokeAgreedRunLine says the user got to their verdict by confirming a machine
+// run instead of deriving it - naming the run, because since run history a case
+// can have failed at one commit and passed at another, and "agreed with qa"
+// would be ambiguous the moment two runs disagree. Empty when the verdict was
+// the user's own, which is the default and needs no line.
+func smokeAgreedRunLine(check smokeCheckClient) string {
+	if check.AgreedRunID == "" {
+		return ""
+	}
+	for _, run := range check.Runs {
+		if run.ID == check.AgreedRunID {
+			return fmt.Sprintf("agreed with qa's run %d", run.Seq)
+		}
+	}
+	return ""
 }
 
 // smokeAgentLines renders the MACHINE's result for a case, always as its own

@@ -16,6 +16,8 @@ import {
 	activeChecks,
 	agentMeta,
 	agentState,
+	agreeableRun,
+	agreedRun,
 	authorLabel,
 	checkTag,
 	checklistState,
@@ -112,10 +114,18 @@ export function SmokeTestView({
 	}, [queryClient, sessionId]);
 
 	const setVerdict = useMutation({
-		mutationFn: async (vars: { checkId: string; verdict: "pass" | "fail" | "skip"; note: string }) => {
+		mutationFn: async (vars: {
+			checkId: string;
+			verdict: "pass" | "fail" | "skip";
+			note: string;
+			agreedRunId?: string;
+		}) => {
 			const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict", {
 				params: { path: { sessionId, checkId: vars.checkId } },
-				body: { verdict: vars.verdict, note: vars.note },
+				// agreedRunId only ever ANNOTATES the user's verdict - the same
+				// endpoint, the same columns, the same "by you". It never routes the
+				// write anywhere qa could have authored it.
+				body: { verdict: vars.verdict, note: vars.note, agreedRunId: vars.agreedRunId },
 			});
 			if (error) throw new Error(apiErrorMessage(error, "Unable to save verdict"));
 		},
@@ -295,8 +305,16 @@ export function SmokeTestView({
 	const state = checklistState(data?.checks ?? [], standDown);
 	const workerLabel = data?.worker || worker || "worker";
 
-	const decide = (check: SmokeCheck, verdict: "pass" | "fail" | "skip", note: string) => {
-		setVerdict.mutate({ checkId: check.id, verdict, note });
+	const decide = (check: SmokeCheck, verdict: "pass" | "fail" | "skip", note: string, agreedRun?: SmokeRun) => {
+		setVerdict.mutate({ checkId: check.id, verdict, note, agreedRunId: agreedRun?.id });
+		// The toast names the actor, because agreeing is the one path where a
+		// person could wonder whose verdict just got recorded. It is theirs.
+		if (agreedRun) {
+			showToast(
+				`Marked ${verdict === "pass" ? "Pass" : "Fail"} · your verdict, agreeing with qa's run ${agreedRun.seq}`,
+			);
+			return;
+		}
 		showToast(
 			verdict === "pass" ? "Marked Pass" : verdict === "fail" ? "Marked Fail · worker will be notified" : "Marked Skip",
 		);
@@ -341,7 +359,7 @@ export function SmokeTestView({
 							check={check}
 							heads={heads}
 							busy={setVerdict.isPending || resetCheck.isPending}
-							onDecide={(verdict, note) => decide(check, verdict, note)}
+							onDecide={(verdict, note, agreedRun) => decide(check, verdict, note, agreedRun)}
 							onChange={() => resetCheck.mutate(check.id)}
 							onUpload={(file) => uploadEvidence(check.id, file)}
 							onDeleteEvidence={(evidenceId) => deleteEvidence.mutate({ checkId: check.id, evidenceId })}
@@ -609,7 +627,7 @@ function CaseCard({
 	check: SmokeCheck;
 	heads: HeadRef[];
 	busy: boolean;
-	onDecide: (verdict: "pass" | "fail" | "skip", note: string) => void;
+	onDecide: (verdict: "pass" | "fail" | "skip", note: string, agreedRun?: SmokeRun) => void;
 	onChange: () => void;
 	onUpload: (file: File) => void;
 	onDeleteEvidence: (evidenceId: string) => void;
@@ -727,6 +745,14 @@ function CaseCard({
 						sessionId={sessionId}
 						check={check}
 						heads={heads}
+						busy={busy}
+						onAgree={(run) => {
+							// Agreeing records the SAME verdict a person would have pressed
+							// below, carrying whatever note they had already typed. The one
+							// extra thing it stores is which run they were looking at.
+							onDecide(run.verdict === "fail" ? "fail" : "pass", note, run);
+							setOpen(false);
+						}}
 						onReveal={(evidenceId, mode) => onRevealEvidence(evidenceId, mode)}
 					/>
 					<EvidenceSection
@@ -1016,11 +1042,15 @@ function QaBlock({
 	sessionId,
 	check,
 	heads,
+	busy,
+	onAgree,
 	onReveal,
 }: {
 	sessionId: string;
 	check: SmokeCheck;
 	heads: HeadRef[];
+	busy: boolean;
+	onAgree: (run: SmokeRun) => void;
 	onReveal: (evidenceId: string, mode: "reveal" | "open") => void;
 }) {
 	const [now] = useState(() => Date.now());
@@ -1042,6 +1072,9 @@ function QaBlock({
 	const shots = current ? evidenceForRun(check, current.id) : [];
 	const ran = relativeTime(check.agentRanAt, now);
 	const earlier = runs.filter((r) => r.id !== current?.id);
+	// The one run a person may confirm in a click. Null on a skip, on an
+	// evidence-only round and on a case already decided - see agreeableRun.
+	const agreeable = agreeableRun(check);
 
 	return (
 		<div
@@ -1064,22 +1097,71 @@ function QaBlock({
 				</span>
 			</div>
 
+			{/* The verdict LEADS, and the action to confirm it sits on its own line.
+			    Both used to be buried: qa's conclusion was one line above a
+			    paragraph, and the only way to act on it was two hundred pixels
+			    below, past the screenshots and the evidence box. The word is what a
+			    person is here to read, so it is the biggest thing in the block -
+			    by size and glyph, never by colour, because these hues belong to the
+			    human's verdict alone and a green PASS here would read as a played
+			    case. */}
+			<div
+				style={{
+					marginTop: 8,
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "space-between",
+					gap: 10,
+					flexWrap: "wrap",
+					rowGap: 8,
+				}}
+			>
+				<span
+					data-testid={`qa-stamp-${check.id}`}
+					style={{
+						display: "inline-flex",
+						alignItems: "center",
+						gap: 7,
+						fontSize: 14.5,
+						fontWeight: 700,
+						letterSpacing: ".07em",
+						lineHeight: 1.1,
+						color: stale ? P.muted : (meta?.color ?? P.muted),
+						border: `1px solid ${P.qaBorder}`,
+						background: P.cardBg,
+						borderRadius: 7,
+						padding: "6px 10px",
+					}}
+				>
+					<Icon size={15} strokeWidth={2.4} aria-hidden="true" style={{ flex: "none" }} />
+					{/* Two states have no verdict and must not borrow the look of one:
+					    "NO VERDICT" is qa declining to judge what it captured, and
+					    "NO RESULT" a round it opened and never closed. */}
+					{meta ? meta.stamp : "NO RESULT"}
+				</span>
+
+				{agreeable && (
+					<button
+						type="button"
+						data-testid={`qa-agree-${check.id}`}
+						disabled={busy}
+						onClick={() => onAgree(agreeable)}
+						title={`Records ${agreeable.verdict === "pass" ? "Pass" : "Fail"} as YOUR verdict, noting that you agreed with qa's run ${agreeable.seq}. qa never writes your verdict.`}
+						style={agreeButton(verdictMeta(agreeable.verdict ?? "pass"), stale)}
+					>
+						{agreeable.verdict === "pass" ? "✓" : "✗"} Agree · record {agreeable.verdict === "pass" ? "Pass" : "Fail"}
+						{runs.length > 1 ? ` (run ${agreeable.seq})` : ""}
+					</button>
+				)}
+			</div>
+
 			{meta ? (
 				<>
-					<div style={{ marginTop: 7, display: "flex", alignItems: "flex-start", gap: 8 }}>
-						<Icon
-							size={13}
-							strokeWidth={2.2}
-							color={stale ? P.muted : meta.color}
-							aria-hidden="true"
-							style={{ flex: "none", marginTop: 2 }}
-						/>
-						<div style={{ minWidth: 0 }}>
-							<div style={{ fontSize: 12.5, fontWeight: 600, color: stale ? P.muted : meta.color, lineHeight: 1.45 }}>
-								{meta.headline}
-							</div>
-							<div style={{ marginTop: 3, fontSize: 11.5, lineHeight: 1.5, color: P.secondary2 }}>{meta.caption}</div>
+					<div style={{ marginTop: 7 }}>
+						<div style={{ fontSize: 12.5, fontWeight: 600, color: stale ? P.muted : meta.color, lineHeight: 1.45 }}>
+							{meta.headline}
 						</div>
+						<div style={{ marginTop: 3, fontSize: 11.5, lineHeight: 1.5, color: P.secondary2 }}>{meta.caption}</div>
 					</div>
 
 					{check.agentNote && (
@@ -1580,45 +1662,62 @@ function VerdictControls({
 	if (decided) {
 		const meta = verdictMeta(check.verdict);
 		const when = relativeTime(check.decidedAt, now);
+		// Which run they agreed with, when they got here by agreeing. It is a
+		// separate, quieter line rather than more words inside the pill: the pill
+		// says WHOSE verdict this is - always theirs - and this says how they
+		// reached it. Collapsing the two would let "agreed" read as "qa decided".
+		const agreed = agreedRun(check);
 		return (
-			<div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
-				<span
-					style={{
-						display: "inline-flex",
-						alignItems: "center",
-						gap: 8,
-						fontSize: 12.5,
-						fontWeight: 600,
-						color: meta.color,
-						background: meta.pillBg,
-						border: `1px solid ${meta.pillBorder}`,
-						borderRadius: 8,
-						padding: "7px 11px",
-					}}
-				>
-					<span aria-hidden="true">{meta.icon}</span>
-					<span>{DECIDED_CAPTION[check.verdict] ?? meta.label}</span>
-					<span style={{ color: P.caption, fontWeight: 500 }}>· by you{when ? ` · ${when}` : ""}</span>
-				</span>
-				<div style={{ flex: 1 }} />
-				<button
-					type="button"
-					disabled={busy}
-					onClick={onChange}
-					style={{
-						fontSize: 12,
-						fontWeight: 600,
-						color: P.secondary,
-						background: "transparent",
-						border: `1px solid ${P.borderPill}`,
-						borderRadius: 7,
-						padding: "6px 12px",
-						cursor: "pointer",
-					}}
-				>
-					Change
-				</button>
-			</div>
+			<>
+				<div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 10 }}>
+					<span
+						style={{
+							display: "inline-flex",
+							alignItems: "center",
+							gap: 8,
+							fontSize: 12.5,
+							fontWeight: 600,
+							color: meta.color,
+							background: meta.pillBg,
+							border: `1px solid ${meta.pillBorder}`,
+							borderRadius: 8,
+							padding: "7px 11px",
+						}}
+					>
+						<span aria-hidden="true">{meta.icon}</span>
+						<span>{DECIDED_CAPTION[check.verdict] ?? meta.label}</span>
+						<span style={{ color: P.caption, fontWeight: 500 }}>· by you{when ? ` · ${when}` : ""}</span>
+					</span>
+					<div style={{ flex: 1 }} />
+					<button
+						type="button"
+						disabled={busy}
+						onClick={onChange}
+						style={{
+							fontSize: 12,
+							fontWeight: 600,
+							color: P.secondary,
+							background: "transparent",
+							border: `1px solid ${P.borderPill}`,
+							borderRadius: 7,
+							padding: "6px 12px",
+							cursor: "pointer",
+						}}
+					>
+						Change
+					</button>
+				</div>
+				{agreed && (
+					<div
+						data-testid={`agreed-with-${check.id}`}
+						style={{ marginTop: 6, fontSize: 10.5, lineHeight: 1.5, color: P.muted }}
+					>
+						you agreed with qa&apos;s run {agreed.seq}
+						{agreed.sha ? " · " : ""}
+						{agreed.sha && <span style={{ fontFamily: MONO }}>{shortSha(agreed.sha)}</span>}
+					</div>
+				)}
+			</>
 		);
 	}
 
@@ -1663,6 +1762,37 @@ function VerdictControls({
 			</div>
 		</div>
 	);
+}
+
+/**
+ * The "agree" affordance, inside qa's block. It wears the HUMAN verdict's colour
+ * on purpose: everything else in that block is monochrome because it is the
+ * machine's report, and this one control is the person's own act - pressing it
+ * records their verdict, not qa's. Deliberately lighter than the Pass/Fail
+ * buttons below (no fill, smaller): deriving the answer yourself stays the
+ * primary path, and this is the shortcut for a conclusion you already believe.
+ */
+function agreeButton(meta: ReturnType<typeof verdictMeta>, stale: boolean): React.CSSProperties {
+	return {
+		display: "inline-flex",
+		alignItems: "center",
+		gap: 5,
+		fontSize: 12,
+		fontWeight: 600,
+		// A stale result is dimmed, and so is the way to accept it. Leaving this
+		// button at full strength beside a greyed-out verdict would have the block
+		// contradict itself: the report says "this ran against older code", the
+		// control says "this is the live answer". It stays clickable - agreeing
+		// with a stale run is still the person's call to make, with the staleness
+		// spelled out right below it.
+		color: stale ? P.secondary : meta.color,
+		background: "transparent",
+		border: `1px solid ${stale ? P.borderPill : meta.pillBorder}`,
+		borderRadius: 7,
+		padding: "6px 11px",
+		cursor: "pointer",
+		whiteSpace: "nowrap",
+	};
 }
 
 function verdictButton(color: string, border: string, bg: string): React.CSSProperties {

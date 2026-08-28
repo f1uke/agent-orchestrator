@@ -158,7 +158,7 @@ func (f *fakeStore) ReplaceSmokeChecks(_ context.Context, sessionID domain.Sessi
 		// An id already present keeps what the user recorded on it (its evidence
 		// rows are keyed to the id and joined on read, so they follow).
 		if prior, ok := f.checks[c.ID]; ok {
-			check.Verdict, check.Note, check.DecidedAt = prior.Verdict, prior.Note, prior.DecidedAt
+			check.Verdict, check.Note, check.DecidedAt, check.AgreedRunID = prior.Verdict, prior.Note, prior.DecidedAt, prior.AgreedRunID
 			check.RetiredAt, check.RetiredReason = prior.RetiredAt, prior.RetiredReason
 			check.CreatedAt = prior.CreatedAt
 		}
@@ -190,7 +190,7 @@ func (f *fakeStore) UpsertSmokeChecks(_ context.Context, sessionID domain.Sessio
 		check := domain.SmokeCheck{ID: c.ID, SessionID: sessionID, ProjectID: projectID, Name: c.Name, Why: c.Why, Steps: c.Steps, Expected: c.Expected, PRNum: c.PRNum, FileRef: c.FileRef, Verdict: domain.SmokePending, Evidence: []domain.SmokeEvidence{}, CreatedAt: now, UpdatedAt: now}
 		if prior, ok := f.checks[c.ID]; ok {
 			check.Seq = prior.Seq
-			check.Verdict, check.Note, check.DecidedAt = prior.Verdict, prior.Note, prior.DecidedAt
+			check.Verdict, check.Note, check.DecidedAt, check.AgreedRunID = prior.Verdict, prior.Note, prior.DecidedAt, prior.AgreedRunID
 			check.RetiredAt, check.RetiredReason = prior.RetiredAt, prior.RetiredReason
 			check.CreatedAt = prior.CreatedAt
 		} else {
@@ -276,12 +276,13 @@ func stampAuthor(check *domain.SmokeCheck, author domain.SmokeAuthor, now time.T
 	check.AuthoredBy, check.AuthoredByRole, check.AuthoredAt = author.ID, author.Role, &at
 }
 
-func (f *fakeStore) SetSmokeVerdict(_ context.Context, id string, verdict domain.SmokeVerdict, note string, decidedAt, now time.Time) (bool, error) {
+func (f *fakeStore) SetSmokeVerdict(_ context.Context, id string, verdict domain.SmokeVerdict, note, agreedRunID string, decidedAt, now time.Time) (bool, error) {
 	c, ok := f.checks[id]
 	if !ok {
 		return false, nil
 	}
 	c.Verdict, c.Note, c.DecidedAt, c.UpdatedAt = verdict, note, &decidedAt, now
+	c.AgreedRunID = agreedRunID
 	f.checks[id] = c
 	return true, nil
 }
@@ -292,6 +293,7 @@ func (f *fakeStore) ResetSmokeCheck(_ context.Context, id string, now time.Time)
 		return false, nil
 	}
 	c.Verdict, c.Note, c.DecidedAt, c.Evidence, c.UpdatedAt = domain.SmokePending, "", nil, nil, now
+	c.AgreedRunID = ""
 	f.checks[id] = c
 	// Like the real store: only the USER's evidence rows go.
 	for evID, ev := range f.evidence {
@@ -997,7 +999,7 @@ func TestAuthorRefusesToDropPlayedCases(t *testing.T) {
 		{
 			name: "verdict",
 			play: func(t *testing.T, svc *Service, _ *fakeStore) {
-				if _, err := svc.SetVerdict(ctx, "w1", "played", domain.SmokeFail, ""); err != nil {
+				if _, err := svc.SetVerdict(ctx, "w1", "played", domain.SmokeFail, "", ""); err != nil {
 					t.Fatalf("set verdict: %v", err)
 				}
 			},
@@ -1070,7 +1072,7 @@ func TestAuthorNamesEveryCaseAtRisk(t *testing.T) {
 		t.Fatalf("author: %v", err)
 	}
 	for _, id := range []string{"first-case", "third-case"} {
-		if _, err := svc.SetVerdict(ctx, "w1", id, domain.SmokePass, ""); err != nil {
+		if _, err := svc.SetVerdict(ctx, "w1", id, domain.SmokePass, "", ""); err != nil {
 			t.Fatalf("set verdict %s: %v", id, err)
 		}
 	}
@@ -1138,7 +1140,7 @@ func TestAuthorKeepsResultsWhenTheIDIsSupplied(t *testing.T) {
 	if _, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{Name: "Played case"}}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if _, err := svc.SetVerdict(ctx, "w1", "played-case", domain.SmokePass, "looked right"); err != nil {
+	if _, err := svc.SetVerdict(ctx, "w1", "played-case", domain.SmokePass, "looked right", ""); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
 	res, err := svc.Author(ctx, "", "w1", []domain.SmokeAuthoredCase{{ID: "played-case", Name: "Played case, reworded"}})

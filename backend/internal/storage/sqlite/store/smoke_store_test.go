@@ -28,7 +28,7 @@ func TestReplaceSmokeChecksPreservesResultsByID(t *testing.T) {
 	}
 
 	// The user plays case a: pass + note + one evidence blob.
-	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokePass, "looks good", now, now); err != nil || !ok {
+	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokePass, "looks good", "", now, now); err != nil || !ok {
 		t.Fatalf("set verdict: ok=%v err=%v", ok, err)
 	}
 	if err := s.InsertSmokeEvidence(ctx, domain.SmokeEvidence{
@@ -105,7 +105,7 @@ func TestResetSmokeCheckClearsVerdictAndEvidence(t *testing.T) {
 	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID, []domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, domain.SmokeAuthor{}, now); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if _, err := s.SetSmokeVerdict(ctx, "a", domain.SmokeFail, "broken", now, now); err != nil {
+	if _, err := s.SetSmokeVerdict(ctx, "a", domain.SmokeFail, "broken", "", now, now); err != nil {
 		t.Fatalf("verdict: %v", err)
 	}
 	if err := s.InsertSmokeEvidence(ctx, domain.SmokeEvidence{ID: "ev1", CheckID: "a", SessionID: rec.ID, Kind: "image", CreatedAt: now}); err != nil {
@@ -283,5 +283,69 @@ func TestSmokeChecklistStandDownRoundTripsAndIsRetractedByACase(t *testing.T) {
 	}
 	if _, ok, err := s.GetSmokeChecklistStandDown(ctx, rec.ID); err != nil || ok {
 		t.Fatalf("a case is on the list and the stand-down survived: ok=%v err=%v", ok, err)
+	}
+}
+
+// TestSetSmokeVerdictRecordsWhichRunTheUserAgreedWith drives the real column
+// through the real statements. The agreement rides on the verdict's own UPDATE,
+// so the two can never disagree: a hand-made verdict clears it, and Reset - the
+// user un-playing the case - takes it with everything else of theirs.
+func TestSetSmokeVerdictRecordsWhichRunTheUserAgreedWith(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "smk")
+	rec, err := s.CreateSession(ctx, sampleRecord("smk"))
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, _, err := s.ReplaceSmokeChecks(ctx, rec.ID, rec.ProjectID,
+		[]domain.SmokeAuthoredCase{{ID: "a", Seq: 1, Name: "case a"}}, domain.SmokeAuthor{}, now); err != nil {
+		t.Fatalf("author: %v", err)
+	}
+	run, opened, err := s.OpenSmokeRun(ctx, "a", rec.ID, now)
+	if err != nil || !opened {
+		t.Fatalf("open run: ok=%v err=%v", opened, err)
+	}
+	if ok, err := s.CloseSmokeRun(ctx, run.ID, domain.SmokeAgentResult{Verdict: domain.SmokePass, SHA: "abc1234def"}, now, now); err != nil || !ok {
+		t.Fatalf("close run: ok=%v err=%v", ok, err)
+	}
+
+	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokePass, "agreed", run.ID, now, now); err != nil || !ok {
+		t.Fatalf("agree: ok=%v err=%v", ok, err)
+	}
+	got, _, err := s.GetSmokeCheck(ctx, "a")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.AgreedRunID != run.ID {
+		t.Fatalf("agreedRunId = %q, want %q", got.AgreedRunID, run.ID)
+	}
+
+	// A hand-made verdict over the top drops the claim rather than leaving it
+	// standing over a decision the user has since changed themselves.
+	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokeFail, "actually broken", "", now, now); err != nil || !ok {
+		t.Fatalf("override: ok=%v err=%v", ok, err)
+	}
+	if got, _, _ = s.GetSmokeCheck(ctx, "a"); got.AgreedRunID != "" {
+		t.Fatalf("agreedRunId = %q after a hand-made verdict, want cleared", got.AgreedRunID)
+	}
+
+	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokePass, "agreed", run.ID, now, now); err != nil || !ok {
+		t.Fatalf("agree again: ok=%v err=%v", ok, err)
+	}
+	if ok, err := s.ResetSmokeCheck(ctx, "a", now); err != nil || !ok {
+		t.Fatalf("reset: ok=%v err=%v", ok, err)
+	}
+	got, _, err = s.GetSmokeCheck(ctx, "a")
+	if err != nil {
+		t.Fatalf("get after reset: %v", err)
+	}
+	if got.AgreedRunID != "" || got.Verdict != domain.SmokePending {
+		t.Fatalf("after reset: verdict %q, agreedRunId %q; want pending and empty", got.Verdict, got.AgreedRunID)
+	}
+	// The machine's run is not the user's to drop, agreement or not.
+	if len(got.Runs) != 1 || got.Runs[0].Verdict != domain.SmokePass {
+		t.Fatalf("runs after reset = %+v, want the machine's run untouched", got.Runs)
 	}
 }

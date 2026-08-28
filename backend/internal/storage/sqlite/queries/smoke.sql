@@ -1,9 +1,9 @@
 -- name: ListSmokeChecksBySession :many
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at, agreed_run_id
 FROM smoke_check WHERE session_id = ? ORDER BY (retired_at IS NOT NULL), seq, created_at;
 
 -- name: GetSmokeCheck :one
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at, agreed_run_id
 FROM smoke_check WHERE id = ?;
 
 -- name: InsertSmokeCheck :exec
@@ -24,10 +24,14 @@ WHERE id = ?;
 DELETE FROM smoke_check WHERE id = ?;
 
 -- name: SetSmokeVerdict :execrows
-UPDATE smoke_check SET verdict = ?, note = ?, decided_at = ?, updated_at = ? WHERE id = ?;
+-- agreed_run_id is written on the SAME statement as the verdict, so a verdict and
+-- the claim about how it was reached can never disagree: agreeing sets both, and
+-- a hand-made call resets it to '' rather than leaving a previous agreement
+-- standing over a verdict the user has since changed by hand.
+UPDATE smoke_check SET verdict = ?, note = ?, decided_at = ?, agreed_run_id = ?, updated_at = ? WHERE id = ?;
 
 -- name: ResetSmokeCheck :execrows
-UPDATE smoke_check SET verdict = 'pending', note = '', decided_at = NULL, updated_at = ? WHERE id = ?;
+UPDATE smoke_check SET verdict = 'pending', note = '', decided_at = NULL, agreed_run_id = '', updated_at = ? WHERE id = ?;
 
 -- name: MarkSmokeReported :execrows
 UPDATE smoke_check SET reported_at = ?, updated_at = ? WHERE session_id = ?;

@@ -121,7 +121,7 @@ func (q *Queries) GetOpenSmokeRun(ctx context.Context, checkID string) (SmokeRun
 }
 
 const getSmokeCheck = `-- name: GetSmokeCheck :one
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at, agreed_run_id
 FROM smoke_check WHERE id = ?
 `
 
@@ -150,6 +150,7 @@ func (q *Queries) GetSmokeCheck(ctx context.Context, id string) (SmokeCheck, err
 		&i.AuthoredBy,
 		&i.AuthoredByRole,
 		&i.AuthoredAt,
+		&i.AgreedRunID,
 	)
 	return i, err
 }
@@ -317,7 +318,7 @@ func (q *Queries) InsertSmokeRun(ctx context.Context, arg InsertSmokeRunParams) 
 }
 
 const listSmokeChecksBySession = `-- name: ListSmokeChecksBySession :many
-SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at
+SELECT id, session_id, project_id, seq, name, why, steps, expected, pr_num, file_ref, verdict, note, decided_at, reported_at, created_at, updated_at, retired_at, retired_reason, authored_by, authored_by_role, authored_at, agreed_run_id
 FROM smoke_check WHERE session_id = ? ORDER BY (retired_at IS NOT NULL), seq, created_at
 `
 
@@ -352,6 +353,7 @@ func (q *Queries) ListSmokeChecksBySession(ctx context.Context, sessionID domain
 			&i.AuthoredBy,
 			&i.AuthoredByRole,
 			&i.AuthoredAt,
+			&i.AgreedRunID,
 		); err != nil {
 			return nil, err
 		}
@@ -561,7 +563,7 @@ func (q *Queries) NextSmokeRunSeq(ctx context.Context, checkID string) (int64, e
 }
 
 const resetSmokeCheck = `-- name: ResetSmokeCheck :execrows
-UPDATE smoke_check SET verdict = 'pending', note = '', decided_at = NULL, updated_at = ? WHERE id = ?
+UPDATE smoke_check SET verdict = 'pending', note = '', decided_at = NULL, agreed_run_id = '', updated_at = ? WHERE id = ?
 `
 
 type ResetSmokeCheckParams struct {
@@ -607,22 +609,28 @@ func (q *Queries) RetireSmokeCheck(ctx context.Context, arg RetireSmokeCheckPara
 }
 
 const setSmokeVerdict = `-- name: SetSmokeVerdict :execrows
-UPDATE smoke_check SET verdict = ?, note = ?, decided_at = ?, updated_at = ? WHERE id = ?
+UPDATE smoke_check SET verdict = ?, note = ?, decided_at = ?, agreed_run_id = ?, updated_at = ? WHERE id = ?
 `
 
 type SetSmokeVerdictParams struct {
-	Verdict   domain.SmokeVerdict
-	Note      string
-	DecidedAt sql.NullTime
-	UpdatedAt time.Time
-	ID        string
+	Verdict     domain.SmokeVerdict
+	Note        string
+	DecidedAt   sql.NullTime
+	AgreedRunID string
+	UpdatedAt   time.Time
+	ID          string
 }
 
+// agreed_run_id is written on the SAME statement as the verdict, so a verdict and
+// the claim about how it was reached can never disagree: agreeing sets both, and
+// a hand-made call resets it to ” rather than leaving a previous agreement
+// standing over a verdict the user has since changed by hand.
 func (q *Queries) SetSmokeVerdict(ctx context.Context, arg SetSmokeVerdictParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSmokeVerdict,
 		arg.Verdict,
 		arg.Note,
 		arg.DecidedAt,
+		arg.AgreedRunID,
 		arg.UpdatedAt,
 		arg.ID,
 	)

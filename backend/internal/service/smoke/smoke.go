@@ -86,7 +86,7 @@ type Manager interface {
 	EditCase(ctx context.Context, from, sessionID domain.SessionID, checkID string, patch domain.SmokeCasePatch) (domain.SmokeCheck, error)
 	RemoveCase(ctx context.Context, from, sessionID domain.SessionID, checkID string) (SessionSmoke, error)
 	StandDown(ctx context.Context, from, sessionID domain.SessionID, reason string) (SessionSmoke, error)
-	SetVerdict(ctx context.Context, sessionID domain.SessionID, checkID string, verdict domain.SmokeVerdict, note string) (domain.SmokeCheck, error)
+	SetVerdict(ctx context.Context, sessionID domain.SessionID, checkID string, verdict domain.SmokeVerdict, note, agreedRunID string) (domain.SmokeCheck, error)
 	RecordAgentResult(ctx context.Context, sessionID domain.SessionID, checkID string, res domain.SmokeAgentResult) (domain.SmokeCheck, error)
 	Retire(ctx context.Context, sessionID domain.SessionID, checkID, reason string) (domain.SmokeCheck, error)
 	Reset(ctx context.Context, sessionID domain.SessionID, checkID string) (domain.SmokeCheck, error)
@@ -113,7 +113,7 @@ type Store interface {
 	GetSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID) (domain.SmokeStandDown, bool, error)
 	SetSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID, reason string, author domain.SmokeAuthor, now time.Time) error
 	ClearSmokeChecklistStandDown(ctx context.Context, sessionID domain.SessionID) error
-	SetSmokeVerdict(ctx context.Context, id string, verdict domain.SmokeVerdict, note string, decidedAt, now time.Time) (bool, error)
+	SetSmokeVerdict(ctx context.Context, id string, verdict domain.SmokeVerdict, note, agreedRunID string, decidedAt, now time.Time) (bool, error)
 	OpenSmokeRun(ctx context.Context, checkID string, sessionID domain.SessionID, now time.Time) (domain.SmokeRun, bool, error)
 	CloseSmokeRun(ctx context.Context, runID string, res domain.SmokeAgentResult, recordedAt, now time.Time) (bool, error)
 	RetireSmokeCheck(ctx context.Context, id, reason string, retiredAt, now time.Time) (bool, error)
@@ -561,16 +561,30 @@ func normalizePatch(patch domain.SmokeCasePatch) (domain.SmokeCasePatch, error) 
 	return out, nil
 }
 
-// SetVerdict records the user's verdict + note for a case.
-func (s *Service) SetVerdict(ctx context.Context, sessionID domain.SessionID, checkID string, verdict domain.SmokeVerdict, note string) (domain.SmokeCheck, error) {
+// SetVerdict records the USER's verdict + note for a case.
+//
+// agreedRunID is optional and is how the Tests tab's "Agree" button reaches
+// here: it names the machine run the user was looking at when they confirmed its
+// conclusion instead of deriving their own. Everything else about the write is
+// identical to a hand-pressed Pass - same columns, same DecidedAt, no run row
+// created, nothing in the machine's lane touched - because that is the whole
+// point. Agreement is a fact about HOW the user arrived at their verdict; it can
+// never be a way for the machine to author one. A case still counts as played
+// only because a person acted, which is what keeps "N of M verified" honest.
+func (s *Service) SetVerdict(ctx context.Context, sessionID domain.SessionID, checkID string, verdict domain.SmokeVerdict, note, agreedRunID string) (domain.SmokeCheck, error) {
 	if !verdict.Valid() {
 		return domain.SmokeCheck{}, fmt.Errorf("%w: verdict must be pass, fail, or skip", ErrInvalid)
 	}
-	if _, err := s.requireActiveCheck(ctx, sessionID, checkID); err != nil {
+	check, err := s.requireActiveCheck(ctx, sessionID, checkID)
+	if err != nil {
+		return domain.SmokeCheck{}, err
+	}
+	agreedRunID = strings.TrimSpace(agreedRunID)
+	if err := checkAgreement(check, verdict, agreedRunID); err != nil {
 		return domain.SmokeCheck{}, err
 	}
 	now := s.now()
-	updated, err := s.store.SetSmokeVerdict(ctx, checkID, verdict, note, now, now)
+	updated, err := s.store.SetSmokeVerdict(ctx, checkID, verdict, note, agreedRunID, now, now)
 	if err != nil {
 		return domain.SmokeCheck{}, err
 	}
@@ -578,6 +592,48 @@ func (s *Service) SetVerdict(ctx context.Context, sessionID domain.SessionID, ch
 		return domain.SmokeCheck{}, fmt.Errorf("%w: smoke check %q", ErrNotFound, checkID)
 	}
 	return s.getCheck(ctx, checkID)
+}
+
+// checkAgreement validates a claim that the user's verdict was reached by
+// agreeing with a machine run. It refuses everything that would let the claim be
+// untrue, because an agreement nobody can trust is worse than no agreement at
+// all: the run must be one of THIS case's, it must have concluded, and its
+// verdict must be the one being recorded.
+//
+// It also refuses `skip` outright, and that is a decision rather than an
+// oversight. qa's skip means "I could not run this one, nothing was exercised";
+// the user's skip means "this check does not apply". Those are different claims,
+// so there is nothing to agree with - a one-click agreement here would record
+// the user asserting a case is irrelevant when all qa said was that it never
+// ran. Evidence-only runs are refused by the same rule that requires a matching
+// verdict: a run that deliberately did not judge has no verdict to confirm, and
+// letting one through could only ever mean "pass".
+func checkAgreement(check domain.SmokeCheck, verdict domain.SmokeVerdict, agreedRunID string) error {
+	if agreedRunID == "" {
+		return nil
+	}
+	if verdict == domain.SmokeSkip {
+		return fmt.Errorf("%w: qa's skip means it could not run the case; your skip means the case does not apply - they are different claims, so there is nothing to agree with. Record the skip on its own", ErrInvalid)
+	}
+	for _, run := range check.Runs {
+		if run.ID != agreedRunID {
+			continue
+		}
+		if !run.Recorded() {
+			return fmt.Errorf("%w: run %q never concluded, so there is no result to agree with", ErrInvalid, agreedRunID)
+		}
+		if run.Verdict != verdict {
+			said := string(run.Verdict)
+			if said == "" {
+				said = "did not judge it"
+			} else {
+				said = "said " + said
+			}
+			return fmt.Errorf("%w: run %q %s, so it cannot be agreed with as %s", ErrInvalid, agreedRunID, said, verdict)
+		}
+		return nil
+	}
+	return fmt.Errorf("%w: smoke run %q is not on this case", ErrNotFound, agreedRunID)
 }
 
 // RecordAgentResult closes the machine's current RUN on a case with its verdict,

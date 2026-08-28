@@ -335,6 +335,7 @@ type SmokeCheck struct {
 	AuthoredBy     domain.SessionID
 	AuthoredByRole domain.CrewRole
 	AuthoredAt     sql.NullTime
+	AgreedRunID    string
 }
 
 type SmokeChecklistState struct {

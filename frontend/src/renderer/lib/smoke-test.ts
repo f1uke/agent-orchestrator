@@ -294,6 +294,14 @@ export function agentState(check: SmokeCheck): AgentState {
 export type AgentMeta = {
 	/** Chip text. Always prefixed `qa ·` so the actor is named, never inferred. */
 	label: string;
+	/**
+	 * The one word the expanded case leads with, so what qa concluded is readable
+	 * without reading a paragraph. It carries the meaning ALONE: the machine's
+	 * lane is monochrome by design (see the note above), so prominence here comes
+	 * from size, weight and the glyph beside it - never from a colour that would
+	 * both break that rule and make a machine result look like a played case.
+	 */
+	stamp: string;
 	/** What the machine did, in its own row of the expanded case. */
 	headline: string;
 	/** What that result does and does NOT mean: the sentence that keeps a
@@ -308,24 +316,28 @@ const QA_FG = "var(--smoke-qa-fg)";
 export const AGENT_META: Record<Exclude<AgentState, "none">, AgentMeta> = {
 	pass: {
 		label: "qa · ran",
+		stamp: "PASS",
 		headline: "qa ran the steps and they passed",
-		caption: "That is not a verdict on how it behaves. This case is still yours to play.",
+		caption: "That is not a verdict on how it behaves. The call is yours - agree with it, or play the case.",
 		color: QA_FG,
 	},
 	fail: {
 		label: "qa · failed",
+		stamp: "FAIL",
 		headline: "qa ran the steps and hit a failure",
 		caption: "Worth reading before you play it, but the call is still yours.",
 		color: "var(--smoke-fail-fg)",
 	},
 	skip: {
 		label: "qa · skipped",
+		stamp: "SKIP",
 		headline: "qa could not run this one",
 		caption: "Nothing was exercised, so there is nothing here to lean on.",
 		color: QA_FG,
 	},
 	captured: {
 		label: "qa · evidence only",
+		stamp: "NO VERDICT",
 		headline: "qa captured the screen and left the judgement to you",
 		caption:
 			"It recorded what it saw and said the capture does not settle this one, so the call is yours. Judge it from what qa captured instead of driving the app yourself.",
@@ -335,6 +347,44 @@ export const AGENT_META: Record<Exclude<AgentState, "none">, AgentMeta> = {
 
 export function agentMeta(state: AgentState): AgentMeta | null {
 	return state === "none" ? null : AGENT_META[state];
+}
+
+/**
+ * The machine run the user may confirm in ONE click, or null when there is
+ * nothing to confirm. This is the whole "agree" rule in one place, and every
+ * refusal in it is deliberate:
+ *
+ * - **Already decided** - nothing to offer; the case shows their verdict and a
+ *   Change button instead.
+ * - **`skip`** - qa's skip means "I could not run this one, nothing was
+ *   exercised"; the user's skip means "this check does not apply". Different
+ *   claims, so there is nothing to agree WITH, and a button here would put words
+ *   in their mouth. The service refuses it too, so this is not the only guard.
+ * - **Evidence-only** - qa ran it and deliberately did not judge. There is no
+ *   verdict to agree with, and an agree button could only ever mean "pass" -
+ *   exactly the disguised pass this state exists to avoid.
+ * - **An open run** - a round that never concluded is not a result.
+ *
+ * It resolves to the LATEST RECORDED run, which is the one the block's stamp
+ * shows. Since a case can have failed at one commit and passed at another,
+ * "agree with qa" would be ambiguous the moment two runs disagree; agreeing
+ * always means this run, and the id is stored so the record says which.
+ * Earlier runs get no button of their own: confirming a superseded round is a
+ * judgement, not a confirmation, and belongs in the user's own Pass/Fail.
+ */
+export function agreeableRun(check: SmokeCheck): SmokeRun | null {
+	if (check.verdict !== "pending") return null;
+	const run = latestRun(check);
+	if (!run) return null;
+	const verdict = run.verdict ?? "";
+	return verdict === "pass" || verdict === "fail" ? run : null;
+}
+
+/** The run a decided case's verdict was reached by agreeing with, if any. */
+export function agreedRun(check: SmokeCheck): SmokeRun | null {
+	const id = check.agreedRunId ?? "";
+	if (!id) return null;
+	return (check.runs ?? []).find((r) => r.id === id) ?? null;
 }
 
 /** Head-of-branch facts the staleness rule needs, structurally typed so the

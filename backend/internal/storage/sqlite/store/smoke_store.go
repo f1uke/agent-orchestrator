@@ -125,16 +125,19 @@ func (s *Store) ReplaceSmokeChecks(ctx context.Context, sessionID domain.Session
 }
 
 // SetSmokeVerdict records the user's verdict + note for a case, ok=false if the
-// case does not exist.
-func (s *Store) SetSmokeVerdict(ctx context.Context, id string, verdict domain.SmokeVerdict, note string, decidedAt, now time.Time) (bool, error) {
+// case does not exist. agreedRunID is the machine run the user confirmed, or ""
+// when they reached the verdict themselves; it rides the same statement so a
+// verdict and the claim about how it was reached cannot drift apart.
+func (s *Store) SetSmokeVerdict(ctx context.Context, id string, verdict domain.SmokeVerdict, note, agreedRunID string, decidedAt, now time.Time) (bool, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	n, err := s.qw.SetSmokeVerdict(ctx, gen.SetSmokeVerdictParams{
-		Verdict:   verdict,
-		Note:      note,
-		DecidedAt: sql.NullTime{Time: decidedAt, Valid: true},
-		UpdatedAt: now,
-		ID:        id,
+		Verdict:     verdict,
+		Note:        note,
+		DecidedAt:   sql.NullTime{Time: decidedAt, Valid: true},
+		AgreedRunID: agreedRunID,
+		UpdatedAt:   now,
+		ID:          id,
 	})
 	if err != nil {
 		return false, fmt.Errorf("set smoke verdict %s: %w", id, err)
@@ -427,6 +430,7 @@ func smokeCheckFromRow(r gen.SmokeCheck) (domain.SmokeCheck, error) {
 		Note:           r.Note,
 		Evidence:       []domain.SmokeEvidence{},
 		DecidedAt:      nullTimePtr(r.DecidedAt),
+		AgreedRunID:    r.AgreedRunID,
 		Runs:           []domain.SmokeRun{},
 		AgentEvidence:  []domain.SmokeEvidence{},
 		RetiredAt:      nullTimePtr(r.RetiredAt),

@@ -23,7 +23,7 @@ func seedPlayedCase(ctx context.Context, t *testing.T) (*Service, *fakeStore) {
 	}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if _, err := svc.SetVerdict(ctx, "w1", "played", domain.SmokePass, "looked right to me"); err != nil {
+	if _, err := svc.SetVerdict(ctx, "w1", "played", domain.SmokePass, "looked right to me", ""); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
 	if _, err := svc.AttachEvidence(ctx, "w1", "played", EvidenceUpload{

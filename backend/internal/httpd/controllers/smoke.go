@@ -104,6 +104,10 @@ type SmokeCheckResponse struct {
 type SetSmokeVerdictInput struct {
 	Verdict string `json:"verdict" description:"pass | fail | skip."`
 	Note    string `json:"note,omitempty" description:"Optional note about what the user saw."`
+	// AgreedRunID records that the user got to this verdict by confirming a
+	// machine run rather than deriving it. It never changes WHOSE verdict this
+	// is - the same columns are written either way.
+	AgreedRunID string `json:"agreedRunId,omitempty" description:"Optional id of the agent run the user agreed with. The run must be on this case, must have concluded, and its verdict must match; skip cannot be agreed with."`
 }
 
 // RecordSmokeAgentResultInput is the body of POST .../{checkId}/agent-result:
@@ -311,7 +315,7 @@ func (c *SmokeController) verdict(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
 		return
 	}
-	check, err := c.Svc.SetVerdict(r.Context(), sessionID(r), chi.URLParam(r, "checkId"), domain.SmokeVerdict(strings.TrimSpace(in.Verdict)), in.Note)
+	check, err := c.Svc.SetVerdict(r.Context(), sessionID(r), chi.URLParam(r, "checkId"), domain.SmokeVerdict(strings.TrimSpace(in.Verdict)), in.Note, in.AgreedRunID)
 	if err != nil {
 		writeSmokeError(w, r, err)
 		return

@@ -98,12 +98,35 @@ func caseRef(c domain.SmokeCheck) string {
 }
 
 func caseDetail(c domain.SmokeCheck) string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if note := strings.TrimSpace(c.Note); note != "" {
 		parts = append(parts, "note: "+note)
+	}
+	// The verdict above is the user's either way; this says how they got to it.
+	// Worth reporting because "they agreed with your run 3" and "they played it
+	// and reached the same answer" are different amounts of independent evidence,
+	// and the worker cannot tell them apart from the icon.
+	if agreed := agreedRunLabel(c); agreed != "" {
+		parts = append(parts, agreed)
 	}
 	if n := len(c.Evidence); n > 0 {
 		parts = append(parts, fmt.Sprintf("Evidence: %d attached", n))
 	}
 	return strings.Join(parts, ". ")
+}
+
+// agreedRunLabel names the machine run a user's verdict confirmed, by its run
+// number rather than its opaque id - "run 3" is what the Tests tab and
+// `ao smoke list` both show. Empty when the verdict was reached independently,
+// or when the named run is no longer on the case.
+func agreedRunLabel(c domain.SmokeCheck) string {
+	if c.AgreedRunID == "" {
+		return ""
+	}
+	for _, run := range c.Runs {
+		if run.ID == c.AgreedRunID {
+			return fmt.Sprintf("agreed with qa's run %d", run.Seq)
+		}
+	}
+	return ""
 }

@@ -142,7 +142,7 @@ func TestAttribution_IsNotMovedByTheHumansVerdict(t *testing.T) {
 		t.Fatalf("precondition: case is not qa's: %q", res.Checks[0].AuthoredByRole)
 	}
 
-	after, err := svc.SetVerdict(ctx, "mer-1", "c1", domain.SmokePass, "looked right")
+	after, err := svc.SetVerdict(ctx, "mer-1", "c1", domain.SmokePass, "looked right", "")
 	if err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}

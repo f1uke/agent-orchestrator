@@ -2999,6 +2999,8 @@ export interface components {
             targetBranch: string;
         };
         SetSmokeVerdictInput: {
+            /** @description Optional id of the agent run the user agreed with. The run must be on this case, must have concluded, and its verdict must match; skip cannot be agreed with. */
+            agreedRunId?: string;
             /** @description Optional note about what the user saw. */
             note?: string;
             /** @description pass | fail | skip. */
@@ -3170,6 +3172,7 @@ export interface components {
             agentRanAt?: null | string;
             agentSha?: string;
             agentVerdict?: string;
+            agreedRunId?: string;
             /** Format: date-time */
             authoredAt?: null | string;
             authoredBy?: string;

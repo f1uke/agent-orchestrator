@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
@@ -356,5 +357,40 @@ func TestSmokeSetSurfacesTheRetiredCaseRefusal(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("message missing %s: %v", want, err)
 		}
+	}
+}
+
+// TestSmokeListSaysTheUserAgreedWithARun: a worker reading its checklist back
+// must be able to tell "they played it and reached the same answer" from "they
+// confirmed my run 2". Both are the user's verdict - the report is not weaker for
+// being an agreement - but they are different amounts of independent evidence,
+// and the verdict word alone cannot tell them apart. The run is named rather than
+// "qa", because a case can have failed at one commit and passed at another.
+func TestSmokeListSaysTheUserAgreedWithARun(t *testing.T) {
+	cfg := setConfigEnv(t)
+	ran := time.Date(2026, 8, 28, 9, 0, 0, 0, time.UTC)
+	agreed := domain.SmokeCheck{
+		ID: "agreed", Seq: 1, Name: "Reset restores every field",
+		Verdict: domain.SmokePass, AgreedRunID: "run_agreed_2",
+		Runs: []domain.SmokeRun{
+			{ID: "run_agreed_1", CheckID: "agreed", Seq: 1, Verdict: domain.SmokeFail, SHA: "9f0c2ad4111", RecordedAt: &ran},
+			{ID: "run_agreed_2", CheckID: "agreed", Seq: 2, Verdict: domain.SmokePass, SHA: "4b21e07c9a5", RecordedAt: &ran},
+		},
+	}
+	own := domain.SmokeCheck{ID: "own", Seq: 2, Name: "Focus lands in the field", Verdict: domain.SmokePass}
+	srv, _ := reviewServer(t, 200, daemonSmokeBody(t, "settings copy", agreed, own))
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, aliveDeps(), "smoke", "list", "w1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "agreed with qa's run 2") {
+		t.Fatalf("output does not say which run the user agreed with:\n%s", out)
+	}
+	// A verdict the user reached themselves says nothing - that is the default,
+	// and a line on every case would make the agreed ones invisible again.
+	if strings.Count(out, "agreed with qa's run") != 1 {
+		t.Fatalf("an independently reached verdict claims an agreement:\n%s", out)
 	}
 }

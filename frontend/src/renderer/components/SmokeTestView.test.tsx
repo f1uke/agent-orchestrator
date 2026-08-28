@@ -1044,4 +1044,160 @@ describe("SmokeTestView shared authorship", () => {
 		expect(await screen.findByText("Actually, look at the header")).toBeInTheDocument();
 		expect(screen.queryByText("qa stood down")).not.toBeInTheDocument();
 	});
+	// -----------------------------------------------------------------------
+	// qa's conclusion, and the human agreeing with it.
+	//
+	// The complaint these answer: qa's verdict was one small line at the top of a
+	// long block, while the buttons that act on it sat far below, past a
+	// paragraph, the screenshots and the evidence box - so the single most useful
+	// word on the card was the least visible thing on it.
+	//
+	// The restriction they protect: agreeing must record that the HUMAN agreed.
+	// qa may never write the user's verdict, because the machine lane exists so
+	// AO never overwrites the one thing it cannot regenerate, and because
+	// "0 of 7 verified" is only a signal for as long as nothing but a person can
+	// move it.
+	describe("reading qa's verdict, and agreeing with it", () => {
+		const HEAD = "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118";
+		const OLD = "9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5";
+		const RAN = "2026-07-11T09:00:00Z";
+
+		function run(over: Record<string, unknown>) {
+			return {
+				checkId: "c1",
+				sessionId: "s1",
+				note: "",
+				sha: HEAD,
+				createdAt: RAN,
+				updatedAt: RAN,
+				...over,
+			};
+		}
+
+		it("leads with the verdict as one word, not a paragraph", async () => {
+			checks = [check({ agentRanAt: RAN, agentVerdict: "pass", agentSha: HEAD })];
+			renderView();
+			const stamp = await screen.findByTestId("qa-stamp-c1");
+			expect(stamp).toHaveTextContent("PASS");
+			// The word carries it alone - colour is never the only signal, because
+			// the machine's lane is monochrome and a person may not see hue at all.
+			expect(stamp.textContent?.trim()).toBe("PASS");
+		});
+
+		it("says NO VERDICT rather than borrowing the look of one when qa declined to judge", async () => {
+			checks = [check({ agentRanAt: RAN, agentSha: HEAD })];
+			renderView();
+			expect(await screen.findByTestId("qa-stamp-c1")).toHaveTextContent("NO VERDICT");
+			// The one thing it must never degrade into.
+			expect(screen.queryByTestId("qa-agree-c1")).not.toBeInTheDocument();
+			expect(screen.getByTestId("qa-stamp-c1")).not.toHaveTextContent("PASS");
+		});
+
+		it("agreeing records the verdict as the USER's, naming the run they agreed with", async () => {
+			checks = [check({ agentRanAt: RAN, agentVerdict: "pass", agentSha: HEAD })];
+			renderView();
+			await userEvent.click(await screen.findByTestId("qa-agree-c1"));
+
+			await waitFor(() => {
+				const call = postMock.mock.calls.find((c) => String(c[0]).endsWith("/verdict"));
+				expect(call).toBeTruthy();
+				// The USER's verdict endpoint, with the run only ANNOTATING it. There
+				// is deliberately no path here through the agent-result route: that
+				// would make the machine the author of a human's call.
+				expect(call?.[1].body).toMatchObject({ verdict: "pass", agreedRunId: "run_c1_1" });
+			});
+			expect(postMock.mock.calls.some((c) => String(c[0]).endsWith("/agent-result"))).toBe(false);
+			expect(await screen.findByText(/your verdict, agreeing with qa's run 1/)).toBeInTheDocument();
+		});
+
+		it("offers no agreement on a skip - qa's skip and the user's skip are different claims", async () => {
+			// qa's skip means "I could not run this, nothing was exercised"; the
+			// user's means "this check does not apply". Agreeing would record a claim
+			// the user never made, so there is no button (and the service refuses it).
+			checks = [check({ agentRanAt: RAN, agentVerdict: "skip", agentSha: HEAD })];
+			renderView();
+			expect(await screen.findByTestId("qa-stamp-c1")).toHaveTextContent("SKIP");
+			expect(screen.queryByTestId("qa-agree-c1")).not.toBeInTheDocument();
+			// The user's own skip is untouched.
+			expect(screen.getByRole("button", { name: /this check doesn't apply/ })).toBeInTheDocument();
+		});
+
+		it("agrees with the LATEST recorded run when earlier runs disagree, and says which", async () => {
+			checks = [
+				check({
+					agentRanAt: RAN,
+					agentVerdict: "pass",
+					agentSha: HEAD,
+					runs: [
+						run({ id: "r1", seq: 1, verdict: "fail", note: "clipped", sha: OLD, recordedAt: "2026-07-10T09:00:00Z" }),
+						run({ id: "r2", seq: 2, verdict: "pass", note: "clean", recordedAt: RAN }),
+					],
+				}),
+			];
+			renderView();
+			const agree = await screen.findByTestId("qa-agree-c1");
+			// With a history behind it, the button names the run, so agreeing cannot
+			// be read as agreeing with the round that said the opposite.
+			expect(agree).toHaveTextContent("run 2");
+			expect(agree).toHaveTextContent("Pass");
+			await userEvent.click(agree);
+			await waitFor(() => {
+				const call = postMock.mock.calls.find((c) => String(c[0]).endsWith("/verdict"));
+				expect(call?.[1].body).toMatchObject({ verdict: "pass", agreedRunId: "r2" });
+			});
+		});
+
+		it("offers no agreement on a run that never concluded", async () => {
+			checks = [
+				check({
+					agentEvidence: [],
+					runs: [run({ id: "r1", seq: 1, verdict: "", recordedAt: null })],
+				}),
+			];
+			renderView();
+			expect(await screen.findByTestId("qa-stamp-c1")).toHaveTextContent("NO RESULT");
+			expect(screen.queryByTestId("qa-agree-c1")).not.toBeInTheDocument();
+		});
+
+		it("shows the agreement under the user's own verdict pill, as theirs", async () => {
+			checks = [
+				check({
+					verdict: "pass",
+					decidedAt: "2026-07-11T10:05:00Z",
+					agreedRunId: "run_c1_1",
+					agentRanAt: RAN,
+					agentVerdict: "pass",
+					agentSha: HEAD,
+				}),
+			];
+			renderView();
+			// Open the collapsed, decided case.
+			await userEvent.click(await screen.findByText("A fresh MR shows up"));
+			// The pill still says the verdict is theirs; the agreement is a separate,
+			// quieter line saying how they got there.
+			expect(await screen.findByText(/· by you/)).toBeInTheDocument();
+			expect(screen.getByTestId("agreed-with-c1")).toHaveTextContent("you agreed with qa's run 1");
+			// A decided case offers no second agreement.
+			expect(screen.queryByTestId("qa-agree-c1")).not.toBeInTheDocument();
+		});
+
+		it("counts an agreed case as verified by a person, like any hand-made call", async () => {
+			checks = [
+				check({
+					verdict: "pass",
+					decidedAt: "2026-07-11T10:05:00Z",
+					agreedRunId: "run_c1_1",
+					agentRanAt: RAN,
+					agentVerdict: "pass",
+					agentSha: HEAD,
+				}),
+				check({ id: "c2", seq: 2, name: "Second case" }),
+			];
+			renderView();
+			const summary = await screen.findByText(/of 2 verified/);
+			expect(summary).toHaveTextContent("1 of 2 verified");
+			// One case left to play, so the machine's own counts are not standing in.
+			expect(screen.getByText("1 to check")).toBeInTheDocument();
+		});
+	});
 });
