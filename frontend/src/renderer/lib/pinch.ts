@@ -37,11 +37,13 @@ export const PINCH_ANCHOR: DragPoint = { x: 0.5, y: 0.5 };
  * The closest the two contacts may be and still land as two.
  *
  * ⚠ This is `simbridge.MinPinchSpan` (backend/internal/simbridge/gesture.go),
- * copied because the pane has to know it and the API does not publish it. If
- * that constant moves, this one has to move with it - and the symptom of it not
- * moving is a refusal a human sees, which no test here fails on. It is
- * duplicated rather than approximated on purpose: the two are compared against
- * the same doubles, so an equal value is exactly safe and a nearby one is not.
+ * copied because the pane has to know it and the API does not publish it. It is
+ * the same number, not a nearby one: a lower copy would send pairs the daemon
+ * refuses and a higher one would hold the fingers further apart than they need
+ * to be. If that constant moves, this one has to move with it - and the symptom
+ * of it not moving is a refusal a human sees, which no test here fails on.
+ * (The margin that keeps a placed pair clear of the threshold is separate, and
+ * lives in HELD_APART_RADIUS below.)
  *
  * What it is FOR: the anchor starts at the middle of the screen, so the two
  * contacts meet when the pointer reaches the middle - on a press that lands
