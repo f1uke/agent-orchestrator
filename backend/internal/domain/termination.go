@@ -58,6 +58,11 @@ const (
 	// TerminationCauseRestart is the terminal beat of a restart-in-place, between
 	// destroying the old runtime and relaunching into the same worktree.
 	TerminationCauseRestart = "restart"
+	// TerminationCauseDevExited is a crew member ended because its DEV's agent
+	// ended its own session. dev owns the branch, the worktree and the PR, so a
+	// subordinate left running after it would be working on something nobody
+	// will land.
+	TerminationCauseDevExited = "dev_exited"
 	// TerminationCauseIssueClosed is the tracker issue behind the session
 	// reaching a terminal state.
 	TerminationCauseIssueClosed = "issue_closed"

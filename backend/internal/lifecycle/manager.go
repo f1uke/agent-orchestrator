@@ -284,6 +284,14 @@ func (m *Manager) ApplyActivitySignal(ctx context.Context, id domain.SessionID, 
 		m.mu.Unlock()
 		return nil
 	}
+	// An ENDING leaves this function. It is the one signal that has consequences
+	// beyond the row - a crew to end, or a park to hold - and both need the lock
+	// released: the crew fan-out re-enters this Manager through MarkTerminated,
+	// and sync.Mutex is not reentrant.
+	if s.State == domain.ActivityExited {
+		m.mu.Unlock()
+		return m.applyAgentExit(ctx, rec, s, now)
+	}
 	prevState := rec.Activity.State
 	prevAt := rec.Activity.LastActivityAt
 	next := rec
@@ -308,17 +316,6 @@ func (m *Manager) ApplyActivitySignal(ctx context.Context, id domain.SessionID, 
 	next.Activity = act
 	if next.FirstSignalAt.IsZero() {
 		next.FirstSignalAt = timeOr(s.Timestamp, now)
-	}
-	if s.State == domain.ActivityExited {
-		next.IsTerminated = true
-		// The agent ended itself. Whatever it said about why is the ONLY account
-		// of an ending AO did not order, so it is recorded here rather than
-		// consumed and dropped by the state derivation upstream.
-		reason := ""
-		if s.End != nil {
-			reason = s.End.Reason
-		}
-		next.Termination = m.termination(rec, domain.TerminationSourceAgent, reason, timeOr(s.Timestamp, now))
 	}
 	next.UpdatedAt = now
 	if err := m.store.UpdateSession(ctx, next); err != nil {

@@ -103,7 +103,7 @@ type SessionRecord struct {
 	// reason does: opening a suspended session resumes it. Written when
 	// IsSuspended is set and cleared when the runtime comes back, so at most one
 	// of this and WokenBy is set at a time.
-	SleepReason SleepReason `json:"sleepReason,omitempty" enum:"idle,turn,merged"`
+	SleepReason SleepReason `json:"sleepReason,omitempty" enum:"idle,turn,merged,undelivered"`
 	// WokenBy records WHAT brought this session's runtime back after a suspend.
 	// change_log fans out the is_suspended flip but not the actor, so a wake that
 	// nobody remembers ordering (the incident this field was added for) could only

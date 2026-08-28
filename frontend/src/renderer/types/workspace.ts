@@ -326,8 +326,14 @@ export type WorkspaceSession = {
 	 *
 	 * What opening a card will NOT do is START an agent that has never run, and
 	 * that is read from `crew.hasRun` (see `neverStarted`), not from here.
+	 *
+	 * `"undelivered"` is an agent that ended its OWN session while holding work
+	 * that had reached nobody - no pull request opened from the worktree it still
+	 * owns. It is parked rather than terminated so the card reads "Needs you"
+	 * instead of filing the task as finished; opening it resumes the agent into
+	 * the tree its work is still sitting in.
 	 */
-	sleepReason?: "idle" | "turn" | "merged";
+	sleepReason?: "idle" | "turn" | "merged" | "undelivered";
 	/**
 	 * True when this worker is expected to open MORE PRs, so a PR merge SUSPENDS it
 	 * in place (card stays on the board, resumable) instead of terminating it to

@@ -1070,3 +1070,28 @@ func TestUpsertSessionWorktreeEmptyStateDefaultsToActive(t *testing.T) {
 		t.Fatalf("State = %q, want %q", got.State, "active")
 	}
 }
+
+// The sleep_reason column carries a CHECK constraint, so a new reason is only
+// real once the migration that widens it has run. 'undelivered' is the park an
+// agent's own exit writes when its work reached nobody; without the widening the
+// write fails and the session terminates instead, which is the bug it exists to
+// stop.
+func TestSessionSleepReasonUndeliveredRoundTrips(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+
+	r, _ := s.CreateSession(ctx, sampleRecord("mer"))
+	r.IsSuspended = true
+	r.SleepReason = domain.SleepReasonUndelivered
+	if err := s.UpdateSession(ctx, r); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, ok, err := s.GetSession(ctx, r.ID)
+	if err != nil || !ok {
+		t.Fatalf("get session: found=%v err=%v", ok, err)
+	}
+	if got.SleepReason != domain.SleepReasonUndelivered {
+		t.Fatalf("sleep_reason did not round-trip: %q", got.SleepReason)
+	}
+}
