@@ -296,6 +296,9 @@ function DeviceRow({
 			) : null}
 
 			{power?.state === "failed" ? <Failure reason={power.reason ?? "It did not work, and said nothing."} /> : null}
+			{power?.state === "warned" ? (
+				<Stock reason={power.profileReason ?? "It came up stock and said nothing."} />
+			) : null}
 		</div>
 	);
 }
@@ -320,6 +323,11 @@ function InFlight({ power }: { power: PowerInfo }) {
 	const seconds = Number.isNaN(started) ? 0 : Math.max(0, Math.round((now - started) / 1000));
 	const elapsed = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
+	// Slimming reboots the simulator, so it runs for tens of seconds after the
+	// device already looks booted. Without naming it, that stretch reads as the
+	// pane being stuck rather than as work still in flight.
+	const verb = power.op === "boot" ? (power.phase === "slimming" ? "Slimming" : "Booting") : "Shutting down";
+
 	return (
 		<span
 			aria-live="polite"
@@ -330,7 +338,7 @@ function InFlight({ power }: { power: PowerInfo }) {
 			<Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
 			<span className="font-mono tabular-nums">{elapsed}</span>
 			<span className="sr-only">
-				{power.op === "boot" ? "Booting" : "Shutting down"}, {elapsed} so far, giving up at {BOOT_TIMEOUT_LABEL}
+				{verb}, {elapsed} so far, giving up at {BOOT_TIMEOUT_LABEL}
 			</span>
 			<span aria-hidden className="text-passive">
 				/ {BOOT_TIMEOUT_LABEL}
@@ -350,6 +358,26 @@ function Failure({ reason }: { reason: string }) {
 		<p className="mt-1.5 flex gap-1.5 rounded-md bg-overlay px-2 py-1.5 text-[11px] leading-snug text-error">
 			<AlertTriangle aria-hidden className="mt-0.5 size-3.5 shrink-0" />
 			<span className="min-w-0">{reason}</span>
+		</p>
+	);
+}
+
+/**
+ * The boot worked; the device just never got slimmed. This sits beside
+ * `Failure` but must not read as one - dressing a success up as an error is
+ * how people learn to ignore the row, and `simctl push` returns exit 0 on a
+ * stock device even though nothing was delivered.
+ */
+function Stock({ reason }: { reason: string }) {
+	return (
+		<p
+			className="mt-1.5 flex gap-1.5 rounded-md bg-overlay px-2 py-1.5 text-[11px] leading-snug text-warning"
+			data-testid="sim-power-stock"
+		>
+			<AlertTriangle aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+			<span className="min-w-0">
+				This simulator is stock, not slimmed - {reason} Features this project expects may silently do nothing.
+			</span>
 		</p>
 	);
 }
