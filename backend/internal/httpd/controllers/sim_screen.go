@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -55,7 +56,7 @@ type SimScreenProvider interface {
 	// boot takes tens of seconds and the request cannot be held open for it.
 	// See internal/simpower for why this is reachable from the desktop app and
 	// from no `ao` subcommand.
-	StartPower(ctx context.Context, udid string, op simpower.Op, done func()) error
+	StartPower(ctx context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error
 	// PowerStatus is what is in flight, keyed by normalized udid, so the
 	// listing the pane already polls carries the progress too.
 	PowerStatus() map[string]simpower.Status
@@ -906,7 +907,7 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 		done = release
 	}
 
-	if err := c.Screen.StartPower(r.Context(), device.UDID, op, done); err != nil {
+	if err := c.Screen.StartPower(r.Context(), device.UDID, op, nil, done); err != nil {
 		done()
 		writePowerStartError(w, r, err)
 		return

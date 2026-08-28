@@ -23,6 +23,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -32,7 +33,9 @@ import (
 // The power surface is not what this file is about: a stream fake answers it
 // with "nothing is happening", which is the truth for a device nobody is
 // powering on or off.
-func (s *streamScreen) StartPower(context.Context, string, simpower.Op, func()) error { return nil }
+func (s *streamScreen) StartPower(context.Context, string, simpower.Op, *simslim.Request, func()) error {
+	return nil
+}
 
 func (s *streamScreen) PowerStatus() map[string]simpower.Status { return nil }
 

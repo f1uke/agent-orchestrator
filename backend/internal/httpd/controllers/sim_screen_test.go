@@ -25,6 +25,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 )
 
@@ -68,7 +69,7 @@ type powerCall struct {
 	Done func()
 }
 
-func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, done func()) error {
+func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, _ *simslim.Request, done func()) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.powerErr != nil {
