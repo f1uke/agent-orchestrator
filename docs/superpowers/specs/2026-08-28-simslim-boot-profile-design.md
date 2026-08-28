@@ -191,6 +191,17 @@ type SimProfileResolver interface {
 A nil resolver means no slimming, which keeps every existing test and every
 existing deployment working unchanged.
 
+The resolver owns the mapping from `domain.SimProfileConfig` to
+`simslim.Profile`, so `domain` never imports `simslim` and the tool's vocabulary
+does not leak into the config types.
+
+**If the resolver itself returns an error** — the session or its project cannot
+be read — the boot proceeds unslimmed and reports outcome `Failed` with that
+error as the reason. It does not fail the boot, for the same reason a missing
+simslim does not, and it does not quietly boot as if no profile were configured:
+"this project asked for a profile and we could not find out which" is exactly
+the kind of thing this design refuses to let pass silently.
+
 `Screen.StartPower` and `Power.Start` take the resolved `*simslim.Profile` as a
 parameter. Neither `Screen` nor `Power` ever looks a profile up: they are
 device-level components, and keeping them ignorant of projects is what keeps
