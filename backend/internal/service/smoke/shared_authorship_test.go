@@ -58,7 +58,7 @@ func TestAddCases_ReAddingAnIDKeepsTheUsersResults(t *testing.T) {
 	if _, err := svc.Author(ctx, "mer-1", "mer-1", []domain.SmokeAuthoredCase{{ID: "c1", Name: "Board still paints"}}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if _, err := svc.SetVerdict(ctx, "mer-1", "c1", domain.SmokeFail, "the header flickers"); err != nil {
+	if _, err := svc.SetVerdict(ctx, "mer-1", "c1", domain.SmokeFail, "the header flickers", ""); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestEditCase_CannotReachTheUsersResult(t *testing.T) {
 	if _, err := svc.Author(ctx, "mer-1", "mer-1", []domain.SmokeAuthoredCase{{ID: "c1", Name: "Board still paints"}}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if _, err := svc.SetVerdict(ctx, "mer-1", "c1", domain.SmokePass, "looked right"); err != nil {
+	if _, err := svc.SetVerdict(ctx, "mer-1", "c1", domain.SmokePass, "looked right", ""); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestRemoveCase_UnplayedGoesPlayedIsRefused(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if _, err := svc.SetVerdict(ctx, "mer-1", "played", domain.SmokeFail, "the header flickers"); err != nil {
+	if _, err := svc.SetVerdict(ctx, "mer-1", "played", domain.SmokeFail, "the header flickers", ""); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
 

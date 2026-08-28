@@ -29,6 +29,7 @@ type fakeSmokeService struct {
 	authoredFrom domain.SessionID
 	authorErr    error
 	verdictErr   error
+	agreedRunID  string
 	lastUpload   smokesvc.EvidenceUpload
 	uploadBytes  []byte
 	blob         smokesvc.EvidenceBlob
@@ -114,11 +115,12 @@ func (f *fakeSmokeService) StandDown(_ context.Context, from, _ domain.SessionID
 	return f.list, nil
 }
 
-func (f *fakeSmokeService) SetVerdict(_ context.Context, _ domain.SessionID, checkID string, verdict domain.SmokeVerdict, note string) (domain.SmokeCheck, error) {
+func (f *fakeSmokeService) SetVerdict(_ context.Context, _ domain.SessionID, checkID string, verdict domain.SmokeVerdict, note, agreedRunID string) (domain.SmokeCheck, error) {
 	if f.verdictErr != nil {
 		return domain.SmokeCheck{}, f.verdictErr
 	}
-	return domain.SmokeCheck{ID: checkID, Verdict: verdict, Note: note}, nil
+	f.agreedRunID = agreedRunID
+	return domain.SmokeCheck{ID: checkID, Verdict: verdict, Note: note, AgreedRunID: agreedRunID}, nil
 }
 
 func (f *fakeSmokeService) RecordAgentResult(_ context.Context, _ domain.SessionID, checkID string, res domain.SmokeAgentResult) (domain.SmokeCheck, error) {
@@ -362,6 +364,36 @@ func TestSmokeVerdictMapsNotFound(t *testing.T) {
 	body, status, headers := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/a/verdict", `{"verdict":"pass"}`)
 	assertJSON(t, headers)
 	assertErrorCode(t, body, status, http.StatusNotFound, "SMOKE_NOT_FOUND")
+}
+
+// TestSmokeVerdictCarriesTheAgreedRun: the Tests tab's "Agree" button is the
+// ordinary verdict endpoint plus one field naming the run the user confirmed.
+// It stays the USER's verdict either way - there is deliberately no route by
+// which an agent result can fill this in.
+func TestSmokeVerdictCarriesTheAgreedRun(t *testing.T) {
+	svc := &fakeSmokeService{}
+	srv := newSmokeTestServer(t, svc)
+
+	body, status, headers := doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/a/verdict",
+		`{"verdict":"pass","note":"agreed","agreedRunId":"run_a_2"}`)
+	assertJSON(t, headers)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, body)
+	}
+	if svc.agreedRunID != "run_a_2" {
+		t.Fatalf("service saw agreedRunId %q, want run_a_2", svc.agreedRunID)
+	}
+	if !strings.Contains(string(body), `"agreedRunId":"run_a_2"`) {
+		t.Fatalf("response does not carry the agreed run back: %s", body)
+	}
+
+	// Omitted is the default and means the user derived the verdict themselves.
+	if _, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions/w1/smoke-checks/a/verdict", `{"verdict":"fail"}`); status != http.StatusOK {
+		t.Fatalf("plain verdict status = %d, want 200", status)
+	}
+	if svc.agreedRunID != "" {
+		t.Fatalf("service saw agreedRunId %q on a plain verdict, want empty", svc.agreedRunID)
+	}
 }
 
 func TestSmokeEvidenceMultipartRoundTrip(t *testing.T) {

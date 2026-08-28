@@ -8577,6 +8577,11 @@ components:
       type: object
     SetSmokeVerdictInput:
       properties:
+        agreedRunId:
+          description: Optional id of the agent run the user agreed with. The run
+            must be on this case, must have concluded, and its verdict must match;
+            skip cannot be agreed with.
+          type: string
         note:
           description: Optional note about what the user saw.
           type: string
@@ -8946,6 +8951,8 @@ components:
         agentSha:
           type: string
         agentVerdict:
+          type: string
+        agreedRunId:
           type: string
         authoredAt:
           format: date-time

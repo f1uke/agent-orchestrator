@@ -70,7 +70,7 @@ func TestSmokeAgentResultAndUserResultAreDisjoint(t *testing.T) {
 		t.Errorf("agent result not stored: %+v", check)
 	}
 
-	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokeFail, "felt laggy", now, now); err != nil || !ok {
+	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokeFail, "felt laggy", "", now, now); err != nil || !ok {
 		t.Fatalf("set verdict: ok=%v err=%v", ok, err)
 	}
 	check, _, _ = s.GetSmokeCheck(ctx, "a")
@@ -173,7 +173,7 @@ func TestRetiredSmokeCheckSurvivesAReAuthor(t *testing.T) {
 	}, domain.SmokeAuthor{}, now); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokeFail, "flashed Unknown", now, now); err != nil || !ok {
+	if ok, err := s.SetSmokeVerdict(ctx, "a", domain.SmokeFail, "flashed Unknown", "", now, now); err != nil || !ok {
 		t.Fatalf("set verdict: ok=%v err=%v", ok, err)
 	}
 	if err := s.InsertSmokeEvidence(ctx, domain.SmokeEvidence{

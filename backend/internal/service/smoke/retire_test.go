@@ -143,7 +143,7 @@ func TestRetiredCaseIsFrozen(t *testing.T) {
 		write func(svc *Service) error
 	}{
 		{"verdict", func(svc *Service) error {
-			_, err := svc.SetVerdict(ctx, "w1", "played", domain.SmokeFail, "")
+			_, err := svc.SetVerdict(ctx, "w1", "played", domain.SmokeFail, "", "")
 			return err
 		}},
 		{"reset", func(svc *Service) error {
@@ -213,7 +213,7 @@ func TestReportAndJiraLeaveRetiredCasesOut(t *testing.T) {
 	ctx := context.Background()
 	svc, store := seedPlayedCase(ctx, t)
 	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj"}
-	if _, err := svc.SetVerdict(ctx, "w1", "draft", domain.SmokeFail, "still broken"); err != nil {
+	if _, err := svc.SetVerdict(ctx, "w1", "draft", domain.SmokeFail, "still broken", ""); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
 	if _, err := svc.Retire(ctx, "w1", "played", "now covered by TestPlayed"); err != nil {

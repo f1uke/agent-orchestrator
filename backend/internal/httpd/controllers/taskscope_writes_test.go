@@ -82,7 +82,7 @@ func (s *writeScopeSmoke) note(route string, id domain.SessionID) {
 	s.asked[route] = append(s.asked[route], id)
 }
 
-func (s *writeScopeSmoke) SetVerdict(_ context.Context, id domain.SessionID, _ string, _ domain.SmokeVerdict, _ string) (domain.SmokeCheck, error) {
+func (s *writeScopeSmoke) SetVerdict(_ context.Context, id domain.SessionID, _ string, _ domain.SmokeVerdict, _, _ string) (domain.SmokeCheck, error) {
 	s.note("verdict", id)
 	return domain.SmokeCheck{}, nil
 }

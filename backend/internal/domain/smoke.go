@@ -72,6 +72,19 @@ type SmokeCheck struct {
 	Note      string          `json:"note"`
 	Evidence  []SmokeEvidence `json:"evidence"`
 	DecidedAt *time.Time      `json:"decidedAt,omitempty"`
+	// AgreedRunID names the machine run the user CONFIRMED, when they reached
+	// this verdict by agreeing with one instead of deriving it themselves. It is
+	// a fact about the user's verdict, never a second author of it: the verdict,
+	// the note and DecidedAt are written exactly as a hand-pressed Pass writes
+	// them, no run row is created and nothing in the machine's lane is touched.
+	// A case counts as played because a PERSON acted, agreement or not - which is
+	// what keeps "N of M verified" meaning "a person looked".
+	//
+	// It names a RUN rather than "qa" because a case can have failed at one
+	// commit and passed at another (Runs): "agreed with qa" is ambiguous the
+	// moment two runs disagree. Empty means the user reached the verdict on their
+	// own, which is what every verdict before this field did.
+	AgreedRunID string `json:"agreedRunId,omitempty"`
 	// Runs is the machine's history on this case, oldest first: one row per
 	// `ao smoke record`, each with its own verdict, note, commit and evidence.
 	// It is a list because it used to be four columns, and four columns meant

@@ -1618,8 +1618,48 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
 			},
 			{
 				...base,
-				id: "settings-copy-legacy-toggle",
+				id: "settings-copy-reset",
 				seq: 7,
+				name: "Reset to defaults restores every field",
+				why: "Reset writes through the same path the copy refactor touched.",
+				steps: ["Change three fields.", "Press Reset to defaults."],
+				expected: "All three come back to their defaults.",
+				prNum: 322,
+				fileRef: "ProjectSettings.tsx:355",
+				// The user AGREED with qa's second run rather than re-deriving it. The
+				// verdict is theirs - "by you", counted as verified - and the row says
+				// which run they confirmed, which matters because run 1 said the
+				// opposite.
+				verdict: "pass",
+				decidedAt: minutesAgo(9),
+				agreedRunId: "run_settings-copy-reset_2",
+				agentVerdict: "pass",
+				agentNote: "Reset restored all three fields; read them back after the write.",
+				agentRanAt: minutesAgo(19),
+				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+				runs: [
+					run(
+						"settings-copy-reset",
+						1,
+						"fail",
+						"The third field kept its edited value after Reset.",
+						"c30f1b8e5a2947d6b1e08c73f5a2d914b6e70c8a",
+						hoursAgo(4),
+					),
+					run(
+						"settings-copy-reset",
+						2,
+						"pass",
+						"Reset restored all three fields; read them back after the write.",
+						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
+						minutesAgo(19),
+					),
+				],
+			},
+			{
+				...base,
+				id: "settings-copy-legacy-toggle",
+				seq: 8,
 				name: "The legacy settings toggle still writes the old key",
 				why: "Kept while the old key was read anywhere.",
 				steps: ["Flip the legacy toggle.", "Read the config file."],

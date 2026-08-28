@@ -122,7 +122,7 @@ func TestSharedAuthorship_NeitherMemberCanDestroyAPlayedCase(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if _, err := svc.SetVerdict(ctx, dev, "played", domain.SmokeFail, "the header flickers"); err != nil {
+	if _, err := svc.SetVerdict(ctx, dev, "played", domain.SmokeFail, "the header flickers", ""); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
 	if err := store.InsertSmokeEvidence(ctx, domain.SmokeEvidence{
@@ -196,7 +196,7 @@ func TestSharedAuthorship_ConcurrentEditsOfOneCaseKeepItCoherent(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("author: %v", err)
 	}
-	if _, err := svc.SetVerdict(ctx, dev, "c1", domain.SmokePass, "looked right"); err != nil {
+	if _, err := svc.SetVerdict(ctx, dev, "c1", domain.SmokePass, "looked right", ""); err != nil {
 		t.Fatalf("set verdict: %v", err)
 	}
 
