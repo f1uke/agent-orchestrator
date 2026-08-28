@@ -2237,6 +2237,9 @@ export interface components {
         DomainReviewerConfig: {
             harness: string;
         };
+        DomainSimProfileConfig: {
+            keep?: string[];
+        };
         DomainSmokeRun: {
             checkId: string;
             /** Format: date-time */
@@ -2618,6 +2621,7 @@ export interface components {
             responseLanguage?: string;
             reviewers?: components["schemas"]["DomainReviewerConfig"][];
             sessionPrefix?: string;
+            simProfile?: components["schemas"]["DomainSimProfileConfig"];
             symlinks?: string[];
             systemPromptAdditions?: components["schemas"]["DomainSystemPromptAdditions"];
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];

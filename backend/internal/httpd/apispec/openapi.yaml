@@ -6703,6 +6703,13 @@ components:
       required:
       - harness
       type: object
+    DomainSimProfileConfig:
+      properties:
+        keep:
+          items:
+            type: string
+          type: array
+      type: object
     DomainSmokeRun:
       properties:
         checkId:
@@ -7614,6 +7621,8 @@ components:
           type: array
         sessionPrefix:
           type: string
+        simProfile:
+          $ref: '#/components/schemas/DomainSimProfileConfig'
         symlinks:
           items:
             type: string
