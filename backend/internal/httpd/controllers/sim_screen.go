@@ -108,10 +108,14 @@ type SimDevicePowerView struct {
 	// Phase is which part of a boot is running: booting, then slimming. The
 	// second takes tens of seconds, and without this the pane looks frozen for
 	// all of them.
-	Phase string `json:"phase,omitempty" description:"booting or slimming, while a boot is in flight."`
+	Phase string `json:"phase,omitempty" description:"booting or slimming, while a boot is in flight. Empty for a shutdown, which has only one part."`
 	// Profile and ProfileReason are what happened to the device's daemon
-	// profile. skipped and failed both mean the device is stock.
-	Profile       string `json:"profile,omitempty" description:"applied, already, skipped or failed. skipped and failed mean the device is stock."`
+	// profile, and in practice only ever say skipped or failed - the two
+	// outcomes that leave the device stock. A profile that applied cleanly is
+	// deleted along with the rest of the entry (simpower.execute), for the same
+	// reason there is no "booted successfully" above, so applied and already
+	// never reach a reader here.
+	Profile       string `json:"profile,omitempty" description:"skipped or failed - the two outcomes that mean the device is stock. A profile that applied leaves no power entry at all, so nothing else reaches the wire."`
 	ProfileReason string `json:"profileReason,omitempty" description:"Why the device is stock, in the tool's own words."`
 }
 

@@ -329,7 +329,7 @@ func TestSimDevices_ReportABootedDeviceThatCameUpStock(t *testing.T) {
 		testSimUDID: {
 			Op:      simpower.Boot,
 			State:   simpower.Warned,
-			Profile: &simslim.Result{Outcome: simslim.Skipped, Reason: "simslim is not on PATH, so this device is stock"},
+			Profile: &simslim.Result{Outcome: simslim.Skipped, Reason: "simslim is not on PATH"},
 		},
 	}}
 	srv := newScreenTestServer(t, &fakeSimService{}, screen)

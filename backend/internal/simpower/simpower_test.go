@@ -557,6 +557,35 @@ func TestShutdown_NeverSlims(t *testing.T) {
 	}
 }
 
+// Status.Phase says which part of a boot is running, and a shutdown has no
+// parts. Announcing one as "booting" puts a word on the wire that contradicts
+// the field's own contract, and the pane would draw a device going down as one
+// coming up.
+func TestShutdown_HasNoPhase(t *testing.T) {
+	release := make(chan struct{})
+	rec := &recorder{reply: func(context.Context, []string) ([]byte, error) {
+		<-release
+		return nil, nil
+	}}
+	p := newTestPower(t, rec)
+
+	if err := p.Start(context.Background(), testUDID, Shutdown, nil, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	waitFor(t, func() bool {
+		st, ok := p.Status(testUDID)
+		return ok && st.State == Running
+	}, "shutdown never showed as running")
+
+	st, _ := p.Status(testUDID)
+	if st.Phase != "" {
+		t.Fatalf("phase = %q on a shutdown, want empty - a shutdown has only one part", st.Phase)
+	}
+
+	close(release)
+	p.wait()
+}
+
 // The Device tab renders this; without it a boot looks frozen for the tens of
 // seconds the reboot takes.
 func TestBoot_ReportsTheSlimmingPhaseWhileItRuns(t *testing.T) {

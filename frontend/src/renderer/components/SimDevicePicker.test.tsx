@@ -239,7 +239,7 @@ describe("SimDevicePicker", () => {
 					state: "warned",
 					startedAt: "2026-08-20T09:00:00Z",
 					profile: "skipped",
-					profileReason: "simslim is not on PATH, so this device is stock",
+					profileReason: "simslim is not on PATH",
 				},
 			} as Partial<SimDevice>),
 		]);
@@ -248,6 +248,30 @@ describe("SimDevicePicker", () => {
 		const stock = screen.getByTestId("sim-power-stock");
 		expect(stock).toHaveTextContent(/stock/i);
 		expect(stock).toHaveTextContent(/not on PATH/i);
+		// The reason is somebody else's words, dropped mid-paragraph, so the row
+		// has to punctuate it. Without this the row reads "...not on PATH
+		// Features this project expects...".
+		expect(stock).toHaveTextContent(/not on PATH\. Features/);
+	});
+
+	// The machine sometimes punctuates its own reason - a shell's stderr often
+	// ends in a full stop - and a second one appended blind reads as a typo.
+	it("does not double a full stop the reason already has", async () => {
+		open([
+			device({
+				state: "Booted",
+				power: {
+					op: "boot",
+					state: "warned",
+					startedAt: "2026-08-20T09:00:00Z",
+					profile: "failed",
+					profileReason: "simslim: unknown daemon com.apple.nope.",
+				},
+			} as Partial<SimDevice>),
+		]);
+		await openPicker();
+
+		expect(screen.getByTestId("sim-power-stock")).toHaveTextContent(/com\.apple\.nope\. Features/);
 	});
 
 	it("says nothing extra when the profile landed", async () => {

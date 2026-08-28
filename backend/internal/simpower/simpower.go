@@ -202,7 +202,14 @@ func (p *Power) Start(ctx context.Context, udid string, op Op, req *simslim.Requ
 		p.mu.Unlock()
 		return fmt.Errorf("%w: %s is already in flight", ErrBusy, current.Op)
 	}
-	p.entries[key] = Status{Op: op, State: Running, StartedAt: p.now(), Phase: PhaseBooting}
+	// Only a boot has phases. A shutdown that announced itself as "booting"
+	// would put a word on the wire that contradicts Status.Phase's own
+	// contract, and the pane would render a shutdown as a boot in progress.
+	phase := ""
+	if op == Boot {
+		phase = PhaseBooting
+	}
+	p.entries[key] = Status{Op: op, State: Running, StartedAt: p.now(), Phase: phase}
 	p.mu.Unlock()
 
 	p.wg.Add(1)

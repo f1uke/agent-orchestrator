@@ -8,9 +8,14 @@
 // the machine this was built for: 217 processes and 3,671 MB stock became 86
 // processes and 1,236 MB with the daemons an iOS app actually needs kept.
 //
-// This package knows the tool's command line and nothing about AO: no projects,
-// no sessions, no config. It takes the same injected lookPath and runner every
-// other sim package takes, so it is testable without Xcode, a mac or a device.
+// This package knows the tool's command line, and its vocabulary stops at the
+// device: it never looks a profile up, so it holds no notion of a project, a
+// session or a config file. The one concession is Request, which carries a
+// profile a CALLER has already resolved together with the failure it may have
+// hit doing so - it is a way of reporting the caller's own bad news down here,
+// not a way of asking AO anything. It takes the same injected lookPath and
+// runner every other sim package takes, so it is testable without Xcode, a mac
+// or a device.
 package simslim
 
 import (
@@ -32,7 +37,10 @@ type Profile struct {
 	Keep []string
 }
 
-// Request is what a caller knows about slimming for one boot.
+// Request is what a caller knows about slimming for one boot. Apply never takes
+// one - it is plumbing between a resolver and whoever drives the boot, and it
+// sits here only so that both ends speak this package's vocabulary rather than
+// inventing a third.
 //
 // Err is the reason this type exists rather than a bare *Profile: "we could not
 // work out which profile this project wants" must not be indistinguishable from
@@ -66,9 +74,16 @@ type Result struct {
 	Reason  string  `json:"reason,omitempty"`
 }
 
-// Stock says whether this result leaves the caller with an unslimmed device,
-// which is the one thing every reporting surface needs to ask.
-func (r Result) Stock() bool { return r.Outcome == Skipped || r.Outcome == Failed }
+// Stock says whether an outcome leaves the caller with an unslimmed device,
+// which is the one thing every reporting surface needs to ask. It is a function
+// as well as a method because the surfaces that ask do not all hold a Result -
+// the CLI has only the outcome's name, off the wire - and a fifth outcome must
+// change the answer in ONE place rather than in however many string comparisons
+// have accumulated.
+func Stock(o Outcome) bool { return o == Skipped || o == Failed }
+
+// Stock says whether this result leaves the caller with an unslimmed device.
+func (r Result) Stock() bool { return Stock(r.Outcome) }
 
 // Apply brings a booted device to the profile. It is idempotent and cheap in
 // the common case.
@@ -80,7 +95,10 @@ func (r Result) Stock() bool { return r.Outcome == Skipped || r.Outcome == Faile
 // feature. `verify` does not reboot.
 func Apply(ctx context.Context, lookPath simctl.LookPath, run simctl.Runner, udid string, p Profile) Result {
 	if _, err := lookPath(Binary); err != nil {
-		return Result{Outcome: Skipped, Reason: Binary + " is not on PATH, so this device is stock"}
+		// Just the fact, and not what it means: every surface that prints this
+		// already says the device is stock in its own words, and a reason that
+		// says it too renders as "stock ... so this device is stock".
+		return Result{Outcome: Skipped, Reason: Binary + " is not on PATH"}
 	}
 	if _, err := run(ctx, Binary, args("verify", udid, p)...); err == nil {
 		return Result{Outcome: Already}

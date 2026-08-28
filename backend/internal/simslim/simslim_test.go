@@ -137,6 +137,12 @@ func TestApply_WithoutTheBinaryRunsNothingAndSaysSkipped(t *testing.T) {
 	if got.Reason == "" {
 		t.Fatal("Skipped carried no reason; a stock device must say why")
 	}
+	// The reason is the bare fact and nothing more. Every surface that prints
+	// it already says the device is stock in its own words, so a reason that
+	// says it too renders as "is stock ... so this device is stock".
+	if strings.Contains(got.Reason, "stock") {
+		t.Fatalf("reason = %q; it repeats the word every caller already prints around it", got.Reason)
+	}
 	if n := len(rec.calls()); n != 0 {
 		t.Fatalf("ran %d commands without the binary, want 0", n)
 	}

@@ -376,10 +376,22 @@ function Stock({ reason }: { reason: string }) {
 		>
 			<AlertTriangle aria-hidden className="mt-0.5 size-3.5 shrink-0" />
 			<span className="min-w-0">
-				This simulator is stock, not slimmed - {reason} Features this project expects may silently do nothing.
+				This simulator is stock, not slimmed - {endSentence(reason)} Features this project expects may silently
+				do nothing.
 			</span>
 		</p>
 	);
+}
+
+/**
+ * Closes a reason off with a full stop unless the machine already punctuated
+ * it. The reason is somebody else's words - simslim's, or a shell's stderr -
+ * and it is rendered mid-paragraph, so without this the sentence after it runs
+ * straight on.
+ */
+function endSentence(reason: string): string {
+	const trimmed = reason.trim();
+	return trimmed === "" || /[.!?:]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 /**

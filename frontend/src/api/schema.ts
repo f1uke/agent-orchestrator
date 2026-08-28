@@ -2112,9 +2112,9 @@ export interface components {
         ControllersSimDevicePowerView: {
             /** @description boot or shutdown. */
             op: string;
-            /** @description booting or slimming, while a boot is in flight. */
+            /** @description booting or slimming, while a boot is in flight. Empty for a shutdown, which has only one part. */
             phase?: string;
-            /** @description applied, already, skipped or failed. skipped and failed mean the device is stock. */
+            /** @description skipped or failed - the two outcomes that mean the device is stock. A profile that applied leaves no power entry at all, so nothing else reaches the wire. */
             profile?: string;
             /** @description Why the device is stock, in the tool's own words. */
             profileReason?: string;

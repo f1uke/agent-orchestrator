@@ -163,13 +163,20 @@ A new `State` value, `Warned`, changes what happens on success:
 | Outcome | entry | what a human sees |
 |---|---|---|
 | `Applied`, `Already` | deleted, as today | nothing; it worked |
-| `Skipped`, `Failed` | **kept, `State: Warned`** | a row saying this device is stock, dismissed with the existing `Clear` |
+| `Skipped`, `Failed` | **kept, `State: Warned`** | a row saying this device is stock, which stays until the device shuts down or the daemon restarts |
 
 Today `execute` deletes the entry on success because "the device's own state is
 the answer now". That stops being true here: whether the device is slim is a
 fact its power state does not carry. `Warned` is not `Failed` — **the boot
 succeeded and is reported as succeeding**. It only refuses to let the outcome
 be silent.
+
+The stock row has no dismiss control, and that is deliberate rather than an
+omission. `ClearPower` drops a stale `Failed` whose goal the machine has since
+reached; there is no equivalent for `Warned`, because there is nothing stale
+about it - the device really is stock, and it stays stock until it is shut down
+or reprofiled. A row a reader can wave away is a row the second crewmate never
+sees.
 
 `profileTimeout` is a field alongside `bootTimeout`, so tests do not wait on
 real time and slow hosts can be given more.
