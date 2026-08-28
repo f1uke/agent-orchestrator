@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>Pinch dots gallery</title>
+	</head>
+	<body>
+		<!--
+			Dev-only harness for e2e/pinch-dots.spec.ts. Served by the Vite dev server
+			(root = frontend/) and deliberately NOT one of the build's rollup inputs,
+			so it never ships in the packaged renderer.
+
+			Two questions live here, and jsdom can answer neither.
+
+			The first is WHERE. The pinch overlay finds the picture inside the pane the
+			way the canvas does - the largest box of the framebuffer's aspect that fits
+			- using aspect-ratio and max-height rather than a measured fit, so it is
+			right in the frame before the stage has been measured as well as after. A
+			dot that is a few percent out points at the wrong part of the device, and
+			every jsdom assertion about it passes: the span is present, sized, and
+			carries the right CSS custom properties. Only a browser lays it out.
+
+			The second is WHETHER YOU CAN SEE IT. These dots sit on whatever the app
+			being driven is showing - a white article, a dark chart - so they are drawn
+			with their own contrast rather than the theme's. Both grounds are here,
+			side by side, in both themes.
+		-->
+		<div id="root"></div>
+		<script type="module" src="./pinch-dots-gallery.tsx"></script>
+	</body>
+</html>

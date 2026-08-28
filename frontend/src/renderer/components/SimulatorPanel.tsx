@@ -9,7 +9,10 @@ import { useSimKeyboard } from "../hooks/useSimKeyboard";
 import { useSimPower, type SimPowerRequest } from "../hooks/useSimPower";
 import { usePageVisible, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
 import { type ForwardedKey, useDeviceKeyboard } from "../hooks/useDeviceKeyboard";
+import type { DragGrip, DragPoint } from "../lib/drag-stream";
 import { DragStream } from "../lib/drag-stream";
+import { PINCH_ANCHOR, pannedAnchor, pinchGrip } from "../lib/pinch";
+import { SimPinchDots } from "./SimPinchDots";
 import { devicePoint, fitDevice } from "../lib/screen-fit";
 import { cn } from "../lib/utils";
 import {
@@ -439,6 +442,46 @@ export function SimulatorPanel({
 
 	const pressed = useRef<{ x: number; y: number; at: number } | null>(null);
 
+	/**
+	 * The pinch tool: hold Option and the pane puts TWO fingers on the screen -
+	 * one under the pointer, one mirrored through the middle - exactly as
+	 * Simulator.app does. See ../lib/pinch.ts for the geometry and how it was
+	 * measured.
+	 *
+	 * 🗝 Option is read ONCE, when the press lands, and the touch stays what it
+	 * started as until the button comes up. A held touch may not change how many
+	 * fingers are on the screen (the daemon refuses it: the contact that
+	 * vanished was never lifted and the one that appeared never landed), so
+	 * there is no honest way to follow the key mid-drag.
+	 *
+	 * ⚠ Simulator.app does try, and it is worth writing down what happens: with
+	 * a pinch under way, releasing Option while the button is still down leaves
+	 * BOTH CONTACTS DOWN - measured, no further move, no end, no cancel, the
+	 * device sat with two fingers on it until an unrelated touch shook it loose.
+	 * That is the exact failure this pane must not have, so it diverges here on
+	 * purpose: the gesture you started is the gesture you finish, and the dots
+	 * stay on screen while it lasts so the picture matches the device.
+	 */
+	const pinch = useRef<{ anchor: DragPoint; at: DragPoint } | null>(null);
+	/** Whether a pinch is live, for the overlay. Flips twice a gesture, not per move. */
+	const [pinching, setPinching] = useState(false);
+	/**
+	 * Whether Option is down anywhere in the app. This is for the OVERLAY only.
+	 *
+	 * 🗝 What actually arms a gesture is `event.altKey` on the press itself,
+	 * which is the key's state at the instant the human committed rather than
+	 * whatever a listener last heard about it. The two cannot disagree about a
+	 * press that way, and the failure they could otherwise have is the worst one
+	 * available here: two fingers landing on a device because a keyup went to
+	 * another window.
+	 */
+	const [optionHeld, setOptionHeld] = useState(false);
+	/** Whether the pointer is over the screen, so armed dots have somewhere to be. */
+	const [overScreen, setOverScreen] = useState(false);
+	/** The last place on the screen the pointer was, for dots that appear under it. */
+	const hovered = useRef<DragPoint | null>(null);
+	const dotsRef = useRef<HTMLDivElement | null>(null);
+
 	// A drag is streamed while the finger is still down rather than replayed
 	// after it comes up. Sending one swipe on release - which is what this did -
 	// means the screen starts moving after the human has stopped, which is the
@@ -446,11 +489,17 @@ export function SimulatorPanel({
 	const drag = useRef<DragStream | null>(null);
 	if (!drag.current) {
 		drag.current = new DragStream(
-			async (step, point) => {
+			async (phase, grip) => {
 				if (!chosenRef.current) throw new Error("No simulator is selected");
+				// The KIND is what tells the daemon how many fingers are down -
+				// it refuses a held touch that changes its mind - so it is read
+				// off the grip here rather than tracked as a second flag that
+				// could disagree with the coordinates travelling beside it.
 				const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture", {
 					params: { path: { sessionId, udid: chosenRef.current } },
-					body: { kind: step, x: point.x, y: point.y },
+					body: grip.b
+						? { kind: `pinch-${phase}`, x: grip.a.x, y: grip.a.y, x2: grip.b.x, y2: grip.b.y }
+						: { kind: `drag-${phase}`, x: grip.a.x, y: grip.a.y },
 				});
 				if (error) throw error;
 			},
@@ -483,6 +532,39 @@ export function SimulatorPanel({
 		return Math.hypot((point.x - start.x) * rect.width, (point.y - start.y) * rect.height);
 	};
 
+	/** The grip a pointer at `point` describes right now: one finger, or a pinch. */
+	const gripFor = (point: DragPoint): DragGrip =>
+		pinch.current ? pinchGrip(point, pinch.current.anchor) : { a: point };
+
+	/**
+	 * paintDots moves the overlay without telling React.
+	 *
+	 * A pointer produces moves as fast as the display refreshes, and this pane
+	 * deliberately does not re-render at that rate - the stream samples its own
+	 * frame clock once a second for exactly this reason. So the dots are two CSS
+	 * custom properties on a container that React renders once when the tool is
+	 * armed, and the pointer handlers write to them directly.
+	 */
+	const paintDots = (grip: DragGrip, anchor: DragPoint) => {
+		const el = dotsRef.current;
+		if (!el) return;
+		const set = (name: string, value: number) => el.style.setProperty(name, `${value * 100}%`);
+		set("--pinch-ax", grip.a.x);
+		set("--pinch-ay", grip.a.y);
+		set("--pinch-bx", grip.b?.x ?? grip.a.x);
+		set("--pinch-by", grip.b?.y ?? grip.a.y);
+		set("--pinch-px", anchor.x);
+		set("--pinch-py", anchor.y);
+	};
+
+	/** endTouch lifts whatever is down, wherever it was last seen. */
+	const endTouch = (grip?: DragGrip) => {
+		const held = drag.current;
+		if (held?.isDragging) held.end(grip);
+		pinch.current = null;
+		setPinching(false);
+	};
+
 	// Deliberately not gated on `busy`. Refusing the press while some other
 	// gesture is still in flight made a drag vanish with no sign it had been
 	// asked for - which is what "sometimes I have to do it twice" was. The
@@ -498,9 +580,35 @@ export function SimulatorPanel({
 		const point = pointFor(event);
 		if (!point) return;
 		event.currentTarget.setPointerCapture(event.pointerId);
-		// Nothing is sent yet: a press that never moves is a tap, and a tap holds
-		// the finger down for a measured moment that a drag's begin does not.
 		pressed.current = { x: point.x, y: point.y, at: Date.now() };
+		if (!event.altKey) return;
+
+		// ⚠ A pinch lands on the PRESS, with no movement threshold, and that
+		// asymmetry with the one-finger path is deliberate rather than an
+		// oversight. A press that never moves is a tap, so one finger has to wait
+		// and see; two fingers have no tap to be mistaken for, and Simulator.app
+		// puts both contacts down on the press too - measured: the very first
+		// frame of an Option-drag already reports two touches. A pinch that only
+		// started once the pointer had travelled eight pixels would throw the
+		// first eight pixels of every zoom away.
+		//
+		// ⚠ A press on the exact middle of the screen puts both contacts on one
+		// spot, because the middle is where they start out from. pinchGrip holds
+		// them the minimum apart rather than letting that happen - see
+		// MIN_PINCH_SPAN. Found on a real device, not in a test.
+		const anchor = PINCH_ANCHOR;
+		pinch.current = { anchor, at: point };
+		setPinching(true);
+		pinchDown(pinchGrip(point, anchor), anchor);
+	};
+
+	/** pinchDown paints the contacts where they are and puts them on the device. */
+	const pinchDown = (grip: DragGrip, anchor: DragPoint) => {
+		paintDots(grip, anchor);
+		const held = drag.current;
+		if (!held) return;
+		if (held.isDragging) held.move(grip);
+		else held.begin(grip);
 	};
 
 	// A pointer capture the browser takes back - a window switch, a gesture the
@@ -508,24 +616,42 @@ export function SimulatorPanel({
 	// finger is still down and ignores every drag after it.
 	const onLostPointerCapture = () => {
 		pressed.current = null;
-		const held = drag.current;
-		if (held?.isDragging) held.end({ x: 0.5, y: 0.5 });
+		endTouch();
 	};
 
 	const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-		const start = pressed.current;
-		if (!start || !canDrive) return;
 		const point = pointFor(event);
+		if (point) hovered.current = point;
+		const start = pressed.current;
+		if (!canDrive) return;
+		if (!start) {
+			// No button down: the dots follow the pointer so somebody can see
+			// where the fingers will land before committing to a gesture.
+			if (point && event.altKey) paintDots(pinchGrip(point, PINCH_ANCHOR), PINCH_ANCHOR);
+			return;
+		}
 		if (!point) return;
+		const live = pinch.current;
+		if (live) {
+			// Shift moves both fingers together instead of apart, which is the
+			// only way to zoom about anywhere but the middle. It is
+			// Simulator.app's own behaviour: with Shift added mid-pinch both
+			// contacts moved by the same delta and their midpoint left the
+			// centre of the screen.
+			const anchor = event.shiftKey ? pannedAnchor(live.anchor, live.at, point) : live.anchor;
+			pinch.current = { anchor, at: point };
+			pinchDown(pinchGrip(point, anchor), anchor);
+			return;
+		}
 		if (drag.current?.isDragging) {
-			drag.current.move(point);
+			drag.current.move({ a: point });
 			return;
 		}
 		// The touch goes down where the press was, not where the pointer has got
 		// to, so the drag starts from the point the human actually aimed at.
 		if (movedPx(event, point) >= DRAG_THRESHOLD_PX) {
-			drag.current?.begin({ x: start.x, y: start.y });
-			drag.current?.move(point);
+			drag.current?.begin({ a: { x: start.x, y: start.y } });
+			drag.current?.move({ a: point });
 		}
 	};
 
@@ -533,8 +659,16 @@ export function SimulatorPanel({
 		const start = pressed.current;
 		pressed.current = null;
 		const point = pointFor(event);
+		// A pinch never becomes a tap - not even one that never landed, which is
+		// what a press on the exact middle that never moved is. Falling through
+		// to the tap below would turn "I meant to zoom and did not move far
+		// enough" into a touch on the device nobody asked for.
+		if (pinch.current) {
+			endTouch(point ? gripFor(point) : undefined);
+			return;
+		}
 		if (drag.current?.isDragging) {
-			drag.current.end(point ?? { x: start?.x ?? 0.5, y: start?.y ?? 0.5 });
+			drag.current.end(point ? { a: point } : undefined);
 			return;
 		}
 		if (!canDrive || busy || !start || !point) return;
@@ -546,16 +680,80 @@ export function SimulatorPanel({
 	// daemon's watchdog lifts it.
 	const onPointerCancel = () => {
 		pressed.current = null;
-		const held = drag.current;
-		if (held?.isDragging) held.end({ x: 0.5, y: 0.5 });
+		endTouch();
 	};
 
-	// Leaving the pane, or losing the lease, must not leave a finger down.
+	// Losing the lease, or the tab going off screen, must not leave a finger down.
+	//
+	// 🗝 It ENDS the touch rather than dropping it locally. Giving up quietly
+	// left the release to the daemon's idle watchdog, which is two seconds of a
+	// device that answers nothing - felt, with two fingers down, as "the
+	// simulator stopped responding". The watchdog is still the backstop for the
+	// ends that never arrive at all (a tab that was closed, a renderer that went
+	// away); it is not the first answer for one this side can see coming.
+	//
+	// `watching` sits beside `canDrive` because this pane stays MOUNTED when its
+	// tab goes off - deliberately, so the chosen device survives the trip - and
+	// a pointer over a pane nobody can point at never sends a pointerup.
 	useEffect(() => {
-		if (canDrive) return;
+		if (canDrive && watching) return;
+		pressed.current = null;
+		endTouch();
+		setOptionHeld(false);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- endTouch is rebuilt every render; the touch it ends is a ref.
+	}, [canDrive, watching]);
+
+	// And going away entirely - a different session is picked, so this pane is
+	// keyed away and unmounted - is the one path with nothing left to notice it
+	// afterwards. The request outlives the component; fetch does not care that
+	// the tree that started it has gone.
+	useEffect(() => {
 		const held = drag.current;
-		if (held?.isDragging) held.cancel();
+		return () => {
+			if (held?.isDragging) held.end();
+		};
+	}, []);
+
+	/**
+	 * Option arms the pinch, and it is watched on the WINDOW rather than on the
+	 * screen surface: somebody reaches for the key before they reach for the
+	 * device, and a canvas that has to be focused first would mean the dots
+	 * appeared only after a click that had already touched the screen.
+	 *
+	 * `blur` is not decoration. A window that loses focus never delivers the
+	 * keyup, so without it the tool would stay armed after a Cmd-Tab and the
+	 * next ordinary click would land two fingers on the device.
+	 */
+	useEffect(() => {
+		if (!canDrive) return;
+		const sync = (event: KeyboardEvent) => setOptionHeld(event.altKey);
+		const lost = () => {
+			setOptionHeld(false);
+			// A pinch cannot survive the window going away: the pointer capture
+			// goes with it, so the moves that would have ended it never come.
+			pressed.current = null;
+			endTouch();
+		};
+		window.addEventListener("keydown", sync);
+		window.addEventListener("keyup", sync);
+		window.addEventListener("blur", lost);
+		return () => {
+			window.removeEventListener("keydown", sync);
+			window.removeEventListener("keyup", sync);
+			window.removeEventListener("blur", lost);
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- endTouch is rebuilt every render; the touch it ends is a ref.
 	}, [canDrive]);
+
+	// Armed but not yet pressed: the dots have to be put under the pointer the
+	// moment they appear, not on the next move.
+	const dotsShown = canDrive && (pinching || (optionHeld && overScreen));
+	useEffect(() => {
+		if (!dotsShown) return;
+		const at = pinch.current?.at ?? hovered.current;
+		if (at) paintDots(gripFor(at), pinch.current?.anchor ?? PINCH_ANCHOR);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- paintDots writes to a ref'd node; it is rebuilt every render.
+	}, [dotsShown]);
 
 	const stageRef = useRef<HTMLDivElement | null>(null);
 	const stage = useStageSize(stageRef);
@@ -606,7 +804,7 @@ export function SimulatorPanel({
 								ref={canvasRef}
 								aria-label={
 									canDrive
-										? "Live simulator screen. Click to focus, then type to send keys to the device; Escape to stop."
+										? "Live simulator screen. Click to focus, then type to send keys to the device; Escape to stop. Hold Option and drag to pinch."
 										: "Live simulator screen"
 								}
 								data-testid="sim-canvas"
@@ -638,9 +836,12 @@ export function SimulatorPanel({
 								onLostPointerCapture={onLostPointerCapture}
 								onPointerCancel={onPointerCancel}
 								onPointerDown={onPointerDown}
+								onPointerEnter={() => setOverScreen(true)}
+								onPointerLeave={() => setOverScreen(false)}
 								onPointerMove={onPointerMove}
 								onPointerUp={onPointerUp}
 							/>
+							{dotsShown && drawn ? <SimPinchDots inset={drawn.bezel} ref={dotsRef} screen={drawn.screen} /> : null}
 						</div>
 					) : (
 						<p className="max-w-[36ch] px-4 text-center text-[12px] text-muted-foreground">
@@ -752,8 +953,10 @@ export function SimulatorPanel({
 						<SimpleTooltip
 							label={
 								<span className="block max-w-[220px]">
-									Click to tap, drag to swipe. Every gesture takes the same gesture hold <code>ao sim tap</code> takes,
-									so it waits for nobody and is refused if this session's agent is mid-gesture.
+									Click to tap, drag to swipe. Hold <kbd>⌥</kbd> and drag to pinch - two fingers appear, one under the
+									pointer and one opposite it - and add <kbd>⇧</kbd> to move the pair instead of spreading it. Every
+									gesture takes the same gesture hold <code>ao sim tap</code> takes, so it waits for nobody and is
+									refused if this session's agent is mid-gesture.
 								</span>
 							}
 						>

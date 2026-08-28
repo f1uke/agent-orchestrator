@@ -113,6 +113,13 @@ func flowStepKind(kind string) simflow.StepKind {
 		return simflow.StepType
 	case "swipe", "drag", "drag-begin", "drag-move", "drag-end":
 		return simflow.StepSwipe
+	case "pinch-begin", "pinch-move", "pinch-end":
+		// Maestro has no pinch, so this is on its way to being refused by name.
+		// It is collapsed onto the one word the CLI already records ("pinch",
+		// from `ao sim pinch`) so both routes are refused in the same sentence:
+		// a human reading "kind \"pinch-begin\" has no Maestro translation"
+		// would reasonably go looking for a "pinch-begin" that does.
+		return simflow.StepKind("pinch")
 	case "button":
 		return simflow.StepButton
 	case "key":

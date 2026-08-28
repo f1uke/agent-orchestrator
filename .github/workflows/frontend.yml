@@ -130,6 +130,14 @@ jobs:
   # release straddle a repaint of the link's own line - so only a real browser
   # holding a real button down for as long as a hand does can tell live from dead.
   #
+  # e2e/pinch-dots.spec.ts is the eleventh, and it is here for what a pixel is
+  # ON. The Device tab's pinch draws its two contacts over whatever the app being
+  # driven is showing - a white article one moment and a dark chart the next - so
+  # they carry their own contrast rather than the theme's. jsdom will happily
+  # agree that a dot which is invisible on white is present, sized and correctly
+  # positioned, because "can a person see this against that" is a question about
+  # paint. The gallery puts both grounds side by side in both themes.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -154,9 +162,10 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Measure the status glyphs, the sidebar qa pip, the editor, the Files rail and the terminal's links in a real browser
+      - name: Measure the status glyphs, the sidebar qa pip, the editor, the Files rail, the terminal's links and the pinch dots in a real browser
         run: >-
           npx playwright test e2e/status-glyph.spec.ts e2e/sidebar-qa-pip.spec.ts
           e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
           e2e/editor-completion.spec.ts e2e/editor-lsp-surface.spec.ts e2e/files-perf.spec.ts
           e2e/files-state.spec.ts e2e/search-perf.spec.ts e2e/terminal-links.spec.ts
+          e2e/pinch-dots.spec.ts

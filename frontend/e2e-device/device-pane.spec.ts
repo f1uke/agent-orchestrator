@@ -21,6 +21,7 @@ import {
 	dragThrough,
 	focusWindow,
 	openDevicePane,
+	pinchThrough,
 	skipReason,
 	startSandbox,
 } from "./sandbox";
@@ -69,6 +70,21 @@ function post(sandbox: Sandbox, path: string, body: unknown): { status: number; 
 		code = undefined;
 	}
 	return { status, code };
+}
+
+/**
+ * driving is the precondition every gesture case shares: the lease claimed and
+ * driving switched on. It is idempotent so a case still runs when it is the only
+ * one asked for (`-g`), rather than depending on an earlier case in the file
+ * having left the pane in the right state.
+ */
+async function driving() {
+	const claim = sandbox.page.getByRole("button", { name: /claim to drive|take over from/i });
+	if ((await claim.count()) > 0) await claim.click();
+	const drive = sandbox.page.getByRole("button", { name: /drive this device/i });
+	await expect(drive).toBeVisible();
+	if ((await drive.getAttribute("aria-pressed")) !== "true") await drive.click();
+	await expect(drive).toHaveAttribute("aria-pressed", "true");
 }
 
 // Claiming is the first thing a person does - nothing can be touched until the
@@ -120,6 +136,71 @@ test("a drag is on the device while the finger is still down", async () => {
 		`the finger was not down on the device while the pointer was (${midDrag.code ?? "no code"})`,
 	).toBe(200);
 	expect(afterRelease.code, "the touch outlived the pointer").toBe("SIM_DRAG_ENDED");
+});
+
+// Holding Option and dragging puts TWO fingers on the device, and the proof is
+// the daemon's own refusal: a held touch may not change how many fingers are on
+// the screen, so a one-finger `drag-move` posted while this is under way can only
+// be refused as a grip change if two contacts really are down. A pinch that had
+// quietly become an ordinary drag would accept it.
+//
+// ⚠ This is the half a unit test cannot reach. jsdom has no layout, so the press
+// never hit-tests onto the screen, and `setPointerCapture` refuses a synthetic
+// PointerEvent outright - so whether a real browser puts `altKey` on the real
+// pointer event that arms this is not a question jsdom can be asked.
+test("holding Option puts two fingers on the device, and takes both off again", async () => {
+	await driving();
+
+	const gesture = `/api/v1/sessions/${sandbox.sessionId}/sim-devices/${sandbox.udid}/gesture`;
+	// Spreading about the middle: the pointer walks away from the centre, so the
+	// contact opposite it walks the other way. It starts clear of the centre
+	// because that is where a person starts a spread from - a press ON the middle
+	// is where the two contacts meet, and is its own case in
+	// SimulatorPanel.test.tsx.
+	const route = [0.6, 0.65, 0.7, 0.75, 0.8, 0.85].map((y) => ({ x: 0.5, y }));
+	let dots = 0;
+	let midPinch: { status: number; code?: string } = { status: 0 };
+	await pinchThrough(sandbox, route, {
+		whileDown: async () => {
+			// The overlay is on screen for as long as the fingers are - the human's
+			// only sign that this is a pinch and not a drag.
+			dots = await sandbox.page.getByTestId("sim-pinch-dots").count();
+			midPinch = post(sandbox, gesture, { kind: "drag-move", x: 0.5, y: 0.4 });
+		},
+	});
+	await sandbox.page.waitForTimeout(500);
+	const afterRelease = post(sandbox, gesture, { kind: "pinch-move", x: 0.5, y: 0.4, x2: 0.5, y2: 0.6 });
+
+	expect(dots, "no pinch overlay was drawn while two fingers were down").toBe(1);
+	expect(midPinch.code, `one finger was accepted mid-pinch, so two were not down (status ${midPinch.status})`).toBe(
+		"SIM_GRIP_CHANGED",
+	);
+	expect(afterRelease.code, "the pinch outlived the pointer").toBe("SIM_DRAG_ENDED");
+});
+
+// 🗝 Every ordinary press must still be one finger. A pinch shares the whole
+// held-touch path with a drag - one registry, one hold, one watchdog - so the
+// gesture people use all day is the thing most easily broken by this feature,
+// and the refusal above is the same instrument pointed the other way.
+test("an ordinary drag is still one finger", async () => {
+	await driving();
+
+	const gesture = `/api/v1/sessions/${sandbox.sessionId}/sim-devices/${sandbox.udid}/gesture`;
+	let dots = 0;
+	let midDrag: { status: number; code?: string } = { status: 0 };
+	await dragThrough(
+		sandbox,
+		[0.75, 0.7, 0.65, 0.6, 0.55].map((y) => ({ x: 0.5, y })),
+		{
+			whileDown: async () => {
+				dots = await sandbox.page.getByTestId("sim-pinch-dots").count();
+				midDrag = post(sandbox, gesture, { kind: "pinch-move", x: 0.5, y: 0.4, x2: 0.5, y2: 0.6 });
+			},
+		},
+	);
+
+	expect(dots, "the pinch overlay was drawn for a gesture nobody asked to be a pinch").toBe(0);
+	expect(midDrag.code, `two fingers were accepted mid-drag (status ${midDrag.status})`).toBe("SIM_GRIP_CHANGED");
 });
 
 /**

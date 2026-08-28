@@ -1017,3 +1017,142 @@ func TestSimKeyboard_AGuestThatWillNotSayIsAnAnswerNotAnError(t *testing.T) {
 		t.Fatal("a no needs its reason, or nobody can tell a Thai guest from an unreadable one")
 	}
 }
+
+// A pinch is the same held touch as a drag with a second contact in it: one
+// hold for the whole gesture, both fingers in every frame, and both released
+// together. It is the Device tab's Option-drag, following a human's hand across
+// as many requests as their hand takes.
+func TestSimGesture_APinchIsOneHeldTouchWithTwoContacts(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+	url := srv.URL + "/api/v1/sessions/p-1/sim-devices/" + testSimUDID + "/gesture"
+
+	for _, body := range []map[string]any{
+		{"kind": "pinch-begin", "x": 0.5, "y": 0.4, "x2": 0.5, "y2": 0.6},
+		{"kind": "pinch-move", "x": 0.5, "y": 0.3, "x2": 0.5, "y2": 0.7},
+		{"kind": "pinch-end", "x": 0.5, "y": 0.2, "x2": 0.5, "y2": 0.8},
+	} {
+		if code, out := postJSON(t, url, body); code != http.StatusOK {
+			t.Fatalf("%s: status %d: %v", body["kind"], code, out)
+		}
+	}
+
+	want := []string{"multitouch:begin", "multitouch:move", "multitouch:end"}
+	got := driver.sent()
+	if len(got) != len(want) {
+		t.Fatalf("events on the device = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("events on the device = %v, want %v", got, want)
+		}
+	}
+	// ⚠ Both contacts, in every frame. A pinch whose second point never left
+	// this process would send a perfectly ordinary one-finger drag and report
+	// success - which is indistinguishable from a pinch that worked until
+	// somebody looks at the screen.
+	for i, batch := range driver.events {
+		if len(batch) != 1 {
+			t.Fatalf("frame %d carried %d events, want one frame per step", i, len(batch))
+		}
+		e := batch[0]
+		if e.X != 0.5 || e.X2 != 0.5 || e.Y2 <= e.Y {
+			t.Fatalf("frame %d = %+v, want two contacts with the second below the first", i, e)
+		}
+	}
+	if svc.holds != 1 {
+		t.Fatalf("the pinch took %d holds, want exactly one for the whole touch", svc.holds)
+	}
+	if svc.gotToken != "tok-fake" {
+		t.Fatalf("the hold must be given back once the pinch ends, released token %q", svc.gotToken)
+	}
+}
+
+// A held touch may not change how many fingers are on the screen, and the route
+// says so in its own words rather than adapting: the contact that vanished was
+// never lifted and the one that appeared never landed. What it must NOT do is
+// leave the touch it interrupted holding the device.
+func TestSimGesture_AHeldTouchThatChangesItsFingerCountIsRefusedAndReleased(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+	url := srv.URL + "/api/v1/sessions/p-1/sim-devices/" + testSimUDID + "/gesture"
+
+	if code, out := postJSON(t, url, map[string]any{"kind": "drag-begin", "x": 0.5, "y": 0.8}); code != http.StatusOK {
+		t.Fatalf("drag-begin: status %d: %v", code, out)
+	}
+	code, out := postJSON(t, url, map[string]any{"kind": "pinch-move", "x": 0.4, "y": 0.5, "x2": 0.6, "y2": 0.5})
+	if code != http.StatusConflict {
+		t.Fatalf("status %d, want 409: %v", code, out)
+	}
+	// The one finger that WAS down comes back up, at the place it was last
+	// seen rather than at either of the two the caller described.
+	if got := driver.sent(); len(got) != 2 || got[0] != "touch:begin" || got[1] != "touch:end" {
+		t.Fatalf("events on the device = %v, want the one finger that was down to be lifted", got)
+	}
+	if svc.gotToken != "tok-fake" {
+		t.Fatal("the hold must be given back when a held touch is cut off")
+	}
+}
+
+// Two contacts on the same spot arrive as one, which reads exactly like a pinch
+// that worked while nothing zoomed. It is refused before anything is held.
+func TestSimGesture_APinchWhoseFingersWouldLandAsOneIsRefused(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "pinch-begin", "x": 0.5, "y": 0.5, "x2": 0.5, "y2": 0.501})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422: %v", code, out)
+	}
+	if svc.holds != 0 {
+		t.Fatalf("a refused pinch took %d holds, want none", svc.holds)
+	}
+	if got := driver.sent(); len(got) != 0 {
+		t.Fatalf("a refused pinch reached the device: %v", got)
+	}
+}
+
+// Off-screen is refused per contact, and the message says WHICH finger - a
+// pinch has two and "coordinates must be normalized" would not say which one to
+// move.
+func TestSimGesture_APinchNamesTheFingerThatIsOffScreen(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "pinch-begin", "x": 0.5, "y": 0.5, "x2": 0.5, "y2": 1.4})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422: %v", code, out)
+	}
+	if msg, _ := out["message"].(string); !strings.Contains(msg, "finger 2") {
+		t.Fatalf("message = %q, want it to name the finger that is off screen", msg)
+	}
+	if svc.holds != 0 {
+		t.Fatalf("a refused pinch took %d holds, want none", svc.holds)
+	}
+}
+
+// What a recording is told about a pinch is the point BETWEEN the fingers - the
+// same point `ao sim pinch` records - because that is what the gesture is about
+// and neither finger alone describes it.
+func TestSimGesture_APinchIsRecordedAtThePointBetweenItsFingers(t *testing.T) {
+	svc := &fakeSimService{}
+	driver := &fakeDriver{}
+	srv := newScreenTestServer(t, svc, &fakeScreen{listing: oneBooted(), driver: driver})
+
+	if code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "pinch-begin", "x": 0.2, "y": 0.3, "x2": 0.8, "y2": 0.7}); code != http.StatusOK {
+		t.Fatalf("status %d: %v", code, out)
+	}
+	if got := svc.gotIntent; got.X != 0.5 || got.Y != 0.5 {
+		t.Fatalf("recorded intent at (%g, %g), want the midpoint (0.5, 0.5)", got.X, got.Y)
+	}
+	if svc.gotIntent.Kind != "pinch-begin" {
+		t.Fatalf("recorded intent kind = %q, want pinch-begin", svc.gotIntent.Kind)
+	}
+}
