@@ -876,26 +876,6 @@ type SimPowerResponse struct {
 // reporting - and progress that lived in the request would die with the
 // popover being closed or the renderer being reloaded, both of which somebody
 // does while waiting a minute for a device.
-// profileFor works out what this boot should do about slimming.
-//
-// A resolver error is carried rather than swallowed: the boot goes ahead - it
-// has to, because `ao sim boot` is what lets a qa be created at all - but
-// "we could not work out this project's profile" must not end up looking
-// identical to "this project does not slim".
-func (c *SimScreenController) profileFor(ctx context.Context, op simpower.Op, id domain.SessionID) *simslim.Request {
-	if op != simpower.Boot || c.Profiles == nil {
-		return nil
-	}
-	prof, err := c.Profiles.SimProfileFor(ctx, id)
-	if err != nil {
-		return &simslim.Request{Err: err}
-	}
-	if prof == nil {
-		return nil
-	}
-	return &simslim.Request{Profile: prof}
-}
-
 func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 	const route = "/api/v1/sessions/{sessionId}/sim-devices/{udid}/power"
 	if c.Screen == nil || c.Leases == nil {
@@ -950,6 +930,26 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 		UDID: device.UDID, State: in.State,
 		Detail: fmt.Sprintf("%s %s", op, device.Label()),
 	})
+}
+
+// profileFor works out what this boot should do about slimming.
+//
+// A resolver error is carried rather than swallowed: the boot goes ahead - it
+// has to, because `ao sim boot` is what lets a qa be created at all - but
+// "we could not work out this project's profile" must not end up looking
+// identical to "this project does not slim".
+func (c *SimScreenController) profileFor(ctx context.Context, op simpower.Op, id domain.SessionID) *simslim.Request {
+	if op != simpower.Boot || c.Profiles == nil {
+		return nil
+	}
+	prof, err := c.Profiles.SimProfileFor(ctx, id)
+	if err != nil {
+		return &simslim.Request{Err: err}
+	}
+	if prof == nil {
+		return nil
+	}
+	return &simslim.Request{Profile: prof}
 }
 
 // arbitrateShutdown decides whether this device may be powered off, and takes
