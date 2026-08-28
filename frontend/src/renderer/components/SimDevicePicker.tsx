@@ -376,8 +376,8 @@ function Stock({ reason }: { reason: string }) {
 		>
 			<AlertTriangle aria-hidden className="mt-0.5 size-3.5 shrink-0" />
 			<span className="min-w-0">
-				This simulator is stock, not slimmed - {endSentence(reason)} Features this project expects may silently
-				do nothing.
+				This simulator is stock, not slimmed - {endSentence(reason)} Features this project expects may silently do
+				nothing.
 			</span>
 		</p>
 	);

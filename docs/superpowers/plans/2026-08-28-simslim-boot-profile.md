@@ -26,10 +26,12 @@
 ### Task 1: The `simslim` package
 
 **Files:**
+
 - Create: `backend/internal/simslim/simslim.go`
 - Test: `backend/internal/simslim/simslim_test.go`
 
 **Interfaces:**
+
 - Consumes: `simctl.LookPath`, `simctl.Runner` from `backend/internal/simctl`.
 - Produces: `simslim.Binary`, `simslim.Profile{Keep []string}`, `simslim.Request{Profile *Profile; Err error}`, `simslim.Outcome` with constants `Applied`/`Already`/`Skipped`/`Failed`, `simslim.Result{Outcome Outcome; Reason string}`, and `simslim.Apply(ctx, lookPath, run, udid string, p Profile) Result`.
 
@@ -359,10 +361,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 2: Run the profile as the second phase of a boot
 
 **Files:**
+
 - Modify: `backend/internal/simpower/simpower.go` (State constants ~line 54, `Status` ~line 92, `Start` ~line 157, `execute` ~line 206)
 - Test: `backend/internal/simpower/simpower_test.go`
 
 **Interfaces:**
+
 - Consumes: `simslim.Apply`, `simslim.Request`, `simslim.Profile`, `simslim.Result`, `simslim.Outcome` constants from Task 1.
 - Produces: `simpower.Start(ctx context.Context, udid string, op Op, req *simslim.Request, done func()) error`; `simpower.Warned State`; `simpower.PhaseBooting`/`simpower.PhaseSlimming` string constants; `Status.Phase string` and `Status.Profile *simslim.Result`; `simpower.ProfileTimeout`.
 
@@ -622,6 +626,7 @@ Add the `profileTimeout` field to `Power` beside `shutdownTimeout`, and set it i
 ```go
 	profileTimeout  time.Duration
 ```
+
 ```go
 		profileTimeout:  ProfileTimeout,
 ```
@@ -749,10 +754,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 3: The project config field
 
 **Files:**
+
 - Modify: `backend/internal/domain/projectconfig.go` (add the field after `HasIOSSimulator` ~line 85; add validation inside `Validate()` ~line 188)
 - Test: `backend/internal/domain/projectconfig_test.go`
 
 **Interfaces:**
+
 - Produces: `domain.SimProfileConfig{Keep []string}` and the field `ProjectConfig.SimProfile *SimProfileConfig`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -920,12 +927,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 4: Plumb the request through the screen, changing no behaviour
 
 **Files:**
+
 - Modify: `backend/internal/simstream/screen.go:147`
 - Modify: `backend/internal/httpd/api.go:217`
 - Modify: `backend/internal/httpd/controllers/sim_screen.go:58` (the `SimScreenProvider` interface) and `:909` (the call)
 - Test: `backend/internal/httpd/controllers/sim_power_test.go`, `backend/internal/httpd/sim_stream_test.go`, `backend/internal/httpd/controllers/sim_screen_test.go` (fakes only)
 
 **Interfaces:**
+
 - Consumes: `simslim.Request` from Task 1.
 - Produces: `Screen.StartPower(ctx context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error` and the matching `SimScreenProvider` method.
 
@@ -984,12 +993,14 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 5: Resolve the profile from the project
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/sim_screen.go` (add `SimProfileResolver`, add the field to `SimScreenController` ~line 221, use it in `power` ~line 909)
 - Create: `backend/internal/httpd/simprofile.go`
 - Modify: `backend/internal/httpd/api.go` (`APIDeps` ~line 32, and the sim screen controller construction ~line 109)
 - Test: `backend/internal/httpd/controllers/sim_power_test.go`, `backend/internal/httpd/controllers/sim_screen_test.go`
 
 **Interfaces:**
+
 - Consumes: `Screen.StartPower(..., req *simslim.Request, ...)` from Task 4; `domain.ProjectConfig.SimProfile` from Task 3.
 - Produces: `controllers.SimProfileResolver` with `SimProfileFor(ctx context.Context, id domain.SessionID) (*simslim.Profile, error)`; `httpd.APIDeps.SimProfiles`.
 
@@ -1272,11 +1283,13 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 6: Expose the phase and the profile on the wire
 
 **Files:**
+
 - Modify: `backend/internal/httpd/controllers/sim_screen.go` (`SimDevicePowerView` ~line 91, `powerView` ~line 371)
 - Test: `backend/internal/httpd/controllers/sim_power_test.go`
 - Regenerate: `frontend/src/api/schema.ts` and the OpenAPI spec via `npm run api`
 
 **Interfaces:**
+
 - Consumes: `simpower.Status.Phase`, `simpower.Status.Profile`, `simpower.Warned` from Task 2.
 - Produces: `SimDevicePowerView.Phase`, `.Profile`, `.ProfileReason` (all `string`).
 
@@ -1440,7 +1453,7 @@ Change the tail of `powerView` to carry them:
 
 ⚠ Leave the early return above it exactly as it is. It must keep testing
 `status.State == simpower.Failed`, never `Warned`: it drops an entry once the
-device reached the goal anyway, and a `Warned` entry is *about* a device that
+device reached the goal anyway, and a `Warned` entry is _about_ a device that
 reached the goal. Widening that condition would delete the warning the moment
 it became true.
 
@@ -1466,10 +1479,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 7: Report the outcome from `ao sim boot`
 
 **Files:**
+
 - Modify: `backend/internal/cli/sim_boot.go` (`simBootResult` ~line 88, `simDevicePowerListing` ~line 109, the result construction ~line 395, `writeSimBoot` ~line 402)
 - Test: `backend/internal/cli/sim_boot_test.go`
 
 **Interfaces:**
+
 - Consumes: `SimDevicePowerView.Phase`/`Profile`/`ProfileReason` from Task 6.
 - Produces: `simBootResult.Profile string`, `simBootResult.ProfileReason string`.
 
@@ -1609,10 +1624,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 8: Show the phase and the warning in the Device tab
 
 **Files:**
+
 - Modify: `frontend/src/renderer/components/SimDevicePicker.tsx` (~line 225 `running`, ~line 298 the failure row, ~line 333 the in-flight label)
 - Test: `frontend/src/renderer/components/SimDevicePicker.test.tsx`
 
 **Interfaces:**
+
 - Consumes: the regenerated `ControllersSimDevicePowerView` from Task 6, with `phase`, `profile` and `profileReason`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1688,8 +1705,12 @@ In `SimDevicePicker.tsx`, name the phase in the in-flight label (~line 333):
 Add the stock row beside the existing failure row (~line 298):
 
 ```tsx
-{power?.state === "failed" ? <Failure reason={power.reason ?? "It did not work, and said nothing."} /> : null}
-{power?.state === "warned" ? <Stock reason={power.profileReason ?? "It came up stock and said nothing."} /> : null}
+{
+	power?.state === "failed" ? <Failure reason={power.reason ?? "It did not work, and said nothing."} /> : null;
+}
+{
+	power?.state === "warned" ? <Stock reason={power.profileReason ?? "It came up stock and said nothing."} /> : null;
+}
 ```
 
 Add `Stock` next to the existing `Failure` component. Style it as a warning, not
@@ -1725,6 +1746,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 9: Verify the whole thing against a real simulator
 
 **Files:**
+
 - None. This task changes nothing; it checks the feature on the machine.
 
 The unit tests all run over fakes, by design. Nothing so far has proved that the flags this code sends are flags the real `simslim` accepts.
@@ -1735,6 +1757,7 @@ The unit tests all run over fakes, by design. Nothing so far has proved that the
 cd backend && go build ./... && go test ./... && golangci-lint run
 npm test
 ```
+
 Expected: all green. `golangci-lint` is the gate that catches what `go vet` does not; clean its cache first if it reports findings in worktrees that no longer exist.
 
 - [ ] **Step 2: Check the tool's real flags**
@@ -1743,6 +1766,7 @@ Expected: all green. `golangci-lint` is the gate that catches what `go vet` does
 simslim verify --help
 simslim on --help
 ```
+
 Expected: both accept `<udid>` positionally and `--keep <comma,separated>`. If the real tool disagrees with `args()` in Task 1, fix `args()` and its tests before going further.
 
 If `simslim` is not installed, install it with `go install github.com/mobai-app/simslim/cmd/simslim@latest` — note the lowercase module path and the `cmd/simslim` suffix; the README's path does not build.
@@ -1763,6 +1787,7 @@ Create a scratch device, boot it with `ao sim boot --udid <udid> --json`, and co
 ```bash
 simslim status <udid>
 ```
+
 Expected: `165/170 managed daemons disabled (partially slim)`.
 
 - [ ] **Step 4: Boot it a second time and confirm there is no second reboot**

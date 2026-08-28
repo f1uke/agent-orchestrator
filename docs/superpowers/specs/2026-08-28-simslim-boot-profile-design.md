@@ -16,10 +16,10 @@ disable` entries for background daemons into a simulator's own launchd database
 and reboots it. A measurement spike on this machine (M5 Pro, 24 GB, iOS 26.3,
 iPhone 17 Pro) found:
 
-| | processes | phys_footprint |
-|---|---|---|
-| stock | 217 | 3,671 MB |
-| slim, keeping what `nter-ios-app` needs | 86 | 1,236 MB |
+|                                         | processes | phys_footprint |
+| --------------------------------------- | --------- | -------------- |
+| stock                                   | 217       | 3,671 MB       |
+| slim, keeping what `nter-ios-app` needs | 86        | 1,236 MB       |
 
 That is 2.97x less memory per device, with every behaviour probe (push,
 universal links, photo library, keychain, biometrics, CallKit daemon liveness)
@@ -160,10 +160,10 @@ Device tab would otherwise look frozen.
 
 A new `State` value, `Warned`, changes what happens on success:
 
-| Outcome | entry | what a human sees |
-|---|---|---|
-| `Applied`, `Already` | deleted, as today | nothing; it worked |
-| `Skipped`, `Failed` | **kept, `State: Warned`** | a row saying this device is stock, which stays until the device shuts down or the daemon restarts |
+| Outcome              | entry                     | what a human sees                                                                                 |
+| -------------------- | ------------------------- | ------------------------------------------------------------------------------------------------- |
+| `Applied`, `Already` | deleted, as today         | nothing; it worked                                                                                |
+| `Skipped`, `Failed`  | **kept, `State: Warned`** | a row saying this device is stock, which stays until the device shuts down or the daemon restarts |
 
 Today `execute` deletes the entry on success because "the device's own state is
 the answer now". That stops being true here: whether the device is slim is a
@@ -239,6 +239,7 @@ half-booted device is left where it is, as documented in `reason()`.
 TDD; tests are written before the code.
 
 **`internal/simslim`**, over the existing `recorder` fake:
+
 - verify passes → `Already`, and **`simslim on` is never invoked** — this is the
   test that guards against a second reboot on every boot
 - verify reports drift → `on` runs → `Applied`
@@ -247,6 +248,7 @@ TDD; tests are written before the code.
 - empty `Keep` → the commands carry no `--keep` flag
 
 **`internal/simpower`**:
+
 - `recorder.calls()` shows `bootstatus` before `simslim` — order, not just presence
 - **a nil profile runs no simslim command whatsoever** — the regression guard for
   every project that has not opted in
