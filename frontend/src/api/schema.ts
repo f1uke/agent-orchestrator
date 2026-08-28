@@ -3035,7 +3035,7 @@ export interface components {
             durationMs?: number;
             /** @description The physical keys a person actually pressed to produce Text on this Mac, one per character, in the same order. Only a caller that watched someone press them may send these: they are forwarded to the device as themselves, so the simulator's input mode decides what they produce, exactly as it would in Simulator.app. A string chosen by an agent has no keys behind it and must be sent as Text alone. */
             keys?: components["schemas"]["ControllersSimKeyPress"][];
-            /** @description tap, swipe, type, key, button, drag-begin, drag-move or drag-end. */
+            /** @description tap, swipe, type, key, button, drag-begin, drag-move, drag-end, pinch-begin, pinch-move or pinch-end. */
             kind: string;
             name?: string;
             paste?: boolean;
@@ -3048,7 +3048,11 @@ export interface components {
             /** Format: double */
             x?: number;
             /** Format: double */
+            x2?: number;
+            /** Format: double */
             y?: number;
+            /** Format: double */
+            y2?: number;
         };
         SimGestureResponse: {
             /** @description What was done, in the same words the CLI prints. */

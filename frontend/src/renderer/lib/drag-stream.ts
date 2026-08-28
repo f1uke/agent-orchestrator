@@ -35,12 +35,24 @@
  *
  * `begin` and `end` are never coalesced away: they are the touch going down and
  * coming up, and the daemon holds the device for exactly the span between them.
+ *
+ * What travels through it is a GRIP - one finger, or the two of a pinch - and
+ * not a point, for the same reason simbridge.Grip exists on the other side of
+ * the wire: a two-finger drag is the same three steps under the same one hold,
+ * so a second stream for it would be a second queue, a second in-flight flag
+ * and a second place to forget the release. How many fingers are down is fixed
+ * when the touch lands; the daemon refuses a held touch that changes it.
  */
 
 export type DragPoint = { x: number; y: number };
-export type DragStep = "drag-begin" | "drag-move" | "drag-end";
 
-export type DragSender = (step: DragStep, point: DragPoint) => Promise<void>;
+/** What is touching the screen: one finger, or the two of a pinch. */
+export type DragGrip = { a: DragPoint; b?: DragPoint };
+
+/** One step of the held path, in the daemon's own three words. */
+export type DragPhase = "begin" | "move" | "end";
+
+export type DragSender = (phase: DragPhase, grip: DragGrip) => Promise<void>;
 
 /**
  * How much unsent motion may wait. At a pointer's ~16 ms sampling this is
@@ -57,7 +69,7 @@ export class DragStream {
 	private active = false;
 	private inFlight = false;
 	/** The begin that has not been sent yet. */
-	private opening: DragPoint | null = null;
+	private opening: DragGrip | null = null;
 	/**
 	 * Positions not yet sent, oldest first.
 	 *
@@ -68,11 +80,11 @@ export class DragStream {
 	 * a second of unsent motion rather than throwing the drag away in the first
 	 * hundred milliseconds.
 	 */
-	private pending: DragPoint[] = [];
-	/** Where the finger came up, once it has. */
-	private closing: DragPoint | null = null;
-	/** The last position this side sent or was asked to send. */
-	private last: DragPoint | null = null;
+	private pending: DragGrip[] = [];
+	/** Where the fingers came up, once they have. */
+	private closing: DragGrip | null = null;
+	/** The last grip this side sent or was asked to send. */
+	private last: DragGrip | null = null;
 
 	constructor(send: DragSender, onError: (error: unknown) => void = () => {}) {
 		this.send = send;
@@ -83,34 +95,45 @@ export class DragStream {
 		return this.active;
 	}
 
-	begin(point: DragPoint): void {
+	begin(grip: DragGrip): void {
 		// A touch still open here means the last one's end never happened - a
 		// pointer the browser took back, a window switch mid-drag. Silently
 		// ignoring the new press is how a pane stops responding to drags until
 		// it is remounted, so the old touch is closed and this one starts. The
 		// daemon recovers the same way, and its watchdog is the backstop if even
 		// this end does not arrive.
-		if (this.active) this.end(this.last ?? point);
+		//
+		// ⚠ The old touch is closed on its OWN grip, not on this one. A pinch
+		// abandoned mid-way and followed by an ordinary press would otherwise be
+		// ended with one finger while two were down - which the daemon refuses
+		// as a grip change, and then has to lift for us.
+		if (this.active) this.end();
 		this.active = true;
-		this.last = point;
-		this.opening = point;
+		this.last = grip;
+		this.opening = grip;
 		this.closing = null;
 		this.pending = [];
 		void this.pump();
 	}
 
-	move(point: DragPoint): void {
+	move(grip: DragGrip): void {
 		if (!this.active) return;
-		this.last = point;
+		this.last = grip;
 		if (this.pending.length >= MAX_PENDING_MOVES) {
-			this.pending[this.pending.length - 1] = point;
+			this.pending[this.pending.length - 1] = grip;
 		} else {
-			this.pending.push(point);
+			this.pending.push(grip);
 		}
 		void this.pump();
 	}
 
-	end(point: DragPoint): void {
+	/**
+	 * end lifts whatever is down. The grip is optional and defaults to the last
+	 * one this side knew about, which is the only honest answer for the ends
+	 * nobody aimed - a lost pointer capture, a cancelled pointer, driving taken
+	 * away mid-touch. Those used to pass an invented centre-of-screen point.
+	 */
+	end(grip?: DragGrip): void {
 		if (!this.active) return;
 		// ⚠ The FIRST end wins, and the guard is load-bearing rather than
 		// defensive. A drag is ended twice on every ordinary release: the pane's
@@ -128,8 +151,9 @@ export class DragStream {
 		// because the touch did end and the drag did work - only its last
 		// position was wrong.
 		if (this.closing) return;
-		this.last = point;
-		this.closing = point;
+		const at = grip ?? this.last ?? { a: { x: 0.5, y: 0.5 } };
+		this.last = at;
+		this.closing = at;
 		// ⚠ The queued moves are NOT dropped here, and that reversal is the
 		// fix. Discarding them looked harmless - the end carries where the
 		// finger really left, so the last unsent move is redundant - but on a
@@ -159,7 +183,7 @@ export class DragStream {
 		if (!next) return;
 		this.inFlight = true;
 		try {
-			await this.send(next.step, next.point);
+			await this.send(next.phase, next.grip);
 		} catch (error) {
 			// One failed step ends the drag here: the daemon lifts the finger on
 			// the same failure, and continuing to send moves for a touch that is
@@ -174,20 +198,20 @@ export class DragStream {
 	}
 
 	/** The one step worth sending now, in the only order that is meaningful. */
-	private take(): { step: DragStep; point: DragPoint } | null {
+	private take(): { phase: DragPhase; grip: DragGrip } | null {
 		if (this.opening) {
-			const point = this.opening;
+			const grip = this.opening;
 			this.opening = null;
-			return { step: "drag-begin", point };
+			return { phase: "begin", grip };
 		}
 		if (this.pending.length > 0) {
-			return { step: "drag-move", point: this.pending.shift()! };
+			return { phase: "move", grip: this.pending.shift()! };
 		}
 		if (this.closing) {
-			const point = this.closing;
+			const grip = this.closing;
 			this.closing = null;
 			this.active = false;
-			return { step: "drag-end", point };
+			return { phase: "end", grip };
 		}
 		return null;
 	}

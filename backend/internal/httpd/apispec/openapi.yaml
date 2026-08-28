@@ -8659,7 +8659,8 @@ components:
             $ref: '#/components/schemas/ControllersSimKeyPress'
           type: array
         kind:
-          description: tap, swipe, type, key, button, drag-begin, drag-move or drag-end.
+          description: tap, swipe, type, key, button, drag-begin, drag-move, drag-end,
+            pinch-begin, pinch-move or pinch-end.
           type: string
         name:
           type: string
@@ -8678,7 +8679,13 @@ components:
         x:
           format: double
           type: number
+        x2:
+          format: double
+          type: number
         "y":
+          format: double
+          type: number
+        y2:
           format: double
           type: number
       required:

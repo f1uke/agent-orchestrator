@@ -42,10 +42,15 @@ type fakeSimService struct {
 	// holds counts grants. A drag that took one per move would still look right
 	// on the device and be wrong about arbitration, so it is counted.
 	holds int
+	// gotIntent is what the last AcquireHold was told the caller is about to
+	// do. It is what a recording is built from, so a gesture that reaches the
+	// device correctly and describes itself wrongly is a bug this catches - see
+	// TestSimGesture_APinchIsRecordedAtThePointBetweenItsFingers.
+	gotIntent simsvc.GestureIntent
 }
 
-func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration, _ simsvc.GestureIntent) (domain.SimHold, error) {
-	f.gotSession, f.gotUDID, f.gotTTL = sessionID, udid, ttl
+func (f *fakeSimService) AcquireHold(_ context.Context, sessionID domain.SessionID, udid string, ttl time.Duration, intent simsvc.GestureIntent) (domain.SimHold, error) {
+	f.gotSession, f.gotUDID, f.gotTTL, f.gotIntent = sessionID, udid, ttl, intent
 	if f.holdErr != nil {
 		return domain.SimHold{}, f.holdErr
 	}

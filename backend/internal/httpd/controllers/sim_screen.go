@@ -126,7 +126,7 @@ type ListSimDevicesResponse struct {
 // carries every gesture on purpose: the arbitration around them is identical,
 // and five routes would be five places to forget the hold.
 type SimGestureInput struct {
-	Kind string `json:"kind" description:"tap, swipe, type, key, button, drag-begin, drag-move or drag-end."`
+	Kind string `json:"kind" description:"tap, swipe, type, key, button, drag-begin, drag-move, drag-end, pinch-begin, pinch-move or pinch-end."`
 	// tap and swipe: normalized 0..1 screen coordinates, the same numbers
 	// `ao sim ax` reports per element.
 	X float64 `json:"x,omitempty"`
@@ -135,6 +135,18 @@ type SimGestureInput struct {
 	ToX        float64 `json:"toX,omitempty"`
 	ToY        float64 `json:"toY,omitempty"`
 	DurationMS int     `json:"durationMs,omitempty" description:"Swipe duration in milliseconds. Omit for 300."`
+	// pinch-begin, pinch-move and pinch-end: the SECOND finger. X/Y is the
+	// first one, and both are ordinary normalized screen coordinates.
+	//
+	// They are a separate pair of fields rather than a repeat of X/Y because
+	// the KIND is what says how many fingers are down - a held touch may not
+	// change that mid-way (see simgesture.ErrGripChanged), so the request has
+	// to declare it rather than have it inferred from which fields happen to
+	// be present. A `drag-move` that quietly became a pinch because two extra
+	// numbers arrived is the same class of bug as a pinch that quietly became
+	// a drag because they did not.
+	X2 float64 `json:"x2,omitempty"`
+	Y2 float64 `json:"y2,omitempty"`
 	// type: the text to send. The keys are US-keyboard key presses and the
 	// GUEST turns them into characters using its own input mode, so this route
 	// asks the device which mode that is and refuses text it cannot promise.
@@ -166,6 +178,12 @@ type SimGestureInput struct {
 	// requests, for a drag that follows a finger instead of being replayed once
 	// it has been let go. They use X and Y, take one hold across the whole drag,
 	// and the touch is lifted by a watchdog if the moves stop arriving.
+	//
+	// pinch-begin, pinch-move and pinch-end are the same held touch with TWO
+	// contacts - the Device tab's Option-drag, following a human's hand. They
+	// are the same three steps, the same one hold, the same watchdog and the
+	// same registry: only the number of fingers differs, which is why they
+	// carry X2/Y2 and are otherwise routed identically. See simbridge.Grip.
 }
 
 // SimKeyPress is one physical key press, named the way a browser names it.
@@ -509,13 +527,43 @@ func keyPresses(in []SimKeyPress) []simbridge.KeyPress {
 	return keys
 }
 
-func isDragKind(kind string) bool {
-	return kind == "drag-begin" || kind == "drag-move" || kind == "drag-end"
+// heldTouch reads a kind as one step of a touch that stays down across several
+// requests: which step it is, and how many fingers it puts on the screen. A
+// kind that is not a held touch answers ("", 0).
+//
+// The finger count comes from the KIND rather than from which coordinates
+// arrived, because simgesture refuses a held touch that changes how many
+// fingers are down - so the count is a thing the caller declares once and is
+// then held to, not a thing inferred per request.
+func heldTouch(kind string) (phase string, fingers int) {
+	switch kind {
+	case "drag-begin":
+		return "begin", 1
+	case "drag-move":
+		return "move", 1
+	case "drag-end":
+		return "end", 1
+	case "pinch-begin":
+		return "begin", 2
+	case "pinch-move":
+		return "move", 2
+	case "pinch-end":
+		return "end", 2
+	}
+	return "", 0
 }
 
-// isDragStep is a drag event that continues one already open, as opposed to the
-// begin that opens it.
-func isDragStep(kind string) bool { return kind == "drag-move" || kind == "drag-end" }
+func isDragKind(kind string) bool {
+	_, fingers := heldTouch(kind)
+	return fingers > 0
+}
+
+// isDragStep is a held-touch event that continues one already open, as opposed
+// to the begin that opens it.
+func isDragStep(kind string) bool {
+	phase, fingers := heldTouch(kind)
+	return fingers > 0 && phase != "begin"
+}
 
 // drag routes one step of a held touch. The registry owns the hold, the
 // watchdog and the lift; this only says which step it is and turns a refusal
@@ -528,21 +576,27 @@ func (c *SimScreenController) drag(
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture")
 		return
 	}
-	point := simbridge.Point{X: in.X, Y: in.Y}
-	if err := simbridge.ValidatePoint(in.Kind, point); err != nil {
+	phase, fingers := heldTouch(in.Kind)
+	// The registry holds a grip rather than a point, so one finger and two are
+	// the same path - one hold, one watchdog, one lift that releases whatever
+	// is down as a set. See simbridge.Grip for why that is not a convenience.
+	grip := simbridge.OneFinger(simbridge.Point{X: in.X, Y: in.Y})
+	if fingers == 2 {
+		grip = simbridge.TwoFingers(simbridge.Point{X: in.X, Y: in.Y}, simbridge.Point{X: in.X2, Y: in.Y2})
+	}
+	// Validate, not ValidatePoint: a pair has to answer for both contacts and
+	// for the gap between them, and a pinch whose fingers land as one touch
+	// reads exactly like a pinch that worked while nothing zoomed.
+	if err := grip.Validate(in.Kind); err != nil {
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", err.Error(), nil)
 		return
 	}
 
-	// One finger: the Device tab draws a pointer, and a pointer is one contact.
-	// The registry holds a grip rather than a point so a two-finger drag needs no
-	// second registry when there is a caller for one - see simbridge.Grip.
-	grip := simbridge.OneFinger(point)
 	var err error
-	switch in.Kind {
-	case "drag-begin":
+	switch phase {
+	case "begin":
 		err = c.Drags.Begin(r.Context(), holder, driver, udid, sessionID, grip)
-	case "drag-move":
+	case "move":
 		err = c.Drags.Move(r.Context(), driver, udid, sessionID, grip)
 	default:
 		err = c.Drags.End(r.Context(), udid, sessionID, grip)
@@ -551,7 +605,11 @@ func (c *SimScreenController) drag(
 		writeSimDragError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, SimGestureResponse{UDID: udid, Kind: in.Kind, Detail: "drag"})
+	detail := "drag"
+	if fingers == 2 {
+		detail = "pinch"
+	}
+	envelope.WriteJSON(w, http.StatusOK, SimGestureResponse{UDID: udid, Kind: in.Kind, Detail: detail})
 }
 
 // writeSimDragError keeps a drag's refusals in the same shape a single
@@ -564,6 +622,14 @@ func writeSimDragError(w http.ResponseWriter, r *http.Request, err error) {
 		// Not an error the human caused: a drag the watchdog already lifted, or
 		// a move that outran its own begin.
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DRAG_ENDED", err.Error(), nil)
+	case errors.Is(err, simgesture.ErrGripChanged):
+		// A step that says one finger for a touch that has two down, or the
+		// other way round. The touch it interrupted has been released, so this
+		// is the same shape of answer as any other ended drag: the client's
+		// next begin will work. It is named separately from SIM_DRAG_ENDED
+		// because the cause is different and only one of the two is a bug in
+		// the caller.
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_GRIP_CHANGED", err.Error(), nil)
 	default:
 		writeSimGestureError(w, r, err)
 	}
@@ -629,10 +695,18 @@ func (h *leaseHolder) Release(ctx context.Context, udid, token string, outcome s
 // point on screen, never a name, so there is nothing in SimGestureInput to
 // carry - that pair has no counterpart here by construction, not by omission.
 func gestureIntentFrom(in SimGestureInput) simsvc.GestureIntent {
+	at := simbridge.Point{X: in.X, Y: in.Y}
+	if _, fingers := heldTouch(in.Kind); fingers == 2 {
+		// A pinch is recorded at the point BETWEEN its fingers, which is what
+		// `ao sim pinch` records too - the gesture is about that point and
+		// neither finger alone describes it. Grip.At is where that midpoint is
+		// defined, so the two routes cannot drift.
+		at = simbridge.TwoFingers(at, simbridge.Point{X: in.X2, Y: in.Y2}).At()
+	}
 	return simsvc.GestureIntent{
 		Kind:       in.Kind,
-		X:          in.X,
-		Y:          in.Y,
+		X:          at.X,
+		Y:          at.Y,
 		ToX:        in.ToX,
 		ToY:        in.ToY,
 		DurationMS: in.DurationMS,

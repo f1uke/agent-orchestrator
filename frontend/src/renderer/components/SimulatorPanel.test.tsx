@@ -1257,3 +1257,347 @@ describe("SimulatorPanel — who holds the device, in the role's words", () => {
 		expect(within(menu).getByText(/Leased by @other-7/i)).toBeInTheDocument();
 	});
 });
+
+/**
+ * Pinch by hand: hold Option and the pane puts two fingers on the screen, one
+ * under the pointer and one mirrored through the middle, exactly as
+ * Simulator.app does (measured - see ../lib/pinch.ts).
+ *
+ * The box these tests give the canvas is 200x400 over a 1320x2868 frame, so the
+ * picture is 184.1 wide with a 7.95px bar each side: clientX 100 is the middle
+ * of the screen and clientY 300 is three quarters of the way down.
+ */
+describe("SimulatorPanel pinch", () => {
+	// ⚠ The dots are drawn over the PICTURE, and where the picture is comes from
+	// the stage's measured size - the same `fitDevice` call the canvas is sized
+	// from, so the two cannot disagree about where the screen is. The repo's
+	// shared ResizeObserver stub never reports, so the pane here believes it has
+	// not been measured yet and draws no overlay at all. One that reports the box
+	// `stubCanvasBox` already gives the canvas puts these tests on the path a
+	// browser takes.
+	const realResizeObserver = window.ResizeObserver;
+	beforeEach(() => {
+		window.ResizeObserver = class {
+			constructor(private readonly cb: ResizeObserverCallback) {}
+			observe() {
+				this.cb([{ contentRect: { width: 200, height: 400 } } as ResizeObserverEntry], this);
+			}
+			unobserve() {}
+			disconnect() {}
+		} as unknown as typeof ResizeObserver;
+	});
+	afterEach(() => {
+		window.ResizeObserver = realResizeObserver;
+	});
+
+	beforeEach(() => {
+		serveDevices(
+			devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator"),
+		);
+	});
+
+	/** A gesture body's kind and both of its contacts, to a floating point's tolerance. */
+	function expectGrip(body: Record<string, unknown>, kind: string, a: [number, number], b: [number, number]) {
+		expect(body.kind).toBe(kind);
+		expect(Number(body.x)).toBeCloseTo(a[0], 6);
+		expect(Number(body.y)).toBeCloseTo(a[1], 6);
+		expect(Number(body.x2)).toBeCloseTo(b[0], 6);
+		expect(Number(body.y2)).toBeCloseTo(b[1], 6);
+	}
+
+	/** Every gesture body that reached the daemon, in order. */
+	function gestureBodies(): Record<string, unknown>[] {
+		return postMock.mock.calls
+			.filter(([path]) => String(path).endsWith("/gesture"))
+			.map(([, options]) => (options as { body?: Record<string, unknown> })?.body ?? {});
+	}
+
+	async function drivableCanvas() {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		stubCanvasBox(canvas);
+		return canvas;
+	}
+
+	it("puts two fingers down, mirrored through the middle of the screen", async () => {
+		const canvas = await drivableCanvas();
+
+		// ⚠ Both contacts land on the PRESS. A pinch has no tap to be mistaken
+		// for, so unlike a one-finger drag it does not wait to see movement -
+		// and Simulator.app's very first frame reports two touches too.
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-begin"));
+		expectGrip(gestureBodies()[0], "pinch-begin", [0.5, 0.75], [0.5, 0.25]);
+
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 360, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-move"));
+		// Spreading: the pointer's finger went down, so the other went up by the
+		// same amount and the gap grew.
+		expectGrip(gestureBodies()[1], "pinch-move", [0.5, 0.9], [0.5, 0.1]);
+
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 360, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-end"));
+		expectGrip(gestureBodies()[2], "pinch-end", [0.5, 0.9], [0.5, 0.1]);
+	});
+
+	// ⚠ The regression this pane could most easily have shipped. A pinch shares
+	// the whole held-touch path with an ordinary drag, so a mistake there is a
+	// mistake in the gesture people use all day.
+	it("still sends an ordinary one-finger drag when Option is not held", async () => {
+		const canvas = await drivableCanvas();
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		expect(gestureKinds()).toEqual([]);
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-end"));
+
+		for (const body of gestureBodies()) {
+			expect(body).not.toHaveProperty("x2");
+			expect(String(body.kind)).toMatch(/^drag-/);
+		}
+	});
+
+	// And a tap is still a tap: a press that never moves, with no Option, must
+	// not have become a gesture with two fingers in it.
+	it("still sends a tap for a press that never moves", async () => {
+		const canvas = await drivableCanvas();
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		await waitFor(() => expect(gestureKinds()).toEqual(["tap"]));
+	});
+
+	// 🗝 The divergence from Simulator.app, and the reason for it. Releasing
+	// Option mid-drag there leaves BOTH CONTACTS DOWN - measured: no further
+	// move, no end, the device stops responding until something else touches it.
+	// Here the gesture you started is the gesture you finish.
+	it("finishes as a pinch when Option is let go mid-gesture", async () => {
+		const canvas = await drivableCanvas();
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-begin"));
+		// Option is released; the button is still down.
+		fireEvent.keyUp(window, { key: "Alt", altKey: false });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 360, altKey: false });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 360, altKey: false });
+
+		await waitFor(() => expect(gestureKinds()).toEqual(["pinch-begin", "pinch-move", "pinch-end"]));
+	});
+
+	// The other half of the same rule: a touch that went down as one finger stays
+	// one finger. The daemon refuses a held touch that changes its count, and
+	// there is no honest way to add a contact that never landed.
+	it("does not turn a drag already under way into a pinch", async () => {
+		const canvas = await drivableCanvas();
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300 });
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 200 });
+		await waitFor(() => expect(gestureKinds()).toContain("drag-begin"));
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 100, altKey: true });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 100, altKey: true });
+
+		await waitFor(() => expect(gestureKinds()).toContain("drag-end"));
+		expect(gestureKinds().every((kind) => kind.startsWith("drag-"))).toBe(true);
+	});
+
+	// Shift moves the pair instead of spreading it, which is the only way to zoom
+	// about anywhere but the middle. Simulator.app does the same.
+	it("moves both fingers together while Shift is held", async () => {
+		const canvas = await drivableCanvas();
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-begin"));
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 140, clientY: 300, altKey: true, shiftKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-move"));
+
+		const before = gestureBodies()[0];
+		const after = gestureBodies()[1];
+		// The gap is unchanged - both fingers travelled the same way.
+		const gap = (b: Record<string, unknown>) => Number(b.y2) - Number(b.y);
+		expect(gap(after)).toBeCloseTo(gap(before), 6);
+		expect(Number(after.x) - Number(before.x)).toBeCloseTo(Number(after.x2) - Number(before.x2), 6);
+		expect(Number(after.x)).toBeGreaterThan(Number(before.x));
+	});
+
+	// A press that never moves is a tap for one finger - and must never be one
+	// for two. There is no two-finger tap here to send, and the daemon refuses
+	// contacts that land on the same spot, so a pinch that went nowhere has to
+	// end as a pinch rather than fall through to the tap.
+	it("does not turn an Option press that never moved into a tap", async () => {
+		const canvas = await drivableCanvas();
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-end"));
+		expect(gestureKinds()).not.toContain("tap");
+	});
+
+	// 🗝 Every way a human abandons a pinch has to lift BOTH contacts, because a
+	// contact left down wedges the device's input until it is rebooted. These are
+	// the ones this side can see coming; the daemon's watchdog is the backstop
+	// for the ones it cannot.
+	it.each([
+		["the pointer capture is taken back", (canvas: HTMLElement) => fireEvent.lostPointerCapture(canvas)],
+		["the pointer is cancelled", (canvas: HTMLElement) => fireEvent.pointerCancel(canvas, { pointerId: 1 })],
+		["the window loses focus", () => fireEvent.blur(window)],
+	])("releases both fingers when %s", async (_why, abandon) => {
+		const canvas = await drivableCanvas();
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-begin"));
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 360, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-move"));
+
+		abandon(canvas);
+
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-end"));
+		// ⚠ Released where the fingers actually were, as a PAIR. An end that
+		// named one finger would be a grip change: the daemon refuses it and has
+		// to lift what is down itself, which is the recovery path rather than
+		// the ordinary one.
+		expectGrip(gestureBodies().find((b) => b.kind === "pinch-end") ?? {}, "pinch-end", [0.5, 0.9], [0.5, 0.1]);
+	});
+
+	// Driving being taken away mid-pinch - the tab switched, the lease lost - has
+	// to lift the fingers too. It used to be given up locally, leaving the
+	// release to the daemon's two-second watchdog: two seconds of a device that
+	// answers nothing, which with two fingers down is felt as a simulator that
+	// has stopped working.
+	it("releases both fingers when the tab stops being the one on screen", async () => {
+		const view = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		stubCanvasBox(canvas);
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-begin"));
+
+		// ⚠ The pane stays MOUNTED when its tab goes off - on purpose, so the
+		// chosen device survives the trip - so nothing else would ever notice.
+		// No pointerup can arrive at a pane nobody can point at.
+		view.rerender(<SimulatorPanel isActive={false} sessionId="p-1" />);
+
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-end"));
+	});
+
+	// And a session switch keys this pane away entirely, which is the one path
+	// with nothing left afterwards to notice a finger is still down.
+	it("releases both fingers when the pane is unmounted", async () => {
+		const view = render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		stubCanvasBox(canvas);
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-begin"));
+
+		view.unmount();
+
+		await waitFor(() => expect(gestureKinds()).toContain("pinch-end"));
+	});
+
+	// The dots are the whole of what tells somebody the tool is armed and where
+	// the fingers will land, so they appear on the key and go away with it.
+	it("shows the two dots while Option is held over the screen", async () => {
+		const canvas = await drivableCanvas();
+		expect(screen.queryByTestId("sim-pinch-dots")).not.toBeInTheDocument();
+
+		fireEvent.pointerEnter(canvas);
+		fireEvent.keyDown(window, { key: "Alt", altKey: true });
+		expect(await screen.findByTestId("sim-pinch-dots")).toBeInTheDocument();
+		expect(screen.getByTestId("sim-pinch-dot-a")).toBeInTheDocument();
+		expect(screen.getByTestId("sim-pinch-dot-b")).toBeInTheDocument();
+
+		fireEvent.keyUp(window, { key: "Alt", altKey: false });
+		await waitFor(() => expect(screen.queryByTestId("sim-pinch-dots")).not.toBeInTheDocument());
+	});
+
+	// ⚠ A window that loses focus never delivers the keyup. Without this the
+	// tool would stay armed after a Cmd-Tab and the next ordinary click would put
+	// two fingers on the device.
+	it("disarms when the window loses focus without a keyup", async () => {
+		const canvas = await drivableCanvas();
+		fireEvent.pointerEnter(canvas);
+		fireEvent.keyDown(window, { key: "Alt", altKey: true });
+		expect(await screen.findByTestId("sim-pinch-dots")).toBeInTheDocument();
+
+		fireEvent.blur(window);
+		await waitFor(() => expect(screen.queryByTestId("sim-pinch-dots")).not.toBeInTheDocument());
+	});
+});
+
+// 🗝 The anchor starts at the middle of the screen, so a press ON the middle puts
+// both fingers on the same spot. The daemon refuses that - a pinch that lands as
+// one touch sends events and changes nothing - and being told off for starting a
+// zoom where a zoom naturally starts is a poor answer. So the contacts are drawn
+// and the touch waits until there are two of them to put down.
+//
+// ⚠ Found on a real device, not in a test: the first Option-drag driven through
+// the packaged app started at 0.5,0.5 and was refused before anything landed.
+describe("SimulatorPanel pinch from the exact middle", () => {
+	beforeEach(() => {
+		window.ResizeObserver = class {
+			constructor(private readonly cb: ResizeObserverCallback) {}
+			observe() {
+				this.cb([{ contentRect: { width: 200, height: 400 } } as ResizeObserverEntry], this);
+			}
+			unobserve() {}
+			disconnect() {}
+		} as unknown as typeof ResizeObserver;
+		serveDevices(
+			devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator"),
+		);
+	});
+
+	it("waits for the fingers to be two before putting them down", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		stubCanvasBox(canvas);
+
+		// clientY 200 of a 400-tall box is the exact middle of the screen, where
+		// the two contacts coincide.
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 200, altKey: true });
+		// Nothing is sent, and nothing is refused: there is no gesture yet.
+		expect(
+			postMock.mock.calls.filter(([path]) => String(path).endsWith("/gesture")),
+			"a pinch with both fingers on one spot was sent to the device",
+		).toHaveLength(0);
+		// The dots are drawn all the same, so the human can see where the fingers
+		// are and that they are on top of each other.
+		expect(await screen.findByTestId("sim-pinch-dots")).toBeInTheDocument();
+
+		// Moving off the middle separates them, and that is when the touch lands.
+		fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toEqual(["pinch-begin"]));
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 300, altKey: true });
+		await waitFor(() => expect(gestureKinds()).toEqual(["pinch-begin", "pinch-end"]));
+	});
+
+	// And a press that never leaves the middle sends nothing at all - not a
+	// pinch, and not a tap either.
+	it("sends nothing for a press that never leaves the middle", async () => {
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		makeLive();
+		await turnDrivingOn();
+		const canvas = await screen.findByTestId("sim-canvas");
+		stubCanvasBox(canvas);
+
+		fireEvent.pointerDown(canvas, { pointerId: 1, clientX: 100, clientY: 200, altKey: true });
+		fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 100, clientY: 200, altKey: true });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(gestureKinds()).toEqual([]);
+	});
+});

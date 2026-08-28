@@ -371,6 +371,33 @@ export async function dragThrough(
 	await sandbox.page.mouse.up();
 }
 
+/**
+ * pinchThrough is dragThrough with Option held, which is what the Device tab
+ * reads as "two fingers": one under the pointer, one mirrored through the middle
+ * of the screen.
+ *
+ * ⚠ The key is held through Playwright's own keyboard, not passed as a flag on
+ * the mouse calls, because that is what a hand does and it is the difference
+ * that matters here - the pane arms the gesture from `event.altKey` on the real
+ * press. A synthetic modifier on a synthetic event would prove nothing about
+ * whether a browser puts the key state on the pointer event at all.
+ */
+export async function pinchThrough(
+	sandbox: Sandbox,
+	route: { x: number; y: number }[],
+	options: { stepMs?: number; shift?: boolean; whileDown?: () => void | Promise<void> } = {},
+): Promise<void> {
+	const { stepMs = 40, shift = false, whileDown } = options;
+	await sandbox.page.keyboard.down("Alt");
+	if (shift) await sandbox.page.keyboard.down("Shift");
+	try {
+		await dragThrough(sandbox, route, { stepMs, whileDown });
+	} finally {
+		if (shift) await sandbox.page.keyboard.up("Shift");
+		await sandbox.page.keyboard.up("Alt");
+	}
+}
+
 /** deviceState is what the sandbox daemon says about the device right now. */
 export async function deviceState(
 	sandbox: Sandbox,
