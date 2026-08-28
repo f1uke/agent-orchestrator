@@ -6071,6 +6071,10 @@ components:
           - dev
           - qa
           type: string
+        stillWorking:
+          description: 'qa only: this message is a mid-run update, not the end of
+            the run, so the handback completeness check does not apply.'
+          type: boolean
       required:
       - role
       - message
@@ -6144,6 +6148,18 @@ components:
           type:
           - "null"
           - string
+      type: object
+    ControllersHandbackCompletenessView:
+      properties:
+        cases:
+          type: integer
+        notDriven:
+          items:
+            type: string
+          type: array
+      required:
+      - cases
+      - notDriven
       type: object
     ControllersListDaemonLoopsResponse:
       properties:
@@ -7955,6 +7971,8 @@ components:
       type: object
     SendSessionMessageResponse:
       properties:
+        handback:
+          $ref: '#/components/schemas/ControllersHandbackCompletenessView'
         message:
           type: string
         ok:

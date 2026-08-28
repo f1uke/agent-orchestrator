@@ -218,21 +218,185 @@ func TestSendToCrewmate_ResolvesTheRoleAndCapsIt(t *testing.T) {
 	dev, qa := crewPair(st)
 	svc := crewService(st, &fakeCommander{})
 
-	peer, _, err := svc.SendToCrewmate(ctx, dev.ID, domain.CrewRoleQA, "pushed the fix", "4a1b2c3")
+	sent, err := svc.SendToCrewmate(ctx, dev.ID, CrewSend{Role: domain.CrewRoleQA, Message: "pushed the fix", Subject: "4a1b2c3"})
 	if err != nil {
 		t.Fatalf("dev messaging qa by role: %v", err)
 	}
-	if peer != qa.ID {
-		t.Fatalf("--crew qa resolved to %q, want %q", peer, qa.ID)
+	if sent.Peer != qa.ID {
+		t.Fatalf("--crew qa resolved to %q, want %q", sent.Peer, qa.ID)
 	}
-	if _, _, err := svc.SendToCrewmate(ctx, dev.ID, domain.CrewRoleQA, "and again", ""); err == nil {
+	if _, err := svc.SendToCrewmate(ctx, dev.ID, CrewSend{Role: domain.CrewRoleQA, Message: "and again"}); err == nil {
 		t.Fatal("a role-addressed message with no subject was accepted")
 	}
 	// A solo session has no crewmate, and says so rather than doing something else
 	// with somebody's only agent.
 	solo := domain.SessionRecord{ID: "mer-9", ProjectID: "mer", Kind: domain.KindWorker}
 	st.sessions[solo.ID] = solo
-	if _, _, err := svc.SendToCrewmate(ctx, solo.ID, domain.CrewRoleQA, "hello", "4a1b2c3"); err == nil {
+	if _, err := svc.SendToCrewmate(ctx, solo.ID, CrewSend{Role: domain.CrewRoleQA, Message: "hello", Subject: "4a1b2c3"}); err == nil {
 		t.Fatal("a solo session was allowed to message a crewmate it does not have")
+	}
+}
+
+// THE HANDBACK GATE.
+//
+// A qa held a simulator, ran three bracketed machine runs and handed the task
+// back with 0 of 7 cases played - and nothing anywhere looked at the checklist,
+// because a case nobody drove and a case nobody CAN drive are the same empty
+// row. These are the assertions that the second state now has to be said out
+// loud, and that saying it is the only thing that clears the count.
+
+func caseWithRun(id string, v domain.SmokeVerdict, note string) domain.SmokeCheck {
+	recorded := time.Unix(1000, 0).UTC()
+	return domain.SmokeCheck{
+		ID: id, Runs: []domain.SmokeRun{{ID: "run-" + id, Seq: 1, Verdict: v, Note: note, RecordedAt: &recorded}},
+	}
+}
+
+func TestHandback_QAIsToldWhatItLeftUndriven(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStore()
+	dev, qa := crewPair(st)
+	fc := &fakeCommander{}
+	svc := crewService(st, fc)
+	st.smokeChecks = map[domain.SessionID][]domain.SmokeCheck{
+		// The checklist lives under the TASK's id, which is dev's.
+		dev.ID: {
+			caseWithRun("mr-appears", domain.SmokePass, "listed within 40s each time"),
+			caseWithRun("press-hold", domain.SmokeSkip, "tried a 1.2s drag; the menu never opened"),
+			{ID: "tab-stays-live"},
+			{ID: "drag-scroll"},
+		},
+	}
+
+	sent, err := svc.SendToCrewmate(ctx, qa.ID, CrewSend{Role: domain.CrewRoleDev, Message: "run done", Subject: "4a1b2c3"})
+	if err != nil {
+		t.Fatalf("qa handing back: %v", err)
+	}
+	// It is NOT refused. A handback that never lands is the stall the handback
+	// obligation was written to prevent, and a refusal here is indistinguishable
+	// from the runaway-loop refusal that parks a task at NEEDS YOU.
+	if sent.Peer != dev.ID {
+		t.Fatalf("the handback reached %q, want dev %q", sent.Peer, dev.ID)
+	}
+	if !sent.Handback.Checked || !sent.Handback.Incomplete() {
+		t.Fatalf("the handback was not reported as incomplete: %+v", sent.Handback)
+	}
+	if got := sent.Handback.NotDriven; len(got) != 2 || got[0] != "tab-stays-live" || got[1] != "drag-scroll" {
+		t.Fatalf("cases left undriven = %v, want [tab-stays-live drag-scroll]", got)
+	}
+	if sent.Handback.Cases != 4 {
+		t.Fatalf("cases = %d, want the 4 active ones", sent.Handback.Cases)
+	}
+	// dev is the member that would otherwise carry on believing the change was
+	// verified, so the fact travels with the message it is about.
+	for _, want := range []string{"[AO]", "2 of 4", "tab-stays-live", "drag-scroll", "nobody looked"} {
+		if !strings.Contains(fc.lastMessage, want) {
+			t.Fatalf("dev's copy does not say %q:\n%s", want, fc.lastMessage)
+		}
+	}
+	if !strings.HasPrefix(fc.lastMessage, "run done") {
+		t.Fatalf("AO's line replaced qa's words instead of following them:\n%s", fc.lastMessage)
+	}
+}
+
+// The two states that clear the count, and the two kinds of case that were never
+// qa's to answer. A gate that fires on finished work is one people learn to
+// satisfy by lying.
+func TestHandback_DrivenAndDeclaredCasesLeaveNothingBehind(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStore()
+	dev, qa := crewPair(st)
+	fc := &fakeCommander{}
+	svc := crewService(st, fc)
+	retired := time.Unix(900, 0).UTC()
+	st.smokeChecks = map[domain.SessionID][]domain.SmokeCheck{
+		dev.ID: {
+			caseWithRun("judged", domain.SmokePass, "ran clean"),
+			caseWithRun("evidence-only", "", "captured it; the lag is not mine to call"),
+			caseWithRun("undriveable", domain.SmokeSkip, "no gesture on this harness can hold a finger down"),
+			{ID: "played-by-hand", Verdict: domain.SmokePass},
+			{ID: "gone", RetiredAt: &retired, RetiredReason: "now covered by a Go test"},
+		},
+	}
+
+	sent, err := svc.SendToCrewmate(ctx, qa.ID, CrewSend{Role: domain.CrewRoleDev, Message: "run done", Subject: "4a1b2c3"})
+	if err != nil {
+		t.Fatalf("qa handing back: %v", err)
+	}
+	if sent.Handback.Incomplete() {
+		t.Fatalf("a complete handback was reported incomplete: %v", sent.Handback.NotDriven)
+	}
+	if sent.Handback.Cases != 4 {
+		t.Fatalf("cases = %d, want the 4 active ones (the retired one is off the list)", sent.Handback.Cases)
+	}
+	if strings.Contains(fc.lastMessage, "[AO]") {
+		t.Fatalf("a complete handback still carried a notice:\n%s", fc.lastMessage)
+	}
+}
+
+// "I am not finished yet" has to be sayable, or the gate's cheapest escape is to
+// declare the remaining cases undriveable - and a gate that is easier to satisfy
+// by lying is worse than no gate.
+func TestHandback_StillWorkingIsNotAHandback(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStore()
+	dev, qa := crewPair(st)
+	fc := &fakeCommander{}
+	svc := crewService(st, fc)
+	st.smokeChecks = map[domain.SessionID][]domain.SmokeCheck{dev.ID: {{ID: "tab-stays-live"}}}
+
+	sent, err := svc.SendToCrewmate(ctx, qa.ID, CrewSend{
+		Role: domain.CrewRoleDev, Message: "the button is dead, please look", Subject: "4a1b2c3", StillWorking: true,
+	})
+	if err != nil {
+		t.Fatalf("qa's mid-run message: %v", err)
+	}
+	if sent.Handback.Checked {
+		t.Fatalf("a mid-run message was checked as a handback: %+v", sent.Handback)
+	}
+	if fc.lastMessage != "the button is dead, please look" {
+		t.Fatalf("a mid-run message was annotated:\n%s", fc.lastMessage)
+	}
+}
+
+// Only qa hands back. dev's messages are a different act entirely and reading
+// them as one would put a notice about qa's work on top of dev's words.
+func TestHandback_DevIsNotHandingAnythingBack(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStore()
+	dev, _ := crewPair(st)
+	fc := &fakeCommander{}
+	svc := crewService(st, fc)
+	st.smokeChecks = map[domain.SessionID][]domain.SmokeCheck{dev.ID: {{ID: "tab-stays-live"}}}
+
+	sent, err := svc.SendToCrewmate(ctx, dev.ID, CrewSend{Role: domain.CrewRoleQA, Message: "pushed the fix", Subject: "4a1b2c3"})
+	if err != nil {
+		t.Fatalf("dev messaging qa: %v", err)
+	}
+	if sent.Handback.Checked {
+		t.Fatalf("dev's message was checked as a handback: %+v", sent.Handback)
+	}
+	if fc.lastMessage != "pushed the fix" {
+		t.Fatalf("dev's message was annotated:\n%s", fc.lastMessage)
+	}
+}
+
+// A checklist AO cannot read must not cost the handback. The check exists to
+// make a silence visible; breaking the handback over it would trade a reported
+// gap for the stall the whole obligation was written to prevent.
+func TestHandback_AnUnreadableChecklistStillDelivers(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStore()
+	_, qa := crewPair(st)
+	fc := &fakeCommander{}
+	svc := crewService(st, fc)
+	st.smokeErr = errors.New("database is locked")
+
+	sent, err := svc.SendToCrewmate(ctx, qa.ID, CrewSend{Role: domain.CrewRoleDev, Message: "run done", Subject: "4a1b2c3"})
+	if err != nil {
+		t.Fatalf("the handback failed because the checklist could not be read: %v", err)
+	}
+	if sent.Handback.Checked || fc.lastMessage != "run done" {
+		t.Fatalf("an unreadable checklist produced a verdict anyway: %+v / %q", sent.Handback, fc.lastMessage)
 	}
 }

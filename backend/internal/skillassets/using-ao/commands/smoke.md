@@ -249,7 +249,7 @@ the Tests tab instead of being something you have to explain in a note.
 | `--session string` | Session id (or pass it as the positional argument) | - |
 | `--case string` | Case id to record against (see `ao smoke list`) | Required |
 | `--verdict string` | `pass`, `fail`, or `skip`. Omit for an evidence-only record | - |
-| `--note string` | What the machine saw | - |
+| `--note string` | What the machine saw. **Required with `--verdict skip`** | - |
 | `--sha string` | Commit the case was run against | HEAD of the repo in the current directory |
 | `--evidence string` | Screenshot/clip the machine captured; repeatable | - |
 
@@ -261,6 +261,19 @@ Omitting `--verdict` while attaching `--evidence` is a legitimate record: it say
 answer whenever what you captured does not actually answer the question the case
 asks, and it needs evidence **from this run** - an earlier round's screenshots
 are not what this one saw.
+
+`--verdict skip` is the third answer, and the only one that says nothing about
+the app: **"this machine could not run this case"**. It REQUIRES `--note`,
+because a reasonless skip is indistinguishable from the case nobody got to - and
+the reason has to come from an **attempt**, not an assumption. It is not a way
+out of judging a case you DID drive; that one is `--evidence` with no
+`--verdict`. Declaring a case undriveable is what takes it out of the handback
+gap (see `ao send`).
+
+```bash
+ao smoke record "$AO_CREW_ID" --case press-hold --verdict skip \
+  --note "tried a 1.2s ao sim drag; the menu never opened, so nothing was exercised"
+```
 
 ---
 

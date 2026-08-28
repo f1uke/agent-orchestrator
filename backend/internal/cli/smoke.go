@@ -628,7 +628,18 @@ it. Attaching evidence without --verdict is a legitimate record: it says "I ran
 it and captured this, I am not the one who can judge it", which is the permanent
 state of a paint/focus/timing/feel case.
 
-  ao smoke record "$AO_SESSION_ID" --case tab-stays-live --evidence /tmp/shot.png`
+  ao smoke record "$AO_SESSION_ID" --case tab-stays-live --evidence /tmp/shot.png
+
+--verdict skip is the third answer, and the only one that says nothing about the
+app: "this machine could not run this case". It REQUIRES --note, because a
+reasonless skip is indistinguishable from the case nobody got to - and the reason
+has to come from an ATTEMPT. "The agent cannot press and hold" is a finding after
+you have tried it and a guess before it, and the note is where a person can tell
+which one they are reading. It is not a way out of judging a case you DID drive:
+that one is --evidence with no --verdict.
+
+  ao smoke record "$AO_CREW_ID" --case press-hold --verdict skip \
+      --note "tried ao sim drag with a 1.2s hold; the menu never opened, so nothing was exercised"`
 
 func newSmokeRecordCommand(ctx *commandContext) *cobra.Command {
 	var session, caseID, verdict, note, sha string
@@ -652,7 +663,7 @@ func newSmokeRecordCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().SetNormalizeFunc(underscoreFlagNames)
 	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
 	cmd.Flags().StringVar(&caseID, "case", "", "Case id to record against (required; see `ao smoke list`)")
-	cmd.Flags().StringVar(&verdict, "verdict", "", "pass | fail | skip. Omit for an evidence-only record.")
+	cmd.Flags().StringVar(&verdict, "verdict", "", "pass | fail | skip. Omit for an evidence-only record. `skip` means THIS MACHINE could not run the case and needs --note saying why.")
 	cmd.Flags().StringVar(&note, "note", "", "What the machine saw")
 	cmd.Flags().StringVar(&sha, "sha", "", "Commit the case was run against (default: HEAD of the repo in the current directory)")
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "Path to a screenshot/clip the machine captured (repeatable)")
@@ -687,6 +698,11 @@ func (c *commandContext) recordSmokeAgentResult(cmd *cobra.Command, args []strin
 	}
 	if verdict == "" && len(opts.evidence) == 0 {
 		return usageError{errors.New("usage: give --verdict pass|fail|skip, or --evidence <path> to record what the machine saw without judging it")}
+	}
+	// skip is the only verdict that answers nothing about the app, so it is the
+	// only one that has to say why - and the reason has to come from an ATTEMPT.
+	if verdict == "skip" && strings.TrimSpace(opts.note) == "" {
+		return usageError{errors.New("usage: --verdict skip needs --note saying WHY this machine could not run the case, and what you tried; a reasonless skip is indistinguishable from a case nobody got to")}
 	}
 	base := "sessions/" + url.PathEscape(session) + "/smoke-checks/" + url.PathEscape(caseID)
 	// Evidence first: an evidence-only record is only accepted once the case

@@ -551,6 +551,10 @@ type CrewSendRequest struct {
 	Role    domain.CrewRole `json:"role" enum:"dev,qa"`
 	Message string          `json:"message" minLength:"1" maxLength:"131072"`
 	About   string          `json:"about,omitempty"`
+	// StillWorking is qa saying this message is NOT the end of its run, which is
+	// what exempts it from the handback completeness check. Absent means the
+	// message is a handback, because that is the shape qa is told to use.
+	StillWorking bool `json:"stillWorking,omitempty" description:"qa only: this message is a mid-run update, not the end of the run, so the handback completeness check does not apply."`
 }
 
 // SendSessionMessageResponse is the body of POST /api/v1/sessions/{sessionId}/send.
@@ -570,6 +574,21 @@ type SendSessionMessageResponse struct {
 	// PendingMessages is how many messages this session now has waiting,
 	// including this one; absent unless queued.
 	PendingMessages int `json:"pendingMessages,omitempty"`
+	// Handback is the checklist's state when qa ended its run, present only on a
+	// qa -> dev message that did not claim to be still working. The message is
+	// delivered either way - see handbackNotice for why this warns rather than
+	// refuses - so this is how the sender is told what it left behind.
+	Handback *HandbackCompletenessView `json:"handback,omitempty"`
+}
+
+// HandbackCompletenessView is what the task's smoke checklist said at the moment
+// qa handed back: how many active cases the person still has, and which of them
+// carry nothing from any machine. A case that a machine genuinely cannot drive is
+// NOT in NotDriven - declaring it is `ao smoke record --verdict skip --note
+// "<why>"`, which is a recorded run.
+type HandbackCompletenessView struct {
+	Cases     int      `json:"cases"`
+	NotDriven []string `json:"notDriven"`
 }
 
 // DispatchCommentRequest is the body of POST /api/v1/sessions/{sessionId}/comment-dispatch.

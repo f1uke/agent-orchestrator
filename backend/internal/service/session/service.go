@@ -70,6 +70,10 @@ type Store interface {
 	// they are different actors and neither substitutes for the other.
 	ListReviewRunsBySession(ctx context.Context, id domain.SessionID) ([]domain.ReviewRun, error)
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
+	// ListSmokeChecksBySession is the TASK's smoke checklist, read on one leg of
+	// one path: qa handing the task back to dev. It answers the only question the
+	// handback gate asks - which cases still carry nothing from any machine.
+	ListSmokeChecksBySession(ctx context.Context, id domain.SessionID) ([]domain.SmokeCheck, error)
 }
 
 // ListFilter captures API-facing session list query filters.

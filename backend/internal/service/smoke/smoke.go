@@ -604,6 +604,16 @@ func (s *Service) RecordAgentResult(ctx context.Context, sessionID domain.Sessio
 	if verdict != "" && !verdict.Valid() {
 		return domain.SmokeCheck{}, fmt.Errorf("%w: agent verdict must be pass, fail, or skip (or omitted, for an evidence-only run)", ErrInvalid)
 	}
+	// A machine skip is the ONE verdict that answers nothing about the app: it
+	// says "I could not run this one", and unaccompanied it is indistinguishable
+	// from the case nobody has got to yet - the very ambiguity a recorded result
+	// is supposed to end. So it must carry its reason, and the reason has to come
+	// from an attempt: "the agent cannot press and hold" is a finding after
+	// trying and a guess before it, and only the words put it in front of a
+	// person who can tell the difference.
+	if verdict == domain.SmokeSkip && strings.TrimSpace(res.Note) == "" {
+		return domain.SmokeCheck{}, fmt.Errorf("%w: a skip must say WHY this machine could not run the case - pass a note, and say what you tried", ErrInvalid)
+	}
 	now := s.now()
 	// The run the machine's captures went into, or a fresh one when it recorded a
 	// verdict without capturing anything.

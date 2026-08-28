@@ -77,7 +77,7 @@ type SessionService interface {
 	// SendToCrewmate delivers a message addressed by ROLE - the only address a
 	// crew member can rely on, since a crew is formed after dev's runtime is
 	// already launched and dev's environment can never carry qa's id.
-	SendToCrewmate(ctx context.Context, from domain.SessionID, role domain.CrewRole, message, subject string) (domain.SessionID, ports.SendOutcome, error)
+	SendToCrewmate(ctx context.Context, from domain.SessionID, in sessionsvc.CrewSend) (sessionsvc.CrewSendResult, error)
 	// SendFrom is Send with the SENDER named, which is what lets the daemon cap a
 	// runaway conversation between two agents.
 	SendFrom(ctx context.Context, id domain.SessionID, message string, talk sessionsvc.CrewTalk) (ports.SendOutcome, error)
@@ -984,25 +984,33 @@ func (c *SessionsController) crewSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message := domain.SanitizeControlChars(in.Message)
-	peer, outcome, err := c.Svc.SendToCrewmate(r.Context(), sessionID(r), in.Role, message, in.About)
+	sent, err := c.Svc.SendToCrewmate(r.Context(), sessionID(r), sessionsvc.CrewSend{
+		Role: in.Role, Message: message, Subject: in.About, StillWorking: in.StillWorking,
+	})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
+	// Message is what was DELIVERED, which is not always what was sent: an
+	// incomplete handback carries a line of AO's own (handbackNotice), and the
+	// sender has to see the same text its crewmate got.
 	// SessionID is the RECIPIENT, as it is on every other send: the caller asked
 	// for a role and this is what the role resolved to.
-	resp := SendSessionMessageResponse{OK: true, SessionID: peer, Message: message}
-	if outcome.Queued {
+	resp := SendSessionMessageResponse{OK: true, SessionID: sent.Peer, Message: sent.Message}
+	if sent.Handback.Checked {
+		resp.Handback = &HandbackCompletenessView{Cases: sent.Handback.Cases, NotDriven: sent.Handback.NotDriven}
+	}
+	if sent.Outcome.Queued {
 		// Held, not delivered - a crewmate that has not been started yet is the
 		// common case, and its mail waits for it.
-		queuedAt := outcome.QueuedAt
+		queuedAt := sent.Outcome.QueuedAt
 		resp.Queued = true
 		resp.QueuedAt = &queuedAt
-		resp.PendingMessages = outcome.Pending
+		resp.PendingMessages = sent.Outcome.Pending
 		envelope.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	c.publishActivity(r.Context(), activityEventFromMessage(peer, message))
+	c.publishActivity(r.Context(), activityEventFromMessage(sent.Peer, sent.Message))
 	envelope.WriteJSON(w, http.StatusOK, resp)
 }
 

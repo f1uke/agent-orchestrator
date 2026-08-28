@@ -32,6 +32,7 @@ type crewStack struct {
 	mgr   *sessionmanager.Manager
 	lcm   *lifecycle.Manager
 	rt    *stubRuntime
+	msg   *captureMessenger
 	repo  string
 	root  string
 	now   time.Time
@@ -88,7 +89,7 @@ func newCrewStackWithIdle(t *testing.T, idleTTL time.Duration) *crewStack {
 	// (a non-dev member launches with an empty branch, which selects the
 	// session-id fallback), so this is fidelity, not convenience.
 	rt := &stubRuntime{perSessionHandles: true, trackLiveness: true}
-	st := &crewStack{store: store, rt: rt, repo: repo, root: managed, now: time.Now()}
+	st := &crewStack{store: store, rt: rt, msg: msg, repo: repo, root: managed, now: time.Now()}
 	st.lcm = lcm
 	st.mgr = sessionmanager.New(sessionmanager.Deps{
 		Runtime: rt, Agents: stubAgents{}, Workspace: ws, Store: store, Messenger: msg,
