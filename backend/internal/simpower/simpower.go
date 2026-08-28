@@ -60,7 +60,7 @@ const (
 	// failure is kept rather than dropped, because the alternative is a
 	// control that spins for ever and never says why.
 	Failed State = "failed"
-	// Warned: the operation itself worked, but something about the device the
+	// Warned means the operation itself worked, but something about the device the
 	// caller should know did not. Today that is only a boot whose profile step
 	// left the device stock.
 	//

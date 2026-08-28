@@ -50,13 +50,13 @@ type Request struct {
 type Outcome string
 
 const (
-	// Applied: the device had drifted, so `simslim on` ran and rebooted it.
+	// Applied means the device had drifted, so `simslim on` ran and rebooted it.
 	Applied Outcome = "applied"
-	// Already: `simslim verify` passed and nothing was run. The common case.
+	// Already means `simslim verify` passed and nothing was run. The common case.
 	Already Outcome = "already"
-	// Skipped: simslim is not installed. The device is stock.
+	// Skipped means simslim is not installed. The device is stock.
 	Skipped Outcome = "skipped"
-	// Failed: simslim ran and refused. The device is stock.
+	// Failed means simslim ran and refused. The device is stock.
 	Failed Outcome = "failed"
 )
 
