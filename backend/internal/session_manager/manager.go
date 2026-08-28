@@ -122,6 +122,25 @@ const (
 	// which always knows.
 	EnvCrewDevID = "AO_CREW_DEV_ID"
 	EnvCrewQAID  = "AO_CREW_QA_ID"
+	// EnvSimUDID and EnvSimDestination name the local iOS Simulator this session
+	// owns. They exist because a device lease refusing to be shared was not
+	// enough: nothing told an agent which device was supposed to be ITS OWN, so
+	// with one simulator booted every session reached for that one - including
+	// the one a crewmate was mid-verification on, whose installed binary it then
+	// overwrote.
+	//
+	// Both are exported rather than one, because the two tools an agent reaches
+	// for want the udid in different shapes: `ao sim --udid` and `xcrun simctl`
+	// take it bare, and `xcodebuild -destination "$AO_SIM_DESTINATION"` wants
+	// `id=<udid>`. Putting BOTH in the environment is what makes the assignment
+	// survive an agent forgetting it - which is the only kind of fix that helps
+	// here, since the incident this comes from was an agent forgetting.
+	//
+	// They are unset when the machine has no simulator left to give: every `ao
+	// sim` command then falls back to the rule it has always used, and nothing
+	// about a session without a device changes.
+	EnvSimUDID        = "AO_SIM_UDID"
+	EnvSimDestination = "AO_SIM_DESTINATION"
 )
 
 // hookBinaryName is the executable name the workspace hook commands invoke:
@@ -250,6 +269,12 @@ type Manager struct {
 	// by the daemon after the smoke service is built, same as reviewerReaper; nil
 	// in tests/wiring that omit it, in which case purge simply skips it.
 	smokeEvidencePurger func(context.Context, domain.SessionID) error
+	// simDeviceAssigner returns the udid of the simulator a session owns,
+	// reserving one if it has none. Injected by the daemon after the simulator
+	// services exist, same as reviewerReaper; nil in tests/wiring that omit it,
+	// in which case a session is spawned with no device of its own - exactly as
+	// it was before assignments existed.
+	simDeviceAssigner func(context.Context, domain.SessionID) (string, error)
 
 	// crewMu guards crewLocks; crewLocks holds one mutex per CREW so the routes
 	// that can make a member awake serialise per task (see lockCrew). A session in
@@ -378,6 +403,33 @@ func (m *Manager) purgeSmokeEvidence(ctx context.Context, id domain.SessionID) {
 	if err := m.smokeEvidencePurger(ctx, id); err != nil {
 		m.logger.Warn("smoke evidence purge failed", "sessionID", id, "error", err)
 	}
+}
+
+// SetSimDeviceAssigner wires the hook that reserves one local iOS Simulator per
+// session, whose udid is exported as AO_SIM_UDID / AO_SIM_DESTINATION. Wired by
+// the daemon after the simulator services exist, mirroring SetReviewerReaper. A
+// manager with no assigner set spawns sessions with no device of their own.
+func (m *Manager) SetSimDeviceAssigner(fn func(context.Context, domain.SessionID) (string, error)) {
+	m.simDeviceAssigner = fn
+}
+
+// assignSimDevice best-effort reserves this session's simulator. A machine with
+// no simulators, none free, or one that cannot be read is a normal outcome and
+// not a spawn failure: the session simply exports no device and behaves as it
+// always did. Refusing to launch an agent because a simulator could not be
+// reserved would be a far worse trade than the ambiguity this removes, so every
+// error is logged and swallowed.
+func (m *Manager) assignSimDevice(ctx context.Context, id domain.SessionID) string {
+	if m.simDeviceAssigner == nil {
+		return ""
+	}
+	udid, err := m.simDeviceAssigner(ctx, id)
+	if err != nil {
+		m.logger.Warn("could not assign this session a simulator; it will fall back to the shared default device",
+			"sessionID", id, "error", err)
+		return ""
+	}
+	return udid
 }
 
 // preserveWorkerKnowledge is the belt-and-suspenders safety net behind the
@@ -3140,6 +3192,22 @@ func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueI
 	return env
 }
 
+// simDeviceEnv renders one session's assigned simulator as environment. An
+// empty udid produces no variables at all rather than empty ones: an exported
+// AO_SIM_UDID="" would read to `ao sim` as "the caller named a device" and to a
+// shell as a `-destination id=` that xcodebuild rejects, where an absent
+// variable correctly means "this session was given no device of its own".
+func simDeviceEnv(udid string) map[string]string {
+	udid = domain.NormalizeSimUDID(udid)
+	if udid == "" {
+		return nil
+	}
+	return map[string]string{
+		EnvSimUDID:        udid,
+		EnvSimDestination: domain.SimDestination(udid),
+	}
+}
+
 // runtimeEnv is spawnEnv plus the hook PATH pin: the session's PATH puts the
 // running daemon's own directory first, so the bare `ao` in workspace hook
 // commands resolves to the daemon that installed them rather than whatever
@@ -3150,6 +3218,9 @@ func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueI
 func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string) map[string]string {
 	env := spawnEnv(id, project, issue, kind, crew, m.crewIDs(ctx, id, crew, role), m.dataDir, m.runFile, projectEnv)
 	for k, v := range crewGitEnv(role, m.dataDir, workspacePath) {
+		env[k] = v
+	}
+	for k, v := range simDeviceEnv(m.assignSimDevice(ctx, id)) {
 		env[k] = v
 	}
 	path, err := HookPATH(m.executable, os.Getenv, projectEnv)

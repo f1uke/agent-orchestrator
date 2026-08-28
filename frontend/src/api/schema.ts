@@ -3207,6 +3207,7 @@ export interface components {
             check: components["schemas"]["SmokeCheck"];
         };
         SmokeEvidence: {
+            build?: string;
             checkId: string;
             /** Format: date-time */
             createdAt: string;

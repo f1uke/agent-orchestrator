@@ -9048,6 +9048,8 @@ components:
       type: object
     SmokeEvidence:
       properties:
+        build:
+          type: string
         checkId:
           type: string
         createdAt:

@@ -40,6 +40,7 @@ import (
 	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
+	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
@@ -330,6 +331,17 @@ func Run() error {
 			log.Warn("initial agent catalog refresh failed", "err", err)
 		}
 	}()
+
+	// One simulator per session, exported into the agent's environment at spawn.
+	// Wired here rather than in startSession because the assigner needs the
+	// daemon's resident device listing (simScreen), which is built for the Device
+	// tab and whose cache means a spawn pays a map lookup rather than a `simctl
+	// list` subprocess.
+	simAssigner := simsvc.NewAssigner(store, simScreen, func() time.Time { return time.Now().UTC() })
+	sessMgr.SetSimDeviceAssigner(func(ctx context.Context, id domain.SessionID) (string, error) {
+		assignment, err := simAssigner.AssignDevice(ctx, id)
+		return assignment.UDID, err
+	})
 
 	// sessionSvc is the Jira SessionGateway (read + set the after-the-fact binding).
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{

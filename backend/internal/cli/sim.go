@@ -14,6 +14,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/pngmeta"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbuild"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simrecord"
 )
@@ -61,6 +64,11 @@ type simDevice struct {
 	// Lease is what AO knows about who is driving this device. It is never
 	// "free": see simLeaseUnknownReason.
 	Lease simLeaseView `json:"lease"`
+	// Assigned marks the device AO gave THIS session (AO_SIM_UDID). It is not a
+	// lease and grants nothing: it says which device is yours to work on, so an
+	// agent looking at a machine with several booted simulators can tell its own
+	// from its crewmate's without having to remember anything.
+	Assigned bool `json:"assigned"`
 }
 
 type simListResult struct {
@@ -80,6 +88,42 @@ type simShotResult struct {
 	Note              string `json:"note"`
 	// Lease is additive: slice 1's keys above are a shipped contract.
 	Lease simLeaseView `json:"lease"`
+	// Build is which app was on the device when the frame was captured, and it
+	// is written INTO the PNG as well as reported here (see simBuildTextKey).
+	// It exists because `xcodebuild test` installs the app target as part of
+	// running tests, so the binary can change under a session that never asked
+	// for it - and two captures either side of that look identical.
+	Build *simBuildView `json:"build,omitempty"`
+	// BuildUnknown is why there is no Build. Never silent: a capture that could
+	// not say which build it saw has to say THAT, or a reader assumes the
+	// question was not worth asking.
+	BuildUnknown string `json:"buildUnknown,omitempty"`
+}
+
+// simBuildView is simbuild.Build on the wire.
+type simBuildView struct {
+	ID          string    `json:"id"`
+	BundleID    string    `json:"bundleId"`
+	Name        string    `json:"name"`
+	Version     string    `json:"version,omitempty"`
+	Number      string    `json:"number,omitempty"`
+	Digest      string    `json:"digest"`
+	InstalledAt time.Time `json:"installedAt"`
+	// Inferred marks a build AO chose rather than was told - the newest of
+	// several apps on the device - and Of is how many it chose from. Reported so
+	// nobody over-trusts a pick, and so the way to pin it is discoverable.
+	Inferred bool `json:"inferred,omitempty"`
+	Of       int  `json:"of,omitempty"`
+}
+
+// ID is what goes in the PNG and on the Build: line. An inferred pick says so:
+// the identity is still exact (it names the app it is about), but a reader
+// should know AO chose which app rather than being told.
+func (b simBuildView) line() string {
+	if !b.Inferred {
+		return b.ID
+	}
+	return fmt.Sprintf("%s (newest of %d apps on this device; pin it with --app or $AO_SIM_APP)", b.ID, b.Of)
 }
 
 func newSimCommand(ctx *commandContext) *cobra.Command {
@@ -102,6 +146,7 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 		newSimTapCommand(ctx), newSimSwipeCommand(ctx), newSimDragCommand(ctx),
 		newSimPinchCommand(ctx),
 		newSimTypeCommand(ctx), newSimButtonCommand(ctx),
+		newSimInstallCommand(ctx), newSimLaunchCommand(ctx),
 		newSimFlowCommand(ctx),
 		newSimRecordCommand(ctx),
 	)
@@ -136,6 +181,7 @@ func newSimShotCommand(ctx *commandContext) *cobra.Command {
 	var opts struct {
 		udid   string
 		output string
+		app    string
 		json   bool
 	}
 	cmd := &cobra.Command{
@@ -153,7 +199,7 @@ func newSimShotCommand(ctx *commandContext) *cobra.Command {
   ao sim shot --output /tmp/screen.png --json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result, err := ctx.captureSimShot(cmd.Context(), opts.udid, opts.output)
+			result, err := ctx.captureSimShot(cmd.Context(), opts.udid, opts.output, opts.app)
 			if err != nil {
 				return err
 			}
@@ -166,6 +212,7 @@ func newSimShotCommand(ctx *commandContext) *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&opts.udid, "udid", "", "Capture this simulator instead of the booted one")
 	f.StringVar(&opts.output, "output", "", "Write the PNG here instead of the session artifact directory")
+	f.StringVar(&opts.app, "app", "", "Fingerprint this bundle id instead of the newest installed app ($AO_SIM_APP pins it)")
 	f.BoolVar(&opts.json, "json", false, "Output the capture result as JSON")
 	return cmd
 }
@@ -187,11 +234,52 @@ func (c *commandContext) listSimDevices(ctx context.Context) ([]simDevice, error
 	return devices, nil
 }
 
+// assignedSimUDID is the device this session was given, read from the
+// environment AO puts it in at spawn (see session_manager.EnvSimUDID). Empty
+// means the machine had no device left to give, and every command falls back to
+// the rule it has always used.
+//
+// It is read here rather than passed down from each command because forgetting
+// to consult it is precisely the failure this exists to prevent: an agent with
+// one booted simulator in front of it reaches for that one, and that one may be
+// its crewmate's.
+func assignedSimUDID() string {
+	return strings.TrimSpace(os.Getenv("AO_SIM_UDID"))
+}
+
+// simUDIDOrAssigned resolves what an unqualified command means: the device the
+// caller named, else the device this session owns. An explicit --udid always
+// wins - naming a device is a deliberate act, and a session that has been given
+// one still has legitimate reasons to look at another (reading a screen takes
+// no lease and corrupts nothing).
+//
+// An assignment that names a device this machine no longer has is DROPPED
+// rather than reported: the session was given that udid at spawn and simulators
+// can be deleted since, and turning a stale reservation into "no simulator with
+// udid ..." would blame the caller for something it never typed.
+func simUDIDOrAssigned(udid string, devices []simDevice) string {
+	if trimmed := strings.TrimSpace(udid); trimmed != "" {
+		return trimmed
+	}
+	assigned := domain.NormalizeSimUDID(assignedSimUDID())
+	for _, d := range devices {
+		if domain.NormalizeSimUDID(d.UDID) == assigned {
+			return assigned
+		}
+	}
+	return ""
+}
+
 // resolveSimDevice applies the shared default-device rule and phrases its
 // refusals the way a person reading a terminal needs them - with the command to
 // run next. The rule itself lives in internal/simctl so the desktop app's
 // device picker cannot drift from it.
+//
+// An unqualified call resolves to the caller's OWN device when it has one, so
+// two members of a crew each driving a simulator no longer make every command
+// ambiguous - and, more importantly, no longer silently agree on one device.
 func resolveSimDevice(devices []simDevice, udid string) (simDevice, error) {
+	udid = simUDIDOrAssigned(udid, devices)
 	plain := make([]simctl.Device, 0, len(devices))
 	for _, d := range devices {
 		plain = append(plain, d.Device)
@@ -243,6 +331,11 @@ func explainSimResolve(err error, udid string) error {
 // says why when there is none.
 func simList(devices []simDevice) simListResult {
 	result := simListResult{Devices: devices}
+	assigned := simUDIDOrAssigned("", devices)
+	for i := range result.Devices {
+		result.Devices[i].Assigned = assigned != "" &&
+			domain.NormalizeSimUDID(result.Devices[i].UDID) == domain.NormalizeSimUDID(assigned)
+	}
 	chosen, err := resolveSimDevice(devices, "")
 	if err != nil {
 		result.DefaultReason = err.Error()
@@ -256,6 +349,9 @@ func simList(devices []simDevice) simListResult {
 	udid := chosen.UDID
 	result.DefaultUDID = &udid
 	result.DefaultReason = "the only booted simulator"
+	if assigned != "" {
+		result.DefaultReason = "the simulator assigned to this session (AO_SIM_UDID)"
+	}
 	return result
 }
 
@@ -278,7 +374,7 @@ func (r simListResult) unknownReason() string {
 	return simLeaseUnknownReason
 }
 
-func (c *commandContext) captureSimShot(ctx context.Context, udid, output string) (simShotResult, error) {
+func (c *commandContext) captureSimShot(ctx context.Context, udid, output, app string) (simShotResult, error) {
 	devices, err := c.listSimDevices(ctx)
 	if err != nil {
 		return simShotResult{}, err
@@ -320,7 +416,7 @@ func (c *commandContext) captureSimShot(ctx context.Context, udid, output string
 	// only reports what AO knows, so an agent that reads a frame is told when
 	// the device belongs to somebody else rather than assuming it may drive it.
 	views, reachable := c.simLeaseViews(ctx)
-	return simShotResult{
+	result := simShotResult{
 		UDID:              device.UDID,
 		Name:              device.Name,
 		Runtime:           device.Runtime,
@@ -330,7 +426,88 @@ func (c *commandContext) captureSimShot(ctx context.Context, udid, output string
 		CapturedAt:        capturedAt.Format(time.RFC3339),
 		Note:              simSharedDeviceNote,
 		Lease:             simLeaseFor(views, device.UDID, reachable),
-	}, nil
+	}
+	result.Build, result.BuildUnknown = c.readSimBuild(ctx, device, app)
+	if result.Build != nil {
+		// Into the file, not merely beside it. Evidence gets downloaded, moved
+		// and dragged into the Tests tab by a person who was never told there
+		// was a second thing to bring, so the build has to travel inside the
+		// picture. A failure here does not fail the capture: a screenshot with
+		// no build recorded is still a screenshot.
+		if err := pngmeta.Set(path, simBuildTextKey, result.Build.ID); err != nil {
+			result.BuildUnknown = fmt.Sprintf("the build was read but could not be written into the PNG: %v", err)
+		}
+	}
+	if size, err := os.Stat(path); err == nil {
+		result.Bytes = size.Size()
+	}
+	return result, nil
+}
+
+// simBuildTextKey is the PNG tEXt keyword the build id is stored under. It is
+// part of the on-disk contract between `ao sim shot`, `ao smoke record` and the
+// Tests tab's own upload, so all three must agree on the spelling.
+const simBuildTextKey = "ao-build"
+
+// readSimBuild fingerprints the app on a device, or says why it could not.
+//
+// Which app is a decision, not a guess. The app under test is the single
+// user-installed application on the device, with the XCUITest runner that
+// `xcodebuild test` installs alongside it discounted. Several candidates are
+// refused with the flag that resolves them, in the same house style every other
+// ambiguity in this CLI is refused with.
+//
+// Deliberately NOT the frontmost app. It IS readable - the accessibility bridge
+// reports a bundle id with every tree - but the read costs over a second, it
+// contends for the exclusive bridge that gestures go through, and it answers
+// "SpringBoard" whenever the app happens to be backgrounded. A silently wrong
+// build id is worse than none, and it would also cost `ao sim shot` the
+// property that makes it useful: that it is cheap and takes no lease.
+func (c *commandContext) readSimBuild(ctx context.Context, device simDevice, bundleID string) (*simBuildView, string) {
+	build, err := simbuild.Read(ctx, simbuild.Runner(c.deps.CommandOutput), device.DataPath, simAppOrEnv(bundleID))
+	if err != nil {
+		return nil, explainSimBuild(err, device)
+	}
+	return &simBuildView{
+		ID:          build.ID(),
+		BundleID:    build.BundleID,
+		Name:        build.Name,
+		Version:     build.Version,
+		Number:      build.Number,
+		Digest:      build.Digest,
+		InstalledAt: build.InstalledAt,
+		Inferred:    build.Inferred,
+		Of:          build.Of,
+	}, ""
+}
+
+// simAppOrEnv resolves which app a capture is about: the one the caller named,
+// else the one this session was configured with.
+//
+// $AO_SIM_APP exists because a project's sessions test the same app every time,
+// and a device that has accumulated nine of them over months should not make
+// every one of those sessions pass a flag. Set it once in the project's
+// environment and every capture, install and launch is pinned.
+func simAppOrEnv(bundleID string) string {
+	if trimmed := strings.TrimSpace(bundleID); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(os.Getenv("AO_SIM_APP"))
+}
+
+// explainSimBuild says why a capture carries no build, with the way out where
+// there is one.
+func explainSimBuild(err error, device simDevice) string {
+	switch {
+	case errors.Is(err, simbuild.ErrNoApp):
+		return fmt.Sprintf("no app is installed on %s, so there is no build to record; `ao sim install <path/to/App.app>` puts one there", device.Name)
+	case errors.Is(err, simbuild.ErrUnknownApp):
+		return err.Error() + " - `ao sim shot` without --app records the single installed app"
+	case errors.Is(err, simbuild.ErrNoDataPath):
+		return fmt.Sprintf("simctl did not say where %s keeps its data, so its installed app could not be read", device.Name)
+	default:
+		return fmt.Sprintf("the build on %s could not be read: %v", device.Name, err)
+	}
 }
 
 // simSessionShotPath puts the capture in this session's own artifact directory
@@ -371,6 +548,9 @@ func writeSimList(out io.Writer, result simListResult, now time.Time) error {
 		if !d.Available {
 			name += " (unavailable)"
 		}
+		if d.Assigned {
+			name += "  <- yours ($AO_SIM_UDID)"
+		}
 		if d.Default {
 			name += "  <- default for `ao sim shot`"
 		}
@@ -407,6 +587,15 @@ func writeSimShot(out io.Writer, result simShotResult, sessionID string) error {
 	if _, err := fmt.Fprintf(out, "Note: %s\n", result.Note); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(out, "Lease: %s\n", result.Lease.captureLine(sessionID))
+	if _, err := fmt.Fprintf(out, "Lease: %s\n", result.Lease.captureLine(sessionID)); err != nil {
+		return err
+	}
+	// The build goes last because it is the line a reader comes back to: it is
+	// what says whether this frame and the one before it are of the same app.
+	if result.Build != nil {
+		_, err := fmt.Fprintf(out, "Build: %s\n", result.Build.line())
+		return err
+	}
+	_, err := fmt.Fprintf(out, "Build: unknown - %s\n", result.BuildUnknown)
 	return err
 }

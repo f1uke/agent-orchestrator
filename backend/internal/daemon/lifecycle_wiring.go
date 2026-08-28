@@ -98,6 +98,11 @@ type sessionLifecycle interface {
 	// has just earned a qa (crew_join.go). It is on this narrow interface because
 	// the daemon is where the two halves meet.
 	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, reason domain.CrewJoinReason)
+	// SetSimDeviceAssigner wires the per-session simulator reservation whose udid
+	// a spawned agent reads as AO_SIM_UDID / AO_SIM_DESTINATION. It is on this
+	// interface for the same reason NoteRuntimeTouch is: the manager is built
+	// before the simulator services, so the daemon is where the two halves meet.
+	SetSimDeviceAssigner(fn func(context.Context, domain.SessionID) (string, error))
 }
 
 // startSession builds the controller-facing session service: a session manager

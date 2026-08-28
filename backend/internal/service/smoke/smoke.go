@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/pngmeta"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
 )
@@ -816,6 +817,12 @@ func (s *Service) AttachEvidence(ctx context.Context, sessionID domain.SessionID
 		CreatedAt: now,
 		Source:    source,
 		RunID:     runID,
+		// Which build the picture is of, taken from the picture. `ao sim shot`
+		// writes it into the PNG, so it is read HERE - the one place every
+		// upload passes through - rather than asked for as a flag. Both lanes
+		// then carry it: the agent that records a run, and the human who drags
+		// a screenshot into the Tests tab having been told nothing at all.
+		Build: pngBuildID(path),
 	}
 	if err := s.store.InsertSmokeEvidence(ctx, ev); err != nil {
 		_ = os.Remove(path)
@@ -823,6 +830,23 @@ func (s *Service) AttachEvidence(ctx context.Context, sessionID domain.SessionID
 	}
 	return ev, nil
 }
+
+// pngBuildID reads the build a capture recorded about itself. Anything that is
+// not a PNG from `ao sim shot` simply has none, which is a legitimate state and
+// never an error: most evidence comes from somewhere else.
+func pngBuildID(path string) string {
+	value, ok := pngmeta.Get(path, simBuildTextKey)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+// simBuildTextKey is the PNG tEXt keyword `ao sim shot` stores the build id
+// under. It is an on-disk contract between the CLI that writes it and this
+// service, which reads it back off a file that may have travelled through a
+// download, a chat and a drag-and-drop in between.
+const simBuildTextKey = "ao-build"
 
 // OpenEvidence resolves a stored blob for serving, verifying it belongs to the
 // session + case and confining the path under the evidence root.

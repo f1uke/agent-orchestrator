@@ -188,3 +188,32 @@ type SimRecordingOutcome struct {
 func NormalizeSimUDID(udid string) string {
 	return strings.ToUpper(strings.TrimSpace(udid))
 }
+
+// SimDeviceAssignment is the device that belongs to one session. It is NOT a
+// lease and does not do a lease's job: a lease says who may drive a device for
+// the next few minutes and expires; an assignment says which device is yours
+// and lasts as long as your session does.
+//
+// It exists because the lease already refused to share and that was not enough.
+// Nothing told an agent which device was supposed to be its own, so with one
+// device booted every session reached for that one - including a crewmate's,
+// mid-verification. The assignment is exported into the agent's environment at
+// spawn (AO_SIM_UDID, AO_SIM_DESTINATION) precisely so that `ao sim` and a raw
+// `xcodebuild -destination` land on the same device without the agent having to
+// remember anything.
+type SimDeviceAssignment struct {
+	SessionID  SessionID `json:"sessionId"`
+	UDID       string    `json:"udid"`
+	AssignedAt time.Time `json:"assignedAt"`
+}
+
+// SimDestination renders a udid the way `xcodebuild -destination` wants it, so
+// an agent can paste the environment variable straight into a build command.
+// Empty in, empty out: a session with no assigned device exports neither var.
+func SimDestination(udid string) string {
+	udid = NormalizeSimUDID(udid)
+	if udid == "" {
+		return ""
+	}
+	return "id=" + udid
+}

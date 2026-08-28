@@ -176,7 +176,7 @@ func (q *Queries) GetSmokeChecklistState(ctx context.Context, sessionID domain.S
 }
 
 const getSmokeEvidence = `-- name: GetSmokeEvidence :one
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build
 FROM smoke_evidence WHERE id = ?
 `
 
@@ -194,6 +194,7 @@ func (q *Queries) GetSmokeEvidence(ctx context.Context, id string) (SmokeEvidenc
 		&i.CreatedAt,
 		&i.Source,
 		&i.RunID,
+		&i.Build,
 	)
 	return i, err
 }
@@ -245,8 +246,8 @@ func (q *Queries) InsertSmokeCheck(ctx context.Context, arg InsertSmokeCheckPara
 }
 
 const insertSmokeEvidence = `-- name: InsertSmokeEvidence :exec
-INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSmokeEvidenceParams struct {
@@ -260,6 +261,7 @@ type InsertSmokeEvidenceParams struct {
 	CreatedAt time.Time
 	Source    domain.SmokeEvidenceSource
 	RunID     string
+	Build     string
 }
 
 func (q *Queries) InsertSmokeEvidence(ctx context.Context, arg InsertSmokeEvidenceParams) error {
@@ -274,6 +276,7 @@ func (q *Queries) InsertSmokeEvidence(ctx context.Context, arg InsertSmokeEviden
 		arg.CreatedAt,
 		arg.Source,
 		arg.RunID,
+		arg.Build,
 	)
 	return err
 }
@@ -369,7 +372,7 @@ func (q *Queries) ListSmokeChecksBySession(ctx context.Context, sessionID domain
 }
 
 const listSmokeEvidenceByCheck = `-- name: ListSmokeEvidenceByCheck :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build
 FROM smoke_evidence WHERE check_id = ? ORDER BY created_at
 `
 
@@ -393,6 +396,7 @@ func (q *Queries) ListSmokeEvidenceByCheck(ctx context.Context, checkID string) 
 			&i.CreatedAt,
 			&i.Source,
 			&i.RunID,
+			&i.Build,
 		); err != nil {
 			return nil, err
 		}
@@ -408,7 +412,7 @@ func (q *Queries) ListSmokeEvidenceByCheck(ctx context.Context, checkID string) 
 }
 
 const listSmokeEvidenceCreatedBefore = `-- name: ListSmokeEvidenceCreatedBefore :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build
 FROM smoke_evidence WHERE created_at < ? ORDER BY created_at
 `
 
@@ -435,6 +439,7 @@ func (q *Queries) ListSmokeEvidenceCreatedBefore(ctx context.Context, createdAt 
 			&i.CreatedAt,
 			&i.Source,
 			&i.RunID,
+			&i.Build,
 		); err != nil {
 			return nil, err
 		}
@@ -491,7 +496,7 @@ func (q *Queries) ListSmokeRunsByCheck(ctx context.Context, checkID string) ([]S
 }
 
 const listUserSmokeEvidenceByCheck = `-- name: ListUserSmokeEvidenceByCheck :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build
 FROM smoke_evidence WHERE check_id = ? AND source = 'user' ORDER BY created_at
 `
 
@@ -517,6 +522,7 @@ func (q *Queries) ListUserSmokeEvidenceByCheck(ctx context.Context, checkID stri
 			&i.CreatedAt,
 			&i.Source,
 			&i.RunID,
+			&i.Build,
 		); err != nil {
 			return nil, err
 		}
