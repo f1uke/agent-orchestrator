@@ -240,7 +240,10 @@ func (c *commandContext) bootSimDevice(ctx context.Context, udid string, timeout
 // guessing. Guessing costs more here than anywhere else in this CLI: the wrong
 // guess starts a multi-gigabyte virtual machine nobody asked for.
 func resolveSimBootTarget(devices []simDevice, udid string) (simDevice, error) {
-	if key := domain.NormalizeSimUDID(udid); key != "" {
+	// A session that owns a device means that device, even when others are
+	// booted or several are installed: booting is exactly where guessing costs
+	// the most, and the assignment is the one answer that is not a guess.
+	if key := domain.NormalizeSimUDID(simUDIDOrAssigned(udid, devices)); key != "" {
 		for _, d := range devices {
 			if domain.NormalizeSimUDID(d.UDID) != key {
 				continue

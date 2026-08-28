@@ -1,12 +1,14 @@
 # ao sim
 
-Local iOS Simulators on this machine: list them, boot one, read what is on a booted one's screen (as an accessibility tree or a PNG), read what an app on it SAYS (its unified log), drive it with taps, swipes, typing and hardware buttons, and claim one so other AO sessions keep off it while you work.
+Local iOS Simulators on this machine: list them, boot one, read what is on a booted one's screen (as an accessibility tree or a PNG), read what an app on it SAYS (its unified log), drive it with taps, swipes, typing and hardware buttons, install and launch a build on one, and claim one so other AO sessions keep off it while you work.
 
 **You can power a simulator ON, and nothing else.** `ao sim boot` is the only subcommand that changes a device's power state; there is no shutdown, reboot or erase, because those wipe a device's data or take a device out from under whoever is using it. A human does those from the desktop app's Device tab. Everything else here runs no background process, opens no port and polls nothing: each command runs, does its one job, and exits. Claiming a device changes nothing about the device itself - a lease is bookkeeping the AO daemon holds, not an operation on the simulator.
 
 Simulators are shared: another AO session, or a human working in Xcode, may be driving the same device. A captured frame can therefore be mid-interaction and is not proof that you put the app in that state.
 
 **Claim a device before you drive it.** A simulator has one finger and no per-caller state, so two sessions interacting at once merge into a single teleporting touch, and one session's release lifts the other's finger. A lost release wedges the device's input until somebody reboots it - which breaks whoever else is mid-test. The commands that touch the screen refuse to run unless this session holds the device, and refuse again while another gesture is in flight. Reading (`ao sim list`, `ao sim shot`, `ao sim ax`) never needs a claim.
+
+**The simulator that is yours is `$AO_SIM_UDID`.** AO gives each crew member its own device and puts the udid in your environment, so `ao sim` with no `--udid` means YOUR device even when several are booted, and `ao sim list` marks it `<- yours`. Every other tool has to be told: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. When the variable is unset this machine had no device to spare - then the old rule applies, and anything that installs or mutates belongs on a scratch device you name with `--udid` rather than on whichever one happens to be booted.
 
 **Never attach a pipe to an app's stdout.** `xcrun simctl launch --console-pipe` looks like the way to read an app's output. It is a trap: as soon as anything stops draining that pipe the 64 KB buffer fills and the app blocks in `write()` **on its main thread**. The app is then wedged - `ao sim ax` returns nothing, `ao sim tap` reports success and changes nothing, the screen looks frozen - and none of those symptoms points back at your capture. Use `ao sim log`, which reads the unified log and cannot block the app.
 
@@ -24,6 +26,8 @@ ao sim ax      [flags]
 ao sim log     [flags]
 ao sim claim   [flags]
 ao sim release [flags]
+ao sim install <path/to/App.app> [flags]
+ao sim launch  [bundle-id]       [flags]
 ao sim tap    <x> <y> | --label <name> | --id <identifier>  [flags]
 ao sim swipe  <x1> <y1> <x2> <y2> [flags]
 ao sim drag   <x1> <y1> <x2> <y2> [<x3> <y3> ...] [flags]
@@ -164,6 +168,7 @@ Capture a booted simulator's screen to a PNG and print its path. Read that path 
 | ----------------- | ------------------------------------------------------------ |
 | `--udid <udid>`   | Capture this simulator instead of the booted one             |
 | `--output <path>` | Write the PNG here instead of the session artifact directory |
+| `--app <bundle>`  | Fingerprint this bundle id instead of the newest installed app |
 | `--json`          | Output the capture result as JSON                            |
 
 **Which device gets captured**
@@ -198,6 +203,26 @@ ao sim shot --json
 ```
 
 A capture never takes or waits for a lease, but it always reports one: if another session holds the device, the output says so and you must not drive it.
+
+**Every capture says which build it saw.** `ao sim shot` reads the identity of the app installed on the device at the moment of capture and prints it as a `Build:` line - bundle id, version, and a digest of the installed bytes:
+
+```
+Build: com.example.MyApp 6.5.18 (708) cdhash:d114bed635ed2eb91f5c
+```
+
+That line is the answer to a question you would otherwise have to remember to ask. `xcodebuild test -destination <udid>` **builds and installs the app target as part of running tests**, so the binary on the device changes underneath you: a screenshot taken before it and one taken after look identical and are of different software. Two captures whose `Build:` lines differ are not evidence of the same thing, however similar they look.
+
+The same string is written INSIDE the PNG (an `ao-build` text chunk), so it survives the file being copied, downloaded and attached. `ao smoke record --evidence` and the Tests tab's own upload both read it back off the file and store it with the evidence - you do not pass it anywhere.
+
+**Which app** is the most recently installed one, discounting the `.xctrunner` host `xcodebuild test` puts on the device beside it - because the app that just landed is the one the question is about. A developer's simulator accumulates apps (the one this was measured on carried nine), so when it chooses between several it says so:
+
+```
+Build: com.example.MyApp 6.5.18 (708) cdhash:d114bed6 (newest of 9 apps on this device; pin it with --app or $AO_SIM_APP)
+```
+
+Pin it with `--app <bundle-id>` for one command, or set `AO_SIM_APP` in the project's environment once and every capture, install and launch on that project is pinned for good. `Build: unknown - ...` says why whenever nothing could be read at all.
+
+A pick is never silently wrong: the build id names the bundle it is about, so a capture of the wrong app is visible at a glance and two captures of different apps are visibly not comparable. What it never does is guess the FOREGROUND app - that is readable, but it reports SpringBoard whenever your app is backgrounded, costs over a second, and contends for the same exclusive bridge gestures go through.
 
 ---
 
@@ -374,6 +399,69 @@ With no `--udid` it releases the one device you hold, and fails if you hold none
 ```bash
 # Done driving the device
 ao sim release
+```
+
+---
+
+### ao sim install
+
+Install a built `.app` on a simulator, **taking the device's lease as part of doing it**.
+
+**Flags:**
+
+| Flag            | Description                                                            |
+| --------------- | ---------------------------------------------------------------------- |
+| `--udid <udid>` | Install on this simulator instead of this session's own                |
+| `--ttl <dur>`   | How long to hold the device afterwards (default 10m)                   |
+| `--json`        | Output the result as JSON                                              |
+
+Use this rather than `xcrun simctl install`. The difference is not convenience: `simctl` consults no lease at all, so it will happily overwrite the binary another AO session is mid-way through verifying, and it has - a worker ran `ao sim claim`, `xcrun simctl install` and `xcrun simctl launch` in one shell call, the claim was refused because a crewmate held the device, and because nothing chained the three commands the install went through anyway and invalidated evidence that had already been captured.
+
+Here the lease is not a step to remember before the install; it IS the install's first act. Another session holding the device refuses the command outright and **nothing is written**. If it goes through, this session holds the device afterwards - run `ao sim release` when you are done.
+
+Installing replaces the app bundle and leaves everything else alone: the app's data container is untouched, and an instance that is already running keeps running the OLD code until it is relaunched. The result reports the build now on the device, read back off the device rather than off the bundle you sent.
+
+**Examples:**
+
+```bash
+# Install onto your own device ($AO_SIM_UDID)
+ao sim install ./build/Debug-iphonesimulator/MyApp.app
+```
+
+```bash
+# Install and then start it, so the screen is running what you just built
+ao sim install ./MyApp.app && ao sim launch
+```
+
+---
+
+### ao sim launch
+
+Start an installed app on a simulator, taking the device's lease the same way `ao sim install` does.
+
+**Flags:**
+
+| Flag                | Description                                                                  |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `--udid <udid>`     | Launch on this simulator instead of this session's own                       |
+| `--ttl <dur>`       | How long to hold the device afterwards (default 10m)                         |
+| `--terminate-first` | Terminate the app first, so the launch runs the code that is installed NOW   |
+| `--json`            | Output the result as JSON                                                    |
+
+With no bundle id it launches the most recently installed app - straight after an `ao sim install`, that is the one you just put there - and says in its output when it chose between several. `AO_SIM_APP` pins it, and a bundle id as an argument settles one command.
+
+`--terminate-first` is what you want straight after an install: a running instance keeps the old code, so a launch that finds it already running shows you the build you just replaced.
+
+**Examples:**
+
+```bash
+# Start the app on your own device
+ao sim launch
+```
+
+```bash
+# Make sure the screen is running what is installed now
+ao sim launch com.example.MyApp --terminate-first
 ```
 
 ---

@@ -309,6 +309,20 @@ type SmokeEvidence struct {
 	// later, contradicting one, and showing it under that verdict would make a
 	// stale capture look like current evidence.
 	RunID string `json:"runId,omitempty"`
+	// Build is which build of the app this capture saw, as `ao sim shot` read it
+	// off the device at the moment of capture ("com.example.App 1.2 (34)
+	// cdhash:abcd..."). It arrives inside the PNG itself, so it survives the file
+	// being downloaded, moved and dragged in by a person who was never told there
+	// was anything else to bring.
+	//
+	// It is not the same fact as a run's SHA. A commit says what the source was;
+	// this says what the installed BYTES were, and `xcodebuild test` reinstalls
+	// the app as part of running tests - so a stale install is right commit,
+	// wrong bytes, and only this field can tell.
+	//
+	// "" means the capture could not say. It never means "the same build as the
+	// one next to it".
+	Build string `json:"build,omitempty"`
 }
 
 // SmokeAuthor is who is making an authoring write: the calling session and the

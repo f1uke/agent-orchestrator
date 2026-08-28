@@ -72,6 +72,11 @@ type Device struct {
 	// for a device this machine has no artwork for, and then the pane draws the
 	// screen without a body rather than guessing one.
 	Frame *simchrome.Frame `json:"frame,omitempty"`
+	// DataPath is the device's own data directory, which is where its installed
+	// applications live (<DataPath>/Containers/Bundle/Application). simctl
+	// reports it, so nothing has to reconstruct it out of $HOME - and it is
+	// readable whether or not the device is booted, unlike `simctl listapps`.
+	DataPath string `json:"dataPath,omitempty"`
 }
 
 // Booted reports whether the device can be captured or driven at all.
@@ -116,6 +121,7 @@ type listing struct {
 		State                string `json:"state"`
 		IsAvailable          bool   `json:"isAvailable"`
 		DeviceTypeIdentifier string `json:"deviceTypeIdentifier"`
+		DataPath             string `json:"dataPath"`
 	} `json:"devices"`
 }
 
@@ -154,6 +160,7 @@ func List(ctx context.Context, lookPath LookPath, run Runner) ([]Device, error) 
 				State:                d.State,
 				Available:            d.IsAvailable,
 				DeviceTypeIdentifier: d.DeviceTypeIdentifier,
+				DataPath:             d.DataPath,
 			})
 		}
 	}

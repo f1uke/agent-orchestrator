@@ -570,6 +570,7 @@ type fakeSessionLifecycle struct {
 	syncOrchestratorCalled bool
 	reconcileErr           error
 	restoreErr             error
+	simDeviceAssigner      func(context.Context, domain.SessionID) (string, error)
 }
 
 func (f *fakeSessionLifecycle) Reconcile(_ context.Context) error {
@@ -583,6 +584,10 @@ func (f *fakeSessionLifecycle) RestoreAll(_ context.Context) error {
 }
 
 func (f *fakeSessionLifecycle) CloseIdleSessions(_ context.Context) error { return nil }
+
+func (f *fakeSessionLifecycle) SetSimDeviceAssigner(fn func(context.Context, domain.SessionID) (string, error)) {
+	f.simDeviceAssigner = fn
+}
 
 func (f *fakeSessionLifecycle) SyncOrchestratorWorkspaces(_ context.Context) error {
 	f.syncOrchestratorCalled = true

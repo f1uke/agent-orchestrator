@@ -51,6 +51,18 @@ var simPromptDecisions = map[string]bool{
 	// always-seen layer is where the "boot the one you need and no more" half
 	// of it belongs.
 	"boot": true,
+	// `install` and `launch` are here because the failure they prevent happened
+	// with the old prompt in front of the agent: it ran `ao sim claim`, `xcrun
+	// simctl install` and `xcrun simctl launch` in one shell call, the claim was
+	// refused, and the two simctl commands ran anyway and overwrote a crewmate's
+	// build mid-verification. Telling an agent about the lease was not enough -
+	// what it needed was a lease-aware way to install, in the layer it always
+	// sees, because reaching for raw simctl is the reasonable thing to do when
+	// nothing else can put a build on a device. They are one bullet and two
+	// lines: an install nobody launches shows the old code, so teaching one
+	// without the other teaches half an operation.
+	"install": true,
+	"launch":  true,
 
 	// Skill page only. Not "less useful" - just not what an agent gets WRONG
 	// without being told, which is the only thing the always-seen layer buys.
@@ -111,6 +123,20 @@ var simPromptDecisions = map[string]bool{
 	"boot --timeout": false,
 	"log --process":  false,
 	"log --since":    false,
+	// `--terminate-first` IS in the prompt, on the launch line, because it is
+	// the difference between seeing the build you just installed and seeing the
+	// one it replaced - which is precisely the confusion this whole change
+	// exists to remove.
+	"launch --terminate-first": true,
+	// The two `--ttl`s move a deadline that is already right, exactly as
+	// `claim --ttl` does; the command's own output prints when the lease lapses.
+	"install --ttl": false,
+	"launch --ttl":  false,
+	// `shot --app` resolves an ambiguity that only exists on a device carrying
+	// more than one app, and the capture itself prints the flag with a line per
+	// candidate at the moment it happens. That is the definition of a hazard
+	// reported at the point of use rather than one carried in every turn.
+	"shot --app": false,
 }
 
 // ambientSimFlags are the two flags nearly every `ao sim` command carries, so
@@ -130,7 +156,15 @@ var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 // `xcodebuild -destination` that never asks the lease. The rule costs every iOS
 // worker a few hundred bytes a turn; a discarded run of manual verification
 // costs more.
-const simGuidanceBudget = 3400
+// Raised 3400 -> 3700 for the per-member device and the lease-aware install: a
+// worker chained `xcrun simctl install` after an `ao sim claim` that had been
+// REFUSED and overwrote a crewmate's binary mid-verification. Telling agents
+// about the lease was already in here and did not stop it; what the block now
+// carries instead is the device that is theirs ($AO_SIM_UDID), the command that
+// takes the lease as part of installing, and the fact that a screenshot records
+// which build it saw. Three facts, replacing two longer bullets that only
+// described the hazard.
+const simGuidanceBudget = 3700
 
 func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 	guidance := prompts.SimulatorGuidance()

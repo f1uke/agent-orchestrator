@@ -311,6 +311,7 @@ func (s *Store) InsertSmokeEvidence(ctx context.Context, ev domain.SmokeEvidence
 		CreatedAt: ev.CreatedAt,
 		Source:    evidenceSourceOrUser(ev.Source),
 		RunID:     ev.RunID,
+		Build:     ev.Build,
 	})
 }
 
@@ -456,6 +457,7 @@ func smokeEvidenceFromRow(r gen.SmokeEvidence) domain.SmokeEvidence {
 		CreatedAt: r.CreatedAt,
 		Source:    evidenceSourceOrUser(r.Source),
 		RunID:     r.RunID,
+		Build:     r.Build,
 	}
 }
 

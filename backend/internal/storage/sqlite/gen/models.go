@@ -272,6 +272,12 @@ type SessionWorktree struct {
 	State        string
 }
 
+type SimDeviceAssignment struct {
+	SessionID  domain.SessionID
+	Udid       string
+	AssignedAt time.Time
+}
+
 type SimLease struct {
 	Udid          string
 	SessionID     domain.SessionID
@@ -359,6 +365,7 @@ type SmokeEvidence struct {
 	CreatedAt time.Time
 	Source    domain.SmokeEvidenceSource
 	RunID     string
+	Build     string
 }
 
 type SmokeRun struct {

@@ -37,22 +37,22 @@ UPDATE smoke_check SET verdict = 'pending', note = '', decided_at = NULL, agreed
 UPDATE smoke_check SET reported_at = ?, updated_at = ? WHERE session_id = ?;
 
 -- name: InsertSmokeEvidence :exec
-INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO smoke_evidence (id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSmokeEvidence :one
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build
 FROM smoke_evidence WHERE id = ?;
 
 -- name: ListSmokeEvidenceByCheck :many
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build
 FROM smoke_evidence WHERE check_id = ? ORDER BY created_at;
 
 -- name: ListSmokeEvidenceCreatedBefore :many
 -- Age-based retention sweep: every evidence row whose created_at predates the
 -- TTL cutoff, across all sessions. Ordered oldest-first so a batch purge is
 -- deterministic.
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build
 FROM smoke_evidence WHERE created_at < ? ORDER BY created_at;
 
 -- name: DeleteUserSmokeEvidenceByCheck :exec
@@ -63,7 +63,7 @@ DELETE FROM smoke_evidence WHERE check_id = ? AND source = 'user';
 -- name: ListUserSmokeEvidenceByCheck :many
 -- The rows Reset is about to delete, so the service can remove exactly those
 -- blobs instead of wiping the case's whole evidence directory.
-SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id
+SELECT id, check_id, session_id, kind, filename, mime, size_bytes, created_at, source, run_id, build
 FROM smoke_evidence WHERE check_id = ? AND source = 'user' ORDER BY created_at;
 
 -- name: DeleteSmokeEvidence :execrows
