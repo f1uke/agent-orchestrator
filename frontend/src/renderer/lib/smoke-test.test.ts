@@ -107,6 +107,44 @@ describe("progressFor, machine lane", () => {
 	});
 });
 
+describe("progressFor, what qa left behind", () => {
+	// An untouched case and one qa DECLARED it could not drive rendered
+	// identically, so a run that ended with cases neglected looked exactly like
+	// one that ended with cases nothing could reach. These are the two numbers
+	// that tell them apart.
+	it("counts a declared skip apart from a case nothing was recorded on", () => {
+		const p = progressFor([
+			check({
+				id: "declared",
+				agentRanAt: "2026-08-20T09:00:00Z",
+				agentVerdict: "skip",
+				agentNote: "tried a 1.2s drag; the menu never opened",
+			}),
+			check({ id: "untouched" }),
+			check({ id: "also-untouched" }),
+			check({ id: "driven", agentRanAt: "2026-08-20T09:00:00Z", agentVerdict: "pass" }),
+		]);
+		expect(p.agentSkip).toBe(1);
+		expect(p.agentNotDriven).toBe(2);
+		// A machine skip says nothing about the app, so it moves none of the
+		// person's counts - all four are still theirs to play.
+		expect(p.skip).toBe(0);
+		expect(p.pending).toBe(4);
+		expect(p.checked).toBe(0);
+	});
+
+	it("stops counting a case the person has already decided", () => {
+		const p = progressFor([check({ id: "played", verdict: "pass" }), check({ id: "open" })]);
+		expect(p.agentNotDriven).toBe(1);
+	});
+
+	it("leaves a retired case out of both", () => {
+		const p = progressFor([check({ id: "gone", retiredAt: "2026-08-21T00:00:00Z" })]);
+		expect(p.agentNotDriven).toBe(0);
+		expect(p.agentSkip).toBe(0);
+	});
+});
+
 describe("isAgentStale", () => {
 	const HEAD = "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118";
 	const OLD = "9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5";

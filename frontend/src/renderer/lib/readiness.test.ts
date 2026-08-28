@@ -39,6 +39,8 @@ const smoke = (overrides: Partial<SmokeProgress> = {}): SmokeProgress => ({
 	agentPass: 0,
 	agentFail: 0,
 	agentCaptured: 0,
+	agentSkip: 0,
+	agentNotDriven: 0,
 	...overrides,
 });
 

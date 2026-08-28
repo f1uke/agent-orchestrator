@@ -164,6 +164,11 @@ func TestSmokeRecordUsageErrors(t *testing.T) {
 		{"bad verdict", []string{"smoke", "record", "w1", "--case", "a", "--verdict", "green"}, "must be pass, fail, or skip"},
 		{"nothing to record", []string{"smoke", "record", "w1", "--case", "a"}, "or --evidence"},
 		{"unsupported evidence", []string{"smoke", "record", "w1", "--case", "a", "--evidence", "notes.txt"}, "not an accepted evidence type"},
+		// skip is the one verdict that answers nothing about the app - "I could not
+		// run this one" - so a reasonless one is indistinguishable from the case
+		// nobody got to, which is exactly what a recorded result is meant to end.
+		{"reasonless skip", []string{"smoke", "record", "w1", "--case", "a", "--verdict", "skip"}, "needs --note saying WHY"},
+		{"blank reason", []string{"smoke", "record", "w1", "--case", "a", "--verdict", "skip", "--note", "  "}, "needs --note saying WHY"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, errOut, err := executeCLI(t, aliveDeps(), tc.args...)

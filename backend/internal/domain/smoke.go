@@ -150,6 +150,49 @@ func (c SmokeCheck) LatestRun() (SmokeRun, bool) {
 	return SmokeRun{}, false
 }
 
+// MachineDrove reports whether a machine has RECORDED anything against this case:
+// a verdict, or an evidence-only round. It is the whole of "driven" - the state a
+// case has to be in, or be explicitly excused from, before qa hands the task back.
+//
+// It reads the run history rather than AgentVerdict because an evidence-only
+// record has no verdict and is a complete answer (see SmokeAgentResult).
+func (c SmokeCheck) MachineDrove() bool {
+	_, ok := c.LatestRun()
+	return ok
+}
+
+// AwaitsMachine reports whether this case is still qa's to drive: on the active
+// list, not yet decided by the person, and carrying nothing from any machine.
+//
+// A case the HUMAN has already played is deliberately excluded. It has its answer
+// from the only judge that outranks the machine, so asking qa to drive it again
+// would make every second handback nag about work that is finished.
+func (c SmokeCheck) AwaitsMachine() bool {
+	return !c.Retired() && c.Verdict != SmokePass && c.Verdict != SmokeFail && c.Verdict != SmokeSkip && !c.MachineDrove()
+}
+
+// SmokeHandbackGap names the cases a handback would leave silently undone, oldest
+// first: every case still awaiting a machine when qa says its run is over.
+//
+// It exists because "not driven yet" and "cannot be driven" look IDENTICAL - both
+// are a case with nothing in it - so a qa that neglected the most direct part of
+// its job is invisible to the human and to itself. Nothing here decides what to DO
+// about a gap; it only makes the second state impossible to leave unsaid, the same
+// way a stand-down makes "there is nothing to check" impossible to leave unsaid.
+//
+// Being counted here is not the same as being unanswerable. A case a machine
+// cannot drive is declared with `ao smoke record --verdict skip --note "<why>"`,
+// which IS a recorded run and so leaves the gap.
+func SmokeHandbackGap(checks []SmokeCheck) []string {
+	gap := []string{}
+	for _, c := range checks {
+		if c.AwaitsMachine() {
+			gap = append(gap, c.ID)
+		}
+	}
+	return gap
+}
+
 // RunEvidence returns the machine artifacts captured during one run.
 func (c SmokeCheck) RunEvidence(runID string) []SmokeEvidence {
 	out := []SmokeEvidence{}

@@ -36,6 +36,8 @@ type fakeStore struct {
 	openRuns      map[domain.SessionID]domain.CrewRun
 	runDiscards   map[domain.SessionID]int
 	crewMessages  []domain.CrewMessage
+	smokeChecks   map[domain.SessionID][]domain.SmokeCheck
+	smokeErr      error
 	num           int
 }
 
@@ -58,6 +60,13 @@ func (f *fakeStore) CreateSession(_ context.Context, rec domain.SessionRecord) (
 	rec.ID = domain.SessionID(fmt.Sprintf("%s-%d", rec.ProjectID, f.num))
 	f.sessions[rec.ID] = rec
 	return rec, nil
+}
+
+func (f *fakeStore) ListSmokeChecksBySession(_ context.Context, id domain.SessionID) ([]domain.SmokeCheck, error) {
+	if f.smokeErr != nil {
+		return nil, f.smokeErr
+	}
+	return f.smokeChecks[id], nil
 }
 
 func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {

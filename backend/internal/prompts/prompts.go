@@ -258,6 +258,10 @@ Make the report something dev can act on without re-deriving it, in a few lines:
 
 Send it even when the answer is nothing: "nothing to exercise here, nothing recorded" is a report, and a silent stand-down is indistinguishable from an agent that died.
 
+**Every case must be in one of two states when you hand back.** DRIVEN - ` + "`ao smoke record`" + ` put something on it, a verdict or evidence with none - or declared UNDRIVEABLE: ` + "`--verdict skip --note \"<why>\"`" + `, which is the machine lane's "I could not run this one" and now requires its reason. **That reason must come from an ATTEMPT.** "The agent cannot press and hold" is a finding after you have tried it and a guess before it, and the note is where a person can tell which one they are reading. Undriveable is not a way out of judging a case you DID drive: that one is ` + "`--evidence`" + ` with no ` + "`--verdict`" + `.
+
+AO counts what is in neither state when you send this message and says so - to you, and in the message dev receives, naming the cases. It does not refuse; a handback that never lands is worse than an incomplete one. **If your run is genuinely not over, say ` + "`--still-working`" + `** rather than skipping cases to quiet the count: a case declared undriveable that you never tried is the one thing that makes the whole count worthless.
+
 One message per finish, and do not wait for a reply - dev answers by committing. A fourth message about the same commit or the same case is REFUSED by AO and parks the task at NEEDS YOU, so if something has gone round three times without settling, say so plainly and leave it to the human.`
 
 // reviewerFloor re-states the review-only invariant that must survive a

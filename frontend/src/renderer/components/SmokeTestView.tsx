@@ -1,5 +1,5 @@
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { CircleSlash, Contrast, ExternalLink, Eye, FolderOpen, OctagonX } from "lucide-react";
+import { Circle, CircleSlash, Contrast, ExternalLink, Eye, FolderOpen, OctagonX } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage, getApiBaseUrl } from "../lib/api-client";
@@ -493,6 +493,25 @@ function QaBanner({ progress }: { progress: SmokeProgress }) {
 			),
 		});
 	}
+	// A case qa DECLARED it could not drive, with its reason. It answers nothing
+	// about the app, so it never moves the person's counts - but leaving it out of
+	// the banner is what made "cannot be driven" and "nobody looked" the same
+	// blank row, and the reason qa gave is on the case itself.
+	if (progress.agentSkip > 0) {
+		lines.push({
+			icon: CircleSlash,
+			color: P.qaFg,
+			text: (
+				<>
+					<b style={{ fontWeight: 600 }}>
+						qa could not drive {progress.agentSkip} case{progress.agentSkip === 1 ? "" : "s"}
+					</b>{" "}
+					and said why on {progress.agentSkip === 1 ? "it" : "each"}. Nothing was exercised there, so{" "}
+					{progress.agentSkip === 1 ? "it is" : "they are"} yours to play from scratch.
+				</>
+			),
+		});
+	}
 	if (progress.agentPass > 0) {
 		lines.push({
 			icon: Contrast,
@@ -518,6 +537,26 @@ function QaBanner({ progress }: { progress: SmokeProgress }) {
 					</b>{" "}
 					without settling {progress.agentCaptured === 1 ? "it" : "them"}, so you can call{" "}
 					{progress.agentCaptured === 1 ? "that one" : "those"} from the evidence without driving the app yourself.
+				</>
+			),
+		});
+	}
+	// What qa left behind, said only once qa has demonstrably worked this list.
+	// On a checklist no machine has touched - every solo worker's - "qa has not
+	// driven these" would be an accusation against an agent that does not exist.
+	const touched = progress.agentPass + progress.agentFail + progress.agentCaptured + progress.agentSkip;
+	if (touched > 0 && progress.agentNotDriven > 0) {
+		lines.push({
+			icon: Circle,
+			color: P.secondary2,
+			text: (
+				<>
+					<b style={{ fontWeight: 600 }}>
+						qa has not driven {progress.agentNotDriven} of the {progress.pending} still open
+					</b>{" "}
+					and gave no reason for {progress.agentNotDriven === 1 ? "it" : "them"} - so{" "}
+					{progress.agentNotDriven === 1 ? "it is" : "they are"} &quot;nobody looked&quot;, not &quot;nothing could
+					reach it&quot;.
 				</>
 			),
 		});

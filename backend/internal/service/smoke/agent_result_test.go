@@ -308,3 +308,54 @@ func TestAnEvidenceOnlyRecordNeedsEvidenceFromTHISRun(t *testing.T) {
 		t.Errorf("error %q does not say the evidence has to come from this run", err)
 	}
 }
+
+// A SKIP HAS TO SAY WHY.
+//
+// It is the only machine verdict that answers nothing about the app - it says
+// "I could not run this one" - so unaccompanied it is indistinguishable from the
+// case nobody got to, which is the exact ambiguity a recorded result is supposed
+// to end. Refusing it here rather than in the CLI is deliberate: the desktop app
+// and a direct API call reach this too.
+func TestRecordAgentResultRejectsAReasonlessSkip(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := seedPlayedCase(ctx, t)
+
+	_, err := svc.RecordAgentResult(ctx, "w1", "draft", domain.SmokeAgentResult{Verdict: domain.SmokeSkip})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a skip with no reason = %v, want ErrInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "what you tried") {
+		t.Fatalf("the refusal does not say the reason must come from an attempt: %v", err)
+	}
+	// Whitespace is not a reason either.
+	if _, err := svc.RecordAgentResult(ctx, "w1", "draft", domain.SmokeAgentResult{Verdict: domain.SmokeSkip, Note: "   "}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a blank reason = %v, want ErrInvalid", err)
+	}
+
+	got, err := svc.RecordAgentResult(ctx, "w1", "draft", domain.SmokeAgentResult{
+		Verdict: domain.SmokeSkip,
+		Note:    "tried a 1.2s ao sim drag on the row; the context menu never opened, so nothing was exercised",
+	})
+	if err != nil {
+		t.Fatalf("a skip WITH its reason: %v", err)
+	}
+	if got.AgentVerdict != domain.SmokeSkip || !strings.Contains(got.AgentNote, "never opened") {
+		t.Fatalf("the declared skip did not land: %+v", got)
+	}
+	// Declared undriveable is a RECORDED run, which is what takes the case out of
+	// the handback gap - the whole point of making it sayable.
+	if !got.MachineDrove() {
+		t.Fatal("a declared skip did not count as a recorded run")
+	}
+}
+
+// pass and fail carry no such requirement, and neither does the evidence-only
+// record: they answer the case's question, and #268 already governs what they
+// have to cite.
+func TestRecordAgentResultDoesNotDemandANoteFromEveryVerdict(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := seedPlayedCase(ctx, t)
+	if _, err := svc.RecordAgentResult(ctx, "w1", "draft", domain.SmokeAgentResult{Verdict: domain.SmokePass}); err != nil {
+		t.Fatalf("a noteless pass was refused: %v", err)
+	}
+}

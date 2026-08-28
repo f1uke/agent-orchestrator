@@ -141,6 +141,23 @@ export type SmokeProgress = {
 	 * a weaker verdict - it is captured evidence waiting for a person's eye.
 	 */
 	agentCaptured: number;
+	/**
+	 * Cases qa DECLARED it could not drive, each with the reason it gave. A
+	 * machine skip answers nothing about the app - it is a fact about the
+	 * machine's reach - so it never touches the person's counts, and it is the
+	 * one thing that tells "cannot be driven" apart from "nobody looked".
+	 */
+	agentSkip: number;
+	/**
+	 * Cases still open for the person that carry NOTHING from any machine.
+	 *
+	 * This is the number that used to be unreadable. An untouched case and an
+	 * undriveable one rendered identically, so a run that ended with cases
+	 * neglected looked exactly like one that ended with cases nothing could
+	 * reach. Now the second state has to be said out loud (agentSkip), and
+	 * whatever is left over is this.
+	 */
+	agentNotDriven: number;
 };
 
 /** Counts for the progress bar + counts row. */
@@ -156,6 +173,8 @@ export function progressFor(checks: SmokeCheck[]): SmokeProgress {
 		agentPass: 0,
 		agentFail: 0,
 		agentCaptured: 0,
+		agentSkip: 0,
+		agentNotDriven: 0,
 	};
 	for (const c of checks) {
 		if (c.retiredAt) {
@@ -184,6 +203,12 @@ export function progressFor(checks: SmokeCheck[]): SmokeProgress {
 						break;
 					case "captured":
 						p.agentCaptured += 1;
+						break;
+					case "skip":
+						p.agentSkip += 1;
+						break;
+					case "none":
+						p.agentNotDriven += 1;
 						break;
 				}
 		}

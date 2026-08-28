@@ -556,3 +556,84 @@ func crewSendServer(t *testing.T, status int, respBody string) (*httptest.Server
 	t.Cleanup(srv.Close)
 	return srv, capture
 }
+
+// WHAT QA SEES WHEN IT HANDS BACK OVER CASES NOBODY DROVE.
+//
+// The message has already gone by the time this prints, and that is the design:
+// refusing the handback recreates the silent stall the handback obligation
+// exists to prevent. So the CLI's job is to make the gap impossible to miss and
+// to name the two things that close it.
+func TestSend_HandbackNamesTheCasesNobodyDrove(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-2")
+	cfg := setConfigEnv(t)
+	srv, _ := crewSendServer(t, http.StatusOK,
+		`{"ok":true,"sessionId":"demo-1","message":"run done","handback":{"cases":4,"notDriven":["tab-stays-live","drag-scroll"]}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--crew", "dev", "--about", "4a1b2c3", "--message", "run done")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	for _, want := range []string{
+		"2 of 4",               // the size of what was left
+		"tab-stays-live",       // named, so the reader is not sent back to the list
+		"drag-scroll",          //
+		"ao smoke record",      // the way to drive one
+		"--verdict skip",       // the way to declare one undriveable
+		"come from an ATTEMPT", // and the rule that keeps that honest
+		"--still-working",      // the way to say the run is not over
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the handback report does not say %q:\n%s", want, out)
+		}
+	}
+}
+
+// A complete handback needs no commentary. A gate that talks after finished work
+// is one people learn to read past.
+func TestSend_ACompleteHandbackSaysNothingExtra(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-2")
+	cfg := setConfigEnv(t)
+	srv, _ := crewSendServer(t, http.StatusOK,
+		`{"ok":true,"sessionId":"demo-1","message":"run done","handback":{"cases":4,"notDriven":[]}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--crew", "dev", "--about", "4a1b2c3", "--message", "run done")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("a complete handback printed something:\n%s", out)
+	}
+}
+
+// "I am not finished yet" travels to the daemon, because the daemon is what
+// decides whether to look at the checklist.
+func TestSend_StillWorkingIsCarriedAndNeedsACrewmate(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-2")
+	cfg := setConfigEnv(t)
+	srv, capture := crewSendServer(t, http.StatusOK, `{"ok":true,"sessionId":"demo-1","message":"still going"}`)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--crew", "dev", "--about", "4a1b2c3", "--still-working", "--message", "still going"); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var req struct {
+		StillWorking bool `json:"stillWorking"`
+	}
+	if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
+		t.Fatalf("decode body: %v\nbody=%s", err, capture.body)
+	}
+	if !req.StillWorking {
+		t.Fatalf("--still-working did not reach the daemon: %s", capture.body)
+	}
+
+	// It is a claim about your own crew run, so it is meaningless without one.
+	if _, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--session", "demo-1", "--still-working", "--message", "hello"); err == nil {
+		t.Fatal("--still-working was accepted outside a crew send")
+	}
+}
