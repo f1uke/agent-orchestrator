@@ -206,15 +206,14 @@ describe("typing into the device", () => {
 		);
 	});
 
-	// 🗝 The fix, and the human's actual case. A Thai rune has no US key, so
-	// sending it as TEXT put every keystroke through the guest's pasteboard -
-	// 2.7-3.7 s each, batched into bursts to make that bearable. The key the
-	// human pressed goes straight through instead, exactly as it does in
-	// Simulator.app, and the guest's own Thai mode turns it back into the rune.
-	//
-	// The character travels too: it is what a recording keeps, and what the
-	// daemon falls back to delivering if it cannot forward the position.
-	it("forwards a Thai keystroke as the key that produced it, one per character", async () => {
+	// 🗝 #277, at the pane. The keys the human pressed still travel - they are
+	// what lets the daemon send a real key press wherever the guest reads it as
+	// the character that was typed - but having a position is no longer a
+	// reason to send a keystroke on its own. This guest would remap those
+	// positions, so the daemon has to deliver the CHARACTERS, and one
+	// pasteboard round trip per BURST is the only bearable way to do that.
+	// Sending them one at a time bought a 2.7-3.7 s trip per keystroke.
+	it("sends a Thai burst as one request, carrying the keys that produced it", async () => {
 		serve(heldByUs, remappingGuest);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
@@ -223,17 +222,22 @@ describe("typing into the device", () => {
 		// "สว" on a Thai Mac: the keys a US keyboard prints `l` and `;` on.
 		typeOn("ส", "KeyL");
 		typeOn("ว", "Semicolon");
-		await waitFor(() => expect(sent()).toHaveLength(2));
+		await settle();
 
 		expect(sent()).toEqual([
-			{ kind: "type", text: "ส", keys: [{ code: "KeyL", shift: false }] },
-			{ kind: "type", text: "ว", keys: [{ code: "Semicolon", shift: false }] },
+			{
+				kind: "type",
+				text: "สว",
+				keys: [
+					{ code: "KeyL", shift: false },
+					{ code: "Semicolon", shift: false },
+				],
+			},
 		]);
 	});
 
-	// ⚠ Shift belongs to the KEY, not to the character. On a Thai keyboard it
-	// produces a different Thai letter, so dropping it would type the wrong
-	// character rather than the same one in lower case.
+	// ⚠ Shift belongs to the KEY, not to the character: it is part of what was
+	// pressed, so the daemon needs it to work out what the guest would read.
 	it("carries shift with the key it was held for", async () => {
 		serve(heldByUs, remappingGuest);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
@@ -241,18 +245,19 @@ describe("typing into the device", () => {
 
 		await focusCanvas();
 		typeOn("ศ", "KeyL", { shiftKey: true });
-		await waitFor(() => expect(sent()).toHaveLength(1));
+		await settle();
 
 		expect(sent()).toEqual([{ kind: "type", text: "ศ", keys: [{ code: "KeyL", shift: true }] }]);
 	});
 
-	// ⚠ Caps Lock is the one case where the position and shift do NOT account
-	// for the character: the Mac made a capital from an unshifted press, and the
-	// device - never told about Caps Lock - would make the lower-case letter
-	// from the same key. So the character is sent instead, by the route that can
-	// promise it. Wrong-and-fast is the one outcome this surface may not have.
-	it("sends the character rather than the key when Caps Lock made it", async () => {
-		serve(heldByUs, remappingGuest);
+	// ⚠ Caps Lock is reported, not judged (#277). The pane used to drop the
+	// position here, on the grounds that an unshifted press cannot account for
+	// a capital - true, and not enough: on a Mac that uses Caps Lock to SWITCH
+	// INPUT SOURCE the modifier state is never set, so a Thai keystroke looked
+	// exactly like a US one. The daemon compares the character against what
+	// the guest would read from the position, which catches both.
+	it("reports the position even when Caps Lock made the character", async () => {
+		serve(heldByUs);
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 		await drive();
 
@@ -260,7 +265,7 @@ describe("typing into the device", () => {
 		typeOn("A", "KeyA", { modifierCapsLock: true });
 		await settle();
 
-		expect(sent()).toEqual([{ kind: "type", text: "A" }]);
+		expect(sent()).toEqual([{ kind: "type", text: "A", keys: [{ code: "KeyA", shift: false }] }]);
 	});
 
 	// ⚠ Still batched where there is no position to forward, because there the
@@ -344,6 +349,36 @@ describe("typing into the device", () => {
 		await settle();
 
 		expect(sent()).toEqual([{ kind: "type", text: "สวัสดี" }]);
+	});
+
+	// 🗝 The human's own configuration in #277: a Thai Mac, a guest still on
+	// en_US. Every keystroke carries a position AND a Thai character, and the
+	// positions are the ones this guest would read as "fa" - so they cannot be
+	// sent as themselves, the characters go through the pasteboard, and the
+	// burst is what makes that bearable. Before the fix this was six separate
+	// requests, each answered "1 key press forwarded", each putting a letter
+	// nobody typed into the field.
+	it("batches a Thai burst typed on a Mac whose guest is still on US", async () => {
+		serve(heldByUs);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await drive();
+		await waitFor(() => expect(getMock).toHaveBeenCalledWith("/api/v1/sim/devices/{udid}/keyboard", expect.anything()));
+
+		await focusCanvas();
+		typeOn("ด", "KeyF");
+		typeOn("ฟ", "KeyA");
+		await settle();
+
+		expect(sent()).toEqual([
+			{
+				kind: "type",
+				text: "ดฟ",
+				keys: [
+					{ code: "KeyF", shift: false },
+					{ code: "KeyA", shift: false },
+				],
+			},
+		]);
 	});
 
 	it("sends Enter, Tab and the arrows as keys rather than as text", async () => {

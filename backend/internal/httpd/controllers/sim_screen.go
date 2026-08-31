@@ -187,13 +187,12 @@ type SimGestureInput struct {
 	// Mac, in the same order, one per character.
 	//
 	// ⚠ Only a caller that WATCHED someone press them may send these - the
-	// Device tab, forwarding a real keyboard. They are sent to the device as
-	// themselves, so what arrives is whatever the simulator's input mode makes
-	// of them, exactly as it would in Simulator.app: correct for a person,
-	// because the same layout resolved the character they saw themselves type,
-	// and wrong for an agent, which is why a string an agent chose must be sent
-	// as Text alone and planned from the guest's input mode.
-	Keys []SimKeyPress `json:"keys,omitempty" description:"The physical keys a person actually pressed to produce Text on this Mac, one per character, in the same order. Only a caller that watched someone press them may send these: they are forwarded to the device as themselves, so the simulator's input mode decides what they produce, exactly as it would in Simulator.app. A string chosen by an agent has no keys behind it and must be sent as Text alone."`
+	// Device tab, forwarding a real keyboard. They are an OFFER, never a
+	// route: the daemon sends them as themselves only where the guest's input
+	// mode was shown to make Text of them, and otherwise ignores them and
+	// delivers Text by the planned route. A string an agent chose has no keys
+	// behind it and must be sent as Text alone.
+	Keys []SimKeyPress `json:"keys,omitempty" description:"The physical keys a person actually pressed to produce Text on this Mac, one per character, in the same order. Only a caller that watched someone press them may send these. They are an offer rather than a route: the keys are forwarded as themselves only where the simulator's input mode was established to produce exactly Text from them, and are otherwise ignored in favour of delivering Text. A string chosen by an agent has no keys behind it and must be sent as Text alone."`
 	// button: home or app-switcher. key: enter, backspace, tab or one of the
 	// arrow keys - the keys that produce no character, and so cannot be
 	// remapped by the guest's keyboard input mode the way a letter can.
@@ -481,13 +480,17 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 	// anything is composed, and a device that cannot say is refused rather than
 	// typed at hopefully.
 	//
-	// ⚠ Keys a person pressed are the exception, and it is the whole of this
-	// fix: forwarding a key does not need the mode, because the mode is what
-	// makes forwarding right rather than what stands in its way. Asking anyway
-	// would put a guest round trip in front of every keystroke for an answer
-	// nothing reads.
+	// ⚠ Keys a person pressed used to skip this, on the reasoning that
+	// forwarding a key does not need the mode - the mode being what makes
+	// forwarding right rather than what stands in its way. That is true only
+	// while the guest's mode follows the Mac's, which a simulator AO drives
+	// through the HID path does not: a guest on en_US turned a Thai Mac's `ดฟ`
+	// into "Fa" and reported success (#277). So the mode is established for
+	// every `type`, forwarded keys included, and PlanText decides from it.
+	// The read is the daemon's own maintained answer (see simstream.Screen),
+	// not a guest round trip per keystroke.
 	var keyboard simbridge.ProbedKeyboard
-	if in.Kind == "type" && !in.RawKeys && !in.Paste && !simbridge.ForwardableKeys(keyPresses(in.Keys)) {
+	if in.Kind == "type" && !in.RawKeys && !in.Paste {
 		keyboard.Mode, keyboard.Err = c.Screen.Keyboard(r.Context(), device.UDID)
 	}
 
