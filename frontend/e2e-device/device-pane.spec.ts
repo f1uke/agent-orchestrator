@@ -423,12 +423,15 @@ test("recording captures a hand drag, and stop writes the flow it reports", asyn
  * Skips a case that can only mean anything on a guest which reads US ASCII key
  * presses as the characters they were sent as.
  *
- * ⚠ The guest follows the MAC'S OWN input source, so these cases quietly depend
- * on the language the developer happens to be typing in. On a Mac set to Thai
- * the very same ASCII goes through the guest pasteboard instead - correctly,
- * but batched, several seconds slower, and with iOS's smart-insert space
- * turning "aXb" into "a X b". Without this they fail with a confusing number or
- * a confusing string rather than saying which machine they are on.
+ * ⚠ It reads the mode off the DEVICE and never infers it from the Mac. A
+ * simulator AO drives through the HID path keeps whichever input mode it was
+ * last left in, whatever the Mac is set to - assuming otherwise is #277 - so
+ * which guest this machine has is a fact to be read, not predicted. On a guest
+ * that is not US the very same ASCII goes through the pasteboard instead:
+ * correctly, but batched, several seconds slower, and with iOS's smart-insert
+ * space turning "aXb" into "a X b". Without this these cases fail with a
+ * confusing number or a confusing string rather than saying which guest they
+ * are on.
  */
 function skipUnlessGuestTakesUSKeys(sandbox: Sandbox) {
 	const keyboard = JSON.parse(
