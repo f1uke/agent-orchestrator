@@ -156,3 +156,31 @@ func TestSummarize_MarksTheDefaultAndSaysWhyThereIsNone(t *testing.T) {
 		t.Fatal("a listing with no default must say why")
 	}
 }
+
+// A device's identity and a BOOT's identity are not the same thing, and
+// conflating them is what let a stale input client answer for a device that had
+// been restarted underneath it. simctl already reports the second one.
+func TestBootIdentifiesTheRunRatherThanTheDevice(t *testing.T) {
+	out := `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+		`{"udid":"UDID-A","name":"iPhone 17","state":"Booted","isAvailable":true,` +
+		`"lastBootedAt":"2026-08-31T04:37:26Z"},` +
+		`{"udid":"UDID-B","name":"iPad","state":"Shutdown","isAvailable":true,` +
+		`"lastBootedAt":"2026-08-30T09:00:00Z"}]}}`
+	devices, err := simctl.List(context.Background(), found, lister(out, nil))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(devices) != 2 {
+		t.Fatalf("want 2 devices, got %d", len(devices))
+	}
+
+	if got := devices[0].Boot(); got != "2026-08-31T04:37:26Z" {
+		t.Fatalf("a booted device's boot = %q, want its lastBootedAt", got)
+	}
+	// The shut-down one has a lastBootedAt too - it ran once. It still has no
+	// boot to name, because the run that timestamp refers to is over, and
+	// handing it out would be exactly the stale identity this exists to stop.
+	if got := devices[1].Boot(); got != "" {
+		t.Fatalf("a shut-down device's boot = %q, want empty", got)
+	}
+}

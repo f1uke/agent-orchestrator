@@ -846,6 +846,15 @@ func writeSimResolveError(w http.ResponseWriter, r *http.Request, err error) {
 // recovery release also failed may have left a finger down on the device, and
 // the person who clicked has to be told.
 func writeSimGestureError(w http.ResponseWriter, r *http.Request, err error) {
+	// A gesture that was refused before anything left the daemon. It is not a
+	// device failure and there is nothing wedged: the device could not be shown
+	// to be the one that would be touched, so it was not touched. Saying so is
+	// the whole point - this used to be a 200 with a success body.
+	if errors.Is(err, simbridge.ErrNotSent) {
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_NOT_SENT",
+			err.Error()+". Check the simulator is still booted in the Device tab's picker, and boot it again if it is not.", nil)
+		return
+	}
 	var failed *simgesture.FailedError
 	if !errors.As(err, &failed) {
 		writeSimError(w, r, err)

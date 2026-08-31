@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -405,6 +406,32 @@ func TestSimGesture_WithoutAScreenIs501(t *testing.T) {
 		map[string]any{"kind": "tap", "x": 0.5, "y": 0.5})
 	if code != http.StatusNotImplemented {
 		t.Fatalf("status %d, want 501", code)
+	}
+}
+
+// 🗝 The regression the Device tab was reported for: a tap answered 200 with a
+// success body while the screen never moved. The bridge below it cannot always
+// tell that its events landed - a simulator accepts them into a dead boot
+// without complaint - so the one thing this route must never do is dress a
+// refusal up as a gesture. A caller reading only the status code has to be able
+// to believe it.
+func TestSimGesture_AGestureThatWasNotSentIsNotReportedAsSuccess(t *testing.T) {
+	driver := &fakeDriver{err: fmt.Errorf("%w: %s is not booted", simbridge.ErrNotSent, testSimUDID)}
+	srv := newScreenTestServer(t, &fakeSimService{}, &fakeScreen{listing: oneBooted(), driver: driver})
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "tap", "x": 0.5, "y": 0.8})
+
+	if code == http.StatusOK {
+		t.Fatalf("a gesture that reached nothing was reported as one that happened: %v", out)
+	}
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422: %v", code, out)
+	}
+	// And it says which device and why, rather than a bare failure: the person
+	// who clicked has to know their simulator went away.
+	if body := fmt.Sprint(out); !strings.Contains(body, "not booted") || !strings.Contains(body, "SIM_NOT_SENT") {
+		t.Fatalf("the refusal does not say what happened: %v", out)
 	}
 }
 

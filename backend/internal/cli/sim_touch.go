@@ -465,7 +465,7 @@ func (c *commandContext) runSimPaste(
 	if err != nil {
 		return err
 	}
-	driver, err := c.simDriver()
+	driver, err := c.simDriver(device)
 	if err != nil {
 		return err
 	}
@@ -627,7 +627,7 @@ func (c *commandContext) runSimGestureOn(
 	if err != nil {
 		return err
 	}
-	driver, err := c.simDriver()
+	driver, err := c.simDriver(device)
 	if err != nil {
 		return err
 	}

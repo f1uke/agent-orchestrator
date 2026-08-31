@@ -54,6 +54,9 @@ type Driver interface {
 	// Perform runs one gesture to completion. It reports whether the bridge had
 	// to lift a finger the gesture left down, because that is the difference
 	// between "nothing happened" and "the device was rescued".
+	//
+	// It answers ErrNotSent rather than success when it cannot establish that
+	// the device is the one it would be touching - see ErrNotSent.
 	Perform(ctx context.Context, udid string, events []Event) (PerformResult, error)
 	// Hold runs events and leaves the finger exactly where they left it.
 	//
@@ -111,6 +114,10 @@ type NodeDriver struct {
 	// NodePath is the resolved `node` binary.
 	NodePath string
 	Start    BridgeStarter
+	// Boot names the boot session of the device about to be touched. A driver
+	// without one touches nothing: see ErrNotSent for why that is the honest
+	// answer rather than a needless refusal.
+	Boot BootFunc
 
 	mu      sync.Mutex
 	session BridgeSession
@@ -123,6 +130,32 @@ const (
 	errCodeAddon = "addon_load_failed"
 	errCodeAX    = "ax_unavailable"
 )
+
+// ErrNotSent is a gesture that was refused before anything left this process,
+// so nothing reached the device and there is nothing to recover from.
+//
+// 🗝 It exists because the layer below cannot tell us. A gesture is injected
+// through a client bound to ONE boot of a device; the udid outlives the boot
+// and the client does not, and the addon neither throws nor logs when its port
+// has died with the device it was attached to - it accepts the events and
+// drops them. A touch sent to a shut-down device behaves the same way. So
+// "did that land?" is unanswerable after the fact, and the only honest place
+// to stand is before the send: if the device's boot session cannot be named,
+// the events do not go out and the caller is told they did not.
+//
+// Distinguishing it from a send that FAILED matters to more than phrasing: a
+// failed gesture may have left a finger down and must be recovered from, and a
+// gesture that was never sent must not be, or a refusal would answer with a
+// warning about a wedged device that nothing ever touched.
+var ErrNotSent = errors.New("nothing was sent to the device")
+
+// BootFunc names a device's current boot session - CoreSimulator's own
+// lastBootedAt - or returns empty for a device that is not booted.
+//
+// It is called immediately before each touch rather than resolved once with the
+// device, because a boot read at the start of a drag is a boot that may be over
+// by the time the drag's next move goes out.
+type BootFunc func(ctx context.Context, udid string) (string, error)
 
 // Error is a failure the bridge itself reported (as opposed to Node failing to
 // start, which is an ordinary exec error).
@@ -141,10 +174,14 @@ func (e *Error) Error() string {
 }
 
 type bridgeRequest struct {
-	AddonPath string  `json:"addonPath"`
-	Op        string  `json:"op"`
-	UDID      string  `json:"udid"`
-	Events    []Event `json:"events,omitempty"`
+	AddonPath string `json:"addonPath"`
+	Op        string `json:"op"`
+	UDID      string `json:"udid"`
+	// Boot is the device's boot session, and it is what keys the bridge's
+	// injector cache. Only a touch carries one; a read builds nothing to
+	// invalidate. See ErrNotSent.
+	Boot   string  `json:"boot,omitempty"`
+	Events []Event `json:"events,omitempty"`
 }
 
 type bridgeResponse struct {
@@ -161,7 +198,7 @@ type bridgeResponse struct {
 // NewNodeDriver builds a driver, installing the bridge under dataDir. lookPath
 // resolves `node`; a machine without it gets an error that says so rather than
 // an exec failure nobody can read.
-func NewNodeDriver(dataDir string, lookPath func(string) (string, error), start BridgeStarter) (*NodeDriver, error) {
+func NewNodeDriver(dataDir string, lookPath func(string) (string, error), boot BootFunc, start BridgeStarter) (*NodeDriver, error) {
 	if runtime.GOOS != "darwin" {
 		return nil, &Error{
 			Message: "reading and touching an iOS Simulator screen only works on macOS",
@@ -183,7 +220,7 @@ func NewNodeDriver(dataDir string, lookPath func(string) (string, error), start 
 	if start == nil {
 		start = startBridgeProcess
 	}
-	return &NodeDriver{Toolchain: tc, NodePath: node, Start: start}, nil
+	return &NodeDriver{Toolchain: tc, NodePath: node, Start: start, Boot: boot}, nil
 }
 
 // AX reads the accessibility tree.
@@ -201,7 +238,11 @@ func (d *NodeDriver) AX(ctx context.Context, udid string) (Snapshot, error) {
 
 // Perform runs a gesture.
 func (d *NodeDriver) Perform(ctx context.Context, udid string, events []Event) (PerformResult, error) {
-	res, err := d.call(ctx, bridgeRequest{Op: "perform", UDID: udid, Events: events})
+	boot, err := d.bootOf(ctx, udid)
+	if err != nil {
+		return PerformResult{}, err
+	}
+	res, err := d.call(ctx, bridgeRequest{Op: "perform", UDID: udid, Boot: boot, Events: events})
 	if err != nil {
 		return PerformResult{}, err
 	}
@@ -210,8 +251,30 @@ func (d *NodeDriver) Perform(ctx context.Context, udid string, events []Event) (
 
 // Hold runs events and leaves the finger down.
 func (d *NodeDriver) Hold(ctx context.Context, udid string, events []Event) error {
-	_, err := d.call(ctx, bridgeRequest{Op: "hold", UDID: udid, Events: events})
+	boot, err := d.bootOf(ctx, udid)
+	if err != nil {
+		return err
+	}
+	_, err = d.call(ctx, bridgeRequest{Op: "hold", UDID: udid, Boot: boot, Events: events})
 	return err
+}
+
+// bootOf names the boot session about to be touched, and refuses rather than
+// guessing. Every way of not knowing is the same answer, because they have the
+// same consequence: events posted into a port nothing is listening on, and an
+// `ok` for a gesture the screen never saw.
+func (d *NodeDriver) bootOf(ctx context.Context, udid string) (string, error) {
+	if d.Boot == nil {
+		return "", fmt.Errorf("%w: this driver cannot tell which boot of %s it would be touching", ErrNotSent, udid)
+	}
+	boot, err := d.Boot(ctx, udid)
+	if err != nil {
+		return "", fmt.Errorf("%w: the boot of %s could not be read: %w", ErrNotSent, udid, err)
+	}
+	if boot == "" {
+		return "", fmt.Errorf("%w: %s is not booted", ErrNotSent, udid)
+	}
+	return boot, nil
 }
 
 func (d *NodeDriver) call(ctx context.Context, req bridgeRequest) (bridgeResponse, error) {
