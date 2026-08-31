@@ -110,8 +110,11 @@ func siblingsOf(rec domain.SessionRecord, all []domain.SessionRecord) []domain.S
 	return out
 }
 
-// crewKeepsWorkspace reports whether this session must leave the shared worktree
-// standing. It is the refcount, and it asks a different question of each role,
+// workspaceHeldByLiveSession reports whether this session must leave the
+// worktree standing because somebody else is still in it. Two questions, in
+// order of how they were learned.
+//
+// FIRST, the CREW refcount, which asks a different question of each role,
 // because the two roles have a different relationship to the tree.
 //
 //   - A SUBORDINATE never removes it while its dev row exists. The tree is dev's:
@@ -126,27 +129,97 @@ func siblingsOf(rec domain.SessionRecord, all []domain.SessionRecord) []domain.S
 //     not - and then keeping the tree is the safe answer, and the reclaim log says
 //     so once per reason.
 //
-// It is deliberately CREW-scoped rather than path-scoped. A path-scoped refcount
-// would be more general, but every orchestrator of a project already shares ONE
-// worktree path (the directory is named for the project, not the session) and
-// SpawnOrchestrator's check-then-spawn is explicitly not atomic, so a project can
-// legitimately hold two non-terminated orchestrator rows on one path. Path-scoping
-// would start refusing orchestrator teardowns that succeed today - a visible
-// change on the solo path, which is the one thing this capability may not cause.
-// A session that is not in a crew takes neither branch.
-func (m *Manager) crewKeepsWorkspace(ctx context.Context, rec domain.SessionRecord) (bool, error) {
-	if !rec.InCrew() || rec.Metadata.WorkspacePath == "" {
+// SECOND, any LIVE session at all on the same path, crew or not. The crew half
+// used to be the whole answer, on the grounds that path-scoping was too general:
+// every orchestrator of a project shares ONE worktree path (the directory is
+// named for the project, not the session) and SpawnOrchestrator's
+// check-then-spawn is not atomic, so a project can legitimately hold two
+// non-terminated orchestrator rows on one path - and path-scoping would refuse a
+// teardown that succeeds today.
+//
+// That reasoning had the sign backwards, and the incident is the proof. A
+// worktree directory is named `worktrees/<project>/<branch>`, so a task RETRIED
+// on the same branch gets a fresh session row on the SAME directory; the finished
+// attempt keeps its WorkspacePath for ever (Restore needs it), so it is an
+// auto-reclaim candidate for ever, and the two rows are in DIFFERENT crews. The
+// crew refcount answers "no" and the sweep deletes the tree the live retry is
+// standing in. Observed four times on one branch (`~/.ao/knowledge/…/plans/
+// bugfix-worker-stop-means-park-not-exit--who-really-ended-the-session.md`).
+//
+// So the orchestrator case the old comment worried about is the SAME bug wearing
+// different clothes: refusing to delete a tree a live row occupies is the correct
+// answer there too. It costs nothing durable, because ReasonWorkspaceShared is a
+// RETRYABLE refusal - the disk comes back one grace period after the last live
+// tenant terminates. A session sharing its path with nobody is unaffected.
+//
+// Liveness, not ownership, is the test here: !IsTerminated. A SUSPENDED session
+// is paused rather than finished and that tree is exactly what it resumes into -
+// including a session #273 parked as `undelivered`, where deleting the tree would
+// undo the very rescue the park performed.
+func (m *Manager) workspaceHeldByLiveSession(ctx context.Context, rec domain.SessionRecord) (bool, error) {
+	if rec.Metadata.WorkspacePath == "" {
 		return false, nil
 	}
-	members, err := m.crewMembers(ctx, rec)
+	all, err := m.store.ListAllSessions(ctx)
 	if err != nil {
 		return false, err
 	}
-	return crewKeepsWorkspaceGiven(rec, members), nil
+	return workspaceHeldGiven(rec, all), nil
 }
 
-// crewKeepsWorkspaceGiven is crewKeepsWorkspace's decision over an already-read
-// member list.
+// workspaceHeldGiven is workspaceHeldByLiveSession's decision over an
+// already-read session list, so a caller asking BOTH refcounts (Teardown) reads
+// the store once and cannot see the two questions answered from different
+// instants.
+func workspaceHeldGiven(rec domain.SessionRecord, all []domain.SessionRecord) bool {
+	if rec.Metadata.WorkspacePath == "" {
+		return false
+	}
+	return crewKeepsWorkspaceGiven(rec, siblingsOf(rec, all)) ||
+		liveCoTenant(rec, all, func(other domain.SessionRecord) string {
+			return other.Metadata.WorkspacePath
+		})
+}
+
+// runtimeHandleHeldGiven reports whether this session's tmux handle is somebody
+// else's live pane, decided over an already-read session list.
+//
+// It is a separate question from the worktree only because it is a separate
+// resource; it has the identical cause. tmux.SessionNameFor derives the handle
+// from project+branch and never from the session id - deliberately, so `tmux ls`
+// lines up with the branch - which means every attempt at one task on one branch
+// addresses ONE pane. Runtime.Destroy is `tmux kill-session`, so a finished
+// attempt's teardown kills the live attempt's agent outright. That is the
+// PROXIMATE killer in the incident: the live harness fires SessionEnd on the way
+// down, and AO then records the death as `termination_source = agent` - AO
+// blaming the agent for a kill AO performed.
+func runtimeHandleHeldGiven(rec domain.SessionRecord, all []domain.SessionRecord) bool {
+	return liveCoTenant(rec, all, func(other domain.SessionRecord) string {
+		return other.Metadata.RuntimeHandleID
+	})
+}
+
+// liveCoTenant reports whether any OTHER non-terminated session names the same
+// resource as rec. A TODO is excluded explicitly rather than relying on its
+// fields being empty: it has neither pane nor tree, so it can hold neither.
+func liveCoTenant(rec domain.SessionRecord, all []domain.SessionRecord, resource func(domain.SessionRecord) string) bool {
+	mine := resource(rec)
+	if mine == "" {
+		return false
+	}
+	for _, other := range all {
+		if other.ID == rec.ID || other.IsTerminated || other.IsTodo {
+			continue
+		}
+		if resource(other) == mine {
+			return true
+		}
+	}
+	return false
+}
+
+// crewKeepsWorkspaceGiven is the CREW half of workspaceHeldGiven, over an
+// already-read member list.
 func crewKeepsWorkspaceGiven(rec domain.SessionRecord, members []domain.SessionRecord) bool {
 	if !rec.InCrew() || rec.Metadata.WorkspacePath == "" {
 		return false

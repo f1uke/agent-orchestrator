@@ -1220,7 +1220,20 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 	if rec.InCrew() && rec.CrewRole.IsDev() {
 		m.teardownCrewSubordinates(ctx, rec, cause)
 	}
-	if handle.ID != "" {
+	// Both refcounts are answered from ONE session list, read here: AFTER the
+	// fan-out above (so a crew tearing itself down still reaps its own members'
+	// panes and tree) and BEFORE anything is destroyed.
+	tenants, err := m.store.ListAllSessions(ctx)
+	if err != nil {
+		return TeardownResult{}, fmt.Errorf("kill %s: tenants: %w", id, err)
+	}
+	// The PANE refcount. A tmux handle is named for the BRANCH
+	// (tmux.SessionNameFor), so a finished attempt at a retried task addresses the
+	// pane its live successor is running in, and Runtime.Destroy is
+	// `tmux kill-session`. Killing it is how a session that never decided anything
+	// ends up recorded as having ended itself: the victim's harness fires
+	// SessionEnd on the way down and AO reads that as `termination_source=agent`.
+	if handle.ID != "" && !runtimeHandleHeldGiven(rec, tenants) {
 		if err := m.runtime.Destroy(ctx, handle); err != nil {
 			return TeardownResult{}, fmt.Errorf("kill %s: runtime: %w", id, err)
 		}
@@ -1234,15 +1247,13 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 	// reaps the reviewer.
 	m.reapReviewer(ctx, id)
 	res := TeardownResult{WorkspacePath: ws.Path}
-	// The refcount (crewKeepsWorkspace): a subordinate never removes dev's tree,
-	// and dev keeps it while a subordinate is still alive on it. Checked AFTER the
+	// The tree refcount (workspaceHeldByLiveSession): a subordinate never removes
+	// dev's tree, dev keeps it while a subordinate is still alive on it, and
+	// NOBODY removes a tree another live session is standing in. Checked AFTER the
 	// fan-out above, so tearing a whole task down still frees the disk in one
-	// pass, and BEFORE any destroy, so a live member never loses its tree. A solo
-	// session has no crew and takes neither branch.
-	held, err := m.crewKeepsWorkspace(ctx, rec)
-	if err != nil {
-		return TeardownResult{}, fmt.Errorf("kill %s: crew: %w", id, err)
-	}
+	// pass, and BEFORE any destroy, so a live tenant never loses its tree. A
+	// session that shares its path with nobody is unaffected.
+	held := workspaceHeldGiven(rec, tenants)
 	switch {
 	case held:
 		// Deliberately NOT an early return like the dirty case: this session IS
@@ -1693,9 +1704,9 @@ func (m *Manager) saveAndTeardownOne(ctx context.Context, rec domain.SessionReco
 	// still terminates and still records its restore marker, so RestoreAll
 	// relaunches it into the tree that is still there.
 	ws := workspaceInfo(rec)
-	held, err := m.crewKeepsWorkspace(ctx, rec)
+	held, err := m.workspaceHeldByLiveSession(ctx, rec)
 	if err != nil {
-		return fmt.Errorf("save %s: crew: %w", rec.ID, err)
+		return fmt.Errorf("save %s: tenants: %w", rec.ID, err)
 	}
 	if held {
 		return m.saveKeepingSharedWorktree(ctx, rec, ws, destroyRuntime)
@@ -2664,15 +2675,15 @@ func (m *Manager) Cleanup(ctx context.Context, project domain.ProjectID) (Cleanu
 			}
 			_ = m.runtime.Destroy(ctx, h) // best effort; usually already gone
 		}
-		// The crew refcount, the same one Teardown consults. Cleanup walks TERMINAL
+		// The tree refcount, the same one Teardown consults. Cleanup walks TERMINAL
 		// rows, and a crew reaches "dev ended, member still live" by routes that
 		// never went through Teardown - a merged PR, an agent ending its own
 		// session - so without this the sweep deletes the tree the live member is
 		// standing in. It also stops the shared tree being destroyed once per row
 		// when the whole crew has ended: the subordinate defers to dev by
 		// ownership, so exactly one pass frees it.
-		if held, err := m.crewKeepsWorkspace(ctx, rec); err != nil {
-			m.logger.Warn("cleanup: crew refcount failed", "sessionID", rec.ID, "error", err)
+		if held, err := m.workspaceHeldByLiveSession(ctx, rec); err != nil {
+			m.logger.Warn("cleanup: tree refcount failed", "sessionID", rec.ID, "error", err)
 			result.Skipped = append(result.Skipped, CleanupSkip{SessionID: rec.ID, Reason: "workspace teardown failed"})
 			continue
 		} else if held {

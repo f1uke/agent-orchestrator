@@ -174,9 +174,10 @@ func TestTeardown_FanOutFailureKeepsTheTree(t *testing.T) {
 	}
 }
 
-// TestTeardown_SoloIsUnchanged is the preservation guard. A solo session has no
-// crew fields, so neither the fan-out nor the refcount may fire: it frees its own
-// worktree, exactly as it does today.
+// TestTeardown_SoloIsUnchanged is the preservation guard. A solo session that
+// shares its worktree and its pane with nobody has no crew fields and no
+// co-tenant, so neither the fan-out nor either refcount may fire: it frees its
+// own worktree, exactly as it does today.
 func TestTeardown_SoloIsUnchanged(t *testing.T) {
 	m, st, rt, ws := newManager()
 	st.sessions["mer-1"] = domain.SessionRecord{
@@ -184,12 +185,10 @@ func TestTeardown_SoloIsUnchanged(t *testing.T) {
 		Metadata: domain.SessionMetadata{Branch: "feature/solo", WorkspacePath: "/ws/feature/solo", RuntimeHandleID: "h1"},
 		Activity: domain.Activity{State: domain.ActivityActive},
 	}
-	// A second, unrelated solo session on the SAME path (which is what every
-	// orchestrator of a project genuinely looks like) must not hold it either:
-	// the refcount is crew-scoped precisely so this case is untouched.
+	// An unrelated session on a DIFFERENT path and pane changes nothing.
 	st.sessions["mer-2"] = domain.SessionRecord{
 		ID: "mer-2", ProjectID: "mer", Kind: domain.KindWorker,
-		Metadata: domain.SessionMetadata{Branch: "feature/solo", WorkspacePath: "/ws/feature/solo", RuntimeHandleID: "h2"},
+		Metadata: domain.SessionMetadata{Branch: "feature/other", WorkspacePath: "/ws/feature/other", RuntimeHandleID: "h2"},
 		Activity: domain.Activity{State: domain.ActivityActive},
 	}
 
@@ -207,7 +206,52 @@ func TestTeardown_SoloIsUnchanged(t *testing.T) {
 		t.Fatalf("runtimes destroyed = %v, want only [h1]", rt.destroyedIDs)
 	}
 	if st.sessions["mer-2"].IsTerminated {
-		t.Fatal("a solo teardown terminated an unrelated session sharing its path")
+		t.Fatal("a solo teardown terminated an unrelated session")
+	}
+}
+
+// TestTeardown_UnrelatedLiveSessionOnTheSamePathHoldsIt REVERSES what this file
+// used to assert. The old case seeded a second unrelated LIVE session on the
+// same path and demanded the tree be deleted anyway, reasoning that the refcount
+// was crew-scoped "precisely so this case is untouched" - the orchestrator
+// double-row case.
+//
+// That assertion was the defect, written down. A worktree is named
+// `worktrees/<project>/<branch>`, so a RETRIED task lands a new session row on
+// the directory a live one occupies, in a different crew; the auto-reclaim loop
+// then deleted a working agent's tree four times on one branch. The orchestrator
+// case the old comment protected is the same bug in different clothes, and
+// refusing there is right too: ReasonWorkspaceShared is retryable, so the disk
+// comes back one grace period after the last live tenant terminates.
+func TestTeardown_UnrelatedLiveSessionOnTheSamePathHoldsIt(t *testing.T) {
+	m, st, rt, ws := newManager()
+	st.sessions["mer-1"] = domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker,
+		Metadata: domain.SessionMetadata{Branch: "feature/solo", WorkspacePath: "/ws/feature/solo", RuntimeHandleID: "h1"},
+		Activity: domain.Activity{State: domain.ActivityActive},
+	}
+	st.sessions["mer-2"] = domain.SessionRecord{
+		ID: "mer-2", ProjectID: "mer", Kind: domain.KindWorker,
+		Metadata: domain.SessionMetadata{Branch: "feature/solo", WorkspacePath: "/ws/feature/solo", RuntimeHandleID: "h2"},
+		Activity: domain.Activity{State: domain.ActivityActive},
+	}
+
+	res, err := m.Teardown(ctx, "mer-1", domain.TerminationCauseKill)
+	if err != nil {
+		t.Fatalf("Teardown: %v", err)
+	}
+	if res.Freed || res.Reason != ReasonWorkspaceShared {
+		t.Fatalf("teardown = freed %v reason %q, want refused as %q", res.Freed, res.Reason, ReasonWorkspaceShared)
+	}
+	if ws.destroyed != 0 {
+		t.Fatalf("workspace destroyed %d time(s); a live session is in it", ws.destroyed)
+	}
+	// Its OWN pane is not the co-tenant's, so it still goes.
+	if len(rt.destroyedIDs) != 1 || rt.destroyedIDs[0] != "h1" {
+		t.Fatalf("runtimes destroyed = %v, want only its own [h1]", rt.destroyedIDs)
+	}
+	if st.sessions["mer-2"].IsTerminated {
+		t.Fatal("a teardown terminated an unrelated session sharing its path")
 	}
 }
 
