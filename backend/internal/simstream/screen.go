@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,9 +115,12 @@ func NewScreen(dataDir string) *Screen {
 		newCap: func(dir string, lookPath func(string) (string, error)) (simbridge.Capturer, error) {
 			return simbridge.NewNodeCapturer(dir, lookPath, nil)
 		},
-		newDrive: func(dir string, lookPath func(string) (string, error)) (simbridge.Driver, error) {
-			return simbridge.NewNodeDriver(dir, lookPath, nil)
-		},
+	}
+	// Set here rather than in the literal above: the driver has to be able to
+	// ask this screen which boot of a device it is about to touch, and there is
+	// no screen to close over until the literal exists.
+	s.newDrive = func(dir string, lookPath func(string) (string, error)) (simbridge.Driver, error) {
+		return simbridge.NewNodeDriver(dir, lookPath, s.Boot, nil)
 	}
 	s.newPower()
 	return s
@@ -132,6 +136,30 @@ func NewScreen(dataDir string) *Screen {
 func (s *Screen) newPower() {
 	s.power = simpower.New(s.lookPath, s.run)
 	s.power.OnSettled(s.forgetListing)
+}
+
+// Boot names the boot session of the device a gesture is about to touch, so
+// the bridge can tell one run of a device from the next. See
+// simbridge.ErrNotSent for what the answer protects against, and simctl.Boot
+// for what it is.
+//
+// It reads the same cached listing the gesture route resolved the device from,
+// rather than shelling out to simctl: the listing costs most of a second and
+// this sits in front of every touch. That cache is dropped the moment any power
+// operation settles (see newPower), so a device AO itself booted or shut down
+// is never named by a memory of the run before. A device rebooted from outside
+// AO is caught when the listing next turns over.
+func (s *Screen) Boot(ctx context.Context, udid string) (string, error) {
+	listing, err := s.Devices(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, device := range listing.Devices {
+		if strings.EqualFold(device.UDID, udid) {
+			return device.Boot(), nil
+		}
+	}
+	return "", nil
 }
 
 // forgetListing drops the cached device listing so the next caller reads the

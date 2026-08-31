@@ -66,7 +66,7 @@ func (c *commandContext) runSimTapByName(cmd *cobra.Command, opts simTouchOption
 	if err != nil {
 		return err
 	}
-	driver, err := c.simDriver()
+	driver, err := c.simDriver(device)
 	if err != nil {
 		return err
 	}

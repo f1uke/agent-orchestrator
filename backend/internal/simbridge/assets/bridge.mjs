@@ -140,15 +140,34 @@ class Touching {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// One injector per device, kept for as long as this process lives. Building it
+// One injector per device BOOT, kept for as long as that boot lasts. Building it
 // is what costs 290 ms; reusing it is the whole point of staying resident.
+//
+// 🗝 The key is the boot session, not the udid, and that distinction is a bug
+// this file already shipped. A SimHID is bound to one boot of one device: the
+// udid survives a reboot and the injector does not. Keyed on the udid alone,
+// this cache went on handing out an injector attached to a device that no
+// longer existed - and since the addon neither throws nor logs when its port is
+// dead, every event was swallowed and every gesture still answered `ok`. The
+// desktop app's Device tab reported taps as delivered while the screen never
+// moved, for as long as the daemon's bridge outlived the boot it first attached
+// to - days.
+//
+// So the caller names the boot it resolved the device on, and a boot it has not
+// seen before gets a new injector. The previous one for that device is dropped
+// rather than lifted: its boot is over, so there is no finger left to raise and
+// nowhere to send the lift.
 const injectors = new Map();
-function injectorFor(addon, udid) {
-  let entry = injectors.get(udid);
+function injectorFor(addon, udid, boot) {
+  const key = udid + "\u0000" + boot;
+  let entry = injectors.get(key);
   if (!entry) {
+    for (const other of injectors.keys()) {
+      if (other !== key && other.startsWith(udid + "\u0000")) injectors.delete(other);
+    }
     const hid = new addon.SimHID(udid);
     entry = { hid, touching: new Touching(hid) };
-    injectors.set(udid, entry);
+    injectors.set(key, entry);
   }
   return entry;
 }
@@ -170,8 +189,8 @@ async function liftEverything(reason) {
 // lifting it - the Go side holds the device's gesture hold for the whole drag
 // and lifts on a watchdog if the far end goes quiet. The process-level lifts
 // (signal, stdin closing, reply channel gone) still cover this process dying.
-async function perform(addon, udid, events, keepDown = false) {
-  const { hid, touching } = injectorFor(addon, udid);
+async function perform(addon, udid, boot, events, keepDown = false) {
+  const { hid, touching } = injectorFor(addon, udid, boot);
 
   try {
     for (const event of events) {
@@ -207,9 +226,18 @@ async function perform(addon, udid, events, keepDown = false) {
 }
 
 async function handle(request) {
-  const { addonPath, op, udid } = request;
+  const { addonPath, op, udid, boot } = request;
   if (!addonPath || !op || !udid) {
     fail(ERR_BAD_REQUEST, "addonPath, op and udid are required");
+    return;
+  }
+  // Nothing is sent to a device whose boot the caller could not name. Without
+  // it there is no way to tell an injector that is attached from one whose
+  // device rebooted underneath it, and the addon will accept the events either
+  // way - so a missing boot is refused rather than answered `ok`. Reading the
+  // screen needs none of this: `ax` builds nothing and caches nothing.
+  if ((op === "perform" || op === "hold") && !boot) {
+    fail(ERR_BAD_REQUEST, "boot is required to touch a device");
     return;
   }
 
@@ -232,12 +260,12 @@ async function handle(request) {
         return;
       }
       case "perform": {
-        const result = await perform(addon, udid, request.events ?? []);
+        const result = await perform(addon, udid, boot, request.events ?? []);
         reply({ ok: true, ...result });
         return;
       }
       case "hold": {
-        const result = await perform(addon, udid, request.events ?? [], true);
+        const result = await perform(addon, udid, boot, request.events ?? [], true);
         reply({ ok: true, ...result });
         return;
       }

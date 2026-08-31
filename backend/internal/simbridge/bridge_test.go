@@ -64,7 +64,10 @@ func newTestDriver(t *testing.T, bridge *fakeBridge) *NodeDriver {
 		t.Fatalf("install: %v", err)
 	}
 	bridge.t = t
-	d := &NodeDriver{Toolchain: tc, NodePath: "node", Start: bridge.start}
+	// A booted device by default, so a test about something else does not have
+	// to say so. The tests that are ABOUT the boot replace this.
+	boot := func(context.Context, string) (string, error) { return "2026-08-31T04:37:26Z", nil }
+	d := &NodeDriver{Toolchain: tc, NodePath: "node", Start: bridge.start, Boot: boot}
 	t.Cleanup(func() { _ = d.Close() })
 	return d
 }
@@ -332,5 +335,82 @@ func TestAddonDigest_MatchesTheNotice(t *testing.T) {
 	}
 	if !strings.Contains(string(notice), digest) {
 		t.Fatalf("NOTICE does not record the vendored addon's digest %s", digest)
+	}
+}
+
+// The bug this pair of tests pins: an injector is bound to one boot of a
+// device, the daemon keeps one bridge process for days, and the addon answers
+// `ok` for events it posts to a port that died with the previous boot. The
+// driver is what makes the boot knowable to the script, so it has to carry one
+// on every touch and refuse to touch without one.
+func TestPerformCarriesTheDevicesBootSession(t *testing.T) {
+	bridge := &fakeBridge{payload: `{"ok":true}`}
+	driver := newTestDriver(t, bridge)
+	driver.Boot = func(context.Context, string) (string, error) { return "2026-08-31T04:37:26Z", nil }
+
+	if _, err := driver.Perform(context.Background(), "UDID-A", []Event{{Kind: "button", Name: "home"}}); err != nil {
+		t.Fatalf("perform: %v", err)
+	}
+
+	if got := bridge.last().Boot; got != "2026-08-31T04:37:26Z" {
+		t.Fatalf("the bridge was not told which boot to touch: boot = %q", got)
+	}
+}
+
+func TestPerformRefusesADeviceWhoseBootIsUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		boot func(context.Context, string) (string, error)
+	}{
+		// A device that is not booted has no boot session, and the addon will
+		// accept its events regardless: `touch` on a shut-down device neither
+		// throws nor lands.
+		{"not booted", func(context.Context, string) (string, error) { return "", nil }},
+		{"cannot be read", func(context.Context, string) (string, error) { return "", errors.New("simctl said no") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bridge := &fakeBridge{payload: `{"ok":true}`}
+			driver := newTestDriver(t, bridge)
+			driver.Boot = tc.boot
+
+			_, err := driver.Perform(context.Background(), "UDID-A", []Event{{Kind: "button", Name: "home"}})
+
+			if !errors.Is(err, ErrNotSent) {
+				t.Fatalf("a gesture that could not be sent must say so: err = %v", err)
+			}
+			if len(bridge.requests) != 0 {
+				t.Fatalf("nothing may reach the device: %d request(s) sent", len(bridge.requests))
+			}
+		})
+	}
+}
+
+// Hold is the drag's half-touch and takes the same refusal: a drag whose device
+// rebooted underneath it must end, not go on posting moves into a dead port.
+func TestHoldRefusesADeviceWhoseBootIsUnknown(t *testing.T) {
+	bridge := &fakeBridge{payload: `{"ok":true}`}
+	driver := newTestDriver(t, bridge)
+	driver.Boot = func(context.Context, string) (string, error) { return "", nil }
+
+	err := driver.Hold(context.Background(), "UDID-A", []Event{{Kind: "touch", Type: "begin"}})
+
+	if !errors.Is(err, ErrNotSent) {
+		t.Fatalf("a hold that could not be sent must say so: err = %v", err)
+	}
+	if len(bridge.requests) != 0 {
+		t.Fatalf("nothing may reach the device: %d request(s) sent", len(bridge.requests))
+	}
+}
+
+// Reading is not touching: AX builds no injector and caches nothing, so it must
+// keep working on a device whose boot nobody can name - that is exactly the
+// device a human is trying to find out about.
+func TestAXNeedsNoBootSession(t *testing.T) {
+	bridge := &fakeBridge{payload: `{"ok":true,"tree":[],"frontmost":{}}`}
+	driver := newTestDriver(t, bridge)
+	driver.Boot = func(context.Context, string) (string, error) { return "", nil }
+
+	if _, err := driver.AX(context.Background(), "UDID-A"); err != nil {
+		t.Fatalf("ax: %v", err)
 	}
 }

@@ -840,3 +840,43 @@ func TestScreen_AFailedKeyboardProbeIsNotCached(t *testing.T) {
 		t.Fatalf("the guest was asked %d times, want every failed probe retried", probes.Load())
 	}
 }
+
+// 🗝 What the daemon has to be able to answer before it touches anything.
+//
+// A simulator's input is driven through a client bound to ONE boot of the
+// device. The udid outlives a reboot and that client does not, and the
+// simulator accepts events into the dead one without complaint - so a daemon
+// whose bridge outlives a device's boot went on reporting taps as delivered
+// while the screen never moved. Naming the boot is what lets the bridge notice.
+func TestScreen_BootNamesTheRunOfADeviceNotTheDevice(t *testing.T) {
+	lister := func(state, lastBootedAt string) simctl.Runner {
+		return func(context.Context, string, ...string) ([]byte, error) {
+			return []byte(`{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+				`{"udid":"UDID-A","name":"iPhone","state":"` + state + `","isAvailable":true,` +
+				`"lastBootedAt":"` + lastBootedAt + `"}]}}`), nil
+		}
+	}
+
+	booted := simstream.NewScreenForTest(nil, lister("Booted", "2026-08-31T04:37:26Z"), nil)
+	boot, err := booted.Boot(context.Background(), "udid-a")
+	if err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	// Matched the way every other lookup here matches - a udid a human typed is
+	// not required to carry simctl's own casing.
+	if boot != "2026-08-31T04:37:26Z" {
+		t.Fatalf("boot = %q, want the device's lastBootedAt", boot)
+	}
+
+	// A device that is not booted has no run to name, and the bridge refuses to
+	// touch it rather than posting events a shut-down simulator swallows.
+	off := simstream.NewScreenForTest(nil, lister("Shutdown", "2026-08-31T04:37:26Z"), nil)
+	if boot, err := off.Boot(context.Background(), "UDID-A"); err != nil || boot != "" {
+		t.Fatalf("a shut-down device named boot %q (err %v), want empty", boot, err)
+	}
+
+	// So does one this machine has never heard of.
+	if boot, err := booted.Boot(context.Background(), "UDID-GONE"); err != nil || boot != "" {
+		t.Fatalf("an unknown device named boot %q (err %v), want empty", boot, err)
+	}
+}

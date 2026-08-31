@@ -205,7 +205,7 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 	if err != nil {
 		return simAXResult{}, err
 	}
-	driver, err := c.simDriver()
+	driver, err := c.simDriver(device)
 	if err != nil {
 		return simAXResult{}, err
 	}
@@ -285,7 +285,7 @@ func blockedSimAppError(device simDevice, front simbridge.Frontmost, diag simhan
 // Failure paths only. It costs a screen read and a second of sampling, and no
 // command that is about to report success may pay either.
 func (c *commandContext) blockedSimAppNote(ctx context.Context, device simDevice) string {
-	driver, err := c.simDriver()
+	driver, err := c.simDriver(device)
 	if err != nil {
 		return ""
 	}
@@ -359,10 +359,16 @@ func (c *commandContext) resolveBootedSimDevice(ctx context.Context, udid string
 	return resolveSimDevice(devices, udid)
 }
 
-// simDriver builds the mechanism. Everything above this line is written against
-// the Driver interface, so replacing the vendored bridge with Apple's own
-// device-interaction route later touches this function and nothing else.
-func (c *commandContext) simDriver() (simbridge.Driver, error) {
+// simDriver builds the mechanism for a device the caller has already resolved.
+// Everything above this line is written against the Driver interface, so
+// replacing the vendored bridge with Apple's own device-interaction route later
+// touches this function and nothing else.
+//
+// The device is taken rather than looked up because the boot session the driver
+// needs (simbridge.BootFunc) is already in the caller's hands: every command
+// that touches a screen resolves the device first, and a second `simctl list`
+// is the single most expensive thing in a touch.
+func (c *commandContext) simDriver(device simDevice) (simbridge.Driver, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -370,7 +376,8 @@ func (c *commandContext) simDriver() (simbridge.Driver, error) {
 	if c.deps.SimDriver != nil {
 		return c.deps.SimDriver(cfg.DataDir)
 	}
-	return simbridge.NewNodeDriver(cfg.DataDir, c.deps.LookPath, nil)
+	boot := func(context.Context, string) (string, error) { return device.Boot(), nil }
+	return simbridge.NewNodeDriver(cfg.DataDir, c.deps.LookPath, boot, nil)
 }
 
 func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {

@@ -77,10 +77,30 @@ type Device struct {
 	// reports it, so nothing has to reconstruct it out of $HOME - and it is
 	// readable whether or not the device is booted, unlike `simctl listapps`.
 	DataPath string `json:"dataPath,omitempty"`
+	// LastBootedAt is when this device was last started, as simctl reports it.
+	// It changes on every boot, which is what makes it an identity for the boot
+	// rather than for the device - see Boot.
+	LastBootedAt string `json:"lastBootedAt,omitempty"`
 }
 
 // Booted reports whether the device can be captured or driven at all.
 func (d Device) Booted() bool { return d.State == BootedState }
+
+// Boot identifies the RUN of this device rather than the device, and is empty
+// for one that is not booted.
+//
+// 🗝 It exists because a udid is not enough to touch a device safely. Anything
+// that attaches to a simulator's input attaches to one boot of it; the udid
+// survives a shutdown and the attachment does not. Something holding the older
+// attachment cannot tell - the simulator accepts its events and drops them
+// silently - so the only defence is to notice that the boot has changed, and
+// that needs a name for the boot. CoreSimulator already keeps one.
+func (d Device) Boot() string {
+	if !d.Booted() {
+		return ""
+	}
+	return d.LastBootedAt
+}
 
 // Label is how a device is named back to a person: enough to recognise it, and
 // the udid needed to address it.
@@ -122,6 +142,7 @@ type listing struct {
 		IsAvailable          bool   `json:"isAvailable"`
 		DeviceTypeIdentifier string `json:"deviceTypeIdentifier"`
 		DataPath             string `json:"dataPath"`
+		LastBootedAt         string `json:"lastBootedAt"`
 	} `json:"devices"`
 }
 
@@ -161,6 +182,7 @@ func List(ctx context.Context, lookPath LookPath, run Runner) ([]Device, error) 
 				Available:            d.IsAvailable,
 				DeviceTypeIdentifier: d.DeviceTypeIdentifier,
 				DataPath:             d.DataPath,
+				LastBootedAt:         d.LastBootedAt,
 			})
 		}
 	}

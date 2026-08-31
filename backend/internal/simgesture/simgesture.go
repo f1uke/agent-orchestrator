@@ -20,6 +20,7 @@ package simgesture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -153,6 +154,14 @@ func run(
 	if performErr == nil {
 		performed = true
 		return gesture, result, nil
+	}
+	if errors.Is(performErr, simbridge.ErrNotSent) {
+		// A refusal, not a failure: the events never left this process, so
+		// there is no finger down to recover and nothing to warn anybody
+		// about. Recovering anyway would answer a device that was never
+		// touched with "it may have a finger held down", which is the same
+		// class of untruth - just pointing the other way.
+		return gesture, simbridge.PerformResult{}, performErr
 	}
 
 	failed := &FailedError{Action: gesture.Action, Cause: performErr}
