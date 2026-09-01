@@ -841,3 +841,62 @@ func TestCrewProtocol_StaysWithinItsBudget(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckInGate_StandardAndDeepStopBeforeImplementing: on a project that opted
+// in, a standard/deep worker must be told (a) it is two turns, (b) orientation -
+// reading, searching, writing into the knowledge store - is allowed first, (c)
+// the implementation itself is what must wait, (d) the pause is taken by ENDING
+// THE TURN, which is the only thing that puts the task in the board's Needs you
+// lane, (e) sitting quietly mid-turn is forbidden precisely because it is
+// indistinguishable from a hang, (f) the hand-back is short and says what was
+// understood / what is intended / what needs deciding, and (g) the human's reply
+// is the go-ahead.
+func TestCheckInGate_StandardAndDeepStopBeforeImplementing(t *testing.T) {
+	for _, size := range []string{"standard", "deep", "", "STANDARD", "huge"} {
+		got := CheckInGate(size)
+		if !strings.HasPrefix(got, "\n\n") {
+			t.Fatalf("CheckInGate(%q) must start with a blank-line separator: %q", size, got)
+		}
+		for _, want := range []string{
+			"## Check in before you implement (AO)",
+			"TWO turns",
+			"knowledge store",                     // orientation is allowed
+			"no edit to a file in the repository", // the implementation is what waits
+			"END YOUR TURN",                       // the mechanism, not "wait"
+			"**Needs you**",                       // where it becomes visible
+			"identical to having hung",            // why a quiet mid-turn pause is wrong
+			"what you understand the task to be",
+			"what you need decided",
+			"reply is your go-ahead",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("CheckInGate(%q) missing %q:\n%s", size, want, got)
+			}
+		}
+	}
+}
+
+// TestCheckInGate_MechanicalNeverPauses: `mechanical` is exempt however the
+// project is configured (user decision 2026-09-01). It already carries an
+// explicit authorization to go straight to edit + verify, so a gate that stopped
+// a one-line fix to ask permission would cost more than the change.
+func TestCheckInGate_MechanicalNeverPauses(t *testing.T) {
+	if got := CheckInGate("mechanical"); got != "" {
+		t.Fatalf("CheckInGate(\"mechanical\") = %q, want empty", got)
+	}
+}
+
+// TestCheckInGate_NamesNoSkillOrPlugin holds the convention #278 established:
+// these prompts describe BEHAVIOUR, never a skill or a plugin by name. Which
+// skill the human reaches for during the check-in is the human's business, and a
+// prompt that names one rots the moment the human switches plugin sets.
+func TestCheckInGate_NamesNoSkillOrPlugin(t *testing.T) {
+	got := strings.ToLower(CheckInGate("standard"))
+	for _, banned := range []string{
+		"skill", "plugin", "/loop", "mattpocock", "requirement-gathering", "spec-writing", "ticket-breakdown",
+	} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("the check-in gate must name no skill or plugin, found %q:\n%s", banned, CheckInGate("standard"))
+		}
+	}
+}

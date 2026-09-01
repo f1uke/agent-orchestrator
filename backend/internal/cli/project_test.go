@@ -589,3 +589,33 @@ func TestProjectSetConfig_ConfigJSONAddsNoDefaults(t *testing.T) {
 		t.Fatalf("config = %#v, want exactly %#v (no invented defaults)", got.Config, want)
 	}
 }
+
+// The check-in gate is a per-project setting a human must be able to set from
+// BOTH surfaces, for the same reason DisableAutoCrew is. --config-json is the
+// sharper half of the test: set-config REPLACES the whole config, so a key the
+// CLI could not represent would be written out of existence by a command that
+// exits 0 - decodeConfigJSON refuses unknown keys, and this proves the new one
+// is known.
+func TestProjectSetConfig_CarriesPauseBeforeImplementing(t *testing.T) {
+	for name, args := range map[string][]string{
+		"flag": {"project", "set-config", "demo", "--pause-before-implementing"},
+		"json": {"project", "set-config", "demo", "--config-json", `{"pauseBeforeImplementing":true}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := setConfigEnv(t)
+			srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+			writeRunFileFor(t, cfg, srv)
+
+			if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, args...); err != nil {
+				t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+			}
+			var got projectsvc.SetConfigInput
+			if err := json.Unmarshal(capture.body, &got); err != nil {
+				t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
+			}
+			if !got.Config.PauseBeforeImplementing {
+				t.Fatalf("config = %#v, want the check-in gate carried to the daemon", got.Config)
+			}
+		})
+	}
+}

@@ -1069,4 +1069,55 @@ describe("ProjectSettingsForm", () => {
 		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["project", "proj-1"] });
 		expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: workspaceQueryKey });
 	});
+
+	it("turns the check-in gate on and saves it, leaving config the form does not expose alone", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, env: { TOKEN: "secret" } },
+		});
+
+		renderSettings();
+		await screen.findByText("git@github.com:acme/project-one.git");
+
+		// Opt-in: a project that never configured it runs straight from brief to code.
+		const toggle = await screen.findByLabelText("Check in with me before implementing");
+		expect(toggle).not.toBeChecked();
+
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.pauseBeforeImplementing).toBe(true);
+		expect(body.config.env).toEqual({ TOKEN: "secret" });
+	});
+
+	it("loads an already-gated project and can turn the check-in gate back off", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, pauseBeforeImplementing: true },
+		});
+
+		renderSettings();
+		const toggle = await screen.findByLabelText("Check in with me before implementing");
+		expect(toggle).toBeChecked();
+
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		// Not pausing IS the default, so "off" is the absence of the field.
+		expect(body.config.pauseBeforeImplementing).toBeUndefined();
+	});
 });

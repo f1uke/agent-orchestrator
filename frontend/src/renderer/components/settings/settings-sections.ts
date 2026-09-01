@@ -24,7 +24,7 @@ export const PROJECT_SECTIONS: SectionMeta[] = [
 		Icon: FolderGit2,
 		hint: "repository, worktrees & branch naming",
 		keywords:
-			"identity id kind path repo workspace repos default branch session prefix git convention workflow prefix web ui browser preview",
+			"identity id kind path repo workspace repos default branch session prefix git convention workflow prefix web ui browser preview crew qa check-in pause before implementing plan approval needs you",
 	},
 	{
 		key: "agents",

@@ -38,6 +38,7 @@ export type ProjectSettingsFormState = {
 	hasWebUI: boolean;
 	hasIOSSimulator: boolean;
 	disableAutoCrew: boolean;
+	pauseBeforeImplementing: boolean;
 	intakeEnabled: boolean;
 	intakeRepo: string;
 	intakeAssignee: string;
@@ -71,6 +72,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		hasWebUI: config.hasWebUI ?? false,
 		hasIOSSimulator: config.hasIOSSimulator ?? false,
 		disableAutoCrew: config.disableAutoCrew ?? false,
+		pauseBeforeImplementing: config.pauseBeforeImplementing ?? false,
 		intakeEnabled: intake.enabled ?? false,
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
@@ -217,6 +219,9 @@ export function useProjectSettingsForm({
 				// Automatic crew IS the default, so "on" is the absence of the field,
 				// same as the two above.
 				disableAutoCrew: form.disableAutoCrew || undefined,
+				// Running straight from brief to code IS the default, so "off" is the
+				// absence of the field, same as the toggles above.
+				pauseBeforeImplementing: form.pauseBeforeImplementing || undefined,
 				trackerIntake: buildIntake(intakeForm),
 				gitConvention: buildGitConvention(form.gitWorkflow, form.branchPrefix),
 				approvalRule: buildApprovalRule(form.approvalRuleEnabled, form.approvalThreshold),
