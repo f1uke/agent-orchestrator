@@ -25,7 +25,7 @@ ao spawn [flags]
 | `--prompt string` | Initial prompt for the agent | - |
 | `--prompt-file string` | Read the initial prompt from a file, or `-` for stdin; mutually exclusive with `--prompt`. Use for large prompts that would exceed the shell's argument-length limit | - |
 | `--skip-agent-check` | Skip the advisory agent catalog install/auth preflight before spawning | - |
-| `--task-size string` | Worker ceremony level: `mechanical` \| `standard` \| `deep`. `mechanical` authorizes the worker to skip the brainstorm/plan/TDD process skills and go straight to edit + verify; use only for small, well-scoped changes | `standard` |
+| `--task-size string` | Worker ceremony level: `mechanical` \| `standard` \| `deep`. `mechanical` authorizes the worker to skip the up-front requirements/plan/test-first process skills and go straight to edit + verify; use only for small, well-scoped changes | `standard` |
 | `--todo` | Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until `ao session start <id>`) | - |
 
 `--agent` is an alias for `--harness`.

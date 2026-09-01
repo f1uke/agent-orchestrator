@@ -3,9 +3,10 @@ package domain
 // TaskSize is the orchestrator's estimate of how much process ceremony a worker
 // task warrants. It is captured once at spawn (`ao spawn --task-size`), persisted
 // on the session, and consumed only by the worker system prompt: a `mechanical`
-// task is explicitly authorized to skip the heavyweight process skills
-// (brainstorming / writing-plans / TDD) and go straight to edit + verify, cutting
-// the turn-count blow-up a small change would otherwise incur. `standard` (the
+// task is explicitly authorized to skip the heavyweight process skills (the ones
+// that gather requirements, write a plan, or impose a test-first loop) and go
+// straight to edit + verify, cutting the turn-count blow-up a small change would
+// otherwise incur. `standard` (the
 // default) and `deep` keep the full default ceremony; `deep` is a distinct,
 // persisted tag today but does not change the prompt.
 type TaskSize string

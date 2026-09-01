@@ -1839,7 +1839,7 @@ func TestSpawnOrchestrator_UsesCoordinatorPrompt(t *testing.T) {
 		"`ao --help`",
 		"avoid doing implementation yourself unless it is necessary",
 		"You are a dispatcher, not an implementer or planner",
-		"never run brainstorming, writing-plans, subagent-driven-development",
+		"do not open any skill whose job is gathering requirements from the human",
 	} {
 		if !strings.Contains(systemPrompt, want) {
 			t.Fatalf("system prompt missing %q:\n%s", want, systemPrompt)

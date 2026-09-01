@@ -116,7 +116,7 @@ type ProjectConfig struct {
 	// the orchestrator included.
 	//
 	// It is deliberately NOT the same fact as `--task-size mechanical`, which
-	// additionally authorizes an agent to skip the brainstorm -> plan -> TDD
+	// additionally authorizes an agent to skip the requirements -> plan -> test-first
 	// ceremony. Implementing this by rewriting the task size would silently strip
 	// the rigor off every large task here and leave no way to ask for a big
 	// careful solo one, so the two stay separate: a `standard` or `deep` task on a

@@ -15,7 +15,7 @@ import (
 //
 // `ProjectConfig.DisableAutoCrew` turns off AUTOMATIC crew formation for one
 // project and nothing else. It is emphatically NOT `--task-size mechanical`:
-// mechanical also authorizes an agent to skip the brainstorm -> plan -> TDD
+// mechanical also authorizes an agent to skip the requirements -> plan -> test-first
 // ceremony, and a `standard` or `deep` task on a crew-off project must still get
 // the full ceremony - just with nobody else in the crew.
 //

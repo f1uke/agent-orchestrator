@@ -260,7 +260,8 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until `ao session start <id>`)")
 	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker on the board (suspend in place, resumable) instead of archiving it to Done when its PR merges — for a worker that will open more PRs")
 	f.StringVar(&opts.taskSize, "task-size", "", "How big the task is - it decides both the ceremony AND how many agents work it.\n"+
-		"  mechanical  ONE agent. Skips the brainstorm/plan/TDD skills and goes straight to edit + verify.\n"+
+		"  mechanical  ONE agent. Skips the up-front requirements/plan/test-first ceremony and goes\n"+
+		"              straight to edit + verify.\n"+
 		"              For a small, well-scoped change: a rename, a copy tweak, a config bump, a one-line fix.\n"+
 		"  standard    (default) TWO agents on one worktree: dev implements and owns the PR, qa writes,\n"+
 		"              runs and records the tests. Full ceremony. The qa is created - awake, beside dev - the first\n"+
