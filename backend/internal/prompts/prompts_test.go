@@ -183,9 +183,9 @@ func TestOrchestratorDefault_CuratesIndexWithPruneOnAdd(t *testing.T) {
 func TestOrchestratorDefault_DocumentsTaskSizeFlag(t *testing.T) {
 	base := DefaultBase(KindOrchestrator)
 	for _, want := range []string{
-		"`--task-size mechanical`", // the flag + the size that skips ceremony
-		"skip the brainstorm",      // what mechanical buys
-		"default `standard`",       // the default is documented
+		"`--task-size mechanical`",                                // the flag + the size that skips ceremony
+		"skip the up-front requirements→plan→test-first ceremony", // what mechanical buys
+		"default `standard`",                                      // the default is documented
 	} {
 		if !strings.Contains(base, want) {
 			t.Fatalf("orchestrator default missing --task-size guidance %q:\n%s", want, base)
@@ -340,8 +340,8 @@ func TestCoordinationFloor_WorkerHasNamespaceAndAoSend_OrchestratorEmpty(t *test
 	}
 }
 
-// Removing any of these rules re-opens the failure mode where Subagent-Driven
-// Development creates .claude/worktrees/agent-* outside the AO worker branch.
+// Removing any of these rules re-opens the failure mode where a child agent
+// creates .claude/worktrees/agent-* outside the AO worker branch.
 func TestCoordinationFloor_WorkerOwnsOneWorktreeForSameTaskChildren(t *testing.T) {
 	worker := CoordinationFloor(KindWorker)
 	for _, want := range []string{
@@ -462,9 +462,9 @@ func TestTaskSizeDirective_MechanicalAuthorizesSkip(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Task size: mechanical (AO)",
-		"authorized to SKIP",                                       // the skip is granted
-		"brainstorming, writing-plans, or test-driven-development", // which skills
-		"overrides any \"you MUST use skills\"",                    // grounded against the hook
+		"authorized to SKIP", // the skip is granted
+		"do not open any skill that interviews the human for requirements", // which skills, by function - never by plugin/skill name
+		"overrides any \"you MUST use skills\"",                            // grounded against the hook
 		"user instructions take precedence over skills",
 		"stop and apply the full process", // safety valve
 	} {
