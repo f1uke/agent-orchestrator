@@ -157,12 +157,18 @@ describe("the key a character came from", () => {
 		}
 	});
 
-	// ⚠ Caps Lock is the one case where the position and shift do NOT account
-	// for the character: the Mac made a capital from an unshifted press, and the
-	// device was never told about Caps Lock, so the same key would make the
-	// lower-case letter there. Sending Shift instead would be a guess, and on a
-	// layout where Caps Lock is not simply Shift it would be the wrong one.
-	it("is absent while Caps Lock is what made the character", () => {
-		expect(classifyKey(press("A", { code: "KeyA", capsLock: true }))).toEqual({ kind: "text", text: "A" });
+	// ⚠ Caps Lock is reported rather than judged (#277). The position and the
+	// character travel exactly as they happened - "A" from an unshifted KeyA -
+	// and the daemon notices that a guest would read that press as "a" and
+	// delivers the character instead. This pane deciding it for itself was
+	// never enough: on a Mac that uses Caps Lock to SWITCH INPUT SOURCE the
+	// modifier state is not set at all, which is how a Thai keystroke reached
+	// the daemon looking like a US one.
+	it("reports the position it was pressed at, Caps Lock included", () => {
+		expect(classifyKey(press("A", { code: "KeyA", capsLock: true }))).toEqual({
+			kind: "text",
+			text: "A",
+			key: { code: "KeyA", shift: false },
+		});
 	});
 });

@@ -3052,7 +3052,7 @@ export interface components {
         SimGestureInput: {
             /** @description Swipe duration in milliseconds. Omit for 300. */
             durationMs?: number;
-            /** @description The physical keys a person actually pressed to produce Text on this Mac, one per character, in the same order. Only a caller that watched someone press them may send these: they are forwarded to the device as themselves, so the simulator's input mode decides what they produce, exactly as it would in Simulator.app. A string chosen by an agent has no keys behind it and must be sent as Text alone. */
+            /** @description The physical keys a person actually pressed to produce Text on this Mac, one per character, in the same order. Only a caller that watched someone press them may send these. They are an offer rather than a route: the keys are forwarded as themselves only where the simulator's input mode was established to produce exactly Text from them, and are otherwise ignored in favour of delivering Text. A string chosen by an agent has no keys behind it and must be sent as Text alone. */
             keys?: components["schemas"]["ControllersSimKeyPress"][];
             /** @description tap, swipe, type, key, button, drag-begin, drag-move, drag-end, pinch-begin, pinch-move or pinch-end. */
             kind: string;

@@ -570,15 +570,43 @@ func TestSimGesture_TypeWithRawKeysSendsWithoutAskingTheDevice(t *testing.T) {
 	}
 }
 
-func TestSimGesture_ForwardedKeysReachTheDeviceWithoutAskingAboutTheKeyboard(t *testing.T) {
-	// 🗝 The fix, at the route. "ด" has no US key, so planning from the TEXT
-	// would take the pasteboard - measured at 2.7-3.7 s, with two screen reads
-	// to prove it landed. The human pressed the position a US keyboard prints
-	// `f` on, and the guest's Thai mode turns that back into "ด" by itself.
+func TestSimGesture_ForwardedKeysAreSentAsThemselvesWhenTheGuestReadsThem(t *testing.T) {
+	// The case forwarding exists for: a person pressed the position a US
+	// keyboard prints `f` on, this guest reads US key presses, so the key goes
+	// as itself - one gesture, no pasteboard, and the app sees a real
+	// keystroke rather than a paste.
 	driver := &fakeDriver{}
 	pb := &fakePasteboard{content: "what the human had copied"}
 	screen := &fakeScreen{listing: oneBooted(), driver: driver,
-		keyboard: "th_TH@sw=Thai;hw=Automatic", pasteboard: pb}
+		keyboard: "en_US@sw=QWERTY;hw=Automatic", pasteboard: pb}
+	srv := newScreenTestServer(t, &fakeSimService{}, screen)
+
+	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
+		map[string]any{"kind": "type", "text": "f", "keys": []map[string]any{{"code": "KeyF"}}})
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	if len(driver.events) != 1 {
+		t.Fatalf("want one gesture on the device, got %d", len(driver.events))
+	}
+	if writes := pb.written(); len(writes) != 0 {
+		t.Fatalf("forwarding a key cycled the guest pasteboard: %q", writes)
+	}
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "key presses forwarded") {
+		t.Fatalf("detail = %q, want it to say what was actually sent", detail)
+	}
+}
+
+func TestSimGesture_ForwardedKeysTheGuestWouldRemapDeliverTheCharacterInstead(t *testing.T) {
+	// 🗝 Bug #277, at the route. The human is on a Thai Mac and pressed the
+	// position a US keyboard prints `f` on; this guest is on en_US and would
+	// read it as "f". Sending the key would put a character in the field that
+	// nobody typed - and answer 200 saying it forwarded a key press. So the
+	// key is dropped and the CHARACTER is delivered.
+	driver := pasteLands("ด")
+	pb := &fakePasteboard{content: "what the human had copied"}
+	screen := &fakeScreen{listing: oneBooted(), driver: driver,
+		keyboard: "en_US@sw=QWERTY;hw=Automatic", pasteboard: pb}
 	srv := newScreenTestServer(t, &fakeSimService{}, screen)
 
 	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
@@ -586,35 +614,35 @@ func TestSimGesture_ForwardedKeysReachTheDeviceWithoutAskingAboutTheKeyboard(t *
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %v", code, out)
 	}
-	if len(driver.events) != 1 {
-		t.Fatalf("want one gesture on the device, got %d", len(driver.events))
+	// The mode has to have been established: skipping the probe is what let
+	// the wrong character through.
+	if _, calls := screen.keyboardAsked(); calls != 1 {
+		t.Fatalf("the guest was asked %d time(s); a forwarded key can only be trusted once it has been", calls)
 	}
-	// The probe is a subprocess inside the guest and it is the only reason
-	// typing was ever slow. Forwarding must not pay for it.
-	if _, calls := screen.keyboardAsked(); calls != 0 {
-		t.Fatalf("forwarding a key asked the guest about its input mode %d time(s)", calls)
+	// The character the human typed goes through the pasteboard, and what they
+	// had copied is put back afterwards.
+	if writes := pb.written(); len(writes) == 0 || writes[0] != "ด" {
+		t.Fatalf("pasteboard writes = %q, want the character the human actually typed first", writes)
 	}
-	if writes := pb.written(); len(writes) != 0 {
-		t.Fatalf("forwarding a key cycled the guest pasteboard: %q", writes)
-	}
-	// It promises a key press. Saying "1 character" would be the claim the
-	// whole layout fix exists to stop anything making.
-	if detail, _ := out["detail"].(string); !strings.Contains(detail, "key presses forwarded") {
-		t.Fatalf("detail = %q, want it to say what was actually sent", detail)
+	if detail, _ := out["detail"].(string); strings.Contains(detail, "forwarded") {
+		t.Fatalf("detail = %q, must not claim a key press it did not send", detail)
 	}
 }
 
 func TestSimGesture_ForwardedKeysCarryShiftAsPartOfThePress(t *testing.T) {
-	// On a Thai keyboard shift produces a DIFFERENT Thai letter, so dropping it
-	// would type the wrong character rather than the same one in lower case.
+	// Shift belongs to the PRESS, not to the character: dropping it would type
+	// a different character rather than the same one in lower case.
 	driver := &fakeDriver{}
 	srv := newScreenTestServer(t, &fakeSimService{},
-		&fakeScreen{listing: oneBooted(), driver: driver, keyboard: "th_TH@sw=Thai;hw=Automatic"})
+		&fakeScreen{listing: oneBooted(), driver: driver, keyboard: "en_US@sw=QWERTY;hw=Automatic"})
 
 	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
-		map[string]any{"kind": "type", "text": "ศ", "keys": []map[string]any{{"code": "KeyL", "shift": true}}})
+		map[string]any{"kind": "type", "text": "$", "keys": []map[string]any{{"code": "Digit4", "shift": true}}})
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %v", code, out)
+	}
+	if detail, _ := out["detail"].(string); !strings.Contains(detail, "key presses forwarded") {
+		t.Fatalf("detail = %q, want the shifted press forwarded", detail)
 	}
 	events := driver.events[0]
 	if len(events) == 0 || events[0].Usage != 225 || events[0].Type != "down" {

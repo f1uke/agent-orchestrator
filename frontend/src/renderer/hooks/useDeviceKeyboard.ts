@@ -20,22 +20,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * `event.code` is the KEY: a position on the keyboard, defined by where it sits
  * on a US layout, which is the same thing the device's HID usages are.
  *
- * This surface sends the POSITION, and the character with it. That is what
- * Simulator.app does, and it is why typing there has never felt slow: the
- * simulator's input mode follows the Mac's, so the guest resolves the position
- * through the very layout that decided which character the human saw. Nothing
- * has to be planned, nothing pasted, nothing read back off the screen to check.
+ * This surface sends BOTH, and lets the daemon choose. The character is the
+ * promise; the position is an OFFER, taken only where the guest was shown to
+ * make that same character of it, and dropped everywhere else.
  *
- * ⚠ **This is exactly the reasoning `ao sim type` may NOT use.** There, an
- * agent chose the string `fa12345`; no person pressed anything, so a US usage
- * for `f` is a guess about the guest's layout, and on a Thai guest it arrives
- * as `ดฟๅ/_ภถ` while reporting success - the bug #198 exists for. The
- * difference is not the mechanism, it is whether a human's own keyboard is at
- * the other end of it. The daemon keeps both routes and picks by that.
+ * ⚠ **It used to be the other way round, and that was bug #277.** The position
+ * was sent unconditionally, on the reasoning that "the simulator's input mode
+ * follows the Mac's, so the guest resolves the position through the very layout
+ * that decided which character the human saw". That is true of Simulator.app
+ * driving its own window and NOT true of a simulator AO drives through the HID
+ * path: a guest sitting on `en_US` while the Mac is on Thai turned `ดฟ` into
+ * `Fa` and reported success. A person typing their own language got somebody
+ * else's alphabet, silently. The reasoning now lives in the daemon as a CHECK
+ * rather than an assumption - see simbridge.forwardingIsFaithful.
  *
- * The character still travels, and still matters: it is what a recording keeps
- * (`inputText`), and it is what the daemon delivers by the planned, proven
- * route whenever the position cannot be forwarded.
+ * ⚠ The related trap is `ao sim type`'s: an agent chose the string `fa12345`,
+ * no person pressed anything, so a US usage for `f` is a guess about the
+ * guest's layout and on a Thai guest it arrives as `ดฟๅ/_ภถ` - bug #198. Both
+ * bugs are the same mistake from opposite ends: believing one side's layout on
+ * the strength of the other's.
  *
  * Keys that produce NO character - Enter, Backspace, Tab, the arrows - go the
  * other way, as named key presses, because there is nothing for a layout to
@@ -50,11 +53,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * character goes out AT ONCE wherever that is cheap, and is batched only where
  * batching is what makes it correct.
  *
- *   - the keystroke carries a position the device can be given (`FORWARDABLE`):
- *     sent on its own, measured at 1-2 ms on the device, whatever the layout.
- *     This is the ordinary case and covers Thai as well as ASCII.
- *   - no position, but the guest reads US ASCII key presses faithfully
- *     (`immediate`) and the character is ASCII: also sent on its own.
+ *   - the guest reads US ASCII key presses faithfully (`immediate`) and the
+ *     character is ASCII: sent on its own, measured at 1-2 ms on the device.
+ *     This is the ordinary case, and it is exactly the case the daemon can
+ *     forward the position for.
  *   - anything else: the characters accumulate and go out as one `type` per
  *     burst, planned by the daemon. On a guest that would remap them that is a
  *     pasteboard round trip which reads the screen twice to prove it landed,
@@ -62,10 +64,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *     pause it was meant to remove, and would cycle the guest's pasteboard on
  *     every character.
  *
- * ⚠ Both `FORWARDABLE` and `immediate` are PACING hints and never routing
- * decisions. The daemon plans every request itself, so a hint that is wrong or
- * stale costs speed and never correctness - which is what keeps "how does this
- * text reach the device" implemented in exactly one place, and not here.
+ * ⚠ `immediate` is a PACING hint and never a routing decision. The daemon plans
+ * every request itself, so a hint that is wrong or stale costs speed and never
+ * correctness - which is what keeps "how does this text reach the device"
+ * implemented in exactly one place, and not here.
+ *
+ * ⚠ Thai typing is therefore BATCHED, and that is the cost of #277's fix rather
+ * than an oversight: a Thai character can only be delivered by a route that
+ * carries characters, and one pasteboard trip per keystroke would be unusable.
+ * It was fast before because it was being delivered wrongly.
  *
  * A burst ends when the human pauses, presses a key that is not a character,
  * leaves the surface, or stops driving.
@@ -111,13 +118,13 @@ export type ForwardedKey = { code: string; shift: boolean };
 export type DeviceKey = { kind: "text"; text: string; key?: ForwardedKey } | { kind: "key"; name: string };
 
 /**
- * The key positions worth forwarding: the ones that carry a character on every
+ * The key positions worth offering: the ones that carry a character on every
  * layout, spelled the way `KeyboardEvent.code` spells them.
  *
- * ⚠ Pacing only. The daemon has the authoritative table and decides the route;
- * this decides whether to send the keystroke on its own or let it batch. Being
- * narrower than the daemon's table costs a keystroke some speed. Being wider
- * costs it some more, because the daemon falls back to the planned route - and
+ * ⚠ It says which presses are worth DESCRIBING to the daemon, never which are
+ * worth sending as themselves. The daemon has the authoritative table, knows
+ * the guest's input mode and decides; being narrower than its table costs a
+ * keystroke nothing but the offer, being wider costs nothing at all - and
  * neither can put the wrong character on the device.
  */
 const FORWARDABLE =
@@ -144,7 +151,6 @@ export function classifyKey(event: {
 	metaKey: boolean;
 	ctrlKey: boolean;
 	altKey: boolean;
-	getModifierState?: (key: "CapsLock") => boolean;
 }): DeviceKey | null {
 	if (event.metaKey || event.ctrlKey || event.altKey) return null;
 
@@ -170,23 +176,21 @@ export function classifyKey(event: {
 }
 
 /**
- * The key press to forward, when the position and shift ACCOUNT FOR the
- * character the Mac produced - and nothing when they do not.
+ * The key press behind a character: the position, and whether Shift was part of
+ * pressing it.
  *
- * ⚠ Caps Lock is the case that makes this a function rather than a field. With
- * it on, the Mac produces a capital from an unshifted press, and the device -
- * which was never told about it - would produce the lower-case letter from the
- * same position. So the position is dropped and the CHARACTER is sent instead,
- * by the route that can promise it. Sending Shift instead would be a guess, and
- * on a layout where Caps Lock is not simply Shift it would be the wrong one.
+ * ⚠ It reports what happened and judges nothing. It used to drop the position
+ * while Caps Lock was on, because with Caps Lock the Mac makes a capital from
+ * an unshifted press and the guest would make the lower-case letter - so the
+ * two do not account for each other. The daemon now compares the character
+ * against what the guest would read, which catches that case and every other
+ * one, including the one this pane could NOT see: on a Mac that uses Caps Lock
+ * to switch input source, `getModifierState("CapsLock")` is never set at all,
+ * so a Thai keystroke arrived here looking exactly like a US one. That is the
+ * Mac #277 was reported from.
  */
-function forwardableKey(event: {
-	code?: string;
-	shiftKey?: boolean;
-	getModifierState?: (key: "CapsLock") => boolean;
-}): ForwardedKey | undefined {
+function forwardableKey(event: { code?: string; shiftKey?: boolean }): ForwardedKey | undefined {
 	if (!event.code || !FORWARDABLE.test(event.code)) return undefined;
-	if (event.getModifierState?.("CapsLock")) return undefined;
 	return { code: event.code, shift: event.shiftKey === true };
 }
 
@@ -357,10 +361,14 @@ export function useDeviceKeyboard({
 			// The keystroke can stand on its own: send it now rather than making
 			// the human wait for a pause they have no reason to take. Anything
 			// already pending goes with it, so nothing can overtake what was
-			// typed before it - which is also why a forwardable key caught up in
-			// a burst that has already lost its positions simply goes by the
-			// slower route with the rest, rather than jumping the queue.
-			if (what.key || (immediate && sendsAlone(pending.current))) {
+			// typed before it.
+			//
+			// ⚠ Having a POSITION is not a reason to send alone, and used to be
+			// (#277). The daemon only forwards a position where the guest reads
+			// it as the character that was typed - which is this same condition
+			// - so on a guest that would remap it, sending alone bought one
+			// pasteboard round trip per keystroke instead of one per burst.
+			if (immediate && sendsAlone(pending.current)) {
 				flush();
 				return;
 			}

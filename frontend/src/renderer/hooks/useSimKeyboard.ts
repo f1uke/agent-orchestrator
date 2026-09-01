@@ -27,11 +27,13 @@ export function useSimKeyboard(udid: string | null, enabled: boolean) {
 	return useQuery({
 		queryKey: simKeyboardQueryKey(udid ?? ""),
 		enabled: enabled && Boolean(udid),
-		// The guest follows the Mac's input source, so this does go stale on its
-		// own - but the answer is re-established by the daemon on a window of its
-		// own, and asking harder from here would spawn a process in the guest for
-		// every refetch. Half a minute is often enough to follow somebody who
-		// switched language, and rare enough to cost nothing.
+		// The guest's own input mode can be changed - on the device, or by
+		// Simulator.app when it is the thing driving - so this does go stale. It
+		// does NOT follow the Mac: assuming that is #277. The answer is
+		// re-established by the daemon on a window of its own, and asking harder
+		// from here would spawn a process in the guest for every refetch. Half a
+		// minute is often enough to follow a change, and rare enough to cost
+		// nothing.
 		staleTime: 30_000,
 		refetchOnWindowFocus: true,
 		queryFn: async ({ signal }): Promise<SimKeyboard> => {

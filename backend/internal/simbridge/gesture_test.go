@@ -561,37 +561,22 @@ func TestForwardKeys_RefusesAPositionItHasNoUsageFor(t *testing.T) {
 	}
 }
 
-func TestForwardableKeys_AnswersWithoutTouchingTheDevice(t *testing.T) {
-	if !ForwardableKeys([]KeyPress{{Code: "KeyF"}, {Code: "Digit1"}}) {
-		t.Fatal("ordinary character positions are forwardable")
-	}
-	if ForwardableKeys([]KeyPress{{Code: "KeyF"}, {Code: "F5"}}) {
-		t.Fatal("one position with no usage makes the whole run unforwardable")
-	}
-	if ForwardableKeys(nil) {
-		t.Fatal("nothing to forward is not a forwardable run")
-	}
-}
-
-func TestPlanText_ForwardsTheKeysAPersonPressedWithoutAskingTheGuestAnything(t *testing.T) {
-	// 🗝 The fix. A Thai rune has no US key, so planning from the TEXT sends it
-	// to the pasteboard - three seconds and two screen reads. Planning from the
-	// KEY the human pressed sends the key, and the guest's Thai mode turns it
-	// back into the same rune, which is why typing into Simulator.app is fast.
-	//
-	// Note what the guest is NOT asked: the probe is not consulted at all here.
-	route, err := PlanText("ด", ProbedKeyboard{Err: errors.New("never asked")},
-		TextOptions{Keys: []KeyPress{{Code: "KeyF"}}})
+func TestPlanText_ForwardsTheKeysAPersonPressedWhenTheGuestReadsThemAsTyped(t *testing.T) {
+	// The case forwarding exists for: the person pressed the key that prints
+	// `f`, the guest reads US key presses, so the key goes as itself and the
+	// app sees a real keystroke rather than a paste.
+	route, err := PlanText("fa", ProbedKeyboard{Mode: usMode},
+		TextOptions{Keys: []KeyPress{{Code: "KeyF"}, {Code: "KeyA"}}})
 	if err != nil {
 		t.Fatalf("PlanText: %v", err)
 	}
 	if route.Paste {
-		t.Fatal("a key a person pressed must be forwarded, not pasted")
+		t.Fatal("a key a person pressed that the guest reads as typed must be forwarded, not pasted")
 	}
 	if !route.Forwarded {
-		t.Fatal("the route must say it forwarded keys: it promises a key press, not a character")
+		t.Fatal("the route must say it forwarded keys")
 	}
-	keys, err := ForwardKeys([]KeyPress{{Code: "KeyF"}})
+	keys, err := ForwardKeys([]KeyPress{{Code: "KeyF"}, {Code: "KeyA"}})
 	if err != nil {
 		t.Fatalf("ForwardKeys: %v", err)
 	}
@@ -600,10 +585,131 @@ func TestPlanText_ForwardsTheKeysAPersonPressedWithoutAskingTheGuestAnything(t *
 	}
 }
 
+func TestPlanText_ShiftIsPartOfThePressAndStillForwards(t *testing.T) {
+	route, err := PlanText("A!", ProbedKeyboard{Mode: usMode},
+		TextOptions{Keys: []KeyPress{{Code: "KeyA", Shift: true}, {Code: "Digit1", Shift: true}}})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if !route.Forwarded {
+		t.Fatal("a shifted press produces the shifted character on a US guest, so it is faithful")
+	}
+}
+
+func TestPlanText_DoesNotForwardAKeyTheGuestWouldReadAsAnotherCharacter(t *testing.T) {
+	// 🗝 Bug #277, in one assertion. `KeyF` is the key a Thai Mac prints "ด"
+	// on; a guest sitting on en_US reads that same position as "f" and the
+	// person gets a character they never pressed, reported as success.
+	// Observed on a real device: `ดฟ` arrived as "Fa".
+	route, err := PlanText("ดฟ", ProbedKeyboard{Mode: usMode},
+		TextOptions{Keys: []KeyPress{{Code: "KeyF"}, {Code: "KeyA"}}})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if route.Forwarded {
+		t.Fatal("a US guest would read these positions as \"fa\", so the keys must not be sent as themselves")
+	}
+	if !route.Paste {
+		t.Fatal("the characters the person typed must still arrive, by the route that can carry them")
+	}
+	if !strings.Contains(route.Why, "ด") {
+		t.Fatalf("Why = %q, must name what forced the pasteboard", route.Why)
+	}
+}
+
+func TestPlanText_DoesNotForwardIntoAGuestThatWouldNotSayWhatItsKeyboardIs(t *testing.T) {
+	// An unanswered probe is not a US keyboard - the assumption this package
+	// exists to refuse - and forwarding is not a door around that.
+	route, err := PlanText("ด", ProbedKeyboard{Err: errors.New("device is not booted")},
+		TextOptions{Keys: []KeyPress{{Code: "KeyF"}}})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if route.Forwarded {
+		t.Fatal("a guest that would not say what it reads must never have keys sent to it as themselves")
+	}
+	if !route.Paste {
+		t.Fatal("the character must still arrive")
+	}
+}
+
+func TestPlanText_DoesNotForwardIntoAGuestThatWouldRemapTheKeys(t *testing.T) {
+	// The mirror of the reported bug: an English typist on a Thai guest. The
+	// positions are the ones that print "fa", and this guest would make
+	// "ดฟ" of them.
+	route, err := PlanText("fa", ProbedKeyboard{Mode: thaiMode},
+		TextOptions{Keys: []KeyPress{{Code: "KeyF"}, {Code: "KeyA"}}})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if route.Forwarded {
+		t.Fatal("a guest that remaps these positions must not be sent them as themselves")
+	}
+	if !route.Paste || !strings.Contains(route.Why, "th_TH") {
+		t.Fatalf("route = %+v, want the pasteboard with the guest's mode named", route)
+	}
+}
+
+func TestPlanText_CapsLockIsCaughtByTheCharacterNotByTheModifier(t *testing.T) {
+	// 🗝 With Caps Lock on, the Mac produces "F" from an unshifted press and
+	// the guest would produce "f" from the same position. The pane no longer
+	// has to notice - which matters, because on a Mac that uses Caps Lock to
+	// SWITCH INPUT SOURCE the modifier state is never set at all, and that is
+	// exactly the Mac this bug was reported from. The characters simply do not
+	// line up, so the keys are dropped.
+	route, err := PlanText("F", ProbedKeyboard{Mode: usMode}, TextOptions{Keys: []KeyPress{{Code: "KeyF"}}})
+	if err != nil {
+		t.Fatalf("PlanText: %v", err)
+	}
+	if route.Forwarded {
+		t.Fatal("an unshifted position cannot account for a capital letter")
+	}
+	// And the character is still typed rather than pasted: "F" has a US key.
+	if route.Paste {
+		t.Fatal("a character the US keyboard can send does not need the pasteboard")
+	}
+	events, err := TypeRaw("F")
+	if err != nil {
+		t.Fatalf("TypeRaw: %v", err)
+	}
+	if !reflect.DeepEqual(route.Events, events) {
+		t.Fatal("the character the person saw is what has to be sent")
+	}
+}
+
+func TestPositionRunes_AgreeWithTheUSKeyboardTable(t *testing.T) {
+	// The two tables are one fact - `code` is defined by the character the
+	// position carries on a US keyboard - so every position must round-trip
+	// back to the usage that sends it.
+	for code := range keyPositions {
+		for _, shift := range []bool{false, true} {
+			r, ok := positionRune(KeyPress{Code: code, Shift: shift})
+			if !ok {
+				t.Fatalf("%s (shift=%v) has a usage but no character", code, shift)
+			}
+			key, ok := usKeyboard[r]
+			if !ok {
+				t.Fatalf("%s (shift=%v) reads as %q, which the US table cannot send", code, shift, string(r))
+			}
+			if key.usage != keyPositions[code] {
+				t.Fatalf("%s (shift=%v) reads as %q, which is sent by another position", code, shift, string(r))
+			}
+			// Space is the one key with nothing on its shifted half.
+			if code != "Space" && key.shift != shift {
+				t.Fatalf("%s (shift=%v) reads as %q, which needs shift=%v", code, shift, string(r), key.shift)
+			}
+		}
+	}
+	if _, ok := positionRune(KeyPress{Code: "F5"}); ok {
+		t.Fatal("a position with no usage has no character either")
+	}
+}
+
 func TestPlanText_FallsBackToTheTextWhenAKeyCannotBeForwarded(t *testing.T) {
-	// The position is unknown, but the CHARACTER is still known - so the
-	// ordinary planner delivers it. Slower, never wrong.
-	route, err := PlanText("ด", ProbedKeyboard{Mode: thaiMode}, TextOptions{Keys: []KeyPress{{Code: "IntlRo"}}})
+	// The position is one this package has no usage for - so it cannot be
+	// forwarded and cannot be read either. The CHARACTER is still known, so
+	// the ordinary planner delivers it. Slower, never wrong.
+	route, err := PlanText("ด", ProbedKeyboard{Mode: usMode}, TextOptions{Keys: []KeyPress{{Code: "IntlRo"}}})
 	if err != nil {
 		t.Fatalf("PlanText: %v", err)
 	}

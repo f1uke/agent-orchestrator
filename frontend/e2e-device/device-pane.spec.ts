@@ -300,6 +300,17 @@ function clearRecordings(sandbox: Sandbox): void {
 	rmSync(path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows"), { recursive: true, force: true });
 }
 
+/** The flows on disk right now, tolerating a directory nothing has written yet. */
+function flowsWritten(sandbox: Sandbox): string[] {
+	try {
+		return readdirSync(path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows")).filter((f) =>
+			f.endsWith(".yaml"),
+		);
+	} catch {
+		return [];
+	}
+}
+
 test("the device screen is exactly the same size with no recordings, one, and fifty", async () => {
 	clearRecordings(sandbox);
 	await sandbox.page.getByTestId("sim-recordings-trigger").click();
@@ -412,12 +423,15 @@ test("recording captures a hand drag, and stop writes the flow it reports", asyn
  * Skips a case that can only mean anything on a guest which reads US ASCII key
  * presses as the characters they were sent as.
  *
- * ⚠ The guest follows the MAC'S OWN input source, so these cases quietly depend
- * on the language the developer happens to be typing in. On a Mac set to Thai
- * the very same ASCII goes through the guest pasteboard instead - correctly,
- * but batched, several seconds slower, and with iOS's smart-insert space
- * turning "aXb" into "a X b". Without this they fail with a confusing number or
- * a confusing string rather than saying which machine they are on.
+ * ⚠ It reads the mode off the DEVICE and never infers it from the Mac. A
+ * simulator AO drives through the HID path keeps whichever input mode it was
+ * last left in, whatever the Mac is set to - assuming otherwise is #277 - so
+ * which guest this machine has is a fact to be read, not predicted. On a guest
+ * that is not US the very same ASCII goes through the pasteboard instead:
+ * correctly, but batched, several seconds slower, and with iOS's smart-insert
+ * space turning "aXb" into "a X b". Without this these cases fail with a
+ * confusing number or a confusing string rather than saying which guest they
+ * are on.
  */
 function skipUnlessGuestTakesUSKeys(sandbox: Sandbox) {
 	const keyboard = JSON.parse(
@@ -747,6 +761,14 @@ test("a recording does not change how a drag reaches the device", async () => {
 
 	await button.click();
 	await sandbox.page.getByTestId("sim-stop-summary").waitFor();
+	// ⚠ Leave no write in flight. The summary appears once the daemon has
+	// ANSWERED `stop`; the flow file lands just after it. A following case that
+	// clears the directory and records its own then finds TWO flows and reads
+	// whichever sorts first - which is how this case silently broke its
+	// neighbour rather than itself. Waiting for the file is what makes the
+	// clear that follows mean anything.
+	await expect.poll(() => flowsWritten(sandbox).length, { timeout: 15_000 }).toBeGreaterThan(0);
+	clearRecordings(sandbox);
 });
 
 // Speed must not have been bought with the drag end coordinates #208 fixed.
@@ -773,8 +795,8 @@ test("a drag recorded at full speed still records where it really ended", async 
 	await sandbox.page.getByTestId("sim-stop-summary").waitFor();
 
 	const dir = path.join(sandbox.dataDir, "sim", sandbox.sessionId, "flows");
-	const written = readdirSync(dir).filter((f) => f.endsWith(".yaml"));
-	expect(written).toHaveLength(1);
+	const written = flowsWritten(sandbox);
+	expect(written, `one recording was stopped, so one flow may be on disk: ${written.join(", ")}`).toHaveLength(1);
 	const body = readFileSync(path.join(dir, written[0]), "utf8");
 	const swipe = body.match(/- swipe: \{start: "(\d+)%,(\d+)%", end: "(\d+)%,(\d+)%"\}/);
 	expect(swipe, `no swipe in the recorded flow:\n${body}`).not.toBeNull();
@@ -850,6 +872,18 @@ async function openSearchField(sandbox: Sandbox) {
 	for (let attempt = 0; attempt < 2; attempt += 1) {
 		await pullSpotlightDown(sandbox);
 		if (foregroundApp(sandbox) === "com.apple.springboard" && (await hasTextField(sandbox))) return;
+	}
+	// ⚠ TERMINATE first, and not only launch. `simctl launch` on an app that is
+	// already in front does nothing at all, so Contacts stayed on whatever
+	// screen the drags of an earlier case had left it on - a contact's details,
+	// or the list scrolled past its search field - and this helper then reported
+	// "no field to type into" for a device that was working perfectly. Killing
+	// it first makes the next launch the root list, with its search field, every
+	// time. Observed on iOS 26.3.
+	try {
+		execFileSync("xcrun", ["simctl", "terminate", sandbox.udid, CONTACTS], { stdio: "ignore" });
+	} catch {
+		// Not running is the state we wanted anyway.
 	}
 	execFileSync("xcrun", ["simctl", "launch", sandbox.udid, CONTACTS], { encoding: "utf8" });
 	await sandbox.page.waitForTimeout(2500);
@@ -930,48 +964,58 @@ test("typing on the human's own keyboard reaches the device", async () => {
 	for (let i = 0; i < 20; i += 1) await sandbox.page.keyboard.press("Backspace");
 	await sandbox.page.waitForTimeout(2500);
 
-	await sandbox.page.keyboard.type("abc");
+	// ⚠ The leading digit is load-bearing. A native search field autocapitalises
+	// the first letter of an empty field, so typing "abc" lands "Abc" and the
+	// case tells you nothing about whether the right KEY arrived - which is what
+	// this case is about. A digit is not a sentence start, so nothing is
+	// rewritten and every character is the one that was pressed. (Observed on
+	// iOS 26.3 Contacts, which is the field this reaches on a device with a home
+	// button, where Spotlight cannot be pulled down.)
+	await sandbox.page.keyboard.type("1abc");
 	await sandbox.page.waitForTimeout(2500);
-	expect(await deviceField(sandbox), "what was typed did not reach the field").toBe("abc");
+	expect(await deviceField(sandbox), "what was typed did not reach the field").toBe("1abc");
 
 	// Backspace, then the arrows - a caret move is the only thing that can put
 	// a character in the MIDDLE of what was already there.
 	await sandbox.page.keyboard.press("Backspace");
 	await sandbox.page.waitForTimeout(2000);
-	expect(await deviceField(sandbox)).toBe("ab");
+	expect(await deviceField(sandbox)).toBe("1ab");
 	await sandbox.page.keyboard.press("ArrowLeft");
 	await sandbox.page.waitForTimeout(800);
 	await sandbox.page.keyboard.type("X");
 	await sandbox.page.waitForTimeout(2500);
-	expect(await deviceField(sandbox), "the arrow key did not move the caret").toBe("aXb");
+	expect(await deviceField(sandbox), "the arrow key did not move the caret").toBe("1aXb");
 });
 
 /**
- * 🗝 The human's own case, end to end: a Thai Mac, a Thai guest, and a person
- * typing.
+ * 🗝 The human's own case, end to end: a Thai Mac and a person typing their own
+ * language, whatever input mode the guest happens to be sitting in.
  *
- * Their Mac resolves the key they pressed into a Thai rune, and no US keyboard
- * key can send a Thai rune - so the pane used to hand the RUNE to the daemon,
- * which put every burst through the guest's pasteboard and read the screen
- * twice to prove it landed: measured at 2.7-3.7 s per burst, for ASCII on this
- * guest just as much as for Thai. Forwarding the KEY instead costs 1-2 ms, and
- * the guest's own Thai mode turns it back into exactly the rune the Mac made,
- * because it is the same layout.
+ * ⚠ This case used to SKIP unless the guest was itself Thai, and the guest it
+ * skipped on is the one the bug was reported from (#277). The pane forwarded
+ * the key POSITION on the reasoning that the guest's input mode follows the
+ * Mac's; a guest on `en_US` read `KeyF` - the key that types "ด" on a Thai Mac
+ * - as "f", and the daemon answered 200 saying it had forwarded a key press.
+ * Observed on a real device before the fix: `ดฟ` arrived as "Fa".
+ *
+ * So the assertion is the one thing that is true on every guest: the characters
+ * the person typed are the characters in the field. How they got there is the
+ * daemon's business and differs by input mode - a forwarded key press where the
+ * guest reads it as typed, the pasteboard where it does not.
  *
  * ⚠ Only measurable here, and only like this. `keyboard.type` cannot deliver a
  * rune at all, and jsdom has no daemon, no guest and no clock - so what a key
  * BECOMES on the device is a claim that can be checked nowhere else.
  */
-test("a Thai keystroke reaches the device as the character the Mac made, without waiting", async () => {
+test("a Thai keystroke reaches the device as the character the Mac made", async () => {
 	const guest = JSON.parse(
 		execFileSync("curl", ["-sS", `${sandbox.api}/api/v1/sim/devices/${sandbox.udid}/keyboard`], {
 			encoding: "utf8",
 		}),
 	) as { sendsUSASCII?: boolean; mode?: string };
-	test.skip(
-		guest.sendsUSASCII !== false,
-		`this simulator's input mode is ${guest.mode ?? "unknown"}; a Thai guest is what turns these keys into Thai`,
-	);
+	// Not a skip - a note in the run's own output, so a failure can be read
+	// against the guest it happened on.
+	console.log(`[thai] guest input mode: ${guest.mode ?? "unknown"} (sendsUSASCII=${guest.sendsUSASCII})`);
 
 	await readyToDrive(sandbox);
 	await openSearchField(sandbox);
@@ -991,13 +1035,13 @@ test("a Thai keystroke reaches the device as the character the Mac made, without
 		{ rune: "ี", code: "KeyU" },
 	];
 
-	const sent: { at: number; body: { kind?: string; keys?: unknown[] } }[] = [];
+	const sent: { at: number; body: { kind?: string; keys?: unknown[]; text?: string } }[] = [];
 	const onFinished = (request: import("@playwright/test").Request) => {
 		if (!request.url().includes("/gesture")) return;
 		const timing = request.timing();
-		let body: { kind?: string; keys?: unknown[] } = {};
+		let body: { kind?: string; keys?: unknown[]; text?: string } = {};
 		try {
-			body = JSON.parse(request.postData() ?? "{}") as { kind?: string; keys?: unknown[] };
+			body = JSON.parse(request.postData() ?? "{}") as { kind?: string; keys?: unknown[]; text?: string };
 		} catch {
 			body = {};
 		}
@@ -1012,18 +1056,23 @@ test("a Thai keystroke reaches the device as the character the Mac made, without
 		await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: rune, code });
 		await sandbox.page.waitForTimeout(120);
 	}
-	await expect.poll(() => sent.filter((s) => s.body.kind === "type").length, { timeout: 15_000 }).toBe(word.length);
+	await expect.poll(() => sent.filter((s) => s.body.kind === "type").length, { timeout: 15_000 }).toBeGreaterThan(0);
+	await sandbox.page.waitForTimeout(1000);
 	sandbox.page.off("requestfinished", onFinished);
 
-	// One request per keystroke, each carrying the key that produced it.
-	for (const one of sent.filter((s) => s.body.kind === "type")) {
-		expect(one.body.keys, "the keystroke was sent as text, so it took the pasteboard route").toHaveLength(1);
-	}
-	// The FIRST character is the one a person is watching for.
-	const echo = sent.filter((s) => s.body.kind === "type")[0].at - pressed;
-	expect(echo, `the first character took ${Math.round(echo)} ms to reach the device`).toBeLessThan(400);
+	// ⚠ The burst is one request, not six. A Thai character can only be
+	// delivered by a route that carries characters, and one pasteboard round
+	// trip per keystroke - 2.7-3.7 s each - would be unusable. Six requests
+	// here would mean the pane went back to sending a position per keystroke.
+	const typed = sent.filter((s) => s.body.kind === "type");
+	expect(typed, `${typed.length} requests for one burst: a Thai keystroke is being sent on its own`).toHaveLength(1);
+	// The keys still travel: they are what lets the daemon send a real key
+	// press wherever the guest reads it as the character that was typed.
+	expect(typed[0].body.keys, "the keys the person pressed were not offered to the daemon").toHaveLength(word.length);
+	expect(typed[0].body.text).toBe("สวัสดี");
+	console.log(`[thai] the burst reached the device ${Math.round(typed[0].at - pressed)} ms after the first key`);
 
-	expect(await deviceField(sandbox), "the guest did not make the character the Mac made").toBe("สวัสดี");
+	expect(await deviceField(sandbox), "the guest did not receive the characters the Mac made").toBe("สวัสดี");
 });
 
 // ⚠ The rule that keeps the rest of AO usable: keys reach the device only when

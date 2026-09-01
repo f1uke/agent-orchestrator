@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 )
@@ -347,10 +348,12 @@ type TextRoute struct {
 	Events []Event
 	// Keyboard is the input mode that was established, when one was.
 	Keyboard simkeyboard.Mode
-	// Forwarded: the keys a person pressed were sent as themselves, so what
-	// arrives is the guest's reading of those keys rather than a promise about
-	// characters. Reported rather than inferred from Events being non-empty:
-	// the two routes compose the same shape and mean different things.
+	// Forwarded: the keys a person pressed were sent as themselves. The
+	// characters are still promised - the route is only taken where the guest
+	// was shown to produce them (see forwardingIsFaithful) - and what it adds
+	// is that the device saw a real key press per character. Reported rather
+	// than inferred from Events being non-empty: the two routes compose the
+	// same shape and mean different things.
 	Forwarded bool
 }
 
@@ -378,10 +381,11 @@ type TextOptions struct {
 	// Paste: use the pasteboard regardless.
 	Paste bool
 	// Keys are the physical keys a person pressed to produce this text on THIS
-	// Mac, in the same order. When they are all forwardable they are sent as
-	// themselves and nothing about the guest's input mode has to be asked or
-	// planned around - see ForwardKeys for why that is correct for a human and
-	// wrong for an agent.
+	// Mac, in the same order. They are sent as themselves wherever the guest
+	// was shown to make the same characters of them, so an app watching
+	// per-keystroke events sees what a real person would; everywhere else they
+	// are dropped and the text is delivered by the planned route. See
+	// forwardingIsFaithful.
 	//
 	// ⚠ Only a caller that watched a person press these keys may set them. A
 	// string an agent chose has no keys behind it, and inventing some would be
@@ -402,7 +406,8 @@ type TextOptions struct {
 //
 // keyboard is what the device reported when asked; a caller that could not ask
 // passes the reason, and gets the pasteboard - which does not care what the
-// input mode is.
+// input mode is. It is read on EVERY route, forwarded key presses included:
+// see forwardingIsFaithful.
 func PlanText(text string, keyboard ProbedKeyboard, opts TextOptions) (TextRoute, error) {
 	if opts.RawKeys && opts.Paste {
 		return TextRoute{}, errors.New(
@@ -428,16 +433,23 @@ func PlanText(text string, keyboard ProbedKeyboard, opts TextOptions) (TextRoute
 				"%d key press(es) were forwarded for %d character(s): the keys and the text must describe "+
 					"the same keystrokes, in the same order", len(opts.Keys), n)
 		}
-		events, err := ForwardKeys(opts.Keys)
-		if err == nil {
-			return TextRoute{Events: events, Forwarded: true}, nil
-		}
-		// A position with no usage is not a failure. The text still says which
-		// characters the human meant, and the ordinary planner can deliver
-		// those - slower, and never wrong.
-		var unknown *UnknownKeyError
-		if !errors.As(err, &unknown) {
-			return TextRoute{}, err
+		// 🗝 The forwarding rule, and the whole of bug #277: a key may be sent
+		// as itself only when the guest is KNOWN to make of it the character
+		// the person saw. See forwardingIsFaithful. When it is not known, the
+		// keys are dropped and the CHARACTERS are planned below - which is
+		// slower and always right.
+		if forwardingIsFaithful(text, opts.Keys, keyboard) {
+			events, err := ForwardKeys(opts.Keys)
+			if err == nil {
+				return TextRoute{Events: events, Forwarded: true, Keyboard: keyboard.Mode}, nil
+			}
+			// A position with no usage is not a failure. The text still says
+			// which characters the human meant, and the ordinary planner can
+			// deliver those - slower, and never wrong.
+			var unknown *UnknownKeyError
+			if !errors.As(err, &unknown) {
+				return TextRoute{}, err
+			}
 		}
 	}
 	if opts.Paste {
@@ -540,22 +552,17 @@ type KeyPress struct {
 
 // ForwardKeys composes the key presses for keys a person actually pressed.
 //
-// 🗝 This is the interactive counterpart of PlanText, and it is a different
-// promise rather than a faster version of the same one. PlanText answers "make
-// these CHARACTERS arrive", which is an agent's question: the agent chose a
-// string, and the guest's input mode stands between that string and the field,
-// so the route has to be planned and proven. Forwarding answers "the human
-// pressed THIS KEY", where the guest's input mode is not an obstacle but the
-// point: it is the same layout the Mac just used to decide which character the
-// human saw themselves type, so whatever the guest makes of the key is what
-// they meant. It is also exactly what Simulator.app does, which is why typing
-// there has never felt slow.
+// 🗝 It composes key presses and promises nothing about what they produce -
+// that judgement belongs to PlanText, which is the only caller allowed to reach
+// this with a human's keystrokes and only reaches it once forwardingIsFaithful
+// has said the guest will make the right characters of them.
 //
-// What it does not promise is characters. A guest whose input mode has drifted
-// away from the Mac's - Simulator's I/O > Keyboard > "Use the Same Keyboard
-// Language as macOS" unticked, or a field that forced the guest to an
-// ASCII-capable mode - will produce something else, exactly as Simulator.app
-// would. The human is watching the screen, and that is the check.
+// ⚠ It used to be reached unconditionally, on the reasoning that the guest's
+// input mode follows the Mac's - true of Simulator.app driving its own window,
+// false of a simulator driven through the HID path, and the whole of bug #277.
+// The reasoning is not repaired here; it is replaced by a check at the caller,
+// so this function stays what it always was: the position, its shift, and the
+// usages that send them.
 func ForwardKeys(keys []KeyPress) ([]Event, error) {
 	if len(keys) == 0 {
 		return nil, errors.New("no keys to forward")
@@ -585,23 +592,100 @@ func ForwardKeys(keys []KeyPress) ([]Event, error) {
 	return events, nil
 }
 
-// ForwardableKeys reports whether every one of these key positions has a usage
-// to send it with.
+// forwardingIsFaithful reports whether sending these key positions to THIS
+// guest will put the characters the person saw themselves type into the field.
 //
-// It exists so a caller can tell, WITHOUT touching the device, that it is about
-// to take the forwarding route and therefore does not need to ask the guest
-// which input mode it is in - the read that costs about a second and is the
-// only reason typing was ever slow.
-func ForwardableKeys(keys []KeyPress) bool {
-	if len(keys) == 0 || len(keys) > MaxTypeRunes {
+// 🗝 It is the answer to bug #277, and it corrects a claim this package used to
+// make. Forwarding was justified by "the guest's input mode follows the Mac's,
+// so whatever the guest makes of the key is what the human meant" - which is
+// true of Simulator.app driving its own window, and NOT true of a simulator AO
+// drives through the HID path. A guest sitting on en_US while the Mac is on
+// Thai turns the position `KeyF` - the key the human pressed to type "ด" - back
+// into "f", and reports it as success. Verified on a real device: `ดฟ` typed on
+// a Thai Mac arrived as "Fa".
+//
+// So the guest's own reading is not assumed any more, it is checked. The one
+// layout this package can speak for is the US one (usKeyboard, and positionRune
+// beside it), so the check is exact and narrow: the guest ANSWERED, it answered
+// with a mode that reads US key presses as US characters, and the US reading of
+// these very presses is the text the human typed. All three, or the keys are
+// dropped and the CHARACTERS are delivered instead.
+//
+// ⚠ What that gives up is worth naming. On a guest whose input mode genuinely
+// does match a non-US Mac - Thai guest, Thai Mac - forwarding was correct and
+// took 1-2 ms, and it now takes the pasteboard route at about 3 s per burst
+// instead. It is given up because it cannot be TOLD APART here from the case
+// above: both are "a Thai character and a US position", and only a Kedmanee
+// table this package does not have could say which guest is on the other end.
+// Correct and slow beats fast and silently wrong; a layout table would buy the
+// speed back, and is a separate piece of work with its own device evidence.
+func forwardingIsFaithful(text string, keys []KeyPress, keyboard ProbedKeyboard) bool {
+	// An unanswered probe is not a US keyboard. It is the one assumption this
+	// whole package exists to refuse, and it is refused here too rather than
+	// being allowed in through the forwarding door.
+	if keyboard.Err != nil || !keyboard.Mode.SendsUSASCII() {
 		return false
 	}
+	rest := text
 	for _, k := range keys {
-		if _, ok := keyPositions[k.Code]; !ok {
+		r, ok := positionRune(k)
+		if !ok {
 			return false
 		}
+		typed, size := utf8.DecodeRuneInString(rest)
+		if size == 0 || typed != r {
+			return false
+		}
+		rest = rest[size:]
 	}
-	return true
+	return rest == ""
+}
+
+// positionRune is the character a guest reading US key presses produces from
+// one position, shift included.
+//
+// It is derived from usKeyboard for the same reason keyPositions is: `code` is
+// DEFINED as the character that position carries on a US keyboard, so the two
+// tables are one fact, and writing it twice is how they would come to disagree.
+func positionRune(k KeyPress) (rune, bool) {
+	pair, ok := positionRunes[k.Code]
+	if !ok {
+		return 0, false
+	}
+	if k.Shift {
+		return pair[1], true
+	}
+	return pair[0], true
+}
+
+// positionRunes maps a key position to what a US guest makes of it: the plain
+// press first, the shifted press second.
+var positionRunes = buildPositionRunes()
+
+func buildPositionRunes() map[string][2]rune {
+	plain, shifted := map[int]rune{}, map[int]rune{}
+	for r, key := range usKeyboard {
+		if key.shift {
+			shifted[key.usage] = r
+		} else {
+			plain[key.usage] = r
+		}
+	}
+	m := make(map[string][2]rune, len(keyPositions))
+	for code, usage := range keyPositions {
+		unshifted, ok := plain[usage]
+		if !ok {
+			panic("simbridge: no unshifted character for the position " + code)
+		}
+		// Space is the one position shift does not change - there is no second
+		// character on that key - so it stands for both presses.
+		capital, ok := shifted[usage]
+		if !ok {
+			capital = unshifted
+		}
+		m[code] = [2]rune{unshifted, capital}
+	}
+	return m
 }
 
 // UnknownKeyError is a key position with no usage to send it with - an F-key, a
