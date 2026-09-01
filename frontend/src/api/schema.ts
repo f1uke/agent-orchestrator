@@ -2623,6 +2623,7 @@ export interface components {
             hasIOSSimulator?: boolean;
             hasWebUI?: boolean;
             orchestrator?: components["schemas"]["RoleOverride"];
+            pauseBeforeImplementing?: boolean;
             postCreate?: string[];
             responseLanguage?: string;
             reviewers?: components["schemas"]["DomainReviewerConfig"][];

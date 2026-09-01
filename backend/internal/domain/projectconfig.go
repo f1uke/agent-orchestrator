@@ -133,6 +133,32 @@ type ProjectConfig struct {
 	// qa that is already mid-task.
 	DisableAutoCrew bool `json:"disableAutoCrew,omitempty"`
 
+	// PauseBeforeImplementing makes a worker here STOP once it understands the
+	// task and hand back to the human BEFORE it writes the first line of the
+	// implementation, resuming only on the human's go-ahead.
+	//
+	// It is opt-in (false), so every existing project keeps running straight from
+	// brief to code exactly as it did. The field is spelled POSITIVELY, unlike
+	// DisableAutoCrew next to it, because the two defaults point opposite ways:
+	// automatic crews are on and the field turns them off, whereas pausing is off
+	// and the field turns it on. A negative spelling here ("dontPause") would make
+	// the default a double negative and the absent key mean "on".
+	//
+	// It applies to `standard` and `deep` only. A `mechanical` task is exempt
+	// however this is set (user decision 2026-09-01): mechanical already carries an
+	// explicit authorization to skip the up-front ceremony and go straight to edit
+	// + verify, and a gate that stopped a one-line fix to ask permission would cost
+	// more than the change. The two facts stay independent for the same reason
+	// DisableAutoCrew is not `--task-size mechanical`: this one is about WHO
+	// decides the shape of the work, that one is about how many agents work it.
+	//
+	// It is read in sessionmanager.buildSystemPrompt, which is the only consumer:
+	// the gate is entirely a prompt, so there is no runtime seam to hold and
+	// nothing to reconcile if it is flipped mid-task. A worker already running
+	// keeps the prompt it was spawned with; the next spawn (or a restore, which
+	// recomputes the prompt) picks the new value up.
+	PauseBeforeImplementing bool `json:"pauseBeforeImplementing,omitempty"`
+
 	// ApprovalRule gates when a PR/MR in this project may be reported as Ready to
 	// merge. It is OFF by default; when enabled it AND-s a minimum-approvals
 	// condition onto the existing ready-to-merge conditions. Approvals are only

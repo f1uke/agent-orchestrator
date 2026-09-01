@@ -93,6 +93,11 @@
 	/* Dark — cloned from the agent-orchestrator web app (packages/web). #0a0b0d
    * base, #15171b is the only bordered surface, hairline white-alpha lines,
    * blue accent, orange=working / amber=needs-you / green=mergeable / red=fail. */
+	/* color-scheme is what makes the UA paint NATIVE controls — checkboxes,
+   * scrollbars, form fields — in this theme. Without it they follow the OS
+   * appearance instead of ours, which showed as an unchecked checkbox
+   * rendering black-on-white in our light theme on a dark-mode machine. */
+	color-scheme: dark;
 	--bg: #0a0b0d;
 	--bg-1: #15171b;
 	--bg-2: #1b1d22;
@@ -290,6 +295,7 @@
 
 :root[data-theme="light"] {
 	/* Light — supported, not primary. */
+	color-scheme: light;
 	--bg: #fcfcfc;
 	--bg-1: #ffffff;
 	--bg-2: #ededee;

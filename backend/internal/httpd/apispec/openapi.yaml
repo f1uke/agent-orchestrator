@@ -7622,6 +7622,8 @@ components:
           type: boolean
         orchestrator:
           $ref: '#/components/schemas/RoleOverride'
+        pauseBeforeImplementing:
+          type: boolean
         postCreate:
           items:
             type: string

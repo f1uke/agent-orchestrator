@@ -341,6 +341,55 @@ const taskSizeMechanical = "\n\n" + `## Task size: mechanical (AO)
 
 This task is tagged mechanical - a small, well-scoped change (a rename, a copy tweak, a config bump, a one-line fix). You are explicitly authorized to SKIP the heavyweight process skills - do not open any skill that interviews the human for requirements, that produces a spec or plan document, or that imposes a test-first loop - and go straight to the edit, then verify (build/lint/test, and exercise the change if it has a runtime surface). This AO instruction deliberately overrides any "you MUST use skills" SessionStart hook: user instructions take precedence over skills. If the change turns out larger or riskier than mechanical once you see the code, stop and apply the full process (or ask the orchestrator to re-tag it).`
 
+// CheckInGate returns the passage that makes a worker STOP once it understands
+// the task and hand back to the human before it implements anything. It renders
+// only for a project that has opted in (ProjectConfig.PauseBeforeImplementing);
+// the caller reads that flag, so this package stays free of a domain dependency,
+// exactly as TaskSizeDirective does.
+//
+// `mechanical` renders "" whatever the project says. A mechanical task already
+// carries an explicit authorization to skip the up-front ceremony and go straight
+// to edit + verify, so stopping a one-line fix to ask permission would cost more
+// than the change (user decision 2026-09-01). `standard`, `deep`, and any
+// unset/unknown size render the gate, matching WithDefault's standard.
+//
+// THE PAUSE IS AN ENDED TURN, and that is the whole design rather than a detail
+// of the wording. AO has no "park me" command and none was invented: a worker
+// that ends its turn already lands in the board's **Needs you** lane, because the
+// harness reports the ending as an activity signal (Stop -> idle, an idle prompt
+// -> parked) and deriveStatusDetail reads a signalled parked/aged-idle row as
+// needs_input, which attentionZone puts in the `action` zone. That is the same
+// lane the crew message cap parks a task in. A worker that instead sat quietly
+// MID-turn would stay `active` for ten minutes (activeStaleGrace) before showing
+// anything, and be indistinguishable from one that had hung - which is the exact
+// ambiguity this passage has to avoid, so it says "end your turn" and not "wait".
+//
+// It names no skill and no plugin, on purpose: which skill a human reaches for
+// during the check-in is the human's business, and the prompt describes the
+// behaviour instead (the convention #278 established).
+//
+// Injected in buildSystemPrompt for KindWorker, next to TaskSizeDirective and
+// under the same qa guard - qa is created part-way through a task, after the
+// go-ahead has already happened, and it does not implement the task.
+func CheckInGate(size string) string {
+	if size == "mechanical" {
+		return ""
+	}
+	return checkInGate
+}
+
+const checkInGate = "\n\n" + `## Check in before you implement (AO)
+
+This project wants a person to see the shape of the work before the work starts, so this task is TWO turns and not one.
+
+**Turn one: understand it.** Read the code, find out what the task actually means, and decide what you would do about it. Reading, searching, running read-only commands, and writing what you learn into the AO knowledge store are all part of this turn and need nobody's permission. What you may not do yet is start the change itself: no edit to a file in the repository, no new source file, no commit that implements the task.
+
+**Then STOP and END YOUR TURN.** Ending the turn is what makes the pause visible: AO reads it as a signal and moves this task into the board's **Needs you** lane, which is how a person finds out you are waiting. Do not instead sit quietly part-way through a turn - to everyone watching, that is identical to having hung, and nobody will come.
+
+**Leave three things behind, short enough to read on a phone:** what you understand the task to be, what you intend to do about it, and what you need decided. If you wrote a plan or a spec, point at where it is rather than pasting it.
+
+**Turn two: implement.** The human's reply is your go-ahead; the rest of this prompt then applies unchanged and you do not stop a second time. If that reply changes the shape of the task, say in one line what changed and carry on.`
+
 const smokeChecklistProtocol = "\n\n" + `## Smoke-test checklist (AO)
 
 When you finish a change whose runtime behavior unit tests can't fully cover — UI flows, live SCM/CI polling, native-app behavior, timing/race windows — author a short manual smoke-test checklist (as few cases as the change's scope and risk warrant: one focused case for a trivial change, more for a broad or risky one) once the change is complete and your local checks (build, tests, lint) pass, BEFORE you open the PR/MR. ` + "`$AO_CREW_ID`" + ` is the TASK's id: your own session id when you are working alone, and dev's when a task has two agents on it - so this command is right either way. Each case is: a one-line ` + "`name`" + ` (what to verify), ` + "`why`" + ` it matters, ordered ` + "`steps`" + `, the ` + "`expected`" + ` result, and the ` + "`prNum`" + ` / ` + "`fileRef`" + ` (file:line) it covers. The PR isn't open yet, so leave ` + "`prNum`" + ` at 0 (you MAY backfill it after opening the PR, but that's optional, not required). Author the whole checklist in one call, JSON on stdin so nothing lands in your checkout:

@@ -2966,6 +2966,16 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 		// A mechanical task never has a qa, so this is dev's/solo's alone.
 		if crewRole != domain.CrewRoleQA {
 			base += prompts.TaskSizeDirective(string(taskSize.WithDefault()))
+			// A project can ask for a person's eye on the shape of the work before
+			// the work starts. Opt-in, so a project that says nothing renders
+			// nothing and its workers' prompts are byte-for-byte what they were.
+			// Same qa guard as the directive above, and for the same reason: qa is
+			// created part-way through a task, after the go-ahead already happened,
+			// and it does not implement the task. mechanical renders "" inside
+			// CheckInGate however this project is configured.
+			if cfg.PauseBeforeImplementing {
+				base += prompts.CheckInGate(string(taskSize.WithDefault()))
+			}
 		}
 	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)

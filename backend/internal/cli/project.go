@@ -99,6 +99,7 @@ type projectSetConfigOptions struct {
 	hasWebUI          bool
 	hasIOSSimulator   bool
 	noAutoCrew        bool
+	pauseBeforeImpl   bool
 	configJSON        string
 	clear             bool
 	json              bool
@@ -292,6 +293,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.hasWebUI, "web-ui", false, "This project has a web UI, so sessions get the Browser tab")
 	f.BoolVar(&opts.hasIOSSimulator, "ios-simulator", false, "This project targets iOS, so sessions get the Device tab")
 	f.BoolVar(&opts.noAutoCrew, "no-auto-crew", false, "Never form a crew automatically on this project; a PERSON can still add a qa by hand (`ao crew add`, or `+ qa` in the app), an AO session cannot")
+	f.BoolVar(&opts.pauseBeforeImpl, "pause-before-implementing", false, "A standard/deep worker here stops once it understands the task and hands back to you before it implements anything; mechanical tasks never stop")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
 	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")
@@ -342,9 +344,10 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 			Workflow:     domain.GitWorkflow(strings.ToLower(strings.TrimSpace(opts.gitWorkflow))),
 			BranchPrefix: opts.branchPrefix,
 		},
-		HasWebUI:        opts.hasWebUI,
-		HasIOSSimulator: opts.hasIOSSimulator,
-		DisableAutoCrew: opts.noAutoCrew,
+		HasWebUI:                opts.hasWebUI,
+		HasIOSSimulator:         opts.hasIOSSimulator,
+		DisableAutoCrew:         opts.noAutoCrew,
+		PauseBeforeImplementing: opts.pauseBeforeImpl,
 	}
 	// "none" is the CLI-friendly spelling of the default (empty) workflow; the
 	// daemon stores it as unset. Normalize so `--git-workflow none` round-trips.

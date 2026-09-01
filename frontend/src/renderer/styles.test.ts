@@ -171,3 +171,42 @@ describe("primary action legibility", () => {
 		});
 	}
 });
+
+/**
+ * Native controls have to follow OUR theme, not the machine's.
+ *
+ * The app switches theme by setting `data-theme` on <html> and redefining custom
+ * properties. Custom properties do not reach a native control's own painting:
+ * without `color-scheme`, the UA renders checkboxes, form fields and scrollbars
+ * from the OS appearance. On a dark-mode Mac that showed as an unchecked
+ * checkbox in project settings painted as a solid black square on our light
+ * surface - every checkbox on the page, in the theme where it is most visible.
+ *
+ * One declaration per theme root is the whole fix, and asserting it here is what
+ * keeps a later token refactor from dropping it silently.
+ */
+describe("native controls follow the app theme", () => {
+	for (const theme of [
+		{ name: "dark", selector: ":root", scheme: "dark" },
+		{ name: "light", selector: ':root[data-theme="light"]', scheme: "light" },
+	]) {
+		it(`declares color-scheme: ${theme.scheme} in the ${theme.name} theme`, () => {
+			const at = STYLES.search(
+				new RegExp(`(^|\\})\\s*${theme.selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{`, "m"),
+			);
+			expect(at, `no ${theme.selector} block in styles.css`).toBeGreaterThanOrEqual(0);
+			const open = STYLES.indexOf("{", at);
+			let depth = 0;
+			let close = STYLES.length;
+			for (let i = open; i < STYLES.length; i++) {
+				if (STYLES[i] === "{") depth++;
+				else if (STYLES[i] === "}" && --depth === 0) {
+					close = i;
+					break;
+				}
+			}
+			const block = STYLES.slice(open + 1, close);
+			expect(block).toMatch(new RegExp(`(^|[\\s;])color-scheme\\s*:\\s*${theme.scheme}\\s*;`));
+		});
+	}
+});

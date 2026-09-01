@@ -4530,6 +4530,76 @@ func TestBuildSystemPrompt_TaskSizeDirective(t *testing.T) {
 	}
 }
 
+// TestBuildSystemPrompt_CheckInGate: the per-project check-in gate. Four facts,
+// each one a way this could ship wrong:
+//
+//   - A project that never opted in renders NOTHING, so every existing project
+//     keeps running straight from brief to code. This is the default.
+//   - An opted-in project's standard/deep worker gets the gate.
+//   - A mechanical task never pauses, even on an opted-in project.
+//   - qa never gets it: it is created part-way through, after the go-ahead.
+//
+// It is injected (not baked into the editable base), so a fully-cleared worker
+// base still carries it - a project cannot lose the gate by editing its prompt.
+func TestBuildSystemPrompt_CheckInGate(t *testing.T) {
+	const heading = "## Check in before you implement (AO)"
+	build := func(t *testing.T, pause bool, size domain.TaskSize, role domain.CrewRole, clearBase bool) string {
+		t.Helper()
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{PauseBeforeImplementing: pause}}
+		var getter func() promptoverrides.Overrides
+		if clearBase {
+			getter = func() promptoverrides.Overrides {
+				return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: "", prompts.KindQA: ""}}
+			}
+		}
+		m := layeredManager(st, getter)
+		sp, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", size, role)
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+
+	// Opt-in: standard and deep pause on an enabled project.
+	for _, size := range []domain.TaskSize{domain.TaskSizeStandard, domain.TaskSizeDeep, ""} {
+		sp := build(t, true, size, "", false)
+		if !strings.Contains(sp, heading) {
+			t.Fatalf("an opted-in project must give a %q worker the check-in gate:\n%s", size, sp)
+		}
+		if !strings.Contains(sp, "END YOUR TURN") || !strings.Contains(sp, "**Needs you**") {
+			t.Fatalf("the gate must tell the worker to end its turn and name the board lane:\n%s", sp)
+		}
+	}
+
+	// The default: a project that says nothing behaves exactly as it did before
+	// this existed, at every size.
+	for _, size := range []domain.TaskSize{domain.TaskSizeStandard, domain.TaskSizeDeep, domain.TaskSizeMechanical, ""} {
+		if sp := build(t, false, size, "", false); strings.Contains(sp, heading) {
+			t.Fatalf("a project that did not opt in must never pause (size %q):\n%s", size, sp)
+		}
+	}
+
+	// mechanical is exempt however the project is configured.
+	if sp := build(t, true, domain.TaskSizeMechanical, "", false); strings.Contains(sp, heading) {
+		t.Fatalf("a mechanical task must never pause, even on an opted-in project:\n%s", sp)
+	}
+
+	// qa is created part-way through a task, after the go-ahead already happened.
+	if sp := build(t, true, domain.TaskSizeStandard, domain.CrewRoleQA, false); strings.Contains(sp, heading) {
+		t.Fatalf("qa must never get the check-in gate:\n%s", sp)
+	}
+	// dev owns the implementation, so dev does get it.
+	if sp := build(t, true, domain.TaskSizeStandard, domain.CrewRoleDev, false); !strings.Contains(sp, heading) {
+		t.Fatalf("a crew's dev must get the check-in gate:\n%s", sp)
+	}
+
+	// Injected, not base: clearing the worker base cannot drop the gate.
+	if sp := build(t, true, domain.TaskSizeStandard, "", true); !strings.Contains(sp, heading) {
+		t.Fatalf("a cleared worker base must still carry the check-in gate:\n%s", sp)
+	}
+}
+
 // TestSpawn_AutoLinksJiraIssueFromPrompt reproduces the Send-to-Orchestrator bug:
 // a worker spawned onto a Jira-keyed branch must be linked to that issue: the
 // link record is sessions.issue_id in canonical "jira:<KEY>" form (the same field

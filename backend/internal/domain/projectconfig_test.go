@@ -293,3 +293,63 @@ func TestProjectConfig_SimProfileRoundTripsThroughJSON(t *testing.T) {
 		t.Fatalf("an unset profile was serialised: %s", b2)
 	}
 }
+
+// The check-in gate is opt-in and its default is DO NOT PAUSE, which is the
+// whole point: shipping it must not change how a single existing project
+// behaves. The config is stored as one JSON blob in a nullable column, so an
+// EXISTING row - written before this field existed - is the real regression
+// case: it has no `pauseBeforeImplementing` key at all and must decode as false
+// with no migration. This test IS that confirmation.
+func TestProjectConfig_PauseBeforeImplementing_OptInRoundTrip(t *testing.T) {
+	// A config persisted before this field existed. No migration touches it: the
+	// absent key decodes to the zero value, which is "do not pause".
+	var legacy ProjectConfig
+	if err := json.Unmarshal([]byte(`{"defaultBranch":"main","disableAutoCrew":true}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.PauseBeforeImplementing {
+		t.Fatal("a config with no pauseBeforeImplementing key must decode as opt-out (never pause)")
+	}
+	if legacy.WithDefaults().PauseBeforeImplementing {
+		t.Fatal("WithDefaults must not switch on a pause the project never asked for")
+	}
+	if DefaultProjectConfig().PauseBeforeImplementing {
+		t.Fatal("the default project config must not pause")
+	}
+
+	cfg := ProjectConfig{PauseBeforeImplementing: true}
+	if cfg.IsZero() {
+		t.Fatal("a config that enables the check-in gate must not be zero, or storage would persist SQL NULL and lose it")
+	}
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"pauseBeforeImplementing":true`) {
+		t.Fatalf("marshalled config = %s, want the pauseBeforeImplementing key", b)
+	}
+	var back ProjectConfig
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !back.PauseBeforeImplementing {
+		t.Fatalf("round-trip lost pauseBeforeImplementing: %s", b)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("pauseBeforeImplementing is a plain toggle and must validate: %v", err)
+	}
+
+	// Off is OMITTED rather than written as false (omitempty), so a project that
+	// never opted in carries no trace of the field at all and an older AO reading
+	// the same row sees exactly the config it wrote.
+	off, err := json.Marshal(ProjectConfig{DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(off), "pauseBeforeImplementing") {
+		t.Fatalf("an opted-out config must not write the key: %s", off)
+	}
+	if !(ProjectConfig{}).IsZero() {
+		t.Fatal("an unset config must still be zero, so storage keeps persisting SQL NULL")
+	}
+}

@@ -158,6 +158,24 @@ function GeneralSection({ project, form }: { project: Project; form: ProjectForm
 				</p>
 			</SettingsGroup>
 
+			<SettingsGroup title="Check-in">
+				<label className="flex items-center gap-2.5 text-[13px] text-foreground">
+					<input
+						type="checkbox"
+						className="h-4 w-4 accent-accent"
+						checked={draft.pauseBeforeImplementing}
+						onChange={(e) => setField("pauseBeforeImplementing", e.target.checked)}
+					/>
+					Check in with me before implementing
+				</label>
+				<p className="text-[11px] text-passive">
+					Off by default. When on, a worker here reads the code and works out what the task means, then stops and hands
+					back to you before it changes anything - with what it understood, what it plans to do, and what it needs you
+					to decide. The task moves to <strong>Needs you</strong> on the board while it waits, and it implements only
+					after you reply. Mechanical tasks never stop: they are already authorized to go straight to the edit.
+				</p>
+			</SettingsGroup>
+
 			<SettingsGroup title="Worktrees">
 				<SettingsField label="Default branch" htmlFor="defaultBranch" modified={isFieldDirty("defaultBranch")}>
 					<input
