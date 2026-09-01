@@ -8550,6 +8550,10 @@ components:
       properties:
         config:
           $ref: '#/components/schemas/ProjectConfig'
+        mergeFields:
+          items:
+            type: string
+          type: array
       required:
       - config
       type: object

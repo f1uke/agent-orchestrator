@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1210,5 +1211,165 @@ func TestManager_ListSummaryCarriesHasWebUI(t *testing.T) {
 				t.Fatalf("summary hasWebUI = %v, want %v", list[0].HasWebUI, tc.want)
 			}
 		})
+	}
+}
+
+// fullStoredConfig is a project config with every key carrying something worth
+// losing, including the four no CLI flag can reach.
+func fullStoredConfig() domain.ProjectConfig {
+	return domain.ProjectConfig{
+		DefaultBranch:    "develop",
+		Env:              map[string]string{"FOO": "bar"},
+		ResponseLanguage: "Thai",
+		HasIOSSimulator:  true,
+		Reviewers:        []domain.ReviewerConfig{{Harness: domain.ReviewerClaudeCode}},
+		SimProfile:       &domain.SimProfileConfig{Keep: []string{"com.apple.backboardd"}},
+		GitConvention: domain.GitConventionConfig{
+			Workflow:     domain.GitWorkflowGitflow,
+			BranchPrefix: "feature/",
+		},
+		ApprovalRule: domain.ApprovalRule{Enabled: true, Threshold: 3},
+	}
+}
+
+// A write that names its fields must touch nothing else. This is the daemon
+// half of the data-loss fix: the CLI can say "only this field", and the merge
+// happens here, inside the same read-modify-write that stores the result.
+func TestManager_SetConfig_MergeFieldsKeepEverythingElse(t *testing.T) {
+	ctx := context.Background()
+	m := newManager(t)
+	repo := gitRepo(t)
+	if _, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("ao")}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	stored := fullStoredConfig()
+	if _, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: stored}); err != nil {
+		t.Fatalf("seed SetConfig: %v", err)
+	}
+
+	// Exactly what `ao project set-config ao --pause-before-implementing` now
+	// sends: one field, and a config carrying nothing else.
+	proj, err := m.SetConfig(ctx, "ao", project.SetConfigInput{
+		Config:      domain.ProjectConfig{PauseBeforeImplementing: true},
+		MergeFields: []string{"pauseBeforeImplementing"},
+	})
+	if err != nil {
+		t.Fatalf("merging SetConfig: %v", err)
+	}
+
+	want := stored
+	want.PauseBeforeImplementing = true
+	if proj.Config == nil || !reflect.DeepEqual(*proj.Config, want) {
+		t.Fatalf("config after merge = %#v, want %#v", proj.Config, want)
+	}
+
+	// And it is what a fresh read sees, not just what the write returned.
+	got, err := m.Get(ctx, "ao")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Project == nil || got.Project.Config == nil || !reflect.DeepEqual(*got.Project.Config, want) {
+		t.Fatalf("stored config = %#v, want %#v", got.Project.Config, want)
+	}
+}
+
+// A merging write is validated as the config it produces, not as the fragment
+// it carries. `--tracker-intake` alone would fail the "assignee is required"
+// rule on its own, and must not: the stored assignee satisfies it.
+func TestManager_SetConfig_MergeValidatesTheResult(t *testing.T) {
+	ctx := context.Background()
+	m := newManager(t)
+	repo := gitRepo(t)
+	if _, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("ao")}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	seed := domain.ProjectConfig{
+		TrackerIntake: domain.TrackerIntakeConfig{Provider: domain.TrackerProviderGitLab, Assignee: "alice"},
+	}
+	if _, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: seed}); err != nil {
+		t.Fatalf("seed SetConfig: %v", err)
+	}
+
+	proj, err := m.SetConfig(ctx, "ao", project.SetConfigInput{
+		Config:      domain.ProjectConfig{TrackerIntake: domain.TrackerIntakeConfig{Enabled: true}},
+		MergeFields: []string{"trackerIntake.enabled"},
+	})
+	if err != nil {
+		t.Fatalf("enabling intake over a stored assignee: %v", err)
+	}
+	if !proj.Config.TrackerIntake.Enabled || proj.Config.TrackerIntake.Assignee != "alice" ||
+		proj.Config.TrackerIntake.Provider != domain.TrackerProviderGitLab {
+		t.Fatalf("tracker intake = %#v", proj.Config.TrackerIntake)
+	}
+
+	// The merged result is still validated: a bad value in a named field is
+	// refused, and nothing is written.
+	_, err = m.SetConfig(ctx, "ao", project.SetConfigInput{
+		Config:      domain.ProjectConfig{AgentConfig: domain.AgentConfig{Permissions: "yolo"}},
+		MergeFields: []string{"agentConfig.permissions"},
+	})
+	wantCode(t, err, "INVALID_PROJECT_CONFIG")
+}
+
+// A field name the config does not have is refused outright. Dropping it
+// silently would be the original bug wearing a different hat: a write that
+// reports success having done something other than what was asked.
+func TestManager_SetConfig_RejectsUnknownMergeField(t *testing.T) {
+	ctx := context.Background()
+	m := newManager(t)
+	repo := gitRepo(t)
+	if _, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("ao")}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	stored := fullStoredConfig()
+	if _, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: stored}); err != nil {
+		t.Fatalf("seed SetConfig: %v", err)
+	}
+
+	_, err := m.SetConfig(ctx, "ao", project.SetConfigInput{
+		Config:      domain.ProjectConfig{DefaultBranch: "main"},
+		MergeFields: []string{"responseLanguag"},
+	})
+	wantCode(t, err, "INVALID_PROJECT_CONFIG")
+
+	got, err := m.Get(ctx, "ao")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Project == nil || got.Project.Config == nil || !reflect.DeepEqual(*got.Project.Config, stored) {
+		t.Fatalf("a refused write must change nothing; config = %#v", got.Project.Config)
+	}
+}
+
+// No mask means replace, exactly as before: the Settings screen, --config-json
+// and --clear all send the whole config and expect it stored as given.
+func TestManager_SetConfig_NoMergeFieldsStillReplaces(t *testing.T) {
+	ctx := context.Background()
+	m := newManager(t)
+	repo := gitRepo(t)
+	if _, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("ao")}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if _, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: fullStoredConfig()}); err != nil {
+		t.Fatalf("seed SetConfig: %v", err)
+	}
+
+	replacement := domain.ProjectConfig{SessionPrefix: "acme"}
+	proj, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: replacement})
+	if err != nil {
+		t.Fatalf("replacing SetConfig: %v", err)
+	}
+	if proj.Config == nil || !reflect.DeepEqual(*proj.Config, replacement) {
+		t.Fatalf("config = %#v, want exactly the replacement %#v", proj.Config, replacement)
+	}
+
+	// And an empty config clears, which is what --clear sends.
+	cleared, err := m.SetConfig(ctx, "ao", project.SetConfigInput{Config: domain.ProjectConfig{}})
+	if err != nil {
+		t.Fatalf("clearing SetConfig: %v", err)
+	}
+	if cleared.Config != nil && !cleared.Config.IsZero() {
+		t.Fatalf("config = %#v, want cleared", cleared.Config)
 	}
 }

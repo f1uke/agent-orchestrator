@@ -63,6 +63,12 @@ type Service struct {
 	// covered by the store's own writeMu, so path/id conflict checks plus the
 	// subsequent mutation must be atomic from the perspective of concurrent callers.
 	addMu sync.Mutex
+	// configMu serialises SetConfig's read-modify-write. A merging write reads
+	// the stored config and writes a derived one; the store's own write lock
+	// covers each statement but not the pair, so without this two concurrent
+	// field-flag writes could each merge onto the same pre-image and the second
+	// would drop the first's field.
+	configMu sync.Mutex
 }
 
 var _ Manager = (*Service)(nil)
@@ -360,15 +366,36 @@ func (m *Service) emitProjectAdded(row domain.ProjectRecord, firstProject bool) 
 	})
 }
 
-// SetConfig replaces the project's stored config. The typed config is validated
-// here so a bad value is rejected when set rather than surfacing at spawn.
+// SetConfig writes the project's per-project config, either replacing it
+// wholesale or merging the fields the caller named onto what is stored (see
+// SetConfigInput). The typed config is validated here so a bad value is
+// rejected when set rather than surfacing at spawn.
+//
+// The merge lives on this side of the wire, and not in the CLI, because it is a
+// read-modify-write: a client doing it would read over one HTTP round trip and
+// write over another, leaving a window in which a concurrent write is silently
+// reverted, and no way to finish the pair if the second call fails. Here the
+// read and the write are one critical section (configMu), so a merge either
+// lands whole or does not land.
 func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConfigInput) (Project, error) {
 	if err := validateProjectID(id); err != nil {
 		return Project{}, err
 	}
-	if err := in.Config.Validate(); err != nil {
-		return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+	merging := len(in.MergeFields) > 0
+	if !merging {
+		// A replace carries the entire config, so it can be judged before the
+		// project is even loaded. A merge cannot: its Config holds only the
+		// named fields, so `--tracker-intake` alone would fail the "assignee is
+		// required" rule that the STORED assignee satisfies. The merged result
+		// is validated below instead.
+		if err := in.Config.Validate(); err != nil {
+			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+		}
 	}
+
+	m.configMu.Lock()
+	defer m.configMu.Unlock()
+
 	row, ok, err := m.store.GetProject(ctx, string(id))
 	if err != nil {
 		return Project{}, apierr.Internal("PROJECT_LOAD_FAILED", "Failed to load project")
@@ -376,7 +403,19 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 	if !ok || !row.ArchivedAt.IsZero() {
 		return Project{}, apierr.NotFound("PROJECT_NOT_FOUND", "Unknown project")
 	}
-	row.Config = in.Config
+
+	next := in.Config
+	if merging {
+		next, err = domain.MergeConfigFields(row.Config, in.Config, in.MergeFields)
+		if err != nil {
+			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+		}
+		if err := next.Validate(); err != nil {
+			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
+		}
+	}
+
+	row.Config = next
 	if err := m.store.UpsertProject(ctx, row); err != nil {
 		return Project{}, apierr.Internal("PROJECT_CONFIG_UPDATE_FAILED", "Failed to update project config")
 	}
