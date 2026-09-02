@@ -486,6 +486,9 @@ type crewTouch struct {
 }
 
 type fakeCommander struct {
+	// killOptions records what each Kill asked for: the discard opt-in has to
+	// reach the manager, not stop at the service.
+	killOptions     []sessionmanager.KillOptions
 	sendOutcome     ports.SendOutcome
 	teardownCauses  []string
 	killed          []domain.SessionID
@@ -594,9 +597,9 @@ func (f *fakeCommander) WakeCrewMember(_ context.Context, id domain.SessionID) (
 	f.crewWoken = append(f.crewWoken, id)
 	return f.wakeRecord, f.crewWakeErr
 }
-func (f *fakeCommander) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
-	res, err := f.Teardown(ctx, id, domain.TerminationCauseKill)
-	return res.Freed, err
+func (f *fakeCommander) Kill(ctx context.Context, id domain.SessionID, opts sessionmanager.KillOptions) (sessionmanager.TeardownResult, error) {
+	f.killOptions = append(f.killOptions, opts)
+	return f.Teardown(ctx, id, domain.TerminationCauseKill)
 }
 
 // teardownResult, when set, is what Teardown reports instead of a clean free.

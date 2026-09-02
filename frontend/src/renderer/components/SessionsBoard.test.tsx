@@ -192,8 +192,51 @@ describe("SessionsBoard", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/kill", {
 				params: { path: { sessionId: "sess-9" } },
+				body: { discardUncommitted: false },
 			}),
 		);
+	});
+
+	// THE INCIDENT, at the gesture that caused it. "Move to Done" on a session
+	// holding work nobody has seen used to close the menu, refetch, and leave the
+	// card exactly where it was with nothing said. The refusal must reach the
+	// human, with the files.
+	it("explains why a card holding undelivered work will not move to Done", async () => {
+		postMock.mockResolvedValue({
+			error: {
+				error: "conflict",
+				code: "SESSION_HAS_UNDELIVERED_WORK",
+				message: "sess-9 still holds 2 uncommitted files that no pull request carries",
+				details: {
+					reason: "workspace_dirty",
+					files: [
+						{ path: "Sources/WebViewZoom.swift", status: "modified" },
+						{ path: "Sources/NewFile.swift", status: "untracked" },
+					],
+				},
+			},
+		});
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-9")] }],
+			isError: false,
+		});
+		renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: "Session actions" }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Move to Done/i }));
+		await userEvent.click(await screen.findByRole("menuitem", { name: /Confirm/i }));
+
+		expect(await screen.findByText(/still holds undelivered work/i)).toBeInTheDocument();
+		expect(screen.getByText("Sources/WebViewZoom.swift")).toBeInTheDocument();
+		expect(screen.getByText("Sources/NewFile.swift")).toBeInTheDocument();
+		// And the way out is offered rather than described.
+		expect(screen.getByRole("button", { name: /Discard and move to Done/i })).toBeInTheDocument();
+
+		// The dialog is portaled but mounted inside the card's open-on-click
+		// wrapper, so a click in it must not also open the session — the same trap
+		// the card menu documents.
+		await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(navigateMock).not.toHaveBeenCalled();
 	});
 
 	it("keeps you on the board — interacting with the card menu never opens the session", async () => {

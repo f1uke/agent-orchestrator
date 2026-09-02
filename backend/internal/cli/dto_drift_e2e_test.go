@@ -118,8 +118,8 @@ func (f *fakeSessionService) AttachCrewMember(context.Context, domain.SessionID,
 	return domain.Session{}, nil
 }
 
-func (f *fakeSessionService) Kill(context.Context, domain.SessionID) (bool, error) {
-	return false, nil
+func (f *fakeSessionService) Kill(context.Context, domain.SessionID, sessionsvc.KillInput) (sessionsvc.KillOutcome, error) {
+	return sessionsvc.KillOutcome{Terminated: true, Freed: true}, nil
 }
 
 func (f *fakeSessionService) Delete(context.Context, domain.SessionID, bool) error {

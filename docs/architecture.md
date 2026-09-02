@@ -49,11 +49,18 @@ The only persistent session state is:
   A park is `activity_state = 'parked'` plus `is_suspended` with `sleep_reason` of
   `undelivered`, and it keeps the worktree. An ending that does terminate runs the
   same crew fan-out `session_manager.Teardown` runs, so a crew's dev can never
-  terminate out from under a live member.
+  terminate out from under a live member. A parked session is discarded only
+  deliberately: an interactive `Kill` REFUSES (409 `SESSION_HAS_UNDELIVERED_WORK`,
+  naming the files, touching nothing) while its worktree holds work no PR carries,
+  and `discardUncommitted` captures that work to `refs/ao/preserved/<session-id>`
+  before the worktree goes. The background teardowns (auto-reclaim, cleanup,
+  project teardown) keep their old policy: preserve the tree and retry later.
 - `termination_*` — How the session ended: `source` (`agent` — the harness reported its
   own exit; `ao` — a teardown AO initiated; `runtime_gone` — the reaper inferred it from a
   missing runtime), `reason` (the harness's own end reason, or the named AO cause such as
-  `kill` / `auto_reclaim` / `daemon_shutdown`), `last_state`, `transcript_path`, and
+  `kill` / `auto_reclaim` / `daemon_shutdown` / `discard_work` — the last for a kill
+  somebody ordered knowing it would destroy uncommitted work), `last_state`,
+  `transcript_path`, and
   `terminated_at`. Written by the lifecycle reducer on every terminal transition and
   cleared on respawn. `activity_state = 'exited'` alone cannot tell a worker that stopped
   by itself mid-task from one AO reclaimed, and that difference is what someone asking

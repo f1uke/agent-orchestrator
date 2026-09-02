@@ -30,6 +30,7 @@ import {
 	type WorkspaceSession,
 	canonicalTrackerIssueId,
 	isMergeSuspended,
+	isUndeliveredParked,
 	jiraKeyFromIssueId,
 	orchestratorHealth,
 	workerSessions,
@@ -45,6 +46,9 @@ import { TodoDetailDialog } from "./TodoDetailDialog";
 import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergeSuspendChip } from "./MergeSuspendChip";
+import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
+import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
+import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/kill-session";
 import { TokenUsageChip } from "./TokenUsageChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
@@ -552,19 +556,22 @@ function EmptyLane({ col }: { col: LaneConfig }) {
 // via the Done bar's Reopen (the sole reversal affordance — this menu has no reopen).
 // Terminating is destructive, so the item arms a one-step confirm inside the menu
 // before firing.
-function SessionCardMenu({ session }: { session: WorkspaceSession }) {
+//
+// The kill can be REFUSED — a worktree still holding work no pull request carries —
+// and that refusal is the one thing this menu may not swallow. A menu is far too
+// small for a file list, so the refusal hands off to UndeliveredWorkDialog, which
+// says what is in the way and offers the deliberate discard.
+function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession; onOpenSession: () => void }) {
 	const queryClient = useQueryClient();
 	const [open, setOpen] = useState(false);
 	const [confirming, setConfirming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [refused, setRefused] = useState<UncommittedFile[] | null>(null);
 
 	const kill = useMutation({
 		mutationFn: async () => {
 			void captureRendererEvent("ao.renderer.session_kill_requested", { project_id: session.workspaceId });
-			const { error: apiError } = await apiClient.POST("/api/v1/sessions/{sessionId}/kill", {
-				params: { path: { sessionId: session.id } },
-			});
-			if (apiError) throw new Error(apiErrorMessage(apiError));
+			await killSession(session.id);
 		},
 		onSuccess: () => {
 			void captureRendererEvent("ao.renderer.session_kill_succeeded", { project_id: session.workspaceId });
@@ -575,6 +582,12 @@ function SessionCardMenu({ session }: { session: WorkspaceSession }) {
 		},
 		onError: (e) => {
 			void captureRendererEvent("ao.renderer.session_kill_failed", { project_id: session.workspaceId });
+			if (e instanceof UndeliveredWorkError) {
+				setOpen(false);
+				setConfirming(false);
+				setRefused(e.files);
+				return;
+			}
 			setError(e instanceof Error ? e.message : "Move to Done failed");
 		},
 	});
@@ -595,104 +608,116 @@ function SessionCardMenu({ session }: { session: WorkspaceSession }) {
 	});
 
 	return (
-		<DropdownMenu
-			open={open}
-			onOpenChange={(next) => {
-				setOpen(next);
-				// Reset the arm-confirm whenever the menu closes so it never reopens mid-confirm.
-				if (!next) {
-					setConfirming(false);
-					setError(null);
-				}
-			}}
-		>
-			<DropdownMenuTrigger asChild>
-				<button
-					aria-label="Session actions"
-					className={cn(
-						"rounded p-0.5 text-passive opacity-0 transition-opacity hover:text-foreground",
-						"focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
-					)}
-					// Stop the click from reaching the card's open-session handler.
-					onClick={(event) => event.stopPropagation()}
-					type="button"
-				>
-					<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-				</button>
-			</DropdownMenuTrigger>
-			{/* The content is portaled, but React events bubble along the React tree — the
+		<>
+			{refused && (
+				<UndeliveredWorkDialog
+					open
+					onOpenChange={(next) => !next && setRefused(null)}
+					sessionId={session.id}
+					sessionTitle={session.title}
+					files={refused}
+					onOpenSession={onOpenSession}
+				/>
+			)}
+			<DropdownMenu
+				open={open}
+				onOpenChange={(next) => {
+					setOpen(next);
+					// Reset the arm-confirm whenever the menu closes so it never reopens mid-confirm.
+					if (!next) {
+						setConfirming(false);
+						setError(null);
+					}
+				}}
+			>
+				<DropdownMenuTrigger asChild>
+					<button
+						aria-label="Session actions"
+						className={cn(
+							"rounded p-0.5 text-passive opacity-0 transition-opacity hover:text-foreground",
+							"focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
+						)}
+						// Stop the click from reaching the card's open-session handler.
+						onClick={(event) => event.stopPropagation()}
+						type="button"
+					>
+						<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+					</button>
+				</DropdownMenuTrigger>
+				{/* The content is portaled, but React events bubble along the React tree — the
 			    menu lives inside the card's open-on-click wrapper — so stop clicks here or
 			    choosing an item would also navigate into the session. */}
-			<DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
-				{confirming ? (
-					<>
-						<div className="max-w-[15rem] px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
-							Stops the agent and reclaims its worktree. The branch and any open PR stay. Reopen from the Done bar to
-							undo.
-						</div>
-						<DropdownMenuItem
-							className="text-error focus:text-error [&_svg]:text-error"
-							disabled={kill.isPending}
-							onSelect={(event) => {
-								// Keep the menu open through the mutation so pending/error state is visible.
-								event.preventDefault();
-								kill.mutate();
-							}}
-						>
-							<CircleCheck aria-hidden="true" />
-							{kill.isPending ? "Moving…" : "Confirm — move to Done"}
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							disabled={kill.isPending}
-							onSelect={(event) => {
-								event.preventDefault();
-								setConfirming(false);
-							}}
-						>
-							Cancel
-						</DropdownMenuItem>
-						{error ? (
-							<div className="max-w-[15rem] px-2 py-1.5 text-[11px] text-error" role="alert">
-								{error}
+				<DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+					{confirming ? (
+						<>
+							<div className="max-w-[15rem] px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
+								Stops the agent and reclaims its worktree. The branch and any open PR stay. Reopen from the Done bar to
+								undo.
 							</div>
-						) : null}
-					</>
-				) : (
-					<>
-						<DropdownMenuItem
-							disabled={keepWarm.isPending}
-							onSelect={(event) => {
-								// Keep the menu open so the checkmark flips in place.
-								event.preventDefault();
-								setError(null);
-								keepWarm.mutate();
-							}}
-						>
-							<Flame aria-hidden="true" />
-							Keep warm after merge
-							{session.keepWarmOnMerge ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden="true" /> : null}
-						</DropdownMenuItem>
-						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							className="text-error focus:text-error [&_svg]:text-error"
-							onSelect={(event) => {
-								event.preventDefault();
-								setError(null);
-								setConfirming(true);
-							}}
-						>
-							<CircleCheck aria-hidden="true" />
-							Move to Done
-						</DropdownMenuItem>
-						{error ? (
-							<div className="max-w-[15rem] px-2 py-1.5 text-[11px] text-error" role="alert">
-								{error}
-							</div>
-						) : null}
-					</>
-				)}
-			</DropdownMenuContent>
-		</DropdownMenu>
+							<DropdownMenuItem
+								className="text-error focus:text-error [&_svg]:text-error"
+								disabled={kill.isPending}
+								onSelect={(event) => {
+									// Keep the menu open through the mutation so pending/error state is visible.
+									event.preventDefault();
+									kill.mutate();
+								}}
+							>
+								<CircleCheck aria-hidden="true" />
+								{kill.isPending ? "Moving…" : "Confirm — move to Done"}
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								disabled={kill.isPending}
+								onSelect={(event) => {
+									event.preventDefault();
+									setConfirming(false);
+								}}
+							>
+								Cancel
+							</DropdownMenuItem>
+							{error ? (
+								<div className="max-w-[15rem] px-2 py-1.5 text-[11px] text-error" role="alert">
+									{error}
+								</div>
+							) : null}
+						</>
+					) : (
+						<>
+							<DropdownMenuItem
+								disabled={keepWarm.isPending}
+								onSelect={(event) => {
+									// Keep the menu open so the checkmark flips in place.
+									event.preventDefault();
+									setError(null);
+									keepWarm.mutate();
+								}}
+							>
+								<Flame aria-hidden="true" />
+								Keep warm after merge
+								{session.keepWarmOnMerge ? <Check className="ml-auto h-3.5 w-3.5" aria-hidden="true" /> : null}
+							</DropdownMenuItem>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem
+								className="text-error focus:text-error [&_svg]:text-error"
+								onSelect={(event) => {
+									event.preventDefault();
+									setError(null);
+									setConfirming(true);
+								}}
+							>
+								<CircleCheck aria-hidden="true" />
+								Move to Done
+							</DropdownMenuItem>
+							{error ? (
+								<div className="max-w-[15rem] px-2 py-1.5 text-[11px] text-error" role="alert">
+									{error}
+								</div>
+							) : null}
+						</>
+					)}
+				</DropdownMenuContent>
+			</DropdownMenu>
+		</>
 	);
 }
 
@@ -954,6 +979,11 @@ function SessionCard({
 							<QueuedMessagesChip session={session} />
 							{isMergeSuspended(session) ? (
 								<MergeSuspendChip session={session} />
+							) : isUndeliveredParked(session) ? (
+								// Parked holding work nobody has seen. Its own chip, for the same
+								// reason the merged one has one: "Paused - open to resume" is true
+								// but says nothing about why this card will not move to Done.
+								<UndeliveredWorkChip session={session} onOpenSession={() => onOpen(session)} />
 							) : (
 								// "Paused - open to resume" is a fact about a session, and on a
 								// crew card it would be read as a fact about the TASK - which is
@@ -965,7 +995,7 @@ function SessionCard({
 							<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
 								{agentLabel(session.provider)}
 							</span>
-							<SessionCardMenu session={session} />
+							<SessionCardMenu session={session} onOpenSession={() => onOpen(session)} />
 						</div>
 					</div>
 					{/* MARGIN, not padding. Bottom padding on a `overflow-hidden` clamped

@@ -8,6 +8,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira/adf"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/legacyimport"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
@@ -443,11 +444,57 @@ type RestoreSessionResponse struct {
 	Session   SessionView      `json:"session"`
 }
 
+// KillSessionRequest is the body of POST /api/v1/sessions/{sessionId}/kill.
+//
+// The contract asks for it on every kill; the handler also tolerates an absent
+// body, which reads as the plain kill - the one that refuses a session whose
+// worktree holds work nobody has seen.
+type KillSessionRequest struct {
+	// DiscardUncommitted says the caller means to destroy the uncommitted work
+	// in the session's worktree. It is the deliberate answer to a refusal, and
+	// the refusal is what shows the caller which files are at stake, so this is
+	// never the first thing a surface sends. The work is still captured to
+	// refs/ao/preserved/<session-id> before the worktree goes.
+	DiscardUncommitted bool `json:"discardUncommitted,omitempty" description:"Destroy the uncommitted work in the session's worktree (captured to refs/ao/preserved/<session-id> first). Without it, a session holding undelivered work refuses the kill with 409 SESSION_HAS_UNDELIVERED_WORK."`
+}
+
 // KillSessionResponse is the body of POST /api/v1/sessions/{sessionId}/kill.
 type KillSessionResponse struct {
 	OK        bool             `json:"ok"`
 	SessionID domain.SessionID `json:"sessionId"`
 	Freed     bool             `json:"freed,omitempty"`
+	// Terminated says the SESSION ended, which `freed` never did: a kill can
+	// free no disk (a crew's shared tree) and still end the session. A response
+	// that carried only `freed` is how "killed (workspace preserved)" came to be
+	// printed over a session that was still running.
+	Terminated bool `json:"terminated"`
+	// Discarded is what a discardUncommitted kill destroyed, and PreservedRef is
+	// the ref it was captured at first. Both omitted on an ordinary kill.
+	Discarded    []UncommittedFileDTO `json:"discarded,omitempty"`
+	PreservedRef string               `json:"preservedRef,omitempty"`
+}
+
+// UncommittedFileDTO is one file in a worktree that a teardown would destroy:
+// the unit of "here is what you are about to lose".
+type UncommittedFileDTO struct {
+	// Path is worktree-relative, slash-separated. For a workspace project it is
+	// prefixed with the repo it belongs to.
+	Path string `json:"path"`
+	// Status is one of modified, added, deleted, renamed, untracked, conflicted,
+	// changed.
+	Status string `json:"status"`
+}
+
+// uncommittedFileDTOs maps the service's file list to the wire shape.
+func uncommittedFileDTOs(files []ports.UncommittedFile) []UncommittedFileDTO {
+	if len(files) == 0 {
+		return nil
+	}
+	out := make([]UncommittedFileDTO, 0, len(files))
+	for _, f := range files {
+		out = append(out, UncommittedFileDTO{Path: f.Path, Status: f.Status})
+	}
+	return out
 }
 
 // RestartSessionResponse is the body of POST /api/v1/sessions/{sessionId}/restart.

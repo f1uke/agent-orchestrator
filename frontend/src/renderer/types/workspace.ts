@@ -569,6 +569,25 @@ export function isMergeSuspended(session: WorkspaceSession): boolean {
 	);
 }
 
+/**
+ * A worker PARKED because it ended its own turn with work nobody has seen: no
+ * pull request was ever opened from it (the #273 guard). Its card sits in "Needs
+ * you" rather than archiving to Done, and until this was surfaced the board said
+ * nothing at all about why - the human dragged, clicked, and was answered with
+ * silence.
+ *
+ * This is the PARK, which is a different fact from the worktree being dirty. A
+ * parked session with a clean tree ends on the first click; only the daemon
+ * knows which, and it answers when asked.
+ */
+export function isUndeliveredParked(session: WorkspaceSession): boolean {
+	// A terminated row keeps the sleep_reason it was parked with, so the terminal
+	// check comes first: a session that has ENDED is not waiting for anybody, and
+	// offering it a "Move to Done" it has already reached would be nonsense.
+	if (session.status === "terminated" || session.status === "merged") return false;
+	return Boolean(session.isSuspended) && session.sleepReason === "undelivered";
+}
+
 /** The merged PR to name in the merge-suspend chip: the highest (most recent) number. */
 export function mergedSuspendPRNumber(session: WorkspaceSession): number | undefined {
 	const merged = session.prs.filter((pr) => pr.state === "merged").map((pr) => pr.number);

@@ -1694,10 +1694,12 @@ func sessionOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/kill", id: "killSession", tag: "sessions",
-			summary:    "Mark a session terminated and tear down runtime/workspace resources",
+			summary:    "End a session and tear down its runtime/workspace. Refuses (409) while its worktree holds uncommitted work no PR carries",
 			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.KillSessionRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.KillSessionResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},

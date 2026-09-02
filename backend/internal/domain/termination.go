@@ -66,6 +66,12 @@ const (
 	// TerminationCauseIssueClosed is the tracker issue behind the session
 	// reaching a terminal state.
 	TerminationCauseIssueClosed = "issue_closed"
+	// TerminationCauseDiscardWork is a kill somebody ordered KNOWING it would
+	// destroy uncommitted work, having been shown the file list first. It is
+	// distinct from a plain kill because the two are different events to find
+	// afterwards: one ended a session, the other ended a session and threw work
+	// away (recoverably - see refs/ao/preserved/<session-id>).
+	TerminationCauseDiscardWork = "discard_work"
 )
 
 // Termination is the account a session leaves of how it reached its terminal

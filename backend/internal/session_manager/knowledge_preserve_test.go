@@ -52,7 +52,7 @@ func TestKill_PreservesWorkerPlanningDocs(t *testing.T) {
 		Activity: domain.Activity{State: domain.ActivityActive},
 	}
 
-	if _, err := m.Kill(context.Background(), "mer-1"); err != nil {
+	if _, err := m.Kill(context.Background(), "mer-1", KillOptions{}); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 
@@ -83,7 +83,7 @@ func TestKill_SkipsOrchestratorKnowledge(t *testing.T) {
 		Activity: domain.Activity{State: domain.ActivityActive},
 	}
 
-	if _, err := m.Kill(context.Background(), "mer-1"); err != nil {
+	if _, err := m.Kill(context.Background(), "mer-1", KillOptions{}); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	if _, err := os.Stat(knowledgestore.PlansDir(dataDir, "mer")); !os.IsNotExist(err) {

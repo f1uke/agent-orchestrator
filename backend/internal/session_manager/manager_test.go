@@ -388,6 +388,11 @@ type fakeWorkspace struct {
 	forceDestroyErr error
 	// stashCalls counts StashUncommitted invocations.
 	stashCalls int
+	// uncommitted is what the worktree holds that exists nowhere else. A REAL
+	// dirty worktree makes Destroy refuse AND reports files, so a test standing
+	// one up sets both this and destroyErr; dirtyWorkspace does it in one line.
+	uncommitted    []ports.UncommittedFile
+	uncommittedErr error
 	// syncCalls records every SyncToBase invocation (path + base branch), so
 	// tests can assert an orchestrator IS synced and a worker is NOT.
 	syncCalls []syncCall
@@ -504,6 +509,9 @@ func (w *fakeWorkspace) ForceDestroy(_ context.Context, info ports.WorkspaceInfo
 		*w.sharedLog = append(*w.sharedLog, entry)
 	}
 	return w.forceDestroyErr
+}
+func (w *fakeWorkspace) UncommittedFiles(_ context.Context, _ ports.WorkspaceInfo) ([]ports.UncommittedFile, error) {
+	return w.uncommitted, w.uncommittedErr
 }
 func (w *fakeWorkspace) StashUncommitted(_ context.Context, info ports.WorkspaceInfo) (string, error) {
 	w.stashCalls++
@@ -987,7 +995,7 @@ func TestSpawn_WorkspaceProjectRollsBackWhenWorktreeRowsFail(t *testing.T) {
 func TestKill_TearsDownRuntimeAndWorkspace(t *testing.T) {
 	m, st, rt, ws := newManager()
 	st.sessions["mer-1"] = mkLive("mer-1")
-	freed, err := m.Kill(ctx, "mer-1")
+	freed, err := killFreed(m, "mer-1")
 	if err != nil || !freed {
 		t.Fatalf("freed=%v err=%v", freed, err)
 	}
@@ -1000,10 +1008,18 @@ func TestKill_TearsDownRuntimeAndWorkspace(t *testing.T) {
 // workspace path is missing is still terminated — the destroy steps are
 // skipped, but the session moves to terminal state so it can be cleaned up
 // from the dashboard.
+// killFreed is the interactive kill in the shape most of these tests were
+// written in: no options, and "did the disk come back?" as a bool. Tests that
+// care about the refusal call m.Kill directly and read the whole result.
+func killFreed(m *Manager, id domain.SessionID) (bool, error) {
+	res, err := m.Kill(ctx, id, KillOptions{})
+	return res.Freed, err
+}
+
 func TestKill_TerminatesIncompleteHandle(t *testing.T) {
 	m, st, _, _ := newManager()
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Activity: domain.Activity{State: domain.ActivityActive}}
-	freed, err := m.Kill(ctx, "mer-1")
+	freed, err := killFreed(m, "mer-1")
 	if err != nil {
 		t.Fatalf("want nil error, got %v", err)
 	}
@@ -1015,26 +1031,135 @@ func TestKill_TerminatesIncompleteHandle(t *testing.T) {
 	}
 }
 
-// TestKill_DirtyWorkspacePreservesAndRemainsRetryable: a workspace teardown
-// refused because of uncommitted work must NOT force-remove the worktree. Kill
-// succeeds with freed=false and leaves the session non-terminal so a later retry
-// can complete cleanup.
-func TestKill_DirtyWorkspacePreservesAndRemainsRetryable(t *testing.T) {
+// dirtyWorkspace makes the fake worktree hold real work: a `git status` that
+// names files AND a `git worktree remove` that refuses. A test that set only one
+// of the two was standing up a worktree that cannot exist.
+func dirtyWorkspace(ws *fakeWorkspace, files ...ports.UncommittedFile) {
+	if len(files) == 0 {
+		files = []ports.UncommittedFile{{Path: "notes.md", Status: ports.UncommittedModified}}
+	}
+	ws.uncommitted = files
+	ws.destroyErr = fmt.Errorf("gitworktree: refusing to remove: %w", ports.ErrWorkspaceDirty)
+}
+
+// TestKill_DirtyWorkspaceIsRefusedAndTouchesNothing: the interactive kill has a
+// person waiting for the answer, so a worktree holding work nobody has seen is
+// not half-torn-down and reported as preserved - it is REFUSED, by name, with
+// nothing touched. The runtime assertion is the load-bearing one: the previous
+// shape discovered the dirt by attempting the removal, long after it had killed
+// the agent's pane.
+func TestKill_DirtyWorkspaceIsRefusedAndTouchesNothing(t *testing.T) {
 	m, st, rt, ws := newManager()
 	st.sessions["mer-1"] = mkLive("mer-1")
-	ws.destroyErr = fmt.Errorf("gitworktree: refusing to remove: %w", ports.ErrWorkspaceDirty)
-	freed, err := m.Kill(ctx, "mer-1")
+	dirtyWorkspace(ws, ports.UncommittedFile{Path: "src/main.go", Status: ports.UncommittedModified})
+
+	res, err := m.Kill(ctx, "mer-1", KillOptions{})
 	if err != nil {
-		t.Fatalf("kill dirty workspace err = %v, want nil", err)
+		t.Fatalf("a refusal is a result, not an error: %v", err)
 	}
-	if freed {
-		t.Fatal("freed = true, want false for preserved workspace")
+	if res.Freed || res.Terminated {
+		t.Fatalf("res = %+v, want nothing freed and nothing terminated", res)
+	}
+	if res.Reason != ReasonWorkspaceDirty {
+		t.Fatalf("reason = %q, want %q so the caller can say WHY", res.Reason, ReasonWorkspaceDirty)
+	}
+	if len(res.Undelivered) != 1 || res.Undelivered[0].Path != "src/main.go" {
+		t.Fatalf("undelivered = %+v, want the file that stopped it, by name", res.Undelivered)
+	}
+	if rt.destroyed != 0 {
+		t.Fatal("a refused kill destroyed the runtime: it must leave the session exactly as it found it")
+	}
+	if ws.destroyed != 0 {
+		t.Fatal("a refused kill still attempted the worktree removal")
+	}
+	if st.sessions["mer-1"].IsTerminated {
+		t.Fatal("a refused kill terminated the session")
+	}
+}
+
+// The BACKGROUND teardown keeps its old contract: nobody is standing there to be
+// asked, so a dirty worktree is preserved, the session stays non-terminal, and
+// the reclaim loop retries later.
+func TestTeardown_DirtyWorkspacePreservesAndRemainsRetryable(t *testing.T) {
+	m, st, rt, ws := newManager()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	dirtyWorkspace(ws)
+	res, err := m.Teardown(ctx, "mer-1", domain.TerminationCauseAutoReclaim)
+	if err != nil {
+		t.Fatalf("teardown dirty workspace err = %v, want nil", err)
+	}
+	if res.Freed || res.Terminated {
+		t.Fatalf("res = %+v, want the workspace preserved and the row retryable", res)
+	}
+	if res.Reason != ReasonWorkspaceDirty {
+		t.Fatalf("reason = %q, want %q", res.Reason, ReasonWorkspaceDirty)
 	}
 	if rt.destroyed != 1 {
 		t.Fatal("runtime should be destroyed")
 	}
 	if st.sessions["mer-1"].IsTerminated {
 		t.Fatal("session should remain active so cleanup can be retried")
+	}
+}
+
+// The deliberate discard: the work is CAPTURED first, then the worktree is
+// force-removed, then the session ends - and the row names discard_work so the
+// record says what happened to it.
+func TestKill_DiscardUncommittedCapturesThenForceRemovesThenTerminates(t *testing.T) {
+	m, st, _, ws := newManager()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	dirtyWorkspace(ws, ports.UncommittedFile{Path: "src/main.go", Status: ports.UncommittedModified})
+	ws.stashRef = "refs/ao/preserved/mer-1"
+
+	res, err := m.Kill(ctx, "mer-1", KillOptions{DiscardUncommitted: true})
+	if err != nil {
+		t.Fatalf("deliberate discard: %v", err)
+	}
+	if !res.Terminated || !res.Freed {
+		t.Fatalf("res = %+v, want the session ended and the disk back", res)
+	}
+	if res.PreservedRef != "refs/ao/preserved/mer-1" {
+		t.Fatalf("preserved ref = %q, want the capture: a discard must stay recoverable", res.PreservedRef)
+	}
+	if ws.stashCalls != 1 {
+		t.Fatalf("stash calls = %d, want exactly one capture BEFORE the removal", ws.stashCalls)
+	}
+}
+
+// A failed capture aborts the whole discard. "Discard" is a decision about where
+// the work goes, not permission to lose it.
+func TestKill_DiscardAbortsWhenTheCaptureFails(t *testing.T) {
+	m, st, rt, ws := newManager()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	dirtyWorkspace(ws)
+	ws.stashErr = errors.New("git is unwell")
+
+	if _, err := m.Kill(ctx, "mer-1", KillOptions{DiscardUncommitted: true}); err == nil {
+		t.Fatal("a discard whose capture failed reported success")
+	}
+	if rt.destroyed != 0 || ws.destroyed != 0 {
+		t.Fatal("the teardown proceeded past a failed capture")
+	}
+	if st.sessions["mer-1"].IsTerminated {
+		t.Fatal("the session was terminated despite the capture failing")
+	}
+}
+
+// A discard asked for over a CLEAN worktree discards nothing and says so: the
+// flag is permission, not an instruction.
+func TestKill_DiscardOnACleanWorktreeIsAnOrdinaryKill(t *testing.T) {
+	m, st, _, ws := newManager()
+	st.sessions["mer-1"] = mkLive("mer-1")
+
+	res, err := m.Kill(ctx, "mer-1", KillOptions{DiscardUncommitted: true})
+	if err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	if !res.Terminated || !res.Freed || len(res.Undelivered) != 0 || res.PreservedRef != "" {
+		t.Fatalf("res = %+v, want a plain kill with nothing discarded", res)
+	}
+	if ws.stashCalls != 0 {
+		t.Fatal("a clean worktree was captured anyway")
 	}
 }
 
@@ -1045,7 +1170,7 @@ func TestKill_DeletesStaleRestoreMarker(t *testing.T) {
 		{SessionID: "mer-1", RepoName: domain.RootWorkspaceRepoName, WorktreePath: "/tmp/wt"},
 	}
 
-	freed, err := m.Kill(ctx, "mer-1")
+	freed, err := killFreed(m, "mer-1")
 	if err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
@@ -1068,7 +1193,7 @@ func TestKill_ReapsReviewerPane(t *testing.T) {
 		reaped = append(reaped, id)
 		return nil
 	})
-	if _, err := m.Kill(ctx, "mer-1"); err != nil {
+	if _, err := killFreed(m, "mer-1"); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	if len(reaped) != 1 || reaped[0] != "mer-1" {
@@ -1076,22 +1201,50 @@ func TestKill_ReapsReviewerPane(t *testing.T) {
 	}
 }
 
-// A worker with a dirty (preserved) worktree still terminates, so its reviewer
-// pane must be reaped even though the worktree is kept.
+// A worker discarded with its worktree kept for a crewmate still ENDS, so its
+// reviewer pane must be reaped even though the tree survives. The pairing that
+// matters: reviewer reaping follows TERMINATION, not disk.
 func TestKill_ReapsReviewerPaneEvenWhenWorkspacePreserved(t *testing.T) {
-	m, st, _, ws := newManager()
+	m, st, _, _ := newManager()
 	st.sessions["mer-1"] = mkLive("mer-1")
-	ws.destroyErr = fmt.Errorf("gitworktree: refusing to remove: %w", ports.ErrWorkspaceDirty)
+	// A live co-tenant on the same path: the tree survives this kill, the
+	// session does not.
+	other := mkLive("mer-2")
+	other.Metadata.WorkspacePath = st.sessions["mer-1"].Metadata.WorkspacePath
+	st.sessions["mer-2"] = other
 	var reaped []domain.SessionID
 	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
 		reaped = append(reaped, id)
 		return nil
 	})
-	if _, err := m.Kill(ctx, "mer-1"); err != nil {
+	res, err := m.Kill(ctx, "mer-1", KillOptions{})
+	if err != nil {
 		t.Fatalf("Kill: %v", err)
+	}
+	if !res.Terminated || res.Freed {
+		t.Fatalf("res = %+v, want the session ended and the shared tree kept", res)
 	}
 	if len(reaped) != 1 || reaped[0] != "mer-1" {
 		t.Fatalf("reaped = %v, want [mer-1] even with a preserved worktree", reaped)
+	}
+}
+
+// A REFUSED kill reaps nothing: the reviewer belongs to a session that is still
+// running.
+func TestKill_RefusedKillLeavesTheReviewerPaneAlone(t *testing.T) {
+	m, st, _, ws := newManager()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	dirtyWorkspace(ws)
+	var reaped []domain.SessionID
+	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
+		reaped = append(reaped, id)
+		return nil
+	})
+	if _, err := m.Kill(ctx, "mer-1", KillOptions{}); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	if len(reaped) != 0 {
+		t.Fatalf("a refused kill reaped %v; the session it refused to kill is still running", reaped)
 	}
 }
 
@@ -1102,7 +1255,7 @@ func TestKill_ReviewerReaperErrorDoesNotFailKill(t *testing.T) {
 	m.SetReviewerReaper(func(_ context.Context, _ domain.SessionID) error {
 		return errors.New("tmux is unhappy")
 	})
-	if _, err := m.Kill(ctx, "mer-1"); err != nil {
+	if _, err := killFreed(m, "mer-1"); err != nil {
 		t.Fatalf("Kill must succeed despite a reviewer-reap error: %v", err)
 	}
 }
@@ -1132,7 +1285,7 @@ func TestKill_OtherWorkspaceErrorStillFails(t *testing.T) {
 	m, st, _, ws := newManager()
 	st.sessions["mer-1"] = mkLive("mer-1")
 	ws.destroyErr = errors.New("disk on fire")
-	if _, err := m.Kill(ctx, "mer-1"); err == nil || !strings.Contains(err.Error(), "disk on fire") {
+	if _, err := killFreed(m, "mer-1"); err == nil || !strings.Contains(err.Error(), "disk on fire") {
 		t.Fatalf("kill err = %v, want workspace error surfaced", err)
 	}
 }
@@ -1221,7 +1374,7 @@ func TestKill_WorkspaceProjectDestroysChildrenBeforeRoot(t *testing.T) {
 		{SessionID: "mer-1", RepoName: "api", Branch: "ao/mer-1", WorktreePath: "/ws/mer-1/api"},
 	}
 
-	freed, err := m.Kill(ctx, "mer-1")
+	freed, err := killFreed(m, "mer-1")
 	if err != nil || !freed {
 		t.Fatalf("freed=%v err=%v", freed, err)
 	}
@@ -1250,7 +1403,7 @@ func TestKill_WorkspaceProjectFailsClosedOnUnregisteredChildRows(t *testing.T) {
 		{SessionID: "mer-1", RepoName: "api", Branch: "ao/mer-1", WorktreePath: "/ws/mer-1/api"},
 	}
 
-	freed, err := m.Kill(ctx, "mer-1")
+	freed, err := killFreed(m, "mer-1")
 	if err == nil || !strings.Contains(err.Error(), "old-api") {
 		t.Fatalf("freed=%v err=%v, want unresolved historical row error", freed, err)
 	}
@@ -1265,7 +1418,7 @@ func TestKill_WorkspaceProjectFailsClosedOnUnregisteredChildRows(t *testing.T) {
 	}
 }
 
-func TestKill_WorkspaceProjectDirtyRowRefusesRemoval(t *testing.T) {
+func TestTeardown_WorkspaceProjectDirtyRowRefusesRemoval(t *testing.T) {
 	m, st, _, ws := newManager()
 	ws.destroyErr = fmt.Errorf("dirty: %w", ports.ErrWorkspaceDirty)
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Path: "/repo/mer", Kind: domain.ProjectKindWorkspace, Config: testRoleAgents()}
@@ -1281,9 +1434,9 @@ func TestKill_WorkspaceProjectDirtyRowRefusesRemoval(t *testing.T) {
 		{SessionID: "mer-1", RepoName: "api", Branch: "ao/mer-1", WorktreePath: "/ws/mer-1/api"},
 	}
 
-	freed, err := m.Kill(ctx, "mer-1")
-	if err != nil || freed {
-		t.Fatalf("freed=%v err=%v, want dirty row to preserve workspace", freed, err)
+	res, err := m.Teardown(ctx, "mer-1", domain.TerminationCauseAutoReclaim)
+	if err != nil || res.Freed {
+		t.Fatalf("res=%+v err=%v, want dirty row to preserve workspace", res, err)
 	}
 	want := []string{"Destroy:api"}
 	if got := ws.calls; strings.Join(got, ",") != strings.Join(want, ",") {
@@ -1299,7 +1452,7 @@ func TestKill_RuntimeDestroyFailureLeavesSessionActive(t *testing.T) {
 	rt.destroyErr = errors.New("tmux transient")
 	st.sessions["mer-1"] = mkLive("mer-1")
 
-	freed, err := m.Kill(ctx, "mer-1")
+	freed, err := killFreed(m, "mer-1")
 	if err == nil || !strings.Contains(err.Error(), "runtime") {
 		t.Fatalf("freed=%v err=%v, want runtime error", freed, err)
 	}
@@ -3397,7 +3550,7 @@ func TestRestoreAll_KilledSessionNotResurrectedOnSecondBoot(t *testing.T) {
 
 	// Simulate the user killing the relaunched session before the next quit, so
 	// it has no fresh marker, then a second boot.
-	if _, err := m.Kill(ctx, "mer-1"); err != nil {
+	if _, err := killFreed(m, "mer-1"); err != nil {
 		t.Fatalf("kill err = %v", err)
 	}
 	if err := m.RestoreAll(ctx); err != nil {

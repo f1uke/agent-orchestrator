@@ -1107,11 +1107,13 @@ func (m *Manager) rollbackSpawn(ctx context.Context, id domain.SessionID) (delet
 	if deleted {
 		return true, false, nil
 	}
-	killed, err = m.Kill(ctx, id)
+	// The background policy on purpose: a spawn that failed part-way is being
+	// undone by machinery, not by a person who can be asked about a dirty tree.
+	res, err := m.Teardown(ctx, id, domain.TerminationCauseKill)
 	if err != nil {
 		return false, false, err
 	}
-	return false, killed, nil
+	return false, res.Terminated, nil
 }
 
 // RollbackSpawn is the public surface of rollbackSpawn for service-layer callers.
@@ -1119,18 +1121,39 @@ func (m *Manager) RollbackSpawn(ctx context.Context, id domain.SessionID) (delet
 	return m.rollbackSpawn(ctx, id)
 }
 
-// Kill tears down the runtime and workspace, then records terminal intent with
-// the LCM. A workspace teardown refused by the worktree-remove safety
-// (uncommitted work) is never forced: Kill succeeds with freed=false,
-// signalling the workspace was preserved and the session is left retryable.
+// Kill is the teardown a PERSON orders, and it is the only one that may refuse.
+//
+// The difference from the background teardowns is who is standing in front of
+// the result. A reclaim loop that meets a worktree full of uncommitted work
+// should keep the tree and try again later; a person who typed `kill` and got
+// "killed (workspace preserved)" over a row nothing touched has been lied to.
+// So an interactive kill probes the tree FIRST and, finding work that exists
+// nowhere else, returns without touching the runtime, the reviewer pane, the
+// worktree or the row - and says which files stopped it.
+//
+// DiscardUncommitted is how that refusal is answered. It is deliberate by
+// construction (the caller has to ask for it, having been told what is there),
+// and it is not a `rm -rf`: the work is captured to refs/ao/preserved/<id>
+// first, the way RetireForReplacement has always captured a replaced
+// orchestrator's tree, and the branch and its commits are never touched.
 //
 // A session whose runtime handle or workspace path is missing (e.g. spawn
 // failed partway, handle lost after a crash) is still terminated after the
 // available destroy steps are skipped so it can be cleaned up from the
 // dashboard.
-func (m *Manager) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
-	res, err := m.Teardown(ctx, id, domain.TerminationCauseKill)
-	return res.Freed, err
+func (m *Manager) Kill(ctx context.Context, id domain.SessionID, opts KillOptions) (TeardownResult, error) {
+	policy := DirtyRefuse
+	if opts.DiscardUncommitted {
+		policy = DirtyDiscard
+	}
+	return m.teardown(ctx, id, domain.TerminationCauseKill, policy)
+}
+
+// KillOptions carries the one decision a caller of Kill can make.
+type KillOptions struct {
+	// DiscardUncommitted permits the teardown to destroy work the worktree holds
+	// and nothing else does. Without it a dirty worktree refuses the kill.
+	DiscardUncommitted bool
 }
 
 // TeardownResult reports what a teardown attempt actually did to the session's
@@ -1148,7 +1171,42 @@ type TeardownResult struct {
 	Reason string
 	// WorkspacePath is where the workspace was, for the reclaim log.
 	WorkspacePath string
+	// Terminated says whether the SESSION actually ended. It is not implied by
+	// anything else here: a teardown can free no disk and still terminate (a
+	// crew's shared tree), and it can leave both the disk and the row exactly as
+	// it found them (a refusal). Without this field a caller has no way to tell
+	// "preserved the worktree, ended the session" from "did nothing at all", and
+	// every caller that guessed guessed the first.
+	Terminated bool
+	// Undelivered is the work the worktree holds and nothing else does, listed
+	// when Reason is ReasonWorkspaceDirty. It is what a refusal has to say to be
+	// worth anything, and what a discard has to show before it runs.
+	Undelivered []ports.UncommittedFile
+	// PreservedRef names the ref a discard captured the undelivered work at
+	// (refs/ao/preserved/<session-id>), so "thrown away" is still recoverable by
+	// someone who changes their mind. Empty when nothing was captured.
+	PreservedRef string
 }
+
+// DirtyPolicy decides what a teardown does when the worktree holds work that
+// exists nowhere else. It is the one axis on which AO's teardowns genuinely
+// differ, so it is a parameter rather than a second teardown implementation.
+type DirtyPolicy int
+
+const (
+	// DirtyPreserve keeps the worktree and leaves the row non-terminal, so the
+	// attempt can be retried once the work has been dealt with. This is what
+	// every BACKGROUND teardown wants - auto-reclaim, cleanup, project teardown,
+	// the crew fan-out - because none of them has anyone to ask.
+	DirtyPreserve DirtyPolicy = iota
+	// DirtyRefuse touches nothing at all and reports what stopped it. For the
+	// interactive kill: a person is waiting for an answer, and half-completing a
+	// teardown they will be told was refused is the worst of both.
+	DirtyRefuse
+	// DirtyDiscard captures the work to refs/ao/preserved/<id> and then removes
+	// the worktree anyway. Only ever reached because someone asked for it.
+	DirtyDiscard
+)
 
 // Teardown reasons.
 const (
@@ -1167,15 +1225,22 @@ const (
 	ReasonWorkspaceShared = "workspace_shared"
 )
 
-// Teardown is Kill's implementation, reporting the full outcome. Kill and the
-// auto-reclaim loop share it so there is exactly one teardown code path and no
-// second, divergent reclaimer to keep in step.
+// Teardown is the BACKGROUND teardown: auto-reclaim, cleanup, project teardown
+// and the crew fan-out. A worktree holding uncommitted work is preserved and the
+// row is left non-terminal so the attempt can be retried; nobody is standing
+// there to be asked. Kill is the same code path with a dirty policy that can
+// refuse or discard instead - one teardown implementation, no second reclaimer
+// to keep in step.
 //
 // Because they share it, cause is how the two stay distinguishable ON THE
 // RECORD: the terminated session names the operation that ordered its teardown,
 // so "did the reclaimer take my live worker?" is answered by the row rather than
 // by correlating logs after the fact.
 func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause string) (TeardownResult, error) {
+	return m.teardown(ctx, id, cause, DirtyPreserve)
+}
+
+func (m *Manager) teardown(ctx context.Context, id domain.SessionID, cause string, dirty DirtyPolicy) (TeardownResult, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
 		return TeardownResult{}, fmt.Errorf("kill %s: %w", id, err)
@@ -1194,6 +1259,52 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 	} else if ok {
 		workspaceProjectRows = rows
 		workspaceProject = true
+	}
+
+	res := TeardownResult{WorkspacePath: ws.Path}
+	// THE REFUSAL, and it has to be HERE - above the crew fan-out, above the
+	// runtime destroy, above the knowledge rescue and the reviewer reap. A kill
+	// that is going to be refused must leave the session exactly as it found it.
+	// The shape this replaces discovered dirtiness by ATTEMPTING the removal, so
+	// by the time the answer came back the agent's tmux was already gone and its
+	// reviewer pane with it - a refusal that had already half-killed the session
+	// it was refusing to kill.
+	discarding := false
+	if dirty != DirtyPreserve {
+		// Only a teardown that will actually REMOVE the tree can lose anything.
+		// A crew member leaves dev's tree standing, and so does any session
+		// sharing a path with a live tenant - refusing those would make one
+		// agent's work in progress a reason nobody could ever close another's
+		// session. It has to be read HERE rather than reusing the refcount below:
+		// that one is taken after the crew fan-out, which is itself something a
+		// refusal must not have done. One extra session read, on the interactive
+		// path only.
+		preflight, listErr := m.store.ListAllSessions(ctx)
+		if listErr != nil {
+			return TeardownResult{}, fmt.Errorf("kill %s: tenants: %w", id, listErr)
+		}
+		files, filesErr := m.uncommittedWork(ctx, ws, workspaceProjectRows, workspaceProject)
+		if filesErr != nil {
+			return TeardownResult{}, fmt.Errorf("kill %s: read uncommitted work: %w", id, filesErr)
+		}
+		if len(files) > 0 && !workspaceOutlivesTeardownGiven(rec, preflight) {
+			res.Undelivered = files
+			if dirty == DirtyRefuse {
+				res.Reason = ReasonWorkspaceDirty
+				return res, nil
+			}
+			// DirtyDiscard. Capture BEFORE anything is destroyed, and abort the
+			// whole teardown if the capture fails: "discard" is a decision about
+			// where the work goes, not permission to lose it. The ref outlives the
+			// worktree, so a person who changes their mind an hour later still has
+			// every byte.
+			ref, stashErr := m.captureUncommittedWork(ctx, ws, workspaceProjectRows, workspaceProject)
+			if stashErr != nil {
+				return TeardownResult{}, fmt.Errorf("kill %s: capture uncommitted work: %w", id, stashErr)
+			}
+			res.PreservedRef = ref
+			discarding = true
+		}
 	}
 
 	// A CREW is torn down as a TASK. Terminating dev is terminating the task: dev
@@ -1246,7 +1357,6 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 	// (possibly refused) workspace teardown so a preserved dirty worktree still
 	// reaps the reviewer.
 	m.reapReviewer(ctx, id)
-	res := TeardownResult{WorkspacePath: ws.Path}
 	// The tree refcount (workspaceHeldByLiveSession): a subordinate never removes
 	// dev's tree, dev keeps it while a subordinate is still alive on it, and
 	// NOBODY removes a tree another live session is standing in. Checked AFTER the
@@ -1263,7 +1373,7 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 		// crewmate.
 		res.Reason = ReasonWorkspaceShared
 	case workspaceProject:
-		cleaned, err := m.destroyWorkspaceProjectRows(ctx, workspaceProjectRows)
+		cleaned, err := m.destroyWorkspaceProjectRows(ctx, workspaceProjectRows, discarding)
 		if err != nil {
 			if errors.Is(err, ports.ErrWorkspaceDirty) {
 				res.Reason = ReasonWorkspaceDirty
@@ -1276,7 +1386,7 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 			res.Reason = ReasonWorkspaceDirty
 		}
 	case ws.Path != "":
-		if err := m.workspace.Destroy(ctx, ws); err != nil {
+		if err := m.destroyWorkspace(ctx, ws, discarding); err != nil {
 			if errors.Is(err, ports.ErrWorkspaceDirty) {
 				res.Reason = ReasonWorkspaceDirty
 				return res, nil
@@ -1294,10 +1404,88 @@ func (m *Manager) Teardown(ctx context.Context, id domain.SessionID, cause strin
 	if err := m.store.DeleteSessionWorktrees(ctx, id); err != nil {
 		m.logger.Warn("kill: delete restore marker failed", "sessionID", id, "error", err)
 	}
-	if err := m.lcm.MarkTerminated(ctx, id, cause); err != nil {
+	// The row names what actually happened to it. A kill that destroyed work is
+	// not the same event as a kill that did not, and the difference has to be
+	// findable a week later without correlating logs.
+	terminalCause := cause
+	if discarding {
+		terminalCause = domain.TerminationCauseDiscardWork
+	}
+	if err := m.lcm.MarkTerminated(ctx, id, terminalCause); err != nil {
 		return TeardownResult{}, fmt.Errorf("kill %s: %w", id, err)
 	}
+	res.Terminated = true
 	return res, nil
+}
+
+// uncommittedWork lists what tearing this session's workspace down would
+// destroy: one worktree, or every repo of a workspace project.
+//
+// Repo-qualified paths for a workspace project ("api/src/main.go"), because an
+// unqualified `src/main.go` in a list drawn from four repos names nothing.
+func (m *Manager) uncommittedWork(ctx context.Context, ws ports.WorkspaceInfo, rows []ports.WorkspaceRepoInfo, workspaceProject bool) ([]ports.UncommittedFile, error) {
+	if !workspaceProject {
+		if ws.Path == "" {
+			return nil, nil
+		}
+		return m.workspace.UncommittedFiles(ctx, ws)
+	}
+	var all []ports.UncommittedFile
+	for _, row := range rows {
+		if row.Path == "" {
+			continue
+		}
+		files, err := m.workspace.UncommittedFiles(ctx, workspaceInfoFromRepoInfo(row))
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			if row.RepoName != "" && row.RepoName != domain.RootWorkspaceRepoName {
+				f.Path = row.RepoName + "/" + f.Path
+			}
+			all = append(all, f)
+		}
+	}
+	return all, nil
+}
+
+// captureUncommittedWork stashes every worktree this session owns to
+// refs/ao/preserved/<session-id> and returns the ref, so a discard is
+// recoverable rather than final. A workspace project writes one ref per repo and
+// they share the session's name, so the ref returned for the record is the
+// first; the others are found the same way, under the same session id.
+func (m *Manager) captureUncommittedWork(ctx context.Context, ws ports.WorkspaceInfo, rows []ports.WorkspaceRepoInfo, workspaceProject bool) (string, error) {
+	if !workspaceProject {
+		if ws.Path == "" {
+			return "", nil
+		}
+		return m.workspace.StashUncommitted(ctx, ws)
+	}
+	first := ""
+	for _, row := range rows {
+		if row.Path == "" {
+			continue
+		}
+		ref, err := m.workspace.StashUncommitted(ctx, workspaceInfoFromRepoInfo(row))
+		if err != nil {
+			return "", err
+		}
+		if first == "" {
+			first = ref
+		}
+	}
+	return first, nil
+}
+
+// destroyWorkspace removes one worktree, forcing past the dirty refusal only
+// when this teardown has already CAPTURED what that refusal was protecting.
+// Force is never reachable without a preceding successful capture: the discard
+// path aborts the whole teardown if the capture fails.
+func (m *Manager) destroyWorkspace(ctx context.Context, ws ports.WorkspaceInfo, discarding bool) error {
+	if discarding {
+		return m.workspace.ForceDestroy(ctx, ws)
+	}
+	return m.workspace.Destroy(ctx, ws)
 }
 
 // PurgeSession tears the session down like Kill, then hard-deletes its row and
@@ -1571,14 +1759,16 @@ func (m *Manager) Restart(ctx context.Context, id domain.SessionID) (domain.Sess
 // process, record that it is gone, relaunch it on the same workspace.
 //
 // It deliberately does none of Kill's teardown. Kill destroys the WORKSPACE, and
-// refuses (ErrWorkspaceDirty) when the worktree holds uncommitted work — that
-// guard is right for a teardown and stays exactly where it is, but routing
-// Restart through it was the bug: Kill destroyed the runtime first and returned
-// on the dirty refusal BEFORE marking the session terminated, so the agent was
-// already dead while Restore still saw a live record and refused with
-// ErrNotRestorable (HTTP 409). Nothing flips such a session to terminated later
-// (Reconcile only runs at daemon boot), so the first click left the session
-// permanently unrestartable with a dead terminal.
+// refuses when the worktree holds uncommitted work — that guard is right for a
+// teardown and stays exactly where it is, but routing Restart through it was the
+// bug: Kill used to destroy the runtime first and return on the dirty refusal
+// BEFORE marking the session terminated, so the agent was already dead while
+// Restore still saw a live record and refused with ErrNotRestorable (HTTP 409).
+// Nothing flips such a session to terminated later (Reconcile only runs at daemon
+// boot), so the first click left the session permanently unrestartable with a dead
+// terminal. (Kill now probes before it destroys anything, so a refusal no longer
+// leaves that wreckage — but Restart still wants none of the teardown, for the
+// reason below.)
 //
 // Restart wants none of what that guard protects. It does not change the branch,
 // does not sync to base, and does not clean anything: the same agent comes back
@@ -2522,7 +2712,7 @@ func (m *Manager) saveAndTeardownWorkspaceProject(ctx context.Context, rec domai
 	return nil
 }
 
-func (m *Manager) destroyWorkspaceProjectRows(ctx context.Context, rows []ports.WorkspaceRepoInfo) (bool, error) {
+func (m *Manager) destroyWorkspaceProjectRows(ctx context.Context, rows []ports.WorkspaceRepoInfo, discarding bool) (bool, error) {
 	cleaned := false
 	var firstErr error
 	for i := len(rows) - 1; i >= 0; i-- {
@@ -2530,7 +2720,7 @@ func (m *Manager) destroyWorkspaceProjectRows(ctx context.Context, rows []ports.
 			continue
 		}
 		info := workspaceInfoFromRepoInfo(rows[i])
-		if err := m.workspace.Destroy(ctx, info); err != nil {
+		if err := m.destroyWorkspace(ctx, info, discarding); err != nil {
 			if errors.Is(err, ports.ErrWorkspaceDirty) {
 				return cleaned, err
 			}
@@ -2695,7 +2885,7 @@ func (m *Manager) Cleanup(ctx context.Context, project domain.ProjectID) (Cleanu
 			result.Skipped = append(result.Skipped, CleanupSkip{SessionID: rec.ID, Reason: "workspace teardown failed"})
 			continue
 		} else if ok {
-			if _, err := m.destroyWorkspaceProjectRows(ctx, rows); err != nil {
+			if _, err := m.destroyWorkspaceProjectRows(ctx, rows, false); err != nil {
 				if !errors.Is(err, ports.ErrWorkspaceDirty) {
 					m.logger.Warn("cleanup: workspace teardown failed", "sessionID", rec.ID, "path", ws.Path, "error", err)
 				}

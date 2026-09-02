@@ -84,6 +84,7 @@ describe("MergeSuspendChip", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/kill", {
 				params: { path: { sessionId: "sess-9" } },
+				body: { discardUncommitted: false },
 			}),
 		);
 	});

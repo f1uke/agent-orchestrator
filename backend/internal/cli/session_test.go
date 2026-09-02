@@ -91,7 +91,7 @@ func sessionCommandServer(t *testing.T) (*httptest.Server, *sessionRequestLog) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/cleanup":
 			_, _ = io.WriteString(w, `{"ok":true,"cleaned":["demo-old","demo-orch"],"skipped":[]}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/demo-1/kill":
-			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","freed":true}`)
+			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","freed":true,"terminated":true}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/demo-1/restore":
 			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","session":`+sessionJSON("demo-1", "demo", "worker", "idle", false)+`}`)
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/sessions/demo-1":
@@ -245,15 +245,15 @@ func TestSessionKill_SuccessWithProjectScope(t *testing.T) {
 	}
 }
 
-// TestSessionKill_PreservedWorkspaceNote: freed=false means the daemon
-// terminated the session but kept the worktree (uncommitted changes are never
-// force-deleted) — the CLI must say so instead of implying a full teardown.
+// TestSessionKill_PreservedWorkspaceNote: terminated with freed=false means the
+// daemon ended the session but kept the worktree (a crewmate is still in it, or
+// removal was refused) — the CLI must say so instead of implying a full teardown.
 func TestSessionKill_PreservedWorkspaceNote(t *testing.T) {
 	cfg := setConfigEnv(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/demo-1/kill" {
-			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","freed":false}`)
+			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","freed":false,"terminated":true}`)
 			return
 		}
 		http.NotFound(w, r)
@@ -746,5 +746,114 @@ func TestWriteSessionDetailsOmitsQueueLinesWhenThereIsNothingToSay(t *testing.T)
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("output should not mention %q for a live session with no held messages:\n%s", unwanted, out)
 		}
+	}
+}
+
+// killRefusalServer answers the plain kill with the daemon's refusal and the
+// discard with a success, so a test can drive the whole two-step exactly as the
+// daemon presents it.
+func killRefusalServer(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sessions/demo-1/kill" {
+			http.NotFound(w, r)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		if strings.Contains(string(raw), `"discardUncommitted":true`) {
+			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","freed":true,"terminated":true,`+
+				`"discarded":[{"path":"src/main.go","status":"modified"},{"path":"NewFile.swift","status":"untracked"}],`+
+				`"preservedRef":"refs/ao/preserved/demo-1"}`)
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"conflict","code":"SESSION_HAS_UNDELIVERED_WORK",`+
+			`"message":"demo-1 still holds 2 uncommitted files that no pull request carries, so it was not killed and nothing was torn down. Finish and deliver the work, or discard it deliberately.",`+
+			`"details":{"reason":"workspace_dirty","files":[{"path":"src/main.go","status":"modified"},{"path":"NewFile.swift","status":"untracked"}]}}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &bodies
+}
+
+// The incident's command. A refused kill must FAIL - non-zero exit - and say
+// which files refused it. The old output was "session demo-1 killed (workspace
+// preserved)" and exit 0 over a row nothing had touched.
+func TestSessionKill_RefusalFailsAndNamesTheFiles(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, bodies := killRefusalServer(t)
+	writeRunFileFor(t, cfg, srv)
+
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "session", "kill", "demo-1")
+	if err == nil {
+		t.Fatalf("a refused kill exited 0; output was:\n%s", out)
+	}
+	msg := err.Error()
+	for _, want := range []string{"src/main.go", "NewFile.swift", "modified", "untracked", "--discard-uncommitted"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("refusal must contain %q; got:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(out, "killed") {
+		t.Fatalf("a refused kill printed a success line:\n%s", out)
+	}
+	if len(*bodies) != 1 {
+		t.Fatalf("requests = %v, want exactly one (the refused kill)", *bodies)
+	}
+}
+
+// The deliberate path: the files are printed BEFORE they go, and the plain kill
+// that produced that list is the same side-effect-free probe the daemon refuses
+// with - so a discard can never happen without the list being shown, even when
+// the flag was typed straight away.
+func TestSessionKill_DiscardListsTheWorkBeforeDestroyingIt(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, bodies := killRefusalServer(t)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"session", "kill", "demo-1", "--discard-uncommitted")
+	if err != nil {
+		t.Fatalf("deliberate discard failed: %v\nstderr=%s", err, errOut)
+	}
+	if len(*bodies) != 2 || !strings.Contains((*bodies)[1], `"discardUncommitted":true`) {
+		t.Fatalf("requests = %v, want the preview then the discard", *bodies)
+	}
+	listedAt := strings.Index(out, "src/main.go")
+	discardedAt := strings.Index(out, "discarded 2 file(s)")
+	if listedAt < 0 || discardedAt < 0 || listedAt > discardedAt {
+		t.Fatalf("the files must be listed BEFORE the discard is reported; got:\n%s", out)
+	}
+	if !strings.Contains(out, "refs/ao/preserved/demo-1") {
+		t.Fatalf("output must say where the work was captured:\n%s", out)
+	}
+	if !strings.Contains(out, "session demo-1 killed") {
+		t.Fatalf("the discard did not report the kill:\n%s", out)
+	}
+}
+
+// terminated=false is the shape that started all this: the daemon did nothing,
+// so the CLI may not print a success line for it.
+func TestSessionKill_UnterminatedResultIsNotReportedAsAKill(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/demo-1/kill" {
+			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","freed":false,"terminated":false}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "session", "kill", "demo-1")
+	if err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	if !strings.Contains(out, "was NOT killed") {
+		t.Fatalf("output = %q, want it to say the session was not killed", out)
 	}
 }

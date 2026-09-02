@@ -121,9 +121,13 @@ type commander interface {
 	// current holder down first. It is the human's (and the orchestrator's) way of
 	// saying "qa's turn now" while automatic handover is deliberately not built.
 	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
-	Kill(ctx context.Context, id domain.SessionID) (bool, error)
-	// Teardown is Kill reporting the full outcome, including WHY a workspace was
-	// preserved. The auto-reclaim loop needs that distinction; Kill's bool loses it.
+	// Kill is the teardown a PERSON ordered: it may REFUSE (a worktree holding
+	// work nobody has seen), and it discards that work only when explicitly told
+	// to. Its result says what actually happened - including whether the session
+	// ended at all.
+	Kill(ctx context.Context, id domain.SessionID, opts sessionmanager.KillOptions) (sessionmanager.TeardownResult, error)
+	// Teardown is the BACKGROUND teardown (auto-reclaim, project teardown): it
+	// preserves a dirty worktree and reports why rather than refusing.
 	Teardown(ctx context.Context, id domain.SessionID, cause string) (sessionmanager.TeardownResult, error)
 	RetireForReplacement(ctx context.Context, id domain.SessionID) error
 	Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error)
@@ -617,10 +621,83 @@ func (s *Service) Restart(ctx context.Context, id domain.SessionID) (domain.Sess
 	return s.toSession(ctx, rec)
 }
 
-// Kill delegates terminal intent and teardown to the internal manager.
-func (s *Service) Kill(ctx context.Context, id domain.SessionID) (bool, error) {
-	freed, err := s.manager.Kill(ctx, id)
-	return freed, toAPIError(err)
+// KillInput carries the one decision the caller of a kill can make: whether
+// they mean to destroy work the worktree holds and nothing else does.
+type KillInput struct {
+	DiscardUncommitted bool
+}
+
+// KillOutcome is what a kill ACTUALLY did. Every field exists because a caller
+// was previously left guessing at it from `freed`.
+type KillOutcome struct {
+	// Terminated says the session ended. A kill that freed no disk may still
+	// have ended the session (a crew's shared tree); a refused one ends nothing.
+	Terminated bool
+	// Freed says the worktree is gone from disk.
+	Freed bool
+	// Reason names why the worktree survived, when it did.
+	Reason string
+	// Discarded lists the work this kill destroyed, and PreservedRef says where
+	// it was captured first. Both empty unless the caller asked to discard.
+	Discarded    []ports.UncommittedFile
+	PreservedRef string
+}
+
+// ErrUndeliveredWork is the code a refused kill answers with.
+const ErrUndeliveredWork = "SESSION_HAS_UNDELIVERED_WORK"
+
+// Kill ends one session on a person's order.
+//
+// It REFUSES when the worktree holds work that exists nowhere else - no commit,
+// no pull request - and the caller has not said to discard it. The refusal is a
+// real error (409, non-zero exit) carrying the file list in Details, because the
+// only thing worse than refusing is refusing silently: the failure this replaces
+// answered 200 "killed (workspace preserved)" over a row it had not touched.
+//
+// The refusal is also the PREVIEW. A caller that means to discard runs a plain
+// kill first, is told exactly which files are at stake, and asks again with
+// DiscardUncommitted - so nothing is ever thrown away by someone who was not
+// shown it first.
+func (s *Service) Kill(ctx context.Context, id domain.SessionID, in KillInput) (KillOutcome, error) {
+	res, err := s.manager.Kill(ctx, id, sessionmanager.KillOptions{DiscardUncommitted: in.DiscardUncommitted})
+	if err != nil {
+		return KillOutcome{}, toAPIError(err)
+	}
+	if res.Reason == sessionmanager.ReasonWorkspaceDirty && !res.Terminated {
+		return KillOutcome{}, undeliveredWorkError(id, res)
+	}
+	out := KillOutcome{
+		Terminated:   res.Terminated,
+		Freed:        res.Freed,
+		Reason:       res.Reason,
+		PreservedRef: res.PreservedRef,
+	}
+	if in.DiscardUncommitted {
+		out.Discarded = res.Undelivered
+	}
+	return out, nil
+}
+
+// undeliveredWorkError renders a refusal a person can act on: what is in the
+// way, by name, and the two things they can do about it.
+func undeliveredWorkError(id domain.SessionID, res sessionmanager.TeardownResult) error {
+	files := make([]map[string]any, 0, len(res.Undelivered))
+	for _, f := range res.Undelivered {
+		files = append(files, map[string]any{"path": f.Path, "status": f.Status})
+	}
+	noun := "files"
+	if len(res.Undelivered) == 1 {
+		noun = "file"
+	}
+	return apierr.Conflict(ErrUndeliveredWork, fmt.Sprintf(
+		"%s still holds %d uncommitted %s that no pull request carries, so it was not killed and nothing was torn down. Finish and deliver the work, or discard it deliberately.",
+		id, len(res.Undelivered), noun,
+	), map[string]any{
+		"reason":        res.Reason,
+		"sessionId":     string(id),
+		"workspacePath": res.WorkspacePath,
+		"files":         files,
+	})
 }
 
 // RollbackSpawn deletes a seed-state session row, or falls back to a Kill if
@@ -1069,8 +1146,12 @@ func (s *Service) TeardownProject(ctx context.Context, project domain.ProjectID)
 		if rec.IsTerminated {
 			continue
 		}
-		if _, err := s.Kill(ctx, rec.ID); err != nil {
-			return err
+		// The BACKGROUND teardown, not the interactive kill: a project being torn
+		// down has no one standing there to be asked about a dirty worktree, and
+		// its trees are preserved on purpose (they outlive the row and are swept
+		// by Cleanup).
+		if _, err := s.manager.Teardown(ctx, rec.ID, domain.TerminationCauseKill); err != nil {
+			return toAPIError(err)
 		}
 	}
 	_, err = s.Cleanup(ctx, project)
