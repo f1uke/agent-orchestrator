@@ -364,9 +364,11 @@ function InlineToken({ token, navigation }: { token: Token; navigation?: NoteNav
 
 		case "wikilink": {
 			const link = token as WikilinkToken;
-			// An unaliased link keeps its brackets: that is what the note says, and
-			// it is how the vault's own editor draws it. An alias replaces them.
-			const text = link.aliased ? link.label : `[[${link.label}]]`;
+			// The brackets are SYNTAX, not text: Obsidian draws `[[a-note]]` as
+			// "a-note" and `[[note|shown]]` as "shown", and a rendered view that
+			// keeps them makes every link read like a typo. The pill is what says
+			// this is a link.
+			const text = link.label;
 			if (!navigation?.onOpenWikilink) return <span className="note-prose__wikilink">{text}</span>;
 			return (
 				<button

@@ -192,7 +192,9 @@ describe("WikiPage — reading a note", () => {
 		renderPage();
 		await userEvent.click(await screen.findByRole("button", { name: /index\.md/ }));
 		expect(await screen.findByText("Linked from")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "[[context-window]]" })).toBeInTheDocument();
+		// Named the way the note itself is, not the way a wikilink is spelled:
+		// the brackets are syntax, and the vault's own editor never shows them.
+		expect(screen.getByRole("button", { name: "context-window" })).toBeInTheDocument();
 	});
 
 	it("back is disabled with nowhere to go, rather than disappearing", async () => {

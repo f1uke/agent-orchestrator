@@ -32,9 +32,9 @@ export type WikilinkToken = {
 	/** What to draw. The alias when there is one, else the target. */
 	label: string;
 	/**
-	 * Whether the link carried a `|alias`. An unaliased link keeps its `[[ ]]`
-	 * on screen (it is how the note is written, and how Obsidian shows it);
-	 * an aliased one shows only the alias, brackets and all machinery gone.
+	 * Whether the link carried a `|alias`. Both spellings render as `label`
+	 * alone — the brackets are syntax — so this exists for a writer that puts a
+	 * link BACK into the source, which has to know which form to restore.
 	 */
 	aliased: boolean;
 };

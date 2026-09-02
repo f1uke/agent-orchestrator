@@ -110,7 +110,7 @@ export function WikiNoteView({
 												onClick={() => onOpenNote(path)}
 												title={path}
 											>
-												[[{baseName(path).replace(/\.md$/i, "")}]]
+												{baseName(path).replace(/\.md$/i, "")}
 											</button>
 										))}
 									</div>
