@@ -2,10 +2,13 @@ package gitworktree
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // This file separates the two things `git status --porcelain` lumps together on
@@ -201,13 +204,78 @@ func isConfinedTo(root, target string) bool {
 // Anything not positively identified as regenerable build output is blocking.
 // That default is the safety property: an unrecognised entry, an unparseable
 // line, or an empty pattern list all steer towards refusing to delete.
-func classifyStatus(out string, patterns []string) (blocking, artifacts []string) {
+func classifyStatus(out string, patterns []string) (blocking []statusEntry, artifacts []string) {
 	for _, e := range parseStatusZ(out) {
 		if e.code == "??" && isRegenerable(e.rel, patterns) {
 			artifacts = append(artifacts, e.rel)
 			continue
 		}
-		blocking = append(blocking, e.rel)
+		blocking = append(blocking, e)
 	}
 	return blocking, artifacts
+}
+
+// statusWord renders git's two-letter XY code as a word a person reading a
+// "this is what you are about to lose" list can act on.
+//
+// It reads the INDEX column first and falls back to the worktree column, so a
+// file that is staged and then edited again ("MM") is reported once, by the
+// strongest thing that happened to it. An unrecognised pair is "changed" rather
+// than a guess: the path is the load-bearing half of the line.
+func statusWord(code string) string {
+	if len(code) < 2 {
+		return ports.UncommittedChanged
+	}
+	if code == "??" {
+		return ports.UncommittedUntracked
+	}
+	if code[0] == 'U' || code[1] == 'U' || code == "AA" || code == "DD" {
+		return ports.UncommittedConflicted
+	}
+	for _, c := range []byte{code[0], code[1]} {
+		switch c {
+		case 'M', 'T':
+			return ports.UncommittedModified
+		case 'A':
+			return ports.UncommittedAdded
+		case 'D':
+			return ports.UncommittedDeleted
+		case 'R', 'C':
+			return ports.UncommittedRenamed
+		}
+	}
+	return ports.UncommittedChanged
+}
+
+// UncommittedFiles lists what a teardown of this worktree would destroy.
+//
+// It is built from the SAME classifier the refusing Destroy stands on, so the
+// list a person is shown before discarding is the list that blocked them, file
+// for file. Reimplementing "what counts as dirty?" here would be a second
+// opinion, and the two would drift the first time either one learned a new
+// artefact pattern.
+//
+// A worktree that is not there any more is not an error: a session keeps its
+// workspace path after its tree is reclaimed, and "nothing to lose" is the
+// truthful answer for it.
+func (w *Workspace) UncommittedFiles(ctx context.Context, info ports.WorkspaceInfo) ([]ports.UncommittedFile, error) {
+	if info.Path == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(info.Path); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("gitworktree: stat %q: %w", info.Path, err)
+	}
+	out, err := w.run(ctx, w.binary, statusPorcelainZArgs(info.Path)...)
+	if err != nil {
+		return nil, fmt.Errorf("gitworktree: status %q: %w", info.Path, err)
+	}
+	blocking, _ := classifyStatus(string(out), w.artifactPatterns())
+	files := make([]ports.UncommittedFile, 0, len(blocking))
+	for _, e := range blocking {
+		files = append(files, ports.UncommittedFile{Path: e.rel, Status: statusWord(e.code)})
+	}
+	return files, nil
 }

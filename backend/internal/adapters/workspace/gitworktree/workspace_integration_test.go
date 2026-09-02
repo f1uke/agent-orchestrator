@@ -248,3 +248,90 @@ func run(t *testing.T, binary string, args ...string) {
 		t.Fatalf("%s %s: %v\n%s", binary, strings.Join(args, " "), err, out)
 	}
 }
+
+// TestWorkspaceIntegrationUncommittedFiles proves, against real git, that the
+// list a person is shown before discarding is exactly the set that blocked the
+// teardown - and that it is a LIST, with each file's fate named.
+//
+// Three shapes against real git: a tracked edit, a brand-new file, and build
+// output a rebuild reproduces. Only the last is absent from the answer, because
+// it is the only one nothing is lost by. (statusWord's full code table is unit
+// tested next door.)
+func TestWorkspaceIntegrationUncommittedFiles(t *testing.T) {
+	git := requireGit(t)
+	tmp := t.TempDir()
+	repo := setupOriginClone(t, git, tmp)
+	root := filepath.Join(tmp, "managed")
+	ws, err := New(Options{
+		Binary: git, ManagedRoot: root, RepoResolver: StaticRepoResolver{"proj": repo},
+		ArtifactPatterns: func() []string { return []string{"derivedDataPath"} },
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	ctx := context.Background()
+	info, err := ws.Create(ctx, ports.WorkspaceConfig{ProjectID: "proj", SessionID: "sess", Branch: "feature/listing"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A clean tree loses nothing, and must say so rather than refusing a kill.
+	files, err := ws.UncommittedFiles(ctx, info)
+	if err != nil {
+		t.Fatalf("UncommittedFiles on a clean tree: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("clean worktree reported %+v; a kill would be refused over nothing", files)
+	}
+
+	seeded := filepath.Join(info.Path, "README.md")
+	if _, statErr := os.Stat(seeded); statErr != nil {
+		t.Fatalf("fixture repo has no README.md to modify: %v", statErr)
+	}
+	if err := os.WriteFile(seeded, []byte("edited by the agent\n"), 0o600); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "NewFile.swift"), []byte("struct New {}\n"), 0o600); err != nil {
+		t.Fatalf("write new file: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(info.Path, "derivedDataPath"), 0o750); err != nil {
+		t.Fatalf("mkdir build output: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "derivedDataPath", "cache.bin"), []byte("rebuildable\n"), 0o600); err != nil {
+		t.Fatalf("write build output: %v", err)
+	}
+
+	files, err = ws.UncommittedFiles(ctx, info)
+	if err != nil {
+		t.Fatalf("UncommittedFiles: %v", err)
+	}
+	got := map[string]string{}
+	for _, f := range files {
+		got[f.Path] = f.Status
+	}
+	if got["README.md"] != ports.UncommittedModified {
+		t.Fatalf("tracked edit = %q, want %q; files=%+v", got["README.md"], ports.UncommittedModified, files)
+	}
+	if got["NewFile.swift"] != ports.UncommittedUntracked {
+		t.Fatalf("new file = %q, want %q; files=%+v", got["NewFile.swift"], ports.UncommittedUntracked, files)
+	}
+	if _, listed := got["derivedDataPath/"]; listed {
+		t.Fatalf("regenerable build output was listed as work to lose: %+v", files)
+	}
+
+	// And the list agrees with the refusal it explains: the same tree makes the
+	// non-force Destroy refuse. Two answers to one question is how they drift.
+	if err := ws.Destroy(ctx, info); !errors.Is(err, ports.ErrWorkspaceDirty) {
+		t.Fatalf("Destroy = %v, want ErrWorkspaceDirty over the same files UncommittedFiles listed", err)
+	}
+
+	// A worktree that is already gone loses nothing either: a reclaimed session
+	// keeps its path for ever, and must not refuse a kill because of it.
+	if err := ws.ForceDestroy(ctx, info); err != nil {
+		t.Fatalf("force destroy: %v", err)
+	}
+	files, err = ws.UncommittedFiles(ctx, info)
+	if err != nil || len(files) != 0 {
+		t.Fatalf("absent worktree = %+v, %v; want an empty list and no error", files, err)
+	}
+}

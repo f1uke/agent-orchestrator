@@ -771,7 +771,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mark a session terminated and tear down runtime/workspace resources */
+        /** End a session and tear down its runtime/workspace. Refuses (409) while its worktree holds uncommitted work no PR carries */
         post: operations["killSession"];
         delete?: never;
         options?: never;
@@ -2016,6 +2016,10 @@ export interface components {
             cases: number;
             notDriven: string[];
         };
+        ControllersKillSessionRequest: {
+            /** @description Destroy the uncommitted work in the session's worktree (captured to refs/ao/preserved/<session-id> first). Without it, a session holding undelivered work refuses the kill with 409 SESSION_HAS_UNDELIVERED_WORK. */
+            discardUncommitted?: boolean;
+        };
         ControllersListDaemonLoopsResponse: {
             loops: components["schemas"]["ControllersDaemonLoop"][];
         };
@@ -2170,6 +2174,10 @@ export interface components {
             from?: string;
             /** @description Why nothing here needs a person's eyes. Required - it is the whole content of standing down. */
             reason: string;
+        };
+        ControllersUncommittedFileDTO: {
+            path: string;
+            status: string;
         };
         ControllersWorkspaceResolveCandidateDTO: {
             inWorkspace: boolean;
@@ -2449,9 +2457,12 @@ export interface components {
             transitions: components["schemas"]["JiraTransition"][];
         };
         KillSessionResponse: {
+            discarded?: components["schemas"]["ControllersUncommittedFileDTO"][];
             freed?: boolean;
             ok: boolean;
+            preservedRef?: string;
             sessionId: string;
+            terminated: boolean;
         };
         LineChangeDTO: {
             end: number;
@@ -6258,7 +6269,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersKillSessionRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -6267,6 +6282,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KillSessionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */

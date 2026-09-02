@@ -173,6 +173,15 @@ type Workspace interface {
 	// tree, and ErrPreservedConflict (wrapped) is returned. The ref must never
 	// be deleted on a failed or conflicted apply.
 	ApplyPreserved(ctx context.Context, info WorkspaceInfo, ref string) error
+	// UncommittedFiles lists the work in the worktree that exists nowhere else:
+	// exactly the entries Destroy refuses on, so "why was this kill refused?"
+	// and "what would discarding it lose?" are one answer rather than two that
+	// can drift apart. Regenerable build output Destroy clears on its way past
+	// is excluded, because a rebuild reproduces it and it never blocks anything.
+	//
+	// An empty result means a teardown of this worktree destroys nothing that
+	// cannot be rebuilt or is not already committed.
+	UncommittedFiles(ctx context.Context, info WorkspaceInfo) ([]UncommittedFile, error)
 	// SyncToBase advances the workspace's own branch to the head of baseBranch,
 	// so a long-lived worktree (the orchestrator's) shows current code instead of
 	// the commit it was cut from. It fetches baseBranch, then fast-forwards.
@@ -187,6 +196,30 @@ type Workspace interface {
 	// a stale tree is the failure this exists to prevent.
 	SyncToBase(ctx context.Context, info WorkspaceInfo, baseBranch string) (WorkspaceSyncResult, error)
 }
+
+// UncommittedFile is one path a teardown of the worktree would destroy.
+//
+// It is deliberately a path plus a word rather than a count: "3 files" is not
+// something a person can weigh, and the whole decision this type serves - throw
+// this away, or go back and finish it - turns on WHICH files they are.
+type UncommittedFile struct {
+	// Path is worktree-relative and slash-separated, exactly as git reports it.
+	Path string
+	// Status is one of "modified", "added", "deleted", "renamed", "untracked",
+	// "conflicted", or "changed" when git's two-letter code is none of those.
+	Status string
+}
+
+// Uncommitted file statuses.
+const (
+	UncommittedModified   = "modified"
+	UncommittedAdded      = "added"
+	UncommittedDeleted    = "deleted"
+	UncommittedRenamed    = "renamed"
+	UncommittedUntracked  = "untracked"
+	UncommittedConflicted = "conflicted"
+	UncommittedChanged    = "changed"
+)
 
 // WorkspaceSyncOutcome names what SyncToBase did.
 type WorkspaceSyncOutcome string

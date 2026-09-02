@@ -84,7 +84,10 @@ type SessionService interface {
 	// WakeCrewMember hands the task's one awake slot to this member, standing the
 	// current holder down first.
 	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error)
-	Kill(ctx context.Context, id domain.SessionID) (bool, error)
+	// Kill may REFUSE: a session whose worktree holds work no pull request
+	// carries comes back as a 409 naming the files, not as a success over an
+	// untouched row.
+	Kill(ctx context.Context, id domain.SessionID, in sessionsvc.KillInput) (sessionsvc.KillOutcome, error)
 	Delete(ctx context.Context, id domain.SessionID, force bool) error
 	RollbackSpawn(ctx context.Context, id domain.SessionID) (sessionsvc.RollbackOutcome, error)
 	Cleanup(ctx context.Context, project domain.ProjectID) (sessionsvc.CleanupOutcome, error)
@@ -858,12 +861,26 @@ func (c *SessionsController) kill(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/kill")
 		return
 	}
-	freed, err := c.Svc.Kill(r.Context(), sessionID(r))
+	// The body is optional - a bare POST is the plain kill. A MALFORMED one is
+	// still a 400: silently reading garbage as "no options" would turn a
+	// misspelled discardUncommitted into a refusal nobody could explain.
+	var req KillSessionRequest
+	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	res, err := c.Svc.Kill(r.Context(), sessionID(r), sessionsvc.KillInput{DiscardUncommitted: req.DiscardUncommitted})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, KillSessionResponse{OK: true, SessionID: sessionID(r), Freed: freed})
+	envelope.WriteJSON(w, http.StatusOK, KillSessionResponse{
+		OK: true, SessionID: sessionID(r),
+		Freed:        res.Freed,
+		Terminated:   res.Terminated,
+		Discarded:    uncommittedFileDTOs(res.Discarded),
+		PreservedRef: res.PreservedRef,
+	})
 }
 
 // restart tears the session down and relaunches it in place (kill-then-restore),

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
-	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // managerWithLCM builds a manager alongside the fake lifecycle recorder, so a
@@ -33,7 +32,7 @@ func TestTeardown_RecordsTheOperationThatOrderedIt(t *testing.T) {
 	}{
 		{
 			name: "an explicit kill",
-			run:  func(m *Manager) error { _, err := m.Kill(ctx, "mer-1"); return err },
+			run:  func(m *Manager) error { _, err := m.Kill(ctx, "mer-1", KillOptions{}); return err },
 			want: domain.TerminationCauseKill,
 		},
 		{
@@ -67,12 +66,44 @@ func TestTeardown_RecordsTheOperationThatOrderedIt(t *testing.T) {
 func TestTeardown_RefusedTeardownRecordsNoCause(t *testing.T) {
 	m, st, lcm := managerWithLCM()
 	st.sessions["mer-1"] = mkLive("mer-1")
-	m.workspace.(*fakeWorkspace).destroyErr = ports.ErrWorkspaceDirty
+	dirtyWorkspace(m.workspace.(*fakeWorkspace))
 
 	if _, err := m.Teardown(ctx, "mer-1", domain.TerminationCauseAutoReclaim); err != nil {
 		t.Fatalf("a refusal is not an error: %v", err)
 	}
 	if got := lcm.terminationCauses["mer-1"]; len(got) != 0 {
 		t.Fatalf("causes = %v, want none for a preserved workspace", got)
+	}
+}
+
+// The same for the interactive refusal, from the other side of the guard.
+func TestKill_RefusedKillRecordsNoCause(t *testing.T) {
+	m, st, lcm := managerWithLCM()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	dirtyWorkspace(m.workspace.(*fakeWorkspace))
+
+	if _, err := m.Kill(ctx, "mer-1", KillOptions{}); err != nil {
+		t.Fatalf("a refusal is not an error: %v", err)
+	}
+	if got := lcm.terminationCauses["mer-1"]; len(got) != 0 {
+		t.Fatalf("causes = %v, want none: the session was not killed", got)
+	}
+}
+
+// A kill that THREW WORK AWAY is not the same event as one that did not, and a
+// week later the row is the only place to find out which happened.
+func TestKill_DiscardRecordsItsOwnCause(t *testing.T) {
+	m, st, lcm := managerWithLCM()
+	st.sessions["mer-1"] = mkLive("mer-1")
+	ws := m.workspace.(*fakeWorkspace)
+	dirtyWorkspace(ws)
+	ws.stashRef = "refs/ao/preserved/mer-1"
+
+	if _, err := m.Kill(ctx, "mer-1", KillOptions{DiscardUncommitted: true}); err != nil {
+		t.Fatalf("discard: %v", err)
+	}
+	got := lcm.terminationCauses["mer-1"]
+	if len(got) != 1 || got[0] != domain.TerminationCauseDiscardWork {
+		t.Fatalf("causes = %v, want [%s]", got, domain.TerminationCauseDiscardWork)
 	}
 }

@@ -230,6 +230,7 @@ describe("api error telemetry", () => {
 
 		await apiClient.POST("/api/v1/sessions/{sessionId}/kill", {
 			params: { path: { sessionId: "ao-raw-id" } },
+			body: {},
 		});
 
 		expect(captureMock).toHaveBeenCalledWith("ao.renderer.api_error", {

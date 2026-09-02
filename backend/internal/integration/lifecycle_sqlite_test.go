@@ -143,7 +143,12 @@ type stubAgents struct{}
 
 func (stubAgents) Agent(domain.AgentHarness) (ports.Agent, bool) { return stubAgent{}, true }
 
-type stubWorkspace struct{ destroyed int }
+type stubWorkspace struct {
+	destroyed int
+	// uncommitted is what this stub's worktree "holds": the interactive kill
+	// reads it to decide whether it may proceed.
+	uncommitted []ports.UncommittedFile
+}
 
 func (s *stubWorkspace) Create(_ context.Context, cfg ports.WorkspaceConfig) (ports.WorkspaceInfo, error) {
 	return ports.WorkspaceInfo{Path: "/ws/" + string(cfg.SessionID), Branch: cfg.Branch, SessionID: cfg.SessionID, ProjectID: cfg.ProjectID}, nil
@@ -156,6 +161,9 @@ func (s *stubWorkspace) Restore(ctx context.Context, cfg ports.WorkspaceConfig) 
 	return s.Create(ctx, cfg)
 }
 func (s *stubWorkspace) ForceDestroy(context.Context, ports.WorkspaceInfo) error { return nil }
+func (s *stubWorkspace) UncommittedFiles(_ context.Context, _ ports.WorkspaceInfo) ([]ports.UncommittedFile, error) {
+	return s.uncommitted, nil
+}
 func (s *stubWorkspace) StashUncommitted(_ context.Context, _ ports.WorkspaceInfo) (string, error) {
 	return "", nil
 }
@@ -240,9 +248,9 @@ func TestSpawnPRKillRoundTrip(t *testing.T) {
 	if got.Status != domain.StatusCIFailed {
 		t.Fatalf("want ci_failed, got %q", got.Status)
 	}
-	freed, err := st.sm.Kill(ctx, sess.ID)
-	if err != nil || !freed {
-		t.Fatalf("kill freed=%v err=%v", freed, err)
+	killed, err := st.sm.Kill(ctx, sess.ID, sessionsvc.KillInput{})
+	if err != nil || !killed.Freed || !killed.Terminated {
+		t.Fatalf("kill = %+v err=%v", killed, err)
 	}
 	rec, _, _ = st.store.GetSession(ctx, sess.ID)
 	if !rec.IsTerminated {
@@ -262,7 +270,7 @@ func TestRestoreRoundTripPreservesMetadata(t *testing.T) {
 	if err := st.store.UpdateSession(ctx, rec); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.sm.Kill(ctx, sess.ID); err != nil {
+	if _, err := st.sm.Kill(ctx, sess.ID, sessionsvc.KillInput{}); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := st.sm.Restore(ctx, sess.ID)

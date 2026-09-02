@@ -28,6 +28,7 @@ import {
 	attentionZone,
 	isMergeSuspended,
 	isOrchestratorSession,
+	isUndeliveredParked,
 	jiraKeyFromIssueId,
 	newestActiveOrchestrator,
 	sessionIsActive,
@@ -87,6 +88,7 @@ import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./Cre
 import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergeSuspendChip } from "./MergeSuspendChip";
+import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
 import { Button } from "./ui/button";
 
@@ -1120,6 +1122,8 @@ function SessionRow({
 					<QueuedMessagesChip session={session} compact />
 					{isMergeSuspended(session) ? (
 						<MergeSuspendChip session={session} compact />
+					) : isUndeliveredParked(session) ? (
+						<UndeliveredWorkChip session={session} compact />
 					) : (
 						<IdleStatusChip session={session} compact />
 					)}

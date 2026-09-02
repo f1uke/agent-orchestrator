@@ -13,11 +13,20 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
+	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 )
 
 type sessionOptions struct {
 	project string
 	json    bool
+}
+
+// sessionKillOptions is `session kill`. discardUncommitted is the deliberate
+// answer to a refusal, and it is a flag rather than a separate command so that
+// the refusal can name the exact thing to type next.
+type sessionKillOptions struct {
+	sessionOptions
+	discardUncommitted bool
 }
 
 type sessionListOptions struct {
@@ -62,9 +71,23 @@ type sessionResponse struct {
 	Session sessionDTO `json:"session"`
 }
 
+type killSessionRequest struct {
+	DiscardUncommitted bool `json:"discardUncommitted,omitempty"`
+}
+
 type killSessionResponse struct {
-	SessionID string `json:"sessionId"`
-	Freed     bool   `json:"freed"`
+	SessionID  string               `json:"sessionId"`
+	Freed      bool                 `json:"freed"`
+	Terminated bool                 `json:"terminated"`
+	Discarded  []uncommittedFileDTO `json:"discarded"`
+}
+
+// uncommittedFileDTO is one file a kill refused over, or discarded. It arrives
+// two ways - in the 409's `details.files` and in a discard's response - so it is
+// decoded once here and rendered once below.
+type uncommittedFileDTO struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
 }
 
 type restoreSessionResponse struct {
@@ -186,11 +209,17 @@ func newSessionGetCommand(ctx *commandContext) *cobra.Command {
 }
 
 func newSessionKillCommand(ctx *commandContext) *cobra.Command {
-	var opts sessionOptions
+	var opts sessionKillOptions
 	cmd := &cobra.Command{
 		Use:   "kill <id>",
 		Short: "Terminate a session",
-		Args:  oneSessionIDArg,
+		Long: "Terminate a session and tear down its runtime and worktree.\n\n" +
+			"A session whose worktree still holds uncommitted work that no pull request\n" +
+			"carries is REFUSED, with the list of files that would be lost, and nothing is\n" +
+			"torn down. Finish and deliver the work, or repeat the command with\n" +
+			"--discard-uncommitted to throw it away deliberately (it is captured to\n" +
+			"refs/ao/preserved/<session-id> first, and the branch is never removed).",
+		Args: oneSessionIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := normalizeSessionID(args[0])
 			if err != nil {
@@ -200,6 +229,8 @@ func newSessionKillCommand(ctx *commandContext) *cobra.Command {
 		},
 	}
 	addSessionProjectFlag(cmd.Flags(), &opts.project, "Project id to scope the lookup")
+	cmd.Flags().BoolVar(&opts.discardUncommitted, "discard-uncommitted", false,
+		"Discard the session's uncommitted work instead of refusing. The files are listed before they go, and captured to refs/ao/preserved/<session-id>")
 	return cmd
 }
 
@@ -464,24 +495,114 @@ func (c *commandContext) getSession(ctx context.Context, cmd *cobra.Command, id 
 	return writeSessionDetails(cmd, sess)
 }
 
-func (c *commandContext) killSession(ctx context.Context, cmd *cobra.Command, id string, opts sessionOptions) error {
+// killSession runs the kill, and - when the daemon refuses because the worktree
+// holds work nobody has seen - either explains the refusal or, if the caller
+// asked for it, shows exactly what is about to be lost and then loses it.
+//
+// The plain kill is what produces that list. It is side-effect free by
+// construction (the daemon probes before it destroys anything), so running it
+// first is not a wasted call: it is the preview, and it means a discard can
+// never happen without the files being printed first - even when the flag was
+// typed straight away.
+func (c *commandContext) killSession(ctx context.Context, cmd *cobra.Command, id string, opts sessionKillOptions) error {
 	if opts.project != "" {
 		if _, err := c.fetchScopedSession(ctx, id, opts.project); err != nil {
 			return err
 		}
 	}
+	res, err := c.postKill(ctx, id, false)
+	if err == nil {
+		return writeKillResult(cmd, res)
+	}
+	files, refused := undeliveredWorkFromError(err)
+	if !refused {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	if !opts.discardUncommitted {
+		// The refusal goes to STDERR with the error: this is a failure, and it
+		// exits non-zero. Nothing about it may read as a completed kill.
+		return fmt.Errorf("%w\n\n%s\nTo throw that work away anyway:\n  ao session kill %s --discard-uncommitted",
+			err, renderUncommittedFiles(files), id)
+	}
+	if _, werr := fmt.Fprintf(out, "discarding the uncommitted work in %s:\n%s\ncaptured to refs/ao/preserved/%s before removal; the branch and its commits stay.\n",
+		id, renderUncommittedFiles(files), id); werr != nil {
+		return werr
+	}
+	res, err = c.postKill(ctx, id, true)
+	if err != nil {
+		return err
+	}
+	return writeKillResult(cmd, res)
+}
+
+func (c *commandContext) postKill(ctx context.Context, id string, discard bool) (killSessionResponse, error) {
 	var res killSessionResponse
-	if err := c.postJSON(ctx, "sessions/"+url.PathEscape(id)+"/kill", struct{}{}, &res); err != nil {
+	err := c.postJSON(ctx, "sessions/"+url.PathEscape(id)+"/kill", killSessionRequest{DiscardUncommitted: discard}, &res)
+	return res, err
+}
+
+// writeKillResult says what the kill DID, never more. "killed" is claimed only
+// for a session the daemon reports as terminated; a teardown that ended nothing
+// says so instead of printing a success over an untouched row.
+func writeKillResult(cmd *cobra.Command, res killSessionResponse) error {
+	out := cmd.OutOrStdout()
+	if len(res.Discarded) > 0 {
+		if _, err := fmt.Fprintf(out, "discarded %d file(s)\n", len(res.Discarded)); err != nil {
+			return err
+		}
+	}
+	switch {
+	case res.Terminated && res.Freed:
+		_, err := fmt.Fprintf(out, "session %s killed\n", res.SessionID)
+		return err
+	case res.Terminated:
+		// The session ended; only its worktree survived (a crewmate is still in
+		// it, or the removal was refused for a reason that is not undelivered work).
+		_, err := fmt.Fprintf(out, "session %s killed (workspace preserved)\n", res.SessionID)
+		return err
+	default:
+		_, err := fmt.Fprintf(out, "session %s was NOT killed: its workspace was preserved and the session is unchanged\n", res.SessionID)
 		return err
 	}
-	if res.Freed {
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "session %s killed\n", res.SessionID)
-		return err
+}
+
+// undeliveredWorkFromError recognises the daemon's refusal and pulls the file
+// list out of the envelope's details, so the CLI renders the same list the UI
+// shows without a second, racy call.
+func undeliveredWorkFromError(err error) ([]uncommittedFileDTO, bool) {
+	var apiErr apiResponseError
+	if !errors.As(err, &apiErr) || apiErr.ErrorBody.Code != sessionsvc.ErrUndeliveredWork {
+		return nil, false
 	}
-	// freed=false: the workspace was preserved (e.g. uncommitted changes) — the
-	// session is terminated either way, but the worktree is left for inspection.
-	_, err := fmt.Fprintf(cmd.OutOrStdout(), "session %s killed (workspace preserved)\n", res.SessionID)
-	return err
+	raw, ok := apiErr.ErrorBody.Details["files"].([]any)
+	if !ok {
+		return nil, true
+	}
+	files := make([]uncommittedFileDTO, 0, len(raw))
+	for _, entry := range raw {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		path, _ := m["path"].(string)
+		status, _ := m["status"].(string)
+		files = append(files, uncommittedFileDTO{Path: path, Status: status})
+	}
+	return files, true
+}
+
+// renderUncommittedFiles lists the files themselves, not a count. A count is
+// not something anyone can weigh: the whole decision turns on WHICH files.
+func renderUncommittedFiles(files []uncommittedFileDTO) string {
+	if len(files) == 0 {
+		return "  (the daemon named no files)"
+	}
+	var b strings.Builder
+	for _, f := range files {
+		fmt.Fprintf(&b, "  %-10s %s\n", f.Status, f.Path)
+	}
+	return b.String()
 }
 
 func (c *commandContext) restoreSession(ctx context.Context, cmd *cobra.Command, id string, opts sessionOptions) error {

@@ -181,6 +181,42 @@ func workspaceHeldGiven(rec domain.SessionRecord, all []domain.SessionRecord) bo
 		})
 }
 
+// workspaceOutlivesTeardownGiven answers the question a REFUSAL has to ask
+// before it refuses: once this teardown has done everything it is going to do,
+// is the worktree still standing for somebody?
+//
+// It is deliberately not workspaceHeldGiven. That one answers "is anyone else in
+// here right now", which is the wrong question at pre-flight time for exactly
+// one case: a dev whose crew members are about to be ended BY this teardown. Its
+// members hold the tree at the moment of asking and will not a second later, so
+// asking the live question would let dev past the refusal and straight into the
+// old silent failure.
+//
+// The mirror case is the one this saves: ending a SUBORDINATE removes no tree at
+// all (the tree is dev's, by ownership), so dev's work in progress must never be
+// a reason nobody can close its qa.
+func workspaceOutlivesTeardownGiven(rec domain.SessionRecord, all []domain.SessionRecord) bool {
+	if rec.Metadata.WorkspacePath == "" {
+		return false
+	}
+	if rec.InCrew() && !rec.CrewRole.IsDev() {
+		return true
+	}
+	for _, other := range all {
+		if other.ID == rec.ID || other.IsTerminated || other.IsTodo {
+			continue
+		}
+		if other.Metadata.WorkspacePath != rec.Metadata.WorkspacePath {
+			continue
+		}
+		if rec.InCrew() && other.CrewID == rec.CrewID {
+			continue // a crewmate this very teardown is about to end
+		}
+		return true
+	}
+	return false
+}
+
 // runtimeHandleHeldGiven reports whether this session's tmux handle is somebody
 // else's live pane, decided over an already-read session list.
 //

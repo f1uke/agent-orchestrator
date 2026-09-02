@@ -58,6 +58,13 @@ Every product command resolves to a daemon HTTP route. Run `ao <command>
 | `ao preview [url]`                  | `POST /api/v1/sessions/{id}/preview`           |
 | `ao hooks <agent> <event>`          | `POST /api/v1/sessions/{id}/activity` (hidden) |
 
+`ao session kill <id>` REFUSES while the session's worktree still holds
+uncommitted work that no pull request carries: it prints the files that would be
+lost, tears nothing down, and exits non-zero. Repeat it with
+`--discard-uncommitted` to throw that work away deliberately — the files are
+listed again before they go, captured to `refs/ao/preserved/<session-id>` first,
+and the branch and its commits are never removed.
+
 `ao agent ls` prints the daemon-supported agent catalog with local install/auth
 readiness. Use `--refresh` to rerun the bounded local probes and `--json` to
 print the raw inventory response.

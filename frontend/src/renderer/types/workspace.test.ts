@@ -20,6 +20,7 @@ import {
 	openPRs,
 	mergedPRCount,
 	isMergeSuspended,
+	isUndeliveredParked,
 	mergedSuspendPRNumber,
 	primaryPR,
 	sortedPRs,
@@ -521,5 +522,38 @@ describe("formatNextTransition", () => {
 		expect(formatNextTransition({ nextTransitionAt: "2026-01-01T00:04:00Z", nextTransitionTo: "working" }, now)).toBe(
 			"",
 		);
+	});
+});
+
+describe("isUndeliveredParked", () => {
+	const base: Omit<WorkspaceSession, "status"> = {
+		id: "s1",
+		workspaceId: "p1",
+		workspaceName: "p",
+		title: "t",
+		provider: "claude-code",
+		kind: "worker",
+		branch: "b",
+		updatedAt: "2026-09-02T00:00:00Z",
+		prs: [],
+	};
+
+	it("is the park: suspended, asleep for undelivered work", () => {
+		expect(
+			isUndeliveredParked({ ...base, status: "needs_input", isSuspended: true, sleepReason: "undelivered" }),
+		).toBe(true);
+	});
+
+	it("is not any other sleep", () => {
+		expect(isUndeliveredParked({ ...base, status: "needs_input", isSuspended: true, sleepReason: "idle" })).toBe(false);
+		expect(isUndeliveredParked({ ...base, status: "working", isSuspended: false })).toBe(false);
+	});
+
+	// A terminated row KEEPS the sleep_reason it was parked with, so without the
+	// terminal check a session already in Done would still offer "Move to Done".
+	it("is over once the session has ended", () => {
+		expect(
+			isUndeliveredParked({ ...base, status: "terminated", isSuspended: true, sleepReason: "undelivered" }),
+		).toBe(false);
 	});
 });

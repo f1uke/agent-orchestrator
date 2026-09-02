@@ -1,10 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GitMerge } from "lucide-react";
+import { useState } from "react";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { apiClient, apiErrorMessage } from "../lib/api-client";
+import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/kill-session";
 import { captureRendererEvent } from "../lib/telemetry";
 import { cn } from "../lib/utils";
 import { mergedSuspendPRNumber, type WorkspaceSession } from "../types/workspace";
+import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
 
 /**
  * The board-card / sidebar affordance for a keep-warm worker SUSPENDED after its
@@ -24,18 +26,22 @@ import { mergedSuspendPRNumber, type WorkspaceSession } from "../types/workspace
  */
 export function MergeSuspendChip({ session, compact = false }: { session: WorkspaceSession; compact?: boolean }) {
 	const queryClient = useQueryClient();
+	const [refused, setRefused] = useState<UncommittedFile[] | null>(null);
 	const prNumber = mergedSuspendPRNumber(session);
 	const label = prNumber ? `Merged #${prNumber}` : "Merged";
 
 	const done = useMutation({
 		mutationFn: async () => {
 			void captureRendererEvent("ao.renderer.merge_suspend_done", { project_id: session.workspaceId });
-			const { error } = await apiClient.POST("/api/v1/sessions/{sessionId}/kill", {
-				params: { path: { sessionId: session.id } },
-			});
-			if (error) throw new Error(apiErrorMessage(error, "Unable to move session to Done"));
+			await killSession(session.id);
 		},
 		onSuccess: () => void queryClient.invalidateQueries({ queryKey: workspaceQueryKey }),
+		onError: (error) => {
+			// Even a merged worker can be holding uncommitted work in its tree, and
+			// the refusal must reach the human here too rather than dying as a
+			// tooltip that says nothing about which files are in the way.
+			if (error instanceof UndeliveredWorkError) setRefused(error.files);
+		},
 	});
 
 	if (compact) {
@@ -49,32 +55,43 @@ export function MergeSuspendChip({ session, compact = false }: { session: Worksp
 		);
 	}
 
-	const errorText = done.error instanceof Error ? done.error.message : null;
+	const errorText = done.error instanceof UndeliveredWorkError ? null : (done.error?.message ?? null);
 
 	return (
-		<span
-			aria-label={`${label} — open to continue, or move to Done`}
-			className={cn(
-				"inline-flex shrink-0 items-center gap-1 rounded-full border py-0.5 pl-1.5 pr-0.5 text-[10px] font-medium",
-				errorText
-					? "border-[color-mix(in_srgb,var(--red)_55%,transparent)]"
-					: "border-[color-mix(in_srgb,var(--fg-passive)_30%,transparent)]",
+		<>
+			{refused && (
+				<UndeliveredWorkDialog
+					open
+					onOpenChange={(next) => !next && setRefused(null)}
+					sessionId={session.id}
+					sessionTitle={session.title}
+					files={refused}
+				/>
 			)}
-			title={errorText ?? `${label} — open the card to continue, or Move to Done to archive`}
-		>
-			<GitMerge className="h-3 w-3" style={{ color: "var(--lane-merge-bright)" }} strokeWidth={2} />
-			<span className="text-passive">{label}</span>
-			<button
-				type="button"
-				disabled={done.isPending}
-				onClick={(e) => {
-					e.stopPropagation();
-					done.mutate();
-				}}
-				className="rounded-full px-1.5 py-px text-passive transition-colors hover:bg-[color-mix(in_srgb,var(--fg-passive)_16%,transparent)] disabled:opacity-50"
+			<span
+				aria-label={`${label} — open to continue, or move to Done`}
+				className={cn(
+					"inline-flex shrink-0 items-center gap-1 rounded-full border py-0.5 pl-1.5 pr-0.5 text-[10px] font-medium",
+					errorText
+						? "border-[color-mix(in_srgb,var(--red)_55%,transparent)]"
+						: "border-[color-mix(in_srgb,var(--fg-passive)_30%,transparent)]",
+				)}
+				title={errorText ?? `${label} — open the card to continue, or Move to Done to archive`}
 			>
-				{done.isPending ? "Moving…" : "Move to Done"}
-			</button>
-		</span>
+				<GitMerge className="h-3 w-3" style={{ color: "var(--lane-merge-bright)" }} strokeWidth={2} />
+				<span className="text-passive">{label}</span>
+				<button
+					type="button"
+					disabled={done.isPending}
+					onClick={(e) => {
+						e.stopPropagation();
+						done.mutate();
+					}}
+					className="rounded-full px-1.5 py-px text-passive transition-colors hover:bg-[color-mix(in_srgb,var(--fg-passive)_16%,transparent)] disabled:opacity-50"
+				>
+					{done.isPending ? "Moving…" : "Move to Done"}
+				</button>
+			</span>
+		</>
 	);
 }

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 )
 
@@ -51,7 +52,7 @@ func TestClassifyStatus_UnrecognisedUntrackedFileBlocks(t *testing.T) {
 	// keeps the worktree.
 	blocking, artifacts := classifyStatus(z("?? notes.md"), reclaimsettings.DefaultArtifactPatterns)
 
-	if len(blocking) != 1 || blocking[0] != "notes.md" {
+	if len(blocking) != 1 || blocking[0].rel != "notes.md" {
 		t.Fatalf("unrecognised untracked file must block, got %v", blocking)
 	}
 	if len(artifacts) != 0 {
@@ -68,7 +69,7 @@ func TestClassifyStatus_UnrecognisedUntrackedFileBlocks(t *testing.T) {
 func TestClassifyStatus_CollapsedUntrackedParentBlocks(t *testing.T) {
 	blocking, artifacts := classifyStatus(z("?? fastlane/"), reclaimsettings.DefaultArtifactPatterns)
 
-	if len(blocking) != 1 || blocking[0] != "fastlane/" {
+	if len(blocking) != 1 || blocking[0].rel != "fastlane/" {
 		t.Fatalf("an unrecognised collapsed parent must block, got blocking=%v", blocking)
 	}
 	if len(artifacts) != 0 {
@@ -155,5 +156,35 @@ func TestIsRegenerable_EmptyPatternIsIgnored(t *testing.T) {
 	// An empty string in a user-supplied pattern list must not match everything.
 	if isRegenerable("src/main.go", []string{""}) {
 		t.Fatal("an empty pattern must never match")
+	}
+}
+
+// statusWord turns git's XY code into the word a person reads next to a path.
+// The table is here rather than inferred from a live repo because half these
+// codes need a staged index, a conflict or a rename to reproduce, and the words
+// are what someone decides on.
+func TestStatusWord_NamesWhatHappenedToTheFile(t *testing.T) {
+	cases := map[string]string{
+		"??": ports.UncommittedUntracked,
+		" M": ports.UncommittedModified,
+		"M ": ports.UncommittedModified,
+		"MM": ports.UncommittedModified,
+		"A ": ports.UncommittedAdded,
+		"AM": ports.UncommittedAdded,
+		" D": ports.UncommittedDeleted,
+		"D ": ports.UncommittedDeleted,
+		"R ": ports.UncommittedRenamed,
+		"C ": ports.UncommittedRenamed,
+		"UU": ports.UncommittedConflicted,
+		"AA": ports.UncommittedConflicted,
+		"DU": ports.UncommittedConflicted,
+		" T": ports.UncommittedModified,
+		"!!": ports.UncommittedChanged,
+		"":   ports.UncommittedChanged,
+	}
+	for code, want := range cases {
+		if got := statusWord(code); got != want {
+			t.Errorf("statusWord(%q) = %q, want %q", code, got, want)
+		}
 	}
 }

@@ -25,6 +25,11 @@ import (
 )
 
 type fakeSessionService struct {
+	// killInputs records what each kill asked for, so a test can prove the
+	// discard opt-in reached the service instead of being dropped in the body.
+	killInputs            []sessionsvc.KillInput
+	killErr               error
+	discarded             []ports.UncommittedFile
 	crewDev               map[domain.SessionID]domain.SessionID
 	crewWoken             []domain.SessionID
 	crewAdded             []domain.CrewRole
@@ -175,7 +180,7 @@ func (f *fakeSessionService) SpawnOrchestrator(ctx context.Context, projectID do
 			return domain.Session{}, err
 		}
 		for _, o := range existing {
-			if _, err := f.Kill(ctx, o.ID); err != nil {
+			if _, err := f.Kill(ctx, o.ID, sessionsvc.KillInput{}); err != nil {
 				return domain.Session{}, err
 			}
 		}
@@ -318,12 +323,21 @@ func (f *fakeSessionService) WakeCrewMember(_ context.Context, id domain.Session
 	return s, nil
 }
 
-func (f *fakeSessionService) Kill(_ context.Context, id domain.SessionID) (bool, error) {
+func (f *fakeSessionService) Kill(_ context.Context, id domain.SessionID, in sessionsvc.KillInput) (sessionsvc.KillOutcome, error) {
+	f.killInputs = append(f.killInputs, in)
+	if f.killErr != nil {
+		return sessionsvc.KillOutcome{}, f.killErr
+	}
 	s := f.sessions[id]
 	s.IsTerminated = true
 	s.Status = domain.StatusTerminated
 	f.sessions[id] = s
-	return true, nil
+	out := sessionsvc.KillOutcome{Terminated: true, Freed: true}
+	if in.DiscardUncommitted {
+		out.Discarded = f.discarded
+		out.PreservedRef = "refs/ao/preserved/" + string(id)
+	}
+	return out, nil
 }
 
 func (f *fakeSessionService) RollbackSpawn(_ context.Context, id domain.SessionID) (sessionsvc.RollbackOutcome, error) {
@@ -2571,5 +2585,107 @@ func TestSessionsAPI_CrewSendOmitsTheHandbackWhenNothingWasChecked(t *testing.T)
 	}
 	if strings.Contains(string(body), "handback") {
 		t.Fatalf("an unchecked send carried a handback: %s", body)
+	}
+}
+
+// A kill's REFUSAL has to arrive as a refusal: 409, the machine code, and - the
+// point of the whole thing - the FILES, so the surface that asked can show a
+// person what is in the way instead of "something went wrong".
+func TestSessionsAPI_KillRefusalCarriesTheFileList(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.killErr = apierr.Conflict(sessionsvc.ErrUndeliveredWork,
+		"ao-1 still holds 2 uncommitted files that no pull request carries, so it was not killed and nothing was torn down. Finish and deliver the work, or discard it deliberately.",
+		map[string]any{
+			"reason":    "workspace_dirty",
+			"sessionId": "ao-1",
+			"files": []map[string]any{
+				{"path": "src/main.go", "status": "modified"},
+				{"path": "NewFile.swift", "status": "untracked"},
+			},
+		})
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/kill", "")
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: a refused kill must not read as a success; body=%s", status, body)
+	}
+	var got struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Details struct {
+			Files []struct {
+				Path   string `json:"path"`
+				Status string `json:"status"`
+			} `json:"files"`
+		} `json:"details"`
+	}
+	mustJSON(t, body, &got)
+	if got.Code != sessionsvc.ErrUndeliveredWork {
+		t.Fatalf("code = %q, want %q", got.Code, sessionsvc.ErrUndeliveredWork)
+	}
+	if len(got.Details.Files) != 2 || got.Details.Files[0].Path != "src/main.go" || got.Details.Files[1].Status != "untracked" {
+		t.Fatalf("details.files = %+v, want both files with their statuses", got.Details.Files)
+	}
+	if !strings.Contains(got.Message, "not killed") {
+		t.Fatalf("message = %q; it must say the session was NOT killed", got.Message)
+	}
+}
+
+// The deliberate opt-in has to survive the wire. A body that decodes to nothing
+// would silently turn every discard back into a refusal.
+func TestSessionsAPI_KillCarriesTheDiscardOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       bool
+	}{
+		{"no body at all", "", false},
+		{"explicit false", `{"discardUncommitted":false}`, false},
+		{"deliberate discard", `{"discardUncommitted":true}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newFakeSessionService()
+			svc.discarded = []ports.UncommittedFile{{Path: "src/main.go", Status: "modified"}}
+			srv := newSessionTestServer(t, svc)
+
+			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/kill", tc.body)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", status, body)
+			}
+			if len(svc.killInputs) != 1 || svc.killInputs[0].DiscardUncommitted != tc.want {
+				t.Fatalf("service saw %+v, want DiscardUncommitted=%v", svc.killInputs, tc.want)
+			}
+			var got struct {
+				Terminated bool `json:"terminated"`
+				Discarded  []struct {
+					Path string `json:"path"`
+				} `json:"discarded"`
+				PreservedRef string `json:"preservedRef"`
+			}
+			mustJSON(t, body, &got)
+			if !got.Terminated {
+				t.Fatal("response omitted terminated: `freed` alone is what let a live session read as killed")
+			}
+			if tc.want && (len(got.Discarded) != 1 || got.PreservedRef == "") {
+				t.Fatalf("discard response = %+v, want the files it destroyed and where they were captured", got)
+			}
+			if !tc.want && len(got.Discarded) != 0 {
+				t.Fatalf("an ordinary kill reported discarded files: %+v", got.Discarded)
+			}
+		})
+	}
+}
+
+// A malformed body is a client error, not "no options": a misspelled
+// discardUncommitted must not silently become a refusal nobody can explain.
+func TestSessionsAPI_KillRejectsAMalformedBody(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/kill", `{"discardUncommitted":`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", status, body)
+	}
+	if len(svc.killInputs) != 0 {
+		t.Fatal("a malformed body reached the service")
 	}
 }

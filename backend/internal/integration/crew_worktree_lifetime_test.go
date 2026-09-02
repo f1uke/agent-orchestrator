@@ -202,11 +202,11 @@ func TestCrew_TerminatingOneMemberLeavesTheOtherWorking(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	freed, err := s.svc.Kill(ctx, qa.ID)
+	out, err := s.svc.Kill(ctx, qa.ID, sessionsvc.KillInput{})
 	if err != nil {
 		t.Fatalf("kill crew member: %v", err)
 	}
-	if freed {
+	if out.Freed {
 		t.Fatal("killing a crew member reported the worktree freed; dev is still in it")
 	}
 	if !dirExists(t, tree) {
@@ -256,7 +256,7 @@ func TestCrew_TerminatingOneMemberLeavesACLEANWorktreeStanding(t *testing.T) {
 	tree := dev.Metadata.WorkspacePath
 	assertCleanWorktree(t, tree)
 
-	if _, err := s.svc.Kill(ctx, qa.ID); err != nil {
+	if _, err := s.svc.Kill(ctx, qa.ID, sessionsvc.KillInput{}); err != nil {
 		t.Fatalf("kill crew member: %v", err)
 	}
 	if !dirExists(t, tree) {
@@ -297,11 +297,11 @@ func TestCrew_TerminatingTheTaskFreesTheWorktree(t *testing.T) {
 	dev, qa := s.spawnCrew(t)
 	tree := dev.Metadata.WorkspacePath
 
-	freed, err := s.svc.Kill(ctx, dev.ID)
+	out, err := s.svc.Kill(ctx, dev.ID, sessionsvc.KillInput{})
 	if err != nil {
 		t.Fatalf("kill dev: %v", err)
 	}
-	if !freed {
+	if !out.Freed {
 		t.Fatal("killing the task did not free the worktree")
 	}
 	if dirExists(t, tree) {
@@ -336,7 +336,7 @@ func TestCrew_ReclaimFreesTheTreeOnlyWhenNoMemberNeedsIt(t *testing.T) {
 
 	// Phase 1: the crew member is finished, dev is still working. The tree is not
 	// the loop's to take, however long it waits.
-	if _, err := s.svc.Kill(ctx, qa.ID); err != nil {
+	if _, err := s.svc.Kill(ctx, qa.ID, sessionsvc.KillInput{}); err != nil {
 		t.Fatal(err)
 	}
 	s.tick(t, r, grace)
@@ -350,7 +350,7 @@ func TestCrew_ReclaimFreesTheTreeOnlyWhenNoMemberNeedsIt(t *testing.T) {
 
 	// Phase 2: dev finishes too. Now nothing needs the tree, and the next pass
 	// past the grace period frees it.
-	if _, err := s.svc.Kill(ctx, dev.ID); err != nil {
+	if _, err := s.svc.Kill(ctx, dev.ID, sessionsvc.KillInput{}); err != nil {
 		t.Fatal(err)
 	}
 	if dirExists(t, tree) {

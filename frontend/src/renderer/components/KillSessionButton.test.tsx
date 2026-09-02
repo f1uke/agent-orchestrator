@@ -98,6 +98,7 @@ describe("KillSessionButton", () => {
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
 		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/kill", {
 			params: { path: { sessionId: "sess-1" } },
+			body: { discardUncommitted: false },
 		});
 	});
 
