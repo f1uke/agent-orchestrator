@@ -291,6 +291,27 @@
 	--smoke-qa-bg: #111116;
 	--smoke-qa-border: #23232a;
 	--smoke-qa-fg: #a3a3ad;
+
+	/* ---- Wiki note prose ---------------------------------------------------
+	   A rendered note is long-form reading, not chrome, so its body sits a step
+	   below --fg: full-strength white on a dark ground glares over a paragraph
+	   the way it never does over a label. Headings keep --fg, so the contrast
+	   between a heading and its prose is what gives the page its structure.
+	   Values verbatim from the design handoff's dark and light artboards. */
+	--prose-fg: #dfe2e7;
+	--prose-code-fg: #c7cbd1;
+	--prose-callout-fg: #cfd8e6;
+	/* Accent INK, for a tag pill or a wikilink sitting on --accent-weak. Raw
+	   --accent is tuned against a plain surface and goes muddy on the tint. */
+	--prose-accent-text: #8fb6ff;
+	/* A code block's header bar. Dark leans on the block's own --bg-1 with only
+	   the hairline separating it; light needs a step of its own or the bar
+	   vanishes into the white block beneath it. */
+	--prose-code-head-bg: transparent;
+	/* The Wiki's agent pill. Ink on a 14% wash of its own hue, so --green and
+	   --orange (tuned against a plain surface) would go muddy used raw. */
+	--pill-running-ink: #8fcfa2;
+	--pill-thinking-ink: #f0b071;
 }
 
 :root[data-theme="light"] {
@@ -465,6 +486,17 @@
 	--smoke-qa-bg: #f2f2f5;
 	--smoke-qa-border: #e2e2e6;
 	--smoke-qa-fg: #4f4f58;
+
+	/* Wiki note prose, light. Ink lightens off pure black for the same reason
+	   the dark body dims off pure white: a full-strength body is heavy over a
+	   paragraph. */
+	--prose-fg: #2f3236;
+	--prose-code-fg: #3a3d42;
+	--prose-callout-fg: #2c3444;
+	--prose-accent-text: #1d4ed8;
+	--prose-code-head-bg: #f5f5f6;
+	--pill-running-ink: #146c2e;
+	--pill-thinking-ink: #9a3d0a;
 }
 
 * {
@@ -5206,4 +5238,1236 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 
 .open-quickly__truncated {
 	flex: none;
+}
+
+/* ── Wiki: a rendered vault note ────────────────────────────────────────────
+   Every value below is from the design handoff's note artboards, dark and
+   light. The measure is capped by the container (.wiki-note__measure), not
+   here, so the same prose styles apply wherever a note is drawn.
+
+   Spacing is expressed as margin-TOP on each block and zeroed on the first
+   one, so a note never opens with a gap above its title regardless of which
+   block happens to come first. */
+
+.note-prose {
+	color: var(--prose-fg);
+	font-size: 14.5px;
+	line-height: 1.78;
+}
+
+.note-prose__h {
+	margin: 0;
+	color: var(--fg);
+	font-weight: 700;
+	letter-spacing: -0.014em;
+}
+
+.note-prose__h1 {
+	margin-top: 30px;
+	font-size: 29px;
+	line-height: 1.22;
+}
+
+.note-prose__h2 {
+	margin-top: 30px;
+	font-size: 18.5px;
+	line-height: 1.3;
+}
+
+.note-prose__h3 {
+	margin-top: 24px;
+	font-size: 15.5px;
+	line-height: 1.35;
+}
+
+.note-prose__h4,
+.note-prose__h5,
+.note-prose__h6 {
+	margin-top: 20px;
+	font-size: 14px;
+	line-height: 1.4;
+}
+
+.note-prose__h--first {
+	margin-top: 0;
+}
+
+.note-prose__p {
+	margin: 20px 0 0;
+	font-size: 14.5px;
+	line-height: 1.78;
+	color: var(--prose-fg);
+	/* A note is prose someone wrote by hand: a long URL or an unbroken code-ish
+	   run must wrap rather than push the 660px measure wider. */
+	overflow-wrap: anywhere;
+}
+
+.note-prose__p--first {
+	margin-top: 0;
+}
+
+.note-prose__strong {
+	font-weight: 600;
+	color: var(--fg);
+}
+
+/* Tailwind's preflight resets every list to `list-style: none`; a note's
+   bullets have to be asked for back explicitly. */
+.note-prose__list {
+	margin: 12px 0 0;
+	padding-left: 20px;
+	font-size: 14.5px;
+	line-height: 1.8;
+	color: var(--prose-fg);
+	list-style: disc outside;
+}
+
+ol.note-prose__list {
+	list-style: decimal outside;
+}
+
+.note-prose__list .note-prose__list {
+	list-style-type: circle;
+}
+
+.note-prose__li {
+	margin-bottom: 3px;
+}
+
+.note-prose__li::marker {
+	color: var(--fg-passive);
+}
+
+/* A task item carries its own checkbox, so the list marker would be a second
+   bullet in front of it. */
+.note-prose__li--task {
+	list-style: none;
+	margin-left: -20px;
+}
+
+.note-prose__li:last-child {
+	margin-bottom: 0;
+}
+
+/* A nested block inside a list item must not re-open the 20px paragraph gap;
+   the item's own line-height already spaces it. */
+.note-prose__li > .note-prose__p,
+.note-prose__task-text > .note-prose__p {
+	margin-top: 0;
+}
+
+.note-prose__li > .note-prose__list {
+	margin-top: 2px;
+}
+
+/* ── task list ── */
+
+.note-prose__task {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+}
+
+.note-prose__checkbox {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 15px;
+	height: 15px;
+	/* Nudged onto the text's baseline: an inline-flex box aligns on its own
+	   bottom edge, which floats it a couple of pixels above the line. */
+	transform: translateY(2px);
+	border: 1.5px solid var(--border-1);
+	border-radius: 4px;
+}
+
+.note-prose__checkbox--on {
+	border-color: var(--accent);
+	background: var(--accent);
+}
+
+.note-prose__checkbox-tick {
+	width: 10px;
+	height: 10px;
+	color: var(--accent-fg);
+	stroke-width: 3.4;
+}
+
+.note-prose__task-text {
+	font-size: 14px;
+	line-height: 1.6;
+	color: var(--prose-fg);
+}
+
+.note-prose__task-text--done {
+	color: var(--fg-passive);
+	text-decoration: line-through;
+}
+
+/* ── callout ── */
+
+.note-prose__callout {
+	margin-top: 20px;
+	padding: 13px 17px;
+	border-left: 2px solid var(--callout-accent);
+	border-radius: 0 8px 8px 0;
+	background: var(--callout-wash);
+}
+
+.note-prose__callout--note,
+.note-prose__callout--quote {
+	--callout-accent: var(--accent);
+	--callout-wash: var(--accent-weak);
+	--callout-ink: var(--prose-accent-text);
+}
+
+.note-prose__callout--tip {
+	--callout-accent: var(--green);
+	--callout-wash: color-mix(in srgb, var(--green) 14%, transparent);
+	--callout-ink: var(--green);
+}
+
+.note-prose__callout--warning {
+	--callout-accent: var(--amber);
+	--callout-wash: color-mix(in srgb, var(--amber) 14%, transparent);
+	--callout-ink: var(--amber);
+}
+
+.note-prose__callout--danger {
+	--callout-accent: var(--red);
+	--callout-wash: color-mix(in srgb, var(--red) 14%, transparent);
+	--callout-ink: var(--red);
+}
+
+.note-prose__callout-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 8px;
+}
+
+.note-prose__callout-kind {
+	flex: none;
+	font-size: 10.5px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--callout-ink);
+}
+
+/* The author's own title, in the case they wrote it. */
+.note-prose__callout-title {
+	min-width: 0;
+	color: var(--fg);
+	font-size: 12.5px;
+	font-weight: 600;
+}
+
+.note-prose__callout-body {
+	margin-top: 6px;
+	font-size: 13.5px;
+	line-height: 1.7;
+	color: var(--prose-callout-fg);
+}
+
+.note-prose__callout-body > .note-prose__p {
+	margin-top: 0;
+	font-size: 13.5px;
+	line-height: 1.7;
+	color: inherit;
+}
+
+.note-prose__callout-body > .note-prose__p ~ .note-prose__p {
+	margin-top: 10px;
+}
+
+/* ── quote ── */
+
+.note-prose__quote {
+	margin: 20px 0 0;
+	padding: 2px 0 2px 15px;
+	border-left: 2px solid var(--border-1);
+	color: var(--fg-muted);
+}
+
+.note-prose__quote > .note-prose__p:first-child {
+	margin-top: 0;
+}
+
+.note-prose__rule {
+	height: 1px;
+	margin: 26px 0 0;
+	border: 0;
+	background: var(--border);
+}
+
+/* ── code ── */
+
+.note-prose__code-inline {
+	padding: 1.5px 5px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: var(--bg-2);
+	color: var(--prose-code-fg);
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+}
+
+.note-prose__code {
+	margin-top: 22px;
+	overflow: hidden;
+	border: 1px solid var(--border);
+	border-radius: 9px;
+	background: var(--bg-1);
+}
+
+.note-prose__code-head {
+	display: flex;
+	align-items: center;
+	height: 30px;
+	padding: 0 13px;
+	border-bottom: 1px solid var(--border);
+	background: var(--prose-code-head-bg);
+}
+
+.note-prose__code-lang {
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+}
+
+.note-prose__code-copy {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	margin-left: auto;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--fg-passive);
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
+}
+
+.note-prose__code-copy:hover {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.note-prose__code-copy svg {
+	width: 13px;
+	height: 13px;
+}
+
+.note-prose__code-body {
+	margin: 0;
+	/* A long line scrolls inside its own block; it must never widen the note. */
+	overflow-x: auto;
+	padding: 13px 15px;
+	color: var(--prose-code-fg);
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	line-height: 1.7;
+}
+
+.note-prose__code-body code {
+	font: inherit;
+}
+
+/* Raw HTML in a note is shown as the literal text it is — never parsed, never
+   injected. It is marked as machine text so a reader can see that is what it
+   is rather than wondering why a tag "did not work". */
+.note-prose__raw-html {
+	margin: 20px 0 0;
+	overflow-x: auto;
+	padding: 10px 13px;
+	border: 1px dashed var(--border-1);
+	border-radius: 8px;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 12px;
+	line-height: 1.6;
+}
+
+/* ── inline marks ── */
+
+.note-prose__tag {
+	padding: 2.5px 7px;
+	border: 0;
+	border-radius: 5px;
+	background: var(--accent-weak);
+	color: var(--prose-accent-text);
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	font-weight: 600;
+	line-height: 1.5;
+}
+
+.note-prose__tag--active {
+	cursor: pointer;
+}
+
+.note-prose__tag--active:hover {
+	background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.note-prose__wikilink {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--accent);
+	font: inherit;
+}
+
+.note-prose__wikilink--active {
+	cursor: pointer;
+}
+
+.note-prose__wikilink--active:hover {
+	text-decoration: underline;
+}
+
+.note-prose__link {
+	color: var(--accent);
+	text-decoration: none;
+}
+
+.note-prose__link:hover {
+	text-decoration: underline;
+}
+
+/* A link whose scheme the app refuses to open (javascript:, file:, …). It is
+   still shown — the reader sees what the note said — but it is not a link. */
+.note-prose__link--inert {
+	color: var(--fg-muted);
+	text-decoration: underline dotted;
+	cursor: help;
+}
+
+.note-prose__image {
+	color: var(--fg-passive);
+	font-style: italic;
+}
+
+/* ── table ── */
+
+.note-prose__table-scroll {
+	margin-top: 20px;
+	overflow-x: auto;
+}
+
+.note-prose__table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.note-prose__table th,
+.note-prose__table td {
+	padding: 7px 11px;
+	border: 1px solid var(--border);
+	text-align: left;
+}
+
+.note-prose__table th {
+	background: var(--bg-1);
+	color: var(--fg);
+	font-weight: 600;
+}
+
+/* ── Wiki page ──────────────────────────────────────────────────────────────
+   The vault destination: a topbar that never moves, a centre that swaps
+   between terminal / picker / note, and the vault rail on the right.
+   Metrics are from the design handoff's artboards. */
+
+.wiki-page {
+	display: flex;
+	height: 100%;
+	min-height: 0;
+	flex-direction: column;
+	background: var(--bg);
+	color: var(--fg);
+}
+
+.wiki-page--message {
+	align-items: center;
+	justify-content: center;
+	padding: 40px;
+	color: var(--fg-passive);
+	font-size: 13px;
+}
+
+.wiki-page__unset {
+	max-width: 420px;
+	text-align: center;
+}
+
+.wiki-page__unset-icon {
+	width: 22px;
+	height: 22px;
+	color: var(--fg-passive);
+}
+
+.wiki-page__unset-title {
+	margin-top: 12px;
+	color: var(--fg);
+	font-size: 15px;
+	font-weight: 700;
+	letter-spacing: -0.012em;
+}
+
+.wiki-page__unset-body {
+	margin: 8px 0 0;
+	color: var(--fg-muted);
+	font-size: 12.5px;
+	line-height: 1.65;
+}
+
+/* ── topbar ── */
+
+.wiki-topbar {
+	display: flex;
+	height: 47px;
+	flex: none;
+	align-items: center;
+	gap: 11px;
+	padding: 0 14px;
+	border-bottom: 1px solid var(--border);
+}
+
+.wiki-topbar__icon {
+	width: 15px;
+	height: 15px;
+	flex: none;
+	color: var(--accent);
+}
+
+.wiki-topbar__title {
+	flex: none;
+	font-size: 13px;
+	font-weight: 700;
+	letter-spacing: -0.012em;
+}
+
+.wiki-topbar__path {
+	min-width: 0;
+	/* The path is already elided by segment in JS (elideVaultPath), which keeps
+	   the vault's NAME. This is the last-resort cap on a single absurd segment. */
+	max-width: 46ch;
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.wiki-topbar__spacer {
+	flex: 1 1 auto;
+}
+
+/* ── the agent pill ── */
+
+.wiki-pill {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 7px;
+	padding: 5px 9px 5px 11px;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	font-size: 11.5px;
+	font-weight: 600;
+	cursor: pointer;
+	transition:
+		background 0.12s ease,
+		color 0.12s ease;
+}
+
+.wiki-pill--running {
+	background: color-mix(in srgb, var(--green) 14%, transparent);
+	color: var(--pill-running-ink);
+}
+
+.wiki-pill--running:hover {
+	background: color-mix(in srgb, var(--green) 22%, transparent);
+}
+
+.wiki-pill--thinking {
+	background: color-mix(in srgb, var(--orange) 14%, transparent);
+	color: var(--pill-thinking-ink);
+}
+
+.wiki-pill--thinking:hover {
+	background: color-mix(in srgb, var(--orange) 22%, transparent);
+}
+
+.wiki-pill--stopped {
+	border: 1px solid var(--border-1);
+	color: var(--fg-muted);
+}
+
+.wiki-pill--stopped:hover {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.wiki-pill__dot {
+	width: 6px;
+	height: 6px;
+	flex: none;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+.wiki-pill--running .wiki-pill__dot {
+	background: var(--green);
+}
+
+.wiki-pill--thinking .wiki-pill__dot {
+	background: var(--orange);
+}
+
+.wiki-pill--stopped .wiki-pill__dot {
+	background: var(--fg-passive);
+	opacity: 0.6;
+}
+
+/* The app's own working signal, so "busy" reads the same here as on the board. */
+.wiki-pill__dot--pulse {
+	animation: var(--animate-status-pulse);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.wiki-pill__dot--pulse {
+		animation: none;
+	}
+}
+
+.wiki-pill__chevron {
+	width: 12px;
+	height: 12px;
+	flex: none;
+}
+
+/* ── body ── */
+
+.wiki-body {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+}
+
+.wiki-centre {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	flex-direction: column;
+}
+
+.wiki-terminal {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+	background: var(--term-bg);
+}
+
+.wiki-terminal__banner {
+	flex: none;
+	padding: 6px 14px;
+	border-bottom: 1px solid var(--border);
+	color: var(--fg-muted);
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+}
+
+.wiki-terminal__surface {
+	position: relative;
+	min-height: 0;
+	flex: 1;
+}
+
+/* ── agent picker ── */
+
+.wiki-picker {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background: var(--term-bg);
+}
+
+.wiki-picker__intro {
+	width: 452px;
+	max-width: 100%;
+	text-align: center;
+}
+
+.wiki-picker__title {
+	color: var(--fg);
+	font-size: 16.5px;
+	font-weight: 700;
+	letter-spacing: -0.012em;
+}
+
+.wiki-picker__subtitle {
+	margin: 7px 0 0;
+	color: var(--fg-muted);
+	font-size: 12.5px;
+	line-height: 1.6;
+}
+
+.wiki-picker__path {
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	overflow-wrap: anywhere;
+}
+
+.wiki-picker__panel {
+	display: flex;
+	width: 452px;
+	max-width: 100%;
+	max-height: 420px;
+	margin-top: 22px;
+	flex-direction: column;
+	overflow: hidden;
+	border: 1px solid var(--border-1);
+	border-radius: 12px;
+	background: var(--bg);
+	box-shadow: var(--shadow);
+}
+
+.wiki-picker__search {
+	display: flex;
+	height: 40px;
+	flex: none;
+	align-items: center;
+	gap: 9px;
+	padding: 0 13px;
+	border-bottom: 1px solid var(--border);
+}
+
+.wiki-picker__search-icon {
+	width: 14px;
+	height: 14px;
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.wiki-picker__input {
+	min-width: 0;
+	flex: 1;
+	border: 0;
+	background: transparent;
+	color: var(--fg);
+	font-size: 12.5px;
+	outline: none;
+}
+
+.wiki-picker__input::placeholder {
+	color: var(--fg-passive);
+}
+
+.wiki-picker__count {
+	flex: none;
+	padding: 2px 5px;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 10px;
+}
+
+.wiki-picker__list {
+	min-height: 0;
+	flex: 1;
+	overflow-y: auto;
+	padding: 6px;
+}
+
+.wiki-picker__empty {
+	padding: 12px 9px;
+	color: var(--fg-passive);
+	font-size: 11.5px;
+}
+
+.wiki-picker__row {
+	display: flex;
+	width: 100%;
+	height: 38px;
+	align-items: center;
+	gap: 10px;
+	padding: 0 9px;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
+}
+
+.wiki-picker__row--active {
+	background: var(--accent-weak);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.wiki-picker__mark {
+	display: grid;
+	width: 22px;
+	height: 22px;
+	flex: none;
+	place-items: center;
+	border-radius: 6px;
+	background: var(--bg-2);
+	color: var(--fg-muted);
+	font-size: 10px;
+	font-weight: 700;
+}
+
+.wiki-picker__mark--active {
+	background: var(--accent);
+	color: var(--accent-fg);
+}
+
+.wiki-picker__name {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--fg-muted);
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.wiki-picker__row--active .wiki-picker__name {
+	color: var(--fg);
+}
+
+.wiki-picker__badge {
+	flex: none;
+	padding: 2px 6px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--accent) 18%, transparent);
+	color: var(--prose-accent-text);
+	font-size: 10.5px;
+	font-weight: 600;
+}
+
+.wiki-picker__not-installed {
+	flex: none;
+	color: var(--fg-passive);
+	font-size: 10.5px;
+}
+
+.wiki-picker__tick {
+	width: 14px;
+	height: 14px;
+	flex: none;
+	margin-left: auto;
+	color: var(--accent);
+}
+
+.wiki-picker__footer {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 8px;
+	padding: 9px 13px;
+	border-top: 1px solid var(--border);
+}
+
+.wiki-picker__hint {
+	min-width: 0;
+	flex: 1;
+	color: var(--fg-passive);
+	font-size: 11px;
+}
+
+.wiki-picker__error {
+	color: var(--red);
+}
+
+.wiki-picker__launch {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 7px;
+	padding: 6px 14px;
+	border: 0;
+	border-radius: 7px;
+	background: var(--accent);
+	color: var(--accent-fg);
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.wiki-picker__launch:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+.wiki-picker__launch-key {
+	width: 11px;
+	height: 11px;
+	opacity: 0.75;
+}
+
+/* ── vault rail ── */
+
+.wiki-rail {
+	display: flex;
+	width: 452px;
+	flex: none;
+	flex-direction: column;
+	border-left: 1px solid var(--border);
+	background: var(--bg);
+}
+
+.wiki-rail__summary {
+	display: flex;
+	height: 36px;
+	flex: none;
+	align-items: center;
+	gap: 8px;
+	padding: 0 14px;
+	border-bottom: 1px solid var(--border);
+}
+
+.wiki-rail__count {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-family: var(--font-mono);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.wiki-rail__refresh {
+	display: inline-flex;
+	width: 20px;
+	height: 20px;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	margin-left: auto;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--fg-passive);
+	cursor: pointer;
+}
+
+.wiki-rail__refresh:hover {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.wiki-rail__refresh svg {
+	width: 13px;
+	height: 13px;
+}
+
+.wiki-rail__search {
+	display: flex;
+	height: 36px;
+	flex: none;
+	align-items: center;
+	gap: 8px;
+	padding: 0 14px;
+	border-bottom: 1px solid var(--border);
+}
+
+.wiki-rail__search-icon {
+	width: 13px;
+	height: 13px;
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.wiki-rail__search-input {
+	min-width: 0;
+	flex: 1;
+	border: 0;
+	background: transparent;
+	color: var(--fg);
+	font-size: 12px;
+	outline: none;
+}
+
+.wiki-rail__search-input::placeholder {
+	color: var(--fg-passive);
+}
+
+.wiki-rail__tree {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 1px;
+	overflow-y: auto;
+	padding: 9px 8px;
+	font-family: var(--font-mono);
+}
+
+.wiki-rail__empty {
+	padding: 10px 8px;
+	color: var(--fg-passive);
+	font-family: var(--font-sans);
+	font-size: 11.5px;
+	line-height: 1.6;
+}
+
+.wiki-rail__row {
+	display: flex;
+	width: 100%;
+	flex: none;
+	align-items: center;
+	gap: 7px;
+	padding-right: 8px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
+}
+
+.wiki-rail__row--folder {
+	height: 28px;
+}
+
+.wiki-rail__row--file {
+	height: 27px;
+}
+
+.wiki-rail__row:hover {
+	background: var(--interactive-hover);
+}
+
+/* The open note, marked the way an active session row is. */
+.wiki-rail__row--open,
+.wiki-rail__row--open:hover {
+	background: var(--accent-weak);
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.wiki-rail__chevron {
+	width: 12px;
+	height: 12px;
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.wiki-rail__name {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--fg-muted);
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.wiki-rail__name--folder {
+	color: var(--fg);
+	font-weight: 600;
+}
+
+.wiki-rail__row--open .wiki-rail__name {
+	color: var(--prose-accent-text);
+	font-weight: 600;
+}
+
+.wiki-rail__age {
+	flex: none;
+	margin-left: auto;
+	color: var(--fg-passive);
+	font-size: 10px;
+}
+
+/* ── a note, open in the centre ── */
+
+.wiki-note {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+	overflow: hidden;
+	background: var(--bg);
+}
+
+.wiki-note__bar {
+	display: flex;
+	height: 38px;
+	flex: none;
+	align-items: center;
+	gap: 9px;
+	padding: 0 14px;
+	border-bottom: 1px solid var(--border);
+}
+
+.wiki-note__bar-button {
+	display: inline-flex;
+	width: 20px;
+	height: 20px;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--fg-muted);
+	cursor: pointer;
+}
+
+.wiki-note__bar-button:hover:not(:disabled) {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+/* Disabled rather than hidden: a control that vanishes as you navigate makes
+   the bar twitch and slides the other one under your cursor. */
+.wiki-note__bar-button:disabled {
+	color: var(--fg-passive);
+	opacity: 0.45;
+	cursor: default;
+}
+
+.wiki-note__bar-button svg {
+	width: 14px;
+	height: 14px;
+}
+
+.wiki-note__bar-divider {
+	width: 1px;
+	height: 15px;
+	flex: none;
+	margin: 0 3px;
+	background: var(--border);
+}
+
+.wiki-note__path {
+	display: flex;
+	min-width: 0;
+	flex: 0 1 auto;
+	overflow: hidden;
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+
+.wiki-note__path-dir {
+	color: var(--fg-passive);
+}
+
+.wiki-note__path-base {
+	color: var(--fg);
+	font-weight: 600;
+}
+
+.wiki-note__bar-spacer {
+	flex: 1 1 auto;
+}
+
+.wiki-note__scroll {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	justify-content: center;
+	overflow-y: auto;
+	padding: 34px 40px 0;
+}
+
+/* The measure. A note is long-form reading: a line that runs the full width of
+   a wide window is unreadable, so it is capped here rather than in the prose. */
+.wiki-note__measure {
+	width: 660px;
+	max-width: 100%;
+}
+
+.wiki-note__message {
+	color: var(--fg-passive);
+	font-size: 12.5px;
+}
+
+.wiki-note__title {
+	margin: 0;
+	color: var(--fg);
+	font-size: 29px;
+	font-weight: 700;
+	line-height: 1.22;
+	letter-spacing: -0.014em;
+	overflow-wrap: anywhere;
+}
+
+.wiki-note__meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin-top: 13px;
+}
+
+.wiki-note__meta-text {
+	margin-left: 4px;
+	color: var(--fg-passive);
+	font-size: 11px;
+}
+
+.wiki-note__body {
+	margin-top: 20px;
+}
+
+.wiki-note__backlinks {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 9px;
+	margin-top: 16px;
+}
+
+.wiki-note__backlinks-icon {
+	width: 13px;
+	height: 13px;
+	flex: none;
+	color: var(--fg-passive);
+}
+
+.wiki-note__backlinks-label {
+	color: var(--fg-passive);
+	font-size: 11.5px;
+}
+
+.wiki-note__backlink {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--accent);
+	font-family: var(--font-mono);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.wiki-note__backlink:hover {
+	text-decoration: underline;
+}
+
+/* Breathing room under the last block, so the note does not end flush against
+   the bottom of its scroller. */
+.wiki-note__tail {
+	height: 48px;
 }

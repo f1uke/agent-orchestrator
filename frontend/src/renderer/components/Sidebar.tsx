@@ -7,6 +7,7 @@ import {
 	Circle,
 	Folder,
 	FolderPlus,
+	BookText,
 	GitPullRequest,
 	Globe,
 	GripVertical,
@@ -84,6 +85,7 @@ import { consumeSplitDragClick, startSplitDrag } from "../lib/split-drag";
 import aoLogo from "../assets/ao-logo.png";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
+import { useWikiStatus } from "../hooks/useWiki";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
@@ -182,10 +184,12 @@ function useSelection() {
 	const pathname = useRouterState({ select: (state) => state.location.pathname });
 	return {
 		isHome: pathname === "/",
+		isWiki: pathname === "/wiki",
 		activeProjectId: params.projectId,
 		activeSessionId: params.sessionId,
 		goHome: () => void navigate({ to: "/" }),
 		goPrs: () => void navigate({ to: "/prs" }),
+		goWiki: () => void navigate({ to: "/wiki" }),
 		goGlobalSettings: () => void navigate({ to: "/settings" }),
 		goSettings: (projectId: string) => void navigate({ to: "/projects/$projectId/settings", params: { projectId } }),
 		// Search opens the settings two-pane (where the in-settings search field
@@ -335,6 +339,12 @@ export function Sidebar({
 			</SidebarHeader>
 
 			<SidebarContent className="gap-0 pl-2.5 pr-[7px] group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-1.5">
+				{/* The Wiki: a top-level DESTINATION, above the Projects section and
+            separated from it by a hairline. It is not a project, so it has no
+            disclosure triangle and no children. It appears only once a vault
+            path is set (Settings › System › Wiki vault). */}
+				<WikiNavItem selection={selection} />
+
 				<SidebarGroup className="p-0">
 					{/* Section label (project-sidebar__nav-label) */}
 					<div className="flex shrink-0 items-center justify-between px-2 pb-2 group-data-[collapsible=icon]:hidden">
@@ -1308,6 +1318,89 @@ function CopySessionIdButton({ sessionId }: { sessionId: string }) {
 			what="session id"
 		/>
 	);
+}
+
+/**
+ * The Wiki row.
+ *
+ * A destination, not a project: one row, no disclosure triangle, no children.
+ * It renders only when a vault path is configured — an unset Wiki is not an
+ * empty state to explain in the rail, it is a feature the user has not turned
+ * on, and a permanent dead row would be noise for everyone who never will.
+ *
+ * The green dot mirrors the page's agent pill, so the rail says at a glance
+ * whether an agent is still sitting in the vault. It collapses into the 48px
+ * icon rail the same way every other row does, via
+ * `group-data-[collapsible=icon]`, with the dot pinned to the glyph's corner.
+ */
+function WikiNavItem({ selection }: { selection: ReturnType<typeof useSelection> }) {
+	const { state } = useSidebar();
+	// No poll here: the row only has to exist. The Wiki page polls while it is
+	// open, and this shares its cache entry, so the dot stays live for free.
+	const status = useWikiStatus({ poll: false }).data;
+	if (status?.configured !== true) return null;
+
+	const running = status.running === true;
+	return (
+		<>
+			<SidebarMenu className="gap-0 pb-0">
+				<SidebarMenuItem>
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<SidebarMenuButton
+								aria-label="Wiki"
+								isActive={selection.isWiki}
+								onClick={selection.goWiki}
+								className={cn(
+									"h-8 gap-2.5 rounded-md px-2 text-[12.5px] font-semibold",
+									"group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0!",
+									selection.isWiki
+										? "bg-accent-weak text-accent shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]"
+										: "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
+								)}
+							>
+								<span className="relative grid shrink-0 place-items-center">
+									<BookText aria-hidden="true" className="size-[15px]!" />
+									{/* In the icon rail the label is gone, so the dot moves onto
+                      the glyph rather than disappearing with the row. */}
+									{running && (
+										<span className="absolute -right-1.5 -top-1.5 hidden size-2 rounded-full bg-success ring-2 ring-sidebar group-data-[collapsible=icon]:block" />
+									)}
+								</span>
+								<span className="min-w-0 flex-1 truncate tracking-[-0.006em] group-data-[collapsible=icon]:hidden">
+									Wiki
+								</span>
+								{running && (
+									<span className="flex shrink-0 items-center gap-[5px] group-data-[collapsible=icon]:hidden">
+										<span className="size-1.5 rounded-full bg-success" />
+										<span className="font-mono text-[10px] font-semibold text-passive">
+											{shortHarness(status.harness)}
+										</span>
+									</span>
+								)}
+							</SidebarMenuButton>
+						</TooltipTrigger>
+						<TooltipContent side="right" hidden={state !== "collapsed"}>
+							Wiki
+						</TooltipContent>
+					</Tooltip>
+				</SidebarMenuItem>
+			</SidebarMenu>
+			{/* The hairline that makes Wiki a section of its own rather than the
+          first entry of Projects. */}
+			<div className="mx-2 my-3 h-px bg-border group-data-[collapsible=icon]:mx-0 group-data-[collapsible=icon]:w-5" />
+		</>
+	);
+}
+
+/**
+ * The agent's name at rail width. "claude-code" does not fit beside the label
+ * and its own dot, and the vendor half is the half that identifies it.
+ */
+function shortHarness(harness: string | undefined): string {
+	const name = (harness ?? "").trim();
+	if (name === "") return "";
+	return name.length <= 8 ? name : (name.split("-")[0] ?? name);
 }
 
 function CreateProjectButton({ onCreateProject }: Pick<SidebarProps, "onCreateProject">) {

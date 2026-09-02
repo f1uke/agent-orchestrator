@@ -74,6 +74,8 @@ func Build() ([]byte, error) {
 			"Legacy AO project import (availability probe and run)"),
 		*(&openapi31.Tag{Name: "settings"}).WithDescription(
 			"User-editable daemon settings (auto-reclaim, etc.)"),
+		*(&openapi31.Tag{Name: "wiki"}).WithDescription(
+			"Personal note vault: its index, its notes, and the one agent running inside it"),
 	}
 
 	for _, op := range operations() {
@@ -340,6 +342,13 @@ var schemaNames = map[string]string{
 	"ControllersSetAutoNudgeSettingsRequest":         "SetAutoNudgeSettingsRequest",
 	"ControllersResponseLanguageSettingsResponse":    "ResponseLanguageSettingsResponse",
 	"ControllersSetResponseLanguageSettingsRequest":  "SetResponseLanguageSettingsRequest",
+	"ControllersWikiSettingsResponse":                "WikiSettingsResponse",
+	"ControllersSetWikiSettingsRequest":              "SetWikiSettingsRequest",
+	"ControllersWikiStatusResponse":                  "WikiStatusResponse",
+	"ControllersStartWikiAgentRequest":               "StartWikiAgentRequest",
+	"ControllersWikiFilesResponse":                   "WikiFilesResponse",
+	"ControllersWikiNoteSummary":                     "WikiNoteSummary",
+	"ControllersWikiNoteResponse":                    "WikiNoteResponse",
 	"ControllersSystemPromptItem":                    "SystemPromptItem",
 	"ControllersSystemPromptsResponse":               "SystemPromptsResponse",
 	"ControllersSetSystemPromptRequest":              "SetSystemPromptRequest",
@@ -1894,6 +1903,86 @@ func settingsOperations() []operation {
 				{http.StatusOK, controllers.ResponseLanguageSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/wiki", id: "getWikiSettings", tag: "settings",
+			summary: "Fetch the global wiki vault path",
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/wiki", id: "setWikiSettings", tag: "settings",
+			summary: "Replace the global wiki vault path (empty turns the wiki off)",
+			reqBody: controllers.SetWikiSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/wiki", id: "getWikiStatus", tag: "wiki",
+			summary: "Report whether a vault is configured and whether its agent is running",
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiStatusResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/wiki/agent", id: "startWikiAgent", tag: "wiki",
+			summary: "Start (or switch) the agent running in the vault",
+			reqBody: controllers.StartWikiAgentRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiStatusResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/wiki/agent/restart", id: "restartWikiAgent", tag: "wiki",
+			summary: "Relaunch the same agent in the vault with a fresh conversation",
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiStatusResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/wiki/agent", id: "stopWikiAgent", tag: "wiki",
+			summary: "Stop the vault's agent, leaving the vault readable",
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiStatusResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/wiki/files", id: "listWikiFiles", tag: "wiki",
+			summary: "Index every file in the vault",
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiFilesResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/wiki/file", id: "readWikiNote", tag: "wiki",
+			summary:    "Return one note's raw markdown",
+			pathParams: []any{controllers.WikiNoteParams{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiNoteResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
 		{

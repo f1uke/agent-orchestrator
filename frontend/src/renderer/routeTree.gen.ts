@@ -13,6 +13,7 @@ import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellPrsRouteImport } from './routes/_shell.prs'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
+import { Route as ShellWikiRouteImport } from './routes/_shell.wiki'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSessionsSessionIdRouteImport } from './routes/_shell.sessions.$sessionId'
 import { Route as ShellProjectsProjectIdJiraRouteImport } from './routes/_shell.projects.$projectId_.jira'
@@ -36,6 +37,11 @@ const ShellPrsRoute = ShellPrsRouteImport.update({
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellWikiRoute = ShellWikiRouteImport.update({
+  id: '/wiki',
+  path: '/wiki',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/prs': typeof ShellPrsRoute
   '/settings': typeof ShellSettingsRoute
+  '/wiki': typeof ShellWikiRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
   '/projects/$projectId/jira': typeof ShellProjectsProjectIdJiraRoute
@@ -80,6 +87,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/prs': typeof ShellPrsRoute
   '/settings': typeof ShellSettingsRoute
+  '/wiki': typeof ShellWikiRoute
   '/': typeof ShellIndexRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
@@ -92,6 +100,7 @@ export interface FileRoutesById {
   '/_shell': typeof ShellRouteWithChildren
   '/_shell/prs': typeof ShellPrsRoute
   '/_shell/settings': typeof ShellSettingsRoute
+  '/_shell/wiki': typeof ShellWikiRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/sessions/$sessionId': typeof ShellSessionsSessionIdRoute
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/'
     | '/prs'
     | '/settings'
+    | '/wiki'
     | '/projects/$projectId'
     | '/sessions/$sessionId'
     | '/projects/$projectId/jira'
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
   to:
     | '/prs'
     | '/settings'
+    | '/wiki'
     | '/'
     | '/projects/$projectId'
     | '/sessions/$sessionId'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
     | '/_shell'
     | '/_shell/prs'
     | '/_shell/settings'
+    | '/_shell/wiki'
     | '/_shell/'
     | '/_shell/projects/$projectId'
     | '/_shell/sessions/$sessionId'
@@ -165,6 +177,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof ShellSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/wiki': {
+      id: '/_shell/wiki'
+      path: '/wiki'
+      fullPath: '/wiki'
+      preLoaderRoute: typeof ShellWikiRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/projects/$projectId': {
@@ -208,6 +227,7 @@ declare module '@tanstack/react-router' {
 interface ShellRouteChildren {
   ShellPrsRoute: typeof ShellPrsRoute
   ShellSettingsRoute: typeof ShellSettingsRoute
+  ShellWikiRoute: typeof ShellWikiRoute
   ShellIndexRoute: typeof ShellIndexRoute
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellSessionsSessionIdRoute: typeof ShellSessionsSessionIdRoute
@@ -219,6 +239,7 @@ interface ShellRouteChildren {
 const ShellRouteChildren: ShellRouteChildren = {
   ShellPrsRoute: ShellPrsRoute,
   ShellSettingsRoute: ShellSettingsRoute,
+  ShellWikiRoute: ShellWikiRoute,
   ShellIndexRoute: ShellIndexRoute,
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellSessionsSessionIdRoute: ShellSessionsSessionIdRoute,

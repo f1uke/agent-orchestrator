@@ -41,6 +41,7 @@ import (
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	wikisvc "github.com/aoagents/agent-orchestrator/backend/internal/service/wiki"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
@@ -48,6 +49,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 	"github.com/aoagents/agent-orchestrator/backend/internal/terminal"
 	"github.com/aoagents/agent-orchestrator/backend/internal/treewatch"
+	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
 )
 
 // Run starts the daemon and blocks until it exits. SIGINT/SIGTERM drive
@@ -209,6 +211,20 @@ func Run() error {
 		return fmt.Errorf("response-language settings: %w", err)
 	}
 
+	// The Wiki is a personal note vault plus one agent pane running inside it.
+	// Its settings store is global (there is one vault, and it belongs to no
+	// project) and unconfigured by default, which is what keeps the destination
+	// hidden until the user points it somewhere. A missing/corrupt file degrades
+	// to unconfigured.
+	wikiSettings, err := wikisettings.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("wiki settings: %w", err)
+	}
+
 	// loopReg tracks each fixed-interval background loop's last-run time so the
 	// API can surface a live countdown to each loop's next run. In-memory only:
 	// rebuilt on boot, forgotten on shutdown. Created before any loop starts so
@@ -344,6 +360,24 @@ func Run() error {
 	})
 
 	// sessionSvc is the Jira SessionGateway (read + set the after-the-fact binding).
+	// The Wiki's agent pane is a bare runtime handle, NOT a session: it is
+	// created straight against the runtime adapter with no store row, no
+	// worktree and no lifecycle wiring, so nothing that sweeps sessions can see
+	// it. Its own registry keeps this off the session manager's resolver.
+	wikiAgents, err := buildAgentRegistryResolver()
+	if err != nil {
+		stop()
+		<-previewDone
+		<-reclaimerDone
+		<-tokenUsageDone
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("wiki agent registry: %w", err)
+	}
+	wikiSvc := wikisvc.New(wikisvc.Deps{Settings: wikiSettings, Agents: wikiAgents, Runtime: gatedRuntime})
+
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
 		Agents:             agentSvc,
@@ -368,6 +402,8 @@ func Run() error {
 		SpawnConfirm:       spawnConfirmSettings,
 		AutoNudge:          autoNudge,
 		ResponseLanguage:   responseLangSettings,
+		WikiSettings:       wikiSettings,
+		Wiki:               wikiSvc,
 		EvidenceRetention:  evidenceRetentionSettings,
 		EvidenceSweeper:    evidenceSweep,
 		SystemPrompts:      promptOverrides,

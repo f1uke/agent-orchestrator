@@ -77,9 +77,9 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		key: "system",
 		label: "System",
 		Icon: Monitor,
-		hint: "notifications, updates, companion & migration",
+		hint: "wiki vault, notifications, updates, companion & migration",
 		keywords:
-			"notifications test updates channel version check migration import legacy companion desktop pet overlay procs library creature species animal character look appearance colour color",
+			"wiki vault obsidian notes knowledge base folder path notifications test updates channel version check migration import legacy companion desktop pet overlay procs library creature species animal character look appearance colour color",
 	},
 ];
 

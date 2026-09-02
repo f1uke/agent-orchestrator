@@ -146,6 +146,18 @@ async function chooseOption(trigger: HTMLElement, optionName: string) {
 	await userEvent.click(await screen.findByRole("option", { name: optionName }));
 }
 
+/**
+ * The sidebar reads more than one endpoint (the agent catalog, and the Wiki's
+ * vault status), so a bare `mockResolvedValueOnce` is consumed by whichever
+ * request happens to fire first. Route by path instead, and answer the wiki
+ * route explicitly so a test's one-shot payload can never be eaten by it.
+ */
+function respondByPath(agents: unknown, wiki: unknown = { data: { configured: false }, error: undefined }) {
+	getMock.mockImplementation((path: string) =>
+		Promise.resolve(path === "/api/v1/wiki" ? wiki : (agents as Promise<unknown> | unknown)),
+	);
+}
+
 beforeEach(() => {
 	getMock.mockReset();
 	getMock.mockResolvedValue({
@@ -979,7 +991,7 @@ describe("Sidebar", () => {
 		const user = userEvent.setup();
 		const onCreateProject = vi.fn().mockResolvedValue(undefined) as CreateProjectHandler;
 		window.ao!.app.chooseDirectory = vi.fn().mockResolvedValue("/repo/new-project");
-		getMock.mockResolvedValueOnce({
+		respondByPath({
 			data: {
 				supported: [
 					{ id: "claude-code", label: "Claude Code" },
@@ -1033,7 +1045,7 @@ describe("Sidebar", () => {
 			};
 			error: undefined;
 		}) => void;
-		getMock.mockReturnValueOnce(
+		respondByPath(
 			new Promise((resolve) => {
 				resolveAgents = resolve;
 			}),

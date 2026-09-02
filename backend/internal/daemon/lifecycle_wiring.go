@@ -354,6 +354,18 @@ func (a agentRegistry) Agent(harness domain.AgentHarness) (ports.Agent, bool) {
 	return agent, ok
 }
 
+// buildAgentRegistryResolver builds a bare agent resolver over the shipped
+// adapters, with none of buildAgentResolver's session-oriented validation
+// (there is no configured default to check) and none of its logging. It is what
+// a non-session surface — the Wiki's vault pane — resolves its harness through.
+func buildAgentRegistryResolver() (ports.AgentResolver, error) {
+	reg, err := buildAgentRegistry()
+	if err != nil {
+		return nil, err
+	}
+	return agentRegistry{reg: reg}, nil
+}
+
 // buildAgentResolver constructs the per-session agent resolver the Session
 // Manager consumes (sessionmanager.Deps.Agents): a registry of the shipped
 // adapters. It still validates AO_AGENT at startup for compatibility with the

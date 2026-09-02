@@ -5,6 +5,7 @@ import { aoBridge } from "../../lib/bridge";
 import type { UpdateChannel, UpdateSettings } from "../../../main/update-settings";
 import type { components } from "../../../api/schema";
 import { updateSettingsQueryKey } from "./SystemActions";
+import { wikiStatusQueryKey } from "../../hooks/useWiki";
 
 export type PromptKind = "orchestrator" | "worker" | "qa" | "reviewer";
 export type PromptItem = { kind: PromptKind; default: string; override: string | null };
@@ -22,6 +23,7 @@ const messageTemplatesQueryKey = ["settings", "messageTemplates"] as const;
 const spawnConfirmQueryKey = ["settings", "spawnConfirm"] as const;
 const autoNudgeQueryKey = ["settings", "autoNudge"] as const;
 const responseLanguageQueryKey = ["settings", "responseLanguage"] as const;
+export const wikiSettingsQueryKey = ["settings", "wiki"] as const;
 const reclaimSettingsQueryKey = ["settings", "reclaim"] as const;
 export const evidenceRetentionQueryKey = ["settings", "evidenceRetention"] as const;
 
@@ -33,6 +35,7 @@ export type GlobalDraft = {
 	spawnConfirm: boolean;
 	autoNudge: boolean;
 	responseLanguage: string;
+	wikiVaultPath: string;
 	reclaimEnabled: boolean;
 	reclaimGrace: number;
 	reclaimArtifacts: boolean;
@@ -46,6 +49,7 @@ export type GlobalScalarField =
 	| "spawnConfirm"
 	| "autoNudge"
 	| "responseLanguage"
+	| "wikiVaultPath"
 	| "reclaimEnabled"
 	| "reclaimGrace"
 	| "reclaimArtifacts"
@@ -60,6 +64,7 @@ const EMPTY_DRAFT: GlobalDraft = {
 	spawnConfirm: true,
 	autoNudge: false,
 	responseLanguage: "English",
+	wikiVaultPath: "",
 	reclaimEnabled: true,
 	reclaimGrace: 24 * 60,
 	reclaimArtifacts: true,
@@ -124,6 +129,14 @@ export function useGlobalSettingsForm() {
 			const { data, error } = await apiClient.GET("/api/v1/settings/response-language", {});
 			if (error) throw new Error(apiErrorMessage(error));
 			return data as { language: string };
+		},
+	});
+	const wikiQuery = useQuery({
+		queryKey: wikiSettingsQueryKey,
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/wiki", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as components["schemas"]["WikiSettingsResponse"];
 		},
 	});
 	const reclaimQuery = useQuery({
@@ -198,6 +211,14 @@ export function useGlobalSettingsForm() {
 	}, [responseLanguageQuery.data]);
 
 	useEffect(() => {
+		if (!wikiQuery.data || seeded.current.has("wiki")) return;
+		seeded.current.add("wiki");
+		const v = wikiQuery.data.vaultPath ?? "";
+		setDraft((d) => ({ ...d, wikiVaultPath: v }));
+		setBaseline((b) => ({ ...b, wikiVaultPath: v }));
+	}, [wikiQuery.data]);
+
+	useEffect(() => {
 		if (!reclaimQuery.data || seeded.current.has("reclaim")) return;
 		seeded.current.add("reclaim");
 		const { enabled, graceMinutes } = reclaimQuery.data;
@@ -250,6 +271,7 @@ export function useGlobalSettingsForm() {
 		draft.spawnConfirm !== baseline.spawnConfirm ||
 		draft.autoNudge !== baseline.autoNudge ||
 		draft.responseLanguage !== baseline.responseLanguage ||
+		draft.wikiVaultPath !== baseline.wikiVaultPath ||
 		draft.reclaimEnabled !== baseline.reclaimEnabled ||
 		draft.reclaimGrace !== baseline.reclaimGrace ||
 		draft.reclaimArtifacts !== baseline.reclaimArtifacts ||
@@ -347,6 +369,16 @@ export function useGlobalSettingsForm() {
 					})(),
 				);
 			}
+			if (draft.wikiVaultPath !== baseline.wikiVaultPath) {
+				ops.push(
+					(async () => {
+						const { error } = await apiClient.PUT("/api/v1/settings/wiki", {
+							body: { vaultPath: draft.wikiVaultPath },
+						});
+						if (error) throw new Error(apiErrorMessage(error));
+					})(),
+				);
+			}
 			if (
 				draft.reclaimEnabled !== baseline.reclaimEnabled ||
 				draft.reclaimGrace !== baseline.reclaimGrace ||
@@ -398,6 +430,12 @@ export function useGlobalSettingsForm() {
 			void queryClient.invalidateQueries({ queryKey: spawnConfirmQueryKey });
 			void queryClient.invalidateQueries({ queryKey: autoNudgeQueryKey });
 			void queryClient.invalidateQueries({ queryKey: responseLanguageQueryKey });
+			void queryClient.invalidateQueries({ queryKey: wikiSettingsQueryKey });
+			// The sidebar's Wiki row exists only while a vault is configured, and it
+			// reads the wiki STATUS (not this settings query) without polling. Setting
+			// or clearing the path has to push that, or the row lingers — or fails to
+			// appear — until the next app start.
+			void queryClient.invalidateQueries({ queryKey: wikiStatusQueryKey });
 			void queryClient.invalidateQueries({ queryKey: reclaimSettingsQueryKey });
 			void queryClient.invalidateQueries({ queryKey: evidenceRetentionQueryKey });
 			void queryClient.invalidateQueries({ queryKey: updateSettingsQueryKey });
