@@ -150,8 +150,11 @@ func TestStart_LaunchesBareInTheVault(t *testing.T) {
 	if len(launch.AllowedTools) != 0 || len(launch.DisallowedTools) != 0 {
 		t.Fatalf("launch restricted tools: %+v", launch)
 	}
-	if launch.Permissions != ports.PermissionModeBypassPermissions {
-		t.Fatalf("permissions = %q, want bypass", launch.Permissions)
+	// DEFAULT is the "no --permission-mode flag" value: AO must not decide how
+	// much the agent may do to the user's notes without asking. Anything else
+	// here — bypass included — is AO framing, which this launch has none of.
+	if launch.Permissions != ports.PermissionModeDefault {
+		t.Fatalf("permissions = %q, want the default (no flag forced)", launch.Permissions)
 	}
 	if ag.preLaunchN != 1 {
 		t.Fatalf("PreLaunch called %d times, want 1", ag.preLaunchN)

@@ -189,11 +189,18 @@ func (s *Service) Start(ctx context.Context, harness domain.AgentHarness) (Statu
 
 	// Deliberately bare: the vault as the working directory, and nothing else.
 	// No Prompt, no SystemPrompt, no tool lists — the agent is the user's, not
-	// AO's. Permissions are bypassed because the vault is the user's own notes
-	// and the point of the page is that the agent can edit them freely.
+	// AO's.
+	//
+	// Permissions are DEFAULT, which emits no flag at all and leaves the agent
+	// on whatever the user's own CLI config says. That is the same rule as
+	// everything else here: forcing bypassPermissions would be AO deciding how
+	// much the agent may do to the user's notes without asking, which is
+	// exactly the kind of framing this page exists not to add. The agent still
+	// has full read/write freedom in the vault — AO restricts nothing — it just
+	// asks on the user's own terms rather than on ours.
 	launch := ports.LaunchConfig{
 		WorkspacePath: vault,
-		Permissions:   ports.PermissionModeBypassPermissions,
+		Permissions:   ports.PermissionModeDefault,
 	}
 	if pl, ok := agent.(preLauncher); ok {
 		if err := pl.PreLaunch(ctx, launch); err != nil {
