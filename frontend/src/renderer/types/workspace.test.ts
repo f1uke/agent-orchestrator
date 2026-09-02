@@ -539,9 +539,9 @@ describe("isUndeliveredParked", () => {
 	};
 
 	it("is the park: suspended, asleep for undelivered work", () => {
-		expect(
-			isUndeliveredParked({ ...base, status: "needs_input", isSuspended: true, sleepReason: "undelivered" }),
-		).toBe(true);
+		expect(isUndeliveredParked({ ...base, status: "needs_input", isSuspended: true, sleepReason: "undelivered" })).toBe(
+			true,
+		);
 	});
 
 	it("is not any other sleep", () => {
@@ -552,8 +552,8 @@ describe("isUndeliveredParked", () => {
 	// A terminated row KEEPS the sleep_reason it was parked with, so without the
 	// terminal check a session already in Done would still offer "Move to Done".
 	it("is over once the session has ended", () => {
-		expect(
-			isUndeliveredParked({ ...base, status: "terminated", isSuspended: true, sleepReason: "undelivered" }),
-		).toBe(false);
+		expect(isUndeliveredParked({ ...base, status: "terminated", isSuspended: true, sleepReason: "undelivered" })).toBe(
+			false,
+		);
 	});
 });

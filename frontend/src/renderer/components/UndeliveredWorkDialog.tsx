@@ -103,8 +103,8 @@ export function UndeliveredWorkDialog({
 						worktree, with the work still there.
 					</p>
 					<p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
-						<span className="text-foreground">Or discard it:</span> the worktree is removed. The branch and every
-						commit on it stay, and these files are captured to{" "}
+						<span className="text-foreground">Or discard it:</span> the worktree is removed. The branch and every commit
+						on it stay, and these files are captured to{" "}
 						<span className="font-mono text-[11px] text-passive">refs/ao/preserved/{sessionId}</span> first, so this is
 						recoverable.
 					</p>

@@ -561,13 +561,7 @@ function EmptyLane({ col }: { col: LaneConfig }) {
 // and that refusal is the one thing this menu may not swallow. A menu is far too
 // small for a file list, so the refusal hands off to UndeliveredWorkDialog, which
 // says what is in the way and offers the deliberate discard.
-function SessionCardMenu({
-	session,
-	onOpenSession,
-}: {
-	session: WorkspaceSession;
-	onOpenSession: () => void;
-}) {
+function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession; onOpenSession: () => void }) {
 	const queryClient = useQueryClient();
 	const [open, setOpen] = useState(false);
 	const [confirming, setConfirming] = useState(false);

@@ -98,7 +98,13 @@ describe("UndeliveredWorkChip", () => {
 		await screen.findByText("Sources/Article/NewFile.swift");
 
 		postMock.mockResolvedValue({
-			data: { ok: true, sessionId: "sess-60", terminated: true, freed: true, preservedRef: "refs/ao/preserved/sess-60" },
+			data: {
+				ok: true,
+				sessionId: "sess-60",
+				terminated: true,
+				freed: true,
+				preservedRef: "refs/ao/preserved/sess-60",
+			},
 		});
 		await userEvent.click(screen.getByRole("button", { name: /Discard and move to Done/i }));
 
