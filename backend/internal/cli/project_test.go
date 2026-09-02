@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -63,8 +64,17 @@ func TestProjectSetConfig_TrackerIntakeFlags(t *testing.T) {
 	if err := json.Unmarshal(capture.body, &got); err != nil {
 		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
 	}
-	if !got.Config.TrackerIntake.Enabled || got.Config.TrackerIntake.Provider != "github" || got.Config.TrackerIntake.Repo != "acme/demo" || got.Config.TrackerIntake.Assignee != "alice" {
+	if !got.Config.TrackerIntake.Enabled || got.Config.TrackerIntake.Repo != "acme/demo" || got.Config.TrackerIntake.Assignee != "alice" {
 		t.Fatalf("tracker intake request = %#v", got.Config.TrackerIntake)
+	}
+	// The provider is left to the daemon, which defaults it to github wherever
+	// intake is read. Sending one from here would make `--tracker-repo` a write
+	// to trackerIntake.provider as well, and flip a gitlab project to github.
+	if got.Config.TrackerIntake.Provider != "" {
+		t.Errorf("tracker provider = %q, want unset when --tracker-provider was not passed", got.Config.TrackerIntake.Provider)
+	}
+	if slices.Contains(got.MergeFields, "trackerIntake.provider") {
+		t.Errorf("mergeFields = %v, must not name a provider the caller never gave", got.MergeFields)
 	}
 }
 
@@ -97,8 +107,13 @@ func TestBuildProjectConfigTrackerIntakeFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.TrackerIntake.Enabled || got.TrackerIntake.Provider != "github" || got.TrackerIntake.Repo != "acme/demo" || got.TrackerIntake.Assignee != "alice" {
+	if !got.TrackerIntake.Enabled || got.TrackerIntake.Repo != "acme/demo" || got.TrackerIntake.Assignee != "alice" {
 		t.Fatalf("tracker intake config = %#v", got.TrackerIntake)
+	}
+	// No client-side github default: the daemon owns it (WithDefaults), and a
+	// second one here would turn every tracker flag into a provider write.
+	if got.TrackerIntake.Provider != "" {
+		t.Errorf("tracker provider = %q, want unset when --tracker-provider was not passed", got.TrackerIntake.Provider)
 	}
 }
 
@@ -157,8 +172,7 @@ func TestBuildProjectConfigGitConventionFlags(t *testing.T) {
 
 func TestBuildProjectConfigGitWorkflowNoneNormalizesToEmpty(t *testing.T) {
 	// "none" is the CLI spelling of the default; it must store as unset so an
-	// otherwise-empty convention persists as NULL. Paired with another flag so the
-	// config is not entirely empty (which would trip the "provide a flag" guard).
+	// otherwise-empty convention persists as NULL.
 	got, err := buildProjectConfig(projectSetConfigOptions{gitWorkflow: "none", defaultBranch: "develop"})
 	if err != nil {
 		t.Fatal(err)

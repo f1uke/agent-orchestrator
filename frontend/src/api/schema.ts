@@ -2989,6 +2989,7 @@ export interface components {
         };
         SetProjectConfigInput: {
             config: components["schemas"]["ProjectConfig"];
+            mergeFields?: string[];
         };
         SetReclaimSettingsRequest: {
             artifactPatterns?: string[];

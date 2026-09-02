@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
@@ -72,11 +73,11 @@ type workspaceRepoDetails struct {
 // daemon's own projectsvc.SetConfigInput body.
 //
 // A local mirror of the config is not a style question here, it is a
-// data-integrity bug: `set-config` REPLACES the stored config wholesale, and
-// encoding/json drops object keys the target struct lacks without erroring, so
-// every field the mirror was missing was destroyed by a faithful
-// `project get --json` -> `set-config --config-json` round trip while the
-// command exited 0. Adding the missing names to a mirror only fixes the fields
+// data-integrity bug: `set-config --config-json` REPLACES the stored config
+// wholesale, and encoding/json drops object keys the target struct lacks
+// without erroring, so every field the mirror was missing was destroyed by a
+// faithful `project get --json` -> `set-config --config-json` round trip while
+// the command exited 0. Adding the missing names to a mirror only fixes the fields
 // that have already been lost once; sharing the type makes the next field
 // impossible to lose, because there is nothing left to keep in sync.
 
@@ -243,15 +244,21 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-config <id>",
 		Short: "Set the per-project config",
-		Long: "Replace a project's per-project config (branch, session prefix, env, " +
+		Long: "Set a project's per-project config (branch, session prefix, env, " +
 			"symlinks, post-create, agent model/permissions, role overrides, tracker intake, " +
 			"git convention). The config " +
 			"is resolved when a session spawns.\n\n" +
-			"Set fields via flags, pass the whole object with --config-json, or --clear " +
-			"to remove all config.\n\n" +
-			"--config-json REPLACES the stored config, so it must carry every field to keep, " +
-			"exactly as `ao project get <id> --json` reports them. A key that is not part of " +
-			"the config is refused rather than dropped.",
+			"Field flags MERGE. Only the fields you actually name on the command line are " +
+			"written; every other setting keeps its stored value, including settings that " +
+			"have no flag at all (reviewers, response language, sim profile, approval rule). " +
+			"A flag you pass counts even when its value is the zero one, so " +
+			"`--web-ui=false` turns the setting off and `--default-branch \"\"` clears it.\n\n" +
+			"--config-json REPLACES the whole stored config, so it must carry every field to " +
+			"keep, exactly as `ao project get <id> --json` reports them. It is the way to edit " +
+			"a setting no flag covers, and the way to remove one entry from a list or map. " +
+			"A key that is not part of the config is refused rather than dropped, and it " +
+			"overrides any field flag passed alongside it.\n\n" +
+			"--clear removes all config.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if err := cobra.ExactArgs(1)(cmd, args); err != nil {
 				return usageError{err}
@@ -263,11 +270,11 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := strings.TrimSpace(args[0])
-			config, err := buildProjectConfig(opts)
+			config, mergeFields, err := resolveSetConfigWrite(cmd.Flags(), opts)
 			if err != nil {
 				return err
 			}
-			req := projectsvc.SetConfigInput{Config: config}
+			req := projectsvc.SetConfigInput{Config: config, MergeFields: mergeFields}
 			var res projectResult
 			if err := ctx.putJSON(cmd.Context(), "projects/"+url.PathEscape(id)+"/config", req, &res); err != nil {
 				return err
@@ -305,10 +312,85 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
+// setConfigFieldFlags maps every set-config FIELD flag to the config field it
+// writes, as a dotted JSON path (the daemon resolves it against
+// domain.ProjectConfig - see domain.MergeConfigFields).
+//
+// This list is what makes a partial write partial. Without it the daemon
+// receives a config built from flag variables alone and cannot tell a field the
+// caller cleared from a field the caller never mentioned, so it can only replace
+// - which is how `set-config <id> --pause-before-implementing` used to destroy
+// five settings and empty a sixth while exiting 0.
+//
+// Every flag that writes a config field belongs here; the meta flags (--clear,
+// --config-json, --json) do not, and TestSetConfigFieldFlagsCoverEveryFieldFlag
+// fails if a new field flag is registered without an entry.
+var setConfigFieldFlags = []struct {
+	flag string
+	path string
+}{
+	{flag: "default-branch", path: "defaultBranch"},
+	{flag: "session-prefix", path: "sessionPrefix"},
+	{flag: "model", path: "agentConfig.model"},
+	{flag: "permission", path: "agentConfig.permissions"},
+	{flag: "worker-agent", path: "worker.agent"},
+	{flag: "orchestrator-agent", path: "orchestrator.agent"},
+	{flag: "env", path: "env"},
+	{flag: "symlink", path: "symlinks"},
+	{flag: "post-create", path: "postCreate"},
+	{flag: "tracker-intake", path: "trackerIntake.enabled"},
+	{flag: "tracker-provider", path: "trackerIntake.provider"},
+	{flag: "tracker-repo", path: "trackerIntake.repo"},
+	{flag: "tracker-assignee", path: "trackerIntake.assignee"},
+	{flag: "git-workflow", path: "gitConvention.workflow"},
+	{flag: "branch-prefix", path: "gitConvention.branchPrefix"},
+	{flag: "web-ui", path: "hasWebUI"},
+	{flag: "ios-simulator", path: "hasIOSSimulator"},
+	{flag: "no-auto-crew", path: "disableAutoCrew"},
+	{flag: "pause-before-implementing", path: "pauseBeforeImplementing"},
+}
+
+// resolveSetConfigWrite decides what this invocation writes and how: the config
+// to send, plus the field mask that turns the write into a merge.
+//
+// --clear and --config-json send no mask, so they keep replacing the stored
+// config wholesale - that is what they are documented to do, --config-json is
+// guarded by the strict decode below, and read-modify-write callers rely on it.
+// Field flags always send a mask, so they can only ever write what they name.
+func resolveSetConfigWrite(flags *pflag.FlagSet, opts projectSetConfigOptions) (domain.ProjectConfig, []string, error) {
+	config, err := buildProjectConfig(opts)
+	if err != nil {
+		return domain.ProjectConfig{}, nil, err
+	}
+	if opts.clear || opts.configJSON != "" {
+		return config, nil, nil
+	}
+	fields := changedConfigFields(flags)
+	if len(fields) == 0 {
+		return domain.ProjectConfig{}, nil, usageError{errors.New("usage: provide at least one config flag, --config-json, or --clear")}
+	}
+	return config, fields, nil
+}
+
+// changedConfigFields lists the config fields this command line actually named.
+// It keys off pflag's Changed rather than the flag values, which is the only way
+// a deliberate zero - `--web-ui=false`, `--default-branch ""` - survives as a
+// write instead of being read as silence.
+func changedConfigFields(flags *pflag.FlagSet) []string {
+	var fields []string
+	for _, f := range setConfigFieldFlags {
+		if flags.Changed(f.flag) {
+			fields = append(fields, f.path)
+		}
+	}
+	return fields
+}
+
 // buildProjectConfig turns the set-config flags into the typed config sent to
 // the daemon. --clear empties the config; --config-json supplies the whole
-// object; otherwise the field flags form the config. The daemon validates the
-// values.
+// object; otherwise the field flags form the config, and the mask from
+// changedConfigFields tells the daemon which of its fields to actually write.
+// The daemon validates the values.
 func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, error) {
 	if opts.clear {
 		return domain.ProjectConfig{}, nil
@@ -354,9 +436,10 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 	if cfg.GitConvention.Workflow == "none" {
 		cfg.GitConvention.Workflow = ""
 	}
-	if cfg.IsZero() {
-		return domain.ProjectConfig{}, usageError{errors.New("usage: provide at least one config flag, --config-json, or --clear")}
-	}
+	// No "did you set anything?" check here: an all-zero config is a legitimate
+	// request now (`--web-ui=false`, `--default-branch ""`), and what makes it
+	// legitimate is the mask, not the values. resolveSetConfigWrite refuses the
+	// genuinely empty command line - the one that named no field at all.
 	return cfg, nil
 }
 
@@ -387,16 +470,19 @@ func decodeConfigJSON(raw string) (domain.ProjectConfig, error) {
 	return cfg, nil
 }
 
-// resolveTrackerProvider picks the issue-tracker provider from
-// --tracker-provider, defaulting to "github" when any tracker flag is set
-// without an explicit provider (keeps the pre-GitLab behavior). An unknown
-// value is a usage error.
+// resolveTrackerProvider normalizes --tracker-provider and refuses a value
+// outside the vocabulary. An unknown value is a usage error.
+//
+// It deliberately does NOT default an unset provider to github any more. The
+// daemon already defaults it (TrackerIntakeConfig.WithDefaults, applied wherever
+// intake is read), and a second default here would be worse than redundant:
+// `--tracker-repo acme/demo` names the repo and nothing else, so filling in a
+// provider would send github as part of that write and flip a project
+// configured for gitlab. A default belongs where it is read, not where an
+// unrelated flag happens to pass by.
 func resolveTrackerProvider(opts projectSetConfigOptions) (string, error) {
 	switch p := strings.ToLower(strings.TrimSpace(opts.trackerProvider)); p {
 	case "":
-		if opts.trackerIntake || opts.trackerRepo != "" || opts.trackerAssignee != "" {
-			return "github", nil
-		}
 		return "", nil
 	case "github", "gitlab":
 		return p, nil
