@@ -5395,6 +5395,10 @@ ol.note-prose__list {
 }
 
 .note-prose__task-text {
+	/* Takes the rest of the row. Without it the span shrink-wraps its words, and
+	   an editor opened inside it gets a `width: 100%` of almost nothing. */
+	flex: 1 1 auto;
+	min-width: 0;
 	font-size: 14px;
 	line-height: 1.6;
 	color: var(--prose-fg);
@@ -5403,6 +5407,121 @@ ol.note-prose__list {
 .note-prose__task-text--done {
 	color: var(--fg-passive);
 	text-decoration: line-through;
+}
+
+/* Bold, links and code inside a done item dim with it. `--fg` on .__strong is
+   what a live line wants; leaving it lit on a struck-through line makes the row
+   read as half-finished. */
+.note-prose__task-text--done * {
+	color: inherit;
+}
+
+/* A save the daemon refused for a reason the reader cannot resolve by looking
+   (the note was deleted, it grew too large). It sits above the note rather than
+   as a toast, because it is a state of this note and not a passing event. */
+.wiki-note__refused {
+	flex: none;
+	padding: 10px 20px;
+	border-bottom: 1px solid color-mix(in oklab, var(--red) 28%, transparent);
+	background: color-mix(in oklab, var(--red) 9%, transparent);
+	color: var(--fg);
+	font-size: 12.5px;
+	line-height: 1.5;
+}
+
+/* ── editing a note in place ── */
+
+/* A block the reader can type into. It stays visually identical until the
+   pointer is over it: a page that outlines every paragraph reads as a form
+   rather than as a note. */
+.note-prose__editable {
+	border-radius: 5px;
+	cursor: text;
+	transition: background 90ms ease;
+}
+
+.note-prose__editable:hover {
+	background: color-mix(in oklab, var(--fg) 5%, transparent);
+	box-shadow: 0 0 0 4px color-mix(in oklab, var(--fg) 5%, transparent);
+}
+
+.note-prose__editable:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 3px;
+}
+
+/* The open block. It inherits the prose metrics rather than restating them, so
+   the words do not move when the box appears under the reader's cursor. */
+.note-prose__editor {
+	display: block;
+	width: 100%;
+	margin: 0;
+	padding: 0;
+	border: none;
+	border-radius: 5px;
+	background: color-mix(in oklab, var(--accent) 7%, transparent);
+	box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 7%, transparent);
+	color: inherit;
+	font: inherit;
+	letter-spacing: inherit;
+	line-height: inherit;
+	resize: none;
+	overflow: hidden;
+}
+
+.note-prose__editor:focus {
+	outline: none;
+}
+
+.note-prose__editor--prose {
+	margin-top: 20px;
+	font-size: 14.5px;
+	line-height: 1.78;
+}
+
+.note-prose__editor--heading {
+	margin-top: 30px;
+	color: var(--fg);
+	font-size: 18.5px;
+	font-weight: 700;
+	letter-spacing: -0.014em;
+	line-height: 1.3;
+}
+
+/* A task item's editor sits inside the row, beside the box it belongs to. */
+.note-prose__task-text > .note-prose__editor,
+.note-prose__li > .note-prose__editor {
+	margin-top: 0;
+	font-size: 14px;
+	line-height: 1.6;
+}
+
+/* The clickable box. The hit area is padded out to a comfortable target while
+   the square itself stays the 15px the design draws. */
+.note-prose__checkbox-hit {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	margin: -5px;
+	padding: 5px;
+	border: none;
+	background: none;
+	cursor: pointer;
+}
+
+.note-prose__checkbox-hit:disabled {
+	cursor: progress;
+}
+
+.note-prose__checkbox-hit:hover .note-prose__checkbox {
+	border-color: var(--accent);
+}
+
+.note-prose__checkbox-hit:focus-visible {
+	border-radius: 7px;
+	outline: 2px solid var(--accent);
+	outline-offset: 0;
 }
 
 /* ── callout ── */

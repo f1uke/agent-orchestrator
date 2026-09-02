@@ -24,6 +24,7 @@ type WikiService interface {
 	Stop(ctx context.Context) (wikisvc.Status, error)
 	ListFiles(ctx context.Context) (wikisvc.Files, error)
 	ReadNote(ctx context.Context, path string) (wikisvc.NoteContent, error)
+	WriteNote(ctx context.Context, in wikisvc.WriteNoteInput) (wikisvc.WriteNoteResult, error)
 }
 
 // WikiController owns the /wiki routes. A nil service keeps them mounted and
@@ -40,6 +41,7 @@ func (c *WikiController) Register(r chi.Router) {
 	r.Delete("/wiki/agent", c.stop)
 	r.Get("/wiki/files", c.files)
 	r.Get("/wiki/file", c.note)
+	r.Put("/wiki/file", c.writeNote)
 }
 
 func (c *WikiController) status(w http.ResponseWriter, r *http.Request) {
@@ -136,11 +138,53 @@ func (c *WikiController) note(w http.ResponseWriter, r *http.Request) {
 		backlinks = []string{}
 	}
 	envelope.WriteJSON(w, http.StatusOK, WikiNoteResponse{
-		Path:       note.Path,
-		Content:    note.Content,
-		Size:       note.Size,
-		Backlinks:  backlinks,
-		ModifiedAt: wikiStamp(note.ModifiedAt),
+		Path:        note.Path,
+		Content:     note.Content,
+		Size:        note.Size,
+		ContentHash: note.ContentHash,
+		Backlinks:   backlinks,
+		ModifiedAt:  wikiStamp(note.ModifiedAt),
+	})
+}
+
+// writeNote saves one note. The body carries the note's whole new bytes plus
+// the hash it was read with; the service refuses the write outright if the file
+// moved underneath the editor.
+func (c *WikiController) writeNote(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/wiki/file")
+		return
+	}
+	var in WriteWikiNoteRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if strings.TrimSpace(in.Path) == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PATH_REQUIRED", "path is required", nil)
+		return
+	}
+	if in.Content == nil {
+		envelope.WriteAPIError(
+			w, r, http.StatusBadRequest, "bad_request", "WIKI_NOTE_CONTENT_REQUIRED",
+			"content is required; emptying a note must be spelled as an explicit empty string", nil,
+		)
+		return
+	}
+	res, err := c.Svc.WriteNote(r.Context(), wikisvc.WriteNoteInput{
+		Path:     in.Path,
+		Content:  *in.Content,
+		BaseHash: strings.TrimSpace(in.BaseHash),
+	})
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, WriteWikiNoteResponse{
+		Path:        res.Path,
+		ContentHash: res.ContentHash,
+		Size:        res.Size,
+		ModifiedAt:  wikiStamp(res.ModifiedAt),
 	})
 }
 

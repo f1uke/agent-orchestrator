@@ -27,6 +27,9 @@ type fakeWikiSvc struct {
 	restarted int
 	stopped   int
 	readPath  string
+	wrote     []wikisvc.WriteNoteInput
+	writeRes  wikisvc.WriteNoteResult
+	writeErr  error
 }
 
 func (f *fakeWikiSvc) Status(context.Context) (wikisvc.Status, error) {
@@ -71,6 +74,14 @@ func (f *fakeWikiSvc) ReadNote(_ context.Context, path string) (wikisvc.NoteCont
 	return f.note, f.err
 }
 
+func (f *fakeWikiSvc) WriteNote(_ context.Context, in wikisvc.WriteNoteInput) (wikisvc.WriteNoteResult, error) {
+	f.wrote = append(f.wrote, in)
+	if f.writeErr != nil {
+		return wikisvc.WriteNoteResult{}, f.writeErr
+	}
+	return f.writeRes, nil
+}
+
 type fakeWikiSettingsSvc struct {
 	cur wikisettings.Settings
 }
@@ -102,6 +113,7 @@ func TestWikiRoutes_WithoutServiceAreNotImplemented(t *testing.T) {
 		{"DELETE", "/api/v1/wiki/agent"},
 		{"GET", "/api/v1/wiki/files"},
 		{"GET", "/api/v1/wiki/file?path=a.md"},
+		{"PUT", "/api/v1/wiki/file"},
 	} {
 		body, status, headers := doRequest(t, srv, route.method, route.path, "")
 		assertJSON(t, headers)
@@ -307,4 +319,79 @@ func TestWikiSettings_EmptyPathTurnsTheWikiOff(t *testing.T) {
 	if set.cur.Harness != "claude-code" {
 		t.Fatalf("remembered harness lost: %+v", set.cur)
 	}
+}
+
+func TestWriteWikiNote_PassesThePreconditionThrough(t *testing.T) {
+	svc := &fakeWikiSvc{writeRes: wikisvc.WriteNoteResult{
+		Path:        "notes/tasks.md",
+		ContentHash: "sha256:after",
+		Size:        12,
+		ModifiedAt:  time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC),
+	}}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, headers := doRequest(t, srv, "PUT", "/api/v1/wiki/file",
+		`{"path":"notes/tasks.md","content":"- [x] one\n","baseHash":" sha256:before "}`)
+	assertJSON(t, headers)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body = %s", status, body)
+	}
+	if len(svc.wrote) != 1 {
+		t.Fatalf("wrote = %+v", svc.wrote)
+	}
+	if svc.wrote[0].Content != "- [x] one\n" || svc.wrote[0].BaseHash != "sha256:before" {
+		t.Fatalf("input = %+v", svc.wrote[0])
+	}
+	var got struct {
+		Path        string `json:"path"`
+		ContentHash string `json:"contentHash"`
+		Size        int64  `json:"size"`
+		ModifiedAt  string `json:"modifiedAt"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ContentHash != "sha256:after" || got.Size != 12 || got.ModifiedAt != "2026-09-02T10:00:00Z" {
+		t.Fatalf("response = %+v", got)
+	}
+}
+
+// A `content` key that never arrived is not an empty note: as a plain string
+// the two collapse, and a client that forgot the field would empty somebody's
+// note and get a 200 for it. The base hash cannot catch that — it is still
+// correct — so the route has to.
+func TestWriteWikiNote_RefusesAnAbsentContentButAllowsAnEmptyOne(t *testing.T) {
+	svc := &fakeWikiSvc{}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, headers := doRequest(t, srv, "PUT", "/api/v1/wiki/file", `{"path":"a.md","baseHash":"sha256:x"}`)
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "WIKI_NOTE_CONTENT_REQUIRED")
+	if len(svc.wrote) != 0 {
+		t.Fatalf("an absent content reached the service: %+v", svc.wrote)
+	}
+
+	if _, status, _ := doRequest(t, srv, "PUT", "/api/v1/wiki/file",
+		`{"path":"a.md","content":"","baseHash":"sha256:x"}`); status != http.StatusOK {
+		t.Fatalf("emptying a note explicitly must be allowed: status = %d", status)
+	}
+}
+
+func TestWriteWikiNote_RequiresAPath(t *testing.T) {
+	svc := &fakeWikiSvc{}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, headers := doRequest(t, srv, "PUT", "/api/v1/wiki/file", `{"content":"x","baseHash":"sha256:x"}`)
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "PATH_REQUIRED")
+}
+
+func TestWriteWikiNote_SurfacesTheConflictEnvelope(t *testing.T) {
+	svc := &fakeWikiSvc{writeErr: apierr.Conflict("WIKI_NOTE_CONFLICT", "changed", map[string]any{"currentHash": "sha256:now"})}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, headers := doRequest(t, srv, "PUT", "/api/v1/wiki/file",
+		`{"path":"a.md","content":"x","baseHash":"sha256:stale"}`)
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusConflict, "WIKI_NOTE_CONFLICT")
 }

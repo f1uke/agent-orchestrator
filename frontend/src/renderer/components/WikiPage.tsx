@@ -8,6 +8,7 @@ import {
 	useWikiNote,
 	useWikiStatus,
 	wikiFilesQueryKey,
+	wikiNoteQueryKey,
 	type WikiFiles,
 } from "../hooks/useWiki";
 import { useUiStore } from "../stores/ui-store";
@@ -186,6 +187,7 @@ export function WikiPage() {
 									: null
 							}
 							onClose={closeNote}
+							onReload={() => void queryClient.invalidateQueries({ queryKey: wikiNoteQueryKey(openPath) })}
 							onOpenNote={resolveWikilink}
 							onOpenTag={openTag}
 						/>

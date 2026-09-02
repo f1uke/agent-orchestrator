@@ -346,10 +346,14 @@ func (s *Service) ListFiles(ctx context.Context) (Files, error) {
 // unparsed on purpose: rendering happens in the renderer, which treats it as
 // untrusted text.
 type NoteContent struct {
-	Path       string
-	Content    string
-	Size       int64
-	ModifiedAt time.Time
+	Path    string
+	Content string
+	Size    int64
+	// ContentHash is the precondition token a save must hand back. It is the
+	// hash of the bytes below, so a note that changed between this read and
+	// that save is refused rather than clobbered - see WriteNote.
+	ContentHash string
+	ModifiedAt  time.Time
 	// Backlinks are the other notes whose text wikilinks to this one, sorted by
 	// path. It is the one thing a reader cannot see from the note itself, which
 	// is why it is computed here rather than left to the renderer.
@@ -384,11 +388,12 @@ func (s *Service) ReadNote(ctx context.Context, relPath string) (NoteContent, er
 		return NoteContent{}, apierr.NotFound("WIKI_NOTE_NOT_FOUND", "Note not found")
 	}
 	return NoteContent{
-		Path:       rel,
-		Content:    string(data),
-		Size:       info.Size(),
-		ModifiedAt: info.ModTime().UTC(),
-		Backlinks:  backlinksTo(ctx, vault, rel),
+		Path:        rel,
+		Content:     string(data),
+		Size:        info.Size(),
+		ContentHash: ContentHash(data),
+		ModifiedAt:  info.ModTime().UTC(),
+		Backlinks:   backlinksTo(ctx, vault, rel),
 	}, nil
 }
 

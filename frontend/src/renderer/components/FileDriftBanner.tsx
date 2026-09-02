@@ -48,7 +48,10 @@ function formatAgo(iso: string | undefined, now = Date.now()): string | null {
  *   the overwrite, and it is the only one offered: the route refuses a BLIND
  *   clobber, not an informed one, so the UI's job is to make the reading
  *   actually happen rather than to add a "force" the daemon correctly declines
- *   to implement.
+ *   to implement. It is OPTIONAL: an editor that edits one block at a time
+ *   cannot offer it, because the block's byte range no longer means anything
+ *   once the file has moved. Such a caller passes no `onReview` and the button
+ *   is not drawn, rather than being drawn to do something unsafe.
  * - **Discard mine and reload** loses the reader's edits, says so, and asks
  *   twice — it sits next to a primary button, and a one-click destroy there is
  *   how work gets lost.
@@ -63,7 +66,7 @@ export function FileDriftBanner({
 	onDismiss,
 }: {
 	drift: Drift;
-	onReview: () => void;
+	onReview?: () => void;
 	onDiscardMine: () => void;
 	onDismiss: () => void;
 }) {
@@ -107,7 +110,7 @@ export function FileDriftBanner({
 					{facts !== "" && <span style={{ color: P.muted3 }}> {facts}</span>}
 				</p>
 			</div>
-			{!drift.reviewing && (
+			{!drift.reviewing && onReview && (
 				<button
 					type="button"
 					onClick={onReview}
