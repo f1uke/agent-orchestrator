@@ -33,8 +33,8 @@ export type WikilinkToken = {
 	label: string;
 	/**
 	 * Whether the link carried a `|alias`. Both spellings render as `label`
-	 * alone — the brackets are syntax — so this exists for a writer that puts a
-	 * link BACK into the source, which has to know which form to restore.
+	 * alone — the brackets are syntax — so this exists for the writer that puts
+	 * a link BACK into the source, which has to know which form to restore.
 	 */
 	aliased: boolean;
 };
@@ -144,12 +144,56 @@ function stripQuotes(value: string): string {
 	return value.replace(/^["']|["']$/g, "").trim();
 }
 
+/**
+ * Lexes markdown into the token tree the renderer draws.
+ *
+ * 🗝 Every path into the lexer goes through here, because of the `checkbox`
+ * strip below. `marked` recognises a task item by setting `task`/`checked` on
+ * the list item AND by inserting a synthetic `checkbox` token in front of the
+ * item's content — the marker twice over, once as data and once as a token
+ * whose `raw` is the literal "[x] ".
+ *
+ * Where that token lands depends on the list: in a TIGHT item it is a
+ * BLOCK-level token in `item.tokens`, in a LOOSE one it is an INLINE token
+ * inside the item's paragraph. Leaving it to the renderer therefore needs the
+ * same rule written into two different switch statements, and the block one was
+ * missed — a nested task list drew its real checkbox and then a literal "[ ]"
+ * as a PARAGRAPH, which is why the item's text also fell to the next line.
+ *
+ * The item already carries `task` and `checked`, so the token is redundant
+ * wherever it appears. It is dropped once, here, at the only place that turns
+ * markdown into tokens.
+ */
+function lex(markdown: string): Token[] {
+	return dropCheckboxTokens(lexer.lexer(markdown));
+}
+
+/**
+ * Removes `marked`'s synthetic task `checkbox` tokens, at every depth.
+ *
+ * A `checkbox` token is emitted for task list items and nothing else, so this
+ * cannot swallow anything a note actually wrote: an item that merely opens with
+ * a bracket (`- [note] something`) is not a task, gets no such token, and keeps
+ * its text intact.
+ */
+function dropCheckboxTokens(tokens: Token[]): Token[] {
+	const kept: Token[] = [];
+	for (const token of tokens) {
+		if (token.type === "checkbox") continue;
+		const nested = token as { tokens?: Token[]; items?: Token[] };
+		if (Array.isArray(nested.tokens)) nested.tokens = dropCheckboxTokens(nested.tokens);
+		if (Array.isArray(nested.items)) nested.items = dropCheckboxTokens(nested.items);
+		kept.push(token);
+	}
+	return kept;
+}
+
 /** Parses one note. Never throws: an unparseable note renders as its own text. */
 export function parseNote(source: string): ParsedNote {
 	const { body, tags, title } = splitFrontmatter(source);
 	let tokens: Token[];
 	try {
-		tokens = lexer.lexer(body);
+		tokens = lex(body);
 	} catch {
 		tokens = [{ type: "paragraph", raw: body, text: body, tokens: [{ type: "text", raw: body, text: body }] } as Token];
 	}
@@ -253,7 +297,7 @@ export function readCallout(quote: Tokens.Blockquote): Callout | null {
 	const [, , , titleAndRest] = match;
 	const rest = paragraph.text.slice(match[0].length).replace(/^\r?\n/, "");
 	const body: Token[] = [];
-	if (rest.trim() !== "") body.push(...lexer.lexer(rest));
+	if (rest.trim() !== "") body.push(...lex(rest));
 	body.push(...quote.tokens.slice(1));
 
 	return {

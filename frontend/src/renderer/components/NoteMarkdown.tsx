@@ -161,6 +161,11 @@ function Heading({ level, first, children }: { level: number; first: boolean; ch
  * single mixed list — and an all-or-nothing checklist mode would then print
  * every `- [x]` as the literal text "[x]". A task item gets its checkbox and
  * loses its marker; everything beside it keeps its bullet.
+ *
+ * The marker never reaches this file: `parse.ts` drops `marked`'s synthetic
+ * `checkbox` token at the lexer, so `item.task`/`item.checked` are the only
+ * record of it. See the note on `lex` there for why that has to happen once, in
+ * the parser, rather than in each of this file's two render switches.
  */
 function List({ list, theme, navigation }: { list: Tokens.List; theme: Theme; navigation?: NoteNavigation }) {
 	const items = list.items.map((item, index) => (
@@ -354,13 +359,6 @@ function InlineToken({ token, navigation }: { token: Token; navigation?: NoteNav
 
 		case "br":
 			return <br />;
-
-		// A LOOSE task item's `[x]` arrives as an inline token inside the item's
-		// paragraph (a tight item's is stripped from its text instead). The item
-		// already draws its own checkbox, so this must render nothing — left to
-		// the default branch it printed the literal "[x] ".
-		case "checkbox":
-			return null;
 
 		case "wikilink": {
 			const link = token as WikilinkToken;
