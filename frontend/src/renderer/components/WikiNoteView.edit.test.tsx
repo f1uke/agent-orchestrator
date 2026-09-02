@@ -299,3 +299,83 @@ describe("a note whose bytes cannot be mapped", () => {
 		expect(screen.queryByRole("button", { name: "Tasks" })).toBeNull();
 	});
 });
+
+/**
+ * The Properties panel is a SECOND write path into the same file, and the
+ * assertions are the same ones: one key's value changes, and every other byte
+ * — the other keys, their order, their quoting, and the whole body — is
+ * identical.
+ */
+describe("a note's properties", () => {
+	it("shows every frontmatter key, with a count in the status line", () => {
+		renderNote();
+		expect(screen.getByText("Properties")).toBeTruthy();
+		expect(screen.getByText("title")).toBeTruthy();
+		expect(screen.getByText("type")).toBeTruthy();
+		expect(screen.getByText(/2 properties/)).toBeTruthy();
+	});
+
+	it("rewrites one key's value and leaves the body and the other keys alone", async () => {
+		const user = userEvent.setup();
+		renderNote();
+
+		await user.click(screen.getByRole("button", { name: "tasks" }));
+		const input = screen.getByRole("textbox", { name: "Edit type" });
+		await user.clear(input);
+		await user.type(input, "notes{Enter}");
+
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		const after = written();
+		expect(after).toContain("---\ntitle: MOBILITY-4713-Webview-Zoom - Tasks\ntype: notes\n---\n");
+		// The body is byte-identical: everything from the closing fence on.
+		expect(after.slice(after.indexOf("\n---\n") + 5)).toBe(CONTENT.slice(CONTENT.indexOf("\n---\n") + 5));
+	});
+
+	it("adds a property at the end of the block without moving the body", async () => {
+		const user = userEvent.setup();
+		renderNote();
+
+		await user.click(screen.getByRole("button", { name: /Add property/ }));
+		await user.type(screen.getByRole("textbox", { name: "New property name" }), "status");
+		await user.type(screen.getByRole("textbox", { name: "New property value" }), "in progress{Enter}");
+
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		const after = written();
+		expect(after).toContain("type: tasks\nstatus: in progress\n---\n");
+		expect(after.slice(after.indexOf("\n---\n") + 5)).toBe(CONTENT.slice(CONTENT.indexOf("\n---\n") + 5));
+	});
+
+	it("refuses a duplicate key and says so instead of writing", async () => {
+		const user = userEvent.setup();
+		renderNote();
+
+		await user.click(screen.getByRole("button", { name: /Add property/ }));
+		await user.type(screen.getByRole("textbox", { name: "New property name" }), "type");
+		await user.type(screen.getByRole("textbox", { name: "New property value" }), "x{Enter}");
+
+		expect(await screen.findByText(/already has/)).toBeTruthy();
+		expect(putMock).not.toHaveBeenCalled();
+	});
+
+	it("writes nothing when a value comes back unchanged", async () => {
+		const user = userEvent.setup();
+		renderNote();
+
+		await user.click(screen.getByRole("button", { name: "tasks" }));
+		await user.tab();
+		expect(putMock).not.toHaveBeenCalled();
+	});
+
+	it("offers a panel with just Add property on a note that has no frontmatter", () => {
+		renderNote({ content: "# Bare\n\nJust prose.\n" });
+		expect(screen.getByText(/no properties yet/)).toBeTruthy();
+		expect(screen.getByRole("button", { name: /Add property/ })).toBeTruthy();
+	});
+
+	it("locks a value whose YAML shape cannot be rewritten in place", () => {
+		renderNote({ content: "---\nnote: |\n  a block scalar\ntitle: T\n---\n\nBody.\n" });
+		// The block scalar has no editable control; the plain key beside it does.
+		expect(screen.queryByRole("button", { name: /^\|$/ })).toBeNull();
+		expect(screen.getByRole("button", { name: "T" })).toBeTruthy();
+	});
+});

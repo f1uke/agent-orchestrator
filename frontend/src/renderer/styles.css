@@ -5429,6 +5429,193 @@ ol.note-prose__list {
 	line-height: 1.5;
 }
 
+/* ── a note's properties ── */
+
+/* Frontmatter, shown the way Obsidian shows it: a small labelled table under
+   the title rather than a block of YAML the reader has to decode. It sits
+   between the meta line and the body, which is where the reference puts it. */
+.note-props {
+	margin: 18px 0 26px;
+	padding: 14px 16px 10px;
+	border: 1px solid var(--border-1);
+	border-radius: 10px;
+	background: color-mix(in oklab, var(--fg) 2.5%, transparent);
+}
+
+.note-props__head {
+	margin-bottom: 10px;
+	color: var(--fg-passive);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+}
+
+.note-props__rows {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.note-props__row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 26px;
+}
+
+.note-props__icon {
+	display: inline-flex;
+	flex: none;
+	width: 14px;
+	color: var(--fg-passive);
+}
+
+.note-props__icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.note-props__key {
+	flex: none;
+	/* A fixed column so the values line up into a table the eye can scan, and a
+	   long key ellipsises rather than pushing every value along with it. */
+	width: 116px;
+	overflow: hidden;
+	color: var(--fg-passive);
+	font-size: 12.5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.note-props__value {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	gap: 5px;
+	min-width: 0;
+	padding: 3px 6px;
+	margin-left: -6px;
+	border: none;
+	border-radius: 5px;
+	background: none;
+	color: var(--fg);
+	font-family: inherit;
+	font-size: 12.5px;
+	text-align: left;
+	flex-wrap: wrap;
+}
+
+.note-props__value--editable {
+	cursor: text;
+}
+
+.note-props__value--editable:hover {
+	background: color-mix(in oklab, var(--fg) 6%, transparent);
+}
+
+.note-props__value--editable:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 0;
+}
+
+.note-props__value--locked {
+	color: var(--fg-passive);
+	cursor: not-allowed;
+}
+
+.note-props__input {
+	background: color-mix(in oklab, var(--accent) 8%, transparent);
+	box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent);
+}
+
+.note-props__input:focus {
+	outline: none;
+}
+
+.note-props__key.note-props__input {
+	flex: none;
+	width: 116px;
+	margin-left: 0;
+}
+
+.note-props__chip {
+	padding: 1px 7px;
+	border-radius: 999px;
+	background: color-mix(in oklab, var(--accent) 14%, transparent);
+	color: var(--accent);
+	font-size: 11.5px;
+}
+
+.note-props__unset,
+.note-props__empty {
+	color: var(--fg-passive);
+	font-size: 12.5px;
+}
+
+.note-props__add {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	margin-top: 8px;
+	padding: 3px 8px 3px 4px;
+	border: none;
+	border-radius: 6px;
+	background: none;
+	color: var(--fg-passive);
+	font-size: 12.5px;
+	cursor: pointer;
+}
+
+.note-props__add:hover:not(:disabled) {
+	background: color-mix(in oklab, var(--fg) 6%, transparent);
+	color: var(--fg);
+}
+
+.note-props__add svg {
+	width: 13px;
+	height: 13px;
+}
+
+.note-props__new {
+	margin-top: 8px;
+}
+
+.note-props__new-actions {
+	display: flex;
+	gap: 6px;
+	margin-top: 8px;
+	padding-left: 22px;
+}
+
+.note-props__save,
+.note-props__cancel {
+	padding: 3px 11px;
+	border-radius: 6px;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.note-props__save {
+	border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+	background: color-mix(in oklab, var(--accent) 16%, transparent);
+	color: var(--accent);
+	font-weight: 600;
+}
+
+.note-props__cancel {
+	border: 1px solid var(--border-1);
+	background: none;
+	color: var(--fg-passive);
+}
+
+.note-props__error {
+	margin: 8px 0 0;
+	padding-left: 22px;
+	color: var(--red);
+	font-size: 12px;
+}
+
 /* ── editing a note in place ── */
 
 /* A block the reader can type into. It stays visually identical until the

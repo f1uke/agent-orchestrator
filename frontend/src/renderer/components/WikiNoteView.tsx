@@ -1,9 +1,11 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Link2, X } from "lucide-react";
 import { NoteMarkdown, type NoteEditing } from "./NoteMarkdown";
+import { NoteProperties } from "./NoteProperties";
 import { type Drift, FileDriftBanner } from "./FileDriftBanner";
 import { parseNote, splitTags } from "../lib/note/parse";
 import { type EditableBlock, spliceBlock, type TaskMarker, toggleTask } from "../lib/note/edit";
+import { addProperty, type NoteProperty, readFrontmatter, writeProperty } from "../lib/note/frontmatter";
 import { useSaveWikiNote, type WikiNote } from "../hooks/useWiki";
 import type { Theme } from "../stores/ui-store";
 
@@ -24,6 +26,10 @@ import type { Theme } from "../stores/ui-store";
  * preconditioned on the hash it was read with. The vault's own agent writes
  * these files, so a refused save is the normal case and gets the same
  * `FileDriftBanner` the workspace editor uses.
+ *
+ * The note's frontmatter is a SECOND write path with the same rule: the
+ * Properties panel splices one key's value and never re-serialises the YAML.
+ * See `lib/note/frontmatter.ts`.
  */
 
 export function WikiNoteView({
@@ -58,13 +64,17 @@ export function WikiNoteView({
 	// token reference would point into the previous parse.
 	const [openAt, setOpenAt] = useState<number | null>(null);
 	const [drift, setDrift] = useState<Drift | null>(null);
+	const [addError, setAddError] = useState<string | undefined>();
 	const closeEditor = useCallback(() => setOpenAt(null), []);
+
+	const frontmatter = useMemo(() => (note ? readFrontmatter(note.content) : null), [note]);
 
 	// Moving to another note closes whatever was open in this one.
 	const path = note?.path;
 	useEffect(() => {
 		setOpenAt(null);
 		setDrift(null);
+		setAddError(undefined);
 		save.reset();
 		// `save` is a stable mutation object; re-running this on its own state
 		// changes would close the editor mid-save.
@@ -99,6 +109,21 @@ export function WikiNoteView({
 			);
 		},
 		[note, save],
+	);
+
+	/**
+	 * A property write. It shares `write` with the body's edits, so a note the
+	 * agent has moved under the reader is refused the same way from either path.
+	 */
+	const writeProperties = useCallback(
+		(next: () => string) => {
+			try {
+				write(next());
+			} catch (error) {
+				setAddError(error instanceof Error ? error.message : String(error));
+			}
+		},
+		[write],
 	);
 
 	const editing: NoteEditing | undefined = note
@@ -178,9 +203,32 @@ export function WikiNoteView({
 									</button>
 								))}
 								<span className="wiki-note__meta-text">
-									{[editedLabel(note.modifiedAt), `${parsed.wordCount} words`].filter(Boolean).join(" · ")}
+									{[
+										editedLabel(note.modifiedAt),
+										`${parsed.wordCount} words`,
+										frontmatter
+											? `${frontmatter.properties.length} propert${frontmatter.properties.length === 1 ? "y" : "ies"}`
+											: "",
+									]
+										.filter(Boolean)
+										.join(" · ")}
 								</span>
 							</div>
+
+							{frontmatter && (
+								<NoteProperties
+									properties={frontmatter.properties}
+									busy={save.isPending}
+									onEdit={(property: NoteProperty, values: string[]) =>
+										writeProperties(() => writeProperty(note.content, property, values))
+									}
+									onAdd={(key: string, value: string) =>
+										writeProperties(() => addProperty(note.content, frontmatter, key, value))
+									}
+									addError={addError}
+									onDismissAddError={() => setAddError(undefined)}
+								/>
+							)}
 
 							<div className="note-prose wiki-note__body">
 								<NoteMarkdown
