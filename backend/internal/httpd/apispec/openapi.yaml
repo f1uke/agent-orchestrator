@@ -5587,6 +5587,55 @@ paths:
       summary: Replace the spawn-confirmation gate setting
       tags:
       - settings
+  /api/v1/settings/wiki:
+    get:
+      operationId: getWikiSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiSettingsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Fetch the global wiki vault path
+      tags:
+      - settings
+    put:
+      operationId: setWikiSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetWikiSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiSettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Replace the global wiki vault path (empty turns the wiki off)
+      tags:
+      - settings
   /api/v1/sim/devices:
     get:
       operationId: listSimDevices
@@ -5664,6 +5713,205 @@ paths:
       summary: List every live iOS Simulator device lease on this machine
       tags:
       - sim
+  /api/v1/wiki:
+    get:
+      operationId: getWikiStatus
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiStatusResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Report whether a vault is configured and whether its agent is running
+      tags:
+      - wiki
+  /api/v1/wiki/agent:
+    delete:
+      operationId: stopWikiAgent
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiStatusResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop the vault's agent, leaving the vault readable
+      tags:
+      - wiki
+    post:
+      operationId: startWikiAgent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartWikiAgentRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiStatusResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Start (or switch) the agent running in the vault
+      tags:
+      - wiki
+  /api/v1/wiki/agent/restart:
+    post:
+      operationId: restartWikiAgent
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiStatusResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Relaunch the same agent in the vault with a fresh conversation
+      tags:
+      - wiki
+  /api/v1/wiki/file:
+    get:
+      operationId: readWikiNote
+      parameters:
+      - description: Vault-relative path of the note to read. May not escape the vault.
+        in: query
+        name: path
+        schema:
+          description: Vault-relative path of the note to read. May not escape the
+            vault.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiNoteResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Return one note's raw markdown
+      tags:
+      - wiki
+  /api/v1/wiki/files:
+    get:
+      operationId: listWikiFiles
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiFilesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Index every file in the vault
+      tags:
+      - wiki
 components:
   schemas:
     APIError:
@@ -8673,6 +8921,13 @@ components:
       required:
       - base
       type: object
+    SetWikiSettingsRequest:
+      properties:
+        vaultPath:
+          type: string
+      required:
+      - vaultPath
+      type: object
     SimDeviceLeaseView:
       properties:
         acquiredAt:
@@ -9288,6 +9543,11 @@ components:
           description: Optional label for the recording, e.g. the flow it will become.
           type: string
       type: object
+    StartWikiAgentRequest:
+      properties:
+        harness:
+          type: string
+      type: object
     SubmitReviewInput:
       properties:
         body:
@@ -9445,6 +9705,82 @@ components:
       - ok
       - sessionId
       - session
+      type: object
+    WikiFilesResponse:
+      properties:
+        notes:
+          items:
+            $ref: '#/components/schemas/WikiNoteSummary'
+          type: array
+        truncated:
+          type: boolean
+      required:
+      - notes
+      - truncated
+      type: object
+    WikiNoteResponse:
+      properties:
+        backlinks:
+          items:
+            type: string
+          type: array
+        content:
+          type: string
+        modifiedAt:
+          type: string
+        path:
+          type: string
+        size:
+          format: int64
+          type: integer
+      required:
+      - path
+      - content
+      - size
+      - backlinks
+      type: object
+    WikiNoteSummary:
+      properties:
+        modifiedAt:
+          type: string
+        path:
+          type: string
+        size:
+          format: int64
+          type: integer
+      required:
+      - path
+      - size
+      type: object
+    WikiSettingsResponse:
+      properties:
+        harness:
+          type: string
+        vaultPath:
+          type: string
+      required:
+      - vaultPath
+      type: object
+    WikiStatusResponse:
+      properties:
+        configured:
+          type: boolean
+        displayPath:
+          type: string
+        handleId:
+          type: string
+        harness:
+          type: string
+        running:
+          type: boolean
+        startedAt:
+          type: string
+        vaultPath:
+          type: string
+      required:
+      - configured
+      - vaultPath
+      - running
       type: object
     WorkspaceChangesResponse:
       properties:
@@ -9676,3 +10012,6 @@ tags:
   name: import
 - description: User-editable daemon settings (auto-reclaim, etc.)
   name: settings
+- description: 'Personal note vault: its index, its notes, and the one agent running
+    inside it'
+  name: wiki

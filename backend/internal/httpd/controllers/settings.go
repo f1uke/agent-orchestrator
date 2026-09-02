@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
+	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
 )
 
 // SettingsService is the reclaim-settings store surface the controller needs.
@@ -45,6 +48,13 @@ type AutoNudgeService interface {
 type ResponseLanguageService interface {
 	Get() responselang.Settings
 	Set(responselang.Settings) error
+}
+
+// WikiSettingsService is the Wiki settings store surface the controller needs.
+// *wikisettings.Store satisfies this directly.
+type WikiSettingsService interface {
+	Get() wikisettings.Settings
+	Set(wikisettings.Settings) error
 }
 
 // EvidenceRetentionService is the evidence-retention settings store surface the
@@ -87,6 +97,7 @@ type SettingsController struct {
 	SpawnConfirm      SpawnConfirmService
 	AutoNudge         AutoNudgeService
 	ResponseLanguage  ResponseLanguageService
+	Wiki              WikiSettingsService
 	EvidenceRetention EvidenceRetentionService
 	EvidenceSweeper   EvidenceSweeper
 	SystemPrompts     SystemPromptsService
@@ -103,6 +114,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/auto-nudge", c.setAutoNudge)
 	r.Get("/settings/response-language", c.getResponseLanguage)
 	r.Put("/settings/response-language", c.setResponseLanguage)
+	r.Get("/settings/wiki", c.getWiki)
+	r.Put("/settings/wiki", c.setWiki)
 	r.Get("/settings/evidence-retention", c.getEvidenceRetention)
 	r.Put("/settings/evidence-retention", c.setEvidenceRetention)
 	r.Post("/settings/evidence-retention/sweep", c.sweepEvidenceRetention)
@@ -223,6 +236,48 @@ func (c *SettingsController) setResponseLanguage(w http.ResponseWriter, r *http.
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, ResponseLanguageSettingsResponse{Language: c.ResponseLanguage.Get().Language})
+}
+
+func (c *SettingsController) getWiki(w http.ResponseWriter, r *http.Request) {
+	if c.Wiki == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/wiki")
+		return
+	}
+	s := c.Wiki.Get()
+	envelope.WriteJSON(w, http.StatusOK, WikiSettingsResponse{VaultPath: s.VaultPath, Harness: s.Harness})
+}
+
+// setWiki replaces the vault path. The remembered harness is NOT part of this
+// body: it is written by the Wiki service when the user picks an agent, and a
+// settings save must not blank it.
+//
+// An empty path is a legitimate value — it is how the user turns the Wiki off —
+// so only a non-empty path that is not a readable directory is rejected.
+func (c *SettingsController) setWiki(w http.ResponseWriter, r *http.Request) {
+	if c.Wiki == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/wiki")
+		return
+	}
+	var in SetWikiSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	next := c.Wiki.Get()
+	next.VaultPath = in.VaultPath
+	if resolved := wikisettings.ExpandHome(strings.TrimSpace(in.VaultPath)); resolved != "" {
+		info, err := os.Stat(resolved)
+		if err != nil || !info.IsDir() {
+			envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "WIKI_VAULT_NOT_A_DIRECTORY", "That path is not a readable directory", nil)
+			return
+		}
+	}
+	if err := c.Wiki.Set(next); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	saved := c.Wiki.Get()
+	envelope.WriteJSON(w, http.StatusOK, WikiSettingsResponse{VaultPath: saved.VaultPath, Harness: saved.Harness})
 }
 
 func (c *SettingsController) getEvidenceRetention(w http.ResponseWriter, r *http.Request) {

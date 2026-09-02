@@ -137,6 +137,8 @@ function mockGet(importPayload: unknown, promptOverrides: Record<string, string>
 				return { data: { enabled: true, graceMinutes: 1440, artifactsEnabled: true }, error: undefined };
 			case "/api/v1/settings/evidence-retention":
 				return { data: { enabled: true, maxAgeDays: 30 }, error: undefined };
+			case "/api/v1/settings/wiki":
+				return { data: { vaultPath: "", harness: "" }, error: undefined };
 			case "/api/v1/import":
 				return importPayload;
 			default:
@@ -268,6 +270,28 @@ describe("GlobalSettingsForm", () => {
 				body: { enabled: false, graceMinutes: 1440, artifactsEnabled: true },
 			}),
 		);
+	});
+
+	it("routes the wiki vault path through the save bar (PUT settings/wiki)", async () => {
+		renderForm();
+		await goToSection("System");
+		await userEvent.type(await screen.findByLabelText("Vault folder"), "~/Notes");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/wiki", { body: { vaultPath: "~/Notes" } }),
+		);
+	});
+
+	// The sidebar's Wiki row exists only while a vault is configured, and it
+	// reads the wiki STATUS query without polling — so the save has to push it,
+	// or clearing the path leaves a row pointing at nothing.
+	it("pushes the wiki status so the sidebar row appears and disappears with the path", async () => {
+		const qc = renderForm();
+		const invalidate = vi.spyOn(qc, "invalidateQueries");
+		await goToSection("System");
+		await userEvent.type(await screen.findByLabelText("Vault folder"), "~/Notes");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["wiki", "status"] }));
 	});
 
 	it("routes the evidence-retention TTL through the save bar (PUT evidence-retention)", async () => {

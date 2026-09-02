@@ -4,6 +4,7 @@ import { Bot, MessageSquare } from "lucide-react";
 import type { UpdateChannel } from "../../../main/update-settings";
 import { apiClient, apiErrorMessage } from "../../lib/api-client";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SettingsGroup } from "./SettingsGroup";
@@ -330,7 +331,7 @@ function SystemSection({ form }: { form: GlobalForm }) {
 	const { draft, setField, isFieldDirty } = form;
 	return (
 		<>
-			<SectionTitle title="System" hint="notifications, updates, companion & migration" />
+			<SectionTitle title="System" hint="wiki vault, notifications, updates, companion & migration" />
 
 			<SettingsGroup title="Updates">
 				<SettingsField label="Automatic updates" htmlFor="updatesEnabled" modified={isFieldDirty("updatesEnabled")}>
@@ -368,6 +369,31 @@ function SystemSection({ form }: { form: GlobalForm }) {
 				<div className="border-t border-border pt-4">
 					<UpdateActions />
 				</div>
+			</SettingsGroup>
+
+			{/* The Wiki is one personal note vault, not a project — so its path is a
+          global setting, and an empty path hides the destination entirely. */}
+			<SettingsGroup title="Wiki vault">
+				<p className="text-[12px] leading-5 text-muted-foreground">
+					A folder of markdown notes — an Obsidian vault, say — that you can ask an agent about. Setting a path adds a
+					Wiki entry above Projects in the sidebar; leaving it empty removes it. The agent runs with your notes as its
+					working directory and can edit and create them.
+				</p>
+				<SettingsField
+					label="Vault folder"
+					htmlFor="wikiVaultPath"
+					modified={isFieldDirty("wikiVaultPath")}
+					help="An absolute path, or one starting with ~/. Leave empty to turn the Wiki off."
+				>
+					<Input
+						id="wikiVaultPath"
+						className="h-8 font-mono text-[12.5px]"
+						placeholder="~/Notes"
+						spellCheck={false}
+						value={draft.wikiVaultPath}
+						onChange={(e) => setField("wikiVaultPath", e.target.value)}
+					/>
+				</SettingsField>
 			</SettingsGroup>
 
 			<SettingsGroup title="Notifications">

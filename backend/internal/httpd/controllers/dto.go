@@ -1847,3 +1847,72 @@ type SetMessageTemplateRequest struct {
 type MessageTemplateNameParam struct {
 	Name string `path:"name" description:"Editable nudge template name." enum:"review-comment-dispatch,ci-failing,merge-conflict,tracker-bot-comment,ao-reviewer-batch,ao-reviewer-single"`
 }
+
+// WikiSettingsResponse mirrors wikisettings.Settings on the wire. It is the
+// body of GET/PUT /api/v1/settings/wiki. VaultPath is empty when no vault is
+// configured, which is what hides the Wiki destination entirely.
+type WikiSettingsResponse struct {
+	VaultPath string `json:"vaultPath"`
+	Harness   string `json:"harness,omitempty"`
+}
+
+// SetWikiSettingsRequest is the body of PUT /api/v1/settings/wiki. An empty
+// vaultPath clears the setting.
+type SetWikiSettingsRequest struct {
+	VaultPath string `json:"vaultPath"`
+}
+
+// WikiStatusResponse is the whole state of the Wiki page in one read: whether a
+// vault is configured, and whether an agent is live inside it.
+//
+// handleId is the terminal handle a pane attaches to. It is NOT a session id:
+// the Wiki's agent has no session row, no worktree, and no board card.
+type WikiStatusResponse struct {
+	Configured bool   `json:"configured"`
+	VaultPath  string `json:"vaultPath"`
+	// DisplayPath is vaultPath with the user's home written as "~". It is what
+	// the page shows; vaultPath stays the exact path for a tooltip.
+	DisplayPath string `json:"displayPath,omitempty"`
+	// Harness is the running agent, or the one last chosen when nothing runs.
+	Harness   string `json:"harness,omitempty"`
+	Running   bool   `json:"running"`
+	HandleID  string `json:"handleId,omitempty"`
+	StartedAt string `json:"startedAt,omitempty"`
+}
+
+// StartWikiAgentRequest is the body of POST /api/v1/wiki/agent. An empty
+// harness reuses the last one chosen.
+type StartWikiAgentRequest struct {
+	Harness string `json:"harness,omitempty"`
+}
+
+// WikiNoteSummary is one file in the vault, addressed by its vault-relative
+// slash-separated path.
+type WikiNoteSummary struct {
+	Path       string `json:"path"`
+	Size       int64  `json:"size"`
+	ModifiedAt string `json:"modifiedAt,omitempty"`
+}
+
+// WikiFilesResponse is the vault index behind the note rail.
+type WikiFilesResponse struct {
+	Notes []WikiNoteSummary `json:"notes"`
+	// Truncated reports that the vault holds more files than the index cap.
+	Truncated bool `json:"truncated"`
+}
+
+// WikiNoteParams is the query string accepted by GET /api/v1/wiki/file.
+type WikiNoteParams struct {
+	Path string `query:"path" description:"Vault-relative path of the note to read. May not escape the vault."`
+}
+
+// WikiNoteResponse is one note's raw markdown. It is returned unparsed: the
+// renderer treats vault content as untrusted input and never evaluates it.
+type WikiNoteResponse struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Size    int64  `json:"size"`
+	// Backlinks are the vault-relative paths of the notes that wikilink here.
+	Backlinks  []string `json:"backlinks"`
+	ModifiedAt string   `json:"modifiedAt,omitempty"`
+}

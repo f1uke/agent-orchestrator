@@ -62,13 +62,18 @@ type APIDeps struct {
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
 	// is the SSE subscription side. Both are satisfied by *activity.Hub.
-	ActivityFeed      controllers.ActivityFeed
-	ActivityStream    controllers.ActivityStream
-	Import            controllers.ImportService
-	Settings          controllers.SettingsService
-	SpawnConfirm      controllers.SpawnConfirmService
-	AutoNudge         controllers.AutoNudgeService
-	ResponseLanguage  controllers.ResponseLanguageService
+	ActivityFeed     controllers.ActivityFeed
+	ActivityStream   controllers.ActivityStream
+	Import           controllers.ImportService
+	Settings         controllers.SettingsService
+	SpawnConfirm     controllers.SpawnConfirmService
+	AutoNudge        controllers.AutoNudgeService
+	ResponseLanguage controllers.ResponseLanguageService
+	// Wiki is the personal note vault destination: the global vault-path
+	// setting, plus the one agent pane that runs inside it. It is deliberately
+	// not a session, so it has no lifecycle wiring of its own.
+	WikiSettings      controllers.WikiSettingsService
+	Wiki              controllers.WikiService
 	EvidenceRetention controllers.EvidenceRetentionService
 	EvidenceSweeper   controllers.EvidenceSweeper
 	SystemPrompts     controllers.SystemPromptsService
@@ -98,6 +103,7 @@ type API struct {
 	activity      *controllers.ActivityController
 	imports       *controllers.ImportController
 	settings      *controllers.SettingsController
+	wiki          *controllers.WikiController
 	daemon        *controllers.DaemonController
 	events        *EventsController
 }
@@ -134,7 +140,8 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
-		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		wiki:          &controllers.WikiController{Svc: deps.Wiki},
 		daemon:        &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
@@ -166,6 +173,7 @@ func (a *API) Register(root chi.Router) {
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)
+			a.wiki.Register(r)
 			a.daemon.Register(r)
 			// Sibling REST controllers plug in here.
 

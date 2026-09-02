@@ -67,6 +67,13 @@ export type UseTerminalSessionOptions = {
 	 * its workspace query; a surface with no query client simply does nothing.
 	 */
 	onSessionChanged?: () => void;
+	/**
+	 * The pane produced output. It is the only "the agent is doing something
+	 * right now" signal available to a surface with no AO session behind it (the
+	 * Wiki's vault pane), where the hook-fed activity state does not exist.
+	 * Called on every frame, so a consumer must debounce rather than re-render.
+	 */
+	onOutput?: () => void;
 	/** Test seam: build the mux client. Defaults to a fresh socket against the current API base. */
 	createMux?: () => TerminalMux;
 };
@@ -208,6 +215,7 @@ export function useTerminalSession(session: AttachableSession | undefined, optio
 			mux.onData(handle, (bytes) => {
 				if (!isCurrentAttachment(generation, handle, mux)) return;
 				terminal.write(bytes);
+				optionsRef.current.onOutput?.();
 			}),
 			mux.onOpened(handle, () => {
 				if (!isCurrentAttachment(generation, handle, mux)) return;
