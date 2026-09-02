@@ -1759,14 +1759,16 @@ func (m *Manager) Restart(ctx context.Context, id domain.SessionID) (domain.Sess
 // process, record that it is gone, relaunch it on the same workspace.
 //
 // It deliberately does none of Kill's teardown. Kill destroys the WORKSPACE, and
-// refuses (ErrWorkspaceDirty) when the worktree holds uncommitted work — that
-// guard is right for a teardown and stays exactly where it is, but routing
-// Restart through it was the bug: Kill destroyed the runtime first and returned
-// on the dirty refusal BEFORE marking the session terminated, so the agent was
-// already dead while Restore still saw a live record and refused with
-// ErrNotRestorable (HTTP 409). Nothing flips such a session to terminated later
-// (Reconcile only runs at daemon boot), so the first click left the session
-// permanently unrestartable with a dead terminal.
+// refuses when the worktree holds uncommitted work — that guard is right for a
+// teardown and stays exactly where it is, but routing Restart through it was the
+// bug: Kill used to destroy the runtime first and return on the dirty refusal
+// BEFORE marking the session terminated, so the agent was already dead while
+// Restore still saw a live record and refused with ErrNotRestorable (HTTP 409).
+// Nothing flips such a session to terminated later (Reconcile only runs at daemon
+// boot), so the first click left the session permanently unrestartable with a dead
+// terminal. (Kill now probes before it destroys anything, so a refusal no longer
+// leaves that wreckage — but Restart still wants none of the teardown, for the
+// reason below.)
 //
 // Restart wants none of what that guard protects. It does not change the branch,
 // does not sync to base, and does not clean anything: the same agent comes back
