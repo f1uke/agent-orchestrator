@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { BookText, ChevronDown, ChevronRight, RefreshCw, Search } from "lucide-react";
 import type { WikiFiles } from "../hooks/useWiki";
+import { defaultOpen, loadFolderState, saveFolderState, type WikiFolderState } from "../lib/wiki-tree-state";
 
 /**
  * The vault, on the right of the Wiki page: every file in it, as a folder tree.
@@ -50,6 +51,15 @@ export function WikiVaultRail({
 	onQueryChange: (query: string) => void;
 }) {
 	const [tab, setTab] = useState<"notes" | "search">("notes");
+	// Which folders the reader has opened or shut, read once on mount and
+	// written through on every toggle. Only toggled folders live here; the rest
+	// follow `defaultOpen`, which is what keeps a 55-folder vault from writing
+	// 55 keys the first time anyone scrolls it.
+	const [folders, setFolders] = useState<WikiFolderState>(loadFolderState);
+	const toggleFolder = useCallback((path: string, open: boolean) => {
+		setFolders((current) => ({ ...current, [path]: open }));
+		saveFolderState(path, open);
+	}, []);
 	const notes = useMemo(() => files?.notes ?? [], [files]);
 	const tree = useMemo(() => buildTree(notes), [notes]);
 	const counts = useMemo(() => summarise(notes), [notes]);
@@ -101,7 +111,15 @@ export function WikiVaultRail({
 					</div>
 					<div className="wiki-rail__tree">
 						{tree.map((node) => (
-							<TreeRow key={node.path} node={node} depth={0} openPath={openPath} onOpenNote={onOpenNote} />
+							<TreeRow
+								key={node.path}
+								node={node}
+								depth={0}
+								openPath={openPath}
+								onOpenNote={onOpenNote}
+								folders={folders}
+								onToggleFolder={toggleFolder}
+							/>
 						))}
 						{!loading && notes.length === 0 && <div className="wiki-rail__empty">This vault has no files yet.</div>}
 						{files?.truncated && (
@@ -154,17 +172,21 @@ function TreeRow({
 	depth,
 	openPath,
 	onOpenNote,
+	folders,
+	onToggleFolder,
 }: {
 	node: TreeNode;
 	depth: number;
 	openPath: string | null;
 	onOpenNote: (path: string) => void;
+	folders: WikiFolderState;
+	onToggleFolder: (path: string, open: boolean) => void;
 }) {
-	// Top-level folders start OPEN: a rail of folder names says nothing about
-	// what is in the vault, and the point of the rail is to reach a note. Deeper
-	// levels start closed so a nested vault does not unroll into a wall — except
-	// the one holding the note being read, which reveals where that note sits.
-	const [open, setOpen] = useState(() => depth === 0 || openPath?.startsWith(`${node.path}/`) === true);
+	// A folder the reader has opened or shut before is drawn the way they left
+	// it; one they have never touched follows the tree's own default. The state
+	// is held by the RAIL rather than by the row so it survives the row
+	// unmounting — which is what expanding a parent does to every child.
+	const open = folders[node.path] ?? defaultOpen(node.path, depth, openPath);
 
 	if (node.kind === "file") {
 		const isOpen = node.path === openPath;
@@ -188,7 +210,7 @@ function TreeRow({
 				className="wiki-rail__row wiki-rail__row--folder"
 				style={{ paddingLeft: 8 + depth * 17 }}
 				aria-expanded={open}
-				onClick={() => setOpen((value) => !value)}
+				onClick={() => onToggleFolder(node.path, !open)}
 			>
 				{open ? (
 					<ChevronDown aria-hidden="true" className="wiki-rail__chevron" />
@@ -200,7 +222,15 @@ function TreeRow({
 			</button>
 			{open &&
 				node.children.map((child) => (
-					<TreeRow key={child.path} node={child} depth={depth + 1} openPath={openPath} onOpenNote={onOpenNote} />
+					<TreeRow
+						key={child.path}
+						node={child}
+						depth={depth + 1}
+						openPath={openPath}
+						onOpenNote={onOpenNote}
+						folders={folders}
+						onToggleFolder={onToggleFolder}
+					/>
 				))}
 		</>
 	);
