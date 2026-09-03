@@ -19,6 +19,7 @@ const (
 	NameReviewCommentDispatch Name = "review-comment-dispatch"
 	NameCIFailing             Name = "ci-failing"
 	NameMergeConflict         Name = "merge-conflict"
+	NamePRBaseMismatch        Name = "pr-base-mismatch"
 	NameTrackerBotComment     Name = "tracker-bot-comment"
 	NameAOReviewerBatch       Name = "ao-reviewer-batch"
 	NameAOReviewerSingle      Name = "ao-reviewer-single"
@@ -30,6 +31,7 @@ func KnownNames() []Name {
 		NameReviewCommentDispatch,
 		NameCIFailing,
 		NameMergeConflict,
+		NamePRBaseMismatch,
 		NameTrackerBotComment,
 		NameAOReviewerBatch,
 		NameAOReviewerSingle,
@@ -40,7 +42,8 @@ func KnownNames() []Name {
 func (n Name) Valid() bool {
 	switch n {
 	case NameReviewCommentDispatch, NameCIFailing, NameMergeConflict,
-		NameTrackerBotComment, NameAOReviewerBatch, NameAOReviewerSingle:
+		NamePRBaseMismatch, NameTrackerBotComment, NameAOReviewerBatch,
+		NameAOReviewerSingle:
 		return true
 	}
 	return false
@@ -85,6 +88,16 @@ type MergeConflictData struct {
 	PRURL      string
 }
 
+// PRBaseMismatchData is the render context for NamePRBaseMismatch. Base is the
+// branch the pull request actually targets and Target is the branch this session
+// was spawned to merge into.
+type PRBaseMismatchData struct {
+	PRIdentity string
+	PRURL      string
+	Base       string
+	Target     string
+}
+
 // TrackerBotData is the render context for NameTrackerBotComment.
 type TrackerBotData struct{ Comments string }
 
@@ -124,6 +137,8 @@ func Placeholders(n Name) []string {
 		return []string{"{{.PRIdentity}}", "{{.PRURL}}", "{{.LogTail}}"}
 	case NameMergeConflict:
 		return []string{"{{.PRIdentity}}", "{{.PRURL}}"}
+	case NamePRBaseMismatch:
+		return []string{"{{.PRIdentity}}", "{{.PRURL}}", "{{.Base}}", "{{.Target}}"}
 	case NameAOReviewerBatch:
 		return []string{"{{.Count}}", "{{range .Reviews}}", "{{.Index}}", "{{.PRURL}}", "{{.Verdict}}", "{{.TargetSHA}}", "{{.ReviewID}}", "{{.Body}}", "{{end}}"}
 	case NameAOReviewerSingle:
@@ -142,6 +157,8 @@ func Default(n Name) string {
 		return ciFailingDefault
 	case NameMergeConflict:
 		return mergeConflictDefault
+	case NamePRBaseMismatch:
+		return prBaseMismatchDefault
 	case NameTrackerBotComment:
 		return trackerBotDefault
 	case NameAOReviewerBatch:
@@ -200,6 +217,11 @@ const reviewCommentDefault = "" +
 const ciFailingDefault = "CI is failing on {{if .PRIdentity}}{{.PRIdentity}}{{else}}your PR{{end}}. Review the output below and push a fix.{{if .PRURL}}\nPR: {{.PRURL}}{{end}}{{if .LogTail}}\n\nFailing output:\n{{.LogTail}}{{end}}"
 
 const mergeConflictDefault = "{{if .PRIdentity}}There are merge conflicts on {{.PRIdentity}}.{{else}}Your PR has merge conflicts.{{end}} Rebase onto the base branch and resolve them.{{if .PRURL}}\nPR: {{.PRURL}}{{end}}"
+
+// prBaseMismatchDefault names both branches and the command that moves the PR,
+// and stops short of telling the agent it is wrong: a base chosen on purpose is
+// allowed, and the human - not AO - decides which of the two is the mistake.
+const prBaseMismatchDefault = "{{if .PRIdentity}}{{.PRIdentity}} targets{{else}}Your PR targets{{end}} `{{.Base}}`, but this session's PR target is `{{.Target}}`. If that was not deliberate, retarget it in place (`gh pr edit --base {{.Target}}`, or `glab mr update --target-branch {{.Target}}`) rather than opening a second one. If `{{.Base}}` IS deliberate, say so to the human and leave it - AO will not move it for you.{{if .PRURL}}\nPR: {{.PRURL}}{{end}}"
 
 const trackerBotDefault = "A bot left a new comment on your tracker issue. Address it and update the session.{{if .Comments}}\n\n{{.Comments}}{{end}}"
 

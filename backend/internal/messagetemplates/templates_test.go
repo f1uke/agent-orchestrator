@@ -23,8 +23,8 @@ func TestExecuteReportsParseError(t *testing.T) {
 
 func TestKnownNamesValidAndHaveDefaults(t *testing.T) {
 	names := KnownNames()
-	if len(names) != 6 {
-		t.Fatalf("want 6 templates, got %d", len(names))
+	if len(names) != 7 {
+		t.Fatalf("want 7 templates, got %d", len(names))
 	}
 	for _, n := range names {
 		if !n.Valid() {
@@ -46,6 +46,7 @@ func TestDefaultsRenderWithZeroData(t *testing.T) {
 		NameReviewCommentDispatch: ReviewCommentData{},
 		NameCIFailing:             CIFailingData{},
 		NameMergeConflict:         MergeConflictData{},
+		NamePRBaseMismatch:        PRBaseMismatchData{},
 		NameTrackerBotComment:     TrackerBotData{},
 		NameAOReviewerBatch:       AOReviewerBatchData{},
 		NameAOReviewerSingle:      AOReviewerSingleData{},

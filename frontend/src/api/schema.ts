@@ -9872,7 +9872,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Editable nudge template name. */
-                name: "review-comment-dispatch" | "ci-failing" | "merge-conflict" | "tracker-bot-comment" | "ao-reviewer-batch" | "ao-reviewer-single";
+                name: "review-comment-dispatch" | "ci-failing" | "merge-conflict" | "pr-base-mismatch" | "tracker-bot-comment" | "ao-reviewer-batch" | "ao-reviewer-single";
             };
             cookie?: never;
         };
@@ -9917,7 +9917,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Editable nudge template name. */
-                name: "review-comment-dispatch" | "ci-failing" | "merge-conflict" | "tracker-bot-comment" | "ao-reviewer-batch" | "ao-reviewer-single";
+                name: "review-comment-dispatch" | "ci-failing" | "merge-conflict" | "pr-base-mismatch" | "tracker-bot-comment" | "ao-reviewer-batch" | "ao-reviewer-single";
             };
             cookie?: never;
         };
