@@ -210,11 +210,15 @@ describe("WikiPage — reading a note", () => {
 
 describe("WikiPage — the tree's sort direction", () => {
 	// Two levels deep on purpose: a toggle that only reordered the root would
-	// pass a shallower fixture and still leave nested folders untouched.
+	// pass a shallower fixture and still leave nested folders untouched. The two
+	// notes are given edit times an hour and three days old so the order they
+	// come back in says something.
+	const HOUR_AGO = new Date(Date.now() - 3_600_000).toISOString();
+	const DAYS_AGO = new Date(Date.now() - 3 * 86_400_000).toISOString();
 	const NESTED = [
-		{ path: "work/nested/alpha.md", size: 10, modifiedAt: new Date().toISOString() },
-		{ path: "work/nested/zeta.md", size: 10, modifiedAt: new Date().toISOString() },
-		{ path: "work/nested/inner/deep.md", size: 10, modifiedAt: new Date().toISOString() },
+		{ path: "work/nested/alpha.md", size: 10, modifiedAt: DAYS_AGO },
+		{ path: "work/nested/zeta.md", size: 10, modifiedAt: HOUR_AGO },
+		{ path: "work/nested/inner/deep.md", size: 10, modifiedAt: HOUR_AGO },
 	];
 
 	function rowNames(container: HTMLElement): string[] {
@@ -227,39 +231,42 @@ describe("WikiPage — the tree's sort direction", () => {
 		await userEvent.click(await screen.findByRole("button", { name: /^nested/ }));
 	}
 
-	it("reverses the order inside a nested folder, not just at the root", async () => {
+	it("reverses the notes inside a nested folder — and keeps its folder on top", async () => {
 		routeGets(wikiStatus(), undefined, NESTED);
 		const { container } = renderPage();
 		await openNested();
+		expect(rowNames(container)).toEqual(["work", "nested", "inner", "zeta.md", "alpha.md"]);
+
+		await userEvent.click(screen.getByRole("button", { name: /Newest notes on top/ }));
+
 		expect(rowNames(container)).toEqual(["work", "nested", "inner", "alpha.md", "zeta.md"]);
-
-		await userEvent.click(screen.getByRole("button", { name: /Sorted A to Z/ }));
-
-		expect(rowNames(container)).toEqual(["work", "nested", "zeta.md", "alpha.md", "inner"]);
 	});
 
 	it("keeps the chosen direction across a remount, the way the folders are kept", async () => {
 		routeGets(wikiStatus(), undefined, NESTED);
 		const first = renderPage();
 		await openNested();
-		await userEvent.click(screen.getByRole("button", { name: /Sorted A to Z/ }));
-		expect(rowNames(first.container)).toEqual(["work", "nested", "zeta.md", "alpha.md", "inner"]);
+		await userEvent.click(screen.getByRole("button", { name: /Newest notes on top/ }));
+		expect(rowNames(first.container)).toEqual(["work", "nested", "inner", "alpha.md", "zeta.md"]);
 		first.unmount();
 
 		const second = renderPage();
-		await screen.findByRole("button", { name: /Sorted Z to A/ });
-		await waitFor(() => expect(rowNames(second.container)).toEqual(["work", "nested", "zeta.md", "alpha.md", "inner"]));
+		await screen.findByRole("button", { name: /Oldest notes on top/ });
+		await waitFor(() => expect(rowNames(second.container)).toEqual(["work", "nested", "inner", "alpha.md", "zeta.md"]));
 	});
 
 	it("says which way the tree runs rather than making you click to find out", async () => {
 		routeGets(wikiStatus(), undefined, NESTED);
 		renderPage();
-		const button = await screen.findByRole("button", { name: /Sorted A to Z/ });
+		const button = await screen.findByRole("button", { name: /Newest notes on top, folders A to Z/ });
 		expect(button).toHaveAttribute("aria-pressed", "false");
 
 		await userEvent.click(button);
 
-		expect(screen.getByRole("button", { name: /Sorted Z to A/ })).toHaveAttribute("aria-pressed", "true");
+		expect(screen.getByRole("button", { name: /Oldest notes on top, folders Z to A/ })).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
 		expect(localStorage.getItem("ao.wiki.sort")).toBe("desc");
 	});
 });
@@ -313,26 +320,69 @@ describe("resolveNotePath — a wikilink names a note, not a path", () => {
 });
 
 describe("the vault tree", () => {
-	it("puts folders before files, each alphabetical", () => {
-		const tree = buildTree([{ path: "zeta.md" }, { path: "alpha.md" }, { path: "work/b.md" }, { path: "agents/a.md" }]);
-		expect(tree.map((node) => node.name)).toEqual(["agents", "work", "alpha.md", "zeta.md"]);
+	const at = (iso: string) => ({ modifiedAt: iso });
+	const OLD = "2026-01-01T00:00:00Z";
+	const MID = "2026-05-01T00:00:00Z";
+	const NEW = "2026-09-01T00:00:00Z";
+
+	it("puts folders first alphabetically, then the notes with the newest edit on top", () => {
+		const tree = buildTree([
+			{ path: "zeta.md", ...at(NEW) },
+			{ path: "alpha.md", ...at(OLD) },
+			{ path: "work/b.md", ...at(MID) },
+			{ path: "agents/a.md", ...at(MID) },
+		]);
+		expect(tree.map((node) => node.name)).toEqual(["agents", "work", "zeta.md", "alpha.md"]);
 	});
 
-	// The toggle inverts the one rule the tree already has — it does not sort on
-	// something else — and it has to reach every level, not just the top one.
-	it("runs backwards at every level when the order is reversed", () => {
+	// "Folders on top" is a GROUPING rule, so reversing must not lift a file
+	// over a folder — it flips the order inside each group, at every level.
+	it("runs each group backwards when reversed, folders still first", () => {
 		const notes = [
-			{ path: "zeta.md" },
-			{ path: "alpha.md" },
-			{ path: "work/b.md" },
-			{ path: "work/a.md" },
-			{ path: "work/inner/deep.md" },
-			{ path: "agents/a.md" },
+			{ path: "zeta.md", ...at(NEW) },
+			{ path: "alpha.md", ...at(OLD) },
+			{ path: "work/b.md", ...at(OLD) },
+			{ path: "work/a.md", ...at(NEW) },
+			{ path: "work/inner/deep.md", ...at(MID) },
+			{ path: "agents/a.md", ...at(MID) },
 		];
 		const tree = buildTree(notes, "desc");
-		expect(tree.map((node) => node.name)).toEqual(["zeta.md", "alpha.md", "work", "agents"]);
+		expect(tree.map((node) => node.name)).toEqual(["work", "agents", "alpha.md", "zeta.md"]);
 		const work = tree.find((node) => node.name === "work");
-		expect(work?.kind === "folder" && work.children.map((child) => child.name)).toEqual(["b.md", "a.md", "inner"]);
+		expect(work?.kind === "folder" && work.children.map((child) => child.name)).toEqual(["inner", "b.md", "a.md"]);
+	});
+
+	it("keeps a folder and a file grouped even when their names would interleave", () => {
+		const notes = [
+			{ path: "aaa.md", ...at(OLD) },
+			{ path: "zzz.md", ...at(NEW) },
+			{ path: "mid/one.md", ...at(MID) },
+		];
+		expect(buildTree(notes).map((node) => node.name)).toEqual(["mid", "zzz.md", "aaa.md"]);
+		expect(buildTree(notes, "desc").map((node) => node.name)).toEqual(["mid", "aaa.md", "zzz.md"]);
+	});
+
+	// An unreadable mtime is "we do not know", not "this is the oldest": it
+	// goes last among the files whichever way the tree is running.
+	it("sorts a note with no usable edit time last among the files, both ways", () => {
+		const notes = [
+			{ path: "dated-old.md", ...at(OLD) },
+			{ path: "dated-new.md", ...at(NEW) },
+			{ path: "undated.md" },
+			{ path: "unparseable.md", modifiedAt: "not a date" },
+		];
+		expect(buildTree(notes).map((node) => node.name)).toEqual([
+			"dated-new.md",
+			"dated-old.md",
+			"undated.md",
+			"unparseable.md",
+		]);
+		expect(buildTree(notes, "desc").map((node) => node.name)).toEqual([
+			"dated-old.md",
+			"dated-new.md",
+			"unparseable.md",
+			"undated.md",
+		]);
 	});
 
 	it("counts every file beneath a folder, not just its direct children", () => {
