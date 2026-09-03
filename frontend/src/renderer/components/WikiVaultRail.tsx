@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { ArrowDownAZ, ArrowDownZA, BookText, ChevronDown, ChevronRight, RefreshCw, Search } from "lucide-react";
+import { BookText, ChevronDown, ChevronRight, ClockArrowDown, ClockArrowUp, RefreshCw, Search } from "lucide-react";
 import type { WikiFiles } from "../hooks/useWiki";
 import {
 	defaultOpen,
@@ -38,6 +38,15 @@ type TreeFile = {
 };
 
 type TreeNode = TreeFolder | TreeFile;
+
+/**
+ * What each direction actually does, said in full. Both halves are named
+ * because the button flips both: the folders' alphabet and the notes' clock.
+ */
+const SORT_LABEL = {
+	asc: "Newest notes on top, folders A to Z",
+	desc: "Oldest notes on top, folders Z to A",
+} as const;
 
 export function WikiVaultRail({
 	files,
@@ -124,15 +133,21 @@ export function WikiVaultRail({
 									}`}
 						</span>
 						<div className="wiki-rail__actions">
+							{/*
+							 * A clock rather than the alphabet pair this button started with:
+							 * the notes now sort by when they were last edited, and an A→Z
+							 * glyph would describe the folders alone. The arrow is the
+							 * direction that clock runs in — down to older, or up to newer.
+							 */}
 							<button
 								type="button"
 								className="wiki-rail__action"
-								aria-label={order === "asc" ? "Sorted A to Z, reverse it" : "Sorted Z to A, reverse it"}
+								aria-label={order === "asc" ? `${SORT_LABEL.asc}, reverse it` : `${SORT_LABEL.desc}, reverse it`}
 								aria-pressed={order === "desc"}
-								title={order === "asc" ? "Sorted A to Z" : "Sorted Z to A"}
+								title={order === "asc" ? SORT_LABEL.asc : SORT_LABEL.desc}
 								onClick={toggleOrder}
 							>
-								{order === "asc" ? <ArrowDownAZ aria-hidden="true" /> : <ArrowDownZA aria-hidden="true" />}
+								{order === "asc" ? <ClockArrowDown aria-hidden="true" /> : <ClockArrowUp aria-hidden="true" />}
 							</button>
 							<button type="button" className="wiki-rail__action" aria-label="Re-read the vault" onClick={onRefresh}>
 								<RefreshCw aria-hidden="true" />
@@ -267,12 +282,17 @@ function TreeRow({
 }
 
 /**
- * Folders before files, each alphabetical — the order a file browser uses.
+ * Folders first, alphabetical; then the files, most recently edited on top —
+ * the order Finder and VS Code use, at every level of the tree.
  *
- * `order: "desc"` INVERTS that one rule rather than replacing it: every level
- * of the tree runs backwards, files ahead of folders and Z before A, which is
- * what the rail's direction toggle asks for. There is no second sort axis here
- * on purpose.
+ * Folders-on-top is a GROUPING rule, not a direction, so `order: "desc"` leaves
+ * it alone and flips the order WITHIN each group: folders run Z to A, files run
+ * oldest-edited first. The toggle therefore reorders the tree rather than
+ * rearranging it — a folder never overtakes a file.
+ *
+ * A file whose mtime the daemon could not read sorts last among files either
+ * way: "we do not know when this changed" is not the same claim as "it is the
+ * oldest", and flipping it to the top would be the wrong one.
  */
 export function buildTree(notes: { path: string; modifiedAt?: string }[], order: WikiSortOrder = "asc"): TreeNode[] {
 	const root: TreeFolder = { kind: "folder", name: "", path: "", children: [], noteCount: 0 };
@@ -307,13 +327,32 @@ export function buildTree(notes: { path: string; modifiedAt?: string }[], order:
 	const direction = order === "desc" ? -1 : 1;
 	const sortNodes = (nodes: TreeNode[]) => {
 		nodes.sort((a, b) => {
-			if (a.kind !== b.kind) return (a.kind === "folder" ? -1 : 1) * direction;
+			// The grouping rule, which the direction does not touch.
+			if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+			// Past that test the two are the same kind, so this is the folders.
+			if (a.kind !== "file" || b.kind !== "file") return a.name.localeCompare(b.name) * direction;
+			const aAt = editedAt(a);
+			const bAt = editedAt(b);
+			if (aAt === null || bAt === null) {
+				if (aAt !== bAt) return aAt === null ? 1 : -1;
+			} else if (aAt !== bAt) {
+				return (bAt - aAt) * direction;
+			}
+			// Two files edited at the same moment — or neither dated at all —
+			// still need one settled order, so fall back to the folders' rule.
 			return a.name.localeCompare(b.name) * direction;
 		});
 		for (const node of nodes) if (node.kind === "folder") sortNodes(node.children);
 	};
 	sortNodes(root.children);
 	return root.children;
+}
+
+/** When a file was last edited, or `null` when the vault could not say. */
+function editedAt(file: TreeFile): number | null {
+	if (!file.modifiedAt) return null;
+	const at = Date.parse(file.modifiedAt);
+	return Number.isNaN(at) ? null : at;
 }
 
 /** "148 notes · 12 folders" — notes are the markdown, folders are every level. */

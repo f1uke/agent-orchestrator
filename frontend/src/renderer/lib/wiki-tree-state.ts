@@ -97,7 +97,8 @@ export function defaultOpen(path: string, depth: number, openPath: string | null
 
 /**
  * Which way round the tree lists its entries: `asc` is the tree's own order
- * (folders before files, each alphabetical), `desc` that same order inverted.
+ * (folders alphabetically, then the notes with the newest edit on top), `desc`
+ * that same order inverted within each group.
  *
  * A sibling of the folder state above, and per-VIEWER for the same reason: the
  * direction someone likes reading their vault in is not a fact about the vault.
