@@ -3,6 +3,7 @@ package simstream_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -878,5 +879,97 @@ func TestScreen_BootNamesTheRunOfADeviceNotTheDevice(t *testing.T) {
 	// So does one this machine has never heard of.
 	if boot, err := booted.Boot(context.Background(), "UDID-GONE"); err != nil || boot != "" {
 		t.Fatalf("an unknown device named boot %q (err %v), want empty", boot, err)
+	}
+}
+
+// A whole JPEG stands on its own, so the rule that holds an H.264 viewer back
+// until it has a description and a keyframe must not hold it back at all.
+//
+// This is the hub's half of the iPhone 14 Pro bug: a device whose framebuffer
+// VideoToolbox refuses is streamed as images, and there is no description
+// coming - not late, not ever - so a viewer gated on one would sit at
+// "connecting" with a working capture running underneath it.
+func TestHub_AWholeImageReachesAViewerThatHasNoDescription(t *testing.T) {
+	capturer := newFakeCapturer()
+	hub := simstream.New(capturer)
+	t.Cleanup(hub.Shutdown)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sub, err := hub.Subscribe(ctx, "UDID-OF-A-MODEL-NOBODY-LISTED")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	capturer.emit <- chunk(simbridge.FrameImage, "jpeg-one")
+	got := recv(t, sub)
+	if got.Frame == nil || got.Frame.Kind != simbridge.FrameImage || string(got.Frame.Data) != "jpeg-one" {
+		t.Fatalf("want the image delivered as-is, got %+v", got.Frame)
+	}
+
+	// And it keeps arriving: an image stream has no picture group to fall out
+	// of, so nothing about the second frame depends on the first.
+	capturer.emit <- chunk(simbridge.FrameImage, "jpeg-two")
+	if next := recv(t, sub); string(next.Frame.Data) != "jpeg-two" {
+		t.Fatalf("want the second image, got %+v", next.Frame)
+	}
+}
+
+// A second viewer joining an image stream needs nothing replayed and nothing
+// restarted - it can decode the very next frame.
+func TestHub_ASecondViewerOfAnImageStreamGetsTheNextImage(t *testing.T) {
+	capturer := newFakeCapturer()
+	hub := simstream.New(capturer)
+	t.Cleanup(hub.Shutdown)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	first, err := hub.Subscribe(ctx, "UDID")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	capturer.emit <- chunk(simbridge.FrameImage, "jpeg-one")
+	recv(t, first)
+
+	second, err := hub.Subscribe(ctx, "UDID")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	capturer.emit <- chunk(simbridge.FrameImage, "jpeg-two")
+	for _, sub := range []<-chan simstream.Event{first, second} {
+		if got := recv(t, sub); string(got.Frame.Data) != "jpeg-two" {
+			t.Fatalf("every viewer must get the image, got %+v", got.Frame)
+		}
+	}
+}
+
+// A viewer that falls behind on an H.264 stream has to be resynchronized,
+// because the frames it missed are what the next ones are encoded against. An
+// image stream has no such chain: the next whole picture puts it right by
+// itself. Asking the device for a fresh start anyway would restart its
+// subscription once per dropped frame, which is a thrash on exactly the device
+// that is already the expensive one to stream.
+func TestHub_ABehindViewerOfAnImageStreamIsNotResynchronized(t *testing.T) {
+	capturer := newFakeCapturer()
+	hub := simstream.New(capturer)
+	t.Cleanup(hub.Shutdown)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sub, err := hub.Subscribe(ctx, "UDID")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	// Far more than one viewer can hold, and nothing is read while they arrive.
+	for i := 0; i < 40; i++ {
+		capturer.emit <- chunk(simbridge.FrameImage, fmt.Sprintf("jpeg-%d", i))
+	}
+	waitFor(t, "the images to be published", func() bool { return len(capturer.emit) == 0 })
+	if got := capturer.keyframeRequests(); got != 0 {
+		t.Fatalf("a dropped image must not restart the device's subscription, %d restarts asked for", got)
+	}
+
+	// And the viewer is still being served: what it holds is whole pictures.
+	if got := recv(t, sub); got.Frame == nil || got.Frame.Kind != simbridge.FrameImage {
+		t.Fatalf("want an image, got %+v", got.Frame)
 	}
 }

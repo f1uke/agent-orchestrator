@@ -30,6 +30,15 @@
 // Frames never touch the disk. The only frame retained is the current avcC
 // description, a few dozen bytes, so a viewer that connects has something to
 // configure its decoder with without waiting for the next group.
+//
+// # The exception: a device that cannot be encoded at all
+//
+// Some framebuffers VideoToolbox refuses outright (see
+// simbridge.codecFallbackAfter), and a capture that has produced nothing is
+// moved to JPEG-per-frame rather than left silent. Those frames arrive as
+// simbridge.FrameImage and every rule above simply does not apply to them: each
+// one stands alone, so there is no starting point to wait for and nothing a
+// viewer can be out of step with.
 package simstream
 
 import (
@@ -231,8 +240,34 @@ func (h *Hub) publish(dev *device, frame simbridge.Frame) {
 			}
 			send(dev, v, kept)
 		}
+	case simbridge.FrameImage:
+		// A whole JPEG needs nothing before it, so the rule that gates the
+		// H.264 kinds has nothing to gate: every viewer can decode this one,
+		// including the one that just arrived. The viewer's state is left
+		// where it is rather than moved to ready - a stream that fell back to
+		// images sends no deltas, and one that has not fallen back sends no
+		// images, so it can never carry the wrong meaning into the other.
+		for v := range dev.viewers {
+			offer(v, kept)
+		}
 	}
 	dev.mu.Unlock()
+}
+
+// offer hands one frame to one viewer and drops it if the viewer is behind,
+// with nothing to put right afterwards. It is what a whole image gets: the next
+// one is a complete picture too, so a viewer that missed this one has lost a
+// frame and nothing else. Asking for a fresh start here would restart the
+// device's subscription for a frame nobody needed replaced - which under load
+// is a restart per dropped frame.
+//
+// Called with the device's mutex held, like send, for the same reason: a send
+// on a closed channel is a panic rather than a dropped frame.
+func offer(v *viewer, frame simbridge.Frame) {
+	select {
+	case v.ch <- Event{Frame: &frame}:
+	default:
+	}
 }
 
 // send hands one frame to one viewer, or - if that viewer has fallen far enough

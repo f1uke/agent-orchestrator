@@ -237,6 +237,49 @@ test("nothing is captured once the tab is not the one on screen", async () => {
 	await expect.poll(capturing, { timeout: 20_000, message: "the stream did not come back" }).toBe(true);
 });
 
+/**
+ * The picture, not the pill - and for whatever device this harness was given.
+ *
+ * A simulator whose framebuffer width is odd (1125x2436 and 1179x2556 - seven
+ * models on this Mac) cannot be encoded as H.264 at all. VideoToolbox
+ * refused every frame, the capture emitted nothing, and the pane sat on
+ * "connecting" for as long as anybody was willing to look at it - while `ao sim
+ * shot` returned a perfect PNG of the same screen. Nothing in jsdom can see
+ * that: it takes a real encoder, a real device and a real canvas.
+ *
+ * So this asserts the whole chain, without naming a model: the canvas is the
+ * size of THIS device's own framebuffer, and it has a picture on it rather than
+ * one flat colour.
+ */
+test("the device's real screen is on the canvas, whatever its framebuffer", async () => {
+	const shot = path.join(sandbox.dataDir, "canvas-check.png");
+	execFileSync("xcrun", ["simctl", "io", sandbox.udid, "screenshot", shot], { stdio: "ignore" });
+	// PNG puts its size in the IHDR chunk, at a fixed offset: no decoder needed
+	// for two integers.
+	const header = readFileSync(shot);
+	const framebuffer = { width: header.readUInt32BE(16), height: header.readUInt32BE(20) };
+	expect(framebuffer.width, "the device produced no screenshot to compare against").toBeGreaterThan(0);
+
+	const painted = await sandbox.page.evaluate(() => {
+		const canvas = document.querySelector("[data-testid=sim-canvas]") as HTMLCanvasElement | null;
+		const context = canvas?.getContext("2d");
+		if (!canvas || !context) return null;
+		const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+		// A blank canvas is one colour; a screen is many. Sampled rather than
+		// walked - a full framebuffer is twelve megabytes of pixels.
+		const colours = new Set<number>();
+		for (let i = 0; i < data.length && colours.size < 32; i += 4 * 977) {
+			colours.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+		}
+		return { width: canvas.width, height: canvas.height, colours: colours.size };
+	});
+	expect(painted, "there is no canvas to read").not.toBeNull();
+	expect({ width: painted!.width, height: painted!.height }, "the canvas is not this device's framebuffer").toEqual(
+		framebuffer,
+	);
+	expect(painted!.colours, "the canvas is one flat colour - nothing was painted").toBeGreaterThan(1);
+});
+
 // The body drawn around the screen is the device's own, read from the artwork
 // Xcode ships - a guessed one was visibly wrong twice.
 test("the body around the screen is the device's own proportions", async () => {
