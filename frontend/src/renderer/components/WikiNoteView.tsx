@@ -1,8 +1,12 @@
-import { type CSSProperties, useMemo } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Link2, X } from "lucide-react";
-import { NoteMarkdown } from "./NoteMarkdown";
+import { NoteMarkdown, type NoteEditing } from "./NoteMarkdown";
+import { NoteProperties } from "./NoteProperties";
+import { type Drift, FileDriftBanner } from "./FileDriftBanner";
 import { parseNote, splitTags } from "../lib/note/parse";
-import type { WikiNote } from "../hooks/useWiki";
+import { type EditableBlock, spliceBlock, type TaskMarker, toggleTask } from "../lib/note/edit";
+import { addProperty, type NoteProperty, readFrontmatter, writeProperty } from "../lib/note/frontmatter";
+import { useSaveWikiNote, type WikiNote } from "../hooks/useWiki";
 import type { Theme } from "../stores/ui-store";
 
 /**
@@ -15,6 +19,17 @@ import type { Theme } from "../stores/ui-store";
  *
  * The chrome mirrors `WorkspaceFileView`: back/forward history chevrons, and a
  * path that ellipsises its DIRECTORY and never its filename.
+ *
+ * 🗝 The note is EDITABLE in place, and every write goes through the same two
+ * steps: splice one mapped byte range into the content that was read (never a
+ * re-rendering of what was drawn — see `lib/note/edit.ts`), then PUT it
+ * preconditioned on the hash it was read with. The vault's own agent writes
+ * these files, so a refused save is the normal case and gets the same
+ * `FileDriftBanner` the workspace editor uses.
+ *
+ * The note's frontmatter is a SECOND write path with the same rule: the
+ * Properties panel splices one key's value and never re-serialises the YAML.
+ * See `lib/note/frontmatter.ts`.
  */
 
 export function WikiNoteView({
@@ -25,6 +40,7 @@ export function WikiNoteView({
 	back,
 	forward,
 	onClose,
+	onReload,
 	onOpenNote,
 	onOpenTag,
 }: {
@@ -35,10 +51,95 @@ export function WikiNoteView({
 	back: { to: string; go: () => void } | null;
 	forward: { to: string; go: () => void } | null;
 	onClose: () => void;
+	/** Re-read the note from disk, discarding what the reader has not saved. */
+	onReload: () => void;
 	onOpenNote: (target: string) => void;
 	onOpenTag: (tag: string) => void;
 }) {
 	const parsed = useMemo(() => (note ? parseNote(note.content) : null), [note]);
+	const save = useSaveWikiNote();
+
+	// The block currently open, addressed by the byte it starts at. A byte offset
+	// rather than a token: the note re-parses on every content change, and a
+	// token reference would point into the previous parse.
+	const [openAt, setOpenAt] = useState<number | null>(null);
+	const [drift, setDrift] = useState<Drift | null>(null);
+	const [addError, setAddError] = useState<string | undefined>();
+	const closeEditor = useCallback(() => setOpenAt(null), []);
+
+	const frontmatter = useMemo(() => (note ? readFrontmatter(note.content) : null), [note]);
+
+	// Moving to another note closes whatever was open in this one.
+	const path = note?.path;
+	useEffect(() => {
+		setOpenAt(null);
+		setDrift(null);
+		setAddError(undefined);
+		save.reset();
+		// `save` is a stable mutation object; re-running this on its own state
+		// changes would close the editor mid-save.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [path]);
+
+	/**
+	 * One write. The caller hands back the note's bytes with exactly one range
+	 * replaced, and this is the only place that talks to the daemon.
+	 */
+	const write = useCallback(
+		(next: string) => {
+			if (!note) return;
+			setOpenAt(null);
+			save.mutate(
+				{ path: note.path, content: next, baseHash: note.contentHash },
+				{
+					onSuccess: () => setDrift(null),
+					onError: (error) => {
+						const current = error.failure.kind === "conflict" ? error.failure.current : undefined;
+						// A conflict is the one failure the reader RESOLVES. The block's
+						// byte range no longer means anything against the file that is
+						// there now, so the banner offers no re-save: reload and edit
+						// what the agent actually wrote.
+						setDrift(
+							error.failure.kind === "conflict"
+								? { hash: current?.hash, size: current?.size, modifiedAt: current?.modifiedAt, reviewing: false }
+								: null,
+						);
+					},
+				},
+			);
+		},
+		[note, save],
+	);
+
+	/**
+	 * A property write. It shares `write` with the body's edits, so a note the
+	 * agent has moved under the reader is refused the same way from either path.
+	 */
+	const writeProperties = useCallback(
+		(next: () => string) => {
+			try {
+				write(next());
+			} catch (error) {
+				setAddError(error instanceof Error ? error.message : String(error));
+			}
+		},
+		[write],
+	);
+
+	const editing: NoteEditing | undefined = note
+		? {
+				content: note.content,
+				// Both strips ahead of the parse are prefix-only, so where the rendered
+				// text starts in the file is just the length difference.
+				sourceOffset: note.content.length - stripLeadingTitle(note.content, titleOf(note, parsed)).length,
+				openAt,
+				onOpen: (block: EditableBlock) => setOpenAt(block.start),
+				onCommit: (block: EditableBlock, text: string) => write(spliceBlock(note.content, block, text)),
+				onCancel: closeEditor,
+				onToggleTask: (marker: TaskMarker) => write(toggleTask(note.content, marker)),
+				busy: save.isPending,
+			}
+		: undefined;
 
 	// Tags shown under the title are the frontmatter's, plus any the note opens
 	// with on its own first line — the two places a vault actually puts them.
@@ -50,7 +151,8 @@ export function WikiNoteView({
 		return [...new Set([...parsed.frontmatterTags, ...inline])];
 	}, [parsed, note]);
 
-	const title = parsed?.frontmatterTitle || headingTitle(note?.content ?? "") || baseName(note?.path ?? "");
+	const title = titleOf(note, parsed);
+	const refused = save.error && save.error.failure.kind !== "conflict" ? save.error.failure : null;
 
 	return (
 		<div className="wiki-note">
@@ -64,6 +166,23 @@ export function WikiNoteView({
 					<X aria-hidden="true" />
 				</button>
 			</div>
+
+			{drift && (
+				<FileDriftBanner
+					drift={drift}
+					onDiscardMine={() => {
+						setDrift(null);
+						save.reset();
+						onReload();
+					}}
+					onDismiss={() => setDrift(null)}
+				/>
+			)}
+			{refused && (
+				<div className="wiki-note__refused" role="alert">
+					<strong>{refused.title}</strong> {refused.detail}
+				</div>
+			)}
 
 			<div className="wiki-note__scroll">
 				<div className="wiki-note__measure">
@@ -84,15 +203,39 @@ export function WikiNoteView({
 									</button>
 								))}
 								<span className="wiki-note__meta-text">
-									{[editedLabel(note.modifiedAt), `${parsed.wordCount} words`].filter(Boolean).join(" · ")}
+									{[
+										editedLabel(note.modifiedAt),
+										`${parsed.wordCount} words`,
+										frontmatter
+											? `${frontmatter.properties.length} propert${frontmatter.properties.length === 1 ? "y" : "ies"}`
+											: "",
+									]
+										.filter(Boolean)
+										.join(" · ")}
 								</span>
 							</div>
+
+							{frontmatter && (
+								<NoteProperties
+									properties={frontmatter.properties}
+									busy={save.isPending}
+									onEdit={(property: NoteProperty, values: string[]) =>
+										writeProperties(() => writeProperty(note.content, property, values))
+									}
+									onAdd={(key: string, value: string) =>
+										writeProperties(() => addProperty(note.content, frontmatter, key, value))
+									}
+									addError={addError}
+									onDismissAddError={() => setAddError(undefined)}
+								/>
+							)}
 
 							<div className="note-prose wiki-note__body">
 								<NoteMarkdown
 									source={stripLeadingTitle(note.content, title)}
 									theme={theme}
 									navigation={{ onOpenWikilink: onOpenNote, onOpenTag }}
+									editing={editing}
 								/>
 							</div>
 
@@ -110,7 +253,7 @@ export function WikiNoteView({
 												onClick={() => onOpenNote(path)}
 												title={path}
 											>
-												[[{baseName(path).replace(/\.md$/i, "")}]]
+												{baseName(path).replace(/\.md$/i, "")}
 											</button>
 										))}
 									</div>
@@ -205,6 +348,15 @@ export function stripLeadingTitle(content: string, title: string): string {
 	const body = noteBody(content);
 	const match = /^#[ \t]+(.+?)[ \t]*(\r?\n|$)/.exec(body);
 	return match && match[1].trim() === title ? body.slice(match[0].length).replace(/^(\r?\n)+/, "") : body;
+}
+
+/**
+ * The note's title: its frontmatter's, else its own opening heading, else its
+ * filename. Read in one place because the body strip depends on it — the
+ * heading is only dropped from the body when the page is already showing it.
+ */
+function titleOf(note: WikiNote | undefined, parsed: { frontmatterTitle: string } | null): string {
+	return parsed?.frontmatterTitle || headingTitle(note?.content ?? "") || baseName(note?.path ?? "");
 }
 
 function baseName(path: string): string {

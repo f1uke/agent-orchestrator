@@ -13,6 +13,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/diffhunk"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/fsatomic"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 )
 
@@ -271,36 +272,9 @@ func writableWorkspacePath(workspace, p string) (target, rel string, ok bool) {
 	return resolved, safeRel, true
 }
 
-// writeFileAtomic replaces a file's contents through a same-directory temp file
-// and a rename, so a concurrent reader - an agent, a build - never observes a
-// half-written file. The original's permission bits are carried over.
-//
-// The rename gives the file a new inode, which breaks any hard link to it. That
-// is the accepted cost of never leaving a torn file behind.
+// writeFileAtomic replaces a file's contents without ever leaving a torn one
+// behind. The implementation is shared with the note vault's writer, which
+// needs the same guarantee against the same hazard - see internal/fsatomic.
 func writeFileAtomic(target string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(target)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(target)+".ao-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	// Removed on every failure path; a no-op once the rename has moved it.
-	defer func() { _ = os.Remove(name) }()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(name, target)
+	return fsatomic.WriteFile(target, data, mode)
 }

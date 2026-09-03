@@ -1861,7 +1861,8 @@ export interface paths {
         };
         /** Return one note's raw markdown */
         get: operations["readWikiNote"];
-        put?: never;
+        /** Replace one note's markdown, preconditioned on the hash it was read with */
+        put: operations["writeWikiNote"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3469,6 +3470,7 @@ export interface components {
         WikiNoteResponse: {
             backlinks: string[];
             content: string;
+            contentHash?: string;
             modifiedAt?: string;
             path: string;
             /** Format: int64 */
@@ -3553,6 +3555,21 @@ export interface components {
             totalFiles: number;
             totalMatches: number;
             truncated: boolean;
+        };
+        WriteWikiNoteRequest: {
+            /** @description The contentHash the note was read with. A mismatch is a 409 conflict; omitting it is a 400. */
+            baseHash: string;
+            /** @description The note's full new content, written verbatim. Required: an absent key is a 400, so emptying a note must be spelled as an explicit empty string. */
+            content: null | string;
+            /** @description Vault-relative path of the note to write. May not escape the vault. */
+            path: string;
+        };
+        WriteWikiNoteResponse: {
+            contentHash: string;
+            modifiedAt?: string;
+            path: string;
+            /** Format: int64 */
+            size: number;
         };
         WriteWorkspaceFileRequest: {
             /** @description The contentHash the file was read with. A mismatch is a 409 conflict; omitting it is a 400. */
@@ -10657,6 +10674,75 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    writeWikiNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WriteWikiNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WriteWikiNoteResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

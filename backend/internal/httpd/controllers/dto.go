@@ -1912,7 +1912,37 @@ type WikiNoteResponse struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
 	Size    int64  `json:"size"`
+	// ContentHash is the precondition a save must hand back, so an edit written
+	// against stale bytes is refused rather than clobbering whatever the vault's
+	// own agent wrote in the meantime.
+	ContentHash string `json:"contentHash,omitempty"`
 	// Backlinks are the vault-relative paths of the notes that wikilink here.
 	Backlinks  []string `json:"backlinks"`
 	ModifiedAt string   `json:"modifiedAt,omitempty"`
+}
+
+// WriteWikiNoteRequest is the body of PUT /api/v1/wiki/file.
+//
+// content is the note's WHOLE new bytes, written verbatim. baseHash is the
+// contentHash the note was read with and is required: there is deliberately no
+// way to spell "write regardless".
+type WriteWikiNoteRequest struct {
+	Path string `json:"path" description:"Vault-relative path of the note to write. May not escape the vault."`
+	// Content is a POINTER so an ABSENT key is distinguishable from an empty
+	// string, exactly as on the workspace write route - and for the same reason,
+	// which cost a data-loss bug there: as a plain string the two collapse, and
+	// a client that forgot the field would empty somebody's note and get a 200
+	// for it. baseHash cannot catch that, because the hash is still correct.
+	// Emptying a note has to be spelled as "content": "".
+	Content  *string `json:"content" description:"The note's full new content, written verbatim. Required: an absent key is a 400, so emptying a note must be spelled as an explicit empty string."`
+	BaseHash string  `json:"baseHash" description:"The contentHash the note was read with. A mismatch is a 409 conflict; omitting it is a 400."`
+}
+
+// WriteWikiNoteResponse is what the editor needs to keep going without a second
+// read: the token to precondition its next save on.
+type WriteWikiNoteResponse struct {
+	Path        string `json:"path"`
+	ContentHash string `json:"contentHash"`
+	Size        int64  `json:"size"`
+	ModifiedAt  string `json:"modifiedAt,omitempty"`
 }

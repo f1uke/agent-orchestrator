@@ -5881,6 +5881,55 @@ paths:
       summary: Return one note's raw markdown
       tags:
       - wiki
+    put:
+      operationId: writeWikiNote
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WriteWikiNoteRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriteWikiNoteResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Replace one note's markdown, preconditioned on the hash it was read
+        with
+      tags:
+      - wiki
   /api/v1/wiki/files:
     get:
       operationId: listWikiFiles
@@ -9726,6 +9775,8 @@ components:
           type: array
         content:
           type: string
+        contentHash:
+          type: string
         modifiedAt:
           type: string
         path:
@@ -9951,6 +10002,44 @@ components:
       - totalFiles
       - filesSearched
       - truncated
+      type: object
+    WriteWikiNoteRequest:
+      properties:
+        baseHash:
+          description: The contentHash the note was read with. A mismatch is a 409
+            conflict; omitting it is a 400.
+          type: string
+        content:
+          description: 'The note''s full new content, written verbatim. Required:
+            an absent key is a 400, so emptying a note must be spelled as an explicit
+            empty string.'
+          type:
+          - "null"
+          - string
+        path:
+          description: Vault-relative path of the note to write. May not escape the
+            vault.
+          type: string
+      required:
+      - path
+      - content
+      - baseHash
+      type: object
+    WriteWikiNoteResponse:
+      properties:
+        contentHash:
+          type: string
+        modifiedAt:
+          type: string
+        path:
+          type: string
+        size:
+          format: int64
+          type: integer
+      required:
+      - path
+      - contentHash
+      - size
       type: object
     WriteWorkspaceFileRequest:
       properties:
