@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { defaultOpen, loadFolderState, saveFolderState } from "./wiki-tree-state";
+import { defaultOpen, loadFolderState, loadSortOrder, saveFolderState, saveSortOrder } from "./wiki-tree-state";
 
 const KEY = "ao.wiki.collapsed";
 
@@ -52,5 +52,30 @@ describe("folder state", () => {
 	it("ignores the vault root, which has no row to remember", () => {
 		saveFolderState("", false);
 		expect(window.localStorage.getItem(KEY)).toBeNull();
+	});
+});
+
+describe("sort order", () => {
+	it("starts in the tree's own order", () => {
+		expect(loadSortOrder()).toBe("asc");
+	});
+
+	it("round-trips the direction the reader chose", () => {
+		saveSortOrder("desc");
+		expect(window.localStorage.getItem("ao.wiki.sort")).toBe("desc");
+		expect(loadSortOrder()).toBe("desc");
+		saveSortOrder("asc");
+		expect(loadSortOrder()).toBe("asc");
+	});
+
+	it("reads a foreign value as the default rather than trusting it", () => {
+		window.localStorage.setItem("ao.wiki.sort", "sideways");
+		expect(loadSortOrder()).toBe("asc");
+	});
+
+	it("survives the folder store filling up: its own key cannot be evicted", () => {
+		saveSortOrder("desc");
+		for (let i = 0; i < 405; i += 1) saveFolderState(`folder-${i}`, false, 1000 + i);
+		expect(loadSortOrder()).toBe("desc");
 	});
 });

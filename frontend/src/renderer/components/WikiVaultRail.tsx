@@ -1,7 +1,15 @@
 import { useCallback, useMemo, useState } from "react";
-import { BookText, ChevronDown, ChevronRight, RefreshCw, Search } from "lucide-react";
+import { ArrowDownAZ, ArrowDownZA, BookText, ChevronDown, ChevronRight, RefreshCw, Search } from "lucide-react";
 import type { WikiFiles } from "../hooks/useWiki";
-import { defaultOpen, loadFolderState, saveFolderState, type WikiFolderState } from "../lib/wiki-tree-state";
+import {
+	defaultOpen,
+	loadFolderState,
+	loadSortOrder,
+	saveFolderState,
+	saveSortOrder,
+	type WikiFolderState,
+	type WikiSortOrder,
+} from "../lib/wiki-tree-state";
 
 /**
  * The vault, on the right of the Wiki page: every file in it, as a folder tree.
@@ -60,8 +68,18 @@ export function WikiVaultRail({
 		setFolders((current) => ({ ...current, [path]: open }));
 		saveFolderState(path, open);
 	}, []);
+	// Which way round the tree runs, read once on mount and written through on
+	// every flip, so the direction outlives the page and the app.
+	const [order, setOrder] = useState<WikiSortOrder>(loadSortOrder);
+	const toggleOrder = useCallback(() => {
+		setOrder((current) => {
+			const next = current === "asc" ? "desc" : "asc";
+			saveSortOrder(next);
+			return next;
+		});
+	}, []);
 	const notes = useMemo(() => files?.notes ?? [], [files]);
-	const tree = useMemo(() => buildTree(notes), [notes]);
+	const tree = useMemo(() => buildTree(notes, order), [notes, order]);
 	const counts = useMemo(() => summarise(notes), [notes]);
 
 	const matches = useMemo(() => {
@@ -105,9 +123,21 @@ export function WikiVaultRail({
 										counts.folders === 1 ? "" : "s"
 									}`}
 						</span>
-						<button type="button" className="wiki-rail__refresh" aria-label="Re-read the vault" onClick={onRefresh}>
-							<RefreshCw aria-hidden="true" />
-						</button>
+						<div className="wiki-rail__actions">
+							<button
+								type="button"
+								className="wiki-rail__action"
+								aria-label={order === "asc" ? "Sorted A to Z, reverse it" : "Sorted Z to A, reverse it"}
+								aria-pressed={order === "desc"}
+								title={order === "asc" ? "Sorted A to Z" : "Sorted Z to A"}
+								onClick={toggleOrder}
+							>
+								{order === "asc" ? <ArrowDownAZ aria-hidden="true" /> : <ArrowDownZA aria-hidden="true" />}
+							</button>
+							<button type="button" className="wiki-rail__action" aria-label="Re-read the vault" onClick={onRefresh}>
+								<RefreshCw aria-hidden="true" />
+							</button>
+						</div>
 					</div>
 					<div className="wiki-rail__tree">
 						{tree.map((node) => (
@@ -236,8 +266,15 @@ function TreeRow({
 	);
 }
 
-/** Folders before files, each alphabetical — the order a file browser uses. */
-export function buildTree(notes: { path: string; modifiedAt?: string }[]): TreeNode[] {
+/**
+ * Folders before files, each alphabetical — the order a file browser uses.
+ *
+ * `order: "desc"` INVERTS that one rule rather than replacing it: every level
+ * of the tree runs backwards, files ahead of folders and Z before A, which is
+ * what the rail's direction toggle asks for. There is no second sort axis here
+ * on purpose.
+ */
+export function buildTree(notes: { path: string; modifiedAt?: string }[], order: WikiSortOrder = "asc"): TreeNode[] {
 	const root: TreeFolder = { kind: "folder", name: "", path: "", children: [], noteCount: 0 };
 	const folders = new Map<string, TreeFolder>([["", root]]);
 
@@ -267,10 +304,11 @@ export function buildTree(notes: { path: string; modifiedAt?: string }[]): TreeN
 		}
 	}
 
+	const direction = order === "desc" ? -1 : 1;
 	const sortNodes = (nodes: TreeNode[]) => {
 		nodes.sort((a, b) => {
-			if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-			return a.name.localeCompare(b.name);
+			if (a.kind !== b.kind) return (a.kind === "folder" ? -1 : 1) * direction;
+			return a.name.localeCompare(b.name) * direction;
 		});
 		for (const node of nodes) if (node.kind === "folder") sortNodes(node.children);
 	};

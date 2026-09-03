@@ -56,10 +56,10 @@ function wikiStatus(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function routeGets(status = wikiStatus(), note?: Record<string, unknown>) {
+function routeGets(status = wikiStatus(), note?: Record<string, unknown>, notes: { path: string }[] = NOTES) {
 	getMock.mockImplementation((path: string) => {
 		if (path === "/api/v1/wiki") return Promise.resolve(status);
-		if (path === "/api/v1/wiki/files") return Promise.resolve({ data: { notes: NOTES, truncated: false } });
+		if (path === "/api/v1/wiki/files") return Promise.resolve({ data: { notes, truncated: false } });
 		if (path === "/api/v1/wiki/file")
 			return Promise.resolve({
 				data: note ?? { path: "agents/compaction.md", content: "# Compaction\n\nbody\n", size: 40, backlinks: [] },
@@ -208,6 +208,62 @@ describe("WikiPage — reading a note", () => {
 	});
 });
 
+describe("WikiPage — the tree's sort direction", () => {
+	// Two levels deep on purpose: a toggle that only reordered the root would
+	// pass a shallower fixture and still leave nested folders untouched.
+	const NESTED = [
+		{ path: "work/nested/alpha.md", size: 10, modifiedAt: new Date().toISOString() },
+		{ path: "work/nested/zeta.md", size: 10, modifiedAt: new Date().toISOString() },
+		{ path: "work/nested/inner/deep.md", size: 10, modifiedAt: new Date().toISOString() },
+	];
+
+	function rowNames(container: HTMLElement): string[] {
+		return Array.from(container.querySelectorAll(".wiki-rail__tree .wiki-rail__name")).map(
+			(node) => node.textContent ?? "",
+		);
+	}
+
+	async function openNested() {
+		await userEvent.click(await screen.findByRole("button", { name: /^nested/ }));
+	}
+
+	it("reverses the order inside a nested folder, not just at the root", async () => {
+		routeGets(wikiStatus(), undefined, NESTED);
+		const { container } = renderPage();
+		await openNested();
+		expect(rowNames(container)).toEqual(["work", "nested", "inner", "alpha.md", "zeta.md"]);
+
+		await userEvent.click(screen.getByRole("button", { name: /Sorted A to Z/ }));
+
+		expect(rowNames(container)).toEqual(["work", "nested", "zeta.md", "alpha.md", "inner"]);
+	});
+
+	it("keeps the chosen direction across a remount, the way the folders are kept", async () => {
+		routeGets(wikiStatus(), undefined, NESTED);
+		const first = renderPage();
+		await openNested();
+		await userEvent.click(screen.getByRole("button", { name: /Sorted A to Z/ }));
+		expect(rowNames(first.container)).toEqual(["work", "nested", "zeta.md", "alpha.md", "inner"]);
+		first.unmount();
+
+		const second = renderPage();
+		await screen.findByRole("button", { name: /Sorted Z to A/ });
+		await waitFor(() => expect(rowNames(second.container)).toEqual(["work", "nested", "zeta.md", "alpha.md", "inner"]));
+	});
+
+	it("says which way the tree runs rather than making you click to find out", async () => {
+		routeGets(wikiStatus(), undefined, NESTED);
+		renderPage();
+		const button = await screen.findByRole("button", { name: /Sorted A to Z/ });
+		expect(button).toHaveAttribute("aria-pressed", "false");
+
+		await userEvent.click(button);
+
+		expect(screen.getByRole("button", { name: /Sorted Z to A/ })).toHaveAttribute("aria-pressed", "true");
+		expect(localStorage.getItem("ao.wiki.sort")).toBe("desc");
+	});
+});
+
 describe("WikiPage — the rail's search", () => {
 	it("finds a note by name", async () => {
 		routeGets();
@@ -260,6 +316,23 @@ describe("the vault tree", () => {
 	it("puts folders before files, each alphabetical", () => {
 		const tree = buildTree([{ path: "zeta.md" }, { path: "alpha.md" }, { path: "work/b.md" }, { path: "agents/a.md" }]);
 		expect(tree.map((node) => node.name)).toEqual(["agents", "work", "alpha.md", "zeta.md"]);
+	});
+
+	// The toggle inverts the one rule the tree already has — it does not sort on
+	// something else — and it has to reach every level, not just the top one.
+	it("runs backwards at every level when the order is reversed", () => {
+		const notes = [
+			{ path: "zeta.md" },
+			{ path: "alpha.md" },
+			{ path: "work/b.md" },
+			{ path: "work/a.md" },
+			{ path: "work/inner/deep.md" },
+			{ path: "agents/a.md" },
+		];
+		const tree = buildTree(notes, "desc");
+		expect(tree.map((node) => node.name)).toEqual(["zeta.md", "alpha.md", "work", "agents"]);
+		const work = tree.find((node) => node.name === "work");
+		expect(work?.kind === "folder" && work.children.map((child) => child.name)).toEqual(["b.md", "a.md", "inner"]);
 	});
 
 	it("counts every file beneath a folder, not just its direct children", () => {
