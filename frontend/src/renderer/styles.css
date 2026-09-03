@@ -6463,14 +6463,22 @@ ol.note-prose__list {
 	white-space: nowrap;
 }
 
-.wiki-rail__refresh {
+/* The tree's own controls - sort direction and refresh - read as one group. */
+.wiki-rail__actions {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 2px;
+	margin-left: auto;
+}
+
+.wiki-rail__action {
 	display: inline-flex;
 	width: 20px;
 	height: 20px;
 	flex: none;
 	align-items: center;
 	justify-content: center;
-	margin-left: auto;
 	padding: 0;
 	border: 0;
 	border-radius: var(--radius-sm);
@@ -6479,12 +6487,18 @@ ol.note-prose__list {
 	cursor: pointer;
 }
 
-.wiki-rail__refresh:hover {
+.wiki-rail__action:hover {
 	background: var(--interactive-hover);
 	color: var(--fg);
 }
 
-.wiki-rail__refresh svg {
+/* Pressed means the tree is inverted: the button carries the state it set. */
+.wiki-rail__action[aria-pressed="true"] {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.wiki-rail__action svg {
 	width: 13px;
 	height: 13px;
 }

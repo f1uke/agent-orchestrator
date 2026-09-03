@@ -94,3 +94,34 @@ export function saveFolderState(path: string, open: boolean, now = Date.now()): 
 export function defaultOpen(path: string, depth: number, openPath: string | null): boolean {
 	return depth === 0 || (openPath !== null && openPath.startsWith(`${path}/`));
 }
+
+/**
+ * Which way round the tree lists its entries: `asc` is the tree's own order
+ * (folders before files, each alphabetical), `desc` that same order inverted.
+ *
+ * A sibling of the folder state above, and per-VIEWER for the same reason: the
+ * direction someone likes reading their vault in is not a fact about the vault.
+ * Kept in its own key rather than folded into the folder blob so the eviction
+ * cap there can never drop it.
+ */
+const SORT_KEY = "ao.wiki.sort";
+
+export type WikiSortOrder = "asc" | "desc";
+
+/** The direction the reader last chose, defaulting to the tree's own order. */
+export function loadSortOrder(): WikiSortOrder {
+	try {
+		return storage()?.getItem(SORT_KEY) === "desc" ? "desc" : "asc";
+	} catch {
+		return "asc";
+	}
+}
+
+/** Records the direction the reader just chose. */
+export function saveSortOrder(order: WikiSortOrder): void {
+	try {
+		storage()?.setItem(SORT_KEY, order);
+	} catch {
+		// A full or disabled quota loses the direction, not the rail.
+	}
+}
