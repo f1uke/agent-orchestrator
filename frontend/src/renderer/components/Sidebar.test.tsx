@@ -8,8 +8,21 @@ import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 import { agentsQueryKey } from "../hooks/useAgentsQuery";
 import { useUiStore } from "../stores/ui-store";
 
-const { getMock, navigateMock, mockParams, renameSessionMock } = vi.hoisted(() => ({
+const { getMock, navigateMock, mockParams, renameSessionMock, apiReady } = vi.hoisted(() => ({
 	getMock: vi.fn(),
+	// The daemon's port, as the renderer learns it. Boot starts UNTRUSTED — the
+	// port arrives over IPC a moment after the window is up — and the sidebar has
+	// to survive that window, so the tests drive it explicitly rather than
+	// pretending the daemon is up before the app is.
+	apiReady: {
+		trusted: true,
+		listeners: new Set<() => void>(),
+		set(next: boolean) {
+			if (this.trusted === next) return;
+			this.trusted = next;
+			this.listeners.forEach((listener) => listener());
+		},
+	},
 	navigateMock: vi.fn(),
 	// Drives useSelection: which project/session the URL points at. Reset per test;
 	// the active-glow tests set these to simulate the Dashboard vs Orchestrator route.
@@ -35,6 +48,11 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 
 vi.mock("../lib/api-client", () => ({
 	apiClient: { GET: getMock },
+	hasTrustedApiBaseUrl: () => apiReady.trusted,
+	subscribeApiBaseUrl: (listener: () => void) => {
+		apiReady.listeners.add(listener);
+		return () => apiReady.listeners.delete(listener);
+	},
 	apiErrorMessage: (error: unknown) => {
 		if (error instanceof Error) return error.message;
 		if (typeof error === "object" && error !== null && "message" in error && typeof error.message === "string") {
@@ -136,10 +154,13 @@ function renderSidebar({
 	// state transition (e.g. the orchestrator going busy → idle) the way a refetch
 	// does, instead of mounting a second sidebar.
 	rerenderWorkspaces = (ws) => result.rerender(tree(ws));
+	renderedQueryClient = queryClient;
 	return onRemoveProject;
 }
 
 let rerenderWorkspaces: (workspaces: WorkspaceSummary[]) => void = () => undefined;
+// The sidebar's own cache, so a test can push it the way a Settings save does.
+let renderedQueryClient: QueryClient | null = null;
 
 async function chooseOption(trigger: HTMLElement, optionName: string) {
 	await userEvent.click(trigger);
@@ -159,6 +180,8 @@ function respondByPath(agents: unknown, wiki: unknown = { data: { configured: fa
 }
 
 beforeEach(() => {
+	apiReady.listeners.clear();
+	apiReady.trusted = true;
 	getMock.mockReset();
 	getMock.mockResolvedValue({
 		data: {
@@ -1298,5 +1321,106 @@ describe("Sidebar project reorder (drag and drop)", () => {
 
 			expect(orchestratorBtn()).toHaveAccessibleName("Spawn Project One orchestrator");
 		});
+	});
+});
+
+/**
+ * The Wiki row is the ONLY way into the Wiki, so "does it render" is the whole
+ * feature's reachability. It shipped with no coverage at all here: every other
+ * wiki test renders the page directly, which no user can do, and the sidebar's
+ * own helper answered `configured: false` for every case — so a build in which
+ * the row could never appear passed CI green.
+ */
+describe("Sidebar — the Wiki row", () => {
+	const configured = {
+		data: { configured: true, vaultPath: "/Users/someone/Notes", displayPath: "~/Notes", running: false },
+		error: undefined,
+	};
+	const wikiRow = () => screen.queryByRole("button", { name: "Wiki" });
+
+	it("renders the destination once a vault path is set", async () => {
+		respondByPath(undefined, configured);
+		renderSidebar();
+
+		expect(await screen.findByRole("button", { name: "Wiki" })).toBeInTheDocument();
+	});
+
+	it("opens the Wiki when the row is clicked", async () => {
+		respondByPath(undefined, configured);
+		renderSidebar();
+
+		await userEvent.click(await screen.findByRole("button", { name: "Wiki" }));
+
+		expect(navigateMock).toHaveBeenCalledWith({ to: "/wiki" });
+	});
+
+	it("keeps the row out of the rail while no vault path is set", async () => {
+		respondByPath(undefined, { data: { configured: false }, error: undefined });
+		renderSidebar();
+
+		await screen.findByText("Project One");
+		expect(wikiRow()).not.toBeInTheDocument();
+	});
+
+	it("drops the row when the vault path is cleared", async () => {
+		let wiki: unknown = configured;
+		getMock.mockImplementation((path: string) =>
+			Promise.resolve(path === "/api/v1/wiki" ? wiki : { data: undefined, error: undefined }),
+		);
+		renderSidebar();
+		await screen.findByRole("button", { name: "Wiki" });
+
+		// Clearing the path in Settings answers the same route with an unset vault
+		// and invalidates this query on save; the row has to go with it.
+		wiki = { data: { configured: false }, error: undefined };
+		await renderedQueryClient?.invalidateQueries({ queryKey: ["wiki", "status"] });
+
+		await waitFor(() => expect(wikiRow()).not.toBeInTheDocument());
+	});
+
+	/**
+	 * THE regression test for the bug that made the whole Wiki unreachable.
+	 *
+	 * The renderer paints before the daemon has reported its port, and until it
+	 * does every request is answered locally with a synthesized 503. The sidebar
+	 * reads this route once and never polls, so it used to spend both of its
+	 * attempts inside that window and stay empty forever — vault configured,
+	 * route answering, row gone for the life of the app.
+	 */
+	it("waits for the daemon's port instead of failing against it", async () => {
+		apiReady.trusted = false;
+		// What the renderer really sees before the daemon reports its port: the
+		// request never leaves the process, and `runtimeFetch` answers it locally.
+		getMock.mockImplementation((path: string) =>
+			Promise.resolve(
+				path !== "/api/v1/wiki"
+					? { data: undefined, error: undefined }
+					: apiReady.trusted
+						? configured
+						: { data: undefined, error: { message: "AO daemon is not ready." } },
+			),
+		);
+		renderSidebar();
+		await screen.findByText("Project One");
+		expect(wikiRow()).not.toBeInTheDocument();
+
+		// The wait IS the test. A cold start spends seconds spawning the daemon and
+		// confirming its port, which comfortably outlasts a two-attempt retry
+		// budget — so the row must still be recoverable long after a query that
+		// tried and failed would have given up for good.
+		await new Promise((resolve) => setTimeout(resolve, 1_300));
+		apiReady.set(true);
+
+		expect(await screen.findByRole("button", { name: "Wiki" })).toBeInTheDocument();
+	});
+
+	it("spends no attempt on a daemon that has not reported its port", async () => {
+		apiReady.trusted = false;
+		respondByPath(undefined, configured);
+		renderSidebar();
+		await screen.findByText("Project One");
+
+		// A gate, not a failure — nothing is asked, so there is nothing to give up on.
+		expect(getMock).not.toHaveBeenCalledWith("/api/v1/wiki", expect.anything());
 	});
 });

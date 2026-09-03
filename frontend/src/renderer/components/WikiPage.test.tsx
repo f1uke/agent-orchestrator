@@ -18,6 +18,8 @@ vi.mock("../lib/api-client", () => ({
 	},
 	apiErrorMessage: (error: unknown) => (error as { message?: string })?.message ?? "failed",
 	getApiBaseUrl: () => "http://127.0.0.1:3001",
+	hasTrustedApiBaseUrl: () => true,
+	subscribeApiBaseUrl: () => () => undefined,
 }));
 vi.mock("../hooks/useDaemonStatus", () => ({ useDaemonStatus: () => ({ state: "ready", port: 3001 }) }));
 // The terminal itself is xterm over a live socket; the page's job is to decide

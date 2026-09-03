@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import type { SaveFailure } from "../lib/editor/save-errors";
+import { useApiReady } from "./useApiReady";
 
 export type WikiStatus = components["schemas"]["WikiStatusResponse"];
 export type WikiFiles = components["schemas"]["WikiFilesResponse"];
@@ -39,16 +40,23 @@ const STATUS_POLL_MS = 5_000;
  * closed nothing polls at all.
  */
 export function useWikiStatus({ poll = true }: { poll?: boolean } = {}) {
+	// Gated on the daemon's port being known, NOT left to fail against it. The
+	// sidebar reads this without polling, so a request spent inside the boot
+	// window is a request it never gets back: it would burn its retries on the
+	// synthesized "daemon is not ready" 503 and leave the Wiki row hidden for the
+	// whole life of the app, with a vault configured and the route answering
+	// perfectly. `useApiReady` also flips on a daemon restart, which is what
+	// re-runs this query afterwards in place of a poll.
+	const ready = useApiReady();
 	return useQuery({
 		queryKey: wikiStatusQueryKey,
+		enabled: ready,
 		queryFn: async (): Promise<WikiStatus> => {
 			const { data, error } = await apiClient.GET("/api/v1/wiki", {});
 			if (error) throw new Error(apiErrorMessage(error));
 			return data as WikiStatus;
 		},
 		refetchInterval: poll ? STATUS_POLL_MS : false,
-		// A daemon that is not up yet answers this route with an error; retrying
-		// forever would spam it, and the poll above recovers on its own.
 		retry: 1,
 	});
 }
