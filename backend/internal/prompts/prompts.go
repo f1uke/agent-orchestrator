@@ -382,6 +382,8 @@ const checkInGate = "\n\n" + `## Check in before you implement (AO)
 
 This project wants a person to see the shape of the work before the work starts, so this task is TWO turns and not one.
 
+**This section outranks your task brief.** The brief describes the WHOLE task, across both turns; it is not permission to skip the first one. So an instruction anywhere in it to work straight through - implement it, open the pull request, watch CI to green, do not stop until it is done, report only when it is finished - is an instruction about turn TWO, and none of it lifts this gate. Where the brief and this section disagree about when the change itself may start, this section wins: turn one ends at the hand-back however the task was worded, and however specific, numbered or urgent the wording was. A brief written before this project turned the gate on cannot know to say so, which is exactly why the rule lives here and not there.
+
 **Turn one: understand it.** Read the code, find out what the task actually means, and decide what you would do about it. Reading, searching, running read-only commands, and writing what you learn into the AO knowledge store are all part of this turn and need nobody's permission. What you may not do yet is start the change itself: no edit to a file in the repository, no new source file, no commit that implements the task.
 
 **Then STOP and END YOUR TURN.** Ending the turn is what makes the pause visible: AO reads it as a signal and moves this task into the board's **Needs you** lane, which is how a person finds out you are waiting. Do not instead sit quietly part-way through a turn - to everyone watching, that is identical to having hung, and nobody will come.
@@ -389,6 +391,37 @@ This project wants a person to see the shape of the work before the work starts,
 **Leave three things behind, short enough to read on a phone:** what you understand the task to be, what you intend to do about it, and what you need decided. If you wrote a plan or a spec, point at where it is rather than pasting it.
 
 **Turn two: implement.** The human's reply is your go-ahead; the rest of this prompt then applies unchanged and you do not stop a second time. If that reply changes the shape of the task, say in one line what changed and carry on.`
+
+// CheckInGateBriefingNote returns the passage that tells an ORCHESTRATOR that the
+// project it is dispatching for has the check-in gate on, so the briefs it writes
+// fit that flow instead of fighting it.
+//
+// It exists because the gate was invisible from the dispatching side: nothing in
+// the orchestrator's prompt said the setting existed, so every brief it wrote
+// ended in some form of "implement it, watch CI to green, then report" - the one
+// instruction that reads as permission to run straight past the pause. The gate
+// itself now says it outranks the brief (see checkInGate), which is what makes
+// the setting work at all; this note is the other half, so a brief and the gate
+// stop contradicting each other in the first place.
+//
+// Rendered only for a project that opted in (ProjectConfig.PauseBeforeImplementing),
+// exactly like CheckInGate: an ungated project's orchestrator prompt is
+// byte-for-byte what it was. Injected in buildSystemPrompt for KindOrchestrator,
+// alongside the other conditional orchestrator sections, so it survives a
+// cleared or overridden orchestrator base.
+//
+// It names no skill and no plugin, per the same convention #278 the gate follows.
+func CheckInGateBriefingNote() string { return checkInGateBriefingNote }
+
+const checkInGateBriefingNote = "\n\n" + `## Workers here check in before they implement (AO)
+
+This project has the check-in gate ON. A worker you spawn here reads the code, works out what the task means, and then STOPS and ends its turn before it changes a single file; AO puts that hand-back in the board's **Needs you** lane, and the human's reply is the go-ahead for the second turn. It is in the worker's own standing instructions and it OUTRANKS anything you write, so it happens whatever your brief says. Write briefs that fit it:
+
+- **Describe the task, not the sequence.** What is wrong or wanted, where it lives, what "done" looks like, what must not regress, how to verify - that is the part only you can give.
+- **Do not script the run-through.** "Implement it, watch CI to green, then report" tells the worker to drive past the very gate this project turned on. It cannot win that fight, so all it does is make the first turn read like a violation. Say what you want built and let the gate order the turns; the worker still opens the PR, still watches CI, still reports - in turn two.
+- **` + "`--task-size mechanical`" + ` is the exemption.** A mechanical task never pauses, whatever this setting says. That is the right tag for a rename or a one-line fix, and the wrong one for a change you actually want eyes on before it starts.
+
+The check-in goes to a PERSON, not to you: the worker leaves what it understood, what it intends, and what it needs decided, and you will see the task sitting in **Needs you** rather than receiving a message.`
 
 const smokeChecklistProtocol = "\n\n" + `## Smoke-test checklist (AO)
 
