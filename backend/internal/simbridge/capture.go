@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Reading a simulator screen continuously, for a human to watch.
@@ -59,10 +60,14 @@ const (
 	FrameKeyframe FrameKind = 2
 	// FrameDelta only means something after the frames before it.
 	FrameDelta FrameKind = 3
+	// FrameImage is a whole JPEG, and the only kind that needs nothing before
+	// it. It is what a device whose framebuffer VideoToolbox refuses is shown
+	// with - see codecFallbackAfter.
+	FrameImage FrameKind = 4
 )
 
 func (k FrameKind) valid() bool {
-	return k == FrameDescription || k == FrameKeyframe || k == FrameDelta
+	return k == FrameDescription || k == FrameKeyframe || k == FrameDelta || k == FrameImage
 }
 
 // Frame is one encoded chunk of a screen, exactly as the device produced it.
@@ -89,10 +94,33 @@ const (
 	maxFrameBytes = 16 << 20
 )
 
-// keyframeRequest is the one control line the capture process understands. A
-// viewer that joined mid-stream cannot decode the deltas of an encoder that is
-// already running, so the hub asks for a picture group that starts fresh.
-var keyframeRequest = []byte(`{"op":"keyframe"}`)
+// keyframeRequest and mjpegRequest are the two control lines the capture
+// process understands. A viewer that joined mid-stream cannot decode the deltas
+// of an encoder that is already running, so the hub asks for a picture group
+// that starts fresh; the other switches the codec - see codecFallbackAfter.
+var (
+	keyframeRequest = []byte(`{"op":"keyframe"}`)
+	mjpegRequest    = []byte(`{"op":"codec","codec":"mjpeg"}`)
+)
+
+// codecFallbackAfter is how long a capture may produce NOTHING AT ALL before it
+// is moved off H.264 onto JPEG-per-frame.
+//
+// Some framebuffers cannot be encoded as H.264 on this machine at all: a device
+// whose width is odd makes VideoToolbox return kVTPixelTransferNotSupportedErr
+// for every single frame, so the capture emits no description, no keyframe and
+// no delta, and the pane sits on "connecting" for as long as anybody is willing
+// to look at it. Seven of this Mac's device types are odd - 1125x2436 (iPhone
+// X, Xs, 11 Pro) and 1179x2556 (iPhone 14 Pro, 15, 15 Pro, 16). The vendored
+// addon does it, and so does the newest one upstream.
+//
+// The trigger is deliberately "no frames", not "this model" or "this width": a
+// list of models is a list somebody has to remember to add to, and the next
+// geometry VideoToolbox will not take is not on it. A device that can be
+// encoded is unaffected - it delivers its first frame in a few hundred
+// milliseconds, well inside this - and one that cannot gets a picture a second
+// or so later instead of never.
+const codecFallbackAfter = 2 * time.Second
 
 // CaptureSession is one running capture process. Close must stop the process,
 // wait for it, and leave Frames unblocked - a reader parked on the frame
@@ -132,6 +160,9 @@ type NodeCapturer struct {
 	Toolchain Toolchain
 	NodePath  string
 	Start     CaptureStarter
+	// fallbackAfter is codecFallbackAfter, as a field so a test does not have
+	// to spend two seconds proving the fallback fires.
+	fallbackAfter time.Duration
 }
 
 // NewNodeCapturer builds a capturer, installing the bridge under dataDir. It
@@ -159,7 +190,7 @@ func NewNodeCapturer(dataDir string, lookPath func(string) (string, error), star
 	if start == nil {
 		start = startCaptureProcess
 	}
-	return &NodeCapturer{Toolchain: tc, NodePath: node, Start: start}, nil
+	return &NodeCapturer{Toolchain: tc, NodePath: node, Start: start, fallbackAfter: codecFallbackAfter}, nil
 }
 
 type captureRequest struct {
@@ -192,16 +223,36 @@ func (c *NodeCapturer) Capture(ctx context.Context, udid string, keyframes <-cha
 	// process is what unblocks it, and both paths below then wait for the reader
 	// to finish - so no frame is ever delivered after Capture has returned.
 	var stopping atomic.Bool
+	var seen atomic.Bool
 	done := make(chan struct{})
 	var readErr error
 	go func() {
 		defer close(done)
 		readErr = readFrames(session.Frames(), func(f Frame) {
+			seen.Store(true)
 			if stopping.Load() {
 				return
 			}
 			onFrame(f)
 		})
+	}()
+
+	// A capture that has produced nothing at all by now is one this machine
+	// cannot encode as H.264, so it is asked for JPEG instead. Started after
+	// the reader, so a frame that arrives while this is being set up counts.
+	// It fires once: a device that will not encode will not start to, and a
+	// second ask would only restart a subscription that is finally working.
+	go func() {
+		timer := time.NewTimer(c.fallbackDelay())
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+		case <-done:
+		case <-timer.C:
+			if !seen.Load() {
+				_ = session.Request(mjpegRequest)
+			}
+		}
 	}()
 
 	// Keyframe requests ride the same stdin the heartbeat holds open, so they
@@ -242,6 +293,14 @@ func (c *NodeCapturer) Capture(ctx context.Context, udid string, keyframes <-cha
 		return fmt.Errorf("the simulator capture ended: %w", closeErr)
 	}
 	return nil
+}
+
+// fallbackDelay is codecFallbackAfter unless a test shortened it.
+func (c *NodeCapturer) fallbackDelay() time.Duration {
+	if c.fallbackAfter > 0 {
+		return c.fallbackAfter
+	}
+	return codecFallbackAfter
 }
 
 // readFrames turns the wire into frames. A short read is an error rather than a

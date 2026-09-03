@@ -19,7 +19,9 @@
 //     device under the same activity: same frame rate, a twenty-fifth of the
 //     bytes, less than half the CPU. An earlier reading that H.264 "reports
 //     encodingFailed" came from the single frame the encoder drops while
-//     VideoToolbox builds its session; every frame after it encodes.
+//     VideoToolbox builds its session; every frame after it encodes - unless the
+//     device's framebuffer is one VideoToolbox will not take at all, which is
+//     why the codec can be switched from outside (see `op: "codec"`).
 //  4. Frames are dropped, never queued, but only whole ones. A delta means
 //     nothing without the frames before it, so the reader is told which kind
 //     each chunk is and Go decides who may receive it.
@@ -29,8 +31,10 @@ import { createWriteStream } from "node:fs";
 
 const require = createRequire(import.meta.url);
 
-// 0 is MJPEG, 1 is H.264 in AVCC framing.
-const KIND_AVCC = 1;
+// 0 is MJPEG, 1 is H.264 in AVCC framing. The addon takes one per subscription;
+// switching is re-subscribing, which is the same thing a keyframe request does.
+const CODEC_MJPEG = 0;
+const CODEC_AVCC = 1;
 
 // The addon's own envelope: a 4-byte big-endian length covering the tag byte,
 // then the tag, then the payload. The tag is redundant with the flags argument,
@@ -45,6 +49,9 @@ const FLAG_KEYFRAME = 1 << 1;
 const FRAME_DESCRIPTION = 1;
 const FRAME_KEYFRAME = 2;
 const FRAME_DELTA = 3;
+// A whole JPEG. It stands on its own - no description, nothing before it - which
+// is the entire reason it is worth carrying a second codec.
+const FRAME_IMAGE = 4;
 
 // Above this many bytes buffered for the reader, frames are dropped rather than
 // queued. H.264 deltas are a few KB and a keyframe a few hundred, so this is
@@ -104,6 +111,14 @@ function kindOf(flags) {
   return FRAME_DELTA;
 }
 
+// MJPEG frames carry no envelope and no flags - the addon hands over the JPEG
+// itself - so the two codecs differ in both the bytes to take and the kind to
+// stamp on them, and nothing else.
+function frameOf(codec, payload, flags) {
+  if (codec === CODEC_MJPEG) return { bytes: payload, kind: FRAME_IMAGE };
+  return { bytes: payload.subarray(ENVELOPE_PREFIX), kind: kindOf(flags) };
+}
+
 async function main() {
   const request = await new Promise((resolve, reject) => {
     let first = true;
@@ -144,26 +159,40 @@ async function main() {
   // and delivers no frames, silently. Passing it explicitly is not optional.
   let unsubscribe = null;
   let restarting = false;
+  let codec = CODEC_AVCC;
 
   const subscribe = async () => {
-    unsubscribe = await capture.subscribe(KIND_AVCC, (payload, width, height, flags) => {
-      writeFrame(payload.subarray(ENVELOPE_PREFIX), width, height, kindOf(flags));
+    const active = codec;
+    unsubscribe = await capture.subscribe(active, (payload, width, height, flags) => {
+      const frame = frameOf(active, payload, flags);
+      writeFrame(frame.bytes, width, height, frame.kind);
     });
   };
 
   // Restarting the subscription is cheap but not free, and two viewers joining
   // together only need one fresh group between them, so a request that arrives
-  // mid-restart is folded into the one already running.
+  // mid-restart is folded into the one already running - and then run once more
+  // after it. Folding alone was enough while every restart wanted the same
+  // thing; a codec change does not, and dropping it would leave the stream on a
+  // codec this device has already shown it cannot encode.
+  let again = false;
   const restart = async () => {
-    if (restarting || stopping) return;
+    if (stopping) return;
+    if (restarting) {
+      again = true;
+      return;
+    }
     restarting = true;
     try {
-      const previous = unsubscribe;
-      unsubscribe = null;
-      if (previous) await previous();
-      if (!stopping) await subscribe();
+      do {
+        again = false;
+        const previous = unsubscribe;
+        unsubscribe = null;
+        if (previous) await previous();
+        if (!stopping) await subscribe();
+      } while (again && !stopping);
     } catch (err) {
-      process.stderr.write(`keyframe restart failed: ${err?.message ?? err}\n`);
+      process.stderr.write(`capture restart failed: ${err?.message ?? err}\n`);
     } finally {
       restarting = false;
     }
@@ -176,7 +205,16 @@ async function main() {
     } catch {
       return;
     }
-    if (command?.op === "keyframe") void restart();
+    if (command?.op === "keyframe") return void restart();
+    // Which codec a device can actually be encoded in is not something this
+    // process is allowed to decide - it transports. Go watches whether any
+    // frame arrived and says so.
+    if (command?.op === "codec") {
+      const next = command.codec === "mjpeg" ? CODEC_MJPEG : CODEC_AVCC;
+      if (next === codec) return;
+      codec = next;
+      void restart();
+    }
   }
 
   const shutdown = async (why) => {

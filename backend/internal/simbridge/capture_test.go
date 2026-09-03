@@ -110,6 +110,7 @@ func TestCapture_FrameKindSurvivesTheWire(t *testing.T) {
 	stream := framed([]byte("avcC"), 1320, 2868, FrameDescription)
 	stream = append(stream, framed([]byte("idr"), 1320, 2868, FrameKeyframe)...)
 	stream = append(stream, framed([]byte("p"), 1320, 2868, FrameDelta)...)
+	stream = append(stream, framed([]byte("jpeg"), 1179, 2556, FrameImage)...)
 	session := &fakeSession{r: bytes.NewReader(stream)}
 	var kinds []FrameKind
 	if err := capturerFor(t, session, nil).Capture(context.Background(), "UDID", nil, func(f Frame) {
@@ -117,7 +118,7 @@ func TestCapture_FrameKindSurvivesTheWire(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	want := []FrameKind{FrameDescription, FrameKeyframe, FrameDelta}
+	want := []FrameKind{FrameDescription, FrameKeyframe, FrameDelta, FrameImage}
 	if len(kinds) != len(want) {
 		t.Fatalf("want %d frames, got %d", len(want), len(kinds))
 	}
@@ -243,4 +244,75 @@ func TestCapture_ProcessExitDiagnosticSurvives(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "image not found") {
 		t.Fatalf("want the process diagnostic, got %v", err)
 	}
+}
+
+// A device whose framebuffer VideoToolbox will not encode produces NOTHING -
+// no description, no keyframe, no delta, and no error either, because the
+// encoder fails inside the addon and the capture process is none the wiser. On
+// this machine that is any simulator whose width is odd - 1125x2436 and
+// 1179x2556, seven models between them - and the pane sat on "connecting" for
+// as long as anybody was willing to watch it.
+//
+// The trigger is silence, not the model: a list of models is a list somebody
+// has to remember to add to, and this asserts the behaviour for a device the
+// code has never heard of.
+func TestCapture_ADeviceThatEncodesNothingIsMovedToImages(t *testing.T) {
+	pr, pw := io.Pipe()
+	session := &fakeSession{r: pr, unblock: pr}
+	capturer := capturerFor(t, session, nil)
+	capturer.fallbackAfter = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- capturer.Capture(ctx, "UDID-OF-A-MODEL-NOBODY-LISTED", nil, func(Frame) {}) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(session.sentRequests()) == 0 {
+		time.Sleep(2 * time.Millisecond)
+	}
+	sent := session.sentRequests()
+	if len(sent) == 0 {
+		t.Fatal("a capture that has produced no frames at all must be asked for images")
+	}
+	if !strings.Contains(string(sent[0]), "mjpeg") {
+		t.Fatalf("unexpected control line %q", sent[0])
+	}
+	cancel()
+	<-done
+	_ = pw.Close()
+}
+
+// The other half of the same rule: a device that IS encoding must be left on
+// H.264. Falling back on a working stream would cost twenty-five times the
+// bytes for a picture that was already fine.
+func TestCapture_ADeviceThatIsEncodingStaysOnH264(t *testing.T) {
+	pr, pw := io.Pipe()
+	session := &fakeSession{r: pr, unblock: pr}
+	capturer := capturerFor(t, session, nil)
+	capturer.fallbackAfter = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	seen := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- capturer.Capture(ctx, "UDID", nil, func(Frame) {
+			select {
+			case seen <- struct{}{}:
+			default:
+			}
+		})
+	}()
+	go func() { _, _ = pw.Write(framed([]byte("avcC"), 1320, 2868, FrameDescription)) }()
+
+	select {
+	case <-seen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the frame never arrived")
+	}
+	// Well past the fallback: if it were going to fire, it has had its chance.
+	time.Sleep(100 * time.Millisecond)
+	if got := session.sentRequests(); len(got) != 0 {
+		t.Fatalf("a stream that is producing frames must not be switched, got %q", got)
+	}
+	cancel()
+	<-done
+	_ = pw.Close()
 }

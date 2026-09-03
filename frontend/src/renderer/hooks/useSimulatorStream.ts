@@ -43,6 +43,13 @@ import { getApiBaseUrl, subscribeApiBaseUrl } from "../lib/api-client";
  *    line. Telling React about every frame would re-render the pane sixty times
  *    a second to move a label, so the frame clock is sampled once a second and
  *    the picture itself is drawn outside React entirely.
+ *
+ * And one thing this file has to survive: some framebuffers cannot be encoded
+ * as H.264 on this machine at all - an odd width makes VideoToolbox refuse
+ * every frame - so the daemon moves such a capture to JPEG-per-frame and
+ * sends whole images instead. They arrive as a fourth kind and are painted
+ * without the decoder, because each one stands on its own. A stream is one or
+ * the other for its whole life; nothing has to mix them.
  */
 
 export type SimStreamState =
@@ -72,9 +79,14 @@ const HEADER_BYTES = 5;
 const KIND_DESCRIPTION = 1;
 const KIND_KEYFRAME = 2;
 const KIND_DELTA = 3;
+/** A whole JPEG, from a device whose screen H.264 will not take. */
+const KIND_IMAGE = 4;
 
 /** Frame clock for the decoder, in microseconds. Only its ordering matters. */
 const FRAME_INTERVAL_US = 16_666;
+
+/** How many whole images may be decoding at once before one is skipped. */
+const MAX_IMAGES_DECODING = 2;
 
 /** How often the freshness clock is allowed to re-render the pane. */
 const FRESHNESS_SAMPLE_MS = 1_000;
@@ -167,26 +179,76 @@ export function useSimulatorStream({
 			setStatus((prev) => (prev.state === "ended" ? prev : { ...prev, state: "ended", message }));
 		};
 
+		const draw = (source: CanvasImageSource, width: number, height: number) => {
+			const canvas = canvasRef.current;
+			if (!canvas || closed) return;
+			if (canvas.width !== width || canvas.height !== height) {
+				canvas.width = width;
+				canvas.height = height;
+			}
+			canvas.getContext("2d")?.drawImage(source, 0, 0);
+		};
+
+		const reportFresh = () => {
+			const now = Date.now();
+			if (now - reportedAt < FRESHNESS_SAMPLE_MS) return;
+			reportedAt = now;
+			setStatus((prev) => ({ ...prev, state: "live", message: "", lastFrameAt: now }));
+		};
+
 		const paint = (frame: VideoFrame) => {
 			try {
-				const canvas = canvasRef.current;
-				if (canvas && !closed) {
-					if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
-						canvas.width = frame.displayWidth;
-						canvas.height = frame.displayHeight;
-					}
-					canvas.getContext("2d")?.drawImage(frame, 0, 0);
-				}
+				draw(frame, frame.displayWidth, frame.displayHeight);
 			} finally {
 				// A VideoFrame holds a GPU buffer until it is closed, and the decoder
 				// stalls once its pool is exhausted. This is the one line that must
 				// run for every frame, painted or not.
 				frame.close();
 			}
-			const now = Date.now();
-			if (now - reportedAt < FRESHNESS_SAMPLE_MS) return;
-			reportedAt = now;
-			setStatus((prev) => ({ ...prev, state: "live", message: "", lastFrameAt: now }));
+			reportFresh();
+		};
+
+		// Decoding a JPEG is asynchronous, so two images can be in flight and the
+		// older one can finish last. Painting it would run the screen backwards,
+		// which on a still device is invisible and on a moving one is a stutter
+		// nobody can explain - so an image older than what is already on the canvas
+		// is dropped rather than drawn.
+		//
+		// And only a few are ever in flight. A whole screen is a few hundred KB
+		// arriving up to fifty times a second, so a renderer that cannot decode
+		// them that fast would otherwise queue an ever-growing backlog of stale
+		// pictures it is going to throw away anyway. Skipping one while the
+		// decoder is busy costs a frame; queueing it costs the memory and shows
+		// the same frame later.
+		let issued = 0;
+		let drawnSeq = 0;
+		let decoding = 0;
+		// The view is over the socket's own ArrayBuffer, spelled out because a Blob
+		// part may not be backed by shared memory and a bare Uint8Array does not
+		// say which kind of buffer is under it.
+		const paintImage = (payload: Uint8Array<ArrayBuffer>) => {
+			if (decoding >= MAX_IMAGES_DECODING) return;
+			const seq = ++issued;
+			decoding += 1;
+			// The Blob constructor copies, so nothing here holds the socket's buffer.
+			createImageBitmap(new Blob([payload], { type: "image/jpeg" }))
+				.then((bitmap) => {
+					try {
+						if (closed || seq <= drawnSeq) return;
+						drawnSeq = seq;
+						draw(bitmap, bitmap.width, bitmap.height);
+					} finally {
+						bitmap.close();
+					}
+					reportFresh();
+				})
+				.catch(() => {
+					// One image this build could not decode is one lost frame, and the
+					// next whole picture is along a fifth of a second later at worst.
+				})
+				.finally(() => {
+					decoding -= 1;
+				});
 		};
 
 		const configure = (description: Uint8Array) => {
@@ -241,6 +303,12 @@ export function useSimulatorStream({
 
 			if (kind === KIND_DESCRIPTION) {
 				configure(payload);
+				return;
+			}
+			// A whole picture needs no decoder and no frame before it, so it is
+			// painted whatever state the H.264 half of this hook is in.
+			if (kind === KIND_IMAGE) {
+				paintImage(payload);
 				return;
 			}
 			// A kind this build does not know is not something to guess at.

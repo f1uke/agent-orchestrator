@@ -65,6 +65,9 @@ function setVisibility(state: "visible" | "hidden") {
 const KIND_DESCRIPTION = 1;
 const KIND_KEYFRAME = 2;
 const KIND_DELTA = 3;
+// A whole JPEG. It is what a device VideoToolbox will not encode is shown with,
+// and it needs neither a decoder nor anything before it.
+const KIND_IMAGE = 4;
 
 function message(kind: number, payload: number[], width = 1320, height = 2868): ArrayBuffer {
 	const out = new Uint8Array(5 + payload.length);
@@ -621,6 +624,47 @@ describe("SimulatorPanel decoding", () => {
 
 		expect(decodedKinds).toHaveLength(0);
 		expect(await screen.findByText(/will not decode/i)).toBeInTheDocument();
+	});
+
+	// The iPhone 14 Pro bug, at the only layer that can prove the picture
+	// appears: some framebuffers cannot be encoded as H.264 on this machine at
+	// all - an odd width makes VideoToolbox refuse every frame - so the daemon
+	// sends whole JPEGs instead. A pane that only knows the three H.264 kinds
+	// drops them and sits on "connecting" for ever while a healthy capture runs
+	// underneath it.
+	//
+	// Deliberately no model name anywhere in here: the device is a size, and the
+	// only thing that decides the path is what arrived on the wire.
+	it("goes live from whole images alone, for a screen H.264 cannot encode", async () => {
+		const bitmaps: { closed: boolean }[] = [];
+		vi.stubGlobal("createImageBitmap", async () => {
+			const bitmap = {
+				width: 1179,
+				height: 2556,
+				closed: false,
+				close() {
+					this.closed = true;
+				},
+			};
+			bitmaps.push(bitmap);
+			return bitmap;
+		});
+		const drawImage = vi.fn();
+		HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({ drawImage });
+
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/connecting/i);
+
+		openSockets()[0].onmessage?.({ data: message(KIND_IMAGE, [0xff, 0xd8, 0xff], 1179, 2556) } as MessageEvent);
+
+		await waitFor(() => expect(screen.getByTestId("sim-freshness")).toHaveTextContent(/live/i));
+		expect(drawImage).toHaveBeenCalledTimes(1);
+		// The decoder is not involved at all, and the bitmap is released - one
+		// held per frame at 5 fps is a leak with a picture on top of it.
+		expect(decoderCalls).toHaveLength(0);
+		expect(decodedKinds).toHaveLength(0);
+		expect(bitmaps.every((b) => b.closed)).toBe(true);
 	});
 
 	// A build without WebCodecs would otherwise show a black rectangle for ever.
