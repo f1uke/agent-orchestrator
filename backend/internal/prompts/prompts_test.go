@@ -876,6 +876,99 @@ func TestCheckInGate_StandardAndDeepStopBeforeImplementing(t *testing.T) {
 	}
 }
 
+// TestCheckInGate_OutranksTheTaskBrief is the load-bearing half of the fix. The
+// gate is a general rule that arrives EARLY in the prompt; the orchestrator's
+// task brief is specific, concrete, arrives later, and reads as the actual
+// assignment - and every brief AO's orchestrator writes today ends in some form
+// of "implement it, watch CI to green, then report". A worker can reasonably
+// follow the brief and never pause, which makes a setting the human deliberately
+// turned on do nothing, silently.
+//
+// So the gate must resolve that conflict IN ITS OWN TEXT, without depending on
+// the brief's author cooperating: the brief may have been written by an
+// orchestrator that predates this, typed by hand, or carried in by a restored
+// session. This asserts the RULE rather than one sentence of it - each group
+// below is satisfied by any of several phrasings, so the wording stays free to
+// change while the guarantee does not.
+func TestCheckInGate_OutranksTheTaskBrief(t *testing.T) {
+	for _, size := range []string{"standard", "deep", "", "huge"} {
+		got := strings.ToLower(CheckInGate(size))
+		groups := []struct {
+			what string
+			any  []string
+		}{
+			// It says outright that it wins, and names WHAT it wins over.
+			{"a precedence claim", []string{"outranks", "takes precedence", "this section wins", "overrides"}},
+			{"the thing it outranks: the task brief", []string{"task brief", "your brief", "the brief"}},
+			// And it wins specifically over the instructions a brief actually
+			// carries - the ones that read as permission to run straight through.
+			{"a brief that says to open the PR", []string{"open the pull request", "opening the pull request", "pull request"}},
+			{"a brief that says to watch CI", []string{"watch ci", "ci to green"}},
+			{"a brief that says not to stop", []string{"do not stop", "straight through", "without stopping", "run through"}},
+			// Whatever the brief said, turn one still ends at the hand-back.
+			{"turn one ends regardless of the wording", []string{"however the task was worded", "however it was worded", "whatever the brief says", "no matter how"}},
+		}
+		for _, g := range groups {
+			if !containsAny(got, g.any) {
+				t.Fatalf("CheckInGate(%q) must assert %s (one of %q); a gate that does not outrank the brief is a setting that silently does nothing:\n%s", size, g.what, g.any, CheckInGate(size))
+			}
+		}
+	}
+}
+
+// containsAny reports whether s contains at least one of the alternatives. It
+// keeps the precedence assertions about the RULE rather than about one exact
+// sentence of prompt prose.
+func containsAny(s string, alternatives []string) bool {
+	for _, a := range alternatives {
+		if strings.Contains(s, a) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCheckInGateBriefingNote_TellsTheOrchestrator: the other half. An
+// orchestrator that does not know the gate exists writes briefs that fight it,
+// so the note has to (a) say the gate is on here, (b) say it is enforced on the
+// worker's side whatever the brief says, (c) tell the orchestrator to describe
+// the task instead of scripting a run-through to a merged PR, and (d) keep the
+// mechanical exemption honest so it is not used as an escape hatch by accident.
+func TestCheckInGateBriefingNote_TellsTheOrchestrator(t *testing.T) {
+	got := CheckInGateBriefingNote()
+	if !strings.HasPrefix(got, "\n\n") {
+		t.Fatalf("CheckInGateBriefingNote must start with a blank-line separator: %q", got)
+	}
+	low := strings.ToLower(got)
+	for _, want := range []string{
+		"check-in gate on", // the project fact the orchestrator could not see
+		"ends its turn",    // what a worker here actually does
+		"**needs you**",    // where the human finds it
+		"outranks",         // the brief cannot win, so do not try
+		"mechanical",       // the one real exemption
+	} {
+		if !strings.Contains(low, strings.ToLower(want)) {
+			t.Fatalf("CheckInGateBriefingNote missing %q:\n%s", want, got)
+		}
+	}
+	if !containsAny(low, []string{"watch ci to green", "ci to green"}) {
+		t.Fatalf("the note must name the run-through instruction it is replacing:\n%s", got)
+	}
+}
+
+// TestCheckInGateBriefingNote_NamesNoSkillOrPlugin holds convention #278 on the
+// orchestrator side too, for the same reason the gate does.
+func TestCheckInGateBriefingNote_NamesNoSkillOrPlugin(t *testing.T) {
+	got := strings.ToLower(CheckInGateBriefingNote())
+	for _, banned := range []string{
+		"skill", "plugin", "/loop", "mattpocock", "requirement-gathering", "spec-writing", "ticket-breakdown",
+	} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("the orchestrator briefing note must name no skill or plugin, found %q:\n%s", banned, CheckInGateBriefingNote())
+		}
+	}
+}
+
 // TestCheckInGate_MechanicalNeverPauses: `mechanical` is exempt however the
 // project is configured (user decision 2026-09-01). It already carries an
 // explicit authorization to go straight to edit + verify, so a gate that stopped

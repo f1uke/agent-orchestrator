@@ -4753,6 +4753,81 @@ func TestBuildSystemPrompt_CheckInGate(t *testing.T) {
 	}
 }
 
+// TestBuildSystemPrompt_CheckInGateBriefsTheOrchestrator: the dispatching side of
+// the gate. The setting was invisible from here - nothing in the orchestrator's
+// prompt said it existed - so the orchestrator kept writing briefs ending in
+// "implement it, watch CI to green, then report", which is precisely the
+// instruction a worker reads as permission to run past the pause.
+//
+// Two facts, and the second is the one that could ship wrong: a project that
+// never opted in must render BYTE-FOR-BYTE what it rendered before this existed.
+// That is asserted by removing the note from the opted-in prompt and requiring
+// what is left to equal the opted-out prompt exactly - nothing else about the
+// assembly may shift when the flag flips.
+func TestBuildSystemPrompt_CheckInGateBriefsTheOrchestrator(t *testing.T) {
+	const heading = "## Workers here check in before they implement (AO)"
+	build := func(t *testing.T, pause bool, clearBase bool) string {
+		t.Helper()
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{PauseBeforeImplementing: pause}}
+		var getter func() promptoverrides.Overrides
+		if clearBase {
+			getter = func() promptoverrides.Overrides {
+				return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindOrchestrator: ""}}
+			}
+		}
+		m := layeredManager(st, getter)
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindOrchestrator, ProjectID: "mer"})
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+
+	gated, ungated := build(t, true, false), build(t, false, false)
+	if !strings.Contains(gated, heading) {
+		t.Fatalf("an opted-in project must tell its orchestrator the gate is on:\n%s", gated)
+	}
+	if !strings.Contains(strings.ToLower(gated), "outranks") {
+		t.Fatalf("the orchestrator must be told the gate beats its brief, or it keeps writing briefs that fight it:\n%s", gated)
+	}
+	if strings.Contains(ungated, heading) {
+		t.Fatalf("a project that did not opt in must say nothing about a gate it does not have:\n%s", ungated)
+	}
+	if got := strings.Replace(gated, prompts.CheckInGateBriefingNote(), "", 1); got != ungated {
+		t.Fatalf("an ungated project's orchestrator prompt must be byte-for-byte unchanged; gated-minus-note differs from ungated:\n--- gated minus note ---\n%s\n--- ungated ---\n%s", got, ungated)
+	}
+
+	// Injected, not base: clearing the orchestrator base cannot drop the note,
+	// same guarantee the worker's gate has.
+	if sp := build(t, true, true); !strings.Contains(sp, heading) {
+		t.Fatalf("a cleared orchestrator base must still carry the check-in briefing note:\n%s", sp)
+	}
+}
+
+// TestBuildSystemPrompt_UngatedWorkerUnchanged pins the other half of the
+// default: on a project that never opted in, a worker's whole system prompt is
+// byte-for-byte what it was before the gate existed. Asserted the same way -
+// remove the gate from the opted-in prompt and require the remainder to equal
+// the opted-out one exactly.
+func TestBuildSystemPrompt_UngatedWorkerUnchanged(t *testing.T) {
+	build := func(t *testing.T, pause bool) string {
+		t.Helper()
+		st := newFakeStore()
+		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{PauseBeforeImplementing: pause}}
+		m := layeredManager(st, nil)
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
+		if err != nil {
+			t.Fatalf("buildSystemPrompt: %v", err)
+		}
+		return sp
+	}
+	gated, ungated := build(t, true), build(t, false)
+	if got := strings.Replace(gated, prompts.CheckInGate("standard"), "", 1); got != ungated {
+		t.Fatalf("an ungated project's worker prompt must be byte-for-byte unchanged; gated-minus-gate differs from ungated:\n--- gated minus gate ---\n%s\n--- ungated ---\n%s", got, ungated)
+	}
+}
+
 // TestSpawn_AutoLinksJiraIssueFromPrompt reproduces the Send-to-Orchestrator bug:
 // a worker spawned onto a Jira-keyed branch must be linked to that issue: the
 // link record is sessions.issue_id in canonical "jira:<KEY>" form (the same field

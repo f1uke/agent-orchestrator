@@ -172,7 +172,9 @@ function GeneralSection({ project, form }: { project: Project; form: ProjectForm
 					Off by default. When on, a worker here reads the code and works out what the task means, then stops and hands
 					back to you before it changes anything - with what it understood, what it plans to do, and what it needs you
 					to decide. The task moves to <strong>Needs you</strong> on the board while it waits, and it implements only
-					after you reply. Mechanical tasks never stop: they are already authorized to go straight to the edit.
+					after you reply. Mechanical tasks never stop: they are already authorized to go straight to the edit. Your
+					orchestrator is told the gate is on here, so it briefs workers to fit it rather than telling them to run
+					straight through to a merged PR.
 				</p>
 			</SettingsGroup>
 

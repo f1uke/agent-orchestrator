@@ -3102,7 +3102,12 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 			prompts.Section(adds.Orchestrator) +
 			prompts.CoordinationFloor(prompts.KindOrchestrator) +
 			orchestratorGitConventionPrompt(conv, cfg.DefaultBranch) +
-			orchestratorSpawnConfirmPrompt(m.confirmBeforeSpawn(), conv, cfg.DefaultBranch)
+			orchestratorSpawnConfirmPrompt(m.confirmBeforeSpawn(), conv, cfg.DefaultBranch) +
+			// A project that pauses its workers before they implement must say so
+			// on the DISPATCHING side too, or the orchestrator keeps writing briefs
+			// that tell the worker to run straight through the gate. Opt-in, so an
+			// ungated project's orchestrator prompt is byte-for-byte unchanged.
+			orchestratorCheckInGatePrompt(cfg.PauseBeforeImplementing)
 	case domain.KindWorker:
 		// A crew's qa is a worker SESSION doing a different job, so it assembles
 		// from its own base and is deliberately never handed the orchestrator
@@ -3396,6 +3401,18 @@ Before you run `+"`ao spawn`"+`, present a short confirmation summary to the hum
 - **PR target** — the `+"`--target`"+` branch the worker's pull request will merge into; omit `+"`--target`"+` and it resolves to `+"`--from`"+` (so, by default, `+"`%[1]s`"+`)
 
 If the human asks for changes, revise and re-confirm. Run `+"`ao spawn`"+` only after they approve. This confirmation is conversational — ask in chat and wait; there is no separate UI dialog.`, baseBranch, newBranch)
+}
+
+// orchestratorCheckInGatePrompt returns the section that tells the orchestrator
+// this project's workers check in before they implement, or "" when the project
+// did not opt in. The gate itself (prompts.CheckInGate, injected into the worker)
+// is what ENFORCES the pause and it outranks any brief; this section only stops
+// the orchestrator writing a brief that fights it in the first place.
+func orchestratorCheckInGatePrompt(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return prompts.CheckInGateBriefingNote()
 }
 
 // workerGitConventionPrompt returns the branch-convention section injected into the
