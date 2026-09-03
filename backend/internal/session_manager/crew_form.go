@@ -9,14 +9,19 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
-// FORMING THE CREW: creating qa the moment the task turns out to need one.
+// FORMING THE CREW: creating qa the moment somebody asks for one.
 //
-// A `standard` or `deep` task is worked by dev AND qa; a `mechanical` one by dev
-// alone (domain.TaskSize.WantsCrew). What --task-size decides is whether a task
-// MAY have a qa - not that it has one from t0. Every spawn creates exactly one
-// session, and qa is created later, by the trigger in crew_join.go, the first
-// time dev touches a runtime surface. A task that never touches one - a
-// backend-only change - never gets a qa and never pays for one.
+// A `standard` or `deep` task MAY be worked by dev AND qa; a `mechanical` one by
+// dev alone (domain.TaskSize.WantsCrew). What --task-size decides is whether a
+// task may have a qa - not that it has one. Every spawn creates exactly one
+// session, and qa is created later, when dev asks for it (`ao crew review`) or a
+// person does (`ao crew add`). A task nobody asks about never gets a qa and never
+// pays for one.
+//
+// It used to be AO that asked, by watching dev: the first simulator claim or
+// `ao preview` created the qa. That is gone, because it fired at the moment dev
+// STARTED driving the app rather than the moment dev was done with it, and the
+// two agents ended up reaching for one device at once (crew_join.go).
 //
 // This file is the WRITE: given a dev and a reason, put one member in dev's
 // worktree. It has one shape to get right, and it is no longer "born suspended":
@@ -39,74 +44,43 @@ import (
 // the row (including crew_role) at wake time, which is also how an edited qa base
 // reaches a qa that was created before the edit.
 
-// wantsCrew is the whole eligibility test for giving THIS session a qa, in one
-// place so the trigger and the manual attach answer it the same way.
-//
-// The first clause is also what makes the trigger fire ONCE. dev gains its crew
-// columns in the same write that creates qa, so a task that already has one
-// answers false here for ever - and it stays false when that qa is later stood
-// down, which is the monotonic absent -> present, one way, once, never back that
-// the design asks for.
-func wantsCrew(project domain.ProjectRecord, dev domain.SessionRecord) bool {
-	if dev.InCrew() {
-		return false
-	}
-	if dev.IsTerminated || dev.IsTodo {
-		return false
-	}
-	if !crewEligible(project, dev.Kind, dev.TaskSize) {
-		return false
-	}
-	return dev.Metadata.Branch != "" && dev.Metadata.WorkspacePath != ""
-}
-
 // crewEligible is the part of the eligibility test that is knowable BEFORE the
 // session is materialized: what kind of session this is, how big the task is,
-// and what kind of project it lives in. It is split out because dev's SYSTEM
-// PROMPT has to be built from it (promptCrewRole), and the prompt is built
-// before there is a materialized record to ask.
+// and what kind of project it lives in. The predicate itself is domain.CrewEligible;
+// this is the package-local name its callers read.
 //
-// It is also where a project that has turned AUTOMATIC crew formation off is
-// answered, and this function is the only correct home for that answer. It sits
-// upstream of BOTH consumers - the trigger that would create qa, and the prompt -
-// and the prompt is the one that would fail silently: a spawn composes it before
-// any crew exists, so a flag read further downstream would leave dev holding the
-// CREW prompt, which tells it the smoke checklist is shared with a crewmate this
-// project never creates - and points it at the per-case verbs for a list nobody
-// else is writing.
+// It is split out because dev's SYSTEM PROMPT has to be built from it
+// (promptCrewRole), and the prompt is built before there is a materialized record
+// to ask. That is also what makes it the one correct home for a project's
+// "form no crews automatically" switch: it sits upstream of BOTH consumers - the
+// request that would create qa, and the prompt - and the prompt is the one that
+// would fail silently. A spawn composes it before any crew exists, so a flag read
+// further downstream would leave dev holding the CREW prompt, which teaches it a
+// verb this project refuses.
 //
-// What it deliberately does NOT gate is the MANUAL path. `ao crew add` and the
-// topbar's `+ qa` go through resolveCrewDev, which never calls this function, so
-// a human can still opt one task into a qa by hand - which is the whole reason
-// this switch turns off automatic formation rather than crews. The manual path
-// reads the flag ONCE MORE, at its own seam, for a different question: whether
-// the CALLER is a person (crew_attach.go). That is not this test duplicated -
-// this one asks whether AO may form a crew unasked, that one asks who is
+// What it deliberately does NOT gate is the HUMAN's door. `ao crew add` and the
+// card's `+ qa` go through resolveCrewDev, which never calls this function, so a
+// person can still opt one task into a qa by hand - which is the whole reason the
+// switch turns off automatic formation rather than crews. The manual path reads
+// the flag ONCE MORE, at its own seam, for a different question: whether the
+// CALLER is a person (crew_attach.go). That is not this test duplicated - this
+// one asks whether an AGENT may decide a task needs a qa, that one asks who is
 // allowed to ask.
 func crewEligible(project domain.ProjectRecord, kind domain.SessionKind, size domain.TaskSize) bool {
-	if kind != domain.KindWorker {
-		return false
-	}
-	if !size.WantsCrew() {
-		return false
-	}
-	if project.Config.DisableAutoCrew {
-		return false
-	}
-	return project.Kind.WithDefault() != domain.ProjectKindWorkspace
+	return domain.CrewEligible(project, kind, size)
 }
 
 // promptCrewRole answers WHOSE PROMPT this spawn is building, which is not the
 // same question as "is this session in a crew".
 //
-// Under lazy creation those two answers are apart for most of a task's life and
-// often for all of it: a `standard` spawn creates dev alone, and dev's crew
-// columns are not written until something creates a qa - which may be never. But
-// dev's SYSTEM PROMPT is fixed when its runtime launches, long before that, and
-// has to be true on both sides of the event. So the prompt is built from the
-// spawn's INTENT - "this task is ALLOWED a qa" - and the crew block it produces
-// is written for a dev that is alone right now and tells it exactly what summons
-// the second agent (prompts.CrewProtocol).
+// Those two answers are apart for most of a task's life and often for all of it:
+// a `standard` spawn creates dev alone, and dev's crew columns are not written
+// until something creates a qa - which may be never. But dev's SYSTEM PROMPT is
+// fixed when its runtime launches, long before that, and has to be true on both
+// sides of the event. So the prompt is built from the spawn's INTENT - "this task
+// is ALLOWED a qa" - and the crew block it produces is written for a dev that is
+// alone right now and tells it how to summon the second agent
+// (prompts.CrewProtocol).
 //
 // A `mechanical` spawn, an orchestrator and a workspace project answer "" here
 // and get the solo prompt byte-for-byte unchanged.
@@ -115,6 +89,33 @@ func promptCrewRole(project domain.ProjectRecord, cfg ports.SpawnConfig) domain.
 		return cfg.CrewRole
 	}
 	if crewEligible(project, cfg.Kind, cfg.TaskSize) {
+		return domain.CrewRoleDev
+	}
+	return ""
+}
+
+// promptCrewRoleOf is promptCrewRole for a session that ALREADY EXISTS, and it is
+// the third door into a dev's system prompt: relaunchRestoredSession, which
+// rebuilds the prompt from the row every time a session comes back.
+//
+// It exists because the row and the spawn's intent disagree for exactly the
+// population this change made load-bearing. A `standard` dev with no qa yet
+// carries NO crew columns - membership is written when a member is created - so a
+// restore that read `rec.CrewRole` composed the SOLO prompt and silently dropped
+// the crew block. That was survivable while the block was informational; it is
+// not now, because the block is where dev learns that `ao crew review` exists.
+// A restored dev would have gone on believing it was working a task that could
+// never have a second pair of eyes.
+//
+// So the row WINS when it says something - a real qa, or a dev that already has
+// one, is a fact - and eligibility answers only when the row is silent. All three
+// composition sites (Spawn, StartTodo, relaunchRestoredSession) therefore give
+// one task's dev the same prompt, whichever one built it.
+func promptCrewRoleOf(project domain.ProjectRecord, rec domain.SessionRecord) domain.CrewRole {
+	if rec.CrewRole != "" {
+		return rec.CrewRole
+	}
+	if crewEligible(project, rec.Kind, rec.TaskSize) {
 		return domain.CrewRoleDev
 	}
 	return ""
@@ -224,7 +225,7 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, reason do
 
 // crewArrival is what a joining member is told about the task it is walking into,
 // and there is now always something to say: EVERY qa arrives after dev started
-// work, because none is created until dev's work asks for one.
+// work, because none is created until somebody asks for one.
 //
 // The constant fact, whatever created it: DEV DID NOT KNOW IT WOULD GET A QA.
 // dev has been authoring the checklist alone and goes on co-authoring it, so
@@ -233,20 +234,29 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, reason do
 // joining member inherits it inherits the same way whatever created it - dev's
 // branch, dev's worktree, dev's brief, dev's id as AO_CREW_ID.
 //
-// What differs by reason is only the FIRST SENTENCE: an automatic join can say
-// what dev was doing, which is also the first thing worth looking at.
+// What differs by reason is only the FIRST SENTENCE, and what it has to carry is
+// WHO ASKED - because that decides where the member looks first. dev asking means
+// the change is finished and there is a whole diff to judge; a person asking
+// means dev may still be mid-change and knows nothing about this.
 func crewArrival(reason domain.CrewJoinReason) string {
 	return crewArrivalOpening(reason) + " " + crewArrivalCommon
 }
 
+// crewArrivalOpening carries the two RETIRED reasons as well as the two live
+// ones. Nothing writes `sim` or `preview` any more - AO used to create a qa the
+// moment dev drove the app, and that put a second agent on the device dev was
+// still using - but a member created before this change has one of them on its
+// row, and this function is the only thing that reads it.
 func crewArrivalOpening(reason domain.CrewJoinReason) string {
 	switch reason {
+	case domain.CrewJoinReview:
+		return "dev asked for you: it believes the change is DONE and wants it checked, so there is a finished piece of work to judge rather than one in flight. Start from the diff against the base branch - that is the claim you are testing."
 	case domain.CrewJoinSim:
 		return "AO created you because dev CLAIMED THE SIMULATOR - it is looking at this change on a device, which is the moment a task stops being something only unit tests can judge. The device is yours from here: dev has been told to hand it over, so claim it (`ao sim claim`) rather than assuming it is free."
 	case domain.CrewJoinPreview:
 		return "AO created you because dev pointed `ao preview` AT THE RUNNING APP - there is a live surface to exercise, which is the moment a task stops being something only unit tests can judge. Start by looking at what dev was looking at (`ao session get \"$AO_CREW_ID\"` carries the preview URL)."
 	default:
-		return "A HUMAN added you to this task."
+		return "A HUMAN added you to this task, which means dev did not ask for you and may still be mid-change: read the branch's diff and the PR before you assume anything is finished."
 	}
 }
 

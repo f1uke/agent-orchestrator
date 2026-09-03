@@ -128,9 +128,8 @@ func TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow(t *testing.T) {
 		}
 	}
 
-	// The same warning reaches a member the TRIGGER created, because the same
-	// thing is true of it - but it is told what dev was doing, not that a human
-	// asked for it.
+	// The same warning reaches a member DEV asked for, because the same thing is
+	// true of it - but it is told that dev asked, not that a human did.
 	m2, st2, _, _ := newManager()
 	auto, err := m2.Spawn(ctx, ports.SpawnConfig{
 		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "build it", TaskSize: domain.TaskSizeStandard,
@@ -138,13 +137,15 @@ func TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	m2.NoteRuntimeTouch(ctx, auto.ID, domain.CrewJoinSim)
+	if _, err := m2.RequestCrewReview(ctx, auto.ID, domain.CrewRoleQA); err != nil {
+		t.Fatalf("RequestCrewReview: %v", err)
+	}
 	_, autoQA := crewOf(t, st2, auto.ID)
 	if strings.Contains(autoQA.Metadata.Prompt, "A HUMAN added you") {
-		t.Fatalf("a member AO created was told a human asked for it:\n%s", autoQA.Metadata.Prompt)
+		t.Fatalf("a member dev asked for was told a human asked for it:\n%s", autoQA.Metadata.Prompt)
 	}
 	if !strings.Contains(autoQA.Metadata.Prompt, "dev has been working alone until now") {
-		t.Fatalf("a member AO created was not warned about work already in progress:\n%s", autoQA.Metadata.Prompt)
+		t.Fatalf("a member dev asked for was not warned about work already in progress:\n%s", autoQA.Metadata.Prompt)
 	}
 }
 
@@ -167,7 +168,7 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 		}
 	})
 
-	t.Run("the trigger already created one", func(t *testing.T) {
+	t.Run("dev already asked for one", func(t *testing.T) {
 		m, st, _, _ := newManager()
 		dev, err := m.Spawn(ctx, ports.SpawnConfig{
 			ProjectID: "mer", Kind: domain.KindWorker, Prompt: "build it", TaskSize: domain.TaskSizeStandard,
@@ -175,7 +176,9 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Spawn: %v", err)
 		}
-		m.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinSim)
+		if _, err := m.RequestCrewReview(ctx, dev.ID, domain.CrewRoleQA); err != nil {
+			t.Fatalf("RequestCrewReview: %v", err)
+		}
 		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, ""); !errors.Is(err, ErrCrewRoleTaken) {
 			t.Fatalf("attach to a full crew err = %v, want ErrCrewRoleTaken", err)
 		}

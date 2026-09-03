@@ -217,6 +217,12 @@ type Store interface {
 	// sole writer of those columns, so the full-row UpdateSession above can never
 	// blank a crew. ok=false means the session id does not exist.
 	SetSessionCrew(ctx context.Context, id, crewID domain.SessionID, role domain.CrewRole, updatedAt time.Time) (ok bool, err error)
+	// SetSessionRuntimeTouch records what this task DID with a running app - it
+	// took the simulator lease, or it pointed `ao preview` at what it built. It
+	// is WRITE-ONCE in the query itself, so ok=false means the row already
+	// carried a touch (or does not exist), and both are ordinary outcomes: the
+	// only question asked of the column is "ever".
+	SetSessionRuntimeTouch(ctx context.Context, id domain.SessionID, touch domain.RuntimeTouch, updatedAt time.Time) (ok bool, err error)
 }
 
 // Manager coordinates internal session spawn, restore, kill, and cleanup over
@@ -1702,8 +1708,12 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Kind:      rec.Kind,
 		ProjectID: rec.ProjectID,
 		TaskSize:  rec.TaskSize,
-		CrewRole:  rec.CrewRole,
-		PRTarget:  rec.PRTarget,
+		// NOT rec.CrewRole. A standard dev that has not asked for a qa yet carries
+		// no crew columns at all, so reading the row alone drops it to the SOLO
+		// prompt on every restore - and the solo prompt is the one that does not
+		// know `ao crew review` exists. See promptCrewRoleOf.
+		CrewRole: promptCrewRoleOf(project, rec),
+		PRTarget: rec.PRTarget,
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: system prompt: %w", rec.ID, err)

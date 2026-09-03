@@ -25,6 +25,9 @@ import (
 )
 
 type fakeSessionService struct {
+	sendUnreviewed sessionsvc.UnreviewedRuntime
+	crewReviewed   []domain.SessionID
+	crewReviewErr  error
 	// killInputs records what each kill asked for, so a test can prove the
 	// discard opt-in reached the service instead of being dropped in the body.
 	killInputs            []sessionsvc.KillInput
@@ -313,6 +316,21 @@ func (f *fakeSessionService) AttachCrewMember(_ context.Context, id domain.Sessi
 	return member, nil
 }
 
+// crewReviewed records the caller id the /crew/review route forwarded. The route
+// carries no body at all, so the path IS the identity, and that is the whole of
+// what the fake has to observe.
+func (f *fakeSessionService) RequestCrewReview(_ context.Context, from domain.SessionID, role domain.CrewRole) (domain.Session, error) {
+	if f.crewReviewErr != nil {
+		return domain.Session{}, f.crewReviewErr
+	}
+	f.crewReviewed = append(f.crewReviewed, from)
+	member := domain.Session{SessionRecord: domain.SessionRecord{ID: from + "-qa"}}
+	member.CrewID = from
+	member.CrewRole = role
+	member.CrewJoinReason = domain.CrewJoinReview
+	return member, nil
+}
+
 // crewWoken records the id the crew-wake route asked for, so a test can assert
 // the controller reached the handover rather than the ordinary wake.
 func (f *fakeSessionService) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.Session, error) {
@@ -372,11 +390,11 @@ func (f *fakeSessionService) Send(_ context.Context, _ domain.SessionID, message
 	return f.sendOutcome, nil
 }
 
-func (f *fakeSessionService) SendFrom(_ context.Context, _ domain.SessionID, message string, talk sessionsvc.CrewTalk) (ports.SendOutcome, error) {
+func (f *fakeSessionService) SendFrom(_ context.Context, _ domain.SessionID, message string, talk sessionsvc.CrewTalk) (sessionsvc.SendResult, error) {
 	f.sent = message
 	f.sentFrom = talk.From
 	f.sentAbout = talk.Subject
-	return f.sendOutcome, nil
+	return sessionsvc.SendResult{Outcome: f.sendOutcome, Unreviewed: f.sendUnreviewed}, nil
 }
 
 func (f *fakeSessionService) SendToCrewmate(_ context.Context, from domain.SessionID, in sessionsvc.CrewSend) (sessionsvc.CrewSendResult, error) {
@@ -2471,6 +2489,63 @@ func TestSessionsAPI_AddCrewMemberReturnsTheNewMember(t *testing.T) {
 				t.Fatalf("service saw roles %v, want exactly [qa]", svc.crewAdded)
 			}
 		})
+	}
+}
+
+// TestSessionsAPI_RequestCrewReviewNamesTheCallerAndTakesNoBody. The session in
+// the path IS the caller here, not a task it points at, and there is nothing else
+// on the wire: the join reason is durable data the board's line and the new
+// member's first turn are written from, so it is decided by the ROUTE the daemon
+// served rather than by a value the caller chose.
+func TestSessionsAPI_RequestCrewReviewNamesTheCallerAndTakesNoBody(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/crew/review", "")
+	if status != http.StatusCreated {
+		t.Fatalf("review = %d, want 201; body=%s", status, body)
+	}
+	var got struct {
+		OK      bool `json:"ok"`
+		Session struct {
+			ID   string `json:"id"`
+			Crew *struct {
+				ID         string `json:"id"`
+				Role       string `json:"role"`
+				JoinReason string `json:"joinReason"`
+			} `json:"crew"`
+		} `json:"session"`
+	}
+	mustJSON(t, body, &got)
+	if !got.OK || got.Session.ID != "ao-1-qa" {
+		t.Fatalf("review response = %#v", got)
+	}
+	if got.Session.Crew == nil || got.Session.Crew.JoinReason != "review" {
+		t.Fatalf("crew = %#v, want the join reason recorded as `review`", got.Session.Crew)
+	}
+	if len(svc.crewReviewed) != 1 || svc.crewReviewed[0] != "ao-1" {
+		t.Fatalf("service saw callers %v, want exactly [ao-1]", svc.crewReviewed)
+	}
+	// It is NOT the attach route: the two doors are different people asking for
+	// different reasons, and they answer to different policy.
+	if len(svc.crewAdded) != 0 {
+		t.Fatalf("a review request went through the manual attach: %v", svc.crewAdded)
+	}
+}
+
+// The same refusals reach the caller as conflicts - the seat is taken, the task
+// is over, this project lets no agent ask - so dev can tell them from a bug.
+func TestSessionsAPI_RequestCrewReviewSurfacesRefusals(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.crewReviewErr = apierr.Conflict("CREW_ROLE_TAKEN", "ao-1 already has a qa (ao-1-qa)", nil)
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/crew/review", "")
+	if status != http.StatusConflict {
+		t.Fatalf("refused review = %d, want 409; body=%s", status, body)
+	}
+	if !strings.Contains(string(body), "CREW_ROLE_TAKEN") {
+		t.Fatalf("the refusal code did not reach the caller: %s", body)
 	}
 }
 

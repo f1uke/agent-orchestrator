@@ -122,14 +122,35 @@ describe("CrewStrip", () => {
 	it("says how the task gained its qa, so a card that changed shape explains itself", () => {
 		render(
 			<CrewStrip
-				task={crewTask({ crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "sim" } })}
+				task={crewTask({ crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "review" } })}
 				review="not run"
 				onOpenMember={() => {}}
 			/>,
 		);
 		const line = document.querySelector("[data-crew-join]");
-		expect(line).toHaveAttribute("data-crew-join", "sim");
-		expect(line).toHaveTextContent("qa joined · dev opened the simulator");
+		expect(line).toHaveAttribute("data-crew-join", "review");
+		expect(line).toHaveTextContent("qa joined · dev asked for a review");
+	});
+
+	// THE WARNING THAT REPLACED THE TRIGGER, rendered where a human can act on it.
+	// AO used to put a qa on a task the moment it saw the app being driven; it no
+	// longer does, so a solo task that drove the app and never asked for one says
+	// so, in the same slot, next to the `+ qa` button that fixes it.
+	it("says when a solo task drove the app and nobody asked for a qa", () => {
+		const dev = member("demo-9", { taskSize: "standard", runtimeTouch: "sim" });
+		render(
+			<CrewStrip
+				task={{ dev, members: [dev], isCrew: false }}
+				review="not run"
+				onOpenMember={() => {}}
+				onAddRole={() => {}}
+			/>,
+		);
+		const line = document.querySelector("[data-crew-unreviewed]");
+		expect(line).toHaveAttribute("data-crew-unreviewed", "sim");
+		expect(line).toHaveTextContent("dev drove the simulator · no qa was asked for");
+		// The control that answers it is on the same card.
+		expect(document.querySelector('[data-crew-add="qa"]')).not.toBeNull();
 	});
 
 	it("says nothing about joining on a solo task, or when the reason was never recorded", () => {

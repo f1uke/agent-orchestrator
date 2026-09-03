@@ -11,7 +11,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
-	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
@@ -57,9 +56,9 @@ func (s *scopeSessions) ListPRCommentThreads(_ context.Context, id domain.Sessio
 	return nil, nil
 }
 
-func (s *scopeSessions) SendFrom(_ context.Context, id domain.SessionID, _ string, _ sessionsvc.CrewTalk) (ports.SendOutcome, error) {
+func (s *scopeSessions) SendFrom(_ context.Context, id domain.SessionID, _ string, _ sessionsvc.CrewTalk) (sessionsvc.SendResult, error) {
 	s.askedSend = append(s.askedSend, id)
-	return ports.SendOutcome{}, nil
+	return sessionsvc.SendResult{}, nil
 }
 
 // scopeSmoke records which id the checklist was read for.

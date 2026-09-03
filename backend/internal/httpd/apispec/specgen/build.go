@@ -1668,6 +1668,18 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/review", id: "requestCrewReview", tag: "sessions",
+			summary:    "dev asks for the qa that checks its work. The path names the CALLER, and there is no body",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusCreated, controllers.AddCrewMemberResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/send", id: "sendToCrewmate", tag: "sessions",
 			summary:    "Message the other member of this session's task, addressed by role. The path names the SENDER",
 			pathParams: []any{controllers.SessionIDParam{}},

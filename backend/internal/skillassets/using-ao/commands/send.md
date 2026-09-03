@@ -77,6 +77,19 @@ If your run is genuinely not over, pass `--still-working` rather than skipping
 cases to quiet the count. A case declared undriveable that nobody tried is the
 one thing that makes the whole count worthless.
 
+### And so is a report on work nobody checked
+
+The same shape, on the other leg. When a WORKER reports to the orchestrator on a
+task that **drove the app** and never had a qa on it, AO appends one clearly
+attributed `[AO]` line to the report and tells you the same on your own stdout:
+nothing here has been checked by anything but the agent that wrote it.
+
+It is **not refused** either, and for the same reasons. `ao crew review` is how
+dev puts a qa on the task when the change is ready; if you have decided it does
+not need one, say so in the report rather than leaving it unsaid. A task that
+never drove a runtime surface - a backend-only change - is never checked here and
+never warned.
+
 ## Examples
 
 ```bash

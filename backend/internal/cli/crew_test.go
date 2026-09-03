@@ -348,3 +348,128 @@ func TestCrewAdd_SurfacesTheCrewOffRefusal(t *testing.T) {
 		t.Fatalf("the caller was not told who can still add a qa: %v / %s", err, errOut)
 	}
 }
+
+// `ao crew review` is DEV asking for the qa that checks its work, and the whole
+// of what it sends is WHICH SESSION is asking - the path. No body at all: the
+// reason a member joined is durable data the board and the member's own first
+// turn are written from, so it must be decided by the route the daemon served and
+// never by a value the caller chose.
+func TestCrewReview_PostsToTheReviewRouteAsItself(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-2")
+	cfg := setConfigEnv(t)
+	var paths, bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		bodies = append(bodies, string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-2","session":{"id":"demo-9","crew":{"id":"demo-2","role":"qa"}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "review")
+	if err != nil {
+		t.Fatalf("ao crew review: %v stderr=%s", err, errOut)
+	}
+	want := "POST /api/v1/sessions/demo-2/crew/review"
+	if len(paths) != 1 || paths[0] != want {
+		t.Fatalf("requests = %v, want exactly [%s]", paths, want)
+	}
+	if len(bodies) != 1 || strings.TrimSpace(bodies[0]) != "" {
+		t.Fatalf("body = %q, want none: the route decides the reason, not the caller", bodies)
+	}
+	// What dev is told back: the member exists, the checklist rules changed, and
+	// how to talk to it. Its own prompt cannot have said the first of those.
+	for _, wantOut := range []string{"demo-9", "qa", "ao smoke add", "never `ao smoke set`", "ao send --crew qa"} {
+		if !strings.Contains(out, wantOut) {
+			t.Fatalf("output is missing %q: %q", wantOut, out)
+		}
+	}
+}
+
+// It is a SESSION asking for its own qa, so a person's shell - which has no
+// $AO_SESSION_ID - has nothing to ask on behalf of. Refused as a usage error
+// (exit 2) naming the command a person actually wants, rather than posting to a
+// route with an empty id and getting a 404 back.
+func TestCrewReview_RefusesAnOrdinaryShell(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	_, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "review")
+	if err == nil {
+		t.Fatal("a shell with no session asked for a review and was allowed to")
+	}
+	if !strings.Contains(errOut+err.Error(), "ao crew add") {
+		t.Fatalf("the refusal does not name what a person should run instead: %v / %s", err, errOut)
+	}
+	for _, p := range paths {
+		if strings.Contains(p, "/crew/review") {
+			t.Fatalf("it posted anyway: %v", paths)
+		}
+	}
+}
+
+// The crew-off refusal reaches dev as the daemon's own sentences, exactly as it
+// does for `ao crew add`: every one of them is there to stop the next agent
+// looking for a way around the project's policy.
+func TestCrewReview_SurfacesTheCrewOffRefusal(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-2")
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"conflict","code":"CREW_AUTO_FORMATION_OFF","message":"session: mer has \"Never form a crew automatically\" turned on, so an AO session may not put a qa on demo-2. A person can still add one - the + qa control in the app"}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	_, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "review")
+	if err == nil {
+		t.Fatal("a crew-off project's refusal was swallowed")
+	}
+	if !strings.Contains(errOut+err.Error(), "Never form a crew automatically") {
+		t.Fatalf("the daemon's own sentences did not reach dev: %v / %s", err, errOut)
+	}
+}
+
+// `ao crew --help` has to LIST it: the verb is only useful if an agent that has
+// read its prompt once can find it again, and the crew command's own help is the
+// first place it will look.
+func TestCrewHelp_ListsTheReviewVerb(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "--help")
+	if err != nil {
+		t.Fatalf("ao crew --help: %v", err)
+	}
+	for _, want := range []string{"review", "ao crew review", "dev asks"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("`ao crew --help` does not mention %q:\n%s", want, out)
+		}
+	}
+}

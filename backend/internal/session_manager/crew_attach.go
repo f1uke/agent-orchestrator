@@ -7,14 +7,25 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
-// ATTACHING A MEMBER BY HAND to a task that already exists.
+// PUTTING A QA ON A TASK THAT ALREADY EXISTS - through either of its two doors.
 //
-// This is the manual half of lazy creation. AO creates a qa when dev touches a
-// runtime surface (crew_join.go); a task that never touches one - a backend-only
-// change, or a `mechanical` task, which is never eligible automatically - still
-// gets a qa the moment a human asks for one, from `ao crew add` or the card's
-// `+ qa`. Nothing else about it differs: same write, same worktree, same branch,
-// and `crew_join_reason` records that a person asked rather than AO observing.
+// Nothing creates a qa by observation any more (crew_join.go). Both doors are
+// somebody asking, and they are kept apart because they are asked by different
+// people, for different reasons, and answer to different policy:
+//
+//   - `ao crew review` is DEV asking, once it believes the change is done and
+//     wants it checked. This is the ordinary way a task gains a qa, and it is
+//     gated by the same crewEligible test that decides whether dev's prompt was
+//     ever told the verb - so a mechanical task and a crew-off project refuse it.
+//   - `ao crew add` (and the card's `+ qa`) is a PERSON asking, and it is the
+//     override: it ignores task size, so a human can put a qa on a mechanical
+//     task, and it stays open on a crew-off project because that switch is about
+//     what AGENTS may do.
+//
+// Everything under them is one write: same worktree, same branch, same start.
+// `crew_join_reason` is what keeps them apart in the data ('review' vs 'manual'),
+// because it is what the board's join line and the joining member's own first
+// turn are written from.
 //
 // Two properties matter and are the same on both paths:
 //
@@ -56,10 +67,11 @@ import (
 // either way, and a human who asked for a qa would rather have one they can open
 // than an error and no member at all.
 func (m *Manager) AttachCrewMember(ctx context.Context, devID domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.SessionRecord, error) {
-	member, err := m.attachCrewMemberRow(ctx, devID, role, requestedBy)
+	member, err := m.attachCrewMemberRow(ctx, devID, role, requestedBy, domain.CrewJoinManual)
 	if err != nil {
 		return domain.SessionRecord{}, err
 	}
+	m.tellDevAMemberJoined(ctx, devID, member)
 	started, err := m.startCrewMember(ctx, member.ID)
 	if err != nil {
 		m.logger.Warn("crew: member was attached but could not be started; open its card to start it",
@@ -75,7 +87,7 @@ func (m *Manager) AttachCrewMember(ctx context.Context, devID domain.SessionID, 
 // because a mutex is a property of one process and the invariant should be a
 // property of the data. Starting the member happens after this returns, because
 // Resume takes the same lock and lockCrew is not reentrant.
-func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.SessionRecord, error) {
+func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID, reason domain.CrewJoinReason) (domain.SessionRecord, error) {
 	defer m.lockCrew(devID)()
 
 	dev, err := m.getRecord(ctx, devID)
@@ -100,12 +112,26 @@ func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionI
 	// exact trap that wiped a config file in #249.
 	if requestedBy != "" && project.Config.DisableAutoCrew {
 		return domain.SessionRecord{}, fmt.Errorf(
-			"%w: %s has \"Never form a crew automatically\" turned on, so an AO session may not attach a %s to %s. "+
+			"%w: %s has \"Never form a crew automatically\" turned on, so an AO session may not put a %s on %s. "+
 				"This is the project's policy, not a temporary failure, and there is no flag that overrides it: "+
 				"do the work solo and own the smoke checklist yourself. A person can still add one by hand - "+
 				"the `+ qa` control on the task in the app, or `ao crew add %s` typed in their own shell - "+
 				"so ask them if this task really needs a second agent",
 			ErrCrewAutoFormationOff, dev.ProjectID, role, devID, devID)
+	}
+	// DEV'S DOOR IS NARROWER THAN A PERSON'S, and by exactly one test: the same
+	// crewEligible that decided whether dev's prompt was ever told this verb
+	// exists. A `mechanical` task is one agent by an explicit decision somebody
+	// made when they sized it, and a request to undo that is a person's call, not
+	// the agent's. A human's `ao crew add` deliberately skips this - it is the
+	// override, and overriding is what it is for.
+	if reason == domain.CrewJoinReview && !crewEligible(project, dev.Kind, dev.TaskSize) {
+		return domain.SessionRecord{}, fmt.Errorf(
+			"%w: %s was tagged `--task-size %s`, which means ONE agent by design, so it cannot ask for a %s. "+
+				"Finish the work and own the smoke checklist yourself. If this task turned out to need a second "+
+				"pair of eyes after all, that is a person's call: ask them to add one with the `+ qa` control on "+
+				"the task in the app, or `ao crew add %s` in their own shell",
+			ErrInvalidCrew, devID, dev.TaskSize.WithDefault(), role, devID)
 	}
 	// One shared eligibility test with the spawn seam: orchestrator, workspace
 	// project, terminated dev, no materialized worktree, no nesting, bad role.
@@ -125,7 +151,7 @@ func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionI
 		}
 	}
 
-	member, err := m.spawnSuspendedCrewMemberLocked(ctx, project, dev, role, domain.CrewJoinManual)
+	member, err := m.spawnSuspendedCrewMemberLocked(ctx, project, dev, role, reason)
 	if err != nil {
 		return domain.SessionRecord{}, err
 	}
@@ -163,4 +189,83 @@ func (m *Manager) CrewDevOf(ctx context.Context, id domain.SessionID) (domain.Se
 		return domain.SessionRecord{}, fmt.Errorf("crew dev of %s: %w", id, err)
 	}
 	return dev, nil
+}
+
+// RequestCrewReview is DEV asking for the qa that checks its work, and it is the
+// ordinary way a task gains one.
+//
+// It replaces an OBSERVATION, and the replacement is the point. AO used to create
+// a qa the first time dev touched the app's runtime - a simulator claim, an `ao
+// preview` - which fires when dev is STARTING to drive the app. The qa that
+// appeared then went straight for the device dev was still using, and on a
+// machine with one booted simulator the two simply fought over it. Nothing about
+// dev's tooling can say "the work is done"; dev can, so dev does.
+//
+// `from` is the CALLER's own session id, which is all the CLI sends (#253: the
+// CLI sends identity, never policy). Everything else - which task this is, what
+// its size is, what the project allows - the daemon reads for itself from the
+// stored record.
+//
+// A qa may not ask: it would be asking for itself, and a crew has one dev and one
+// qa. A solo worker IS its own task's dev, so it asks with its own id and needs
+// to know nothing about crew ids.
+func (m *Manager) RequestCrewReview(ctx context.Context, from domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
+	requester, err := m.getRecord(ctx, from)
+	if err != nil {
+		return domain.SessionRecord{}, err
+	}
+	// Asked by the wrong member. It is worth its own sentence rather than falling
+	// through to resolveCrewDev's "crews do not nest": a qa running this has
+	// misread its own role, and the useful answer says so.
+	if requester.InCrew() && !requester.CrewRole.IsDev() {
+		return domain.SessionRecord{}, fmt.Errorf(
+			"%w: %s is the %s of this task, not its dev; the review is what you are here to DO, not to ask for",
+			ErrInvalidCrew, from, requester.CrewRole)
+	}
+	member, err := m.attachCrewMemberRow(ctx, from, role, from, domain.CrewJoinReview)
+	if err != nil {
+		return domain.SessionRecord{}, err
+	}
+	// No message to dev here, unlike the manual door: dev just ran the command and
+	// reads the answer on its own stdout.
+	started, err := m.startCrewMember(ctx, member.ID)
+	if err != nil {
+		m.logger.Warn("crew: qa was created but could not be started; open its card to start it",
+			"crew", from, "qa", member.ID, "error", err)
+		return member, nil
+	}
+	return started, nil
+}
+
+// tellDevAMemberJoined is the one message AO sends dev on its own account, and it
+// exists because a system prompt is fixed when a runtime launches while crew
+// membership is not.
+//
+// A dev whose task was never crew-eligible - a `mechanical` one, or any task on a
+// project that forms no crews automatically - is launched with the SOLO prompt.
+// That prompt tells it the smoke checklist is its own and hands it `ao smoke set`,
+// which REPLACES the whole list. The moment a person attaches a qa, that is no
+// longer true and the instruction has become destructive: the next `ao smoke set`
+// from dev deletes every case its new crewmate wrote. The prompt cannot be
+// rewritten under a running agent (only a restore recomputes it, from the row),
+// so the correction is delivered the one way a live agent can receive one.
+//
+// Best effort and never fatal: a member that is on the task with dev unaware is
+// still better than a refused attach, and the human asked for the member.
+func (m *Manager) tellDevAMemberJoined(ctx context.Context, devID domain.SessionID, member domain.SessionRecord) {
+	if _, err := m.Send(ctx, devID, crewJoinedNotice(member.CrewRole)); err != nil {
+		m.logger.Warn("crew: could not tell dev that a member joined its task",
+			"crew", devID, "member", member.ID, "error", err)
+	}
+}
+
+// crewJoinedNotice is what dev is told. It is written in AO's voice and marked as
+// such, and it carries only what CHANGES for dev - the two facts a solo prompt
+// gets wrong the moment a crewmate exists, and how to address them.
+func crewJoinedNotice(role domain.CrewRole) string {
+	return "[AO] A **" + string(role) + "** has just been added to this task by a person, and is working in your worktree right now, at the same time as you. " +
+		"Two things your standing instructions do not know about:\n\n" +
+		"- **The smoke checklist is now SHARED.** Never `ao smoke set` again on this task - it replaces the WHOLE list, so it would delete the cases " + string(role) + " has written. Use `ao smoke add`, `ao smoke edit --case <id>` and `ao smoke remove --case <id>`, which touch only the case they name. Leave `ao smoke record` to " + string(role) + ".\n" +
+		"- **One worktree, one git index, and anything exclusive is contended live** - a `git add -A` sweeps up your crewmate's half-written work, and the simulator lease is one device two agents can reach for. Commit the paths you meant to commit, and bracket a build or a test run you want to trust with `ao crew run`.\n\n" +
+		"Address it by role, never by id: `ao send --crew " + string(role) + " --about <commit-sha|smoke-case-id> --message \"...\"`. There is no obligation to reply to this."
 }

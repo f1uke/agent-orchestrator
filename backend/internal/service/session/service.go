@@ -103,6 +103,11 @@ type commander interface {
 	// SUSPENDED. It is how a task that was spawned solo - every `mechanical` one,
 	// and every task older than the crew - gains a qa.
 	AttachCrewMember(ctx context.Context, devID domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.SessionRecord, error)
+	// RequestCrewReview is DEV asking for the qa that checks its work, once it
+	// believes the change is done. `from` is the caller's own session id and is
+	// all the request carries: the daemon reads the task, its size and the
+	// project's policy for itself.
+	RequestCrewReview(ctx context.Context, from domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error)
 	// CrewDevOf resolves any session to the DEV of the task it belongs to; a solo
 	// session answers with itself.
 	CrewDevOf(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
@@ -116,7 +121,7 @@ type commander interface {
 	// task that turns out to have a runtime surface gains the qa that verifies it
 	// (design §1.12.1). Best effort and silent: a preview must not fail because a
 	// crew could not be formed.
-	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, reason domain.CrewJoinReason)
+	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, touch domain.RuntimeTouch)
 	// WakeCrewMember gives the crew slot to one member of a task, standing the
 	// current holder down first. It is the human's (and the orchestrator's) way of
 	// saying "qa's turn now" while automatic handover is deliberately not built.
@@ -610,6 +615,36 @@ func (s *Service) AttachCrewMember(ctx context.Context, id domain.SessionID, rol
 	return s.toSession(ctx, rec)
 }
 
+// RequestCrewReview is DEV asking AO for the qa that checks its work.
+//
+// It shares AttachCrewMember's finished-task refusal, and for the same reason:
+// the status is DERIVED from PR facts at read time, so the manager cannot see it
+// and should not learn to. A task whose PR has merged is over, and a qa woken
+// into it would be verifying something nobody can still change.
+//
+// It does NOT resolve the caller to its task's dev the way AttachCrewMember does.
+// The caller IS the dev here - that is the whole shape of the request - and
+// resolving would quietly turn a qa running this command into a request for a
+// second qa; the manager refuses that by name instead.
+func (s *Service) RequestCrewReview(ctx context.Context, from domain.SessionID, role domain.CrewRole) (domain.Session, error) {
+	dev, err := s.manager.CrewDevOf(ctx, from)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	sess, err := s.toSession(ctx, dev)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if sess.Status == domain.StatusMerged || sess.Status == domain.StatusTerminated {
+		return domain.Session{}, toAPIError(fmt.Errorf("%w: %s is %s", sessionmanager.ErrCrewTaskFinished, dev.ID, sess.Status))
+	}
+	rec, err := s.manager.RequestCrewReview(ctx, from, role)
+	if err != nil {
+		return domain.Session{}, toAPIError(err)
+	}
+	return s.toSession(ctx, rec)
+}
+
 // Restart tears a session down and relaunches it in place (kill-then-restore),
 // keeping the same session id and native transcript so the agent resumes its
 // conversation with a freshly recomputed system prompt.
@@ -970,34 +1005,53 @@ func (s *Service) Delete(ctx context.Context, id domain.SessionID, force bool) e
 // which is nearly all of them, carries an empty CrewTalk and takes exactly the
 // path it always has.
 func (s *Service) Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
-	return s.SendFrom(ctx, id, message, CrewTalk{})
+	out, err := s.SendFrom(ctx, id, message, CrewTalk{})
+	return out.Outcome, err
+}
+
+// SendResult is what came of a send: what the queue did with it, and - when the
+// message was a worker reporting out - what AO had to say about work nobody has
+// checked. See unreviewed.go.
+type SendResult struct {
+	Outcome    ports.SendOutcome
+	Unreviewed UnreviewedRuntime
 }
 
 // SendFrom is Send with the sender named. See Send.
-func (s *Service) SendFrom(ctx context.Context, id domain.SessionID, message string, talk CrewTalk) (ports.SendOutcome, error) {
+//
+// It is also where a worker's report to an ORCHESTRATOR is looked at: a task that
+// drove the app and never had a qa is closing out on work nobody but its author
+// has seen, and the report is delivered carrying that fact rather than refused.
+// Every other message - a human's, an orchestrator's, one crewmate's to the other
+// - takes the untouched path.
+func (s *Service) SendFrom(ctx context.Context, id domain.SessionID, message string, talk CrewTalk) (SendResult, error) {
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil {
-		return ports.SendOutcome{}, fmt.Errorf("send %s: %w", id, err)
+		return SendResult{}, fmt.Errorf("send %s: %w", id, err)
 	}
 	if !ok {
-		return ports.SendOutcome{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+		return SendResult{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
 	}
 	entry, err := s.crewTalkCheck(ctx, rec, talk)
 	if err != nil {
-		return ports.SendOutcome{}, err
+		return SendResult{}, err
 	}
 	if entry != nil {
 		// Recorded whatever the answer: a refusal is not a non-event, it is the
 		// signal that parks the task at NEEDS YOU.
 		if err := s.store.InsertCrewMessage(ctx, *entry); err != nil {
-			return ports.SendOutcome{}, fmt.Errorf("record crew message: %w", err)
+			return SendResult{}, fmt.Errorf("record crew message: %w", err)
 		}
 		if entry.Refused() {
-			return ports.SendOutcome{}, apierr.Conflict("CREW_MESSAGE_CAPPED", entry.RefusedReason, nil)
+			return SendResult{}, apierr.Conflict("CREW_MESSAGE_CAPPED", entry.RefusedReason, nil)
 		}
 	}
+	unreviewed := s.unreviewedRuntime(ctx, rec, talk)
+	if unreviewed.Unreviewed() {
+		message += unreviewedNotice(unreviewed)
+	}
 	outcome, err := s.manager.Send(ctx, id, message)
-	return outcome, toAPIError(err)
+	return SendResult{Outcome: outcome, Unreviewed: unreviewed}, toAPIError(err)
 }
 
 // Rename updates the user-facing session display name.
@@ -1054,7 +1108,7 @@ func (s *Service) SetPreviewFromAgent(ctx context.Context, id domain.SessionID, 
 	if err != nil {
 		return domain.Session{}, err
 	}
-	s.manager.NoteRuntimeTouch(ctx, id, domain.CrewJoinPreview)
+	s.manager.NoteRuntimeTouch(ctx, id, domain.RuntimeTouchPreview)
 	return out, nil
 }
 

@@ -637,3 +637,62 @@ func TestSend_StillWorkingIsCarriedAndNeedsACrewmate(t *testing.T) {
 		t.Fatal("--still-working was accepted outside a crew send")
 	}
 }
+
+// A worker's report to the orchestrator went out on work nobody checked, and the
+// sender is told so on its own stdout.
+//
+// AO used to put a qa on a task by itself the first time it drove the app. That
+// is gone - it fired while dev was still using the device - so dev asks, and this
+// is what catches a dev that never did. It is NOT a refusal: the message is
+// delivered and the CLI exits 0, because a report that never lands is worse than
+// one with a warning attached to it.
+func TestSend_SaysWhenTheReportWentOutUnchecked(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-orch","unreviewed":{"touch":"sim"}}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--session", "demo-orch", "--message", "done, PR is green")
+	if err != nil {
+		t.Fatalf("the report was refused: %v stderr=%s", err, errOut)
+	}
+	for _, want := range []string{"sent", "took the simulator", "no qa was ever on it", "ao crew review"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the sender was not told %q:\n%s", want, out)
+		}
+	}
+}
+
+// And it says nothing at all otherwise. A warning that prints on every message is
+// one nobody reads, which is the whole reason the daemon answers this question
+// rather than the CLI guessing at it.
+func TestSend_SaysNothingWhenThereIsNothingToSay(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-orch"}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--session", "demo-orch", "--message", "backend only, nothing to drive")
+	if err != nil {
+		t.Fatalf("ao send: %v stderr=%s", err, errOut)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("an ordinary send printed something:\n%s", out)
+	}
+}

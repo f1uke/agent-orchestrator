@@ -21,10 +21,11 @@ import (
 // gesture reads the tree through the process that is already touching the
 // device rather than starting a second one.
 //
-// crew is the "this task has a runtime surface" observer: a granted lease is what
-// creates a task's qa (design §1.12.1), and the daemon is the only place that
-// knows both halves. Wired here rather than in the controller so a take-over
-// counts exactly as a claim does.
-func newSimService(store simsvc.Store, screen simsvc.ScreenReader, crew simsvc.CrewJoiner) *simsvc.Service {
-	return simsvc.New(store, simsvc.WithRecorder(screen), simsvc.WithCrewJoiner(crew))
+// crew is the "this task drove the app" observer: a granted lease records that
+// fact on the session's row, and the daemon is the only place that knows both
+// halves. Wired here rather than in the controller so a take-over counts exactly
+// as a claim does. It creates nobody - dev asks for its own qa with
+// `ao crew review`; the fact is what the unreviewed-work warning reads.
+func newSimService(store simsvc.Store, screen simsvc.ScreenReader, crew simsvc.RuntimeWatcher) *simsvc.Service {
+	return simsvc.New(store, simsvc.WithRecorder(screen), simsvc.WithRuntimeWatcher(crew))
 }

@@ -8,10 +8,10 @@ INSERT INTO sessions (
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments, auto_resolve_on_reply,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
-    crew_id, crew_role, crew_join_reason, sleep_reason, woken_by,
+    crew_id, crew_role, crew_join_reason, runtime_touch, sleep_reason, woken_by,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateSession :exec
 UPDATE sessions SET
@@ -31,7 +31,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
 FROM sessions WHERE id = ?;
 
 -- name: ListSessionsByProject :many
@@ -41,7 +41,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
 FROM sessions WHERE project_id = ? ORDER BY num;
 
 -- name: ListAllSessions :many
@@ -51,7 +51,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
 FROM sessions ORDER BY project_id, num;
 
 
@@ -116,6 +116,19 @@ SELECT EXISTS(
       AND agent_session_id = ''
       AND prompt = ''
 ) AS is_seed;
+
+-- name: SetSessionRuntimeTouch :execrows
+-- Sole writer of runtime_touch: what this task DID with a running app, recorded
+-- the first time it takes the simulator lease or points `ao preview` at what it
+-- built. Absent from UpdateSession's SET list for the same reason the crew
+-- columns are - a full-row lifecycle write must never blank it.
+--
+-- Written ONCE. The WHERE clause is what makes that a property of the data
+-- rather than of the caller: a row that already carries a touch is not updated,
+-- so a second claim is a no-op and the recorded surface stays the FIRST one.
+-- Bumps updated_at so the sessions_cdc_update trigger redraws the card, which is
+-- where the "drove the app, no qa" line lives.
+UPDATE sessions SET runtime_touch = ?, updated_at = ? WHERE id = ? AND runtime_touch = '';
 
 -- name: SetSessionCrew :execrows
 -- Sole writer of crew_id / crew_role: they are deliberately absent from the SET

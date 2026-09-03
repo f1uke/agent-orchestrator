@@ -53,6 +53,16 @@ type sendAPIResponse struct {
 	// Handback is present when the daemon checked this message as the end of qa's
 	// run; see reportHandback.
 	Handback *handbackAPIView `json:"handback,omitempty"`
+	// Unreviewed is present when this message was a WORKER reporting to an
+	// orchestrator on a task that drove the app and never had a qa; see
+	// reportUnreviewed.
+	Unreviewed *unreviewedAPIView `json:"unreviewed,omitempty"`
+}
+
+// unreviewedAPIView mirrors the daemon's UnreviewedRuntimeView: what this task
+// did with the running app, while nobody but this agent ever looked at it.
+type unreviewedAPIView struct {
+	Touch string `json:"touch"`
 }
 
 // handbackAPIView mirrors the daemon's HandbackCompletenessView.
@@ -160,7 +170,44 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 	if err := c.postJSON(ctx, path, sendAPIRequest{Message: message, From: sender, About: opts.about}, &res); err != nil {
 		return err
 	}
+	if err := reportUnreviewed(c.deps.Out, res); err != nil {
+		return err
+	}
 	return reportSend(c.deps.Out, session, res)
+}
+
+// reportUnreviewed says that this report went out on work nobody has checked.
+//
+// AO used to put a qa on a task by itself the moment it saw the app being driven.
+// It no longer does - that fired while dev was still using the device, and the qa
+// it created fought dev for it - so dev asks, and a dev that never asks is what
+// this catches. It prints AFTER the message has been delivered, deliberately: a
+// refusal would recreate the silent stall the old trigger was buying protection
+// against, it collides with the crew-message refusal that parks a task at NEEDS
+// YOU, and it is the version easiest to get past by lying.
+func reportUnreviewed(out io.Writer, res sendAPIResponse) error {
+	if res.Unreviewed == nil {
+		return nil
+	}
+	_, err := fmt.Fprintf(out,
+		"sent - and AO added a line saying this too: this task %s and no qa was ever on it, so nothing here\n"+
+			"has been checked by anything but you. If the change is ready, `ao crew review` puts one on it; if you\n"+
+			"have already decided it does not need one, say so in your report rather than leaving it unsaid.\n",
+		unreviewedTouchPhrase(res.Unreviewed.Touch))
+	return err
+}
+
+// unreviewedTouchPhrase mirrors domain.RuntimeTouch.Describe. The CLI keeps its
+// own copy for the same reason it hand-mirrors every DTO in this package: it is a
+// thin HTTP client and does not import the daemon's packages.
+func unreviewedTouchPhrase(touch string) string {
+	switch touch {
+	case "sim":
+		return "took the simulator"
+	case "preview":
+		return "opened a preview of the app"
+	}
+	return "drove the app"
 }
 
 // reportHandback says what the task's checklist looked like at the moment this

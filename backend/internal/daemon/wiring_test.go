@@ -594,7 +594,7 @@ func (f *fakeSessionLifecycle) SyncOrchestratorWorkspaces(_ context.Context) err
 	return nil
 }
 
-func (f *fakeSessionLifecycle) NoteRuntimeTouch(_ context.Context, _ domain.SessionID, _ domain.CrewJoinReason) {
+func (f *fakeSessionLifecycle) NoteRuntimeTouch(_ context.Context, _ domain.SessionID, _ domain.RuntimeTouch) {
 	f.runtimeTouched = true
 }
 

@@ -130,7 +130,7 @@ You are the human-facing coordinator for project ` + ProjectIDPlaceholder + `. C
 
 Spawn worker sessions for implementation with:
 ` + "`ao spawn --project " + ProjectIDPlaceholder + " --from <base-branch> --name \"<label, max 20 chars>\" --prompt \"<clear worker task>\"`" + `
---project, --from, and --name are required. --from is the existing branch the worker's worktree is CUT FROM (e.g. main). Optional ` + "`--target <branch>`" + ` is the branch the worker's PR MERGES INTO — pass it whenever that differs from --from (e.g. cut from ` + "`release/2.1`" + `, merge into ` + "`develop`" + `); when omitted it resolves to --from. Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself. Add ` + "`--todo`" + ` to stage the worker as a TODO instead of starting it now (nothing is created until it is started with ` + "`ao session start <id>`" + ` or ▶ Start) — use it whenever the human asks to queue, stage, or hold a task rather than start it. **` + "`--task-size`" + ` now decides how many agents work the task, so choose it deliberately every time.** ` + "`--task-size mechanical`" + ` gives the task ONE agent, authorized to skip the up-front requirements→plan→test-first ceremony and go straight to edit + verify: tag a small, well-scoped change that way (a rename, a copy tweak, a config bump, a one-line fix, a doc edit). The default ` + "`standard`" + ` (and ` + "`deep`" + `, which is standard plus a high-stakes flag) ALLOWS it a second: dev implements and owns the PR, and a qa member that writes, runs and records the tests is created - awake, working beside dev - the first time dev touches the app's runtime (an ` + "`ao sim`" + ` claim, or ` + "`ao preview`" + `). A task with nothing to exercise never trips that and stays one agent, so ` + "`standard`" + ` on a backend-only change costs nothing extra; where a qa does appear, a crew is dearer than one agent on a SHORT task and cheaper on a long one - so a small change tagged standard is a real waste, and a real feature tagged mechanical loses the rigor it needed. When in doubt, ask yourself whether you would want someone to test this by hand: if not, it is mechanical.
+--project, --from, and --name are required. --from is the existing branch the worker's worktree is CUT FROM (e.g. main). Optional ` + "`--target <branch>`" + ` is the branch the worker's PR MERGES INTO — pass it whenever that differs from --from (e.g. cut from ` + "`release/2.1`" + `, merge into ` + "`develop`" + `); when omitted it resolves to --from. Leave --branch off and AO names the new branch from the task, or pass --branch <name> to set it yourself. Add ` + "`--todo`" + ` to stage the worker as a TODO instead of starting it now (nothing is created until it is started with ` + "`ao session start <id>`" + ` or ▶ Start) — use it whenever the human asks to queue, stage, or hold a task rather than start it. **` + "`--task-size`" + ` now decides how many agents work the task, so choose it deliberately every time.** ` + "`--task-size mechanical`" + ` gives the task ONE agent, authorized to skip the up-front requirements→plan→test-first ceremony and go straight to edit + verify: tag a small, well-scoped change that way (a rename, a copy tweak, a config bump, a one-line fix, a doc edit). The default ` + "`standard`" + ` (and ` + "`deep`" + `, which is standard plus a high-stakes flag) ALLOWS it a second: dev implements and owns the PR, and asks AO for a qa member that writes, runs and records the tests - awake, working beside it - when dev believes the change is done and wants it checked. **That is dev's call, not yours**: do not write "wake your qa" or "add a qa" into a brief. A task with nothing to exercise never asks and stays one agent, so ` + "`standard`" + ` on a backend-only change costs nothing extra; where a qa does appear, a crew is dearer than one agent on a SHORT task and cheaper on a long one - so a small change tagged standard is a real waste, and a real feature tagged mechanical loses the rigor it needed. When in doubt, ask yourself whether you would want someone to test this by hand: if not, it is mechanical.
 
 In the common case each worker session owns one branch and one pull request. When the project sets a branch convention (prefix + PR target, injected separately), spawn the worker on a branch that follows it (e.g. ` + "`feature/<topic>`" + `) and set ` + "`--target`" + ` to the branch its PR should merge into — one worker, one on-convention branch, one PR. For a task of a different type (e.g. a ` + "`bugfix/`" + ` alongside a ` + "`feature/`" + ` worker), spawn a separate worker session rather than adding a second branch to an existing one. The convention and AO's namespace tracking are complementary, not competing.
 
@@ -487,22 +487,26 @@ func SimulatorGuidance() string { return simulatorGuidance }
 // SimulatorHandoverToQA is the short note a CREW-ELIGIBLE dev gets AFTER the full
 // simulator catalog, and the ordering is the point.
 //
-// It used to REPLACE the catalog: on a crew the device was qa's instrument, so
-// dev was told not to claim the lease at all. Lazy creation makes that circular -
-// claiming the lease is the very event that CREATES the qa, so a dev that obeyed
-// the old block could never get one, and an iOS task would sit for ever with the
-// member that drives devices never being born. dev therefore keeps the whole
-// catalog (it may be alone on this task for its entire life) and is told what
-// changes at the moment it first claims: the device becomes qa's, and dev hands
-// the verification over.
+// The block has been written twice, against two different systems, and the second
+// rewrite is the one that matters. It first REPLACED the catalog ("the device is
+// qa's, do not claim it"), which became circular the moment qa was created BY the
+// claim. It then told dev that claiming was what created its qa - true at the
+// time, and the source of the collision this change exists to remove: dev claimed
+// a device, a qa appeared beside it and reached for the same one, and on a
+// machine with a single booted simulator the two undid each other's work.
 //
-// A SOLO worker - every `mechanical` task, and every session on a project with no
-// crew - gets the catalog and no note, byte-for-byte what it always had.
+// Now the claim creates nobody, so what is left to say is the honest sequencing:
+// drive the device while you are working, and when the change is DONE hand the
+// verification over by asking for a qa. dev keeps the whole catalog either way -
+// it may be alone on this task for its entire life.
+//
+// A SOLO worker - every `mechanical` task, and every session on a project that
+// forms no crews - gets the catalog and no note, byte-for-byte what it always had.
 func SimulatorHandoverToQA() string { return simulatorHandoverToQA }
 
-const simulatorHandoverToQA = "\n\n" + `### The device becomes qa's the moment you claim it (AO)
+const simulatorHandoverToQA = "\n\n" + `### Drive it while you work, then hand the verification over (AO)
 
-Your FIRST ` + "`ao sim claim`" + ` on this task is what creates its **qa** member - the agent whose job is to drive the device, play the flows and capture the evidence. So claim it when the work needs it, and then hand the driving over: release the lease when you are done with what you were checking, and give qa the verification rather than re-playing screens yourself. qa is awake and working at the same time as you, so a lease you leave held is one qa is blocked on. Reading (` + "`ao sim ax`" + `, ` + "`ao sim shot`" + `, ` + "`ao sim log`" + `) never needs a claim and never blocks anyone.`
+The device is yours while the change is being built: claim it, install, look, release. What you should NOT do is verify your own finished work on it. When you believe the change is done, ask for the agent whose job that is - ` + "`ao crew review`" + ` - and give it the driving: it plays the flows, captures the evidence and records the results. It is awake and working at the same time as you from the moment it exists, so release the lease and leave the device to it rather than re-playing screens yourself; a lease you leave held is one it is blocked on. Reading (` + "`ao sim ax`" + `, ` + "`ao sim shot`" + `, ` + "`ao sim log`" + `) never needs a claim and never blocks anyone.`
 
 const simulatorGuidance = "\n\n" + `## Driving the iOS Simulator (AO)
 
@@ -625,13 +629,23 @@ const crewProtocolHeading = "\n\n" + `## Your crewmate (AO)
 // for a while and is still working.
 const crewOpeningQA = `You are **qa** on a task worked by TWO agents in ONE worktree, and **you are both running right now**. Nothing takes turns: your crewmate is editing, building and committing while you are, and starting one of you never stops the other.`
 
-// crewOpeningDev is the one that had to change. A dev is told the shape of its
-// own task HONESTLY - it is alone, it may stay alone, and it is told exactly what
-// summons the second agent - because dev's prompt is fixed when its runtime
+// crewOpeningDev is the one that had to change, twice. A dev is told the shape of
+// its own task HONESTLY - it is alone, it may stay alone, and it is told exactly
+// how the second agent arrives - because dev's prompt is fixed when its runtime
 // launches and has to stay true on both sides of that event.
+//
+// It used to name a TRIGGER: AO created the qa the first time dev touched the
+// app's runtime, and dev was told so as an observation it could neither ask for
+// nor avoid. That is gone. Touching the runtime is when dev STARTS driving the
+// app, so the qa it produced woke up wanting the same device dev was still using,
+// and the two fought over it. The verb is dev's now, and it is stated as an
+// instruction with a TIME on it, because the time is the whole content of the
+// change: when you think it is done, not when you start looking at it.
 const crewOpeningDev = `You are **dev**. You are working this task ALONE right now, and a task that never needs a second pair of eyes stays that way: a backend-only change gets no qa and you carry the whole job.
 
-**AO creates a qa the first time you touch the app's runtime** - taking the ` + "`ao sim`" + ` lease, or pointing ` + "`ao preview`" + ` at what you built. That is an observation, not a request: it is not yours to ask for or to avoid, so do whatever the work needs. From that moment you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other - and one thing stops being yours alone: the device - release the lease and hand the verification over. The smoke checklist you SHARE from that moment (below).`
+**When you believe the change is DONE and want it checked, ask for a qa:** ` + "`ao crew review`" + ` (no arguments - the task is this session). Ask once the work is finished and your own checks pass, not while you are still driving the app: a qa is a second agent that starts working the moment it exists, and the device, the worktree and the git index are things you will then be sharing in real time. Nothing else creates one, so a task you never ask about is one nobody but you ever looked at - and if you close out having driven the app without asking, AO says so in the report you send.
+
+From the moment it exists you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other - and one thing stops being yours alone: the device - release the lease and hand the verification over. The smoke checklist you SHARE from that moment (below).`
 
 const crewProtocolBody = `
 

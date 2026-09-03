@@ -256,36 +256,56 @@ export function canAttachRole(task: Task): boolean {
 }
 
 /**
- * `qa joined · dev opened the simulator` - one sentence, under the crew strip.
+ * One quiet sentence under the crew strip, and it answers whichever of two
+ * questions this card raises.
  *
- * It exists because the card can CHANGE SHAPE while somebody is looking at it,
- * and once it does, the merge gate has an input it did not have a moment ago: a
- * task reading READY TO MERGE can drop to IN REVIEW. That is the gate working,
- * not a glitch, and this line is the difference between those two readings.
+ * On a CREW: `qa joined · dev asked for a review`. The card can change shape
+ * while somebody is looking at it, and once it does the merge gate has an input
+ * it did not have a moment ago - a task reading READY TO MERGE can drop to IN
+ * REVIEW. That is the gate working, not a glitch, and the line is the difference
+ * between those two readings.
  *
- * It is DERIVED, not stored: there is exactly one transition (absent -> present,
- * one way, once), so the daemon records one small enum on the member's row and
- * everything else - when, and to which task - is already on the record.
+ * On a SOLO task that DROVE THE APP: `dev drove the app · no qa was asked for`.
+ * AO used to put a qa on that task by itself, the moment it saw the app being
+ * driven. It no longer does - that fired while dev was still using the device,
+ * and the qa it created fought dev for it - so dev asks instead, when it thinks
+ * the work is done. Removing a trigger and saying nothing would hand back the
+ * failure it was buying protection against: a task that finished with nobody but
+ * its author having looked, and nothing anywhere saying so. This is the human's
+ * half of that warning, and it sits beside the `+ qa` control that answers it.
  *
- * Undefined for a solo task and for a member created before AO recorded the
- * reason: saying nothing is the honest answer, and a card with no crew has
- * nothing to explain.
+ * Both are DERIVED, not stored: one small enum on the member's row, one on dev's.
+ *
+ * Undefined for a solo task that never drove anything, and for a member created
+ * before AO recorded the reason: saying nothing is the honest answer, and a card
+ * with nothing to explain explains nothing.
  */
 export function crewJoinLine(task: Task): string | undefined {
 	const reason = task.qa?.crew?.joinReason;
-	if (!reason) return undefined;
-	return `qa joined · ${CREW_JOIN_CAUSE[reason]}`;
+	if (reason) return `qa joined · ${CREW_JOIN_CAUSE[reason]}`;
+	if (task.isCrew) return undefined;
+	const touch = task.dev.runtimeTouch;
+	if (!touch) return undefined;
+	return `${RUNTIME_TOUCH_CAUSE[touch]} · no qa was asked for`;
 }
 
 /**
- * What each reason SAYS. Two of them name what dev did, because that is the
- * event and it is also the first thing worth looking at; the third names the
- * person, because a human asking is its own explanation.
+ * What each reason SAYS. `review` is the ordinary one - dev decided the change
+ * was ready - and `manual` names the person, because a human asking is its own
+ * explanation. `sim` and `preview` are retired and appear only on members created
+ * before dev did the asking.
  */
 const CREW_JOIN_CAUSE: Record<NonNullable<SessionCrew["joinReason"]>, string> = {
+	review: "dev asked for a review",
+	manual: "you added it",
 	sim: "dev opened the simulator",
 	preview: "dev opened a preview",
-	manual: "you added it",
+};
+
+/** What driving the app was, said the way the join line above says things. */
+const RUNTIME_TOUCH_CAUSE: Record<NonNullable<WorkspaceSession["runtimeTouch"]>, string> = {
+	sim: "dev drove the simulator",
+	preview: "dev opened a preview",
 };
 
 /**

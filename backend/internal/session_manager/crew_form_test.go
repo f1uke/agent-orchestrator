@@ -143,10 +143,12 @@ func TestWakeCrewMember_StartsItWithoutStoppingDev(t *testing.T) {
 	}
 	rt.aliveByHandle["h1"] = true
 
-	m.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinSim)
+	if _, err := m.RequestCrewReview(ctx, dev.ID, domain.CrewRoleQA); err != nil {
+		t.Fatalf("RequestCrewReview: %v", err)
+	}
 	_, qa := crewOf(t, st, dev.ID)
-	// Put it back to sleep: this test is about the WAKE, and a member created by
-	// the trigger is already awake.
+	// Put it back to sleep: this test is about the WAKE, and a member dev asked
+	// for is already awake.
 	if err := m.SuspendRuntime(ctx, qa.ID); err != nil {
 		t.Fatalf("SuspendRuntime qa: %v", err)
 	}

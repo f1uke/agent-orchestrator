@@ -101,19 +101,19 @@ func TestCrewParallel_SpawnBringsUpASecondMemberInARunningTree(t *testing.T) {
 	}
 }
 
-// TestCrewParallel_TheRuntimeTouchBringsUpASecondAgent is lazy creation end to
-// end, against a real worktree: a `standard` task starts as ONE agent, and dev
-// driving the app turns it into two - both awake, in one tree, with dev never
+// TestCrewParallel_DevAskingBringsUpASecondAgent is the feature end to end,
+// against a real worktree: a `standard` task starts as ONE agent, and dev asking
+// for a review turns it into two - both awake, in one tree, with dev never
 // interrupted. This is the whole feature; everything else here is a property of
 // it.
-func TestCrewParallel_TheRuntimeTouchBringsUpASecondAgent(t *testing.T) {
+func TestCrewParallel_DevAskingBringsUpASecondAgent(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)
 	dev, qa := setupCrew(t, s)
 
 	s.assertBothAwake(t, dev.ID, qa.ID)
-	if qa.CrewJoinReason != domain.CrewJoinSim {
-		t.Fatalf("qa join reason = %q, want %q", qa.CrewJoinReason, domain.CrewJoinSim)
+	if qa.CrewJoinReason != domain.CrewJoinReview {
+		t.Fatalf("qa join reason = %q, want %q", qa.CrewJoinReason, domain.CrewJoinReview)
 	}
 	// ONE worktree, and it is dev's - still on disk, with dev's work in it.
 	if qa.Metadata.WorkspacePath != dev.Metadata.WorkspacePath || qa.Metadata.Branch != dev.Metadata.Branch {
@@ -136,8 +136,17 @@ func TestCrewParallel_TheRuntimeTouchBringsUpASecondAgent(t *testing.T) {
 
 	// And it happens ONCE: dev drives the device all day and the task stays two.
 	for range 3 {
-		s.mgr.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinSim)
-		s.mgr.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinPreview)
+		s.mgr.NoteRuntimeTouch(ctx, dev.ID, domain.RuntimeTouchSim)
+		s.mgr.NoteRuntimeTouch(ctx, dev.ID, domain.RuntimeTouchPreview)
+	}
+	if _, err := s.mgr.RequestCrewReview(ctx, dev.ID, domain.CrewRoleQA); err == nil {
+		t.Fatal("a second review request created a second qa")
+	}
+	// And the touch is DURABLE and write-once in the real column: it survives to
+	// be read back, and the FIRST surface is what it says. That fact is the whole
+	// input to the "you drove the app and nobody checked it" warning.
+	if got := s.record(t, dev.ID).RuntimeTouch; got != domain.RuntimeTouchSim {
+		t.Fatalf("runtime touch reads %q from the store, want the first surface %q", got, domain.RuntimeTouchSim)
 	}
 	all, err := s.store.ListSessions(ctx, "mer")
 	if err != nil {

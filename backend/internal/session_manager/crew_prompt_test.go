@@ -65,21 +65,25 @@ func TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"## Smoke-test checklist (AO)",                    // it owns the list until a qa exists
-		"ao sim tap --label",                              // and it may drive the device itself
-		"Most sessions open one pull request",             // the worker base, unchanged
-		"## Orchestrator coordination",                    // dev is the one that reports
-		"The device becomes qa's the moment you claim it", // and what changes then
-		"AO creates a qa the first time you touch the app's runtime",
+		"## Smoke-test checklist (AO)",                             // it owns the list until a qa exists
+		"ao sim tap --label",                                       // and it may drive the device itself
+		"Most sessions open one pull request",                      // the worker base, unchanged
+		"## Orchestrator coordination",                             // dev is the one that reports
+		"Drive it while you work, then hand the verification over", // and what changes when it is done
+		"`ao crew review`",                                         // THE verb: dev asks for its own qa
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("crew dev prompt missing %q:\n%s", want, got)
 		}
 	}
-	// The old block forbade the claim outright, which under lazy creation would
-	// stop the only event that ever creates a qa.
+	// The first version of this block forbade the claim outright; the second told
+	// dev that claiming CREATED its qa, which is the collision this change
+	// removed. Neither may come back.
 	if strings.Contains(got, "do not claim the lease or drive the screen yourself") {
-		t.Fatalf("crew dev is still forbidden the claim that creates its qa:\n%s", got)
+		t.Fatalf("crew dev is forbidden the device it may need to build the change:\n%s", got)
+	}
+	if strings.Contains(got, "is what creates its **qa** member") || strings.Contains(got, "AO creates a qa the first time you touch") {
+		t.Fatalf("crew dev is still told that driving the app creates its qa:\n%s", got)
 	}
 }
 
@@ -259,8 +263,8 @@ func TestSpawn_StandardTaskLaunchesDevWithTheCrewPrompt(t *testing.T) {
 	if !strings.Contains(launched, "## Your crewmate (AO)") {
 		t.Fatalf("dev was launched without knowing it has a crewmate:\n%s", launched)
 	}
-	if !strings.Contains(launched, "AO creates a qa the first time you touch the app's runtime") {
-		t.Fatalf("dev was launched without being told what creates its qa:\n%s", launched)
+	if !strings.Contains(launched, "ao crew review") {
+		t.Fatalf("dev was launched without being told how to ask for its qa:\n%s", launched)
 	}
 	if !strings.Contains(launched, "The smoke checklist is SHARED") {
 		t.Fatalf("dev was launched without being told the checklist is shared:\n%s", launched)

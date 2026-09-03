@@ -168,6 +168,20 @@ func (f *fakeStore) SetSessionCrew(_ context.Context, id, crewID domain.SessionI
 	return true, nil
 }
 
+// SetSessionRuntimeTouch mirrors the real store, including the part that matters:
+// it is WRITE-ONCE. A row that already carries a touch is left alone and reports
+// false, so the FIRST surface a task drove is the one recorded.
+func (f *fakeStore) SetSessionRuntimeTouch(_ context.Context, id domain.SessionID, touch domain.RuntimeTouch, updatedAt time.Time) (bool, error) {
+	rec, ok := f.sessions[id]
+	if !ok || rec.RuntimeTouch != "" {
+		return false, nil
+	}
+	rec.RuntimeTouch = touch
+	rec.UpdatedAt = updatedAt
+	f.sessions[id] = rec
+	return true, nil
+}
+
 type fakeLCM struct {
 	store     *fakeStore
 	completed int
@@ -561,23 +575,47 @@ func fakeWorkspaceRepoName(info ports.WorkspaceInfo) string {
 	return filepath.Base(info.Path)
 }
 
-type fakeMessenger struct{ msgs []string }
+type fakeMessenger struct {
+	msgs []string
+	// to is the recipient of each message, parallel to msgs. AO sends one message
+	// of its own accord (crewJoinedNotice), and WHO it reached is half of what
+	// makes it correct.
+	to []domain.SessionID
+}
 
-func (m *fakeMessenger) Send(_ context.Context, _ domain.SessionID, msg string) (ports.SendOutcome, error) {
+func (m *fakeMessenger) Send(_ context.Context, id domain.SessionID, msg string) (ports.SendOutcome, error) {
 	m.msgs = append(m.msgs, msg)
+	m.to = append(m.to, id)
 	return ports.SendOutcome{}, nil
 }
 
+// sentTo returns every message this messenger delivered to one session.
+func (m *fakeMessenger) sentTo(id domain.SessionID) []string {
+	var out []string
+	for i, msg := range m.msgs {
+		if m.to[i] == id {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
 func newManager() (*Manager, *fakeStore, *fakeRuntime, *fakeWorkspace) {
+	m, st, rt, ws, _ := newManagerWithMessenger()
+	return m, st, rt, ws
+}
+
+func newManagerWithMessenger() (*Manager, *fakeStore, *fakeRuntime, *fakeWorkspace, *fakeMessenger) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	rt := &fakeRuntime{}
 	ws := &fakeWorkspace{}
+	msgr := &fakeMessenger{}
 	// Stub lookPath so the pre-launch agent-binary check passes; the fakeAgent
 	// returns argv ["launch"] which is not a real binary on PATH.
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
-	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
-	return m, st, rt, ws
+	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: ws, Store: st, Messenger: msgr, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+	return m, st, rt, ws, msgr
 }
 func testRoleAgents() domain.ProjectConfig {
 	return domain.ProjectConfig{

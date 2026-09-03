@@ -1671,6 +1671,52 @@ paths:
         it
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/crew/review:
+    post:
+      operationId: requestCrewReview
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersAddCrewMemberResponse'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: dev asks for the qa that checks its work. The path names the CALLER,
+        and there is no body
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/crew/runs:
     get:
       operationId: listCrewRuns
@@ -6632,6 +6678,13 @@ components:
           type: integer
         queuedMessagesFailed:
           type: integer
+        runtimeTouch:
+          description: 'What this session did with the running app: took the simulator
+            lease, or pointed ao preview at it. Absent when it never drove one.'
+          enum:
+          - sim
+          - preview
+          type: string
         sleepReason:
           enum:
           - idle
@@ -6862,6 +6915,18 @@ components:
       required:
       - path
       - status
+      type: object
+    ControllersUnreviewedRuntimeView:
+      properties:
+        touch:
+          description: 'What this task did with the running app: took the simulator
+            lease, or pointed ao preview at it.'
+          enum:
+          - sim
+          - preview
+          type: string
+      required:
+      - touch
       type: object
     ControllersWorkspaceResolveCandidateDTO:
       properties:
@@ -8351,6 +8416,8 @@ components:
           - string
         sessionId:
           type: string
+        unreviewed:
+          $ref: '#/components/schemas/ControllersUnreviewedRuntimeView'
       required:
       - ok
       - sessionId
