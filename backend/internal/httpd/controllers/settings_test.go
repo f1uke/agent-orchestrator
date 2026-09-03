@@ -598,7 +598,7 @@ func TestMessageTemplatesAPI_GetListsAllWithDefaults(t *testing.T) {
 	var got controllers.MessageTemplatesResponse
 	mustJSON(t, body, &got)
 	wantNames := []string{
-		"review-comment-dispatch", "ci-failing", "merge-conflict",
+		"review-comment-dispatch", "ci-failing", "merge-conflict", "pr-base-mismatch",
 		"tracker-bot-comment", "ao-reviewer-batch", "ao-reviewer-single",
 	}
 	if len(got.Templates) != len(wantNames) {

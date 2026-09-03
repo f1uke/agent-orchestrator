@@ -31,7 +31,7 @@ func crewPromptStore(t *testing.T) *fakeStore {
 func TestBuildSystemPrompt_SoloWorkerKeepsEverything(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeMechanical, "")
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeMechanical})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestBuildSystemPrompt_SoloWorkerKeepsEverything(t *testing.T) {
 func TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleDev})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA(t *testing.T) {
 func TestBuildSystemPrompt_CrewQAIsItsOwnAgent(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestBuildSystemPrompt_QABaseIsEditableLikeEveryOther(t *testing.T) {
 		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindQA: "CUSTOM QA BASE"}}
 	})
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestBuildSystemPrompt_QABaseIsEditableLikeEveryOther(t *testing.T) {
 func TestBuildSystemPrompt_OnlyQAGetsTheRecordedFlowLoop(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
-	qa, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	qa, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestBuildSystemPrompt_OnlyQAGetsTheRecordedFlowLoop(t *testing.T) {
 	// dev hands the device over; a SOLO worker has nobody to ask for a play and
 	// keeps the prompt it had.
 	for _, role := range []domain.CrewRole{domain.CrewRoleDev, ""} {
-		got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, role)
+		got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: role})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,7 +175,7 @@ func TestBuildSystemPrompt_NoSimulatorMeansNoRecordedFlowLoop(t *testing.T) {
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{HasIOSSimulator: false}}
 	m := layeredManager(st, nil)
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestBuildSystemPrompt_NoSimulatorMeansNoRecordedFlowLoop(t *testing.T) {
 func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsShared(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
-	dev, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
+	dev, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleDev})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsShared(t *testing.T) {
 
 	// A solo worker is in no crew, so it is told none of this and keeps the
 	// protocol it has always had.
-	solo, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, "")
+	solo, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestBuildSystemPrompt_EveryMemberIsToldNotToDriveADeviceItDoesNotHold(t *te
 	m := layeredManager(crewPromptStore(t), nil)
 
 	for _, role := range []domain.CrewRole{domain.CrewRoleDev, domain.CrewRoleQA, ""} {
-		got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, role)
+		got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: role})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -323,7 +323,7 @@ func TestBuildSystemPrompt_EveryMemberIsToldNotToDriveADeviceItDoesNotHold(t *te
 	// instruction an agent cannot follow is worse than none.
 	st := crewPromptStore(t)
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{HasIOSSimulator: false}}
-	plain, err := layeredManager(st, nil).buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
+	plain, err := layeredManager(st, nil).buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleDev})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestBuildSystemPrompt_EveryMemberIsToldNotToDriveADeviceItDoesNotHold(t *te
 func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
-	qa, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	qa, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
 	}
 	// The re-timing is about WHEN qa writes, not WHO writes: dev is still told the
 	// list is shared and still carries the per-case verbs.
-	dev, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleDev)
+	dev, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleDev})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
 	}
 
 	for _, role := range []domain.CrewRole{domain.CrewRoleDev, ""} {
-		got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, role)
+		got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: role})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -386,7 +386,7 @@ func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
 	// owns the same checklist there - so this block is not gated on iOS.
 	st := crewPromptStore(t)
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{HasIOSSimulator: false}}
-	plain, err := layeredManager(st, nil).buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, domain.CrewRoleQA)
+	plain, err := layeredManager(st, nil).buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA})
 	if err != nil {
 		t.Fatal(err)
 	}

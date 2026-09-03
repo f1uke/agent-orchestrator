@@ -1845,7 +1845,7 @@ type SetMessageTemplateRequest struct {
 // MessageTemplateNameParam is the {name} path parameter for the
 // /settings/message-templates/{name} routes.
 type MessageTemplateNameParam struct {
-	Name string `path:"name" description:"Editable nudge template name." enum:"review-comment-dispatch,ci-failing,merge-conflict,tracker-bot-comment,ao-reviewer-batch,ao-reviewer-single"`
+	Name string `path:"name" description:"Editable nudge template name." enum:"review-comment-dispatch,ci-failing,merge-conflict,pr-base-mismatch,tracker-bot-comment,ao-reviewer-batch,ao-reviewer-single"`
 }
 
 // WikiSettingsResponse mirrors wikisettings.Settings on the wire. It is the

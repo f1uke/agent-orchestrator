@@ -257,6 +257,13 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			nudges = append(nudges, pendingNudge{key: "ci:" + o.URL + ":" + ch.Name, sig: ch.CommitHash + ":" + ch.LogTail, msg: msg, maxAttempts: 0})
 		}
 	}
+	// Tell the worker when its PR merges somewhere other than where this session
+	// was spawned to land. AO never moves the PR itself - a base chosen on purpose
+	// must stay possible - so this is the whole of the detection: one message,
+	// naming both branches.
+	if err := m.queuePRBaseMismatchNudge(ctx, id, rec, o, ident, &nudges); err != nil {
+		return err
+	}
 	// Auto-nudge the worker when its PR carries human review feedback it has not
 	// been told about yet (see review_nudge.go for what counts and why "unresolved"
 	// is not the trigger) — but only when this session opts in: a per-session
@@ -872,6 +879,50 @@ func prIdentity(o ports.PRObservation) string {
 	}
 	return id
 }
+
+// queuePRBaseMismatchNudge queues the "your PR targets the wrong branch" nudge
+// when an OPEN PR's base is not the branch this session records as its PR target.
+//
+// Two workers in 24 hours opened against the repository's default branch instead
+// of the project's target, because `gh pr create` with no `--base` picks the
+// default silently. The first defence is the worker prompt, which now names the
+// branch and the flag; this is the one that does not depend on an agent reading
+// it. What it must NOT do is retarget anything: a PR aimed somewhere unusual on
+// purpose stays valid, and this only makes the divergence visible.
+//
+// Two cases are deliberately quiet:
+//
+//   - the session has no recorded target (rows predating it), so there is nothing
+//     to compare against and a guess would be worse than silence; and
+//   - the PR is STACKED on a still-open sibling, where targeting a branch other
+//     than the session's target is exactly the documented shape.
+func (m *Manager) queuePRBaseMismatchNudge(ctx context.Context, id domain.SessionID, rec domain.SessionRecord, o ports.PRObservation, ident string, nudges *[]pendingNudge) error {
+	target := strings.TrimSpace(rec.PRTarget)
+	base := strings.TrimSpace(o.TargetBranch)
+	if target == "" || base == "" || base == target {
+		return nil
+	}
+	stacked, err := m.prBlockedByOpenParent(ctx, id, rec.ProjectID, o.URL)
+	if err != nil {
+		return err
+	}
+	if stacked {
+		return nil
+	}
+	msg := m.renderNudge(messagetemplates.NamePRBaseMismatch, messagetemplates.PRBaseMismatchData{
+		PRIdentity: ident,
+		PRURL:      domain.SanitizeControlChars(o.URL),
+		Base:       domain.SanitizeControlChars(base),
+		Target:     domain.SanitizeControlChars(target),
+	})
+	// The signature is the branch PAIR, so retargeting to a THIRD wrong branch is
+	// news again while the same divergence re-observed on every poll stays silent.
+	*nudges = append(*nudges, pendingNudge{key: prBaseMismatchKey(o.URL), sig: base + "\x00" + target, msg: msg, maxAttempts: 0})
+	return nil
+}
+
+// prBaseMismatchKey is the reaction key the wrong-base nudge dedups under.
+func prBaseMismatchKey(prURL string) string { return "pr-base:" + prURL }
 
 // mergeConflictKey is the reaction key the merge-conflict nudge dedups under.
 func mergeConflictKey(prURL string) string { return "merge-conflict:" + prURL }

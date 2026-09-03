@@ -13,6 +13,7 @@ export type TemplateName =
 	| "review-comment-dispatch"
 	| "ci-failing"
 	| "merge-conflict"
+	| "pr-base-mismatch"
 	| "tracker-bot-comment"
 	| "ao-reviewer-batch"
 	| "ao-reviewer-single";

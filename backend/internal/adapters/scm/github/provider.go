@@ -11,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -228,8 +229,8 @@ const prObservationQuery = `query($owner:String!,$repo:String!,$number:Int!){
           contexts(first:CONTEXT_LIMIT){
             nodes{
               __typename
-              ... on CheckRun  { name status conclusion detailsUrl url databaseId }
-              ... on StatusContext { context state targetUrl }
+              ... on CheckRun  { name status conclusion detailsUrl url databaseId startedAt completedAt }
+              ... on StatusContext { context state targetUrl createdAt }
             }
             pageInfo{ hasNextPage }
           }
@@ -282,31 +283,47 @@ func (p *Provider) fetchJobLogTail(ctx context.Context, owner, repo string, jobI
 // Projection helpers
 // ---------------------------------------------------------------------------
 
-// ciSummaryFromGraphQL maps the per-PR status rollup onto domain.CIState.
-// If ANY visible context concluded failure-class we return CIFailing.
-// Otherwise any pending context wins over passing. An empty rollup is
-// CIUnknown. When the rollup is paginated (pageInfo.hasNextPage=true)
-// the verdict is conservative: a known failure is still safe — failures
-// don't get un-failed by more pages — but passing/pending/unknown
-// verdicts could hide a failing context on the next page, so we degrade
-// them all to CIUnknown rather than risk reporting a broken PR as ready.
+// ciSummaryFromGraphQL maps the per-PR status rollup onto domain.CIState,
+// counting only the LATEST run of each check name (latestCheckContexts).
+// If any of those concluded failure-class we return CIFailing. Otherwise
+// any pending check wins over passing. An empty rollup is CIUnknown.
+// When the rollup is paginated (pageInfo.hasNextPage=true) the verdict is
+// conservative: a visible failure still wins - this path never pages, so
+// degrading it would report a broken PR as unknown on every large rollup -
+// but passing/pending/unknown verdicts could hide a failing context on the
+// next page, so we degrade them all to CIUnknown rather than risk reporting
+// a broken PR as ready.
 func ciSummaryFromGraphQL(pr map[string]any) domain.CIState {
 	roll := statusRollup(pr)
 	if roll == nil {
 		return domain.CIUnknown
 	}
 	contexts, _ := roll["contexts"].(map[string]any)
-	rawNodes := nodes(contexts["nodes"])
-	if len(rawNodes) == 0 {
+	latest := latestCheckContexts(nodes(contexts["nodes"]))
+	if len(latest) == 0 {
 		// GitHub returns a top-level "state" on the rollup even when the
 		// nodes list is empty (e.g. SUCCESS / FAILURE / PENDING). Honor it
 		// rather than returning CIUnknown for an otherwise-decided PR.
 		return mapRollupState(str(roll["state"]))
 	}
+	state := ciStateFromCheckContexts(latest)
+	if state == domain.CIFailing {
+		return domain.CIFailing
+	}
+	if pageInfoHasMore(contexts) {
+		return domain.CIUnknown
+	}
+	return state
+}
+
+// ciStateFromCheckContexts folds already-deduplicated rollup contexts into one
+// CI verdict: any failure-class check fails the PR, else any queued/running one
+// keeps it pending, else a passing one passes it. Skipped/unknown checks count
+// for nothing on their own, so a rollup of only those is CIUnknown.
+func ciStateFromCheckContexts(latest []map[string]any) domain.CIState {
 	pending, passing := false, false
-	for _, n := range rawNodes {
-		st := checkStatusFromGraphQL(n)
-		switch st {
+	for _, n := range latest {
+		switch checkStatusFromGraphQL(n) {
 		case domain.PRCheckFailed, domain.PRCheckCancelled:
 			return domain.CIFailing
 		case domain.PRCheckQueued, domain.PRCheckInProgress:
@@ -314,9 +331,6 @@ func ciSummaryFromGraphQL(pr map[string]any) domain.CIState {
 		case domain.PRCheckPassed:
 			passing = true
 		}
-	}
-	if pageInfoHasMore(contexts) {
-		return domain.CIUnknown
 	}
 	switch {
 	case pending:
@@ -326,6 +340,97 @@ func ciSummaryFromGraphQL(pr map[string]any) domain.CIState {
 	default:
 		return domain.CIUnknown
 	}
+}
+
+// latestCheckContexts collapses a statusCheckRollup context list to ONE node per
+// check, keeping the most recent RUN of each.
+//
+// GitHub keeps SUPERSEDED runs in the rollup: re-running a workflow adds a second
+// CheckRun with the same name (in a new check suite) beside the one that failed,
+// and the rollup's own `state` stays FAILURE for as long as the loser is listed.
+// Asking "is any run failing?" then reports a green, mergeable PR as red for
+// ever: PR #287 was mergeStateStatus=CLEAN with `format` FAILURE (08:13:58Z)
+// listed beside `format` SUCCESS (08:16:09Z), and AO's board read ci_failed.
+//
+// Recency is startedAt for a CheckRun and createdAt for a StatusContext, with the
+// monotonic databaseId and then list order as tiebreakers, so a payload carrying
+// no timestamps at all still resolves to the last-listed run rather than an
+// arbitrary one. A node's first appearance keeps its position, so the projected
+// check list stays in the order GitHub reported it.
+func latestCheckContexts(rawNodes []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(rawNodes))
+	at := make(map[string]int, len(rawNodes))
+	for _, n := range rawNodes {
+		key, ok := checkContextKey(n)
+		if !ok {
+			// An unnamed or unknown node has no identity to group by; keep it and
+			// let the projections drop it as they always have.
+			out = append(out, n)
+			continue
+		}
+		i, seen := at[key]
+		if !seen {
+			at[key] = len(out)
+			out = append(out, n)
+			continue
+		}
+		if checkContextNewer(n, out[i]) {
+			out[i] = n
+		}
+	}
+	return out
+}
+
+// checkContextKey identifies the CHECK a rollup node is a run of. Type is part of
+// the key because a commit status and an Actions check that happen to share a name
+// are different checks with independent verdicts.
+func checkContextKey(n map[string]any) (string, bool) {
+	typ := str(n["__typename"])
+	var name string
+	switch typ {
+	case "CheckRun":
+		name = str(n["name"])
+	case "StatusContext":
+		name = str(n["context"])
+	default:
+		return "", false
+	}
+	if name == "" {
+		return "", false
+	}
+	return typ + "\x00" + name, true
+}
+
+// checkContextNewer reports whether candidate supersedes current.
+func checkContextNewer(candidate, current map[string]any) bool {
+	ct, cok := checkContextStartedAt(candidate)
+	pt, pok := checkContextStartedAt(current)
+	switch {
+	case cok && pok && !ct.Equal(pt):
+		return ct.After(pt)
+	case cok != pok:
+		// A run GitHub timestamped beats one it did not (older API shapes, and
+		// test payloads, omit the field entirely).
+		return cok
+	}
+	if cid, pid := num(candidate["databaseId"]), num(current["databaseId"]); cid != pid {
+		return cid > pid
+	}
+	// Indistinguishable: the rollup lists a check's runs oldest-first, so the
+	// later entry is the one to keep.
+	return true
+}
+
+// checkContextStartedAt reads when a rollup node's run began. CheckRun carries
+// startedAt; StatusContext carries createdAt. ok is false when neither parses,
+// which is what keeps an untimestamped payload falling through to databaseId.
+func checkContextStartedAt(n map[string]any) (time.Time, bool) {
+	for _, field := range []string{"startedAt", "createdAt"} {
+		if t := parseGitHubTime(str(n[field])); !t.IsZero() {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // pageInfoHasMore reports whether the rollup contexts have a next page
@@ -429,13 +534,14 @@ func mergeabilityFromGraphQL(pr map[string]any, rest restPull, ci domain.CIState
 	return domain.MergeUnknown
 }
 
-// checksFromGraphQL projects each context node into a PRCheckObservation.
+// checksFromGraphQL projects each context node into a PRCheckObservation,
+// one row per CHECK (the latest run of it) rather than one per run.
 // StatusContext (commit-status) and CheckRun (Actions) are both flattened
 // into the same slice because downstream consumers don't distinguish.
 func checksFromGraphQL(pr map[string]any, headSHA string) []ports.PRCheckObservation {
 	roll := statusRollup(pr)
 	contexts, _ := roll["contexts"].(map[string]any)
-	rawNodes := nodes(contexts["nodes"])
+	rawNodes := latestCheckContexts(nodes(contexts["nodes"]))
 	if len(rawNodes) == 0 {
 		return nil
 	}
@@ -514,13 +620,15 @@ func isBotAuthor(author map[string]any) bool {
 }
 
 // jobIDForCheck looks up the Actions job ID for a check by name, so we
-// can call /actions/jobs/{job_id}/logs. StatusContext rows have no job
-// ID (they're commit statuses, not Actions runs); those return 0 and
-// the log fetch is skipped for them.
+// can call /actions/jobs/{job_id}/logs. It resolves to the LATEST run of
+// that name, so the log tail we splice in is the one that failed now
+// rather than a superseded attempt. StatusContext rows have no job ID
+// (they're commit statuses, not Actions runs); those return 0 and the
+// log fetch is skipped for them.
 func jobIDForCheck(pr map[string]any, name string) int64 {
 	roll := statusRollup(pr)
 	contexts, _ := roll["contexts"].(map[string]any)
-	for _, n := range nodes(contexts["nodes"]) {
+	for _, n := range latestCheckContexts(nodes(contexts["nodes"])) {
 		if str(n["__typename"]) != "CheckRun" {
 			continue
 		}

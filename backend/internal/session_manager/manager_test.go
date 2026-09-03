@@ -2105,7 +2105,7 @@ func TestSystemPrompt_AppendsConfidentialityGuard(t *testing.T) {
 			lookPath := func(string) (string, error) { return "/bin/true", nil }
 			m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 
-			sp, err := m.buildSystemPrompt(ctx, tc.kind, "mer", domain.TaskSizeStandard, "")
+			sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: tc.kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 			if err != nil {
 				t.Fatalf("buildSystemPrompt: %v", err)
 			}
@@ -2143,7 +2143,7 @@ func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, ResponseLanguage: func() string { return globalLang }})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -2255,7 +2255,7 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -2354,7 +2354,7 @@ func TestSystemPrompt_SpawnConfirm(t *testing.T) {
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, SpawnConfirmEnabled: enabled})
 	}
 	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -4579,7 +4579,7 @@ func TestBuildSystemPrompt_WorkerLayers(t *testing.T) {
 		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: "CUSTOM WORKER BASE"}}
 	})
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, "")
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4612,7 +4612,7 @@ func TestBuildSystemPrompt_OrchestratorDefaultSubstitutesProjectID(t *testing.T)
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer"}
 	m := layeredManager(st, nil) // nil getter ⇒ built-in defaults
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindOrchestrator, "mer", domain.TaskSizeStandard, "")
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindOrchestrator, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4633,7 +4633,7 @@ func TestBuildSystemPrompt_ClearedBaseKeepsFloorAndGuard(t *testing.T) {
 		return promptoverrides.Overrides{Base: map[prompts.Kind]string{prompts.KindWorker: ""}} // fully cleared
 	})
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, "")
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4658,7 +4658,7 @@ func TestBuildSystemPrompt_TaskSizeDirective(t *testing.T) {
 			}
 		}
 		m := layeredManager(st, getter)
-		sp, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", size, "")
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: size})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -4707,7 +4707,7 @@ func TestBuildSystemPrompt_CheckInGate(t *testing.T) {
 			}
 		}
 		m := layeredManager(st, getter)
-		sp, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", size, role)
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: size, CrewRole: role})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -4841,7 +4841,7 @@ func TestSystemPrompt_SkillPointerFollowsProjectWebUI(t *testing.T) {
 		}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
 		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
@@ -4891,7 +4891,7 @@ func TestSystemPrompt_SimulatorGuidance(t *testing.T) {
 		st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
 		m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
-		sp, err := m.buildSystemPrompt(ctx, kind, "mer", domain.TaskSizeStandard, "")
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}

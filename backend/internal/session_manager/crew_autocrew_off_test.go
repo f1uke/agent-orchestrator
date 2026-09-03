@@ -93,10 +93,15 @@ func TestSpawn_CrewOffProjectLaunchesDevWithTheSoloPrompt(t *testing.T) {
 func TestBuildSystemPrompt_CrewOffDoesNotStripCeremony(t *testing.T) {
 	m, _, _, _ := crewOffManager(t)
 
-	got, err := m.buildSystemPrompt(ctx, domain.KindWorker, "mer", domain.TaskSizeStandard, promptCrewRole(
-		domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{DisableAutoCrew: true}},
-		ports.SpawnConfig{Kind: domain.KindWorker, TaskSize: domain.TaskSizeStandard},
-	))
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{
+		Kind:      domain.KindWorker,
+		ProjectID: "mer",
+		TaskSize:  domain.TaskSizeStandard,
+		CrewRole: promptCrewRole(
+			domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{DisableAutoCrew: true}},
+			ports.SpawnConfig{Kind: domain.KindWorker, TaskSize: domain.TaskSizeStandard},
+		),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -279,8 +279,8 @@ author{ login }
 mergeCommit{ oid }
 commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state contexts(first:CONTEXT_LIMIT){ nodes{
   __typename
-  ... on CheckRun { name status conclusion detailsUrl url databaseId }
-  ... on StatusContext { context state targetUrl }
+  ... on CheckRun { name status conclusion detailsUrl url databaseId startedAt completedAt }
+  ... on StatusContext { context state targetUrl createdAt }
 } pageInfo{ hasNextPage endCursor } } } } } }
 `, "CONTEXT_LIMIT", strconv.Itoa(scmBatchCheckContextLimit))
 }
@@ -326,8 +326,8 @@ func buildCheckContextsQuery(ref ports.SCMPRRef, cursor string) string {
 repo: repository(owner:%s,name:%s){ pullRequest(number:%d){
   commits(last:1){ nodes{ commit{ statusCheckRollup{ contexts(first:%d, after:%s){ nodes{
     __typename
-    ... on CheckRun { name status conclusion detailsUrl url databaseId }
-    ... on StatusContext { context state targetUrl }
+    ... on CheckRun { name status conclusion detailsUrl url databaseId startedAt completedAt }
+    ... on StatusContext { context state targetUrl createdAt }
   } pageInfo{ hasNextPage endCursor } } } } } }
 } }
 }`, graphQLString(ref.Repo.Owner), graphQLString(ref.Repo.Name), ref.Number, scmBatchCheckContextLimit, graphQLString(cursor))
@@ -362,7 +362,7 @@ func pageInfoEndCursor(connection map[string]any) string {
 func scmObservationFromGraphQL(ref ports.SCMPRRef, pr map[string]any) ports.SCMObservation {
 	checks := scmChecksFromGraphQL(pr)
 	failed := failedSCMChecks(checks)
-	ci := string(ciSummaryFromRollupState(pr))
+	ci := string(ciSummaryFromRollup(pr))
 	prURL := firstNonEmpty(str(pr["url"]), ref.URL)
 	review := string(reviewDecisionFromGraphQL(pr))
 	providerMergeable := str(pr["mergeable"])
@@ -414,22 +414,70 @@ func scmObservationFromGraphQL(ref ports.SCMPRRef, pr map[string]any) ports.SCMO
 	return obs
 }
 
-func ciSummaryFromRollupState(pr map[string]any) domain.CIState {
+// ciSummaryFromRollup resolves the batch observer's CI verdict from the rollup,
+// resolving each check NAME to its LATEST run before judging it.
+//
+// GitHub's own rollup `state` cannot be trusted on its own: it stays FAILURE
+// while a superseded run of a re-run check is still listed, which is how a PR
+// GitHub itself calls CLEAN and MERGEABLE read ci_failed on the board (#287).
+// The itemized contexts win when they are complete; the rollup state still
+// decides the two cases they cannot:
+//
+//   - no contexts at all - GitHub has not aggregated this commit's checks yet,
+//     and its PENDING there is what keeps a just-pushed head from reading
+//     unknown (the ci-checks-stuck-pending fix depends on this).
+//   - a PENDING rollup over an otherwise-passing set - a required check GitHub
+//     has not created yet is pending without appearing as a context, so a
+//     passing verdict would be premature.
+func ciSummaryFromRollup(pr map[string]any) domain.CIState {
 	roll := statusRollup(pr)
 	if roll == nil {
 		return domain.CIUnknown
 	}
-	return mapRollupState(str(roll["state"]))
+	rollupState := mapRollupState(str(roll["state"]))
+	contexts, _ := roll["contexts"].(map[string]any)
+	if contexts == nil {
+		return rollupState
+	}
+	if pageInfoHasMore(contexts) {
+		// The itemized set is truncated, so a missing failure is indistinguishable
+		// from a superseded one. FetchPullRequests pages the rest in before this
+		// runs (fetchRemainingCheckContexts); anything still paginated here has no
+		// better answer than the aggregate.
+		return rollupState
+	}
+	latest := latestCheckContexts(nodes(contexts["nodes"]))
+	if len(latest) == 0 {
+		return rollupState
+	}
+	state := ciStateFromCheckContexts(latest)
+	if state == domain.CIFailing {
+		return domain.CIFailing
+	}
+	if rollupState == domain.CIPending {
+		return domain.CIPending
+	}
+	if state == domain.CIUnknown {
+		// Contexts exist but none of them decides anything (all skipped, or
+		// completed with no conclusion). Nothing was learned, so leave the
+		// aggregate standing rather than overwrite it with a weaker verdict.
+		return rollupState
+	}
+	return state
 }
 
 func scmContextsPaginated(pr map[string]any) bool {
 	return pageInfoHasMore(statusContexts(pr))
 }
 
+// scmChecksFromGraphQL projects the rollup into one check row per CHECK NAME,
+// carrying its LATEST run. A superseded run must not survive here either: it is
+// what the PR panel lists, and what failedSCMChecks turns into the CI-failing
+// nudge and its log tail.
 func scmChecksFromGraphQL(pr map[string]any) []ports.SCMCheckObservation {
 	roll := statusRollup(pr)
 	contexts, _ := roll["contexts"].(map[string]any)
-	rawNodes := nodes(contexts["nodes"])
+	rawNodes := latestCheckContexts(nodes(contexts["nodes"]))
 	out := make([]ports.SCMCheckObservation, 0, len(rawNodes))
 	for _, n := range rawNodes {
 		typ := str(n["__typename"])

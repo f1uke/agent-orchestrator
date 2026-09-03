@@ -484,7 +484,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	// The role the prompt is written for is the role this session is ABOUT to
 	// have: dev's qa is created after it is materialized, and its prompt is
 	// already fixed by then (promptCrewRole).
-	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, promptCrewRole(project, cfg))
+	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, project, promptCrewRole(project, cfg))
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: prompt: %w", err)
 	}
@@ -756,7 +756,7 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if err := m.validateRuntimePrerequisites(); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
 	}
-	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, promptCrewRole(project, cfg))
+	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, project, promptCrewRole(project, cfg))
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: prompt: %w", id, err)
 	}
@@ -1698,7 +1698,13 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	}
 	// The system prompt is derived, not persisted: recompute it so a restored
 	// session keeps its standing instructions across the relaunch.
-	systemPrompt, err := m.buildSystemPrompt(ctx, rec.Kind, rec.ProjectID, rec.TaskSize, rec.CrewRole)
+	systemPrompt, err := m.buildSystemPrompt(ctx, systemPromptSpec{
+		Kind:      rec.Kind,
+		ProjectID: rec.ProjectID,
+		TaskSize:  rec.TaskSize,
+		CrewRole:  rec.CrewRole,
+		PRTarget:  rec.PRTarget,
+	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: system prompt: %w", rec.ID, err)
 	}
@@ -3029,25 +3035,51 @@ func buildPrompt(cfg ports.SpawnConfig) string {
 // buildSpawnTexts returns the user-facing prompt and the system prompt to
 // deliver separately to the agent. `role` is the crew role the prompt is written
 // FOR, which the caller derives with promptCrewRole rather than reading off the
-// config: a dev's crew does not exist yet at this point in a spawn. Orchestrator role instructions and worker
-// coordination hints are placed in the system prompt so they are treated as
-// standing instructions rather than part of the human's task request. A
-// promptless spawn delivers no user prompt at all: the agent simply lands at an
-// empty input box rather than receiving an auto-generated kickoff turn.
-func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, role domain.CrewRole) (prompt, systemPrompt string, err error) {
+// config: a dev's crew does not exist yet at this point in a spawn. `project`
+// supplies the defaults an omitted branch flag falls back to. Orchestrator role
+// instructions and worker coordination hints are placed in the system prompt so
+// they are treated as standing instructions rather than part of the human's task
+// request. A promptless spawn delivers no user prompt at all: the agent simply
+// lands at an empty input box rather than receiving an auto-generated kickoff turn.
+func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, project domain.ProjectRecord, role domain.CrewRole) (prompt, systemPrompt string, err error) {
 	prompt = buildPrompt(cfg)
-	systemPrompt, err = m.buildSystemPrompt(ctx, cfg.Kind, cfg.ProjectID, cfg.TaskSize, role)
+	// The prompt names the branch this session's PR merges into, so it resolves
+	// the target the same way the row does (an omitted --target is the base, which
+	// is the project default when that was omitted too) rather than rendering the
+	// raw flag and telling a worker with no --target to go and look one up.
+	_, prTarget := resolveSpawnBranches(cfg, project)
+	systemPrompt, err = m.buildSystemPrompt(ctx, systemPromptSpec{
+		Kind:      cfg.Kind,
+		ProjectID: cfg.ProjectID,
+		TaskSize:  cfg.TaskSize,
+		CrewRole:  role,
+		PRTarget:  prTarget,
+	})
 	if err != nil {
 		return "", "", err
 	}
 	return prompt, systemPrompt, nil
 }
 
+// systemPromptSpec is what the standing instructions are derived FROM: the
+// session facts that shape them, separate from the project state buildSystemPrompt
+// reads for itself. PRTarget is the session's own resolved `--target` (empty on
+// rows predating it, and on kinds that open no pull request).
+type systemPromptSpec struct {
+	Kind      domain.SessionKind
+	ProjectID domain.ProjectID
+	TaskSize  domain.TaskSize
+	CrewRole  domain.CrewRole
+	PRTarget  string
+}
+
 // buildSystemPrompt derives the standing instructions for a session of the
 // given kind from current store state. Restore recomputes them through here
 // rather than persisting them, so a restored worker points at the orchestrator
 // that is active now, not the one from its original spawn.
-func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, taskSize domain.TaskSize, crewRole domain.CrewRole) (string, error) {
+func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) (string, error) {
+	// Unpacked once so the assembly below reads as the layered composition it is.
+	kind, projectID, taskSize, crewRole := spec.Kind, spec.ProjectID, spec.TaskSize, spec.CrewRole
 	// Resolve the project's convention so the orchestrator/worker prompts carry the
 	// branch prefix and base branch. A missing project yields a zero config, which
 	// resolves to no convention (prompts unchanged from the pre-convention default).
@@ -3096,7 +3128,10 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 			// every session an ordinary spawn creates - renders nothing here and
 			// its prompt is byte-for-byte what it was.
 			prompts.CrewProtocol(string(crewRole)) +
-			workerGitConventionPrompt(conv, cfg.DefaultBranch)
+			workerGitConventionPrompt(conv, cfg.DefaultBranch) +
+			// dev owns the pull request, so only it is told how to open one. qa's
+			// branch above deliberately renders nothing here.
+			workerPRTargetPrompt(spec.PRTarget)
 		if ok {
 			base = workerOrchestratorPrompt(orchestratorID) + "\n\n" + body
 		} else {
@@ -3381,6 +3416,33 @@ This project follows gitflow: name branches by type (`+"`feature/…`"+`, `+"`bu
 	return fmt.Sprintf("\n\n"+`## Git branch convention
 
 This project prefixes branches with `+"`%[2]s`"+`: keep any branches you create under that prefix and open your pull requests against this session's recorded PR target (`+"`%[1]s`"+` unless spawn set a different `+"`--target`"+`).`, baseBranch, prefix)
+}
+
+// workerPRTargetPrompt returns the section that names THIS session's PR target
+// branch and the flag that aims a new pull request at it, or "" when the target
+// is unknown (rows created before AO recorded one; the convention section and the
+// worker floor still describe where to look).
+//
+// The generic instruction - "open the PR against this session's recorded PR
+// target" - was not enough, twice in 24 hours: `gh pr create` with no `--base`
+// silently defaults to the REPOSITORY's default branch, so a worker following its
+// nose opened against `main` instead of the project's `main-fluke`, CI ran the
+// format gate over ~1300 commits of unrelated drift, and the red run it left in
+// the rollup is what showed a green PR as ci_failed on the board (#282, #287).
+// Naming the branch, and the flag, at the moment the PR is opened is the fix; AO
+// deliberately does NOT retarget on its own, so a PR aimed somewhere unusual on
+// purpose is still the worker's (and the human's) call to make.
+func workerPRTargetPrompt(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	return fmt.Sprintf("\n\n"+`## Opening this session's pull request
+
+This session's PR target is `+"`%[1]s`"+`. Name it EXPLICITLY when you open the pull request:
+`+"`gh pr create --base %[1]s ...`"+` (GitHub) or `+"`glab mr create --target-branch %[1]s ...`"+` (GitLab)
+
+Neither tool defaults to your target: with no base they aim at the REPOSITORY's default branch, which merges your work into the wrong place and runs CI over every commit between the two branches. If you have already opened one against the wrong base, retarget it in place (`+"`gh pr edit <number> --base %[1]s`"+`, `+"`glab mr update <number> --target-branch %[1]s`"+`) rather than opening a second pull request. Targeting a different branch on purpose - stacking on a sibling, say - is still fine: say so in the pull request description.`, target)
 }
 
 // spawnEnv builds the runtime environment: the per-project env vars first, then
