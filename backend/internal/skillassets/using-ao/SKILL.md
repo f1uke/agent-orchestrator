@@ -15,6 +15,7 @@ trigger: Using the ao CLI in an AO workspace: spawning workers, managing session
 | `project` | Register, inspect, configure, or remove projects | Setting up or managing repos AO knows about | [commands/project.md](commands/project.md) |
 | `orchestrator` | List orchestrator sessions | Viewing which sessions are orchestrators | [commands/orchestrator.md](commands/orchestrator.md) |
 | `review` | Submit a reviewer result for a worker's PR | Completing a code review loop | [commands/review.md](commands/review.md) |
+| `crew` | The two agents on one task: ask for a qa when the change is done (`review`), add one by hand, start one, bracket a run | Handing your finished work to a tester; seeing who is on a task | [commands/crew.md](commands/crew.md) |
 | `send` | Send a message to a running agent session, or to your crewmate by role | Correcting or directing a live agent; telling dev/qa about a commit or a case | [commands/send.md](commands/send.md) |
 | `smoke` | Author a session's manual smoke-test checklist (whole list, or one case at a time), record a machine's result beside the user's, retire a case, or say nothing needs a person | Writing the checklist before opening a PR, or reading what the user played | [commands/smoke.md](commands/smoke.md) |
 | `sim` | List local iOS Simulators, capture a booted one's screen, claim one so other sessions keep off it | Checking how an iOS screen actually looks, or driving one (macOS) | [commands/sim.md](commands/sim.md) |

@@ -350,10 +350,10 @@ func TestSessionSetPreviewPersistsURL(t *testing.T) {
 }
 
 // TestSessionSetPreviewFromAgent_ReportsTheRuntimeTouch. `ao preview` pointing at
-// what dev built is the second half of the lazy-creation trigger: it says this
-// task has a running surface, which is what a qa is for. Reported only for a
-// preview that actually LANDED - an unknown session has no task to give a member
-// to.
+// what dev built is the second half of the runtime-touch observation: it says
+// this task has a running surface. It creates nobody - dev asks for its own qa -
+// and the fact is what the unreviewed-work warning is made of. Reported only for
+// a preview that actually LANDED.
 func TestSessionSetPreviewFromAgent_ReportsTheRuntimeTouch(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
@@ -366,8 +366,8 @@ func TestSessionSetPreviewFromAgent_ReportsTheRuntimeTouch(t *testing.T) {
 	if len(fc.runtimeTouches) != 1 {
 		t.Fatalf("setting a preview reported %d runtime touches, want 1", len(fc.runtimeTouches))
 	}
-	if got := fc.runtimeTouches[0]; got.id != "mer-1" || got.reason != domain.CrewJoinPreview {
-		t.Fatalf("reported %s/%q, want mer-1/%q", got.id, got.reason, domain.CrewJoinPreview)
+	if got := fc.runtimeTouches[0]; got.id != "mer-1" || got.touch != domain.RuntimeTouchPreview {
+		t.Fatalf("reported %s/%q, want mer-1/%q", got.id, got.touch, domain.RuntimeTouchPreview)
 	}
 
 	if _, err := svc.SetPreviewFromAgent(context.Background(), "ghost-1", "http://x"); err == nil {
@@ -382,7 +382,7 @@ func TestSessionSetPreviewFromAgent_ReportsTheRuntimeTouch(t *testing.T) {
 // callers and NEITHER means "this task has a runtime surface": the background
 // poller, which publishes an HTML file it found in the worktree that nobody
 // asked for, and `ao preview clear`, which is the opposite of a touch. Either
-// one creating a qa would be the trigger firing on its own.
+// one recording a touch would leave a task warned about an app it never drove.
 func TestSessionSetPreview_SaysNothingAboutACrew(t *testing.T) {
 	st := newFakeStore()
 	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer"}
@@ -481,11 +481,17 @@ type crewSeat struct {
 // crewTouch is one "this task has a runtime surface" report: which session, and
 // what it did.
 type crewTouch struct {
-	id     domain.SessionID
-	reason domain.CrewJoinReason
+	id    domain.SessionID
+	touch domain.RuntimeTouch
 }
 
 type fakeCommander struct {
+	// sentMessages is what was DELIVERED, parallel to sent. AO appends a line of
+	// its own to some messages, and the delivered text is the assertion.
+	sentMessages        []string
+	crewReviewRequested []domain.SessionID
+	crewReviewErr       error
+
 	// killOptions records what each Kill asked for: the discard opt-in has to
 	// reach the manager, not stop at the service.
 	killOptions     []sessionmanager.KillOptions
@@ -587,10 +593,24 @@ func (f *fakeCommander) AttachCrewMember(_ context.Context, devID domain.Session
 	return rec, nil
 }
 
-// noteRuntimeTouch records what the service reported and WHY, which is the whole
-// of the preview half of the lazy-creation trigger.
-func (f *fakeCommander) NoteRuntimeTouch(_ context.Context, id domain.SessionID, reason domain.CrewJoinReason) {
-	f.runtimeTouches = append(f.runtimeTouches, crewTouch{id: id, reason: reason})
+// RequestCrewReview is dev asking for its own qa. The fake records the caller,
+// not a resolved dev, because the caller IS the dev on this path.
+func (f *fakeCommander) RequestCrewReview(_ context.Context, from domain.SessionID, role domain.CrewRole) (domain.SessionRecord, error) {
+	f.crewReviewRequested = append(f.crewReviewRequested, from)
+	if f.crewReviewErr != nil {
+		return domain.SessionRecord{}, f.crewReviewErr
+	}
+	rec := domain.SessionRecord{ID: from + "-qa", ProjectID: "mer", Kind: domain.KindWorker}
+	rec.CrewID = from
+	rec.CrewRole = role
+	rec.CrewJoinReason = domain.CrewJoinReview
+	return rec, nil
+}
+
+// NoteRuntimeTouch records what the service reported and WHAT SURFACE, which is
+// the whole of the preview half of the runtime-touch observation.
+func (f *fakeCommander) NoteRuntimeTouch(_ context.Context, id domain.SessionID, touch domain.RuntimeTouch) {
+	f.runtimeTouches = append(f.runtimeTouches, crewTouch{id: id, touch: touch})
 }
 
 func (f *fakeCommander) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
@@ -634,6 +654,7 @@ func (f *fakeCommander) Send(_ context.Context, id domain.SessionID, message str
 		return ports.SendOutcome{}, f.sendErr
 	}
 	f.sent = append(f.sent, id)
+	f.sentMessages = append(f.sentMessages, message)
 	f.lastMessage = message
 	return f.sendOutcome, nil
 }

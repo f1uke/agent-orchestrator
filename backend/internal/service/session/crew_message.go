@@ -123,8 +123,8 @@ func (s *Service) SendToCrewmate(ctx context.Context, from domain.SessionID, in 
 	if handback.Incomplete() {
 		message += handbackNotice(handback)
 	}
-	outcome, err := s.SendFrom(ctx, peer.ID, message, CrewTalk{From: from, Subject: in.Subject})
-	return CrewSendResult{Peer: peer.ID, Outcome: outcome, Message: message, Handback: handback}, err
+	sent, err := s.SendFrom(ctx, peer.ID, message, CrewTalk{From: from, Subject: in.Subject})
+	return CrewSendResult{Peer: peer.ID, Outcome: sent.Outcome, Message: message, Handback: handback}, err
 }
 
 // handbackGap answers "did qa just end its run over cases nobody drove?".

@@ -120,17 +120,22 @@ type Store interface {
 	ListSimRecordingSteps(ctx context.Context, udid string) ([]domain.SimRecordingStep, error)
 }
 
-// CrewJoiner is told when a session takes a device, so a task that turns out to
-// have a runtime surface can gain the qa that verifies it (design §1.12.1). The
-// lease is the signal because the daemon already owns it: no new instrumentation,
-// and no judgement call routed through the agent that would be tested.
+// RuntimeWatcher is told when a session takes a device, so AO knows this task
+// has driven the app. The lease is the signal because the daemon already owns
+// it: no new instrumentation, and nothing routed through the agent's judgement.
 //
-// It is deliberately a one-way notification with no error: whether a crew forms
-// is not the simulator's business, and a claim must not fail because one did not.
-// nil is the ordinary configuration in tests and in every package that is not the
-// daemon.
-type CrewJoiner interface {
-	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, reason domain.CrewJoinReason)
+// It used to CREATE the task's qa on the spot, and that is exactly what it must
+// not do: taking the device is when dev starts driving the app, so the qa it
+// created went straight for the same device dev was using. dev asks for its own
+// qa now (`ao crew review`). What is left here is the fact, and the fact is what
+// the "you drove the app and nobody checked it" warning is made of.
+//
+// It is deliberately a one-way notification with no error: what AO does with the
+// fact is not the simulator's business, and a claim must not fail because a row
+// could not be written. nil is the ordinary configuration in tests and in every
+// package that is not the daemon.
+type RuntimeWatcher interface {
+	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, touch domain.RuntimeTouch)
 }
 
 // Service is the concrete Manager.
@@ -139,7 +144,7 @@ type Service struct {
 	clock    func() time.Time
 	tokens   func() string
 	recorder ScreenReader
-	crew     CrewJoiner
+	crew     RuntimeWatcher
 
 	// recMu guards pending and screens: the recorder's in-memory bookkeeping.
 	// See recording.go - both are keyed by hold token or udid, never touched
@@ -168,11 +173,11 @@ type Service struct {
 // Option customizes a Service.
 type Option func(*Service)
 
-// WithCrewJoiner wires the "this task has a runtime surface" observer. Left
-// unset, taking a lease notifies nobody and the service behaves exactly as it
-// did before crews were lazy.
-func WithCrewJoiner(crew CrewJoiner) Option {
-	return func(s *Service) { s.crew = crew }
+// WithRuntimeWatcher wires the "this task drove the app" observer. Left unset,
+// taking a lease notifies nobody and the service behaves exactly as it did
+// before the fact was recorded at all.
+func WithRuntimeWatcher(watcher RuntimeWatcher) Option {
+	return func(s *Service) { s.crew = watcher }
 }
 
 // WithClock overrides the service clock for tests.
@@ -411,11 +416,11 @@ func (s *Service) now() time.Time { return s.clock().UTC() }
 
 // noteRuntimeTouch reports a GRANTED lease - the moment this session started
 // driving a device, whether it claimed a free one or took one over. A renewal
-// reports too and costs nothing: the observer is idempotent, because a task that
-// already has its qa can never gain a second one.
+// reports too and costs nothing: the fact is written once at the store, so every
+// later claim is a no-op.
 func (s *Service) noteRuntimeTouch(ctx context.Context, sessionID domain.SessionID) {
 	if s.crew == nil {
 		return
 	}
-	s.crew.NoteRuntimeTouch(ctx, sessionID, domain.CrewJoinSim)
+	s.crew.NoteRuntimeTouch(ctx, sessionID, domain.RuntimeTouchSim)
 }

@@ -53,13 +53,13 @@ describe("CrewSwitcher — a solo task pays for one thing only", () => {
 		expect(document.querySelector("[data-crew-switcher-gate='review']")).toBeNull();
 	});
 
-	it("says AO will add a qa by itself — and, where it will not, that it will not", async () => {
+	it("says dev asks for its own qa — and, where it may not, that it may not", async () => {
 		// The `+ qa` button is the one place a human asks "why is there no qa
-		// here?", so it has to answer honestly. On an ordinary project AO forms the
-		// crew itself the first time the task drives the app; on a project with
-		// automatic crew turned off it never does, and a button that still worked
-		// while quietly promising something that never happens is the confusing
-		// half of this feature.
+		// here?", so it has to answer honestly. On an ordinary project dev asks for
+		// one itself once it thinks the change is done; on a project with automatic
+		// crew turned off no agent may ask, and a button that still worked while
+		// quietly promising something that never happens is the confusing half of
+		// this feature.
 		const user = userEvent.setup();
 
 		const { unmount } = render(
@@ -73,7 +73,7 @@ describe("CrewSwitcher — a solo task pays for one thing only", () => {
 		);
 		await user.hover(document.querySelector("[data-crew-switcher-add='qa']")!);
 		expect(await screen.findByRole("tooltip")).toHaveTextContent(
-			"AO adds one by itself the first time this task drives the app",
+			"dev asks for one itself when it believes the change is done",
 		);
 		unmount();
 
@@ -95,7 +95,7 @@ describe("CrewSwitcher — a solo task pays for one thing only", () => {
 		await user.hover(add);
 		const tip = await screen.findByRole("tooltip");
 		expect(tip).toHaveTextContent("automatic crew is off");
-		expect(tip).not.toHaveTextContent("AO adds one by itself the first time this task drives the app");
+		expect(tip).not.toHaveTextContent("dev asks for one itself when it believes the change is done");
 	});
 
 	it("renders NOTHING at all when the task cannot gain a member", () => {

@@ -95,6 +95,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				termination: session.termination,
 				crew: session.crew,
 				taskSize: session.taskSize,
+				runtimeTouch: session.runtimeTouch,
 			})),
 	}));
 }

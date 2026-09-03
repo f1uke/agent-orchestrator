@@ -20,7 +20,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
 FROM sessions WHERE id = ?
 `
 
@@ -76,6 +76,7 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.SleepReason,
 		&i.WokenBy,
 		&i.CrewJoinReason,
+		&i.RuntimeTouch,
 	)
 	return i, err
 }
@@ -87,10 +88,10 @@ INSERT INTO sessions (
     branch, workspace_path, runtime_handle_id, agent_session_id, prompt,
     preview_url, preview_revision, auto_nudge_comments, auto_resolve_on_reply,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
-    crew_id, crew_role, crew_join_reason, sleep_reason, woken_by,
+    crew_id, crew_role, crew_join_reason, runtime_touch, sleep_reason, woken_by,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
     created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -127,6 +128,7 @@ type InsertSessionParams struct {
 	CrewID                    string
 	CrewRole                  string
 	CrewJoinReason            string
+	RuntimeTouch              string
 	SleepReason               string
 	WokenBy                   string
 	TerminationSource         domain.TerminationSource
@@ -173,6 +175,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.CrewID,
 		arg.CrewRole,
 		arg.CrewJoinReason,
+		arg.RuntimeTouch,
 		arg.SleepReason,
 		arg.WokenBy,
 		arg.TerminationSource,
@@ -193,7 +196,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
 FROM sessions ORDER BY project_id, num
 `
 
@@ -255,6 +258,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.SleepReason,
 			&i.WokenBy,
 			&i.CrewJoinReason,
+			&i.RuntimeTouch,
 		); err != nil {
 			return nil, err
 		}
@@ -276,7 +280,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -338,6 +342,7 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.SleepReason,
 			&i.WokenBy,
 			&i.CrewJoinReason,
+			&i.RuntimeTouch,
 		); err != nil {
 			return nil, err
 		}
@@ -563,6 +568,34 @@ type SetSessionPreviewURLParams struct {
 // trigger and the desktop browser panel re-navigates / refreshes.
 func (q *Queries) SetSessionPreviewURL(ctx context.Context, arg SetSessionPreviewURLParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSessionPreviewURL, arg.PreviewURL, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setSessionRuntimeTouch = `-- name: SetSessionRuntimeTouch :execrows
+UPDATE sessions SET runtime_touch = ?, updated_at = ? WHERE id = ? AND runtime_touch = ''
+`
+
+type SetSessionRuntimeTouchParams struct {
+	RuntimeTouch string
+	UpdatedAt    time.Time
+	ID           domain.SessionID
+}
+
+// Sole writer of runtime_touch: what this task DID with a running app, recorded
+// the first time it takes the simulator lease or points `ao preview` at what it
+// built. Absent from UpdateSession's SET list for the same reason the crew
+// columns are - a full-row lifecycle write must never blank it.
+//
+// Written ONCE. The WHERE clause is what makes that a property of the data
+// rather than of the caller: a row that already carries a touch is not updated,
+// so a second claim is a no-op and the recorded surface stays the FIRST one.
+// Bumps updated_at so the sessions_cdc_update trigger redraws the card, which is
+// where the "drove the app, no qa" line lives.
+func (q *Queries) SetSessionRuntimeTouch(ctx context.Context, arg SetSessionRuntimeTouchParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionRuntimeTouch, arg.RuntimeTouch, arg.UpdatedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}

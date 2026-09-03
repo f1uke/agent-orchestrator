@@ -80,14 +80,16 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "crew",
 		Short: "See and start the two agents working one task",
-		Long: "A `standard` or `deep` task is worked by a CREW of two sessions sharing one\n" +
+		Long: "A `standard` or `deep` task MAY be worked by a CREW of two sessions sharing one\n" +
 			"worktree: dev owns the branch and the pull request, qa writes, runs and records\n" +
 			"the tests. BOTH run at the same time - starting one never stops the other - and\n" +
 			"`ao crew run` is what keeps a result honest when they overlap.\n\n" +
-			"A `mechanical` task has no crew: it is dev alone - and if that turns out to be\n" +
-			"the wrong call, `ao crew add` attaches a qa to it without disturbing the agent\n" +
-			"that is already working.",
+			"Every task starts as dev ALONE, and stays that way until somebody asks for the\n" +
+			"second agent. dev asks with `ao crew review`, when it believes the change is\n" +
+			"done and wants it checked; a person asks with `ao crew add`, which also works\n" +
+			"on a `mechanical` task, where dev may not ask at all.",
 	}
+	cmd.AddCommand(newCrewReviewCommand(ctx))
 	cmd.AddCommand(newCrewAddCommand(ctx))
 	cmd.AddCommand(newCrewWakeCommand(ctx))
 	cmd.AddCommand(newCrewRunCommand(ctx))
@@ -95,15 +97,67 @@ func newCrewCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
-// newCrewAddCommand is the MANUAL half of lazy creation, built as what it
+// newCrewReviewCommand is DEV asking for the qa that checks its work, and it is
+// the ordinary way a task gains one.
+//
+// It replaced an OBSERVATION: AO used to create a qa the first time dev touched
+// the app's runtime - a simulator claim, an `ao preview`. That fires when dev is
+// STARTING to drive the app, so the qa it created reached for the device dev was
+// still using and the two fought over it. Nothing about dev's tooling can say
+// "the work is done"; dev can.
+//
+// It takes NO argument. The task is the caller's own ($AO_SESSION_ID), which is
+// the one id dev always has, and the daemon reads everything else - the task's
+// size, the project's policy - from its own records. That is the same division
+// `ao crew add` follows: the CLI sends identity, never policy.
+func newCrewReviewCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "review",
+		Short: "dev: ask for a qa to check this task, now that you think it is done",
+		Long: "Puts a **qa** on this task - a second agent, in the same worktree, awake and\n" +
+			"working beside you from the moment it is created. Run it when you believe the\n" +
+			"change is finished and you want it verified: qa writes and runs what a machine\n" +
+			"can assert, records what it found, and hands the account back to you.\n\n" +
+			"Nothing else creates one. AO used to add a qa by itself the first time a task\n" +
+			"drove the app, and that fired when you were STARTING to drive it - so the qa\n" +
+			"turned up wanting the same device you were using. You are the only one who\n" +
+			"knows the work is ready, so you are the one who says so.\n\n" +
+			"It takes no argument: the task is this session's own. It is refused if the task\n" +
+			"already has a qa, if the task is finished (its pull request has merged), if it\n" +
+			"was tagged `--task-size mechanical` - one agent by design - or if this project\n" +
+			"is set to form no crews automatically. In each of those a PERSON can still add\n" +
+			"one with the `+ qa` control on the task in the app.\n\n" +
+			"Asking is one-way and once: a task has one qa, it keeps its id, and standing it\n" +
+			"down (`ao session kill`) is the undo.",
+		Example: `  ao crew review   # the change is done; have it checked`,
+		Args:    noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			self := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
+			if self == "" {
+				return usageError{errors.New("`ao crew review` is a session asking for its own qa, so it has to be run from inside an AO session; a person adds one with `ao crew add <session-id>`")}
+			}
+			var out crewAddResponse
+			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(self)+"/crew/review", nil, &out); err != nil {
+				return explainCrewAddRefusal(err)
+			}
+			_, printErr := fmt.Fprintf(cmd.OutOrStdout(),
+				"%s (%s) is on this task and working, in your worktree. It reads the diff against the base branch, not your conversation.\n"+
+					"From here the smoke checklist is SHARED: use `ao smoke add` / `edit --case <id>`, never `ao smoke set`, which would delete its cases.\n"+
+					"Message it by role: `ao send --crew %s --about <commit-sha> --message \"...\"`.\n",
+				out.Session.ID, crewRoleOf(out.Session), crewRoleOf(out.Session))
+			return printErr
+		},
+	}
+}
+
+// newCrewAddCommand is the PERSON's door, built as what it
 // actually is: a CREATE.
 //
-// No task has a qa until something creates one. AO creates one by OBSERVING dev -
-// the first `ao sim` claim, or an `ao preview` (session_manager/crew_join.go) -
-// and a task that never touches a runtime surface never gets one. This is how a
-// human overrules that: for a `mechanical` task, which is never eligible
-// automatically, or for a backend-only change with subtle behaviour somebody
-// wants a second pair of eyes on.
+// No task has a qa until somebody asks. dev asks with `ao crew review` when it
+// thinks the change is done; this is how a PERSON asks, and it is the wider door.
+// It works where dev's does not - a `mechanical` task, which is one agent by an
+// explicit decision only a person may undo - and it works when dev simply did not
+// think to ask.
 //
 // The member arrives WORKING, and dev keeps running straight through, so the task
 // gains an agent without losing a moment of the one it had.
@@ -115,9 +169,11 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 		Long: "Adds a second agent to an existing task, sharing its worktree. The new member\n" +
 			"STARTS WORKING straight away, beside the agent that is already there - attaching\n" +
 			"never interrupts it, and both members then run at the same time.\n\n" +
-			"AO adds a qa by itself the first time a task drives the app (`ao sim`, `ao\n" +
-			"preview`), so this is for the tasks it does not: a `mechanical` one, or a\n" +
-			"backend-only change you want a second pair of eyes on.\n\n" +
+			"dev asks for its own qa with `ao crew review` once it thinks the change is done.\n" +
+			"This is the wider door: it also works on a `mechanical` task, where dev may not\n" +
+			"ask, and on a task whose dev never got round to it. dev is TOLD when you use it,\n" +
+			"because a dev that was working alone is holding instructions that say the smoke\n" +
+			"checklist is its own.\n\n" +
 			"Name either member of the task; both resolve to the same crew. It is refused if\n" +
 			"the task already has that role, or if the task is finished (its pull request has\n" +
 			"merged, or its agent has been torn down).\n\n" +

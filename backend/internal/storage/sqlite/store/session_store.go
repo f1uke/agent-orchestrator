@@ -196,6 +196,32 @@ func (s *Store) SetSessionCrew(ctx context.Context, id, crewID domain.SessionID,
 	return rows > 0, nil
 }
 
+// SetSessionRuntimeTouch records what this task DID with a running app - it took
+// the simulator, or it pointed `ao preview` at what it built.
+//
+// It is WRITE-ONCE, and the query is what enforces that rather than the caller:
+// the UPDATE matches only a row whose runtime_touch is still empty, so ok=false
+// means either "no such session" or, far more often, "this task had already
+// driven the app". Both are ordinary and neither is an error - the only question
+// asked of this column is "ever".
+//
+// Bumping updated_at trips the sessions_cdc_update trigger so the card redraws:
+// a solo task that has driven the app says so under its crew strip, next to the
+// `+ qa` control that answers it.
+func (s *Store) SetSessionRuntimeTouch(ctx context.Context, id domain.SessionID, touch domain.RuntimeTouch, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionRuntimeTouch(ctx, gen.SetSessionRuntimeTouchParams{
+		ID:           id,
+		RuntimeTouch: string(touch),
+		UpdatedAt:    updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set runtime touch for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionIssueBinding sets a session's issue_id and display_name together —
 // the after-the-fact Jira link/unlink path. issue_id becomes "jira:<KEY>" (with
 // display_name = the issue title) on link, or "" on unlink (display_name is kept
@@ -394,6 +420,7 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		CrewID:             domain.SessionID(row.CrewID),
 		CrewRole:           domain.CrewRole(row.CrewRole),
 		CrewJoinReason:     domain.CrewJoinReason(row.CrewJoinReason),
+		RuntimeTouch:       domain.RuntimeTouch(row.RuntimeTouch),
 		Metadata: domain.SessionMetadata{
 			Branch:          row.Branch,
 			WorkspacePath:   row.WorkspacePath,
@@ -467,6 +494,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		CrewID:                    string(rec.CrewID),
 		CrewRole:                  string(rec.CrewRole),
 		CrewJoinReason:            string(rec.CrewJoinReason),
+		RuntimeTouch:              string(rec.RuntimeTouch),
 		TerminationSource:         rec.Termination.Source,
 		TerminationReason:         rec.Termination.Reason,
 		TerminationLastState:      rec.Termination.LastState,

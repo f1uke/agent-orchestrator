@@ -74,13 +74,17 @@ type SessionService interface {
 	// belongs to, and starts it. It is how a human adds a qa to a task AO did not
 	// give one to.
 	AttachCrewMember(ctx context.Context, id domain.SessionID, role domain.CrewRole, requestedBy domain.SessionID) (domain.Session, error)
+	// RequestCrewReview is dev asking for the qa that checks its work. The
+	// session in the path IS the caller, which is why the request carries no
+	// identity of its own.
+	RequestCrewReview(ctx context.Context, from domain.SessionID, role domain.CrewRole) (domain.Session, error)
 	// SendToCrewmate delivers a message addressed by ROLE - the only address a
 	// crew member can rely on, since a crew is formed after dev's runtime is
 	// already launched and dev's environment can never carry qa's id.
 	SendToCrewmate(ctx context.Context, from domain.SessionID, in sessionsvc.CrewSend) (sessionsvc.CrewSendResult, error)
 	// SendFrom is Send with the SENDER named, which is what lets the daemon cap a
 	// runaway conversation between two agents.
-	SendFrom(ctx context.Context, id domain.SessionID, message string, talk sessionsvc.CrewTalk) (ports.SendOutcome, error)
+	SendFrom(ctx context.Context, id domain.SessionID, message string, talk sessionsvc.CrewTalk) (sessionsvc.SendResult, error)
 	// WakeCrewMember hands the task's one awake slot to this member, standing the
 	// current holder down first.
 	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error)
@@ -184,6 +188,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/restart", c.restart)
 	r.Post("/sessions/{sessionId}/wake", c.wake)
 	r.Post("/sessions/{sessionId}/crew/members", c.crewAddMember)
+	r.Post("/sessions/{sessionId}/crew/review", c.crewRequestReview)
 	r.Post("/sessions/{sessionId}/crew/wake", c.crewWake)
 	r.Post("/sessions/{sessionId}/crew/send", c.crewSend)
 	r.Post("/sessions/{sessionId}/kill", c.kill)
@@ -922,10 +927,10 @@ func (c *SessionsController) wake(w http.ResponseWriter, r *http.Request) {
 // crewAddMember attaches a member to the task this session belongs to.
 //
 // It is a CREATE, and that is the whole point of it existing: no task has a qa
-// until something creates one. AO does it by observing dev (a simulator claim, an
-// `ao preview`); this route is how a HUMAN does it - for a `mechanical` task,
-// which is never eligible automatically, or for a backend-only one that never
-// trips the trigger.
+// until somebody asks. DEV asks on the /crew/review route below, once it thinks
+// the change is ready; this route is how a HUMAN asks, and it is the wider door -
+// it works on a `mechanical` task, which dev may never ask for, and on a task
+// whose dev never thought to.
 //
 // A HUMAN. `from` is what makes that word mean something: on a project with
 // automatic crew formation turned off, a call carrying a session id is refused
@@ -952,6 +957,31 @@ func (c *SessionsController) crewAddMember(w http.ResponseWriter, r *http.Reques
 		role = domain.CrewRoleQA
 	}
 	sess, err := c.Svc.AttachCrewMember(r.Context(), sessionID(r), role, in.From)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusCreated, AddCrewMemberResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
+}
+
+// crewRequestReview is DEV asking for the qa that checks its work, on the task
+// the path names - which IS the caller, not a task it points at.
+//
+// It is a separate route from /crew/members rather than a field on it, and that
+// is deliberate: the reason a member joined is durable data that the board's join
+// line and the member's own first turn are written from, so it must be decided by
+// the ROUTE the daemon served and never by a value on the wire the caller chose
+// (#253's rule - the CLI sends identity, never policy).
+//
+// It carries no body at all. Everything the decision needs - which task this is,
+// how it was sized, what the project allows - the daemon reads from the stored
+// record.
+func (c *SessionsController) crewRequestReview(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/review")
+		return
+	}
+	sess, err := c.Svc.RequestCrewReview(r.Context(), sessionID(r), domain.CrewRoleQA)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
@@ -1086,12 +1116,18 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message := domain.SanitizeControlChars(in.Message)
-	outcome, err := c.Svc.SendFrom(r.Context(), sessionID(r), message, sessionsvc.CrewTalk{From: in.From, Subject: in.About})
+	sent, err := c.Svc.SendFrom(r.Context(), sessionID(r), message, sessionsvc.CrewTalk{From: in.From, Subject: in.About})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
+	outcome := sent.Outcome
 	resp := SendSessionMessageResponse{OK: true, SessionID: sessionID(r), Message: message}
+	// The report went either way; this is how the sender is told what AO attached
+	// to it. See service/session/unreviewed.go for why it warns rather than refuses.
+	if sent.Unreviewed.Unreviewed() {
+		resp.Unreviewed = &UnreviewedRuntimeView{Touch: sent.Unreviewed.Touch}
+	}
 	if outcome.Queued {
 		// Held, not delivered: say so, and do NOT publish an activity event - the
 		// agent has not seen this message and the feed must not imply it has.
@@ -1471,7 +1507,7 @@ func sessionView(s domain.Session) SessionView {
 	if s.IsTodo {
 		prompt = s.Metadata.Prompt
 	}
-	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s), Crew: sessionCrew(s), TaskSize: s.TaskSize, CrewRun: s.CrewRun, CrewRunDiscards: s.CrewRunDiscards}
+	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s), Crew: sessionCrew(s), TaskSize: s.TaskSize, RuntimeTouch: s.RuntimeTouch, CrewRun: s.CrewRun, CrewRunDiscards: s.CrewRunDiscards}
 }
 
 // sessionCrew builds the curated crew wire object, or nil for a SOLO session.

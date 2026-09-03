@@ -714,25 +714,38 @@ func TestQADefault_JudgesBySufficiencyOfEvidenceNotByCategory(t *testing.T) {
 	}
 }
 
-// TestCrewProtocol_DevIsToldWhatSummonsItsQA. dev's system prompt is fixed when
-// its runtime launches, and under lazy creation the crew does not exist then -
-// so the block has to be true BOTH before and after the join, and it has to name
-// the event, because that event is something dev does.
-func TestCrewProtocol_DevIsToldWhatSummonsItsQA(t *testing.T) {
+// TestCrewProtocol_DevIsToldHowToSummonItsQA. dev's system prompt is fixed when
+// its runtime launches and the crew does not exist then, so the block has to be
+// true BOTH before and after the join. What changed is WHOSE act the join is:
+// AO used to create the qa by observing dev drive the app, and dev was told so as
+// something it could neither ask for nor avoid. dev asks now, and the prompt is
+// the only place it can learn the verb - no brief and no other block names it.
+func TestCrewProtocol_DevIsToldHowToSummonItsQA(t *testing.T) {
 	dev := CrewProtocol("dev")
 	for _, want := range []string{
 		"You are working this task ALONE right now",
-		"AO creates a qa the first time you touch the app's runtime",
-		"ao sim",
-		"ao preview",
-		// It is an observation, not a request: dev must not treat it as a decision
-		// about its own work, which is the incentive problem the design rejected.
-		"That is an observation, not a request",
+		// THE VERB, and the TIME - the time is the whole content of the change.
+		"`ao crew review`",
+		"When you believe the change is DONE",
+		// Nothing else creates one, and forgetting is not silent.
+		"Nothing else creates one",
+		"AO says so in the report you send",
 		// And what changes when it happens.
 		"both running at once",
 	} {
 		if !strings.Contains(dev, want) {
-			t.Fatalf("crew dev is not told what creates its qa: missing %q:\n%s", want, dev)
+			t.Fatalf("crew dev is not told how to get its qa: missing %q:\n%s", want, dev)
+		}
+	}
+	// The retired trigger must be GONE rather than merely contradicted later in
+	// the block: a dev that reads "AO creates one when you drive the app" will
+	// wait for it, and nothing is coming.
+	for _, gone := range []string{
+		"AO creates a qa the first time you touch",
+		"That is an observation, not a request",
+	} {
+		if strings.Contains(dev, gone) {
+			t.Fatalf("crew dev still carries the retired runtime-touch trigger: %q\n%s", gone, dev)
 		}
 	}
 	// qa's opening is unchanged in substance: by the time a qa exists, dev has
@@ -741,8 +754,8 @@ func TestCrewProtocol_DevIsToldWhatSummonsItsQA(t *testing.T) {
 	if !strings.Contains(qa, "you are both running right now") {
 		t.Fatalf("qa is not told its crewmate is live:\n%s", qa)
 	}
-	if strings.Contains(qa, "AO creates a qa the first time") {
-		t.Fatalf("qa was handed dev's account of how it got here:\n%s", qa)
+	if strings.Contains(qa, "ao crew review") {
+		t.Fatalf("qa was handed dev's verb for summoning a qa:\n%s", qa)
 	}
 }
 

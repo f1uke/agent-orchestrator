@@ -204,8 +204,8 @@ function AddRoleButton({ onAdd, pending }: { onAdd: () => void; pending?: boolea
 			</TooltipTrigger>
 			<TooltipContent>
 				Add a qa to this task. It starts working in the same worktree straight away, beside the agent that is already
-				there - nothing that is running now is interrupted. AO adds one by itself the first time this task drives the
-				app.
+				there - nothing that is running now is interrupted. dev asks for one itself when it believes the change is done;
+				this is how you add one before that, or on a task where dev may not ask.
 			</TooltipContent>
 		</Tooltip>
 	);
@@ -264,21 +264,30 @@ export function CrewStrip({
 }
 
 /**
- * The join line, under the strip: `qa joined · dev opened the simulator`.
+ * The line under the strip, which says one of two things.
  *
- * Quiet and passive - it is background, not a status - and it renders nothing at
- * all for a solo task or a member whose reason predates this. It sits BELOW the
- * chips rather than inside them because the strip is a row of live things and
- * this is a fact about the past; and because the card's column is narrow enough
- * that anything added to that row would push a chip off it.
+ * On a crew: `qa joined · dev asked for a review` - what changed the shape of a
+ * card somebody may have been looking at. On a solo task that DROVE THE APP:
+ * `dev drove the simulator · no qa was asked for`, which is the human's half of
+ * the warning that replaced AO's old habit of adding a qa by itself the moment it
+ * saw the app being driven. It sits directly beside the `+ qa` control that
+ * answers it.
+ *
+ * Quiet and passive either way - it is background, not a status - and it renders
+ * nothing at all for a task with nothing to explain. It sits BELOW the chips
+ * rather than inside them because the strip is a row of live things and this is a
+ * fact about the past; and because the card's column is narrow enough that
+ * anything added to that row would push a chip off it.
  */
 function CrewJoinLine({ task }: { task: Task }) {
 	const line = crewJoinLine(task);
 	if (!line) return null;
+	const joined = task.qa?.crew?.joinReason;
 	return (
 		<div
 			className="truncate px-[13px] pb-1.5 text-[10px] text-passive"
-			data-crew-join={task.qa?.crew?.joinReason}
+			data-crew-join={joined}
+			data-crew-unreviewed={joined ? undefined : task.dev.runtimeTouch}
 			onClick={(event) => event.stopPropagation()}
 		>
 			{line}

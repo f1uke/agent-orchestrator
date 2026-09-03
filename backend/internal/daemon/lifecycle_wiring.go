@@ -93,11 +93,12 @@ type sessionLifecycle interface {
 	RestoreAll(ctx context.Context) error
 	CloseIdleSessions(ctx context.Context) error
 	SyncOrchestratorWorkspaces(ctx context.Context) error
-	// NoteRuntimeTouch is the crew's lazy-creation trigger: the simulator service
-	// reports a granted lease and the manager decides whether that means this task
-	// has just earned a qa (crew_join.go). It is on this narrow interface because
-	// the daemon is where the two halves meet.
-	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, reason domain.CrewJoinReason)
+	// NoteRuntimeTouch records that a task drove the app: the simulator service
+	// reports a granted lease and the manager writes the fact onto the session's
+	// row (crew_join.go). It creates nobody - dev asks for its own qa - and the
+	// fact is what the unreviewed-work warning is made of. It is on this narrow
+	// interface because the daemon is where the two halves meet.
+	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, touch domain.RuntimeTouch)
 	// SetSimDeviceAssigner wires the per-session simulator reservation whose udid
 	// a spawned agent reads as AO_SIM_UDID / AO_SIM_DESTINATION. It is on this
 	// interface for the same reason NoteRuntimeTouch is: the manager is built

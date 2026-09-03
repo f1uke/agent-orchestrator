@@ -118,6 +118,10 @@ func (f *fakeSessionService) AttachCrewMember(context.Context, domain.SessionID,
 	return domain.Session{}, nil
 }
 
+func (f *fakeSessionService) RequestCrewReview(context.Context, domain.SessionID, domain.CrewRole) (domain.Session, error) {
+	return domain.Session{}, nil
+}
+
 func (f *fakeSessionService) Kill(context.Context, domain.SessionID, sessionsvc.KillInput) (sessionsvc.KillOutcome, error) {
 	return sessionsvc.KillOutcome{Terminated: true, Freed: true}, nil
 }
@@ -172,8 +176,8 @@ func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) (po
 	return ports.SendOutcome{}, nil
 }
 
-func (f *fakeSessionService) SendFrom(context.Context, domain.SessionID, string, sessionsvc.CrewTalk) (ports.SendOutcome, error) {
-	return ports.SendOutcome{}, nil
+func (f *fakeSessionService) SendFrom(context.Context, domain.SessionID, string, sessionsvc.CrewTalk) (sessionsvc.SendResult, error) {
+	return sessionsvc.SendResult{}, nil
 }
 
 func (f *fakeSessionService) SendToCrewmate(_ context.Context, from domain.SessionID, in sessionsvc.CrewSend) (sessionsvc.CrewSendResult, error) {

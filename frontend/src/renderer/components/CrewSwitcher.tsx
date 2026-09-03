@@ -76,10 +76,9 @@ export function CrewSwitcher({
 	 * Whether this project has AUTOMATIC crew formation turned off
 	 * (ProjectConfig.disableAutoCrew). It changes nothing about what the button
 	 * DOES — adding a qa by hand is exactly what such a project keeps — only what
-	 * the button PROMISES: the default copy tells a human AO will form the crew
-	 * itself the first time the task drives the app, which here it never will.
-	 * `+ qa` that works but never fires on its own is the confusing state this
-	 * answers.
+	 * the button PROMISES: the default copy says dev asks for its own qa when it
+	 * thinks the change is done, and on a crew-off project dev is refused, so
+	 * adding one is always the human's.
 	 */
 	autoCrewDisabled?: boolean;
 	/**
@@ -269,8 +268,8 @@ function AddRoleButton({
 				Add a qa to this task. It starts working in the same worktree straight away, beside the agent that is already
 				there - nothing that is running now is interrupted.{" "}
 				{autoCrewDisabled
-					? "AO never adds one here on its own: automatic crew is off in this project's settings, so adding one is always yours to do."
-					: "AO adds one by itself the first time this task drives the app."}
+					? "No agent may ask for one here: automatic crew is off in this project's settings, so adding one is always yours to do."
+					: "dev asks for one itself when it believes the change is done; this is how you add one before that."}
 			</TooltipContent>
 		</Tooltip>
 	);

@@ -401,9 +401,24 @@ export type WorkspaceSession = {
 	 * shows it: the choice is visible next to its consequence.
 	 */
 	taskSize?: TaskSize;
+	/**
+	 * What this session DID with the running app: it took the simulator lease, or
+	 * it pointed `ao preview` at what it built. Absent when it never drove one,
+	 * which is most sessions.
+	 *
+	 * The card reads it for ONE thing: a SOLO task that drove the app has been
+	 * checked by nobody but the agent that wrote it. AO used to put a qa on that
+	 * task by itself and deliberately no longer does - dev asks, when it thinks
+	 * the work is done - so this is the human's half of the warning that replaced
+	 * the trigger, rendered next to the `+ qa` control that answers it.
+	 */
+	runtimeTouch?: RuntimeTouch;
 };
 
 export type TaskSize = "mechanical" | "standard" | "deep";
+
+/** A runtime surface a session drove: the simulator, or an `ao preview`. */
+export type RuntimeTouch = "sim" | "preview";
 
 export type CrewRole = "dev" | "qa";
 
@@ -424,13 +439,16 @@ export type SessionCrew = {
 	 * task that changed shape.
 	 *
 	 * A crew is not decided at spawn: a task starts as dev alone and gains a qa
-	 * when dev first touches the app's runtime - taking the simulator lease, or
-	 * pointing `ao preview` at it - or when a human asks. A task with nothing to
-	 * exercise never gains one at all.
+	 * when DEV asks for one (`review`), once it believes the change is done, or
+	 * when a person does (`manual`). A task nobody asks about never gains one.
+	 *
+	 * `sim` and `preview` are RETIRED: AO used to create a qa the moment dev drove
+	 * the app, which put a second agent on the device dev was still using. Nothing
+	 * writes them any more; rows created before the change still carry them.
 	 *
 	 * Absent on dev, and on a member created before AO recorded this.
 	 */
-	joinReason?: "sim" | "preview" | "manual";
+	joinReason?: "sim" | "preview" | "manual" | "review";
 };
 
 /**

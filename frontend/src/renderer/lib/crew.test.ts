@@ -597,14 +597,9 @@ describe("taskLane — a task with NO qa is a pass, not a pending", () => {
 });
 
 describe("crewJoinLine", () => {
-	it("names what dev did, so a card that changed shape explains itself", () => {
-		const { dev, qa } = crew({}, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "sim" } });
-		expect(crewJoinLine({ dev, qa, members: [dev, qa], isCrew: true })).toBe("qa joined · dev opened the simulator");
-	});
-
-	it("distinguishes a preview from a device", () => {
-		const { dev, qa } = crew({}, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "preview" } });
-		expect(crewJoinLine({ dev, qa, members: [dev, qa], isCrew: true })).toBe("qa joined · dev opened a preview");
+	it("names dev's own request, which is how a task ordinarily gains a qa", () => {
+		const { dev, qa } = crew({}, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "review" } });
+		expect(crewJoinLine({ dev, qa, members: [dev, qa], isCrew: true })).toBe("qa joined · dev asked for a review");
 	});
 
 	it("names the person when a person asked", () => {
@@ -612,7 +607,44 @@ describe("crewJoinLine", () => {
 		expect(crewJoinLine({ dev, qa, members: [dev, qa], isCrew: true })).toBe("qa joined · you added it");
 	});
 
-	it("says nothing for a solo task, or for a member whose reason was never recorded", () => {
+	it("still reads the two retired reasons, because rows still carry them", () => {
+		// AO used to create a qa the moment dev drove the app. Nothing writes these
+		// any more, and a member created before the change must not go blank.
+		const s = crew({}, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "sim" } });
+		expect(crewJoinLine({ dev: s.dev, qa: s.qa, members: [s.dev, s.qa], isCrew: true })).toBe(
+			"qa joined · dev opened the simulator",
+		);
+		const p = crew({}, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "preview" } });
+		expect(crewJoinLine({ dev: p.dev, qa: p.qa, members: [p.dev, p.qa], isCrew: true })).toBe(
+			"qa joined · dev opened a preview",
+		);
+	});
+
+	// THE WARNING THAT REPLACED THE TRIGGER. A solo task that drove the app has
+	// been checked by nobody but the agent that wrote it. AO used to add a qa here
+	// by itself; it deliberately no longer does, so the card is where a human
+	// finds out - right beside the `+ qa` control that answers it.
+	it("says so when a solo task drove the app and nobody asked for a qa", () => {
+		const dev = session("demo-1", { runtimeTouch: "sim" });
+		expect(crewJoinLine({ dev, members: [dev], isCrew: false })).toBe("dev drove the simulator · no qa was asked for");
+
+		const previewed = session("demo-1", { runtimeTouch: "preview" });
+		expect(crewJoinLine({ dev: previewed, members: [previewed], isCrew: false })).toBe(
+			"dev opened a preview · no qa was asked for",
+		);
+	});
+
+	// And it stops the moment the task has a qa: the join line takes over, and a
+	// task that was checked is not a task nobody looked at.
+	it("says nothing about driving the app once the task has a qa", () => {
+		const { dev, qa } = crew(
+			{ runtimeTouch: "sim" },
+			{ crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "review" } },
+		);
+		expect(crewJoinLine({ dev, qa, members: [dev, qa], isCrew: true })).toBe("qa joined · dev asked for a review");
+	});
+
+	it("says nothing for a solo task that drove nothing, or a member with no recorded reason", () => {
 		const dev = session("demo-1");
 		expect(crewJoinLine({ dev, members: [dev], isCrew: false })).toBeUndefined();
 		const pair = crew();

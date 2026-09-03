@@ -238,6 +238,17 @@ type SessionView struct {
 	// dev + qa), so the board can say which choice was made on a card whose crew
 	// it is already drawing. Empty for a row that predates the field.
 	TaskSize domain.TaskSize `json:"taskSize,omitempty" enum:"mechanical,standard,deep"`
+	// RuntimeTouch is what this session DID with the running app: it took the
+	// simulator lease, or it pointed `ao preview` at what it built. Omitted for
+	// every session that never drove one - which is most of them, and is why the
+	// card says nothing rather than saying "no".
+	//
+	// It is on the wire for ONE reading, and only the card assembles it: a SOLO
+	// task that drove the app has been checked by nobody but the agent that wrote
+	// it. AO used to create a qa on this event and no longer does (dev asks, with
+	// `ao crew review`), so this is the human's half of the warning that replaced
+	// the trigger - rendered where the `+ qa` control that answers it already is.
+	RuntimeTouch domain.RuntimeTouch `json:"runtimeTouch,omitempty" enum:"sim,preview" description:"What this session did with the running app: took the simulator lease, or pointed ao preview at it. Absent when it never drove one."`
 }
 
 // SessionCrew is the wire shape of "these sessions are one task": the crew id
@@ -626,6 +637,18 @@ type SendSessionMessageResponse struct {
 	// delivered either way - see handbackNotice for why this warns rather than
 	// refuses - so this is how the sender is told what it left behind.
 	Handback *HandbackCompletenessView `json:"handback,omitempty"`
+	// Unreviewed is present only when a WORKER reported to an orchestrator on a
+	// task that drove the app and never had a qa. The message is delivered either
+	// way, carrying the same fact as an [AO] line - see
+	// service/session/unreviewed.go for why this warns rather than refuses - so
+	// this is how the sender is told what went out with its report.
+	Unreviewed *UnreviewedRuntimeView `json:"unreviewed,omitempty"`
+}
+
+// UnreviewedRuntimeView says what a task DID with the app while never having a
+// qa on it: it took the simulator, or it opened a preview.
+type UnreviewedRuntimeView struct {
+	Touch domain.RuntimeTouch `json:"touch" enum:"sim,preview" description:"What this task did with the running app: took the simulator lease, or pointed ao preview at it."`
 }
 
 // HandbackCompletenessView is what the task's smoke checklist said at the moment

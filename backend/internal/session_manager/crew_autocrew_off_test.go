@@ -110,29 +110,49 @@ func TestBuildSystemPrompt_CrewOffDoesNotStripCeremony(t *testing.T) {
 	}
 }
 
-// THE TRIGGER IS OFF. dev claiming the simulator is what creates a qa on an
-// ordinary project; on a crew-off one it must create nothing and say nothing -
-// the touch is a command about something else, and failing it would be worse
-// than forming no crew.
-func TestNoteRuntimeTouch_CrewOffProjectCreatesNoQA(t *testing.T) {
-	for _, reason := range []domain.CrewJoinReason{domain.CrewJoinSim, domain.CrewJoinPreview} {
-		t.Run(string(reason), func(t *testing.T) {
-			m, st, rt, _ := crewOffManager(t)
-			dev := standardDev(t, m, st)
-			if rt.aliveByHandle == nil {
-				rt.aliveByHandle = map[string]bool{}
-			}
-			rt.aliveByHandle[dev.Metadata.RuntimeHandleID] = true
+// DEV MAY NOT ASK HERE. Asking for a qa is an AGENT deciding a task needs a
+// second one, which is precisely what this project switched off - so the switch
+// answers dev's own request as well as it ever answered the observation that
+// preceded it.
+func TestRequestCrewReview_CrewOffProjectCreatesNoQA(t *testing.T) {
+	m, st, rt, _ := crewOffManager(t)
+	dev := standardDev(t, m, st)
+	if rt.aliveByHandle == nil {
+		rt.aliveByHandle = map[string]bool{}
+	}
+	rt.aliveByHandle[dev.Metadata.RuntimeHandleID] = true
 
-			m.NoteRuntimeTouch(ctx, dev.ID, reason)
+	_, err := m.RequestCrewReview(ctx, dev.ID, domain.CrewRoleQA)
+	if !errors.Is(err, ErrCrewAutoFormationOff) {
+		t.Fatalf("dev asked for a qa on a crew-off project: err = %v, want ErrCrewAutoFormationOff", err)
+	}
+	if len(st.sessions) != 1 {
+		t.Fatalf("a refused request produced %d rows, want 1", len(st.sessions))
+	}
+	if st.sessions[dev.ID].InCrew() {
+		t.Fatal("a refused request put dev in a crew on a crew-off project")
+	}
+}
 
-			if len(st.sessions) != 1 {
-				t.Fatalf("a %s touch on a crew-off project produced %d rows, want 1", reason, len(st.sessions))
-			}
-			if st.sessions[dev.ID].InCrew() {
-				t.Fatalf("a %s touch put dev in a crew on a crew-off project", reason)
-			}
-		})
+// AND DEV IS NEVER TOLD THE VERB HERE, which is the half that keeps the refusal
+// above from ever being reached. crewEligible gates the prompt and the request
+// from one place, so the two cannot disagree.
+func TestBuildSystemPrompt_CrewOffDevIsNotTaughtTheVerb(t *testing.T) {
+	m, _, _, _ := crewOffManager(t)
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{
+		Kind:      domain.KindWorker,
+		ProjectID: "mer",
+		TaskSize:  domain.TaskSizeStandard,
+		CrewRole: promptCrewRole(
+			domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{DisableAutoCrew: true}},
+			ports.SpawnConfig{Kind: domain.KindWorker, TaskSize: domain.TaskSizeStandard},
+		),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "ao crew review") {
+		t.Fatalf("a crew-off project taught dev a verb it would be refused:\n%s", got)
 	}
 }
 
@@ -151,16 +171,16 @@ func TestAddCrewMember_StillWorksOnACrewOffProject(t *testing.T) {
 	if qa.CrewRole != domain.CrewRoleQA || qa.CrewID != dev.ID {
 		t.Fatalf("manual qa row role=%q crew=%q, want qa/%s", qa.CrewRole, qa.CrewID, dev.ID)
 	}
-	// `manual` is the reason the flag must NOT block; sim/preview are the two it
-	// does.
+	// `manual` is the reason the flag must NOT block; `review` - dev asking - is
+	// the one it does.
 	if qa.CrewJoinReason != domain.CrewJoinManual {
 		t.Fatalf("manual qa join reason = %q, want %q", qa.CrewJoinReason, domain.CrewJoinManual)
 	}
 }
 
-// THE FLAG IS PER PROJECT. A second project on the same daemon keeps forming
-// crews, so turning it off is never a global switch by accident.
-func TestNoteRuntimeTouch_OtherProjectsStillFormCrews(t *testing.T) {
+// THE FLAG IS PER PROJECT. A second project on the same daemon still lets its
+// devs ask, so turning it off is never a global switch by accident.
+func TestRequestCrewReview_OtherProjectsStillFormCrews(t *testing.T) {
 	m, st, rt, _ := crewOffManager(t)
 	st.projects["other"] = domain.ProjectRecord{ID: "other", Config: testRoleAgents()}
 
@@ -175,7 +195,9 @@ func TestNoteRuntimeTouch_OtherProjectsStillFormCrews(t *testing.T) {
 	}
 	rt.aliveByHandle[dev.Metadata.RuntimeHandleID] = true
 
-	m.NoteRuntimeTouch(ctx, dev.ID, domain.CrewJoinSim)
+	if _, err := m.RequestCrewReview(ctx, dev.ID, domain.CrewRoleQA); err != nil {
+		t.Fatalf("RequestCrewReview on another project: %v", err)
+	}
 
 	if !st.sessions[dev.ID].InCrew() {
 		t.Fatal("turning automatic crew off for one project turned it off for another")

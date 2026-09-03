@@ -182,6 +182,17 @@ type SessionRecord struct {
 	// reaches the board through the curated crew wire object, which is what turns
 	// it into the join line under the crew strip.
 	CrewJoinReason CrewJoinReason `json:"-"`
+	// RuntimeTouch is what this task DID with a running app: it took the
+	// simulator, or it pointed `ao preview` at what it built. Recorded on the
+	// session that did it (dev, or a solo worker), written once by the first
+	// touch and never toggled.
+	//
+	// It creates nobody. It is the input to one question - did this task drive
+	// the app and then finish without ever asking for a qa? - which is the
+	// warning that replaced the trigger this fact used to be. Not part of the API
+	// read model directly: it reaches the board as a derived boolean on the
+	// curated session wire object.
+	RuntimeTouch RuntimeTouch `json:"-"`
 	// TokenUsage holds the per-session token totals summed from the harness
 	// transcript (claude-code only; all-zero for agents without a parseable
 	// transcript). Durable measured facts; the raw + cost-weighted totals and the

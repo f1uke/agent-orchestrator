@@ -589,6 +589,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/crew/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** dev asks for the qa that checks its work. The path names the CALLER, and there is no body */
+        post: operations["requestCrewReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/crew/runs": {
         parameters: {
             query?: never;
@@ -2188,6 +2205,11 @@ export interface components {
             prs: components["schemas"]["SessionPRFacts"][];
             queuedMessages?: number;
             queuedMessagesFailed?: number;
+            /**
+             * @description What this session did with the running app: took the simulator lease, or pointed ao preview at it. Absent when it never drove one.
+             * @enum {string}
+             */
+            runtimeTouch?: "sim" | "preview";
             /** @enum {string} */
             sleepReason?: "idle" | "turn" | "merged" | "undelivered";
             /** @enum {string} */
@@ -2283,6 +2305,13 @@ export interface components {
         ControllersUncommittedFileDTO: {
             path: string;
             status: string;
+        };
+        ControllersUnreviewedRuntimeView: {
+            /**
+             * @description What this task did with the running app: took the simulator lease, or pointed ao preview at it.
+             * @enum {string}
+             */
+            touch: "sim" | "preview";
         };
         ControllersWorkspaceResolveCandidateDTO: {
             inWorkspace: boolean;
@@ -2898,6 +2927,7 @@ export interface components {
             /** Format: date-time */
             queuedAt?: null | string;
             sessionId: string;
+            unreviewed?: components["schemas"]["ControllersUnreviewedRuntimeView"];
         };
         SessionCrew: {
             hasRun: boolean;
@@ -5636,6 +5666,65 @@ export interface operations {
                 "application/json": components["schemas"]["ControllersAddCrewMemberRequest"];
             };
         };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersAddCrewMemberResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    requestCrewReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Created */
             201: {

@@ -248,6 +248,7 @@ type Session struct {
 	SleepReason               string
 	WokenBy                   string
 	CrewJoinReason            string
+	RuntimeTouch              string
 }
 
 type SessionMessageQueue struct {

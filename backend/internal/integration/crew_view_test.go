@@ -35,8 +35,8 @@ func setupCrew(t *testing.T, s *crewStack) (dev, qa domain.SessionRecord) {
 }
 
 // setupCrewNeverStarted produces the one state a crew member can still be in
-// without ever having run: the trigger created it and its LAUNCH failed. Starting
-// is best effort - the member is on the task, visible and openable - and this is
+// without ever having run: dev asked for it and its LAUNCH failed. Starting is
+// best effort - the member is on the task, visible and openable - and this is
 // the state the glance rule below is about.
 func setupCrewNeverStarted(t *testing.T, s *crewStack) (dev, qa domain.SessionRecord) {
 	t.Helper()
@@ -56,13 +56,22 @@ func setupCrewWithStartFailure(t *testing.T, s *crewStack, startErr error) (dev,
 	if _, ok, _ := s.qaOf(ctx, devRec.ID); ok {
 		t.Fatal("a standard spawn created a qa; it must start as dev alone")
 	}
+	// dev drives the app while it works, and that alone creates NOBODY: the
+	// trigger this replaced fired here, which is why a qa used to turn up wanting
+	// the device dev was still on.
+	s.mgr.NoteRuntimeTouch(ctx, devRec.ID, domain.RuntimeTouchSim)
+	if _, ok, _ := s.qaOf(ctx, devRec.ID); ok {
+		t.Fatal("driving the app created a qa; only a request may")
+	}
 	// createErr fails exactly the next Create, which is the new member's launch.
 	s.rt.createErr = startErr
-	s.mgr.NoteRuntimeTouch(ctx, devRec.ID, domain.CrewJoinSim)
+	if _, err := s.mgr.RequestCrewReview(ctx, devRec.ID, domain.CrewRoleQA); err != nil {
+		t.Fatalf("RequestCrewReview: %v", err)
+	}
 
 	qaRec, ok, err := s.qaOf(ctx, devRec.ID)
 	if err != nil || !ok {
-		t.Fatalf("touching the runtime created no qa: %v", err)
+		t.Fatalf("dev asked for a review and got no qa: %v", err)
 	}
 	if startErr == nil && qaRec.IsSuspended {
 		t.Fatal("qa was created asleep; there is nothing left to start it")

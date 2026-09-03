@@ -98,16 +98,23 @@ func (r SessionRecord) Awake() bool {
 // is why the board falls back to saying nothing rather than guessing.
 type CrewJoinReason string
 
-// The three ways a member joins a task.
+// The ways a member joins a task.
 const (
-	// CrewJoinSim: dev took the simulator lease. `ao sim claim`, or any gesture,
-	// which cannot touch a device without one.
+	// CrewJoinSim: LEGACY. dev took the simulator lease and AO created a qa on
+	// the spot. Nothing writes this any more - taking a device is the moment dev
+	// STARTS driving the app, not the moment it is finished, so two agents ended
+	// up reaching for one device at once. Kept because rows carry it.
 	CrewJoinSim CrewJoinReason = "sim"
-	// CrewJoinPreview: dev pointed `ao preview` at the app, moving the session's
-	// preview_url / preview_revision.
+	// CrewJoinPreview: LEGACY, and retired with CrewJoinSim for the same reason.
+	// dev pointed `ao preview` at the app and AO created a qa on the spot.
 	CrewJoinPreview CrewJoinReason = "preview"
 	// CrewJoinManual: a human asked for it - `ao crew add`, or the card's `+ qa`.
 	CrewJoinManual CrewJoinReason = "manual"
+	// CrewJoinReview: DEV asked for it - `ao crew review`, once dev believes the
+	// change is done and wants it checked. This is the ordinary way a task gains
+	// a qa: the one member that knows whether the work is finished is the one
+	// that says so, which is what the two retired reasons above could not do.
+	CrewJoinReview CrewJoinReason = "review"
 )
 
 // Valid reports whether r is a recorded reason. The empty string is NOT valid:
@@ -115,14 +122,93 @@ const (
 // carries.
 func (r CrewJoinReason) Valid() bool {
 	switch r {
-	case CrewJoinSim, CrewJoinPreview, CrewJoinManual:
+	case CrewJoinSim, CrewJoinPreview, CrewJoinManual, CrewJoinReview:
 		return true
 	}
 	return false
 }
 
-// Automatic reports whether AO created this member by OBSERVING dev, rather than
-// because a person asked for it.
-func (r CrewJoinReason) Automatic() bool {
-	return r == CrewJoinSim || r == CrewJoinPreview
+// RuntimeTouch is what a task DID with a running app, recorded on dev's own row.
+//
+// It used to be a trigger: the first one created the task's qa. It is now only a
+// FACT, and the change is the point rather than a refinement. A task touches a
+// runtime surface when dev STARTS driving the app - it installs a build, it takes
+// the device, it points a preview at what it has so far - which is the opposite
+// end of the work from "this is ready for somebody to check". Creating a qa there
+// put a second agent on the same device while dev was still using it, and the two
+// fought over it. dev now calls qa itself (`ao crew review`, CrewJoinReview).
+//
+// What the fact is FOR is the warning that replaces the trigger: a task that drove
+// the app and finished without ever asking for a qa is a task nobody but its
+// author looked at, and AO says so rather than letting it pass in silence. A task
+// that never drove one - a backend-only change - is not nudged and costs nothing.
+//
+// It is monotonic and written once: the first touch records it and later ones are
+// no-ops, because "has this task ever driven the app" is the only question asked
+// of it.
+type RuntimeTouch string
+
+// The two runtime surfaces AO can observe a session driving.
+const (
+	// RuntimeTouchSim: the session was GRANTED the simulator lease. Gestures
+	// cannot reach a device without one, so the claim covers every `ao sim
+	// tap|drag|type`; the read-only commands never take it and never count.
+	RuntimeTouchSim RuntimeTouch = "sim"
+	// RuntimeTouchPreview: the AGENT pointed `ao preview` at the app. The
+	// background poller and `ao preview clear` go through a different service
+	// method on purpose and do not count.
+	RuntimeTouchPreview RuntimeTouch = "preview"
+)
+
+// Valid reports whether t names a runtime surface. The empty string is NOT valid:
+// it is "this task has never driven the app", which is the default for every row.
+func (t RuntimeTouch) Valid() bool {
+	switch t {
+	case RuntimeTouchSim, RuntimeTouchPreview:
+		return true
+	}
+	return false
+}
+
+// Describe says what the touch WAS, in the voice the board and the warning both
+// use. An unrecorded touch describes nothing.
+func (t RuntimeTouch) Describe() string {
+	switch t {
+	case RuntimeTouchSim:
+		return "took the simulator"
+	case RuntimeTouchPreview:
+		return "opened a preview of the app"
+	}
+	return ""
+}
+
+// CrewEligible answers ONE question, and every crew decision that is not "who is
+// asking" reduces to it: may this task have a qa at all?
+//
+// It is knowable before a session is materialized - what kind of session it is,
+// how big the task was called, what kind of project it lives in - which is why it
+// lives here rather than being derived from a live record. Three consumers have
+// to agree on it or they contradict each other in ways nobody notices:
+//
+//   - dev's SYSTEM PROMPT, composed at spawn, which is where dev learns that
+//     `ao crew review` exists at all. Teach the verb on a task that would refuse
+//     it and dev spends a turn being told no;
+//   - the REQUEST itself, which refuses when this is false;
+//   - the WARNING about a task that drove the app and never had a qa, which must
+//     not nag a task that was never allowed one.
+//
+// It deliberately does NOT gate the human's door (`ao crew add`, the card's
+// `+ qa`). A person may put a qa on a mechanical task or on a crew-off project:
+// those settings say what AO and its agents may decide, not what a person may.
+func CrewEligible(project ProjectRecord, kind SessionKind, size TaskSize) bool {
+	if kind != KindWorker {
+		return false
+	}
+	if !size.WantsCrew() {
+		return false
+	}
+	if project.Config.DisableAutoCrew {
+		return false
+	}
+	return project.Kind.WithDefault() != ProjectKindWorkspace
 }
