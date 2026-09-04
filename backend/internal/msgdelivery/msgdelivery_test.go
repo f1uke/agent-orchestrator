@@ -65,6 +65,69 @@ func TestRecordReachesTheCollectorAndTheJournal(t *testing.T) {
 	}
 }
 
+// ---- the per-send wire ----------------------------------------------------
+
+func TestWireRoundTripsAndDefaultsToAskingForNothing(t *testing.T) {
+	ctx := msgdelivery.WithWire(context.Background(), msgdelivery.WirePane)
+	if got := msgdelivery.WireOf(ctx); got != msgdelivery.WirePane {
+		t.Fatalf("WireOf = %q, want the wire that was demanded", got)
+	}
+	if got := msgdelivery.WireOf(context.Background()); got != msgdelivery.WireAuto {
+		t.Fatalf("WireOf on a bare context = %q, want the default", got)
+	}
+	// "Asked for the default" and "asked for nothing" are the same thing, and
+	// must not become two.
+	if got := msgdelivery.WireOf(msgdelivery.WithWire(context.Background(), msgdelivery.WireAuto)); got != msgdelivery.WireAuto {
+		t.Fatalf("WireOf after demanding the default = %q, want the default", got)
+	}
+}
+
+// Valid is what the API refuses an unknown value with: a wire nobody can honour
+// must not be accepted and then quietly ignored.
+func TestOnlyTheTwoOverridesAreValidWires(t *testing.T) {
+	for _, w := range []msgdelivery.Wire{msgdelivery.WireAuto, msgdelivery.WirePane, msgdelivery.WireSocket} {
+		if !w.Valid() {
+			t.Fatalf("%q must be a wire a caller can ask for", w)
+		}
+	}
+	for _, w := range []msgdelivery.Wire{"PANE", "tmux", "none", "socket "} {
+		if w.Valid() {
+			t.Fatalf("%q was accepted; only pane and socket are honourable", w)
+		}
+	}
+}
+
+// The flag name travels into the transport's refusal, so a reader knows which
+// control to change. The default has no flag: nobody turned anything.
+func TestWireNamesTheFlagThatAsksForIt(t *testing.T) {
+	if got := msgdelivery.WirePane.Flag(); got != "--pane-only" {
+		t.Fatalf("WirePane.Flag() = %q", got)
+	}
+	if got := msgdelivery.WireSocket.Flag(); got != "--socket-only" {
+		t.Fatalf("WireSocket.Flag() = %q", got)
+	}
+	if got := msgdelivery.WireAuto.Flag(); got != "" {
+		t.Fatalf("WireAuto.Flag() = %q, want nothing: no control was turned", got)
+	}
+}
+
+// A forced delivery has to be tellable from an ordinary one in the record - a
+// pane line means something different when somebody asked for the pane.
+func TestTheRecordKeepsTheWireTheCallerDemanded(t *testing.T) {
+	journal := &fakeJournal{}
+	ctx := msgdelivery.WithWire(context.Background(), msgdelivery.WirePane)
+	msgdelivery.Record(ctx, journal, "tmux-1", msgdelivery.Report{Path: msgdelivery.PathPane, Reason: "disabled-by-flag"})
+	if len(journal.entries) != 1 || journal.entries[0].Wire != msgdelivery.WirePane {
+		t.Fatalf("journal lost the demand: %+v", journal.entries)
+	}
+
+	plain := &fakeJournal{}
+	msgdelivery.Record(context.Background(), plain, "tmux-1", msgdelivery.Report{Path: msgdelivery.PathPane, Reason: "no-descriptor"})
+	if len(plain.entries) != 1 || plain.entries[0].Wire != msgdelivery.WireAuto {
+		t.Fatalf("journal invented a demand nobody made: %+v", plain.entries)
+	}
+}
+
 // Recording is an observation of a send, never a condition of it: no collector,
 // no journal, no origin - and nothing panics or blocks.
 func TestRecordIsSafeWithNothingAttached(t *testing.T) {

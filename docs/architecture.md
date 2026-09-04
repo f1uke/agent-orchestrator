@@ -264,7 +264,8 @@ rate guards would drop, or any incomplete write. The commit point is a complete
 write of the frame, so a message lands on exactly one of the two paths, never
 both.
 
-`AO_CLAUDE_NATIVE_SEND` chooses how hard AO tries for the socket:
+`AO_CLAUDE_NATIVE_SEND` chooses how hard AO tries for the socket, for the whole
+daemon:
 
 | value                          | behaviour                                                                           |
 | ------------------------------ | ----------------------------------------------------------------------------------- |
@@ -272,13 +273,38 @@ both.
 | `0` / `false` / `FALSE` / `no` | pane only; never touch the socket                                                   |
 | `strict`                       | socket only; a send that cannot take it FAILS, naming the reason, and types nothing |
 
-Under `strict` the refusal reaches the caller as `MESSAGE_NOT_DELIVERED`, carrying
-the transport's reason:
+**It is read from the DAEMON's environment, at daemon start** (per send, but from
+the process the daemon was launched with). Prefixing a CLI invocation -
+`AO_CLAUDE_NATIVE_SEND=0 ao send ...` - sets it in a process that never touches
+the transport, so the message goes out the default way while the operator
+believes they pinned it. Changing it daemon-wide means restarting the daemon with
+it set.
+
+The per-send way in is a pair of flags on `ao send`, which ride the request as
+`wire` and govern **that one message only** - nothing sticky, and the default is
+untouched when neither is passed:
+
+| flag            | same choice as                 | behaviour                                                       |
+| --------------- | ------------------------------ | --------------------------------------------------------------- |
+| `--pane-only`   | `AO_CLAUDE_NATIVE_SEND=0`      | type it into the terminal; never touch the socket               |
+| `--socket-only` | `AO_CLAUDE_NATIVE_SEND=strict` | socket or nothing: the send FAILS rather than fall back         |
+
+The two are mutually exclusive and refused together. A flag beats the daemon-wide
+value for that send, in both directions. A message HELD for a sleeping agent is
+delivered later by the queue drain, under whatever the daemon is set to then -
+the flag governs the send that carried it, and that send delivered nothing.
+
+Under strict the refusal reaches the caller as `MESSAGE_NOT_DELIVERED`, naming
+the control that refused the fallback and the transport's reason:
 
 ```
-$ ao send --session repo-2 --message "..."
+$ ao send --session repo-2 --message "..."          # daemon-wide
 send repo-2: message not delivered: AO_CLAUDE_NATIVE_SEND=strict refused the pane
 fallback and the claude peer socket could not be used (reason=no-descriptor) ...
+
+$ ao send --session repo-2 --socket-only --message "..."
+send repo-2: message not delivered: --socket-only refused the pane fallback and the
+claude peer socket could not be used (reason=no-descriptor) ...
 ```
 
 The default does not force the socket on purpose: the protocol is undocumented,
@@ -304,8 +330,12 @@ higher up:
   `<AO_DATA_DIR>/message-delivery.jsonl` (`~/.ao/data/` by default), carrying the
   time, the session, what triggered the send (`send`, `queue-drain`, `nudge`,
   `smoke-report`, `review-notify`, ...), the path, the reason, the sender name, the
-  frame's `msg_id` and any error. It rolls over at 4 MiB, keeping one previous
-  generation as `message-delivery.jsonl.1`. Read it with `tail`/`jq`.
+  frame's `msg_id` and any error. A send that was PINNED also carries `wire`
+  (`pane` / `socket`), so a forced delivery can be told from an ordinary one, and
+  a pane line carries `reason: disabled-by-flag` rather than `disabled-by-env`
+  when it was the caller's flag and not the daemon's environment. It rolls over at
+  4 MiB, keeping one previous generation as `message-delivery.jsonl.1`. Read it
+  with `tail`/`jq`.
 
 Every path a message can travel is covered, not only the interactive `ao send`:
 the held message drained later, the replay after a daemon restart, a nudge, a

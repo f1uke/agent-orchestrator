@@ -1031,8 +1031,12 @@ func (c *SessionsController) crewSend(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Message is too long", nil)
 		return
 	}
+	ctx, ok := wireContext(w, r, in.Wire)
+	if !ok {
+		return
+	}
 	message := domain.SanitizeControlChars(in.Message)
-	sent, err := c.Svc.SendToCrewmate(r.Context(), sessionID(r), sessionsvc.CrewSend{
+	sent, err := c.Svc.SendToCrewmate(ctx, sessionID(r), sessionsvc.CrewSend{
 		Role: in.Role, Message: message, Subject: in.About, StillWorking: in.StillWorking,
 	})
 	if err != nil {
@@ -1117,8 +1121,12 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "MESSAGE_TOO_LONG", "Message is too long", nil)
 		return
 	}
+	ctx, ok := wireContext(w, r, in.Wire)
+	if !ok {
+		return
+	}
 	message := domain.SanitizeControlChars(in.Message)
-	sent, err := c.Svc.SendFrom(r.Context(), sessionID(r), message, sessionsvc.CrewTalk{From: in.From, Subject: in.About})
+	sent, err := c.Svc.SendFrom(ctx, sessionID(r), message, sessionsvc.CrewTalk{From: in.From, Subject: in.About})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
@@ -1143,6 +1151,26 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 	resp.Delivery = deliveryView(outcome.Delivery)
 	c.publishActivity(r.Context(), activityEventFromMessage(sessionID(r), message))
 	envelope.WriteJSON(w, http.StatusOK, resp)
+}
+
+// wireContext carries the caller's per-send delivery choice down to the
+// transport, and refuses a value it does not recognise rather than quietly
+// sending on the default path - a control that silently does nothing is the
+// thing this override exists to fix. It reports false once it has written the
+// refusal, so the handler simply returns.
+//
+// It is set HERE, at the edge, because it is a property of this request and of
+// nothing else: every layer between - the service, the session manager, the
+// queue, the runtime wrappers - passes the context through untouched, exactly as
+// it does for the message's author (internal/msgorigin).
+func wireContext(w http.ResponseWriter, r *http.Request, requested string) (context.Context, bool) {
+	wire := msgdelivery.Wire(requested)
+	if !wire.Valid() {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_WIRE",
+			"wire must be \"pane\" or \"socket\"", nil)
+		return nil, false
+	}
+	return msgdelivery.WithWire(r.Context(), wire), true
 }
 
 // deliveryView passes the transport's account of a send through to the caller,

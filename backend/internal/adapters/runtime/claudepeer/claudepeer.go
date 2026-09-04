@@ -40,14 +40,20 @@ type Delegate interface {
 	GetOutput(ctx context.Context, handle ports.RuntimeHandle, lines int) (string, error)
 }
 
-// modeEnv chooses how hard AO tries to use the socket. It exists because the
-// protocol is undocumented: if a Claude Code release starts behaving oddly, an
-// operator can pin AO back to the tmux path without waiting for a new AO build,
-// and someone hunting fallbacks can make them impossible to miss.
+// modeEnv chooses how hard AO tries to use the socket, DAEMON-WIDE. It exists
+// because the protocol is undocumented: if a Claude Code release starts behaving
+// oddly, an operator can pin AO back to the tmux path without waiting for a new
+// AO build, and someone hunting fallbacks can make them impossible to miss.
 //
 //	0 / false / FALSE / no   pane only: never touch the socket
 //	strict                   socket only: FAIL the send rather than fall back
 //	anything else, or unset  prefer the socket, fall back to the pane
+//
+// It is read from the DAEMON's environment. Prefixing a CLI invocation -
+// `AO_CLAUDE_NATIVE_SEND=0 ao send ...` - sets it in a process that never
+// touches this transport and does nothing at all, which is why the same two
+// choices are also reachable per send, as msgdelivery.Wire (`ao send
+// --pane-only` / `--socket-only`).
 const modeEnv = "AO_CLAUDE_NATIVE_SEND"
 
 // sendMode is what modeEnv resolved to for one send.
@@ -158,9 +164,10 @@ func New(delegate Delegate, opts Options) *Runtime {
 // to the delivery journal - because the decision is made on facts only this
 // function has, and the question is asked hours later. See internal/msgdelivery.
 //
-// Under AO_CLAUDE_NATIVE_SEND=strict the fallback is refused and the send fails
-// instead, carrying the same reason. That is opt-in and never the default; see
-// modeEnv.
+// Under strict mode - AO_CLAUDE_NATIVE_SEND=strict daemon-wide, or
+// msgdelivery.WireSocket for one send - the fallback is refused and the send
+// fails instead, carrying the same reason. That is opt-in and never the default;
+// see modeEnv.
 func (r *Runtime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error {
 	report, err := r.trySocket(ctx, handle, message)
 	if err == nil {
@@ -175,12 +182,13 @@ func (r *Runtime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, m
 		r.log.Debug("claude peer socket not used; delivering through the pane",
 			"session", handle.ID, "reason", report.Reason)
 	}
-	if mode() == modeStrict {
-		// Opted out of the fallback: say what was refused and why, and let the
-		// caller find out instead of having text typed at somebody.
+	if resolved, control := modeFor(ctx); resolved == modeStrict {
+		// Opted out of the fallback: say what was refused, WHICH CONTROL refused
+		// it and why, and let the caller find out instead of having text typed at
+		// somebody.
 		report.Path = msgdelivery.PathNone
-		strictErr := fmt.Errorf("%w: %s=strict refused the pane fallback and the claude peer socket could not be used (reason=%s): %w",
-			msgdelivery.ErrNotDelivered, modeEnv, report.Reason, err)
+		strictErr := fmt.Errorf("%w: %s refused the pane fallback and the claude peer socket could not be used (reason=%s): %w",
+			msgdelivery.ErrNotDelivered, control, report.Reason, err)
 		report.Error = strictErr.Error()
 		r.log.Error("strict mode refused the pane fallback; the message was not delivered",
 			"session", handle.ID, "reason", report.Reason, "error", err)
@@ -217,8 +225,8 @@ func (r *Runtime) trySocket(ctx context.Context, handle ports.RuntimeHandle, mes
 	fellBack := func(reason string) (msgdelivery.Report, error) {
 		return msgdelivery.Report{Reason: reason, Sender: sender}, errFellBack
 	}
-	if mode() == modeOff {
-		return fellBack("disabled-by-env")
+	if resolved, _ := modeFor(ctx); resolved == modeOff {
+		return fellBack(offReason(ctx))
 	}
 	if handle.ID == "" {
 		return fellBack("empty-handle")
@@ -284,10 +292,32 @@ func senderName(ctx context.Context) string {
 	return defaultSenderName
 }
 
-// mode reads modeEnv. It is read per send rather than cached at construction so
-// an operator can change it without restarting the daemon - the same property
-// the kill switch has always had.
-func mode() sendMode {
+// modeFor resolves how hard THIS send tries for the socket, and names the
+// control that decided it.
+//
+// A per-send wire wins over the daemon-wide switch, and applies to that send
+// only: nothing here is sticky, and a caller that asks for nothing gets exactly
+// what the daemon is set to. The control is returned because a refusal has to
+// say what to change to get a different answer - "strict refused this" is only
+// half an answer if the reader cannot tell whether it was their flag or the
+// daemon's environment.
+func modeFor(ctx context.Context) (sendMode, string) {
+	if wire := msgdelivery.WireOf(ctx); wire != msgdelivery.WireAuto {
+		switch wire {
+		case msgdelivery.WirePane:
+			return modeOff, wire.Flag()
+		case msgdelivery.WireSocket:
+			return modeStrict, wire.Flag()
+		}
+	}
+	return envMode(), modeEnv + "=" + os.Getenv(modeEnv)
+}
+
+// envMode reads modeEnv. It is read per send rather than cached at construction
+// so an operator can change it without restarting the daemon - the same property
+// the kill switch has always had. (Changing it still means changing the DAEMON's
+// environment; the per-send way in is msgdelivery.Wire.)
+func envMode() sendMode {
 	value := os.Getenv(modeEnv)
 	switch {
 	case value == "0" || value == "false" || value == "FALSE" || value == "no":
@@ -297,4 +327,15 @@ func mode() sendMode {
 	default:
 		return modeAuto
 	}
+}
+
+// offReason distinguishes the two ways the socket can be switched off, because
+// they are changed in different places: one is this send's own flag, the other
+// is the daemon's environment. Reading "disabled" and not knowing which would
+// send someone to restart a daemon over a flag they typed themselves.
+func offReason(ctx context.Context) string {
+	if msgdelivery.WireOf(ctx) == msgdelivery.WirePane {
+		return "disabled-by-flag"
+	}
+	return "disabled-by-env"
 }

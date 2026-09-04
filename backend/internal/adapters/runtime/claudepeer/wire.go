@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -158,6 +158,20 @@ func buildFrame(session Session, message, senderName string) (builtFrame, error)
 	return built, nil
 }
 
+// envelopeMarkup matches the envelope as MARKUP - the bracketed open or close
+// tag - which is the only shape that can break the receiver's rebuild-and-
+// compare. It deliberately does NOT match the bare tag name: a body that merely
+// DISCUSSES this subsystem, with no angle bracket anywhere, is an ordinary
+// message and keeps its sender name. That those two were once the same test is
+// why every report ever written about peer messaging arrived anonymous.
+//
+// It stays wider than a strict parser would be, because the trade is asymmetric:
+// losing a name is cheap and leaking markup in front of a human is not. So it
+// ignores case, tolerates whitespace a lenient parser might also tolerate
+// (`< / cross-session-message`), and treats a `-` after the tag name as still
+// ours. Attributes need no special case: the open tag is matched by its name.
+var envelopeMarkup = regexp.MustCompile(`(?i)<\s*/?\s*` + envelopeTag + `\b`)
+
 // withSenderEnvelope wraps message in the envelope the receiver reads a sender's
 // display name out of, so the message renders as a named, expandable row
 // instead of an anonymous block.
@@ -191,9 +205,9 @@ func withSenderEnvelope(message, senderName string) (content, dropped string) {
 	if !usableSenderName(senderName) {
 		return message, "unusable-sender-name"
 	}
-	if strings.Contains(strings.ToLower(message), envelopeTag) {
-		// A body naming the tag is one the receiver would escape before
-		// comparing, so an envelope around it could never round-trip.
+	if envelopeMarkup.MatchString(message) {
+		// A body carrying the tag as MARKUP is one the receiver would escape
+		// before comparing, so an envelope around it could never round-trip.
 		return message, "body-contains-envelope-markup"
 	}
 	return "<" + envelopeTag + ` from-name="` + senderName + `">` + "\n" + message + "\n</" + envelopeTag + ">", ""

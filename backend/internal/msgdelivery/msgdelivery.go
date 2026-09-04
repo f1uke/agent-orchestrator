@@ -32,11 +32,11 @@ import (
 // ErrNotDelivered marks a send that delivered the message NOWHERE, so a caller
 // can tell it apart from any other failure and say so to a human.
 //
-// The only thing that raises it today is strict mode
-// (AO_CLAUDE_NATIVE_SEND=strict), which refuses the pane fallback on purpose.
-// It lives here rather than in the transport so the layers between - the
-// session service, the API - can recognise it without importing a runtime
-// adapter.
+// The only thing that raises it today is strict mode - daemon-wide with
+// AO_CLAUDE_NATIVE_SEND=strict, or for one send with WireSocket - which refuses
+// the pane fallback on purpose. It lives here rather than in the transport so
+// the layers between - the session service, the API - can recognise it without
+// importing a runtime adapter.
 var ErrNotDelivered = errors.New("message not delivered")
 
 // Path is the wire a message travelled.
@@ -122,6 +122,78 @@ func OriginOf(ctx context.Context) Origin {
 	return origin
 }
 
+// Wire is a caller's demand that ONE message take a particular path, overriding
+// the daemon-wide default for that send and nothing else.
+//
+// It exists because the daemon-wide switch (AO_CLAUDE_NATIVE_SEND) is read from
+// the DAEMON's environment, so the thing an operator naturally types -
+// `AO_CLAUDE_NATIVE_SEND=0 ao send ...` - sets it in a CLI process that never
+// touches the transport and silently does nothing. A control nobody can reach is
+// worse than no control, because people believe they used it.
+//
+// It rides the context rather than the messaging port for the same reason
+// msgorigin does: everything between the request and the transport - the
+// service, the session manager, the queue, three runtime wrappers - is
+// indifferent to it, and it is metadata about the request rather than a
+// parameter of it. It is kept apart from Origin deliberately: an Origin
+// DESCRIBES a send and is read when recording one, while a Wire CHANGES what the
+// send does, and a behaviour switch hidden inside a struct read for journalling
+// is exactly the kind of thing nobody finds later.
+type Wire string
+
+const (
+	// WireAuto is the absence of a demand, and the default for every send: prefer
+	// the socket, fall back to the pane. It must stay the default - delivering the
+	// message outranks delivering it the tidy way.
+	WireAuto Wire = ""
+	// WirePane pins one message to the terminal pane.
+	WirePane Wire = "pane"
+	// WireSocket refuses the pane fallback for one message: it goes over the
+	// socket or the send fails, naming the reason.
+	WireSocket Wire = "socket"
+)
+
+// Valid reports whether w is a wire a caller may ask for.
+func (w Wire) Valid() bool {
+	return w == WireAuto || w == WirePane || w == WireSocket
+}
+
+// Flag names the `ao send` flag that asks for this wire.
+//
+// It travels into the transport's error text and the journal because "the wire
+// was forced" is only half an answer: the reader has to know WHAT forced it to
+// change it. The strings are mirrored by the flag definitions in internal/cli;
+// they are one short list and they are named in the docs, so they are kept in
+// step by hand rather than by an import the CLI does not otherwise need.
+func (w Wire) Flag() string {
+	switch w {
+	case WirePane:
+		return "--pane-only"
+	case WireSocket:
+		return "--socket-only"
+	default:
+		return ""
+	}
+}
+
+type wireKey struct{}
+
+// WithWire returns a context demanding that this one message take w. WireAuto
+// leaves ctx untouched, so "the caller asked for nothing" and "the caller asked
+// for the default" stay the same thing.
+func WithWire(ctx context.Context, w Wire) context.Context {
+	if w == WireAuto {
+		return ctx
+	}
+	return context.WithValue(ctx, wireKey{}, w)
+}
+
+// WireOf reports the wire this send was pinned to, or WireAuto when it was not.
+func WireOf(ctx context.Context) Wire {
+	w, _ := ctx.Value(wireKey{}).(Wire)
+	return w
+}
+
 // Collector receives the transport's report for one send.
 type Collector struct {
 	mu     sync.Mutex
@@ -178,8 +250,13 @@ type Entry struct {
 	Session string    `json:"session,omitempty"`
 	// Handle is the runtime handle the message was addressed to (the tmux
 	// session), kept because it is what the transport itself resolved against.
-	Handle      string `json:"handle,omitempty"`
-	Trigger     string `json:"trigger,omitempty"`
+	Handle  string `json:"handle,omitempty"`
+	Trigger string `json:"trigger,omitempty"`
+	// Wire is the path the CALLER demanded for this one send, empty when it
+	// demanded none. It is recorded beside the path the message actually took so
+	// a forced delivery can be told from an ordinary one, and so a reader can see
+	// which control produced the line they are looking at.
+	Wire        Wire   `json:"wire,omitempty"`
 	Path        Path   `json:"path"`
 	Reason      string `json:"reason,omitempty"`
 	Sender      string `json:"sender,omitempty"`
@@ -212,6 +289,7 @@ func Record(ctx context.Context, journal Journal, handle string, r Report) {
 		Session:     origin.Session,
 		Handle:      handle,
 		Trigger:     origin.Trigger,
+		Wire:        WireOf(ctx),
 		Path:        r.Path,
 		Reason:      r.Reason,
 		Sender:      r.Sender,

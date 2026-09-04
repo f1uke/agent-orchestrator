@@ -791,3 +791,98 @@ func TestSend_QueuedMessageNamesNoPath(t *testing.T) {
 		t.Fatalf("output = %q, want the queued line", out)
 	}
 }
+
+// ---- pinning one message to one wire -------------------------------------
+
+// AO_CLAUDE_NATIVE_SEND is read from the DAEMON's environment, so the thing an
+// operator types - `AO_CLAUDE_NATIVE_SEND=0 ao send ...` - sets it here, in a
+// process that never touches the transport, and the message goes out the
+// default way while they believe they pinned it. These flags are the reachable
+// version of the same two choices.
+func TestSend_WireFlagsAskTheDaemonForOnePath(t *testing.T) {
+	tests := []struct {
+		flag string
+		want string
+	}{
+		{flag: "--pane-only", want: "pane"},
+		{flag: "--socket-only", want: "socket"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.flag, func(t *testing.T) {
+			t.Setenv("AO_SESSION_ID", "")
+			cfg := setConfigEnv(t)
+			srv, capture := sendServer(t, http.StatusOK, `{"ok":true,"sessionId":"demo-1","message":"hi"}`)
+			writeRunFileFor(t, cfg, srv)
+
+			if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+				"send", "--session", "demo-1", tc.flag, "--message", "hi"); err != nil {
+				t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+			}
+			var req struct {
+				Wire string `json:"wire"`
+			}
+			if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
+				t.Fatalf("decode body: %v\nbody=%s", err, capture.body)
+			}
+			if req.Wire != tc.want {
+				t.Errorf("wire = %q, want %q", req.Wire, tc.want)
+			}
+		})
+	}
+}
+
+// A crewmate message is an ordinary send once the caps have had their say, so
+// the override has to reach that leg too: a flag that silently does nothing on
+// one of the two ways to send is the bug this whole change is about.
+func TestSend_WireFlagRidesTheCrewFormToo(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "demo-1")
+	cfg := setConfigEnv(t)
+	srv, capture := crewSendServer(t, http.StatusOK, `{"ok":true,"sessionId":"demo-2","message":"hi"}`)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--crew", "qa", "--about", "abc1234", "--pane-only", "--message", "hi"); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var req struct {
+		Wire string `json:"wire"`
+	}
+	if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
+		t.Fatalf("decode body: %v\nbody=%s", err, capture.body)
+	}
+	if req.Wire != "pane" {
+		t.Errorf("wire = %q, want pane", req.Wire)
+	}
+}
+
+// Sending nothing means asking for nothing: an absent `wire` is what keeps the
+// default - prefer the socket, fall back to the pane - exactly where it was.
+func TestSend_NoWireFlagAsksForNothing(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	srv, capture := sendServer(t, http.StatusOK, `{"ok":true,"sessionId":"demo-1","message":"hi"}`)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--session", "demo-1", "--message", "hi"); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if strings.Contains(capture.body, "wire") {
+		t.Errorf("body carries a wire nobody asked for: %s", capture.body)
+	}
+}
+
+// "Pane only" and "socket or nothing" are opposite demands. Picking one for the
+// caller would be the same silent disobedience the flags exist to end.
+func TestSend_TheTwoWireFlagsAreExclusive(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	setConfigEnv(t)
+	_, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"send", "--session", "demo-1", "--pane-only", "--socket-only", "--message", "hi")
+	if err == nil {
+		t.Fatal("--pane-only and --socket-only were accepted together")
+	}
+	if !strings.Contains(err.Error(), "--pane-only") || !strings.Contains(err.Error(), "--socket-only") {
+		t.Errorf("error = %q, want it to name both flags", err)
+	}
+}

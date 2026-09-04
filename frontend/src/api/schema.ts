@@ -2172,6 +2172,11 @@ export interface components {
             role: "dev" | "qa";
             /** @description qa only: this message is a mid-run update, not the end of the run, so the handback completeness check does not apply. */
             stillWorking?: boolean;
+            /**
+             * @description Pin this one message to a path: pane (type it into the terminal, never touch the socket) or socket (socket or nothing - the send FAILS rather than fall back). Absent means the default, prefer the socket and fall back to the pane.
+             * @enum {string}
+             */
+            wire?: "pane" | "socket";
         };
         ControllersDaemonLoop: {
             description: string;
@@ -2994,6 +2999,11 @@ export interface components {
             about?: string;
             from?: string;
             message: string;
+            /**
+             * @description Pin this one message to a path: pane (type it into the terminal, never touch the socket) or socket (socket or nothing - the send FAILS rather than fall back). Absent means the default, prefer the socket and fall back to the pane.
+             * @enum {string}
+             */
+            wire?: "pane" | "socket";
         };
         SendSessionMessageResponse: {
             delivery?: components["schemas"]["ControllersMessageDeliveryView"];

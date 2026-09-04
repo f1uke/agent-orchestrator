@@ -265,19 +265,19 @@ func TestStrictModeStillDeliversOverTheSocket(t *testing.T) {
 func TestModeDefaultsToFallingBack(t *testing.T) {
 	for _, value := range []string{"", "1", "true", "yes", "STRICTLY", "on"} {
 		t.Setenv(modeEnv, value)
-		if got := mode(); got != modeAuto {
+		if got := envMode(); got != modeAuto {
 			t.Fatalf("%s=%q resolved to %v, want the fall-back default", modeEnv, value, got)
 		}
 	}
 	for _, value := range []string{"0", "false", "FALSE", "no"} {
 		t.Setenv(modeEnv, value)
-		if got := mode(); got != modeOff {
+		if got := envMode(); got != modeOff {
 			t.Fatalf("%s=%q resolved to %v, want pane only", modeEnv, value, got)
 		}
 	}
 	for _, value := range []string{"strict", "STRICT", " strict "} {
 		t.Setenv(modeEnv, value)
-		if got := mode(); got != modeStrict {
+		if got := envMode(); got != modeStrict {
 			t.Fatalf("%s=%q resolved to %v, want strict", modeEnv, value, got)
 		}
 	}
@@ -293,5 +293,164 @@ func TestSendWorksWithoutAJournal(t *testing.T) {
 	}
 	if got := box.userMessages(t, 1); len(got) != 1 {
 		t.Fatalf("socket received %q, want the message", got)
+	}
+}
+
+// ---- pinning one send to one wire ----------------------------------------
+
+// The daemon-wide switch is read from the DAEMON's environment, so an operator
+// typing `AO_CLAUDE_NATIVE_SEND=0 ao send ...` changes nothing at all. A wire on
+// the context is the reachable version, and it must actually take effect - and
+// be visible afterwards as its own reason, so nobody restarts a daemon over a
+// flag they typed themselves.
+func TestAPerSendWireCanPinTheMessageToThePane(t *testing.T) {
+	box := newInbox(t)
+	delegate := &fakeDelegate{}
+	rt, journal := newJournalledRuntime(t, delegate, fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}})
+
+	ctx := msgdelivery.WithWire(context.Background(), msgdelivery.WirePane)
+	report, err := sendAndCollect(ctx, t, rt, journal, "type this at me")
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if report.Path != msgdelivery.PathPane || report.Reason != "disabled-by-flag" {
+		t.Fatalf("report = %+v, want the pane for the flag's own reason", report)
+	}
+	if got := delegate.messages(); len(got) != 1 || got[0] != "type this at me" {
+		t.Fatalf("the pane got %q, want exactly the message", got)
+	}
+	if got := box.userMessages(t, 0); len(got) != 0 {
+		t.Fatalf("the socket got %q; --pane-only must never touch it", got)
+	}
+	// The record has to say the wire was FORCED, or a reader cannot tell this
+	// line apart from a socket that was merely unavailable.
+	if entry := journal.only(t); entry.Wire != msgdelivery.WirePane {
+		t.Fatalf("journal lost the wire the caller demanded: %+v", entry)
+	}
+}
+
+// The per-send strict override, and the one thing it must never do: type.
+func TestAPerSendWireCanRefuseThePaneFallback(t *testing.T) {
+	delegate := &fakeDelegate{}
+	rt, journal := newJournalledRuntime(t, delegate, fakeRegistry{err: reject("no-descriptor")})
+
+	ctx := msgdelivery.WithWire(context.Background(), msgdelivery.WireSocket)
+	report, err := sendAndCollect(ctx, t, rt, journal, "socket or nothing")
+	if err == nil {
+		t.Fatal("want the send to fail rather than fall back")
+	}
+	if !errors.Is(err, msgdelivery.ErrNotDelivered) {
+		t.Fatalf("a send that delivered nothing must say so: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--socket-only") {
+		t.Fatalf("the error must name the control that refused the fallback, got %v", err)
+	}
+	if strings.Contains(err.Error(), modeEnv) {
+		t.Fatalf("the error blames the daemon's environment for the caller's own flag: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no-descriptor") {
+		t.Fatalf("the error must name the real reason, got %v", err)
+	}
+	if got := delegate.messages(); len(got) != 0 {
+		t.Fatalf("the pane was typed into anyway: %q", got)
+	}
+	if report.Path != msgdelivery.PathNone || report.Reason != "no-descriptor" {
+		t.Fatalf("report = %+v, want nothing delivered, for the transport's own reason", report)
+	}
+	if entry := journal.only(t); entry.Wire != msgdelivery.WireSocket || entry.Path != msgdelivery.PathNone {
+		t.Fatalf("journal lost what was demanded or what happened: %+v", entry)
+	}
+}
+
+// A per-send wire is an override, so it wins over the daemon-wide switch in
+// BOTH directions - and it is not sticky: it governs the send it rode in on.
+func TestAPerSendWireOverridesTheDaemonWideSwitch(t *testing.T) {
+	t.Run("pane-only beats a strict daemon", func(t *testing.T) {
+		box := newInbox(t)
+		delegate := &fakeDelegate{}
+		rt, journal := newJournalledRuntime(t, delegate, fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}})
+		t.Setenv(modeEnv, "strict")
+
+		ctx := msgdelivery.WithWire(context.Background(), msgdelivery.WirePane)
+		report, err := sendAndCollect(ctx, t, rt, journal, "the pane, please")
+		if err != nil {
+			t.Fatalf("SendMessage: %v", err)
+		}
+		if report.Path != msgdelivery.PathPane || report.Reason != "disabled-by-flag" {
+			t.Fatalf("report = %+v, want the flag to win", report)
+		}
+	})
+	t.Run("socket-only beats a disabled daemon", func(t *testing.T) {
+		box := newInbox(t)
+		delegate := &fakeDelegate{}
+		rt, journal := newJournalledRuntime(t, delegate, fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}})
+		t.Setenv(modeEnv, "0")
+
+		ctx := msgdelivery.WithWire(context.Background(), msgdelivery.WireSocket)
+		report, err := sendAndCollect(ctx, t, rt, journal, "the socket, please")
+		if err != nil {
+			t.Fatalf("SendMessage: %v", err)
+		}
+		if report.Path != msgdelivery.PathSocket {
+			t.Fatalf("report = %+v, want the flag to win", report)
+		}
+		if got := delegate.messages(); len(got) != 0 {
+			t.Fatalf("the pane got %q; the flag asked for the socket", got)
+		}
+	})
+	t.Run("nothing demanded leaves the daemon in charge", func(t *testing.T) {
+		box := newInbox(t)
+		delegate := &fakeDelegate{}
+		rt, journal := newJournalledRuntime(t, delegate, fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}})
+		t.Setenv(modeEnv, "0")
+
+		report, err := sendAndCollect(context.Background(), t, rt, journal, "whatever the daemon says")
+		if err != nil {
+			t.Fatalf("SendMessage: %v", err)
+		}
+		if report.Path != msgdelivery.PathPane || report.Reason != "disabled-by-env" {
+			t.Fatalf("report = %+v, want the daemon's own switch, named as such", report)
+		}
+		if entry := journal.only(t); entry.Wire != msgdelivery.WireAuto {
+			t.Fatalf("journal invented a demand nobody made: %+v", entry)
+		}
+	})
+}
+
+// modeFor is the whole resolution in one place: the per-send wire first, the
+// daemon's environment otherwise, and the control named either way.
+func TestModeForNamesTheControlThatDecided(t *testing.T) {
+	t.Setenv(modeEnv, "")
+	tests := []struct {
+		name        string
+		ctx         context.Context
+		env         string
+		wantMode    sendMode
+		wantControl string
+	}{
+		{name: "nothing set", ctx: context.Background(), wantMode: modeAuto, wantControl: modeEnv + "="},
+		{name: "env off", ctx: context.Background(), env: "0", wantMode: modeOff, wantControl: modeEnv + "=0"},
+		{name: "env strict", ctx: context.Background(), env: "strict", wantMode: modeStrict, wantControl: modeEnv + "=strict"},
+		{
+			name:     "wire pane",
+			ctx:      msgdelivery.WithWire(context.Background(), msgdelivery.WirePane),
+			env:      "strict",
+			wantMode: modeOff, wantControl: "--pane-only",
+		},
+		{
+			name:     "wire socket",
+			ctx:      msgdelivery.WithWire(context.Background(), msgdelivery.WireSocket),
+			env:      "0",
+			wantMode: modeStrict, wantControl: "--socket-only",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(modeEnv, tc.env)
+			gotMode, gotControl := modeFor(tc.ctx)
+			if gotMode != tc.wantMode || gotControl != tc.wantControl {
+				t.Fatalf("modeFor = %v/%q, want %v/%q", gotMode, gotControl, tc.wantMode, tc.wantControl)
+			}
+		})
 	}
 }
