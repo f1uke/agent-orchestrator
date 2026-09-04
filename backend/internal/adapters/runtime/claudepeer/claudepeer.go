@@ -179,8 +179,8 @@ func (r *Runtime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, m
 		// Opted out of the fallback: say what was refused and why, and let the
 		// caller find out instead of having text typed at somebody.
 		report.Path = msgdelivery.PathNone
-		strictErr := fmt.Errorf("claudepeer: %s=strict and the message was not delivered over the claude peer socket (reason=%s): %w",
-			modeEnv, report.Reason, err)
+		strictErr := fmt.Errorf("%w: %s=strict refused the pane fallback and the claude peer socket could not be used (reason=%s): %w",
+			msgdelivery.ErrNotDelivered, modeEnv, report.Reason, err)
 		report.Error = strictErr.Error()
 		r.log.Error("strict mode refused the pane fallback; the message was not delivered",
 			"session", handle.ID, "reason", report.Reason, "error", err)

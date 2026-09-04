@@ -10,6 +10,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
@@ -1013,6 +1014,21 @@ func TestToAPIErrorMapsWorkspaceBranchSentinels(t *testing.T) {
 				t.Fatalf("mapped = %v, want %s %s", mapped, tc.wantCode, e)
 			}
 		})
+	}
+}
+
+// A message nothing delivered must reach the caller AS a refusal, carrying the
+// reason - a generic 500 would leave the sender believing something went wrong
+// in AO rather than that their message went nowhere, and why.
+func TestToAPIError_NotDelivered(t *testing.T) {
+	err := fmt.Errorf("send mer-1: %w: AO_CLAUDE_NATIVE_SEND=strict refused the pane fallback (reason=no-descriptor)", msgdelivery.ErrNotDelivered)
+	mapped := toAPIError(err)
+	var e *apierr.Error
+	if !errors.As(mapped, &e) || e.Kind != apierr.KindConflict || e.Code != "MESSAGE_NOT_DELIVERED" {
+		t.Fatalf("mapped = %v, want Conflict MESSAGE_NOT_DELIVERED", mapped)
+	}
+	if !strings.Contains(e.Message, "no-descriptor") {
+		t.Fatalf("message = %q, want the transport's own reason in it", e.Message)
 	}
 }
 

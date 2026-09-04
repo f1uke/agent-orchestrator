@@ -24,9 +24,20 @@ package msgdelivery
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
+
+// ErrNotDelivered marks a send that delivered the message NOWHERE, so a caller
+// can tell it apart from any other failure and say so to a human.
+//
+// The only thing that raises it today is strict mode
+// (AO_CLAUDE_NATIVE_SEND=strict), which refuses the pane fallback on purpose.
+// It lives here rather than in the transport so the layers between - the
+// session service, the API - can recognise it without importing a runtime
+// adapter.
+var ErrNotDelivered = errors.New("message not delivered")
 
 // Path is the wire a message travelled.
 type Path string

@@ -227,6 +227,11 @@ func TestStrictModeFailsInsteadOfTypingIntoThePane(t *testing.T) {
 	if !strings.Contains(err.Error(), modeEnv+"=strict") {
 		t.Fatalf("the error must say which switch refused the fallback, got %v", err)
 	}
+	// The layers above recognise this without importing a runtime adapter, which
+	// is what turns it into a refusal the sender reads instead of a 500.
+	if !errors.Is(err, msgdelivery.ErrNotDelivered) {
+		t.Fatalf("a send that delivered nothing must say so: %v", err)
+	}
 	if got := delegate.messages(); len(got) != 0 {
 		t.Fatalf("strict mode typed %q into the pane; it must deliver nothing", got)
 	}

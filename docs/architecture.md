@@ -272,6 +272,16 @@ both.
 | `0` / `false` / `FALSE` / `no` | pane only; never touch the socket |
 | `strict` | socket only; a send that cannot take it FAILS, naming the reason, and types nothing |
 
+Under `strict` the refusal reaches the caller as `MESSAGE_NOT_DELIVERED`, carrying
+the transport's reason:
+
+```
+$ ao send --session repo-2 --message "..."
+send repo-2: message not delivered: AO_CLAUDE_NATIVE_SEND=strict refused the pane
+fallback and the claude peer socket could not be used (reason=no-descriptor) ...
+```
+
+
 The default does not force the socket on purpose: the protocol is undocumented,
 and if a Claude Code release changed it, a forced-socket default would make every
 message in the system vanish silently - far worse than one being typed at
