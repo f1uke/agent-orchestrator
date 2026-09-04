@@ -5684,6 +5684,68 @@ paths:
       summary: Replace the global wiki vault path (empty turns the wiki off)
       tags:
       - settings
+  /api/v1/settings/wiki/tasks:
+    get:
+      operationId: getWikiTasksSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiTasksSettingsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Fetch the Tasks tab configuration (subtree, sections, cutoff, owner
+        aliases)
+      tags:
+      - settings
+    put:
+      operationId: setWikiTasksSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetWikiTasksSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiTasksSettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Replace the Tasks tab configuration (an empty folder scans nothing)
+      tags:
+      - settings
   /api/v1/sim/devices:
     get:
       operationId: listSimDevices
@@ -6007,6 +6069,87 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Index every file in the vault
+      tags:
+      - wiki
+  /api/v1/wiki/tasks:
+    get:
+      operationId: listWikiTasks
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WikiTasksResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the unchecked task rows in the configured vault subtree
+      tags:
+      - wiki
+  /api/v1/wiki/tasks/complete:
+    post:
+      operationId: completeWikiTask
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteWikiTaskRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteWikiTaskResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Tick one task row off, matched on its exact text so a stale row is
+        refused
       tags:
       - wiki
 components:
@@ -6376,6 +6519,42 @@ components:
       required:
       - sessionId
       - reason
+      type: object
+    CompleteWikiTaskRequest:
+      properties:
+        line:
+          description: '1-based line the row was read from. A hint: the row may have
+            moved, and raw decides.'
+          type: integer
+        path:
+          description: Vault-relative path of the note holding the row.
+          type: string
+        raw:
+          description: The row's line byte for byte as it was displayed. Required;
+            a line whose text differs is never written to.
+          type: string
+      required:
+      - path
+      - line
+      - raw
+      type: object
+    CompleteWikiTaskResponse:
+      properties:
+        line:
+          type: integer
+        moved:
+          type: boolean
+        noteModifiedAt:
+          type: string
+        path:
+          type: string
+        raw:
+          type: string
+      required:
+      - path
+      - line
+      - raw
+      - moved
       type: object
     ControllersAddCrewMemberRequest:
       properties:
@@ -9046,6 +9225,29 @@ components:
       required:
       - vaultPath
       type: object
+    SetWikiTasksSettingsRequest:
+      properties:
+        cutoff:
+          description: YYYY-MM-DD. Rows older than this are hidden by the tab, never
+            modified or deleted.
+          type: string
+        folders:
+          description: Vault-relative subtrees to scan. An empty list scans nothing
+            and the tab says so.
+          items:
+            type: string
+          type: array
+        ownerAliases:
+          description: Owner tokens that mean 'me', for the mine/others filter.
+          items:
+            type: string
+          type: array
+        sections:
+          description: Only rows under these '## ' headings. Empty means every section.
+          items:
+            type: string
+          type: array
+      type: object
     SimDeviceLeaseView:
       properties:
         acquiredAt:
@@ -9901,6 +10103,97 @@ components:
       - configured
       - vaultPath
       - running
+      type: object
+    WikiTaskRow:
+      properties:
+        due:
+          type: string
+        id:
+          type: string
+        line:
+          type: integer
+        noteModifiedAt:
+          type: string
+        owner:
+          type: string
+        path:
+          type: string
+        raw:
+          type: string
+        section:
+          type: string
+        subsection:
+          type: string
+        text:
+          type: string
+      required:
+      - id
+      - path
+      - line
+      - raw
+      - text
+      type: object
+    WikiTasksResponse:
+      properties:
+        configured:
+          type: boolean
+        cutoff:
+          type: string
+        folders:
+          items:
+            type: string
+          type: array
+        ownerAliases:
+          items:
+            type: string
+          type: array
+        owners:
+          items:
+            type: string
+          type: array
+        scannedNotes:
+          type: integer
+        sections:
+          items:
+            type: string
+          type: array
+        tasks:
+          items:
+            $ref: '#/components/schemas/WikiTaskRow'
+          type: array
+        truncated:
+          type: boolean
+      required:
+      - configured
+      - folders
+      - sections
+      - ownerAliases
+      - tasks
+      - owners
+      - scannedNotes
+      - truncated
+      type: object
+    WikiTasksSettingsResponse:
+      properties:
+        cutoff:
+          type: string
+        folders:
+          items:
+            type: string
+          type: array
+        ownerAliases:
+          items:
+            type: string
+          type: array
+        sections:
+          items:
+            type: string
+          type: array
+      required:
+      - folders
+      - sections
+      - cutoff
+      - ownerAliases
       type: object
     WorkspaceChangesResponse:
       properties:

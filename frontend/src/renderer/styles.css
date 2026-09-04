@@ -6619,6 +6619,380 @@ ol.note-prose__list {
 	font-size: 10px;
 }
 
+/* ── the Tasks tab ── */
+
+/* Whose rows to show. A segmented control rather than a dropdown: there are
+   three options, they are always the same three, and the current one should be
+   readable without opening anything. */
+.wiki-tasks__filters {
+	display: flex;
+	height: 36px;
+	flex: none;
+	align-items: center;
+	gap: 2px;
+	padding: 0 12px;
+	border-bottom: 1px solid var(--border);
+}
+
+.wiki-tasks__filter {
+	padding: 3px 9px;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--fg-passive);
+	font-size: 11.5px;
+	cursor: pointer;
+}
+
+.wiki-tasks__filter:hover {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.wiki-tasks__filter.is-active {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+/* The cutoff announces itself, always. A backlog that quietly went missing is
+   the failure this strip exists to prevent, so it says what is hidden, that the
+   rows are still in the notes, and offers them back. */
+.wiki-tasks__cutoff {
+	display: flex;
+	flex: none;
+	align-items: flex-start;
+	gap: 7px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--border);
+	color: var(--fg-muted);
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+.wiki-tasks__cutoff-icon {
+	width: 12px;
+	height: 12px;
+	flex: none;
+	margin-top: 2px;
+	color: var(--fg-passive);
+}
+
+.wiki-tasks__cutoff-toggle {
+	flex: none;
+	margin-left: auto;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--accent);
+	font-size: 11px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.wiki-tasks__cutoff-toggle:hover {
+	text-decoration: underline;
+}
+
+.wiki-tasks__group {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	margin-bottom: 8px;
+}
+
+.wiki-tasks__group-head {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 8px 4px;
+	border: 0;
+	background: transparent;
+	cursor: pointer;
+	text-align: left;
+}
+
+.wiki-tasks__group-label {
+	color: var(--fg-muted);
+	font-size: 10.5px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+/* Overdue is the one group that is late, so it is the one group with a colour.
+   Everything else is a heading. */
+.wiki-tasks__group-label.is-overdue {
+	color: var(--red);
+}
+
+.wiki-tasks__row {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 5px 8px;
+	border-radius: var(--radius-sm);
+	font-family: var(--font-sans);
+}
+
+.wiki-tasks__row:hover {
+	background: var(--interactive-hover);
+}
+
+/* A ticked row stays on screen for a beat before the list drops it: a row that
+   vanishes the instant it is clicked reads as a bug even when it is correct. */
+.wiki-tasks__row.is-done .wiki-tasks__text {
+	color: var(--fg-passive);
+	text-decoration: line-through;
+}
+
+.wiki-tasks__box {
+	display: inline-flex;
+	width: 14px;
+	height: 14px;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	margin-top: 2px;
+	padding: 0;
+	border: 1px solid var(--border-1);
+	border-radius: 3px;
+	background: transparent;
+	color: var(--fg);
+	cursor: pointer;
+}
+
+.wiki-tasks__box:hover:not(:disabled) {
+	border-color: var(--accent);
+}
+
+.wiki-tasks__box:disabled {
+	cursor: default;
+}
+
+.wiki-tasks__box svg {
+	width: 10px;
+	height: 10px;
+}
+
+.wiki-tasks__spin {
+	animation: wiki-tasks-spin 900ms linear infinite;
+}
+
+@keyframes wiki-tasks-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.wiki-tasks__body {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.wiki-tasks__text {
+	color: var(--fg);
+	font-size: 12px;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+.wiki-tasks__meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--fg-passive);
+	font-size: 10.5px;
+}
+
+.wiki-tasks__owner {
+	flex: none;
+	color: var(--fg-muted);
+}
+
+.wiki-tasks__where {
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--fg-passive);
+	font-size: 10.5px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.wiki-tasks__where:hover {
+	color: var(--fg);
+	text-decoration: underline;
+}
+
+.wiki-tasks__note {
+	color: var(--fg-muted);
+	font-size: 10.5px;
+	line-height: 1.5;
+}
+
+/* A refusal stays until it is read. Nothing was written, and the reader has to
+   know which of the "we did not touch your note" cases happened. */
+.wiki-tasks__error {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	margin-top: 3px;
+	padding: 6px 8px;
+	border-radius: var(--radius-sm);
+	background: var(--interactive-hover);
+	color: var(--fg-muted);
+	font-size: 10.5px;
+	line-height: 1.5;
+}
+
+.wiki-tasks__error svg {
+	width: 12px;
+	height: 12px;
+	flex: none;
+	margin-top: 1px;
+	color: var(--red);
+}
+
+.wiki-tasks__error strong {
+	color: var(--fg);
+	font-weight: 500;
+}
+
+.wiki-tasks__dismiss {
+	flex: none;
+	margin-left: auto;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--fg-passive);
+	cursor: pointer;
+}
+
+.wiki-tasks__dismiss:hover {
+	color: var(--fg);
+}
+
+.wiki-tasks__dismiss svg {
+	width: 11px;
+	height: 11px;
+	color: inherit;
+}
+
+/* ── the Tasks tab's own configuration ── */
+
+.wiki-tasks__form {
+	display: flex;
+	min-height: 0;
+	flex: 1;
+	flex-direction: column;
+	gap: 14px;
+	overflow-y: auto;
+	padding: 16px 14px;
+}
+
+.wiki-tasks__form-intro {
+	margin: 0;
+	color: var(--fg-muted);
+	font-size: 11.5px;
+	line-height: 1.6;
+}
+
+.wiki-tasks__field {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+
+.wiki-tasks__label {
+	color: var(--fg);
+	font-size: 11.5px;
+	font-weight: 500;
+}
+
+.wiki-tasks__input {
+	height: 28px;
+	padding: 0 9px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-1);
+	color: var(--fg);
+	font-size: 12px;
+	outline: none;
+}
+
+.wiki-tasks__input:focus {
+	border-color: var(--accent);
+}
+
+.wiki-tasks__input::placeholder {
+	color: var(--fg-passive);
+}
+
+.wiki-tasks__hint {
+	color: var(--fg-passive);
+	font-size: 10.5px;
+	line-height: 1.55;
+}
+
+.wiki-tasks__hint code,
+.wiki-tasks__form-intro code {
+	font-family: var(--font-mono);
+	font-size: 10px;
+}
+
+.wiki-tasks__form-error {
+	margin: 0;
+	color: var(--red);
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+.wiki-tasks__form-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+	margin-top: 2px;
+}
+
+.wiki-tasks__button {
+	height: 26px;
+	padding: 0 11px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--fg-muted);
+	font-size: 11.5px;
+	cursor: pointer;
+}
+
+.wiki-tasks__button:hover:not(:disabled) {
+	background: var(--interactive-hover);
+	color: var(--fg);
+}
+
+.wiki-tasks__button:disabled {
+	cursor: default;
+	opacity: 0.6;
+}
+
+.wiki-tasks__button--primary {
+	border-color: transparent;
+	background: var(--accent);
+	color: #fff;
+}
+
+.wiki-tasks__button--primary:hover:not(:disabled) {
+	background: var(--accent);
+	color: #fff;
+	filter: brightness(1.08);
+}
+
 /* ── a note, open in the centre ── */
 
 .wiki-note {

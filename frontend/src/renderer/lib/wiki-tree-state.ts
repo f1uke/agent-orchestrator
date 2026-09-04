@@ -126,3 +126,90 @@ export function saveSortOrder(order: WikiSortOrder): void {
 		// A full or disabled quota loses the direction, not the rail.
 	}
 }
+
+/* -------------------------------------------------------------------------
+ * The Tasks tab's per-viewer state
+ *
+ * The tab's real CONFIGURATION — which subtree, which sections, the cutoff,
+ * the owner aliases — lives in the daemon, because it decides what is scanned
+ * and it is a fact about the vault. What lives here is only how one person
+ * likes to look at it, which is nobody else's business and no reason to write
+ * to disk on another machine.
+ * ---------------------------------------------------------------------- */
+
+const OWNER_FILTER_KEY = "ao.wiki.tasks.owner";
+const SHOW_HIDDEN_KEY = "ao.wiki.tasks.showHidden";
+const COLLAPSED_GROUPS_KEY = "ao.wiki.tasks.collapsed";
+
+/** Which rows the reader last asked for. */
+export type WikiOwnerFilter = "all" | "mine" | "others";
+
+export function loadOwnerFilter(): WikiOwnerFilter {
+	try {
+		const raw = storage()?.getItem(OWNER_FILTER_KEY);
+		return raw === "mine" || raw === "others" ? raw : "all";
+	} catch {
+		return "all";
+	}
+}
+
+export function saveOwnerFilter(filter: WikiOwnerFilter): void {
+	try {
+		storage()?.setItem(OWNER_FILTER_KEY, filter);
+	} catch {
+		// A full or disabled quota loses the preference, not the tab.
+	}
+}
+
+/**
+ * Whether the rows the cutoff hides are being shown.
+ *
+ * It defaults to FALSE — hiding is what the cutoff is for — but it is
+ * remembered, because someone who turned it on is working through the backlog
+ * and having it snap shut every visit would be its own small hostility.
+ */
+export function loadShowHidden(): boolean {
+	try {
+		return storage()?.getItem(SHOW_HIDDEN_KEY) === "1";
+	} catch {
+		return false;
+	}
+}
+
+export function saveShowHidden(show: boolean): void {
+	try {
+		storage()?.setItem(SHOW_HIDDEN_KEY, show ? "1" : "0");
+	} catch {
+		// As above.
+	}
+}
+
+/** The day groups the reader has collapsed, as a set of group keys. */
+export function loadCollapsedGroups(): Record<string, boolean> {
+	try {
+		const raw = storage()?.getItem(COLLAPSED_GROUPS_KEY);
+		if (!raw) return {};
+		const parsed: unknown = JSON.parse(raw);
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+		const out: Record<string, boolean> = {};
+		for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+			if (typeof value === "boolean") out[key] = value;
+		}
+		return out;
+	} catch {
+		return {};
+	}
+}
+
+export function saveCollapsedGroups(state: Record<string, boolean>): void {
+	try {
+		// Only the collapsed ones are stored. A dated group's key is a DATE, so
+		// keeping the expanded ones would grow this blob by one key a day
+		// forever, for days that have long since gone.
+		const collapsed: Record<string, boolean> = {};
+		for (const [key, value] of Object.entries(state)) if (value) collapsed[key] = true;
+		storage()?.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify(collapsed));
+	} catch {
+		// As above.
+	}
+}

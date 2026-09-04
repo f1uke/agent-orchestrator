@@ -30,6 +30,23 @@ type fakeWikiSvc struct {
 	wrote     []wikisvc.WriteNoteInput
 	writeRes  wikisvc.WriteNoteResult
 	writeErr  error
+	tasks     wikisvc.Tasks
+	tasksErr  error
+	completed []wikisvc.CompleteTaskInput
+	completeR wikisvc.CompleteTaskResult
+	completeE error
+}
+
+func (f *fakeWikiSvc) ListTasks(context.Context) (wikisvc.Tasks, error) {
+	return f.tasks, f.tasksErr
+}
+
+func (f *fakeWikiSvc) CompleteTask(_ context.Context, in wikisvc.CompleteTaskInput) (wikisvc.CompleteTaskResult, error) {
+	f.completed = append(f.completed, in)
+	if f.completeE != nil {
+		return wikisvc.CompleteTaskResult{}, f.completeE
+	}
+	return f.completeR, nil
 }
 
 func (f *fakeWikiSvc) Status(context.Context) (wikisvc.Status, error) {
@@ -114,6 +131,8 @@ func TestWikiRoutes_WithoutServiceAreNotImplemented(t *testing.T) {
 		{"GET", "/api/v1/wiki/files"},
 		{"GET", "/api/v1/wiki/file?path=a.md"},
 		{"PUT", "/api/v1/wiki/file"},
+		{"GET", "/api/v1/wiki/tasks"},
+		{"POST", "/api/v1/wiki/tasks/complete"},
 	} {
 		body, status, headers := doRequest(t, srv, route.method, route.path, "")
 		assertJSON(t, headers)
@@ -394,4 +413,126 @@ func TestWriteWikiNote_SurfacesTheConflictEnvelope(t *testing.T) {
 		`{"path":"a.md","content":"x","baseHash":"sha256:stale"}`)
 	assertJSON(t, headers)
 	assertErrorCode(t, body, status, http.StatusConflict, "WIKI_NOTE_CONFLICT")
+}
+
+func TestWikiTasks_ShapesTheRowsAndNeverNullsAList(t *testing.T) {
+	svc := &fakeWikiSvc{tasks: wikisvc.Tasks{
+		Configured: true,
+		Folders:    []string{"Areas"},
+		Rows: []wikisvc.Task{{
+			ID: "abc", Path: "Areas/a.md", Line: 7, Raw: "- [ ] [@Someone] a row due:2026-05-09",
+			Text: "a row", Section: "Mine", Owner: "Someone", Due: "2026-05-09",
+			NoteModifiedAt: time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC),
+		}},
+	}}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, headers := doRequest(t, srv, "GET", "/api/v1/wiki/tasks", "")
+	assertJSON(t, headers)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var got struct {
+		Configured bool     `json:"configured"`
+		Folders    []string `json:"folders"`
+		Tasks      []struct {
+			ID             string `json:"id"`
+			Path           string `json:"path"`
+			Line           int    `json:"line"`
+			Raw            string `json:"raw"`
+			Text           string `json:"text"`
+			Owner          string `json:"owner"`
+			Due            string `json:"due"`
+			NoteModifiedAt string `json:"noteModifiedAt"`
+		} `json:"tasks"`
+		Sections     []string `json:"sections"`
+		Owners       []string `json:"owners"`
+		OwnerAliases []string `json:"ownerAliases"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Configured || len(got.Folders) != 1 || got.Folders[0] != "Areas" || len(got.Tasks) != 1 {
+		t.Fatalf("body = %+v", got)
+	}
+	row := got.Tasks[0]
+	if row.Line != 7 || row.Raw != "- [ ] [@Someone] a row due:2026-05-09" || row.Text != "a row" {
+		t.Fatalf("row = %+v", row)
+	}
+	if row.Owner != "Someone" || row.Due != "2026-05-09" || row.NoteModifiedAt != "2026-09-02T10:00:00Z" {
+		t.Fatalf("row = %+v", row)
+	}
+	// A renderer maps over these, so they must be [] and never null.
+	if got.Sections == nil || got.Owners == nil || got.OwnerAliases == nil || got.Folders == nil {
+		t.Fatalf("a list came back null: %+v", got)
+	}
+}
+
+// The row's exact text is its identity, so the route must hand it through
+// untouched — trimming it would make a row with trailing whitespace
+// unmatchable and the tick would be refused for no reason the reader can see.
+func TestWikiCompleteTask_PassesTheRawRowThroughVerbatim(t *testing.T) {
+	raw := "  - [ ] a row with trailing space  "
+	svc := &fakeWikiSvc{completeR: wikisvc.CompleteTaskResult{Path: "Areas/a.md", Line: 4, Raw: "  - [x] a row with trailing space  "}}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	payload, err := json.Marshal(map[string]any{"path": "Areas/a.md", "line": 4, "raw": raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/complete", string(payload))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	if len(svc.completed) != 1 {
+		t.Fatalf("completed = %v", svc.completed)
+	}
+	if svc.completed[0].Raw != raw {
+		t.Fatalf("Raw = %q, want it verbatim (%q)", svc.completed[0].Raw, raw)
+	}
+	if svc.completed[0].Line != 4 || svc.completed[0].Path != "Areas/a.md" {
+		t.Fatalf("input = %+v", svc.completed[0])
+	}
+}
+
+func TestWikiCompleteTask_RequiresAPath(t *testing.T) {
+	svc := &fakeWikiSvc{}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, headers := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/complete", `{"raw":"- [ ] x"}`)
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "PATH_REQUIRED")
+	if len(svc.completed) != 0 {
+		t.Fatal("a pathless tick reached the service")
+	}
+}
+
+// A refusal must arrive as the service's own code, so the tab can explain
+// exactly which of the three "we did not write anything" cases happened.
+func TestWikiCompleteTask_SurfacesTheRefusalCode(t *testing.T) {
+	svc := &fakeWikiSvc{completeE: apierr.Conflict("WIKI_TASK_AMBIGUOUS", "two rows match", nil)}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/complete", `{"path":"a.md","line":1,"raw":"- [ ] x"}`)
+	assertErrorCode(t, body, status, http.StatusConflict, "WIKI_TASK_AMBIGUOUS")
+}
+
+func TestWikiCompleteTask_ReportsAMovedRow(t *testing.T) {
+	svc := &fakeWikiSvc{completeR: wikisvc.CompleteTaskResult{Path: "a.md", Line: 9, Raw: "- [x] x", Moved: true}}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/complete", `{"path":"a.md","line":2,"raw":"- [ ] x"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var got struct {
+		Line  int  `json:"line"`
+		Moved bool `json:"moved"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Moved || got.Line != 9 {
+		t.Fatalf("body = %+v, want moved to line 9", got)
+	}
 }

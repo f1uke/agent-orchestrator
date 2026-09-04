@@ -7,6 +7,7 @@
  * never appears on the board.
  */
 
+import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
@@ -235,6 +236,196 @@ export function useSaveWikiNote() {
 			);
 			// The rail shows each note's age, and this note just aged.
 			void queryClient.invalidateQueries({ queryKey: wikiFilesQueryKey });
+		},
+	});
+}
+
+/* -------------------------------------------------------------------------
+ * Tasks
+ *
+ * The unchecked `- [ ]` rows in one configured corner of the vault, and the
+ * one write that ticks a row off.
+ *
+ * 🗝 A tick is preconditioned on the row's EXACT text. The daemon writes only
+ * to a line whose full text still equals the `raw` sent back, so a row that
+ * changed underneath the reader is refused rather than guessed at — and this
+ * layer never invents a `raw` of its own.
+ * ---------------------------------------------------------------------- */
+
+export type WikiTasks = components["schemas"]["WikiTasksResponse"];
+export type WikiTaskRow = components["schemas"]["WikiTaskRow"];
+export type WikiTaskCompleted = components["schemas"]["CompleteWikiTaskResponse"];
+export type WikiTasksSettings = components["schemas"]["WikiTasksSettingsResponse"];
+
+export const wikiTasksQueryKey = ["wiki", "tasks"] as const;
+export const wikiTasksSettingsQueryKey = ["wiki", "tasks", "settings"] as const;
+
+/**
+ * How often the task list is re-read. The vault's own agent edits these notes,
+ * so a stale list is the normal case rather than the exception — but the
+ * interval is longer than the file rail's because a task list is read
+ * deliberately, not glanced at.
+ *
+ * `enabled` gates the poll on the tab being open: nothing scans the vault
+ * while the reader is looking at their notes.
+ */
+const TASKS_POLL_MS = 60_000;
+
+export function useWikiTasks(enabled: boolean) {
+	return useQuery({
+		queryKey: wikiTasksQueryKey,
+		enabled,
+		queryFn: async (): Promise<WikiTasks> => {
+			const { data, error } = await apiClient.GET("/api/v1/wiki/tasks", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as WikiTasks;
+		},
+		staleTime: 15_000,
+		refetchInterval: TASKS_POLL_MS,
+		retry: 1,
+	});
+}
+
+export function useWikiTasksSettings(enabled: boolean) {
+	return useQuery({
+		queryKey: wikiTasksSettingsQueryKey,
+		enabled,
+		queryFn: async (): Promise<WikiTasksSettings> => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/wiki/tasks", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as WikiTasksSettings;
+		},
+		retry: 1,
+	});
+}
+
+export function useSaveWikiTasksSettings() {
+	const queryClient = useQueryClient();
+	return useMutation<WikiTasksSettings, Error, WikiTasksSettings>({
+		mutationFn: async (input) => {
+			const { data, error } = await apiClient.PUT("/api/v1/settings/wiki/tasks", {
+				body: {
+					folders: input.folders,
+					sections: input.sections,
+					cutoff: input.cutoff,
+					ownerAliases: input.ownerAliases,
+				},
+			});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as WikiTasksSettings;
+		},
+		onSuccess: (saved) => {
+			queryClient.setQueryData(wikiTasksSettingsQueryKey, saved);
+			// The config decides what is scanned, so the list is now wrong.
+			void queryClient.invalidateQueries({ queryKey: wikiTasksQueryKey });
+		},
+	});
+}
+
+/** Why a tick was refused, in words the reader can act on. */
+export type TaskTickFailure = {
+	/** `stale` is the reader's to resolve; `refused` is everything else. */
+	kind: "stale" | "refused";
+	title: string;
+	detail: string;
+};
+
+/** Thrown by the tick so the tab can branch without reparsing the body. */
+export class WikiTaskTickError extends Error {
+	readonly failure: TaskTickFailure;
+
+	constructor(failure: TaskTickFailure) {
+		super(`${failure.title} ${failure.detail}`);
+		this.name = "WikiTaskTickError";
+		this.failure = failure;
+	}
+}
+
+/**
+ * What went wrong with a tick.
+ *
+ * Every one of these means NOTHING WAS WRITTEN, and each says which of the
+ * "we did not touch your note" cases happened — the whole point of matching on
+ * the row's exact text is that a mismatch can be explained rather than guessed
+ * at, so the wording here has to carry that through instead of flattening the
+ * three cases into one shrug.
+ */
+export function taskTickFailure(error: unknown): TaskTickFailure {
+	const body: ErrorBody = typeof error === "object" && error !== null ? (error as ErrorBody) : {};
+	switch (str(body.code)) {
+		case "WIKI_TASK_NOT_FOUND":
+			return {
+				kind: "stale",
+				title: "This row has changed in the note.",
+				detail: "Nothing was written. Re-read the vault to see what it says now.",
+			};
+		case "WIKI_TASK_AMBIGUOUS":
+			return {
+				kind: "stale",
+				title: "This note has more than one row with exactly this text.",
+				detail: "Nothing was written, because there is no way to tell which one you meant. Tick it in the note itself.",
+			};
+		case "WIKI_TASK_ALREADY_DONE":
+			return { kind: "stale", title: "This was already ticked off.", detail: "Nothing was written." };
+		case "WIKI_NOTE_CONFLICT":
+			return {
+				kind: "stale",
+				title: "The note changed while this was being written.",
+				detail: "Nothing was written. Re-read the vault and try again.",
+			};
+		case "WIKI_NOTE_NOT_FOUND":
+			return { kind: "refused", title: "This note is no longer there.", detail: "It was moved or deleted." };
+		default:
+			// Never swallow an error we did not anticipate: show what the daemon
+			// actually said rather than a sentence that hides it.
+			return {
+				kind: "refused",
+				title: "This couldn’t be ticked off.",
+				detail: apiErrorMessage(error, "The daemon refused the write."),
+			};
+	}
+}
+
+/**
+ * Tick one row off.
+ *
+ * 🗝 Ticks are SERIALIZED through one promise chain. Two ticks in the same note
+ * otherwise race on the note's content hash and the second is refused with a
+ * conflict the reader did nothing to cause. They are rare enough — one click
+ * each — that a queue costs nothing and removes the whole class of failure.
+ *
+ * The caller owns the pending/optimistic state, because it is what must
+ * survive the list being refetched underneath it.
+ */
+export function useCompleteWikiTask() {
+	const queryClient = useQueryClient();
+	// One chain for the whole app. A ref rather than state: it is a lock, and
+	// re-rendering because the lock moved would be noise.
+	const chain = useRef<Promise<unknown>>(Promise.resolve());
+
+	return useMutation<WikiTaskCompleted, WikiTaskTickError, { path: string; line: number; raw: string }>({
+		mutationFn: async (input) => {
+			const send = async (): Promise<WikiTaskCompleted> => {
+				const { data, error } = await apiClient.POST("/api/v1/wiki/tasks/complete", {
+					// `raw` goes out exactly as it came in. Trimming or
+					// re-rendering it here would break the one guarantee this
+					// whole path rests on.
+					body: { path: input.path, line: input.line, raw: input.raw },
+				});
+				if (error) throw new WikiTaskTickError(taskTickFailure(error));
+				return data as WikiTaskCompleted;
+			};
+			// `then(send, send)` rather than `then(send)`: a tick that failed
+			// must not poison the queue for every tick behind it.
+			const run = chain.current.then(send, send);
+			// The chain itself never rejects, or the next `.then` would skip.
+			chain.current = run.catch(() => undefined);
+			return run;
+		},
+		onSuccess: (_result, input) => {
+			// The note aged, and the rail shows each note's age.
+			void queryClient.invalidateQueries({ queryKey: wikiFilesQueryKey });
+			void queryClient.invalidateQueries({ queryKey: wikiNoteQueryKey(input.path) });
 		},
 	});
 }

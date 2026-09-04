@@ -11,12 +11,14 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
 )
 
 type fakeSettings struct {
 	mu      sync.Mutex
 	vault   string
 	harness string
+	tasks   wikisettings.TaskSettings
 }
 
 func (f *fakeSettings) VaultPath() string {
@@ -36,6 +38,12 @@ func (f *fakeSettings) SetHarness(h string) error {
 	defer f.mu.Unlock()
 	f.harness = h
 	return nil
+}
+
+func (f *fakeSettings) Tasks() wikisettings.TaskSettings {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tasks
 }
 
 type fakeRuntime struct {

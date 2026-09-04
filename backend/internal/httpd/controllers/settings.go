@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -116,6 +118,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/response-language", c.setResponseLanguage)
 	r.Get("/settings/wiki", c.getWiki)
 	r.Put("/settings/wiki", c.setWiki)
+	r.Get("/settings/wiki/tasks", c.getWikiTasks)
+	r.Put("/settings/wiki/tasks", c.setWikiTasks)
 	r.Get("/settings/evidence-retention", c.getEvidenceRetention)
 	r.Put("/settings/evidence-retention", c.setEvidenceRetention)
 	r.Post("/settings/evidence-retention/sweep", c.sweepEvidenceRetention)
@@ -278,6 +282,87 @@ func (c *SettingsController) setWiki(w http.ResponseWriter, r *http.Request) {
 	}
 	saved := c.Wiki.Get()
 	envelope.WriteJSON(w, http.StatusOK, WikiSettingsResponse{VaultPath: saved.VaultPath, Harness: saved.Harness})
+}
+
+func (c *SettingsController) getWikiTasks(w http.ResponseWriter, r *http.Request) {
+	if c.Wiki == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/wiki/tasks")
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, wikiTasksSettingsResponse(c.Wiki.Get().Tasks))
+}
+
+// setWikiTasks replaces the Tasks tab's configuration. The vault path and the
+// remembered harness are NOT part of this body: three surfaces write this file
+// and none of them may blank the others.
+//
+// An empty list is a legitimate value — it is the unconfigured state, in which
+// the tab scans nothing and says so — but a folder that is set and is not a
+// directory in the vault is rejected here rather than saved and discovered
+// later as an empty tab.
+func (c *SettingsController) setWikiTasks(w http.ResponseWriter, r *http.Request) {
+	if c.Wiki == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/wiki/tasks")
+		return
+	}
+	var in SetWikiTasksSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if cutoff := strings.TrimSpace(in.Cutoff); cutoff != "" {
+		if _, err := time.Parse("2006-01-02", cutoff); err != nil {
+			envelope.WriteAPIError(
+				w, r, http.StatusBadRequest, "bad_request", "WIKI_TASKS_CUTOFF_INVALID",
+				"The cutoff must be a date written as YYYY-MM-DD", nil,
+			)
+			return
+		}
+	}
+	next := c.Wiki.Get()
+	next.Tasks = wikisettings.TaskSettings{
+		Folders:      in.Folders,
+		Sections:     in.Sections,
+		Cutoff:       in.Cutoff,
+		OwnerAliases: in.OwnerAliases,
+	}
+	folders := wikisettings.NormalizeFolders(in.Folders)
+	if len(folders) > 0 {
+		vault := strings.TrimSpace(next.VaultPath)
+		if vault == "" {
+			envelope.WriteAPIError(
+				w, r, http.StatusBadRequest, "bad_request", "WIKI_NOT_CONFIGURED",
+				"Set the wiki vault path before choosing a tasks folder", nil,
+			)
+			return
+		}
+		// Every folder is checked, so a typo in the second one is reported
+		// here rather than surfacing later as a tab that will not load.
+		for _, folder := range folders {
+			info, err := os.Stat(filepath.Join(vault, filepath.FromSlash(folder)))
+			if err != nil || !info.IsDir() {
+				envelope.WriteAPIError(
+					w, r, http.StatusBadRequest, "bad_request", "WIKI_TASKS_FOLDER_NOT_A_DIRECTORY",
+					"That folder is not a directory inside the vault", map[string]any{"folder": folder},
+				)
+				return
+			}
+		}
+	}
+	if err := c.Wiki.Set(next); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, wikiTasksSettingsResponse(c.Wiki.Get().Tasks))
+}
+
+func wikiTasksSettingsResponse(t wikisettings.TaskSettings) WikiTasksSettingsResponse {
+	return WikiTasksSettingsResponse{
+		Folders:      nonNil(t.Folders),
+		Sections:     nonNil(t.Sections),
+		Cutoff:       t.Cutoff,
+		OwnerAliases: nonNil(t.OwnerAliases),
+	}
 }
 
 func (c *SettingsController) getEvidenceRetention(w http.ResponseWriter, r *http.Request) {

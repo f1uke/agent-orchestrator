@@ -3,18 +3,24 @@ import { useQueryClient } from "@tanstack/react-query";
 import { BookText } from "lucide-react";
 import { useDaemonStatus } from "../hooks/useDaemonStatus";
 import {
+	useCompleteWikiTask,
+	useSaveWikiTasksSettings,
 	useWikiAgentControls,
 	useWikiFiles,
 	useWikiNote,
 	useWikiStatus,
+	useWikiTasks,
+	useWikiTasksSettings,
 	wikiFilesQueryKey,
 	wikiNoteQueryKey,
+	wikiTasksQueryKey,
 	type WikiFiles,
 } from "../hooks/useWiki";
 import { useUiStore } from "../stores/ui-store";
 import { WikiAgentControl, type WikiAgentState } from "./WikiAgentControl";
 import { WikiAgentPicker } from "./WikiAgentPicker";
 import { WikiNoteView } from "./WikiNoteView";
+import { WikiTasksPanel } from "./WikiTasksPanel";
 import { WikiTerminal } from "./WikiTerminal";
 import { WikiVaultRail } from "./WikiVaultRail";
 
@@ -55,6 +61,15 @@ export function WikiPage() {
 
 	const filesQuery = useWikiFiles(configured);
 	const [railQuery, setRailQuery] = useState("");
+
+	// The Tasks tab's own data. It is fetched alongside the file index rather
+	// than only when the tab is opened: the scan is bounded to one configured
+	// folder, and a tab that spends a second loading every time you glance at
+	// it is a tab you stop glancing at.
+	const tasksQuery = useWikiTasks(configured);
+	const tasksSettingsQuery = useWikiTasksSettings(configured);
+	const saveTasksSettings = useSaveWikiTasksSettings();
+	const completeTask = useCompleteWikiTask();
 
 	// The reading history behind the file bar's chevrons: a stack of note paths
 	// with a cursor, so Back returns to the note you came FROM.
@@ -224,6 +239,23 @@ export function WikiPage() {
 					onRefresh={() => void queryClient.invalidateQueries({ queryKey: wikiFilesQueryKey })}
 					query={railQuery}
 					onQueryChange={setRailQuery}
+					tasks={
+						<WikiTasksPanel
+							tasks={tasksQuery.data}
+							settings={tasksSettingsQuery.data}
+							loading={tasksQuery.isPending}
+							error={tasksQuery.error as Error | null}
+							onRefresh={() => void queryClient.invalidateQueries({ queryKey: wikiTasksQueryKey })}
+							onComplete={async (row) => {
+								const result = await completeTask.mutateAsync({ path: row.path, line: row.line, raw: row.raw });
+								return { moved: result.moved };
+							}}
+							onSaveSettings={(next) => saveTasksSettings.mutateAsync(next)}
+							savingSettings={saveTasksSettings.isPending}
+							settingsError={saveTasksSettings.error ? saveTasksSettings.error.message : null}
+							onOpenNote={openNote}
+						/>
+					}
 				/>
 			</div>
 		</div>
