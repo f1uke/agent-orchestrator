@@ -284,10 +284,10 @@ The per-send way in is a pair of flags on `ao send`, which ride the request as
 `wire` and govern **that one message only** - nothing sticky, and the default is
 untouched when neither is passed:
 
-| flag            | same choice as                 | behaviour                                                       |
-| --------------- | ------------------------------ | --------------------------------------------------------------- |
-| `--pane-only`   | `AO_CLAUDE_NATIVE_SEND=0`      | type it into the terminal; never touch the socket               |
-| `--socket-only` | `AO_CLAUDE_NATIVE_SEND=strict` | socket or nothing: the send FAILS rather than fall back         |
+| flag            | same choice as                 | behaviour                                               |
+| --------------- | ------------------------------ | ------------------------------------------------------- |
+| `--pane-only`   | `AO_CLAUDE_NATIVE_SEND=0`      | type it into the terminal; never touch the socket       |
+| `--socket-only` | `AO_CLAUDE_NATIVE_SEND=strict` | socket or nothing: the send FAILS rather than fall back |
 
 The two are mutually exclusive and refused together. A flag beats the daemon-wide
 value for that send, in both directions. A message HELD for a sleeping agent is
