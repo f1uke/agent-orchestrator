@@ -231,8 +231,8 @@ export function WikiTasksPanel({
 						{view.undated > 0 && (
 							<>
 								{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no date of{" "}
-								{view.undated === 1 ? "its" : "their"} own, so the cutoff leaves{" "}
-								{view.undated === 1 ? "it" : "them"} here.
+								{view.undated === 1 ? "its" : "their"} own, so the cutoff leaves {view.undated === 1 ? "it" : "them"}{" "}
+								here.
 							</>
 						)}
 					</span>
