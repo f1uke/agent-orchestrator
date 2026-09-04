@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/telemetrymeta"
@@ -1060,7 +1061,11 @@ func (s *Service) SendFrom(ctx context.Context, id domain.SessionID, message str
 	if unreviewed.Unreviewed() {
 		message += unreviewedNotice(unreviewed)
 	}
-	outcome, err := s.manager.Send(ctx, id, message)
+	// Name the author for the transports that can carry a sender: a claude-code
+	// session shows a named, expandable row for a message that has one and an
+	// anonymous block for one that does not. Empty for a human or a tool, which
+	// is exactly what the transport then reports.
+	outcome, err := s.manager.Send(msgorigin.WithSender(ctx, string(talk.From)), id, message)
 	return SendResult{Outcome: outcome, Unreviewed: unreviewed}, toAPIError(err)
 }
 

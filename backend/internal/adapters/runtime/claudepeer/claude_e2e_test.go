@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -106,6 +107,21 @@ func TestAgainstRealClaude(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	// --- the message says who sent it -------------------------------------
+	//
+	// First, while the session is freshly started and IDLE: a peer message
+	// delivered mid-turn is absorbed into the running turn and rendered as a
+	// plain queued block, which says nothing about whether it carried an
+	// identity.
+	const sender = "ao-e2e-1"
+	if err := rt.SendMessage(msgorigin.WithSender(ctx, sender), handle, "E2E-IDENTITY probe. Do not reply."); err != nil {
+		t.Fatalf("SendMessage (identity): %v", err)
+	}
+	pane := waitFor("the named sender row", "Message from @"+sender, 60*time.Second)
+	if strings.Contains(pane, "<cross-session-message") {
+		t.Fatalf("the receiver did not recognise the sender envelope and showed its markup. Pane:\n%s", pane)
+	}
+
 	// --- the headline: deliver while the human is mid-keystroke -----------
 	const draft = "half-typed draft the human is still writing"
 	if out, err := tmuxRun("send-keys", "-t", sess, "-l", draft); err != nil {
@@ -115,7 +131,7 @@ func TestAgainstRealClaude(t *testing.T) {
 	if err := rt.SendMessage(ctx, handle, "E2E-INTERLEAVE probe. Do not reply and take no action."); err != nil {
 		t.Fatalf("SendMessage while typing: %v", err)
 	}
-	pane := waitFor("the socket-delivered message", "E2E-INTERLEAVE", 60*time.Second)
+	pane = waitFor("the socket-delivered message", "E2E-INTERLEAVE", 60*time.Second)
 	if !strings.Contains(pane, draft) {
 		t.Fatalf("the human's half-typed line was lost or corrupted. Pane:\n%s", pane)
 	}
