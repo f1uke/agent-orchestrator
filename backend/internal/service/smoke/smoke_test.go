@@ -1158,3 +1158,38 @@ func TestAuthorKeepsResultsWhenTheIDIsSupplied(t *testing.T) {
 		t.Errorf("results lost across the rename: verdict=%q note=%q", got.Verdict, got.Note)
 	}
 }
+
+// Reading a checklist for a session that does not exist must say so. Reporting
+// an empty list instead is indistinguishable from "nobody has authored one
+// yet", which is how an id that was never AO's - a Claude Code session name,
+// say - passes for a real one and leaves the reader thinking there is nothing
+// to play.
+func TestListRefusesAnUnknownSession(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj", Kind: domain.KindWorker}
+	svc := newTestService(t, store, nil)
+
+	_, err := svc.List(context.Background(), "mobility-4734-chat-unsafe-url-whitelist-f5")
+	if err == nil {
+		t.Fatal("listing an unknown session succeeded; it cannot be told from an empty checklist")
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("error = %v, want ErrNotFound", err)
+	}
+}
+
+// A real session with nothing authored yet is still the empty answer it always
+// was.
+func TestListOfAKnownSessionWithNoChecklistIsEmpty(t *testing.T) {
+	store := newFakeStore()
+	store.sessions["w1"] = domain.SessionRecord{ID: "w1", ProjectID: "proj", Kind: domain.KindWorker}
+	svc := newTestService(t, store, nil)
+
+	res, err := svc.List(context.Background(), "w1")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(res.Checks) != 0 {
+		t.Fatalf("want an empty checklist, got %d cases", len(res.Checks))
+	}
+}

@@ -14,6 +14,11 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 )
 
+// sessionResolvedHeader mirrors controllers.SessionResolvedHeader. It is
+// duplicated rather than imported because the CLI is a thin HTTP client and
+// does not depend on the daemon's controller package.
+const sessionResolvedHeader = "X-AO-Session-Resolved"
+
 // commandTimeout bounds a mutating daemon call. Spawns do real work (git
 // worktree add, tmux launch, hook install), so it is generous compared to the
 // status probe timeout.
@@ -163,6 +168,7 @@ func (c *commandContext) sendDaemonRequest(req *http.Request, out any) error {
 		return fmt.Errorf("call daemon: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	c.noteResolvedSession(resp)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var e apiError
@@ -178,4 +184,26 @@ func (c *commandContext) sendDaemonRequest(req *http.Request, out any) error {
 		}
 	}
 	return nil
+}
+
+// noteResolvedSession tells the user when the daemon read the session id they
+// typed as a Claude Code session name and answered for a different AO session.
+//
+// It prints once per distinct substitution: a command that makes several calls
+// about one session would otherwise repeat itself. It goes to stderr so it
+// never lands in the output of a command being piped somewhere, and it names
+// the AO id so the next command can use it directly.
+func (c *commandContext) noteResolvedSession(resp *http.Response) {
+	note := resp.Header.Get(sessionResolvedHeader)
+	if note == "" || c.deps.Err == nil {
+		return
+	}
+	if c.notedSessions == nil {
+		c.notedSessions = map[string]bool{}
+	}
+	if c.notedSessions[note] {
+		return
+	}
+	c.notedSessions[note] = true
+	_, _ = fmt.Fprintf(c.deps.Err, "note: session resolved %s\n", note)
 }

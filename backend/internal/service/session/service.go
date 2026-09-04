@@ -197,6 +197,12 @@ type Service struct {
 	// live session. The read model exposes IdleCloseAt = idleReference + this so
 	// the board can count down to suspension. 0 (disabled) omits IdleCloseAt.
 	idleCloseTTL time.Duration
+	// claudeRegistry reads Claude Code's own session registry, which is what
+	// lets a Claude session name stand in for an AO session id (see
+	// ResolveSessionAlias). Lazily defaulted so the constructor is unchanged;
+	// tests inject through Deps.ClaudeRegistry.
+	claudeRegistry claudeRegistry
+	claudeOnce     sync.Once
 	// targetFetch throttles the Changes panel's read-only refresh of a session's
 	// target branch. Zero value ready; deliberately a field rather than a package
 	// global so two services in one test process cannot share throttle state.
@@ -229,11 +235,15 @@ type Deps struct {
 	// IdleCloseTTL is the idle-suspend window (config.SessionIdleClose), used to
 	// derive the read model's IdleCloseAt countdown. 0 disables it (no countdown).
 	IdleCloseTTL time.Duration
+	// ClaudeRegistry reads Claude Code's own session registry (see
+	// ResolveSessionAlias). Left nil, the real ~/.claude/sessions is read on
+	// first use; tests inject a fake so they never touch the developer's own.
+	ClaudeRegistry claudeRegistry
 }
 
 // NewWithDeps wires a session service with optional PR-claim dependencies.
 func NewWithDeps(d Deps) *Service {
-	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, clock: d.Clock, signalCapable: d.SignalCapable, telemetry: d.Telemetry, renderer: d.Renderer, idleCloseTTL: d.IdleCloseTTL}
+	s := &Service{manager: d.Manager, store: d.Store, prClaimer: d.PRClaimer, scm: d.SCM, clock: d.Clock, signalCapable: d.SignalCapable, telemetry: d.Telemetry, renderer: d.Renderer, idleCloseTTL: d.IdleCloseTTL, claudeRegistry: d.ClaudeRegistry}
 	if s.prClaimer == nil {
 		if w, ok := d.Store.(ports.PRClaimer); ok {
 			s.prClaimer = w
