@@ -251,6 +251,10 @@ func NewRootCommand(deps Deps) *cobra.Command {
 
 type commandContext struct {
 	deps Deps
+	// notedSessions remembers which session-alias substitutions have already
+	// been reported, so a command that makes several daemon calls about one
+	// session says it once.
+	notedSessions map[string]bool
 }
 
 func shouldEmitCLIInvocation(cmd *cobra.Command) bool {

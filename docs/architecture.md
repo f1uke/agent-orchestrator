@@ -270,6 +270,30 @@ which the receiving session labels as coming from another Claude session rather
 than from its user. That is inherent to the interface: it has no frame that
 injects a plain user prompt.
 
+### Session ids, and Claude Code's own session names
+
+Claude Code names every session after its worktree directory plus a random
+suffix (`mobility-4734-chat-unsafe-url-whitelist-f5`) and shows the agent THAT
+name, so an agent asked to identify itself answers with something that looks
+like an AO session id and is not one. Pasted into `ao send` or `ao smoke list`
+it used to resolve to nothing.
+
+`controllers.SessionAlias` (mounted once, above `TaskScoped`, on the group that
+carries every session route) resolves such a name to the AO session that owns
+the same tmux pane and rewrites the `{sessionId}` path parameter, so every
+route - and `TaskScoped`, which reads the same parameter - sees an ordinary AO
+id. The pane is the only sound join: a crew's dev and qa share a worktree, a
+branch and a display name, so cwd cannot tell them apart.
+
+It never changes what a known id means. An id AO already has wins before
+Claude's registry is read, and a name matching zero or several live sessions is
+passed through so the handler returns its own 404.
+
+Every resolved request carries `X-AO-Session-Resolved: <given> -> <ao id> (tmux
+<handle>)`, and the CLI prints it to stderr. That is load-bearing rather than
+decorative: because the two crew members are indistinguishable by name, a silent
+substitution could message the wrong agent with nothing to show for it.
+
 ### Core Data Flow
 
 ```mermaid

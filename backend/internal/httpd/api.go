@@ -161,6 +161,17 @@ func (a *API) Register(root chi.Router) {
 
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Timeout(timeout))
+			// Normalise the session id BEFORE anything reads it, so a Claude
+			// Code session name works anywhere an AO id does. It has to sit
+			// above TaskScoped (which reads the same parameter) and above every
+			// controller; on a route with no {sessionId} it costs nothing.
+			// Optional capability, reached by assertion like every other one:
+			// a controller test that wires a minimal session service simply
+			// does not get alias resolution, rather than being forced to grow
+			// a method it has no use for.
+			if resolver, ok := a.sessions.Svc.(controllers.SessionAliasResolver); ok {
+				r.Use(controllers.SessionAlias(resolver))
+			}
 			a.agents.Register(r)
 			a.projects.Register(r)
 			a.sessions.Register(r)

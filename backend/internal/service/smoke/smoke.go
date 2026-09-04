@@ -238,11 +238,24 @@ func (s *Service) List(ctx context.Context, sessionID domain.SessionID) (Session
 	if sessionID == "" {
 		return SessionSmoke{}, fmt.Errorf("%w: session id is required", ErrInvalid)
 	}
+	// An unknown session must say so. Reporting an empty checklist for one
+	// cannot be told apart from "nobody has authored one yet", and that is
+	// exactly how a session id that was never AO's (a Claude Code session name,
+	// say) passes for a real one: the reader concludes there is nothing to
+	// play rather than that they are looking at the wrong session. Author
+	// already refuses an unknown session, so only the read was silent.
+	rec, ok, err := s.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return SessionSmoke{}, err
+	}
+	if !ok {
+		return SessionSmoke{}, fmt.Errorf("%w: session %q", ErrNotFound, sessionID)
+	}
 	checks, err := s.store.ListSmokeChecksBySession(ctx, sessionID)
 	if err != nil {
 		return SessionSmoke{}, err
 	}
-	worker := s.workerLabel(ctx, sessionID)
+	worker := workerLabelOf(rec, sessionID)
 	out := SessionSmoke{Worker: worker, ReportedAt: reportedAt(checks), Checks: checks}
 	stood, ok, err := s.store.GetSmokeChecklistStandDown(ctx, sessionID)
 	if err != nil {
@@ -1219,11 +1232,9 @@ func (s *Service) getCheck(ctx context.Context, checkID string) (domain.SmokeChe
 	return check, nil
 }
 
-func (s *Service) workerLabel(ctx context.Context, sessionID domain.SessionID) string {
-	rec, ok, err := s.store.GetSession(ctx, sessionID)
-	if err != nil || !ok {
-		return string(sessionID)
-	}
+// workerLabelOf is how a session is named in a checklist header: its display
+// name when it has one, else its id.
+func workerLabelOf(rec domain.SessionRecord, sessionID domain.SessionID) string {
 	if rec.DisplayName != "" {
 		return rec.DisplayName
 	}

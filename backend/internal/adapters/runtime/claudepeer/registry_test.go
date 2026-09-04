@@ -42,6 +42,7 @@ func (f registryFixture) writeDescriptor(t *testing.T, pid int, mutate func(m ma
 	desc := map[string]any{
 		"pid":                 pid,
 		"sessionId":           "conv-" + strconv.Itoa(pid),
+		"name":                "worktree-name-" + strconv.Itoa(pid),
 		"peerProtocol":        supportedPeerProtocol,
 		"kind":                "interactive",
 		"tmux":                "ao-worker-7:@12.%12",
@@ -76,8 +77,8 @@ func (f registryFixture) registry(argv []string, alive bool) *FileRegistry {
 	return NewFileRegistry(FileRegistryOptions{
 		Dir:      f.dir,
 		PIDAlive: func(int) bool { return alive },
-		ProcInfo: func(context.Context, int) (procInfo, error) {
-			return procInfo{Argv: argv}, nil
+		ProcArgv: func(context.Context, int) ([]string, error) {
+			return argv, nil
 		},
 	})
 }
@@ -211,22 +212,5 @@ func TestLookupSucceedsWithoutAKeyFile(t *testing.T) {
 	}
 	if session.PeerToken != "" {
 		t.Fatal("want an empty token when no key file is readable")
-	}
-}
-
-func TestTmuxSessionName(t *testing.T) {
-	tests := map[string]string{
-		"ao-worker-7:@12.%12":        "ao-worker-7",
-		"proj-feature-a-b:@892.%892": "proj-feature-a-b",
-		"plain":                      "plain",
-		"":                           "",
-		// A tmux session name may itself contain a colon; the pane target is
-		// always the last one.
-		"weird:name:@1.%1": "weird:name",
-	}
-	for target, want := range tests {
-		if got := tmuxSessionName(target); got != want {
-			t.Fatalf("tmuxSessionName(%q) = %q, want %q", target, got, want)
-		}
 	}
 }
