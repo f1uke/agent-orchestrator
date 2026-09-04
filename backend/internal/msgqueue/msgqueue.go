@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -331,6 +332,14 @@ func (q *Queue) deliver(ctx context.Context, handle ports.RuntimeHandle, msg dom
 		// past it or the inbox would be reordered.
 		return false, nil
 	}
+	// A held message is one nobody watches being delivered - it lands minutes or
+	// hours after it was sent, at whoever happens to be at the keyboard - so it
+	// is exactly the delivery that has to be recorded. The queue names itself so
+	// the record says a drain did this, not an `ao send`.
+	ctx = msgdelivery.WithOrigin(ctx, msgdelivery.Origin{
+		Session: string(msg.SessionID),
+		Trigger: msgdelivery.TriggerQueueDrain,
+	})
 	if err := q.sender.SendMessage(ctx, handle, decorate(msg, now)); err != nil {
 		cause := fmt.Sprintf("delivery failed: %v", err)
 		if msg.Attempts+1 >= maxAttempts {

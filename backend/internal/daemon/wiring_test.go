@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
@@ -158,7 +159,7 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 	lcm := lifecycle.New(store, nil)
 	cfg := config.Config{DataDir: t.TempDir()}
 
-	rt := runtimeselect.New(nil)
+	rt := runtimeselect.New(nil, runtimeselect.Options{})
 	messenger := newSessionMessenger(store, rt, nil, log)
 	spawnConfirm, err := spawnconfirm.NewStore(cfg.DataDir)
 	if err != nil {
@@ -298,7 +299,7 @@ func TestStartTrackerIntake_RunsEvenWithoutEnabledProjects(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	lcm := lifecycle.New(store, nil)
 	cfg := config.Config{DataDir: t.TempDir()}
-	rt := runtimeselect.New(nil)
+	rt := runtimeselect.New(nil, runtimeselect.Options{})
 	messenger := newSessionMessenger(store, rt, nil, log)
 	spawnConfirm, err := spawnconfirm.NewStore(cfg.DataDir)
 	if err != nil {
@@ -885,5 +886,103 @@ func TestWiring_SessionMessengerDeliversToAParkedSession(t *testing.T) {
 	}
 	if runtime.message != "CI is failing" {
 		t.Fatalf("runtime message = %q, want it typed into the live pane", runtime.message)
+	}
+}
+
+// reportingRuntimeSender stands in for the transport: it says which wire it
+// took, exactly as claudepeer does, and records the origin it was handed.
+type reportingRuntimeSender struct {
+	report msgdelivery.Report
+	origin msgdelivery.Origin
+}
+
+func (r *reportingRuntimeSender) SendMessage(ctx context.Context, handle ports.RuntimeHandle, _ string) error {
+	r.origin = msgdelivery.OriginOf(ctx)
+	msgdelivery.Record(ctx, nil, handle.ID, r.report)
+	return nil
+}
+
+func messengerTestSession(t *testing.T, store *sqlite.Store) domain.SessionRecord {
+	t.Helper()
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "p", Path: "/repo/p", RegisteredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "p", Kind: domain.KindWorker,
+		Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()},
+		Metadata: domain.SessionMetadata{RuntimeHandleID: "ao-1/terminal_0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+// The path a message took is the transport's answer, and it must survive all
+// the way back to whoever asked - that is the whole point of carrying it.
+func TestWiring_SessionMessengerCarriesTheDeliveryPathBack(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	runtime := &reportingRuntimeSender{report: msgdelivery.Report{
+		Path: msgdelivery.PathPane, Reason: "no-descriptor",
+	}}
+	rec := messengerTestSession(t, store)
+
+	outcome, err := newSessionMessenger(store, runtime, nil, nil).Send(context.Background(), rec.ID, "hello agent")
+	if err != nil {
+		t.Fatalf("messenger.Send: %v", err)
+	}
+	if outcome.Delivery.Path != msgdelivery.PathPane || outcome.Delivery.Reason != "no-descriptor" {
+		t.Fatalf("delivery = %+v, want the transport's own answer", outcome.Delivery)
+	}
+	// The transport sees a runtime handle, so the session id and the reason the
+	// send is happening have to be handed to it.
+	if runtime.origin.Session != string(rec.ID) || runtime.origin.Trigger != msgdelivery.TriggerSend {
+		t.Fatalf("origin = %+v, want this session and an ordinary send", runtime.origin)
+	}
+}
+
+// A caller that already said WHY it is sending keeps its own trigger: a nudge
+// must not be recorded as somebody's `ao send`.
+func TestWiring_SessionMessengerKeepsTheCallersTrigger(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	runtime := &reportingRuntimeSender{report: msgdelivery.Report{Path: msgdelivery.PathSocket}}
+	rec := messengerTestSession(t, store)
+
+	ctx := msgdelivery.WithOrigin(context.Background(), msgdelivery.Origin{Trigger: msgdelivery.TriggerNudge})
+	if _, err := newSessionMessenger(store, runtime, nil, nil).Send(ctx, rec.ID, "CI is failing"); err != nil {
+		t.Fatalf("messenger.Send: %v", err)
+	}
+	if runtime.origin.Trigger != msgdelivery.TriggerNudge {
+		t.Fatalf("trigger = %q, want the caller's own", runtime.origin.Trigger)
+	}
+}
+
+// A transport that reported nothing leaves the outcome silent about the path,
+// rather than claiming one. "Nobody accounted for this" is the honest answer.
+func TestWiring_SessionMessengerInventsNoPath(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	rec := messengerTestSession(t, store)
+	outcome, err := newSessionMessenger(store, &captureRuntimeSender{}, nil, nil).Send(context.Background(), rec.ID, "hello")
+	if err != nil {
+		t.Fatalf("messenger.Send: %v", err)
+	}
+	if outcome.Delivery.Path != "" {
+		t.Fatalf("path = %q, want nothing claimed", outcome.Delivery.Path)
 	}
 }

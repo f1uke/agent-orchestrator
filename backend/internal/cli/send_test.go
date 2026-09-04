@@ -434,8 +434,10 @@ func TestSend_SaysWhenTheMessageWasQueuedInsteadOfDelivered(t *testing.T) {
 	}
 }
 
-// A delivered send stays silent, as it always has.
-func TestSend_SaysNothingWhenTheMessageWasDelivered(t *testing.T) {
+// A daemon that said nothing about the path leaves the CLI silent about it -
+// it never fills one in. (Every current daemon answers; an older one, or a
+// platform whose transport reported nothing, does not.)
+func TestSend_SaysNothingWhenTheDaemonNamedNoPath(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "")
 	cfg := setConfigEnv(t)
 	srv, _ := sendServer(t, http.StatusOK, `{"ok":true,"sessionId":"demo-1","message":"hello"}`)
@@ -694,5 +696,98 @@ func TestSend_SaysNothingWhenThereIsNothingToSay(t *testing.T) {
 	}
 	if strings.TrimSpace(out) != "" {
 		t.Fatalf("an ordinary send printed something:\n%s", out)
+	}
+}
+
+// WHICH WIRE DID IT TAKE. AO has two ways to reach an agent and they are not
+// equivalent: the socket hands the message to the agent's own process, the pane
+// types it at whatever the human is also typing into. The answer used to be
+// computed on every send and thrown away.
+func TestSend_SaysTheMessageWentOverClaudesOwnChannel(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	srv, _ := sendServer(t, http.StatusOK,
+		`{"ok":true,"sessionId":"demo-1","message":"hello","delivery":{"path":"socket","sender":"agent-orchestrator-105"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "send", "--session", "demo-1", "--message", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "delivered: socket") {
+		t.Fatalf("output = %q, want it to name the path", out)
+	}
+	if !strings.Contains(out, "from @agent-orchestrator-105") {
+		t.Fatalf("output = %q, want the sender that travelled on the wire", out)
+	}
+}
+
+// A fallback is the interesting case, so the REASON is printed verbatim - the
+// same string the daemon logged and the journal kept, so a reader can match the
+// three up.
+func TestSend_NamesTheRealReasonItFellBackToThePane(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	srv, _ := sendServer(t, http.StatusOK,
+		`{"ok":true,"sessionId":"demo-1","message":"hello","delivery":{"path":"pane","reason":"no-descriptor"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "send", "--session", "demo-1", "--message", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "delivered: pane") || !strings.Contains(out, "reason=no-descriptor") {
+		t.Fatalf("output = %q, want the pane path and the transport's own reason", out)
+	}
+}
+
+// A name deliberately left off the wire is reported as such. It is CORRECT
+// behaviour - a body containing the receiver's envelope markup cannot be
+// wrapped without leaking that markup to a human - and looks like a bug.
+func TestSend_SaysWhenTheSenderNameWasLeftOffTheWire(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	srv, _ := sendServer(t, http.StatusOK,
+		`{"ok":true,"sessionId":"demo-1","message":"hello","delivery":{"path":"socket","sender":"agent-orchestrator-105","nameDropped":"body-contains-envelope-markup"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "send", "--session", "demo-1", "--message", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "sender name left off the wire: body-contains-envelope-markup") {
+		t.Fatalf("output = %q, want the dropped name explained", out)
+	}
+	if strings.Contains(out, "from @agent-orchestrator-105") {
+		t.Fatalf("output = %q must not claim a name travelled when it did not", out)
+	}
+}
+
+// A held message has not been delivered at all, so there is no path to name -
+// and the queue line must still be the thing the sender reads.
+func TestSend_QueuedMessageNamesNoPath(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "")
+	cfg := setConfigEnv(t)
+	srv, _ := sendServer(t, http.StatusOK,
+		`{"ok":true,"sessionId":"demo-1","message":"hello","queued":true,"pendingMessages":1}`)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{
+		ProcessAlive: func(int) bool { return true },
+	}, "send", "--session", "demo-1", "--message", "hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	if strings.Contains(out, "delivered:") {
+		t.Fatalf("output = %q must not claim a delivery for a held message", out)
+	}
+	if !strings.Contains(out, "queued for demo-1") {
+		t.Fatalf("output = %q, want the queued line", out)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 )
 
 // PUTTING A QA ON A TASK THAT ALREADY EXISTS - through either of its two doors.
@@ -253,6 +254,7 @@ func (m *Manager) RequestCrewReview(ctx context.Context, from domain.SessionID, 
 // Best effort and never fatal: a member that is on the task with dev unaware is
 // still better than a refused attach, and the human asked for the member.
 func (m *Manager) tellDevAMemberJoined(ctx context.Context, devID domain.SessionID, member domain.SessionRecord) {
+	ctx = msgdelivery.WithOrigin(ctx, msgdelivery.Origin{Trigger: msgdelivery.TriggerCrewNotice})
 	if _, err := m.Send(ctx, devID, crewJoinedNotice(member.CrewRole)); err != nil {
 		m.logger.Warn("crew: could not tell dev that a member joined its task",
 			"crew", devID, "member", member.ID, "error", err)

@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/pngmeta"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
@@ -1001,6 +1002,9 @@ func (s *Service) Report(ctx context.Context, sessionID domain.SessionID) (Repor
 // active orchestrator for the worker's project gets a wrapped copy; otherwise
 // the results stay persisted (surfaced by `ao smoke list`).
 func (s *Service) deliver(ctx context.Context, worker domain.SessionRecord, summary string) ReportOutcome {
+	// The report-back is a message nobody types: it leaves the Tests tab when the
+	// human records a result and lands at whatever the agent is doing.
+	ctx = msgdelivery.WithOrigin(ctx, msgdelivery.Origin{Trigger: msgdelivery.TriggerSmokeReport})
 	if s.messenger != nil && !worker.IsTerminated {
 		if out, err := s.messenger.Send(ctx, worker.ID, "[smoke results]\n\n"+summary); err == nil {
 			return ReportOutcome{Delivered: !out.Queued, Queued: out.Queued, Target: "worker"}

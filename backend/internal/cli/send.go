@@ -57,6 +57,16 @@ type sendAPIResponse struct {
 	// orchestrator on a task that drove the app and never had a qa; see
 	// reportUnreviewed.
 	Unreviewed *unreviewedAPIView `json:"unreviewed,omitempty"`
+	// Delivery is which wire the message actually took; absent when it was held.
+	Delivery *deliveryAPIView `json:"delivery,omitempty"`
+}
+
+// deliveryAPIView mirrors the daemon's MessageDeliveryView.
+type deliveryAPIView struct {
+	Path        string `json:"path"`
+	Reason      string `json:"reason,omitempty"`
+	Sender      string `json:"sender,omitempty"`
+	NameDropped string `json:"nameDropped,omitempty"`
 }
 
 // unreviewedAPIView mirrors the daemon's UnreviewedRuntimeView: what this task
@@ -161,6 +171,9 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 		if err := reportHandback(c.deps.Out, res); err != nil {
 			return err
 		}
+		if err := reportDelivery(c.deps.Out, res); err != nil {
+			return err
+		}
 		return reportSend(c.deps.Out, orFallback(res.SessionID, role), res)
 	}
 
@@ -171,6 +184,9 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 		return err
 	}
 	if err := reportUnreviewed(c.deps.Out, res); err != nil {
+		return err
+	}
+	if err := reportDelivery(c.deps.Out, res); err != nil {
 		return err
 	}
 	return reportSend(c.deps.Out, session, res)
@@ -235,6 +251,49 @@ func reportHandback(out io.Writer, res sendAPIResponse) error {
 			"and no verdict) or one you must declare UNDRIVEABLE (`--verdict skip --note \"<why>\"`) - and the why\n"+
 			"has to come from an ATTEMPT, not an assumption. If your run is not actually over, say `--still-working`.\n",
 		n, res.Handback.Cases, subject, strings.Join(res.Handback.NotDriven, ", "))
+	return err
+}
+
+// reportDelivery says WHICH WIRE the message took, because AO has two and they
+// are not equivalent: the socket hands the message to the agent's own process,
+// while the pane types it at whatever the human is also typing into. Which one
+// a given message took used to be computed on every send and then thrown away,
+// so nobody could answer the one question that gets asked afterwards.
+//
+// The reason is printed verbatim, exactly as the transport produced it. The CLI
+// does not translate it into friendlier words: these strings are what the
+// persisted record and the daemon log carry, and a reader has to be able to
+// match the three up.
+func reportDelivery(out io.Writer, res sendAPIResponse) error {
+	if res.Delivery == nil {
+		return nil
+	}
+	line := "delivered: " + res.Delivery.Path
+	switch res.Delivery.Path {
+	case "socket":
+		line += " (claude's own message channel"
+		// The name is only named on the socket path, because that is the only
+		// path it travels on: the pane carries the sender in the message's own
+		// `[from @...]` prefix, which the CLI wrote and the reader can see.
+		if res.Delivery.Sender != "" && res.Delivery.NameDropped == "" {
+			line += "; from @" + res.Delivery.Sender
+		}
+	case "pane":
+		line += " (typed into the terminal"
+	default:
+		line += " ("
+	}
+	if res.Delivery.Reason != "" {
+		line += "; reason=" + res.Delivery.Reason
+	}
+	line += ")"
+	if res.Delivery.NameDropped != "" {
+		// Not a failure. The commonest cause is a message whose own body contains
+		// the receiver's envelope markup, which is sent unwrapped ON PURPOSE -
+		// wrapping it would leak that markup to a human.
+		line += "\n  sender name left off the wire: " + res.Delivery.NameDropped
+	}
+	_, err := fmt.Fprintln(out, line)
 	return err
 }
 

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
@@ -184,6 +185,12 @@ func (l *agentLauncher) Notify(ctx context.Context, handleID string, spec Launch
 	if err != nil {
 		return fmt.Errorf("reviewer message: %w", err)
 	}
+	// The reviewer's brief is a message nobody types either, and it goes to a
+	// pane the human never watches. Name the path it took like every other.
+	ctx = msgdelivery.WithOrigin(ctx, msgdelivery.Origin{
+		Session: handleID,
+		Trigger: msgdelivery.TriggerReviewNotify,
+	})
 	if err := l.runtime.SendMessage(ctx, ports.RuntimeHandle{ID: handleID}, msg); err != nil {
 		return fmt.Errorf("notify reviewer: %w", err)
 	}

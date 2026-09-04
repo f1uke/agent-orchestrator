@@ -186,7 +186,7 @@ func senderOf(t *testing.T, content string) (name, body string) {
 
 func newTestRuntime(t *testing.T, delegate Delegate, registry Registry) *Runtime {
 	t.Helper()
-	t.Setenv(disableEnv, "")
+	t.Setenv(modeEnv, "")
 	return New(delegate, Options{Registry: registry})
 }
 
@@ -273,7 +273,7 @@ func TestShortWriteFallsBackAndDeliversNothingOnTheSocket(t *testing.T) {
 			return &shortWriteConn{sink: &wire}, nil
 		},
 	})
-	t.Setenv(disableEnv, "")
+	t.Setenv(modeEnv, "")
 
 	if err := rt.SendMessage(context.Background(), ports.RuntimeHandle{ID: "ao-1"}, "half a message is no message"); err != nil {
 		t.Fatalf("SendMessage: %v", err)
@@ -296,7 +296,7 @@ func TestDuplicateWithinTheDedupeWindowGoesThroughThePane(t *testing.T) {
 		Registry: fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}},
 		Now:      func() time.Time { return clock },
 	})
-	t.Setenv(disableEnv, "")
+	t.Setenv(modeEnv, "")
 
 	handle := ports.RuntimeHandle{ID: "ao-1"}
 	for range 2 {
@@ -373,10 +373,11 @@ func TestGuardRateLimitFallsBackBeforeTheReceiverWouldDrop(t *testing.T) {
 // ---- framing -------------------------------------------------------------
 
 func TestBuildFrameShape(t *testing.T) {
-	frame, err := buildFrame(Session{PeerToken: "0123456789abcdef0123456789abcdef"}, "hi", "ao-1")
+	built, err := buildFrame(Session{PeerToken: "0123456789abcdef0123456789abcdef"}, "hi", "ao-1")
 	if err != nil {
 		t.Fatalf("buildFrame: %v", err)
 	}
+	frame := built.bytes
 	lines := strings.Split(strings.TrimSuffix(string(frame), "\n"), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("frame has %d lines, want auth + message: %q", len(lines), frame)
@@ -404,12 +405,12 @@ func TestBuildFrameShape(t *testing.T) {
 }
 
 func TestBuildFrameOmitsAuthWhenTheKeyIsUnreadable(t *testing.T) {
-	frame, err := buildFrame(Session{}, "hi", "ao-1")
+	built, err := buildFrame(Session{}, "hi", "ao-1")
 	if err != nil {
 		t.Fatalf("buildFrame: %v", err)
 	}
-	if strings.Count(string(frame), "\n") != 1 {
-		t.Fatalf("want a single message line without auth, got %q", frame)
+	if strings.Count(string(built.bytes), "\n") != 1 {
+		t.Fatalf("want a single message line without auth, got %q", built.bytes)
 	}
 }
 
@@ -448,7 +449,7 @@ func TestDisableEnvPinsDeliveryToThePane(t *testing.T) {
 	box := newInbox(t)
 	delegate := &fakeDelegate{}
 	rt := New(delegate, Options{Registry: fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}}})
-	t.Setenv(disableEnv, "0")
+	t.Setenv(modeEnv, "0")
 
 	if err := rt.SendMessage(context.Background(), ports.RuntimeHandle{ID: "ao-1"}, "typed, not sent"); err != nil {
 		t.Fatalf("SendMessage: %v", err)

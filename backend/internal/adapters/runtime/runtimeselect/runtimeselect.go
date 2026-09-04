@@ -15,6 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/claudepeer"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/conpty"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -40,10 +41,20 @@ var _ Runtime = (*claudepeer.Runtime)(nil)
 // queued-message delivery.
 var _ ports.AgentLivenessProber = (*claudepeer.Runtime)(nil)
 
+// Options configures the selected runtime. The zero value is usable.
+type Options struct {
+	// Journal persists which wire each message took, so a delivery can be
+	// explained hours later. Nil keeps nothing. It is handed to the runtime
+	// rather than to the callers of SendMessage on purpose: the transport is the
+	// one layer that always knows the answer and cannot be bypassed by a caller
+	// that forgets to ask.
+	Journal msgdelivery.Journal
+}
+
 // New returns the per-platform runtime: tmux on Darwin/Linux, conpty on Windows.
-func New(log *slog.Logger) Runtime {
+func New(log *slog.Logger, opts Options) Runtime {
 	if runtime.GOOS == "windows" {
-		return conpty.New(conpty.Options{})
+		return conpty.New(conpty.Options{Journal: opts.Journal})
 	}
-	return claudepeer.New(tmux.New(tmux.Options{}), claudepeer.Options{Logger: log})
+	return claudepeer.New(tmux.New(tmux.Options{}), claudepeer.Options{Logger: log, Journal: opts.Journal})
 }

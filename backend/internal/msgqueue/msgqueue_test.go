@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgqueue"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -32,11 +33,13 @@ type sender struct {
 	alive    bool
 	aliveErr error
 	probes   int
+	origins  []msgdelivery.Origin
 }
 
-func (s *sender) SendMessage(_ context.Context, handle ports.RuntimeHandle, message string) error {
+func (s *sender) SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.origins = append(s.origins, msgdelivery.OriginOf(ctx))
 	if handle.ID != testHandle {
 		return errors.New("can't find pane: " + handle.ID)
 	}
@@ -62,6 +65,15 @@ func (s *sender) delivered() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.sent...)
+}
+
+func (s *sender) lastOrigin() msgdelivery.Origin {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.origins) == 0 {
+		return msgdelivery.Origin{}
+	}
+	return s.origins[len(s.origins)-1]
 }
 
 func (s *sender) setAlive(alive bool) {
@@ -619,5 +631,31 @@ func TestAHeldMessageLandsOnceThePromptIsAnswered(t *testing.T) {
 				t.Fatalf("delivered = %v, want the held nudge once the agent was listening", got)
 			}
 		})
+	}
+}
+
+// A held message is delivered minutes or hours after it was sent, at whoever is
+// at the keyboard by then - which makes it exactly the delivery whose path
+// nobody can reconstruct afterwards. The queue names itself so the record can
+// tell a drain apart from somebody's `ao send`.
+func TestADrainedMessageSaysADrainDeliveredIt(t *testing.T) {
+	h := newHarness(t)
+	h.suspend(t)
+	h.enqueue(t, "held, then delivered")
+	h.wake(t)
+	h.sender.setAlive(true)
+	h.drain(t)
+	h.advance(11 * time.Second)
+	h.drain(t)
+
+	if got := h.sender.delivered(); len(got) != 1 {
+		t.Fatalf("delivered %v, want the held message", got)
+	}
+	origin := h.sender.lastOrigin()
+	if origin.Trigger != msgdelivery.TriggerQueueDrain {
+		t.Fatalf("trigger = %q, want the queue to name itself", origin.Trigger)
+	}
+	if origin.Session != string(h.session) {
+		t.Fatalf("session = %q, want %q", origin.Session, h.session)
 	}
 }

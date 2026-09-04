@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 )
 
 // PRWriter records the PR facts a PR observation carries. The pr table's own DB
@@ -83,6 +84,11 @@ type SendOutcome struct {
 	// Pending is how many messages the session now has waiting, including this
 	// one; zero unless Queued.
 	Pending int
+	// Delivery is which wire the message actually took and why, straight from
+	// the transport that took it. A zero Path means no transport reported one -
+	// the message was queued, or the send never reached a transport - and the
+	// caller must say so rather than infer a path.
+	Delivery msgdelivery.Report
 }
 
 // AgentMessenger injects a message into a running agent, or holds it for a

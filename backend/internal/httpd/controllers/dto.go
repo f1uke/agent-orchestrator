@@ -643,6 +643,30 @@ type SendSessionMessageResponse struct {
 	// service/session/unreviewed.go for why this warns rather than refuses - so
 	// this is how the sender is told what went out with its report.
 	Unreviewed *UnreviewedRuntimeView `json:"unreviewed,omitempty"`
+	// Delivery says which wire the message actually took. Absent when it was
+	// queued (nothing has been delivered yet) or when no transport reported one,
+	// which is a real answer and not a reason to guess at a path.
+	Delivery *MessageDeliveryView `json:"delivery,omitempty"`
+}
+
+// MessageDeliveryView is the transport's own account of how a message reached
+// an agent: over the claude-code session's messaging socket, or typed into its
+// terminal pane. AO prefers the socket and falls back to the pane whenever
+// anything about it is unfamiliar, unavailable or merely uncertain - so the
+// interesting half of this is Reason, which names the fallback that fired.
+type MessageDeliveryView struct {
+	Path string `json:"path" enum:"socket,pane,none" description:"The wire the message took: socket (claude-code's own messaging channel), pane (typed into the terminal), or none (nothing was delivered)."`
+	// Reason is the transport's own word for why, absent on a plain socket
+	// delivery. It is never re-derived at a higher layer: a plausible wrong
+	// reason is worse than none, because it would be believed.
+	Reason string `json:"reason,omitempty"`
+	// Sender is the display name AO put on the wire for this message.
+	Sender string `json:"sender,omitempty"`
+	// NameDropped names why a known sender was deliberately left off the wire.
+	// The one that fires in practice is a message whose own body contains the
+	// envelope markup: wrapping it would fail the receiver's byte-for-byte
+	// re-serialisation and leak markup to a human, so it goes out unwrapped.
+	NameDropped string `json:"nameDropped,omitempty"`
 }
 
 // UnreviewedRuntimeView says what a task DID with the app while never having a

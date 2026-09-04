@@ -93,6 +93,23 @@ type userFrameMessage struct {
 	Content string `json:"content"`
 }
 
+// builtFrame is the framed message plus what AO can say about it afterwards.
+//
+// The msgID and the envelope verdict exist for the delivery record: the
+// receiver stores the same msg_id beside the message it accepted, so a
+// persisted line here can be matched against the receiving agent's own
+// transcript - and "the name was deliberately left off, for this reason" is a
+// thing a human reading that record needs told, since it is correct behaviour
+// that otherwise looks like a bug.
+type builtFrame struct {
+	bytes []byte
+	msgID string
+	// nameOnWire is true when the sender's name actually travelled.
+	nameOnWire bool
+	// nameDropped names why a known sender was left off, empty when none was.
+	nameDropped string
+}
+
 // buildFrame renders the newline-delimited JSON the receiver reads. The message
 // is the LAST line and ends in a newline, which is what makes a short write
 // safe: the receiver enqueues only whole parseable lines and discards a
@@ -101,38 +118,44 @@ type userFrameMessage struct {
 // senderName is who the message is FROM, as AO understands it. It travels
 // inside the content, in the envelope the receiver parses a display name out
 // of, because the frame itself has no field for one.
-func buildFrame(session Session, message, senderName string) ([]byte, error) {
+func buildFrame(session Session, message, senderName string) (builtFrame, error) {
 	if message == "" {
 		// The receiver ignores an empty-content user frame outright, so sending
 		// one would look like delivery and be nothing of the kind.
-		return nil, errors.New("claudepeer: empty message")
+		return builtFrame{}, errors.New("claudepeer: empty message")
 	}
-	content := withSenderEnvelope(message, senderName)
+	content, dropped := withSenderEnvelope(message, senderName)
+	built := builtFrame{
+		msgID:       uuid.NewString(),
+		nameOnWire:  senderName != "" && dropped == "",
+		nameDropped: dropped,
+	}
 	var buf []byte
 	if session.PeerToken != "" {
 		line, err := json.Marshal(authFrame{Type: "auth", Token: session.PeerToken})
 		if err != nil {
-			return nil, fmt.Errorf("claudepeer: encode auth frame: %w", err)
+			return builtFrame{}, fmt.Errorf("claudepeer: encode auth frame: %w", err)
 		}
 		buf = append(buf, line...)
 		buf = append(buf, '\n')
 	}
 	line, err := json.Marshal(userFrame{
 		MsgV:     1,
-		MsgID:    uuid.NewString(),
+		MsgID:    built.msgID,
 		Type:     "user",
 		Message:  userFrameMessage{Role: "user", Content: content},
 		Priority: "next",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("claudepeer: encode user frame: %w", err)
+		return builtFrame{}, fmt.Errorf("claudepeer: encode user frame: %w", err)
 	}
 	buf = append(buf, line...)
 	buf = append(buf, '\n')
 	if len(buf) > maxFrameBytes {
-		return nil, fmt.Errorf("claudepeer: framed message is %d bytes, over the receiver's %d-byte line cap", len(buf), maxFrameBytes)
+		return builtFrame{}, fmt.Errorf("claudepeer: framed message is %d bytes, over the receiver's %d-byte line cap", len(buf), maxFrameBytes)
 	}
-	return buf, nil
+	built.bytes = buf
+	return built, nil
 }
 
 // withSenderEnvelope wraps message in the envelope the receiver reads a sender's
@@ -156,16 +179,24 @@ func buildFrame(session Session, message, senderName string) ([]byte, error) {
 // of the human. That is why this returns the message untouched - today's exact
 // behaviour - whenever the name or the body is not one both sides would write
 // identically.
-func withSenderEnvelope(message, senderName string) string {
+//
+// The second return names WHY a name was left off, empty when one travelled or
+// when there was no name to put on. It is reported, not just logged: a message
+// arriving anonymous because its own body discusses the envelope is CORRECT and
+// looks exactly like a regression to anyone reading the record.
+func withSenderEnvelope(message, senderName string) (content, dropped string) {
+	if senderName == "" {
+		return message, ""
+	}
 	if !usableSenderName(senderName) {
-		return message
+		return message, "unusable-sender-name"
 	}
 	if strings.Contains(strings.ToLower(message), envelopeTag) {
 		// A body naming the tag is one the receiver would escape before
 		// comparing, so an envelope around it could never round-trip.
-		return message
+		return message, "body-contains-envelope-markup"
 	}
-	return "<" + envelopeTag + ` from-name="` + senderName + `">` + "\n" + message + "\n</" + envelopeTag + ">"
+	return "<" + envelopeTag + ` from-name="` + senderName + `">` + "\n" + message + "\n</" + envelopeTag + ">", ""
 }
 
 // usableSenderName reports whether the receiver would read back exactly the

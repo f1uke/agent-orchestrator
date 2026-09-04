@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/conpty/ptyregistry"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -32,11 +33,14 @@ type Options struct {
 	// Spawner overrides the default OS-level process spawner. If nil,
 	// defaultSpawnHost is used (Windows-only; returns an error on other OSes).
 	Spawner hostSpawner
+	// Journal persists which wire each message took. Nil keeps nothing.
+	Journal msgdelivery.Journal
 }
 
 // Runtime is the conpty runtime adapter.
 type Runtime struct {
 	spawner hostSpawner
+	journal msgdelivery.Journal
 
 	mu       sync.Mutex
 	sessions map[string]*hostSession // sessionID -> live session
@@ -50,6 +54,7 @@ func New(opts Options) *Runtime {
 	}
 	return &Runtime{
 		spawner:  sp,
+		journal:  opts.Journal,
 		sessions: make(map[string]*hostSession),
 	}
 }
@@ -163,12 +168,29 @@ func (r *Runtime) IsAlive(ctx context.Context, handle ports.RuntimeHandle) (bool
 }
 
 // SendMessage chunks message and writes it to the pty-host followed by Enter.
+//
+// There is only ever one path here: Claude Code's messaging socket is a unix
+// socket and the peer transport is Darwin/Linux only, so on Windows every
+// message is typed into the pane. That is still REPORTED rather than left to be
+// inferred - a delivery record that simply stops on Windows would read as a
+// missing answer instead of a known one.
 func (r *Runtime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error {
 	sess := r.resolve(handle.ID)
 	if sess == nil {
-		return fmt.Errorf("conpty: session %q not found", handle.ID)
+		err := fmt.Errorf("conpty: session %q not found", handle.ID)
+		msgdelivery.Record(ctx, r.journal, handle.ID, msgdelivery.Report{
+			Path: msgdelivery.PathNone, Reason: "conpty-session-not-found", Error: err.Error(),
+		})
+		return err
 	}
-	return clientSendMessage(sess.addr, message)
+	err := clientSendMessage(sess.addr, message)
+	report := msgdelivery.Report{Path: msgdelivery.PathPane, Reason: "no-peer-socket-on-windows"}
+	if err != nil {
+		report.Path = msgdelivery.PathNone
+		report.Error = err.Error()
+	}
+	msgdelivery.Record(ctx, r.journal, handle.ID, report)
+	return err
 }
 
 // GetOutput returns the last lines lines from the pty-host ring buffer.

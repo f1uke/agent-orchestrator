@@ -25,6 +25,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgqueue"
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -119,7 +120,19 @@ func Run() error {
 	// attach Stream and liveness; the CDC broadcaster feeds the session-state channel. The manager
 	// is handed to httpd, which mounts it at /mux. Raw PTY bytes never flow
 	// through the CDC change_log -- only session-state events do.
-	runtimeAdapter := runtimeselect.New(log)
+	// Which wire each message to an agent actually took - claude-code's own
+	// messaging socket, or typed into the pane - and why. The daemon's own logs
+	// go to a stdout the supervisor swallows, so without this the answer is
+	// computed correctly on every send and then thrown away, and a question
+	// asked at 09:00 about a message sent at 02:00 has nothing to read. It is
+	// handed to the RUNTIME, not to the senders, because the transport is the
+	// only layer that always knows. A journal that cannot be opened is not worth
+	// refusing to boot over: log it and deliver messages unrecorded.
+	deliveryJournal, err := msgdelivery.NewFileJournal(cfg.DataDir)
+	if err != nil {
+		log.Error("message delivery journal unavailable; deliveries will not be recorded", "err", err)
+	}
+	runtimeAdapter := runtimeselect.New(log, runtimeselect.Options{Journal: journalOrNil(deliveryJournal)})
 	// The input gate couples message injection with live user typing. The terminal
 	// mux records every client keystroke into it (WithInputRecorder); the gated
 	// runtime consults it before SendMessage so an inbound message never merges

@@ -2215,6 +2215,16 @@ export interface components {
         ControllersListSimFlowsResponse: {
             flows: components["schemas"]["ControllersSimFlowView"][];
         };
+        ControllersMessageDeliveryView: {
+            nameDropped?: string;
+            /**
+             * @description The wire the message took: socket (claude-code's own messaging channel), pane (typed into the terminal), or none (nothing was delivered).
+             * @enum {string}
+             */
+            path: "socket" | "pane" | "none";
+            reason?: string;
+            sender?: string;
+        };
         ControllersRenameSimFlowInput: {
             /** @description What to call it. Slugified; an empty name puts it back to its timestamp alone. */
             name: string;
@@ -2986,6 +2996,7 @@ export interface components {
             message: string;
         };
         SendSessionMessageResponse: {
+            delivery?: components["schemas"]["ControllersMessageDeliveryView"];
             handback?: components["schemas"]["ControllersHandbackCompletenessView"];
             message: string;
             ok: boolean;
