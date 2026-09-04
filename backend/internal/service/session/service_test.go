@@ -10,6 +10,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
@@ -488,7 +489,10 @@ type crewTouch struct {
 type fakeCommander struct {
 	// sentMessages is what was DELIVERED, parallel to sent. AO appends a line of
 	// its own to some messages, and the delivered text is the assertion.
-	sentMessages        []string
+	sentMessages []string
+	// sentSenders is who each send said it was from, as the transport reads it
+	// off the context.
+	sentSenders         []string
 	crewReviewRequested []domain.SessionID
 	crewReviewErr       error
 
@@ -649,10 +653,11 @@ func (f *fakeCommander) RetireForReplacement(_ context.Context, id domain.Sessio
 	f.retired = append(f.retired, id)
 	return nil
 }
-func (f *fakeCommander) Send(_ context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
+func (f *fakeCommander) Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
 	if f.sendErr != nil {
 		return ports.SendOutcome{}, f.sendErr
 	}
+	f.sentSenders = append(f.sentSenders, msgorigin.Sender(ctx))
 	f.sent = append(f.sent, id)
 	f.sentMessages = append(f.sentMessages, message)
 	f.lastMessage = message
@@ -1906,5 +1911,26 @@ func TestAttachCrewMember_ResolvesEitherMemberToTheTask(t *testing.T) {
 	}
 	if len(cmd.crewAttached) != 1 || cmd.crewAttached[0] != "dev-1" {
 		t.Fatalf("manager saw %v, want the TASK's dev [dev-1]", cmd.crewAttached)
+	}
+}
+
+// The transport that can name a sender reads it off the context, so SendFrom
+// has to put it there - and must leave it empty for a message no session
+// authored, which is what tells the transport to name AO itself.
+func TestSendFromNamesTheAuthorOnTheContext(t *testing.T) {
+	st := newFakeStore()
+	st.sessions["mer-1"] = domain.SessionRecord{ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker}
+	fc := &fakeCommander{}
+	svc := &Service{store: st, manager: fc, clock: time.Now}
+
+	if _, err := svc.SendFrom(context.Background(), "mer-1", "from an agent", CrewTalk{From: "mer-2"}); err != nil {
+		t.Fatalf("SendFrom: %v", err)
+	}
+	if _, err := svc.Send(context.Background(), "mer-1", "from a human"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	want := []string{"mer-2", ""}
+	if len(fc.sentSenders) != len(want) || fc.sentSenders[0] != want[0] || fc.sentSenders[1] != want[1] {
+		t.Fatalf("senders on the context: %q, want %q", fc.sentSenders, want)
 	}
 }

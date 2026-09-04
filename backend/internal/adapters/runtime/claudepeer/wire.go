@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +24,25 @@ const (
 	// there and always works.
 	dialTimeout  = 2 * time.Second
 	writeTimeout = 5 * time.Second
+
+	// lingerTimeout bounds the wait for the receiver to finish reading the
+	// frame. See linger: that wait is what earns the kernel-verified sender pid,
+	// and it ends the moment the receiver closes the connection - about 40ms in
+	// practice, measured against a live session.
+	lingerTimeout = 2 * time.Second
+
+	// envelopeTag is the element the receiver parses a sender's display name out
+	// of. The format is undocumented and checked by an exact round trip on the
+	// receiving side - it re-serialises what it parsed and compares - so this
+	// builder mirrors it byte for byte, and declines to build one at all rather
+	// than build one that is nearly right.
+	envelopeTag = "cross-session-message"
+
+	// maxSenderNameLen is the receiver's own cap on a display name. A longer one
+	// is not refused, it is truncated - but truncation happens after the round
+	// trip check, so keeping our names inside the cap costs nothing and keeps
+	// both sides describing the same string.
+	maxSenderNameLen = 64
 )
 
 // Dialer opens a connection to a session's messaging socket.
@@ -49,10 +69,13 @@ type authFrame struct {
 // boundary", which is the closest match to typing into the pane.
 //
 // Deliberately absent:
-//   - from: an address the receiver could reply to. AO's daemon does not listen
-//     on a socket in the receiver's namespace, so a from would be unreachable;
-//     omitting it makes the receiver record the sender as "unknown", which is
-//     true.
+//   - from: an address the receiver could reply to, and only that - the receiver
+//     documents it as sender-authored and uses it for reply routing alone. AO's
+//     daemon does not listen on a socket in the receiver's namespace, so a from
+//     would be unreachable; omitting it makes the receiver record the sender as
+//     "unknown", which is true. The sender's NAME travels in the content
+//     envelope instead (withSenderEnvelope), and the one field the receiver
+//     verifies against the kernel is the connecting pid, which is AO's own.
 //   - session_id: the receiver drops a frame whose session_id does not match its
 //     CURRENT conversation, and that id changes on /clear before the descriptor
 //     catches up. Setting it would turn a harmless race into silently lost mail;
@@ -74,12 +97,17 @@ type userFrameMessage struct {
 // is the LAST line and ends in a newline, which is what makes a short write
 // safe: the receiver enqueues only whole parseable lines and discards a
 // trailing fragment, so an interrupted write delivers nothing at all.
-func buildFrame(session Session, message string) ([]byte, error) {
+//
+// senderName is who the message is FROM, as AO understands it. It travels
+// inside the content, in the envelope the receiver parses a display name out
+// of, because the frame itself has no field for one.
+func buildFrame(session Session, message, senderName string) ([]byte, error) {
 	if message == "" {
 		// The receiver ignores an empty-content user frame outright, so sending
 		// one would look like delivery and be nothing of the kind.
 		return nil, errors.New("claudepeer: empty message")
 	}
+	content := withSenderEnvelope(message, senderName)
 	var buf []byte
 	if session.PeerToken != "" {
 		line, err := json.Marshal(authFrame{Type: "auth", Token: session.PeerToken})
@@ -93,7 +121,7 @@ func buildFrame(session Session, message string) ([]byte, error) {
 		MsgV:     1,
 		MsgID:    uuid.NewString(),
 		Type:     "user",
-		Message:  userFrameMessage{Role: "user", Content: message},
+		Message:  userFrameMessage{Role: "user", Content: content},
 		Priority: "next",
 	})
 	if err != nil {
@@ -105,6 +133,58 @@ func buildFrame(session Session, message string) ([]byte, error) {
 		return nil, fmt.Errorf("claudepeer: framed message is %d bytes, over the receiver's %d-byte line cap", len(buf), maxFrameBytes)
 	}
 	return buf, nil
+}
+
+// withSenderEnvelope wraps message in the envelope the receiver reads a sender's
+// display name out of, so the message renders as a named, expandable row
+// instead of an anonymous block.
+//
+// The envelope carries a NAME and nothing else. The receiver's other envelope
+// attributes are deliberately left off:
+//
+//   - from / from-session: addresses a UI would navigate back to. AO is not
+//     addressable in either namespace, so both would be inventions.
+//   - from-mode: an attestation of the SENDER's permission class. AO is not a
+//     Claude session and has no permission mode to attest, and the receiver
+//     only consults it to decide whether to hold a message at a session that
+//     runs without asking - a session this adapter already refuses to use the
+//     socket for.
+//
+// The receiver validates the envelope by rebuilding it from what it parsed and
+// requiring byte equality, so anything it would have escaped or normalised
+// differently makes the whole envelope invisible and leaves its markup in front
+// of the human. That is why this returns the message untouched - today's exact
+// behaviour - whenever the name or the body is not one both sides would write
+// identically.
+func withSenderEnvelope(message, senderName string) string {
+	if !usableSenderName(senderName) {
+		return message
+	}
+	if strings.Contains(strings.ToLower(message), envelopeTag) {
+		// A body naming the tag is one the receiver would escape before
+		// comparing, so an envelope around it could never round-trip.
+		return message
+	}
+	return "<" + envelopeTag + ` from-name="` + senderName + `">` + "\n" + message + "\n</" + envelopeTag + ">"
+}
+
+// usableSenderName reports whether the receiver would read back exactly the
+// name we wrote. It is deliberately narrower than what the receiver accepts:
+// AO's own names are session ids, so anything outside that alphabet is a sign
+// we are about to describe a sender we do not actually know.
+func usableSenderName(name string) bool {
+	if name == "" || len(name) > maxSenderNameLen {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // writeFrame is the commit point. It returns nil only when every byte of frame
@@ -139,5 +219,33 @@ func writeFrame(ctx context.Context, dial Dialer, socketPath string, frame []byt
 	if halfCloser, ok := conn.(interface{ CloseWrite() error }); ok {
 		_ = halfCloser.CloseWrite()
 	}
+	linger(ctx, conn)
 	return nil
+}
+
+// linger waits for the receiver to finish with the connection, and is the whole
+// reason AO's messages carry a verified sender pid.
+//
+// The receiver reads the connecting process's pid off the CONNECTION, with
+// SO_PEERCRED / LOCAL_PEERPID, at the moment it parses our line - not when we
+// connect. Closing the socket the instant the write returns loses that race -
+// measured against a live session, every time - and the message lands
+// unidentified. Staying open until the receiver hangs up (it does so as soon as
+// it has consumed the frame) closes the race without guessing at a delay.
+//
+// It is a courtesy, never a condition: the bytes are delivered before this runs,
+// so every outcome here - EOF, error, timeout, a receiver that never hangs up -
+// is ignored, and none of them may reach the caller as a reason to fall back.
+func linger(ctx context.Context, conn net.Conn) {
+	deadline := time.Now().Add(lingerTimeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		return
+	}
+	// One read is enough: EOF means the receiver is done with us, and any byte
+	// it sent means it got at least as far as reading our line.
+	var scratch [1]byte
+	_, _ = conn.Read(scratch[:])
 }

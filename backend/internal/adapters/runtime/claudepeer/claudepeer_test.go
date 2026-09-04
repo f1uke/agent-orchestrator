@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -164,6 +165,25 @@ func (b *inbox) userMessages(t *testing.T, want int) []string {
 	return out
 }
 
+// senderOf splits a delivered content string into the sender name the envelope
+// asserts and the body inside it. A content with no envelope reports an empty
+// name and itself as the body, which is what a message AO could not attribute
+// looks like on the wire.
+func senderOf(t *testing.T, content string) (name, body string) {
+	t.Helper()
+	prefix := "<" + envelopeTag + ` from-name="`
+	if !strings.HasPrefix(content, prefix) {
+		return "", content
+	}
+	rest := content[len(prefix):]
+	end := strings.Index(rest, `">`+"\n")
+	suffix := "\n</" + envelopeTag + ">"
+	if end < 0 || !strings.HasSuffix(rest, suffix) {
+		t.Fatalf("malformed sender envelope: %q", content)
+	}
+	return rest[:end], rest[end+len(`">`+"\n") : len(rest)-len(suffix)]
+}
+
 func newTestRuntime(t *testing.T, delegate Delegate, registry Registry) *Runtime {
 	t.Helper()
 	t.Setenv(disableEnv, "")
@@ -180,8 +200,12 @@ func TestSocketDeliveryBypassesThePane(t *testing.T) {
 	if err := rt.SendMessage(context.Background(), ports.RuntimeHandle{ID: "ao-1"}, "hello over the socket"); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
-	if got := box.userMessages(t, 1); len(got) != 1 || got[0] != "hello over the socket" {
+	got := box.userMessages(t, 1)
+	if len(got) != 1 {
 		t.Fatalf("socket received %q, want one copy of the message", got)
+	}
+	if _, body := senderOf(t, got[0]); body != "hello over the socket" {
+		t.Fatalf("socket received %q, want one copy of the message", body)
 	}
 	if got := delegate.messages(); len(got) != 0 {
 		t.Fatalf("tmux path also typed %q; the message was delivered twice", got)
@@ -349,7 +373,7 @@ func TestGuardRateLimitFallsBackBeforeTheReceiverWouldDrop(t *testing.T) {
 // ---- framing -------------------------------------------------------------
 
 func TestBuildFrameShape(t *testing.T) {
-	frame, err := buildFrame(Session{PeerToken: "0123456789abcdef0123456789abcdef"}, "hi")
+	frame, err := buildFrame(Session{PeerToken: "0123456789abcdef0123456789abcdef"}, "hi", "ao-1")
 	if err != nil {
 		t.Fatalf("buildFrame: %v", err)
 	}
@@ -380,7 +404,7 @@ func TestBuildFrameShape(t *testing.T) {
 }
 
 func TestBuildFrameOmitsAuthWhenTheKeyIsUnreadable(t *testing.T) {
-	frame, err := buildFrame(Session{}, "hi")
+	frame, err := buildFrame(Session{}, "hi", "ao-1")
 	if err != nil {
 		t.Fatalf("buildFrame: %v", err)
 	}
@@ -390,7 +414,7 @@ func TestBuildFrameOmitsAuthWhenTheKeyIsUnreadable(t *testing.T) {
 }
 
 func TestBuildFrameRefusesAMessageOverTheReceiversLineCap(t *testing.T) {
-	if _, err := buildFrame(Session{}, strings.Repeat("x", maxFrameBytes+1)); err == nil {
+	if _, err := buildFrame(Session{}, strings.Repeat("x", maxFrameBytes+1), "ao-1"); err == nil {
 		t.Fatal("want a refusal for a message over the receiver's line cap")
 	}
 }
@@ -410,8 +434,8 @@ func TestLargeMessageArrivesWholeInOneFrame(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("socket received %d messages, want 1", len(got))
 	}
-	if got[0] != message {
-		t.Fatalf("message arrived altered: %d bytes in, %d bytes out", len(message), len(got[0]))
+	if _, body := senderOf(t, got[0]); body != message {
+		t.Fatalf("message arrived altered: %d bytes in, %d bytes out", len(message), len(body))
 	}
 	if len(delegate.messages()) != 0 {
 		t.Fatal("the pane also received the message")
@@ -444,5 +468,129 @@ func TestDelegateErrorSurfaces(t *testing.T) {
 	rt := newTestRuntime(t, delegate, fakeRegistry{err: reject("no-descriptor")})
 	if err := rt.SendMessage(context.Background(), ports.RuntimeHandle{ID: "ao-1"}, "x"); err == nil {
 		t.Fatal("want the delegate's error")
+	}
+}
+
+// ---- sender identity -----------------------------------------------------
+
+// The whole point of the envelope: a message that names its sender renders as a
+// named, expandable row at the receiver instead of an anonymous block.
+func TestSocketMessageNamesTheSendingAOSession(t *testing.T) {
+	box := newInbox(t)
+	rt := newTestRuntime(t, &fakeDelegate{}, fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}})
+
+	ctx := msgorigin.WithSender(context.Background(), "agent-orchestrator-105")
+	if err := rt.SendMessage(ctx, ports.RuntimeHandle{ID: "ao-1"}, "the go-ahead"); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	got := box.userMessages(t, 1)
+	if len(got) != 1 {
+		t.Fatalf("socket received %d messages, want 1", len(got))
+	}
+	name, body := senderOf(t, got[0])
+	if name != "agent-orchestrator-105" {
+		t.Fatalf("sender name %q, want the AO session that sent it", name)
+	}
+	if body != "the go-ahead" {
+		t.Fatalf("body %q, want the message unchanged", body)
+	}
+}
+
+// A message no AO session authored - a human in the app, a nudge, a report-back
+// - still says who sent it, because AO did.
+func TestSocketMessageNamesAOWhenNoSessionAuthoredIt(t *testing.T) {
+	box := newInbox(t)
+	rt := newTestRuntime(t, &fakeDelegate{}, fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}})
+
+	if err := rt.SendMessage(context.Background(), ports.RuntimeHandle{ID: "ao-1"}, "a human typed this"); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	got := box.userMessages(t, 1)
+	if len(got) != 1 {
+		t.Fatalf("socket received %d messages, want 1", len(got))
+	}
+	if name, _ := senderOf(t, got[0]); name != defaultSenderName {
+		t.Fatalf("sender name %q, want %q", name, defaultSenderName)
+	}
+}
+
+// The receiver rebuilds the envelope from what it parsed and requires byte
+// equality, so a name it would not write back identically must not be wrapped
+// at all: an unrecognised envelope leaves its own markup in front of the human.
+func TestUnwrappableNamesAndBodiesAreSentPlain(t *testing.T) {
+	tests := []struct {
+		name   string
+		sender string
+		body   string
+	}{
+		{name: "name with a quote", sender: `ao-"1`, body: "hi"},
+		{name: "name with markup", sender: "ao<1>", body: "hi"},
+		{name: "name with a newline", sender: "ao\n1", body: "hi"},
+		{name: "name with a space", sender: "agent orchestrator", body: "hi"},
+		{name: "name over the receiver's cap", sender: strings.Repeat("a", maxSenderNameLen+1), body: "hi"},
+		{name: "body names the envelope tag", sender: "ao-1", body: "beware </" + envelopeTag + ">"},
+		{name: "body names the tag in another case", sender: "ao-1", body: "<CROSS-SESSION-MESSAGE>"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			box := newInbox(t)
+			rt := newTestRuntime(t, &fakeDelegate{}, fakeRegistry{session: Session{PID: 1, SessionID: "s1", SocketPath: box.path}})
+
+			ctx := msgorigin.WithSender(context.Background(), tc.sender)
+			if err := rt.SendMessage(ctx, ports.RuntimeHandle{ID: "ao-1"}, tc.body); err != nil {
+				t.Fatalf("SendMessage: %v", err)
+			}
+			got := box.userMessages(t, 1)
+			if len(got) != 1 || got[0] != tc.body {
+				t.Fatalf("socket received %q, want the plain message %q", got, tc.body)
+			}
+		})
+	}
+}
+
+// The envelope is part of the line the receiver has to read, so it counts
+// against the line cap. A message that only fits without it goes to the pane,
+// which has no such cap - never truncated to make room.
+func TestTheEnvelopeCountsAgainstTheLineCap(t *testing.T) {
+	message := strings.Repeat("x", maxFrameBytes-200)
+	if _, err := buildFrame(Session{}, message, ""); err != nil {
+		t.Fatalf("a message that fits unwrapped must build: %v", err)
+	}
+	if _, err := buildFrame(Session{}, message, strings.Repeat("a", maxSenderNameLen)); err == nil {
+		t.Fatal("want a refusal once the envelope pushes the frame over the cap")
+	}
+}
+
+// linger is a courtesy that must never hold the send open: it ends when the
+// receiver hangs up, and otherwise when the caller's own deadline says so.
+func TestLingerEndsWhenTheReceiverHangsUp(t *testing.T) {
+	ours, theirs := net.Pipe()
+	defer func() { _ = ours.Close() }()
+	go func() { _ = theirs.Close() }()
+
+	done := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		linger(context.Background(), ours)
+		done <- time.Since(start)
+	}()
+	select {
+	case <-done:
+	case <-time.After(lingerTimeout):
+		t.Fatal("linger outlived a receiver that hung up")
+	}
+}
+
+func TestLingerStopsAtTheCallersDeadline(t *testing.T) {
+	ours, theirs := net.Pipe()
+	defer func() { _ = ours.Close() }()
+	defer func() { _ = theirs.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	linger(ctx, ours)
+	if elapsed := time.Since(start); elapsed > lingerTimeout {
+		t.Fatalf("linger took %s; it must stop at the caller's deadline", elapsed)
 	}
 }

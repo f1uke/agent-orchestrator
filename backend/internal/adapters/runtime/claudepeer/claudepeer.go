@@ -20,8 +20,10 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -155,7 +157,8 @@ func (r *Runtime) trySocket(ctx context.Context, handle ports.RuntimeHandle, mes
 	if err != nil {
 		return lookupReason(err), errFellBack
 	}
-	frame, err := buildFrame(session, message)
+	sender := senderName(ctx)
+	frame, err := buildFrame(session, message, sender)
 	if err != nil {
 		return "frame-rejected", errFellBack
 	}
@@ -172,8 +175,29 @@ func (r *Runtime) trySocket(ctx context.Context, handle ports.RuntimeHandle, mes
 	}
 	release(true)
 	r.log.Info("delivered message over the claude peer socket",
-		"session", handle.ID, "pid", session.PID, "bytes", len(frame))
+		"session", handle.ID, "pid", session.PID, "bytes", len(frame), "sender", sender)
 	return "socket", nil
+}
+
+// defaultSenderName is what AO calls itself on the wire when no AO session
+// authored the message - a human typing in the app, a nudge, a report-back. It
+// names the thing that is actually sending, which is the daemon, and it is the
+// only name AO ever asserts about itself.
+const defaultSenderName = "agent-orchestrator"
+
+// senderName is the name to put on the wire for this send.
+//
+// It is an ATTRIBUTION, not an authentication. What AO knows is what the caller
+// of `ao send` said about itself, the same claim it already prints as
+// `[from @<id>]`; the receiver treats a name as sender-asserted display text
+// for exactly that reason, and verifies only the connecting pid, which is AO's
+// own daemon. When no session authored the message, AO says so by naming
+// itself rather than by going anonymous.
+func senderName(ctx context.Context) string {
+	if session := strings.TrimSpace(msgorigin.Sender(ctx)); session != "" {
+		return session
+	}
+	return defaultSenderName
 }
 
 func disabled() bool {
