@@ -12,6 +12,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -1008,7 +1009,10 @@ func (m *Manager) sendOnce(ctx context.Context, id domain.SessionID, prURL, key,
 	if maxAttempts > 0 && attempts >= maxAttempts {
 		return nil
 	}
-	outcome, err := m.messenger.Send(ctx, id, msg)
+	// A nudge fires from an observer poll, at an agent nobody is watching. Name
+	// it so the record can tell AO's own prodding apart from a person's message.
+	nudgeCtx := msgdelivery.WithOrigin(ctx, msgdelivery.Origin{Trigger: msgdelivery.TriggerNudge})
+	outcome, err := m.messenger.Send(nudgeCtx, id, msg)
 	if err != nil {
 		return err
 	}

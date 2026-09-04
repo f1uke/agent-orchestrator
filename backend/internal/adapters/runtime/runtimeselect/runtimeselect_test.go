@@ -15,7 +15,7 @@ func TestSelectedRuntimeStillReportsAgentLiveness(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("conpty does not implement AgentAlive")
 	}
-	if _, ok := New(nil).(ports.AgentLivenessProber); !ok {
+	if _, ok := New(nil, Options{}).(ports.AgentLivenessProber); !ok {
 		t.Fatal("the selected runtime no longer implements ports.AgentLivenessProber")
 	}
 }

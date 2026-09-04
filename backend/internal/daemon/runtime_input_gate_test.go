@@ -89,7 +89,7 @@ func TestAgentLivenessProberComesFromTheUnwrappedRuntime(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("conpty cannot report agent liveness; the queue falls back to a bounded wait there")
 	}
-	adapter := runtimeselect.New(nil)
+	adapter := runtimeselect.New(nil, runtimeselect.Options{})
 	if agentLivenessProber(adapter) == nil {
 		t.Fatal("the selected runtime must expose AgentAlive, or queued messages lose their readiness signal")
 	}

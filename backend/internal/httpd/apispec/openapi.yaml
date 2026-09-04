@@ -6724,6 +6724,25 @@ components:
       required:
       - flows
       type: object
+    ControllersMessageDeliveryView:
+      properties:
+        nameDropped:
+          type: string
+        path:
+          description: 'The wire the message took: socket (claude-code''s own messaging
+            channel), pane (typed into the terminal), or none (nothing was delivered).'
+          enum:
+          - socket
+          - pane
+          - none
+          type: string
+        reason:
+          type: string
+        sender:
+          type: string
+      required:
+      - path
+      type: object
     ControllersRenameSimFlowInput:
       properties:
         name:
@@ -8578,6 +8597,8 @@ components:
       type: object
     SendSessionMessageResponse:
       properties:
+        delivery:
+          $ref: '#/components/schemas/ControllersMessageDeliveryView'
         handback:
           $ref: '#/components/schemas/ControllersHandbackCompletenessView'
         message:

@@ -7,6 +7,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 )
 
 // DispatchCommentToWorker renders the review-comment-dispatch template for one
@@ -67,6 +68,6 @@ func (s *Service) DispatchCommentToWorker(ctx context.Context, id domain.Session
 	if extra := strings.TrimSpace(extraPrompt); extra != "" {
 		msg += "\n\n" + domain.SanitizeControlChars(extra)
 	}
-	_, err = s.Send(ctx, id, msg)
+	_, err = s.Send(msgdelivery.WithOrigin(ctx, msgdelivery.Origin{Trigger: msgdelivery.TriggerCommentDispatch}), id, msg)
 	return err
 }

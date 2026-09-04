@@ -18,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/reaper"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
@@ -311,13 +312,36 @@ func (m runtimeMessenger) Send(ctx context.Context, id domain.SessionID, message
 	if handleID == "" {
 		return ports.SendOutcome{}, fmt.Errorf("session %s: %w", id, sessionmanager.ErrIncompleteHandle)
 	}
+	// Ask the transport which wire it takes, and tell it who this message is for
+	// and why it is being sent. The trigger is whatever the caller already put on
+	// the context - a nudge, a report-back, a dispatched comment - and plain
+	// `send` when nobody said, which is what a human's message is.
+	ctx = msgdelivery.WithOrigin(ctx, deliveryOrigin(ctx, id))
+	ctx, collector := msgdelivery.WithCollector(ctx)
 	// A LIVE session whose send fails still fails loudly rather than queueing: the
 	// session is not asleep, so a failure here means something is genuinely wrong
 	// and the caller must hear about it now, not in an inbox.
 	if err := m.runtime.SendMessage(ctx, ports.RuntimeHandle{ID: handleID}, message); err != nil {
 		return ports.SendOutcome{}, err
 	}
-	return ports.SendOutcome{}, nil
+	// Only what the transport said. An unreported send leaves the zero Report,
+	// which the caller reads as "nobody accounted for this path" rather than
+	// filling one in.
+	delivered, _ := collector.Collected()
+	return ports.SendOutcome{Delivery: delivered}, nil
+}
+
+// deliveryOrigin completes the origin a caller started: the session id is this
+// layer's to fill in (callers address a session, the transport sees a runtime
+// handle), the trigger is the caller's, and an unset trigger is an ordinary
+// send - a human's message, or an agent's `ao send`.
+func deliveryOrigin(ctx context.Context, id domain.SessionID) msgdelivery.Origin {
+	origin := msgdelivery.OriginOf(ctx)
+	origin.Session = string(id)
+	if origin.Trigger == "" {
+		origin.Trigger = msgdelivery.TriggerSend
+	}
+	return origin
 }
 
 // newSessionMessenger assembles the per-daemon agent messenger: submit the
@@ -415,4 +439,14 @@ func (r projectRepoResolver) RepoPath(projectID domain.ProjectID) (string, error
 		return "", fmt.Errorf("project %q has no repo path on record: %w", projectID, sessionmanager.ErrProjectNotResolvable)
 	}
 	return rec.Path, nil
+}
+
+// journalOrNil keeps a nil *FileJournal from becoming a non-nil
+// msgdelivery.Journal interface holding a nil pointer, which would panic on the
+// first delivery instead of quietly recording nothing.
+func journalOrNil(j *msgdelivery.FileJournal) msgdelivery.Journal {
+	if j == nil {
+		return nil
+	}
+	return j
 }

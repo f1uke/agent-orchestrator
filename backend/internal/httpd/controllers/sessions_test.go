@@ -20,6 +20,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 )
@@ -2438,6 +2439,53 @@ func TestSessionsAPI_SendOmitsQueuedForADeliveredMessage(t *testing.T) {
 	}
 	if strings.Contains(string(body), "\"queued\"") || strings.Contains(string(body), "pendingMessages") {
 		t.Fatalf("delivered send reported queue fields: %s", body)
+	}
+}
+
+// The response says WHICH WIRE the message took, straight from the transport.
+// AO has two and they are not equivalent, and the answer is the one a human
+// asks for afterwards.
+func TestSessionsAPI_SendReportsTheDeliveryPath(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.sendOutcome = ports.SendOutcome{Delivery: msgdelivery.Report{
+		Path: msgdelivery.PathPane, Reason: "no-descriptor", Sender: "agent-orchestrator-105",
+	}}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", sendBody(t, "straight through"))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	var got struct {
+		Delivery *struct {
+			Path   string `json:"path"`
+			Reason string `json:"reason"`
+			Sender string `json:"sender"`
+		} `json:"delivery"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, body)
+	}
+	if got.Delivery == nil {
+		t.Fatalf("no delivery in %s", body)
+	}
+	if got.Delivery.Path != "pane" || got.Delivery.Reason != "no-descriptor" {
+		t.Fatalf("delivery = %+v, want the transport's own answer", *got.Delivery)
+	}
+}
+
+// A send no transport reported on carries NO delivery field. Inventing a path
+// here is exactly the failure this whole path exists to prevent: a plausible
+// wrong answer would be believed.
+func TestSessionsAPI_SendOmitsTheDeliveryWhenNoneWasReported(t *testing.T) {
+	srv := newSessionTestServer(t, newFakeSessionService())
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", sendBody(t, "straight through"))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	if strings.Contains(string(body), "\"delivery\"") {
+		t.Fatalf("an unreported send claimed a path: %s", body)
 	}
 }
 

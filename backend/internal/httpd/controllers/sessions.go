@@ -18,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	previewutil "github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
@@ -1057,6 +1058,7 @@ func (c *SessionsController) crewSend(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
+	resp.Delivery = deliveryView(sent.Outcome.Delivery)
 	c.publishActivity(r.Context(), activityEventFromMessage(sent.Peer, sent.Message))
 	envelope.WriteJSON(w, http.StatusOK, resp)
 }
@@ -1138,8 +1140,25 @@ func (c *SessionsController) send(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
+	resp.Delivery = deliveryView(outcome.Delivery)
 	c.publishActivity(r.Context(), activityEventFromMessage(sessionID(r), message))
 	envelope.WriteJSON(w, http.StatusOK, resp)
+}
+
+// deliveryView passes the transport's account of a send through to the caller,
+// unchanged. A send no transport reported on returns nil: "which wire did this
+// take" is then genuinely unanswered, and saying so is the point of the whole
+// path - inventing an answer here is what this feature exists to stop.
+func deliveryView(report msgdelivery.Report) *MessageDeliveryView {
+	if report.Path == "" {
+		return nil
+	}
+	return &MessageDeliveryView{
+		Path:        string(report.Path),
+		Reason:      report.Reason,
+		Sender:      report.Sender,
+		NameDropped: report.NameDropped,
+	}
 }
 
 // commentDispatch forwards a review-thread comment (plus an optional extra

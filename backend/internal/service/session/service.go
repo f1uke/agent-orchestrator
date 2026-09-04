@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
+	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
@@ -464,6 +465,7 @@ func (s *Service) SpawnOrchestrator(ctx context.Context, projectID domain.Projec
 const orchestratorRetireNotice = "AO is replacing this project orchestrator. Stop coordinating new work now; a fresh orchestrator will take over on the canonical branch."
 
 func (s *Service) sendRetireNotice(ctx context.Context, id domain.SessionID) error {
+	ctx = msgdelivery.WithOrigin(ctx, msgdelivery.Origin{Trigger: msgdelivery.TriggerCrewNotice})
 	if _, err := s.manager.Send(ctx, id, orchestratorRetireNotice); err != nil {
 		return fmt.Errorf("send retire notice to %s: %w", id, err)
 	}
@@ -1300,6 +1302,11 @@ func toAPIError(err error) error {
 		return apierr.Conflict("SESSION_NOT_RESTORABLE", "Session is not restorable", nil)
 	case errors.Is(err, sessionmanager.ErrTerminated):
 		return apierr.Conflict("SESSION_TERMINATED", "Session is terminated", nil)
+	case errors.Is(err, msgdelivery.ErrNotDelivered):
+		// Nothing was delivered, and the caller has to be told WHY in the same
+		// breath - the reason is the only thing that makes a refused send
+		// actionable, and it came from the transport that refused it.
+		return apierr.Conflict("MESSAGE_NOT_DELIVERED", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrIncompleteHandle):
 		return apierr.Conflict("SESSION_INCOMPLETE_HANDLE", "Session is missing runtime or workspace handles", nil)
 	case errors.Is(err, sessionmanager.ErrNotResumable):

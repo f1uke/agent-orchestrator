@@ -262,8 +262,55 @@ dead socket, a session that might be in `bypassPermissions` (which parks peer
 messages instead of delivering them), a message the receiver's own duplicate and
 rate guards would drop, or any incomplete write. The commit point is a complete
 write of the frame, so a message lands on exactly one of the two paths, never
-both. Which path carried it is in the daemon log on every send. Set
-`AO_CLAUDE_NATIVE_SEND=0` to pin delivery to the pane.
+both.
+
+`AO_CLAUDE_NATIVE_SEND` chooses how hard AO tries for the socket:
+
+| value                          | behaviour                                                                           |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| unset, or anything below       | **the default:** prefer the socket, fall back to the pane                           |
+| `0` / `false` / `FALSE` / `no` | pane only; never touch the socket                                                   |
+| `strict`                       | socket only; a send that cannot take it FAILS, naming the reason, and types nothing |
+
+Under `strict` the refusal reaches the caller as `MESSAGE_NOT_DELIVERED`, carrying
+the transport's reason:
+
+```
+$ ao send --session repo-2 --message "..."
+send repo-2: message not delivered: AO_CLAUDE_NATIVE_SEND=strict refused the pane
+fallback and the claude peer socket could not be used (reason=no-descriptor) ...
+```
+
+The default does not force the socket on purpose: the protocol is undocumented,
+and if a Claude Code release changed it, a forced-socket default would make every
+message in the system vanish silently - far worse than one being typed at
+somebody. `strict` is opt-in, for someone deliberately hunting fallbacks.
+
+#### Which wire a message took
+
+The path and the reason are decided inside the transport, on facts only it has,
+and the question gets asked hours later - so they are reported, never re-derived
+higher up:
+
+- **`ao send` prints it**, and it also rides the API as `delivery` on the send
+  response:
+
+  ```
+  delivered: socket (claude's own message channel; from @agent-orchestrator-105)
+  delivered: pane (typed into the terminal; reason=no-descriptor)
+  ```
+
+- **The daemon keeps it**: one JSON line per delivery in
+  `<AO_DATA_DIR>/message-delivery.jsonl` (`~/.ao/data/` by default), carrying the
+  time, the session, what triggered the send (`send`, `queue-drain`, `nudge`,
+  `smoke-report`, `review-notify`, ...), the path, the reason, the sender name, the
+  frame's `msg_id` and any error. It rolls over at 4 MiB, keeping one previous
+  generation as `message-delivery.jsonl.1`. Read it with `tail`/`jq`.
+
+Every path a message can travel is covered, not only the interactive `ao send`:
+the held message drained later, the replay after a daemon restart, a nudge, a
+report-back and the reviewer's brief take the same decision, and nobody watches
+any of those being delivered.
 
 A message delivered over the socket reaches the agent as a **peer message**,
 which the receiving session labels as coming from another Claude session rather
