@@ -23,8 +23,8 @@ import (
 //
 // Everything about the vault's task convention is CONFIGURATION. This file
 // knows the markdown — a checkbox row, a "## " heading, an owner token, a
-// `due:` field — and nothing at all about which folder, which section, or which
-// person any particular vault uses. A schema baked in here would make the tab
+// `due:` or `created:` field, a "(from: …)" tag — and nothing at all about which
+// folder, which section, or which person any particular vault uses. A schema baked in here would make the tab
 // work for exactly one person's notes.
 
 // maxTaskNoteBytes bounds one note's contribution to the scan. A task list is
@@ -57,6 +57,21 @@ var ownerPattern = regexp.MustCompile(`^(?:\[@([^\]\n]+)\]|@([^\s\]]+))[ \t]*`)
 // means the same thing and refusing to read it would be a puzzle, not a rule.
 var duePattern = regexp.MustCompile(`(?:^|\s)due:(\d{4}-\d{2}-\d{2})(?:\s|$)`)
 
+// createdPattern matches a `created:YYYY-MM-DD` field anywhere in a row's text.
+// It is the row's OWN creation date — the thing "how old is this backlog item"
+// actually asks — as opposed to `due:`, which is a promise about the future.
+var createdPattern = regexp.MustCompile(`(?:^|\s)created:(\d{4}-\d{2}-\d{2})(?:\s|$)`)
+
+// fromTagPattern matches a parenthesised provenance tag: "(from: 2026-05-07
+// standup)", "(from: chat 2026-05-07, Mobility HQ)". The capture is the tag's
+// free text, and a date is looked for INSIDE it and nowhere else — a date in
+// the task's own sentence is a date the task talks about, not the date the task
+// was written.
+var fromTagPattern = regexp.MustCompile(`(?i)\(\s*from:([^)\n]*)\)`)
+
+// isoDatePattern is a bare YYYY-MM-DD. It is only ever run inside a from-tag.
+var isoDatePattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+
 // Task is one unchecked checkbox row, addressed well enough that ticking it can
 // never land on a different line.
 type Task struct {
@@ -72,8 +87,9 @@ type Task struct {
 	// real key: a tick is only ever written to a line whose full text equals
 	// the text the reader was shown.
 	Raw string
-	// Text is the row for display: the checkbox, the owner token and the due
-	// field removed, so the sentence reads as a sentence.
+	// Text is the row for display: the checkbox, the owner token and the
+	// `due:` / `created:` fields removed, so the sentence reads as a sentence.
+	// The "(from: …)" tag stays — it is prose the reader wrote.
 	Text string
 	// Section is the nearest "## " heading above the row, Subsection the
 	// nearest "### ". Empty when the row sits above any heading.
@@ -84,9 +100,13 @@ type Task struct {
 	Owner string
 	// Due is the row's `due:` date as YYYY-MM-DD, empty when it carries none.
 	Due string
-	// NoteModifiedAt is the NOTE's mtime, not the row's — a row has no
-	// modification time of its own. It is what the cutoff falls back to.
-	NoteModifiedAt time.Time
+	// Created is the row's `created:` date, FromDate the date inside its
+	// "(from: …)" provenance tag. Both are YYYY-MM-DD, empty when absent, and
+	// both describe the ROW — which is why the note's mtime is not here at all.
+	// A row that carries neither has no date, and saying so is more honest than
+	// borrowing the file's.
+	Created  string
+	FromDate string
 }
 
 // Tasks is the whole answer behind the Tasks tab.
@@ -222,7 +242,7 @@ func (s *Service) scanFolder(
 			return nil //nolint:nilerr // unreadable note, skip
 		}
 		out.ScannedNotes++
-		for _, row := range parseTasks(rel, string(body), info.ModTime().UTC(), wanted) {
+		for _, row := range parseTasks(rel, string(body), wanted) {
 			if row.Owner != "" {
 				owners[row.Owner] = true
 			}
@@ -265,7 +285,7 @@ func sectionFilter(sections []string) map[string]bool {
 // Only "## " and "### " are tracked. A "# " title names the note, which the
 // path already says, and levels below three are rarer than the noise they would
 // add to a one-line row.
-func parseTasks(notePath, body string, modified time.Time, wanted map[string]bool) []Task {
+func parseTasks(notePath, body string, wanted map[string]bool) []Task {
 	var out []Task
 	section, subsection := "", ""
 	inFence := false
@@ -320,24 +340,59 @@ func parseTasks(notePath, body string, modified time.Time, wanted map[string]boo
 		}
 		due := ""
 		if dm := duePattern.FindStringSubmatch(text); dm != nil {
-			due = dm[1]
+			due = validDate(dm[1])
 			text = strings.TrimSpace(strings.Replace(text, dm[0], " ", 1))
 		}
+		created := ""
+		if cm := createdPattern.FindStringSubmatch(text); cm != nil {
+			created = validDate(cm[1])
+			text = strings.TrimSpace(strings.Replace(text, cm[0], " ", 1))
+		}
 		out = append(out, Task{
-			ID:             TaskID(notePath, i+1, raw),
-			Path:           notePath,
-			Line:           i + 1,
-			Raw:            raw,
-			Text:           strings.TrimSpace(text),
-			Section:        section,
-			Subsection:     subsection,
-			Owner:          owner,
-			Due:            due,
-			NoteModifiedAt: modified,
+			ID:         TaskID(notePath, i+1, raw),
+			Path:       notePath,
+			Line:       i + 1,
+			Raw:        raw,
+			Text:       strings.TrimSpace(text),
+			Section:    section,
+			Subsection: subsection,
+			Owner:      owner,
+			Due:        due,
+			Created:    created,
+			FromDate:   fromDate(text),
 		})
 	}
 	return out
 }
+
+// fromDate reads a row's provenance date: the first real date inside a
+// "(from: …)" tag. Every from-tag on the row is considered, so a row carrying
+// both "(from: My active items)" and a dated tag still finds the date.
+func fromDate(text string) string {
+	for _, tag := range fromTagPattern.FindAllStringSubmatch(text, -1) {
+		for _, candidate := range isoDatePattern.FindAllString(tag[1], -1) {
+			if at := validDate(candidate); at != "" {
+				return at
+			}
+		}
+	}
+	return ""
+}
+
+// validDate returns the date unchanged when it is a real calendar day, and ""
+// when it is not. "2026-13-45" is shaped like a date and is not one: an
+// impossible date is treated as an ABSENT field rather than guessed at or
+// raised as an error, because a typo in one row must not cost the reader the
+// note.
+func validDate(day string) string {
+	if _, err := time.Parse(dayLayout, day); err != nil {
+		return ""
+	}
+	return day
+}
+
+// dayLayout is the only date format any of these fields is written in.
+const dayLayout = "2006-01-02"
 
 // headingOf reads an ATX heading, returning its text and level. A "#" with no
 // space after it is a tag, not a heading.

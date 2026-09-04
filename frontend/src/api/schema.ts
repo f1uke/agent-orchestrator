@@ -3603,10 +3603,11 @@ export interface components {
             vaultPath: string;
         };
         WikiTaskRow: {
+            created?: string;
             due?: string;
+            fromDate?: string;
             id: string;
             line: number;
-            noteModifiedAt?: string;
             owner?: string;
             path: string;
             raw: string;

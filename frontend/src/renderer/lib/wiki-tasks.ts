@@ -36,6 +36,11 @@ export type TaskView = {
 	hiddenByCutoff: number;
 	/** Rows the owner filter hid. */
 	hiddenByOwner: number;
+	/**
+	 * Rows the cutoff could not judge because they carry no date at all. They
+	 * are shown, and the tab says so — see `partitionTasks`.
+	 */
+	undated: number;
 };
 
 /** Today as YYYY-MM-DD in the reader's own timezone, not UTC. */
@@ -61,22 +66,25 @@ export function isMine(row: WikiTaskRow, aliases: string[]): boolean {
 }
 
 /**
- * The date a row is judged by.
+ * The date a row is judged by, resolved from the ROW and never from its file.
  *
- * `due:` when the row carries one; otherwise the NOTE's mtime. A row has no
- * date of its own, so the note's is the only other honest answer — and the
- * cutoff means "start counting from here", which is a question about how stale
- * the work is, not about when it is due.
+ * In order:
+ *   1. `created:YYYY-MM-DD` — written on the row when it was captured.
+ *   2. the date inside the row's `(from: …)` provenance tag.
+ *   3. nothing: the row has no date, and `null` says exactly that.
  *
- * 🗝 This fallback is used for the CUTOFF only, never for grouping. Grouping by
- * note mtime would drop every undated row in a note into the day that note was
- * last touched, which is a claim the note never made.
+ * 🗝 The note's mtime is NOT in this list, and the daemon no longer sends it.
+ * mtime is a property of the FILE: editing one line of a task note would push
+ * every row in it to today at once, so a backlog could never go quiet while the
+ * note was still being touched. The row's own fields are the only ones that
+ * describe the row.
+ *
+ * Used for the CUTOFF only. Grouping still keys on `due:` alone: a creation
+ * date is not a promise, and grouping by one would file a row under a day on
+ * which nothing is actually due.
  */
-export function effectiveDate(row: WikiTaskRow): string | null {
-	if (row.due) return row.due;
-	if (!row.noteModifiedAt) return null;
-	const at = new Date(row.noteModifiedAt);
-	return Number.isNaN(at.getTime()) ? null : today(at);
+export function rowDate(row: WikiTaskRow): string | null {
+	return row.created || row.fromDate || null;
 }
 
 /**
@@ -104,6 +112,7 @@ export function partitionTasks(
 	const stamp = today(now);
 	let hiddenByCutoff = 0;
 	let hiddenByOwner = 0;
+	let undated = 0;
 	const kept: WikiTaskRow[] = [];
 
 	for (const row of rows) {
@@ -114,9 +123,13 @@ export function partitionTasks(
 		}
 		// A row with no date at all is never hidden by the cutoff. "We do not
 		// know how old this is" is not the claim "it is older than the cutoff",
-		// and hiding it would lose work with nothing to show for it.
-		const at = cutoff ? effectiveDate(row) : null;
-		if (cutoff && at !== null && at < cutoff) {
+		// and hiding a row on a field it never carried would lose real work —
+		// the one failure this tab exists to rule out. It is counted instead,
+		// and the tab names the count, so the exception is visible rather than
+		// a silent asterisk on the cutoff.
+		const at = rowDate(row);
+		if (at === null) undated += 1;
+		else if (cutoff && at < cutoff) {
 			hiddenByCutoff += 1;
 			if (!showHidden) continue;
 		}
@@ -143,7 +156,7 @@ export function partitionTasks(
 	}
 	push("undated");
 
-	return { groups, visible: kept.length, hiddenByCutoff, hiddenByOwner };
+	return { groups, visible: kept.length, hiddenByCutoff, hiddenByOwner, undated };
 }
 
 /**

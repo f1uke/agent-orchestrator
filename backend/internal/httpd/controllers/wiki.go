@@ -208,16 +208,17 @@ func (c *WikiController) tasks(w http.ResponseWriter, r *http.Request) {
 	rows := make([]WikiTaskRow, 0, len(res.Rows))
 	for _, t := range res.Rows {
 		rows = append(rows, WikiTaskRow{
-			ID:             t.ID,
-			Path:           t.Path,
-			Line:           t.Line,
-			Raw:            t.Raw,
-			Text:           t.Text,
-			Section:        t.Section,
-			Subsection:     t.Subsection,
-			Owner:          t.Owner,
-			Due:            t.Due,
-			NoteModifiedAt: wikiStamp(t.NoteModifiedAt),
+			ID:         t.ID,
+			Path:       t.Path,
+			Line:       t.Line,
+			Raw:        t.Raw,
+			Text:       t.Text,
+			Section:    t.Section,
+			Subsection: t.Subsection,
+			Owner:      t.Owner,
+			Due:        t.Due,
+			Created:    t.Created,
+			FromDate:   t.FromDate,
 		})
 	}
 	envelope.WriteJSON(w, http.StatusOK, WikiTasksResponse{

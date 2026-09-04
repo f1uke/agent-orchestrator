@@ -10106,14 +10106,16 @@ components:
       type: object
     WikiTaskRow:
       properties:
+        created:
+          type: string
         due:
+          type: string
+        fromDate:
           type: string
         id:
           type: string
         line:
           type: integer
-        noteModifiedAt:
-          type: string
         owner:
           type: string
         path:
