@@ -601,7 +601,7 @@ graph TD
     Ports[Ports Interfaces] -->|implemented by| Adapters[Adapters]
 
     Adapters --> Agent[agent/*<br/>23+ harnesses]
-    Adapters --> Runtime[runtime/*<br/>tmux, conpty]
+    Adapters --> Runtime[runtime/*<br/>tmux, conpty, claudepeer]
     Adapters --> Workspace[workspace/*<br/>gitworktree]
     Adapters --> SCM[scm/*<br/>github]
     Adapters --> Tracker[tracker/*<br/>github]

@@ -228,13 +228,47 @@ backend/internal/
 ├── terminal/            # Terminal session protocol
 ├── adapters/            # Concrete adapter implementations
 │   ├── agent/           # 23+ agent harnesses
-│   ├── runtime/         # tmux/conpty runtimes
+│   ├── runtime/         # tmux/conpty runtimes + the claude-code socket path
 │   ├── workspace/       # git worktree
 │   ├── scm/             # GitHub
 │   └── tracker/         # GitHub tracker
 ├── daemon/              # Production wiring
 └── config/              # Environment-based configuration
 ```
+
+### Message delivery
+
+Every message AO injects into a session - `ao send`, lifecycle nudges, review
+nudges - goes through one port method, `SendMessage`, on the runtime selected by
+`adapters/runtime/runtimeselect`. Queueing, the crew rules and the input gate all
+sit above it; the runtime only decides how the bytes reach the agent.
+
+There are two ways they reach it:
+
+- **The pane (tmux `send-keys`).** The default for all 23 harnesses. The message
+  is typed into the pane's input line in chunks and submitted with a separate
+  Enter, so it competes with whatever the human is typing there.
+- **The session's own unix socket (`adapters/runtime/claudepeer`).** Only for
+  claude-code, and only on Darwin/Linux. Claude Code registers every running
+  session in `~/.claude/sessions/<pid>.json` - including the tmux pane it owns,
+  which is what joins it to AO's runtime handle - and listens on a per-session
+  socket. Handing the message to that socket leaves the input line alone
+  entirely, carries an arbitrarily large message in one frame, and is atomic.
+
+The socket is an undocumented interface with a version on it, so `claudepeer`
+wraps the tmux runtime rather than replacing it and falls back to it, quietly and
+automatically, on every uncertainty: an unfamiliar `peerProtocol`, a missing or
+dead socket, a session that might be in `bypassPermissions` (which parks peer
+messages instead of delivering them), a message the receiver's own duplicate and
+rate guards would drop, or any incomplete write. The commit point is a complete
+write of the frame, so a message lands on exactly one of the two paths, never
+both. Which path carried it is in the daemon log on every send. Set
+`AO_CLAUDE_NATIVE_SEND=0` to pin delivery to the pane.
+
+A message delivered over the socket reaches the agent as a **peer message**,
+which the receiving session labels as coming from another Claude session rather
+than from its user. That is inherent to the interface: it has no frame that
+injects a plain user prompt.
 
 ### Core Data Flow
 
