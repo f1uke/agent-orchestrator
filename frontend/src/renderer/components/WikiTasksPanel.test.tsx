@@ -167,7 +167,7 @@ describe("ticking a row", () => {
 describe("the cutoff", () => {
 	const withCutoff = tasks({
 		cutoff: "2026-06-01",
-		tasks: [row({ id: "old", due: "2026-01-01" }), row({ id: "new", due: "2099-01-01" })],
+		tasks: [row({ id: "old", fromDate: "2026-01-01" }), row({ id: "new", created: "2026-09-01" })],
 	});
 
 	/**
@@ -190,9 +190,45 @@ describe("the cutoff", () => {
 		expect(screen.getByRole("button", { name: "Hide them" })).toBeTruthy();
 	});
 
-	it("says nothing when no cutoff hides anything", () => {
+	/**
+	 * The other half of the same promise: a row the cutoff cannot date is KEPT,
+	 * and the strip says so. Silence here would read as "the cutoff hid nothing"
+	 * while the list never emptied, and the reader would have no way to tell the
+	 * two apart.
+	 */
+	it("says how many rows it could not date, and keeps them", () => {
+		render(
+			panel({
+				tasks: tasks({
+					cutoff: "2026-06-01",
+					tasks: [row({ id: "old", fromDate: "2026-01-01" }), row({ id: "undated" })],
+				}),
+			}),
+		);
+		expect(screen.getByText(/1 row carries no date of its own, so the cutoff leaves it here/)).toBeTruthy();
+		expect(screen.getAllByRole("button", { name: /^Tick off:/ })).toHaveLength(1);
+	});
+
+	it("says it even when the cutoff hid nothing at all", () => {
+		render(panel({ tasks: tasks({ cutoff: "2026-06-01", tasks: [row({ id: "a" }), row({ id: "b" })] }) }));
+		expect(screen.getByText(/2 rows carry no date of their own/)).toBeTruthy();
+		expect(screen.queryByRole("button", { name: "Show them" })).toBeNull();
+	});
+
+	/**
+	 * A due date is a promise about the future; the cutoff asks how old a row
+	 * is. An overdue row is never hidden for being old.
+	 */
+	it("does not hide a row that carries only a due date", () => {
+		render(panel({ tasks: tasks({ cutoff: "2026-06-01", tasks: [row({ id: "due", due: "2026-01-01" })] }) }));
+		expect(screen.queryByText(/is hidden/)).toBeNull();
+		expect(screen.getAllByRole("button", { name: /^Tick off:/ })).toHaveLength(1);
+	});
+
+	it("says nothing when there is no cutoff at all", () => {
 		render(panel());
 		expect(screen.queryByText(/still in your notes/)).toBeNull();
+		expect(screen.queryByText(/no date of its own/)).toBeNull();
 	});
 });
 

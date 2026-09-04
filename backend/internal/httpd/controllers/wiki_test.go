@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -420,9 +421,9 @@ func TestWikiTasks_ShapesTheRowsAndNeverNullsAList(t *testing.T) {
 		Configured: true,
 		Folders:    []string{"Areas"},
 		Rows: []wikisvc.Task{{
-			ID: "abc", Path: "Areas/a.md", Line: 7, Raw: "- [ ] [@Someone] a row due:2026-05-09",
-			Text: "a row", Section: "Mine", Owner: "Someone", Due: "2026-05-09",
-			NoteModifiedAt: time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC),
+			ID: "abc", Path: "Areas/a.md", Line: 7, Raw: "- [ ] [@Someone] a row (from: 2026-05-07 standup) due:2026-05-09",
+			Text: "a row (from: 2026-05-07 standup)", Section: "Mine", Owner: "Someone", Due: "2026-05-09",
+			Created: "2026-05-06", FromDate: "2026-05-07",
 		}},
 	}}
 	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
@@ -436,14 +437,15 @@ func TestWikiTasks_ShapesTheRowsAndNeverNullsAList(t *testing.T) {
 		Configured bool     `json:"configured"`
 		Folders    []string `json:"folders"`
 		Tasks      []struct {
-			ID             string `json:"id"`
-			Path           string `json:"path"`
-			Line           int    `json:"line"`
-			Raw            string `json:"raw"`
-			Text           string `json:"text"`
-			Owner          string `json:"owner"`
-			Due            string `json:"due"`
-			NoteModifiedAt string `json:"noteModifiedAt"`
+			ID       string `json:"id"`
+			Path     string `json:"path"`
+			Line     int    `json:"line"`
+			Raw      string `json:"raw"`
+			Text     string `json:"text"`
+			Owner    string `json:"owner"`
+			Due      string `json:"due"`
+			Created  string `json:"created"`
+			FromDate string `json:"fromDate"`
 		} `json:"tasks"`
 		Sections     []string `json:"sections"`
 		Owners       []string `json:"owners"`
@@ -456,11 +458,16 @@ func TestWikiTasks_ShapesTheRowsAndNeverNullsAList(t *testing.T) {
 		t.Fatalf("body = %+v", got)
 	}
 	row := got.Tasks[0]
-	if row.Line != 7 || row.Raw != "- [ ] [@Someone] a row due:2026-05-09" || row.Text != "a row" {
+	if row.Line != 7 || row.Raw != "- [ ] [@Someone] a row (from: 2026-05-07 standup) due:2026-05-09" {
 		t.Fatalf("row = %+v", row)
 	}
-	if row.Owner != "Someone" || row.Due != "2026-05-09" || row.NoteModifiedAt != "2026-09-02T10:00:00Z" {
+	// The dates that describe the ROW travel with it; the note's mtime does not
+	// travel at all, so nothing downstream can date a row by its file again.
+	if row.Owner != "Someone" || row.Due != "2026-05-09" || row.Created != "2026-05-06" || row.FromDate != "2026-05-07" {
 		t.Fatalf("row = %+v", row)
+	}
+	if strings.Contains(string(body), "noteModifiedAt") {
+		t.Fatalf("a task row still carries the note's mtime: %s", body)
 	}
 	// A renderer maps over these, so they must be [] and never null.
 	if got.Sections == nil || got.Owners == nil || got.OwnerAliases == nil || got.Folders == nil {

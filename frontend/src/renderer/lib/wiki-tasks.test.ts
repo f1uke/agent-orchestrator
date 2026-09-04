@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WikiTaskRow } from "../hooks/useWiki";
-import { effectiveDate, isMine, partitionTasks, today } from "./wiki-tasks";
+import { isMine, partitionTasks, rowDate } from "./wiki-tasks";
 
 const NOW = new Date("2026-09-04T12:00:00");
 
@@ -38,18 +38,26 @@ describe("isMine", () => {
 	});
 });
 
-describe("effectiveDate", () => {
-	it("prefers the row's own due date", () => {
-		expect(effectiveDate(row({ due: "2026-01-02", noteModifiedAt: "2026-08-01T00:00:00Z" }))).toBe("2026-01-02");
+describe("rowDate", () => {
+	it("prefers the row's own created: date", () => {
+		expect(rowDate(row({ created: "2026-08-20", fromDate: "2026-05-07" }))).toBe("2026-08-20");
 	});
 
-	it("falls back to the note's mtime, in the reader's timezone", () => {
-		const at = new Date("2026-08-01T10:00:00Z");
-		expect(effectiveDate(row({ noteModifiedAt: at.toISOString() }))).toBe(today(at));
+	it("falls back to the date in the (from: …) tag", () => {
+		expect(rowDate(row({ fromDate: "2026-05-07" }))).toBe("2026-05-07");
 	});
 
-	it("is null when there is nothing to go on", () => {
-		expect(effectiveDate(row())).toBeNull();
+	/**
+	 * 🗝 A due date is a promise about the future, not a record of when the row
+	 * was written, so it does not answer "how old is this". The cutoff asks the
+	 * second question; the day grouping asks the first.
+	 */
+	it("is not the due date", () => {
+		expect(rowDate(row({ due: "2026-01-02" }))).toBeNull();
+	});
+
+	it("is null when the row carries no date of its own", () => {
+		expect(rowDate(row())).toBeNull();
 	});
 });
 
@@ -72,12 +80,12 @@ describe("partitionTasks grouping", () => {
 	});
 
 	/**
-	 * The rule the plan committed to: an undated row does NOT inherit the
-	 * note's mtime for GROUPING. One edit to a 40-row note would otherwise drop
-	 * all 40 into "today", which is a claim the note never made.
+	 * The rule #293 committed to and this change keeps: grouping keys on `due:`
+	 * ALONE. A creation date is not a promise, so a row dated only by when it
+	 * was captured belongs in the undated group, not under some past day.
 	 */
-	it("never dates a row by its note's mtime", () => {
-		const view = partitionTasks([row({ noteModifiedAt: "2026-09-04T09:00:00Z" })], {
+	it("never groups a row by the date it was created", () => {
+		const view = partitionTasks([row({ created: "2026-08-20", fromDate: "2026-05-07" })], {
 			ownerFilter: "all",
 			ownerAliases: [],
 			now: NOW,
@@ -125,9 +133,9 @@ describe("partitionTasks owner filter", () => {
 
 describe("partitionTasks cutoff", () => {
 	const rows = [
-		row({ id: "old", due: "2026-01-01" }),
-		row({ id: "new", due: "2026-09-10" }),
-		row({ id: "stale-note", noteModifiedAt: "2026-01-05T00:00:00Z" }),
+		row({ id: "old-created", created: "2026-01-01" }),
+		row({ id: "old-from", fromDate: "2026-01-05" }),
+		row({ id: "recent", created: "2026-09-01" }),
 		row({ id: "no-date-at-all" }),
 	];
 
@@ -138,7 +146,6 @@ describe("partitionTasks cutoff", () => {
 			cutoff: "2026-06-01",
 			now: NOW,
 		});
-		// The old due date and the stale note both fall before the cutoff.
 		expect(view.hiddenByCutoff).toBe(2);
 		expect(view.visible).toBe(2);
 	});
@@ -146,17 +153,30 @@ describe("partitionTasks cutoff", () => {
 	/**
 	 * A row with no date at all is never hidden. "We do not know how old this
 	 * is" is not the claim "it is older than the cutoff", and hiding it would
-	 * lose work with nothing to show for it.
+	 * lose work with nothing to show for it. It is COUNTED, so the tab can say
+	 * out loud that the cutoff left it here.
 	 */
-	it("never hides a row it cannot date", () => {
-		const view = partitionTasks([row({ id: "unknown" })], {
+	it("never hides a row it cannot date, and says how many those are", () => {
+		const view = partitionTasks([row({ id: "unknown" }), row({ id: "due-only", due: "2026-01-01" })], {
 			ownerFilter: "all",
 			ownerAliases: [],
 			cutoff: "2026-06-01",
 			now: NOW,
 		});
 		expect(view.hiddenByCutoff).toBe(0);
-		expect(view.visible).toBe(1);
+		expect(view.undated).toBe(2);
+		expect(view.visible).toBe(2);
+	});
+
+	it("counts only the rows the owner filter left", () => {
+		const view = partitionTasks([row({ id: "mine" }), row({ id: "theirs", owner: "Someone" })], {
+			ownerFilter: "mine",
+			ownerAliases: ["Fluke"],
+			cutoff: "2026-06-01",
+			now: NOW,
+		});
+		expect(view.undated).toBe(1);
+		expect(view.hiddenByOwner).toBe(1);
 	});
 
 	it("showHidden reveals them while still reporting the count", () => {

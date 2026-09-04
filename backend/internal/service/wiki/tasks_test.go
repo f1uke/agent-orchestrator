@@ -146,6 +146,48 @@ func TestListTasks_ParsesOwnerDueAndStripsThemFromText(t *testing.T) {
 	}
 }
 
+// A row's own dates: the `created:` field and the date inside its "(from: …)"
+// provenance tag. Both describe the ROW, which is the whole reason the note's
+// mtime plays no part — see the resolution order in the renderer's wiki-tasks.
+func TestListTasks_ReadsTheRowsOwnDates(t *testing.T) {
+	svc, _, _ := taskVault(t, wikisettings.TaskSettings{Folders: []string{"A"}}, map[string]string{
+		"A/a.md": "- [ ] confirm the timeline (from: 2026-05-07 standup)\n" +
+			"- [ ] review the proposal (from: chat 2026-05-07, Mobility HQ) due:2026-05-09\n" +
+			"- [ ] a new row created:2026-08-20 (from: 2026-05-07 standup)\n" +
+			"- [ ] no provenance at all\n" +
+			"- [ ] the tag names no date (from: My active items)\n" +
+			"- [ ] shipped on 2026-05-07 to production\n" +
+			"- [ ] two tags (from: My active items) (from: 2026-06-01 review)\n" +
+			"- [ ] an impossible day created:2026-02-30 (from: 2026-13-45 nowhere)\n",
+	})
+	got, _ := svc.ListTasks(context.Background())
+	want := []struct {
+		created, from, text string
+	}{
+		{"", "2026-05-07", "confirm the timeline (from: 2026-05-07 standup)"},
+		{"", "2026-05-07", "review the proposal (from: chat 2026-05-07, Mobility HQ)"},
+		{"2026-08-20", "2026-05-07", "a new row (from: 2026-05-07 standup)"},
+		{"", "", "no provenance at all"},
+		{"", "", "the tag names no date (from: My active items)"},
+		// A date in the task's own sentence is a date the task TALKS about. The
+		// row is only ever dated from inside a from-tag.
+		{"", "", "shipped on 2026-05-07 to production"},
+		{"", "2026-06-01", "two tags (from: My active items) (from: 2026-06-01 review)"},
+		// Shaped like a date, and not one. An absent field, not an error.
+		{"", "", "an impossible day (from: 2026-13-45 nowhere)"},
+	}
+	if len(got.Rows) != len(want) {
+		t.Fatalf("rows = %d, want %d", len(got.Rows), len(want))
+	}
+	for i, w := range want {
+		row := got.Rows[i]
+		if row.Created != w.created || row.FromDate != w.from || row.Text != w.text {
+			t.Errorf("row %d = {created:%q from:%q text:%q}, want {created:%q from:%q text:%q}",
+				i, row.Created, row.FromDate, row.Text, w.created, w.from, w.text)
+		}
+	}
+}
+
 // The raw line is the row's identity, so it must survive parsing untouched.
 func TestListTasks_RawIsTheLineVerbatim(t *testing.T) {
 	line := "  - [ ] [@Someone] indented row due:2026-01-02  (from: somewhere)"

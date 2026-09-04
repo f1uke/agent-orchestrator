@@ -1982,8 +1982,9 @@ type WikiTaskRow struct {
 	Path string `json:"path"`
 	Line int    `json:"line"`
 	Raw  string `json:"raw"`
-	// Text is the row for display: the checkbox, the owner token and the due
-	// field taken out, so the sentence reads as a sentence.
+	// Text is the row for display: the checkbox, the owner token and the
+	// `due:` / `created:` fields taken out, so the sentence reads as a
+	// sentence. The "(from: …)" tag stays — it is prose the reader wrote.
 	Text string `json:"text"`
 	// Section is the nearest "## " heading above the row, subsection the
 	// nearest "### ".
@@ -1993,10 +1994,15 @@ type WikiTaskRow struct {
 	// Empty means the row names nobody.
 	Owner string `json:"owner,omitempty"`
 	// Due is a YYYY-MM-DD date from the row's `due:` field, empty without one.
+	// It is what the day grouping keys on, and only that.
 	Due string `json:"due,omitempty"`
-	// NoteModifiedAt is the NOTE's mtime — a row has none of its own. It is
-	// what a cutoff falls back to for an undated row.
-	NoteModifiedAt string `json:"noteModifiedAt,omitempty"`
+	// Created is the row's `created:` date and FromDate the date inside its
+	// "(from: …)" provenance tag, both YYYY-MM-DD and both empty when the row
+	// carries none. They are how old the ROW is, which is what the cutoff asks;
+	// the note's mtime is deliberately not on this row, because one edit to a
+	// task note would otherwise make every row in it look new.
+	Created  string `json:"created,omitempty"`
+	FromDate string `json:"fromDate,omitempty"`
 }
 
 // WikiTasksResponse is the whole Tasks tab in one read.

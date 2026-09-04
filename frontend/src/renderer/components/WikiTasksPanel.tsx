@@ -210,21 +210,37 @@ export function WikiTasksPanel({
 			</div>
 
 			{/*
-			 * The cutoff always announces itself. A backlog that quietly went
-			 * missing is the failure this line exists to prevent: the rows are
-			 * still in the notes, untouched, and this says so and offers them.
+			 * The cutoff always announces itself, and it announces BOTH of its
+			 * outcomes. A backlog that quietly went missing is the failure the
+			 * first sentence exists to prevent; the second is the same promise
+			 * pointed the other way — rows with no date of their own are kept,
+			 * so the reader learns that the cutoff has an edge rather than
+			 * wondering why the list never empties.
 			 */}
-			{cutoff !== "" && view.hiddenByCutoff > 0 && (
+			{cutoff !== "" && (view.hiddenByCutoff > 0 || view.undated > 0) && (
 				<div className="wiki-tasks__cutoff">
 					<EyeOff aria-hidden="true" className="wiki-tasks__cutoff-icon" />
 					<span>
-						{view.hiddenByCutoff} row{view.hiddenByCutoff === 1 ? " " : "s "}
-						before {cutoff} {view.hiddenByCutoff === 1 ? "is" : "are"} {showHidden ? "shown" : "hidden"}.{" "}
-						{view.hiddenByCutoff === 1 ? "It is" : "They are"} still in your notes.
+						{view.hiddenByCutoff > 0 && (
+							<>
+								{view.hiddenByCutoff} row{view.hiddenByCutoff === 1 ? " " : "s "}
+								before {cutoff} {view.hiddenByCutoff === 1 ? "is" : "are"} {showHidden ? "shown" : "hidden"}.{" "}
+								{view.hiddenByCutoff === 1 ? "It is" : "They are"} still in your notes.{" "}
+							</>
+						)}
+						{view.undated > 0 && (
+							<>
+								{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no date of{" "}
+								{view.undated === 1 ? "its" : "their"} own, so the cutoff leaves {view.undated === 1 ? "it" : "them"}{" "}
+								here.
+							</>
+						)}
 					</span>
-					<button type="button" className="wiki-tasks__cutoff-toggle" onClick={toggleHidden}>
-						{showHidden ? "Hide them" : "Show them"}
-					</button>
+					{view.hiddenByCutoff > 0 && (
+						<button type="button" className="wiki-tasks__cutoff-toggle" onClick={toggleHidden}>
+							{showHidden ? "Hide them" : "Show them"}
+						</button>
+					)}
 				</div>
 			)}
 

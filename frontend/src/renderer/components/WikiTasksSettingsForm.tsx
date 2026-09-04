@@ -107,8 +107,9 @@ export function WikiTasksSettingsForm({
 					onChange={(event) => edit(setCutoff)(event.target.value)}
 				/>
 				<span className="wiki-tasks__hint">
-					Rows older than this are hidden from the list — never changed and never deleted. The tab says how many, and
-					shows them on request.
+					Rows older than this are hidden from the list — never changed and never deleted. A row's date is its{" "}
+					<code>created:</code> field, or the date in its <code>(from: …)</code> tag; a row with neither has no date and
+					stays. The tab says how many of each, and shows the hidden ones on request.
 				</span>
 			</label>
 
