@@ -62,3 +62,112 @@ func TestNewStore_EmptyDir_Errors(t *testing.T) {
 		t.Fatal("want error for empty dir")
 	}
 }
+
+func TestSetTasks_KeepsVaultPathAndHarness(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := NewStore(dir)
+	if err := st.Set(Settings{VaultPath: "/tmp/vault", Harness: "codex"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetTasks(TaskSettings{Folders: []string{"Areas"}, Cutoff: "2026-01-01"}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.Get()
+	if got.VaultPath != "/tmp/vault" || got.Harness != "codex" {
+		t.Fatalf("SetTasks disturbed the rest: %+v", got)
+	}
+	if len(got.Tasks.Folders) != 1 || got.Tasks.Folders[0] != "Areas" || got.Tasks.Cutoff != "2026-01-01" {
+		t.Fatalf("tasks = %+v", got.Tasks)
+	}
+}
+
+func TestSetHarness_KeepsTasks(t *testing.T) {
+	st, _ := NewStore(t.TempDir())
+	if err := st.SetTasks(TaskSettings{Folders: []string{"Areas"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetHarness("claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.Tasks().Folders; len(got) != 1 || got[0] != "Areas" {
+		t.Fatalf("Tasks().Folders = %v after SetHarness, want [Areas]", got)
+	}
+}
+
+func TestTasks_PersistAndReload(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := NewStore(dir)
+	if err := st.SetTasks(TaskSettings{
+		Folders:      []string{"Areas/work"},
+		Sections:     []string{"My items"},
+		Cutoff:       "2026-06-01",
+		OwnerAliases: []string{"me"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st2, _ := NewStore(dir)
+	got := st2.Tasks()
+	if len(got.Folders) != 1 || got.Folders[0] != "Areas/work" || got.Cutoff != "2026-06-01" {
+		t.Fatalf("reloaded = %+v", got)
+	}
+	if len(got.Sections) != 1 || got.Sections[0] != "My items" {
+		t.Fatalf("sections = %v", got.Sections)
+	}
+	if len(got.OwnerAliases) != 1 || got.OwnerAliases[0] != "me" {
+		t.Fatalf("ownerAliases = %v", got.OwnerAliases)
+	}
+}
+
+func TestNormalizeTasks_TrimsFolderSlashesAndDropsBlankEntries(t *testing.T) {
+	st, _ := NewStore(t.TempDir())
+	if err := st.SetTasks(TaskSettings{
+		Folders:      []string{"  /Areas/work/  ", "", "Areas/work"},
+		Sections:     []string{" Mine ", "", "   "},
+		OwnerAliases: []string{"", " me "},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.Tasks()
+	// Trimmed, de-duplicated, and blanks dropped: "/Areas/work/" and
+	// "Areas/work" are the same folder and must not be scanned twice.
+	if len(got.Folders) != 1 || got.Folders[0] != "Areas/work" {
+		t.Fatalf("Folders = %#v, want [Areas/work]", got.Folders)
+	}
+	if len(got.Sections) != 1 || got.Sections[0] != "Mine" {
+		t.Fatalf("Sections = %#v, want [Mine]", got.Sections)
+	}
+	if len(got.OwnerAliases) != 1 || got.OwnerAliases[0] != "me" {
+		t.Fatalf("OwnerAliases = %#v, want [me]", got.OwnerAliases)
+	}
+}
+
+// An all-blank list must come back nil rather than an empty slice, so the
+// settings file does not accumulate "sections": [] for a filter nobody set.
+func TestNormalizeTasks_AllBlankListIsNil(t *testing.T) {
+	st, _ := NewStore(t.TempDir())
+	if err := st.SetTasks(TaskSettings{Sections: []string{"", "  "}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.Tasks().Sections; got != nil {
+		t.Fatalf("Sections = %#v, want nil", got)
+	}
+}
+
+// A settings file written before the Tasks tab existed must still load.
+func TestNewStore_FileWithoutTasks_LoadsClean(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, fileName), []byte(`{"vaultPath":"/tmp/v","harness":"codex"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := st.Get()
+	if got.VaultPath != "/tmp/v" || got.Harness != "codex" {
+		t.Fatalf("legacy file = %+v", got)
+	}
+	if got.Tasks.Folders != nil || got.Tasks.Sections != nil {
+		t.Fatalf("tasks = %+v, want zero", got.Tasks)
+	}
+}

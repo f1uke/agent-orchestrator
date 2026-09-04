@@ -25,6 +25,8 @@ type WikiService interface {
 	ListFiles(ctx context.Context) (wikisvc.Files, error)
 	ReadNote(ctx context.Context, path string) (wikisvc.NoteContent, error)
 	WriteNote(ctx context.Context, in wikisvc.WriteNoteInput) (wikisvc.WriteNoteResult, error)
+	ListTasks(ctx context.Context) (wikisvc.Tasks, error)
+	CompleteTask(ctx context.Context, in wikisvc.CompleteTaskInput) (wikisvc.CompleteTaskResult, error)
 }
 
 // WikiController owns the /wiki routes. A nil service keeps them mounted and
@@ -42,6 +44,8 @@ func (c *WikiController) Register(r chi.Router) {
 	r.Get("/wiki/files", c.files)
 	r.Get("/wiki/file", c.note)
 	r.Put("/wiki/file", c.writeNote)
+	r.Get("/wiki/tasks", c.tasks)
+	r.Post("/wiki/tasks/complete", c.completeTask)
 }
 
 func (c *WikiController) status(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +190,93 @@ func (c *WikiController) writeNote(w http.ResponseWriter, r *http.Request) {
 		Size:        res.Size,
 		ModifiedAt:  wikiStamp(res.ModifiedAt),
 	})
+}
+
+// tasks lists every unchecked row in the configured subtrees. The cutoff and
+// the owner filter travel WITH the rows rather than being applied here — see
+// WikiTasksResponse for why.
+func (c *WikiController) tasks(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/wiki/tasks")
+		return
+	}
+	res, err := c.Svc.ListTasks(r.Context())
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	rows := make([]WikiTaskRow, 0, len(res.Rows))
+	for _, t := range res.Rows {
+		rows = append(rows, WikiTaskRow{
+			ID:             t.ID,
+			Path:           t.Path,
+			Line:           t.Line,
+			Raw:            t.Raw,
+			Text:           t.Text,
+			Section:        t.Section,
+			Subsection:     t.Subsection,
+			Owner:          t.Owner,
+			Due:            t.Due,
+			NoteModifiedAt: wikiStamp(t.NoteModifiedAt),
+		})
+	}
+	envelope.WriteJSON(w, http.StatusOK, WikiTasksResponse{
+		Configured:   res.Configured,
+		Folders:      nonNil(res.Folders),
+		Sections:     nonNil(res.Sections),
+		Cutoff:       res.Cutoff,
+		OwnerAliases: nonNil(res.OwnerAliases),
+		Tasks:        rows,
+		Owners:       nonNil(res.Owners),
+		ScannedNotes: res.ScannedNotes,
+		Truncated:    res.Truncated,
+	})
+}
+
+// completeTask ticks one row off in the note it lives in. The body carries the
+// row's exact text, and a line whose text no longer matches is refused rather
+// than written to.
+func (c *WikiController) completeTask(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/wiki/tasks/complete")
+		return
+	}
+	var in CompleteWikiTaskRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if strings.TrimSpace(in.Path) == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PATH_REQUIRED", "path is required", nil)
+		return
+	}
+	res, err := c.Svc.CompleteTask(r.Context(), wikisvc.CompleteTaskInput{
+		Path: in.Path,
+		Line: in.Line,
+		// NOT trimmed: the row's identity is its exact bytes, and trimming here
+		// would make a row with trailing whitespace unmatchable.
+		Raw: in.Raw,
+	})
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, CompleteWikiTaskResponse{
+		Path:           res.Path,
+		Line:           res.Line,
+		Raw:            res.Raw,
+		Moved:          res.Moved,
+		NoteModifiedAt: res.NoteModifiedAt,
+	})
+}
+
+// nonNil keeps a list field rendering as [] rather than null, so the renderer
+// never has to guard a map over it.
+func nonNil(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 func wikiStatusResponse(st wikisvc.Status) WikiStatusResponse {

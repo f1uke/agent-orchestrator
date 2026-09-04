@@ -1766,6 +1766,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/wiki/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the Tasks tab configuration (subtree, sections, cutoff, owner aliases) */
+        get: operations["getWikiTasksSettings"];
+        /** Replace the Tasks tab configuration (an empty folder scans nothing) */
+        put: operations["setWikiTasksSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sim/devices": {
         parameters: {
             query?: never;
@@ -1898,6 +1916,40 @@ export interface paths {
         get: operations["listWikiFiles"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/wiki/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the unchecked task rows in the configured vault subtree */
+        get: operations["listWikiTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/wiki/tasks/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tick one task row off, matched on its exact text so a stale row is refused */
+        post: operations["completeWikiTask"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2080,6 +2132,21 @@ export interface components {
         CleanupSkippedSession: {
             reason: string;
             sessionId: string;
+        };
+        CompleteWikiTaskRequest: {
+            /** @description 1-based line the row was read from. A hint: the row may have moved, and raw decides. */
+            line: number;
+            /** @description Vault-relative path of the note holding the row. */
+            path: string;
+            /** @description The row's line byte for byte as it was displayed. Required; a line whose text differs is never written to. */
+            raw: string;
+        };
+        CompleteWikiTaskResponse: {
+            line: number;
+            moved: boolean;
+            noteModifiedAt?: string;
+            path: string;
+            raw: string;
         };
         ControllersAddCrewMemberRequest: {
             /** @description The calling session's own id. An AO session is refused (409 CREW_AUTO_FORMATION_OFF) on a project with automatic crew formation turned off; omitted callers are never refused. */
@@ -3173,6 +3240,16 @@ export interface components {
         SetWikiSettingsRequest: {
             vaultPath: string;
         };
+        SetWikiTasksSettingsRequest: {
+            /** @description YYYY-MM-DD. Rows older than this are hidden by the tab, never modified or deleted. */
+            cutoff?: string;
+            /** @description Vault-relative subtrees to scan. An empty list scans nothing and the tab says so. */
+            folders?: string[];
+            /** @description Owner tokens that mean 'me', for the mine/others filter. */
+            ownerAliases?: string[];
+            /** @description Only rows under these '## ' headings. Empty means every section. */
+            sections?: string[];
+        };
         SimDeviceLeaseView: {
             /** Format: date-time */
             acquiredAt?: null | string;
@@ -3524,6 +3601,35 @@ export interface components {
             running: boolean;
             startedAt?: string;
             vaultPath: string;
+        };
+        WikiTaskRow: {
+            due?: string;
+            id: string;
+            line: number;
+            noteModifiedAt?: string;
+            owner?: string;
+            path: string;
+            raw: string;
+            section?: string;
+            subsection?: string;
+            text: string;
+        };
+        WikiTasksResponse: {
+            configured: boolean;
+            cutoff?: string;
+            folders: string[];
+            ownerAliases: string[];
+            owners: string[];
+            scannedNotes: number;
+            sections: string[];
+            tasks: components["schemas"]["WikiTaskRow"][];
+            truncated: boolean;
+        };
+        WikiTasksSettingsResponse: {
+            cutoff: string;
+            folders: string[];
+            ownerAliases: string[];
+            sections: string[];
         };
         WorkspaceChangesResponse: {
             available: boolean;
@@ -10440,6 +10546,95 @@ export interface operations {
             };
         };
     };
+    getWikiTasksSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiTasksSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setWikiTasksSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetWikiTasksSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiTasksSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     listSimDevices: {
         parameters: {
             query?: never;
@@ -10879,6 +11074,122 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listWikiTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WikiTasksResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    completeWikiTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteWikiTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompleteWikiTaskResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

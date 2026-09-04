@@ -30,6 +30,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
 )
 
 // HandleID is the runtime handle the Wiki's agent pane runs under. It is fixed
@@ -52,6 +53,10 @@ type Settings interface {
 	VaultPath() string
 	Harness() string
 	SetHarness(harness string) error
+	// Tasks configures the Tasks tab: which subtree holds task rows, which
+	// sections count, the cutoff, and which owner tokens mean "me". Every one
+	// of them is the user's, not this package's.
+	Tasks() wikisettings.TaskSettings
 }
 
 // Runtime is the slice of the runtime adapter the Wiki needs: start a pane in a

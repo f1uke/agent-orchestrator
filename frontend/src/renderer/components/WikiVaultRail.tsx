@@ -1,5 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
-import { BookText, ChevronDown, ChevronRight, ClockArrowDown, ClockArrowUp, RefreshCw, Search } from "lucide-react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+	BookText,
+	ChevronDown,
+	ChevronRight,
+	ClockArrowDown,
+	ClockArrowUp,
+	ListChecks,
+	RefreshCw,
+	Search,
+} from "lucide-react";
 import type { WikiFiles } from "../hooks/useWiki";
 import {
 	defaultOpen,
@@ -56,6 +65,7 @@ export function WikiVaultRail({
 	onRefresh,
 	query,
 	onQueryChange,
+	tasks,
 }: {
 	files: WikiFiles | undefined;
 	loading: boolean;
@@ -66,8 +76,16 @@ export function WikiVaultRail({
 	/** The Search tab's term. Empty means the Notes tab is showing. */
 	query: string;
 	onQueryChange: (query: string) => void;
+	/**
+	 * The Tasks tab's whole panel, passed in rather than built here.
+	 *
+	 * It is the only tab that WRITES to the vault, and it carries its own
+	 * queries and its own unsaved state. The rail's job is the tab strip; it
+	 * has no business owning a tick that must not be lost.
+	 */
+	tasks?: ReactNode;
 }) {
-	const [tab, setTab] = useState<"notes" | "search">("notes");
+	const [tab, setTab] = useState<"notes" | "search" | "tasks">("notes");
 	// Which folders the reader has opened or shut, read once on mount and
 	// written through on every toggle. Only toggled folders live here; the rest
 	// follow `defaultOpen`, which is what keeps a 55-folder vault from writing
@@ -120,9 +138,23 @@ export function WikiVaultRail({
 					</span>
 					<span className="session-inspector__tab-label">Search</span>
 				</button>
+				{tasks !== undefined && (
+					<button
+						type="button"
+						className={`session-inspector__tab${tab === "tasks" ? " is-active" : ""}`}
+						onClick={() => setTab("tasks")}
+					>
+						<span className="session-inspector__tab-icon">
+							<ListChecks aria-hidden="true" />
+						</span>
+						<span className="session-inspector__tab-label">Tasks</span>
+					</button>
+				)}
 			</div>
 
-			{tab === "notes" ? (
+			{tab === "tasks" && tasks}
+
+			{tab === "notes" && (
 				<>
 					<div className="wiki-rail__summary">
 						<span className="wiki-rail__count">
@@ -174,7 +206,9 @@ export function WikiVaultRail({
 						)}
 					</div>
 				</>
-			) : (
+			)}
+
+			{tab === "search" && (
 				<>
 					<div className="wiki-rail__search">
 						<Search aria-hidden="true" className="wiki-rail__search-icon" />

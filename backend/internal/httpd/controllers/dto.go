@@ -1969,3 +1969,110 @@ type WriteWikiNoteResponse struct {
 	Size        int64  `json:"size"`
 	ModifiedAt  string `json:"modifiedAt,omitempty"`
 }
+
+// WikiTaskRow is one unchecked `- [ ]` row in the vault, addressed well enough
+// that ticking it can never land on a different line.
+//
+// `raw` is the load-bearing field: it is the line EXACTLY as it is on disk, and
+// a tick echoes it back. The daemon writes to a line only when its full text
+// still equals this, so a row that changed underneath the reader is refused
+// rather than guessed at.
+type WikiTaskRow struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Raw  string `json:"raw"`
+	// Text is the row for display: the checkbox, the owner token and the due
+	// field taken out, so the sentence reads as a sentence.
+	Text string `json:"text"`
+	// Section is the nearest "## " heading above the row, subsection the
+	// nearest "### ".
+	Section    string `json:"section,omitempty"`
+	Subsection string `json:"subsection,omitempty"`
+	// Owner is the owner token at the start of the row, without its brackets.
+	// Empty means the row names nobody.
+	Owner string `json:"owner,omitempty"`
+	// Due is a YYYY-MM-DD date from the row's `due:` field, empty without one.
+	Due string `json:"due,omitempty"`
+	// NoteModifiedAt is the NOTE's mtime — a row has none of its own. It is
+	// what a cutoff falls back to for an undated row.
+	NoteModifiedAt string `json:"noteModifiedAt,omitempty"`
+}
+
+// WikiTasksResponse is the whole Tasks tab in one read.
+//
+// The cutoff and the owner filter are NOT applied here: every row under the
+// configured subtrees is returned, annotated, and the renderer hides what the
+// reader asked to hide. That is what lets the tab say "N rows are hidden by the
+// cutoff — show them" and flip it instantly, so a filtered list can never be
+// mistaken for a destroyed backlog.
+type WikiTasksResponse struct {
+	// Configured is false when no subtree is set. Nothing is scanned in that
+	// state — the tab explains what to set rather than reading the whole vault.
+	Configured bool `json:"configured"`
+	// Folders are the configured subtrees, echoed back.
+	Folders  []string `json:"folders"`
+	Sections []string `json:"sections"`
+	// Cutoff is the configured YYYY-MM-DD date, echoed for the renderer to
+	// apply. Empty means no cutoff.
+	Cutoff string `json:"cutoff,omitempty"`
+	// OwnerAliases are the owner tokens that mean "me".
+	OwnerAliases []string      `json:"ownerAliases"`
+	Tasks        []WikiTaskRow `json:"tasks"`
+	// Owners are the distinct owner tokens seen in the scan, sorted, so the
+	// filter can offer real names without the app knowing any.
+	Owners       []string `json:"owners"`
+	ScannedNotes int      `json:"scannedNotes"`
+	// Truncated reports that the subtree holds more rows than the cap.
+	Truncated bool `json:"truncated"`
+}
+
+// CompleteWikiTaskRequest is the body of POST /api/v1/wiki/tasks/complete: one
+// tick, addressed by the row's note, its line, and its exact text.
+//
+// 🗝 `raw` is REQUIRED and it is the real key. `line` is only a hint — the row
+// may have moved — and there is deliberately no way to spell "tick line N
+// regardless". The daemon writes only to a line whose full text equals `raw`;
+// zero matches or more than one is a refusal, never a guess.
+type CompleteWikiTaskRequest struct {
+	Path string `json:"path" description:"Vault-relative path of the note holding the row."`
+	Line int    `json:"line" description:"1-based line the row was read from. A hint: the row may have moved, and raw decides."`
+	Raw  string `json:"raw" description:"The row's line byte for byte as it was displayed. Required; a line whose text differs is never written to."`
+}
+
+// CompleteWikiTaskResponse says what was actually written.
+type CompleteWikiTaskResponse struct {
+	Path string `json:"path"`
+	// Line is where the tick LANDED, which is not always where it was asked for.
+	Line int `json:"line"`
+	// Raw is the line as written, now ticked.
+	Raw string `json:"raw"`
+	// Moved reports that the row was found somewhere other than the line named.
+	// Not an error — the text matched exactly, so it is provably the same row —
+	// but the tab shows it rather than hiding it.
+	Moved          bool   `json:"moved"`
+	NoteModifiedAt string `json:"noteModifiedAt,omitempty"`
+}
+
+// WikiTasksSettingsResponse is the Tasks tab's configuration on the wire, the
+// body of GET/PUT /api/v1/settings/wiki/tasks.
+//
+// Every field is the user's own vocabulary. This repo ships no folder name, no
+// section name and no person: a vault's task convention belongs to whoever
+// writes the vault.
+type WikiTasksSettingsResponse struct {
+	Folders      []string `json:"folders"`
+	Sections     []string `json:"sections"`
+	Cutoff       string   `json:"cutoff"`
+	OwnerAliases []string `json:"ownerAliases"`
+}
+
+// SetWikiTasksSettingsRequest replaces the whole Tasks configuration. It is
+// separate from SetWikiSettingsRequest for the same reason `harness` is: three
+// surfaces write these settings and none of them may blank the others.
+type SetWikiTasksSettingsRequest struct {
+	Folders      []string `json:"folders,omitempty" description:"Vault-relative subtrees to scan. An empty list scans nothing and the tab says so."`
+	Sections     []string `json:"sections,omitempty" description:"Only rows under these '## ' headings. Empty means every section."`
+	Cutoff       string   `json:"cutoff,omitempty" description:"YYYY-MM-DD. Rows older than this are hidden by the tab, never modified or deleted."`
+	OwnerAliases []string `json:"ownerAliases,omitempty" description:"Owner tokens that mean 'me', for the mine/others filter."`
+}

@@ -351,6 +351,12 @@ var schemaNames = map[string]string{
 	"ControllersWikiNoteResponse":                    "WikiNoteResponse",
 	"ControllersWriteWikiNoteRequest":                "WriteWikiNoteRequest",
 	"ControllersWriteWikiNoteResponse":               "WriteWikiNoteResponse",
+	"ControllersWikiTaskRow":                         "WikiTaskRow",
+	"ControllersWikiTasksResponse":                   "WikiTasksResponse",
+	"ControllersCompleteWikiTaskRequest":             "CompleteWikiTaskRequest",
+	"ControllersCompleteWikiTaskResponse":            "CompleteWikiTaskResponse",
+	"ControllersWikiTasksSettingsResponse":           "WikiTasksSettingsResponse",
+	"ControllersSetWikiTasksSettingsRequest":         "SetWikiTasksSettingsRequest",
 	"ControllersSystemPromptItem":                    "SystemPromptItem",
 	"ControllersSystemPromptsResponse":               "SystemPromptsResponse",
 	"ControllersSetSystemPromptRequest":              "SetSystemPromptRequest",
@@ -1938,6 +1944,26 @@ func settingsOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodGet, path: "/api/v1/settings/wiki/tasks", id: "getWikiTasksSettings", tag: "settings",
+			summary: "Fetch the Tasks tab configuration (subtree, sections, cutoff, owner aliases)",
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiTasksSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/wiki/tasks", id: "setWikiTasksSettings", tag: "settings",
+			summary: "Replace the Tasks tab configuration (an empty folder scans nothing)",
+			reqBody: controllers.SetWikiTasksSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiTasksSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/wiki", id: "getWikiStatus", tag: "wiki",
 			summary: "Report whether a vault is configured and whether its agent is running",
 			resps: []respUnit{
@@ -2005,6 +2031,29 @@ func settingsOperations() []operation {
 			reqBody: controllers.WriteWikiNoteRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.WriteWikiNoteResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/wiki/tasks", id: "listWikiTasks", tag: "wiki",
+			summary: "List the unchecked task rows in the configured vault subtree",
+			resps: []respUnit{
+				{http.StatusOK, controllers.WikiTasksResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/wiki/tasks/complete", id: "completeWikiTask", tag: "wiki",
+			summary: "Tick one task row off, matched on its exact text so a stale row is refused",
+			reqBody: controllers.CompleteWikiTaskRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.CompleteWikiTaskResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusConflict, envelope.APIError{}},
