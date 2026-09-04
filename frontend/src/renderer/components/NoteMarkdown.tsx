@@ -22,7 +22,14 @@ import {
 	type WikilinkToken,
 } from "../lib/note/parse";
 import { type CodeToken, highlightCode } from "../lib/note/highlight";
-import { type EditableBlock, indexNote, type NoteIndex, type TaskMarker, taskMarker } from "../lib/note/edit";
+import {
+	type EditableBlock,
+	indexNote,
+	type NoteIndex,
+	type Span,
+	type TaskMarker,
+	taskMarker,
+} from "../lib/note/edit";
 import type { Theme } from "../stores/ui-store";
 
 /**
@@ -68,6 +75,32 @@ export type NoteEditing = {
 	busy: boolean;
 };
 
+/**
+ * One line of the note to point the reader at, as a byte range in `content`.
+ *
+ * 🗝 It marks the OUTERMOST block that STARTS inside that line, and stops
+ * there: a block whose bytes merely surround the line (the parent bullet of a
+ * nested one, the paragraph a wrapped line belongs to) is not the row the
+ * reader clicked, and highlighting it would point at the wrong thing while
+ * looking confident about it. Nothing matching means nothing is marked, and
+ * `WikiNoteView` says so rather than scrolling anywhere.
+ *
+ * Only ever a hint for the eye — the reveal reads no bytes and writes none.
+ */
+export type NoteReveal = Span;
+
+/**
+ * The attribute `WikiNoteView` finds the revealed block by, so the scroll does
+ * not have to re-derive which element it was.
+ */
+const REVEALED = { "data-reveal": "" } as const;
+const NOT_REVEALED: Partial<typeof REVEALED> = {};
+
+/** Whether a block's own bytes begin inside the line being revealed. */
+function startsInside(span: Span | undefined, reveal: NoteReveal | null | undefined): boolean {
+	return span !== undefined && reveal != null && span.start >= reveal.start && span.start <= reveal.end;
+}
+
 /** Where a click on a `[[wikilink]]` or a `#tag` goes. */
 export type NoteNavigation = {
 	/** Open the note a wikilink names. Absent → wikilinks render as plain pills. */
@@ -81,11 +114,16 @@ export function NoteMarkdown({
 	theme,
 	navigation,
 	editing,
+	reveal,
 }: {
 	source: string;
 	theme: Theme;
 	navigation?: NoteNavigation;
 	editing?: NoteEditing;
+	/** One line to point the reader at. The spans it is matched against come
+	    from the editing index, so a note that could not be mapped simply is not
+	    pointed at — see `NoteReveal`. */
+	reveal?: NoteReveal | null;
 }) {
 	const { tokens } = useMemo(() => parseNote(source), [source]);
 	// The index is built from the SAME token objects the render walks, because it
@@ -95,7 +133,7 @@ export function NoteMarkdown({
 		() => (editing ? indexNote(source, tokens, editing.sourceOffset) : undefined),
 		[editing, source, tokens],
 	);
-	return <Blocks tokens={tokens} theme={theme} navigation={navigation} edit={bind(editing, index)} />;
+	return <Blocks tokens={tokens} theme={theme} navigation={navigation} edit={bind(editing, index)} reveal={reveal} />;
 }
 
 /** The editing props and the index travel together or not at all. */
@@ -110,18 +148,28 @@ function Blocks({
 	theme,
 	navigation,
 	edit,
+	reveal,
 }: {
 	tokens: Token[];
 	theme: Theme;
 	navigation?: NoteNavigation;
 	edit?: Edit;
+	reveal?: NoteReveal | null;
 }) {
 	return (
 		<>
 			{tokens.map((token, index) => (
 				// Tokens have no stable identity, and a note re-renders wholesale when
 				// its content changes, so the index IS the identity here.
-				<Block key={index} token={token} first={index === 0} theme={theme} navigation={navigation} edit={edit} />
+				<Block
+					key={index}
+					token={token}
+					first={index === 0}
+					theme={theme}
+					navigation={navigation}
+					edit={edit}
+					reveal={reveal}
+				/>
 			))}
 		</>
 	);
@@ -133,18 +181,29 @@ function Block({
 	theme,
 	navigation,
 	edit,
+	reveal,
 }: {
 	token: Token;
 	first: boolean;
 	theme: Theme;
 	navigation?: NoteNavigation;
 	edit?: Edit;
+	reveal?: NoteReveal | null;
 }) {
 	const block = edit?.index.editable.get(token);
 	if (edit && block && edit.editing.openAt === block.start) {
 		return <BlockEditor block={block} editing={edit.editing} kind={token.type === "heading" ? "heading" : "prose"} />;
 	}
 	const open = block && edit ? openHandlers(block, edit.editing) : undefined;
+	/*
+	 * Whether this block is the revealed line. Only blocks that CARRY text ask
+	 * — a list and a blockquote begin on the same byte as their own first
+	 * child, so letting a container answer "yes" would consume the mark and
+	 * then draw nothing with it. Containers below pass `reveal` straight
+	 * through; the `<li>` and the prose blocks are what consume it.
+	 */
+	const here = startsInside(edit?.index.spans.get(token), reveal);
+	const mark = here ? REVEALED : NOT_REVEALED;
 
 	switch (token.type) {
 		case "space":
@@ -153,7 +212,7 @@ function Block({
 		case "heading": {
 			const heading = token as Tokens.Heading;
 			return (
-				<Heading level={heading.depth} first={first} open={open}>
+				<Heading level={heading.depth} first={first} open={open} revealed={here}>
 					<Inline tokens={heading.tokens} navigation={navigation} />
 				</Heading>
 			);
@@ -162,8 +221,11 @@ function Block({
 		case "paragraph":
 			return (
 				<p
-					className={`note-prose__p${first ? " note-prose__p--first" : ""}${open ? " note-prose__editable" : ""}`}
+					className={`note-prose__p${first ? " note-prose__p--first" : ""}${open ? " note-prose__editable" : ""}${
+						here ? " note-prose__revealed" : ""
+					}`}
 					{...open}
+					{...mark}
 				>
 					<Inline tokens={(token as Tokens.Paragraph).tokens} navigation={navigation} />
 				</p>
@@ -174,16 +236,20 @@ function Block({
 			// own inline tokens.
 			const text = token as Tokens.Text;
 			const body = text.tokens ? <Inline tokens={text.tokens} navigation={navigation} /> : plainSegments(text.text);
-			if (!open) return <>{body}</>;
+			if (!open && !here) return <>{body}</>;
 			return (
-				<span className="note-prose__editable" {...open}>
+				<span
+					className={[open ? "note-prose__editable" : "", here ? "note-prose__revealed" : ""].filter(Boolean).join(" ")}
+					{...open}
+					{...mark}
+				>
 					{body}
 				</span>
 			);
 		}
 
 		case "list":
-			return <List list={token as Tokens.List} theme={theme} navigation={navigation} edit={edit} />;
+			return <List list={token as Tokens.List} theme={theme} navigation={navigation} edit={edit} reveal={reveal} />;
 
 		case "code":
 			return <CodeBlock code={token as Tokens.Code} theme={theme} />;
@@ -197,7 +263,7 @@ function Block({
 				<CalloutBlock callout={callout} theme={theme} navigation={navigation} />
 			) : (
 				<blockquote className="note-prose__quote">
-					<Blocks tokens={quote.tokens} theme={theme} navigation={navigation} />
+					<Blocks tokens={quote.tokens} theme={theme} navigation={navigation} reveal={reveal} />
 				</blockquote>
 			);
 		}
@@ -225,49 +291,52 @@ function Heading({
 	first,
 	children,
 	open,
+	revealed,
 }: {
 	level: number;
 	first: boolean;
 	children: ReactNode;
 	open?: OpenHandlers;
+	revealed: boolean;
 }) {
 	const className = `note-prose__h note-prose__h${Math.min(level, 6)}${first ? " note-prose__h--first" : ""}${
 		open ? " note-prose__editable" : ""
-	}`;
+	}${revealed ? " note-prose__revealed" : ""}`;
+	const mark = revealed ? REVEALED : NOT_REVEALED;
 	switch (level) {
 		case 1:
 			return (
-				<h1 className={className} {...open}>
+				<h1 className={className} {...open} {...mark}>
 					{children}
 				</h1>
 			);
 		case 2:
 			return (
-				<h2 className={className} {...open}>
+				<h2 className={className} {...open} {...mark}>
 					{children}
 				</h2>
 			);
 		case 3:
 			return (
-				<h3 className={className} {...open}>
+				<h3 className={className} {...open} {...mark}>
 					{children}
 				</h3>
 			);
 		case 4:
 			return (
-				<h4 className={className} {...open}>
+				<h4 className={className} {...open} {...mark}>
 					{children}
 				</h4>
 			);
 		case 5:
 			return (
-				<h5 className={className} {...open}>
+				<h5 className={className} {...open} {...mark}>
 					{children}
 				</h5>
 			);
 		default:
 			return (
-				<h6 className={className} {...open}>
+				<h6 className={className} {...open} {...mark}>
 					{children}
 				</h6>
 			);
@@ -294,26 +363,39 @@ function List({
 	theme,
 	navigation,
 	edit,
+	reveal,
 }: {
 	list: Tokens.List;
 	theme: Theme;
 	navigation?: NoteNavigation;
 	edit?: Edit;
+	reveal?: NoteReveal | null;
 }) {
-	const items = list.items.map((item, index) => (
-		<li className={`note-prose__li${item.task ? " note-prose__li--task" : ""}`} key={index}>
-			{item.task ? (
-				<span className="note-prose__task">
-					<Checkbox item={item} edit={edit} />
-					<span className={`note-prose__task-text${item.checked ? " note-prose__task-text--done" : ""}`}>
-						<Blocks tokens={item.tokens} theme={theme} navigation={navigation} edit={edit} />
+	const items = list.items.map((item, index) => {
+		// A task row IS a list item, so this is where a revealed row is nearly
+		// always marked — and the `<li>` is the right unit to light up, because
+		// it is what the reader sees as "the row".
+		const here = startsInside(edit?.index.spans.get(item), reveal);
+		const inner = here ? null : reveal;
+		return (
+			<li
+				className={`note-prose__li${item.task ? " note-prose__li--task" : ""}${here ? " note-prose__revealed" : ""}`}
+				key={index}
+				{...(here ? REVEALED : NOT_REVEALED)}
+			>
+				{item.task ? (
+					<span className="note-prose__task">
+						<Checkbox item={item} edit={edit} />
+						<span className={`note-prose__task-text${item.checked ? " note-prose__task-text--done" : ""}`}>
+							<Blocks tokens={item.tokens} theme={theme} navigation={navigation} edit={edit} reveal={inner} />
+						</span>
 					</span>
-				</span>
-			) : (
-				<Blocks tokens={item.tokens} theme={theme} navigation={navigation} edit={edit} />
-			)}
-		</li>
-	));
+				) : (
+					<Blocks tokens={item.tokens} theme={theme} navigation={navigation} edit={edit} reveal={inner} />
+				)}
+			</li>
+		);
+	});
 	return list.ordered ? (
 		<ol className="note-prose__list" start={typeof list.start === "number" ? list.start : undefined}>
 			{items}

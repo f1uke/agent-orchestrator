@@ -5429,6 +5429,63 @@ ol.note-prose__list {
 	line-height: 1.5;
 }
 
+/* What became of the row a Tasks-row source line asked for, when the note has
+   changed since the list read it. Not a refusal — nothing was attempted and
+   nothing failed — so it is a note in the page's own voice rather than a red
+   banner. It is shown only when there is something to say. */
+.wiki-note__reveal {
+	display: flex;
+	flex: none;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 8px 20px 9px;
+	border-bottom: 1px solid var(--border-1);
+	background: var(--bg-1);
+	color: var(--fg-muted);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.wiki-note__reveal svg {
+	width: 13px;
+	height: 13px;
+	flex: none;
+	margin-top: 3px;
+	stroke-width: 2;
+}
+
+/* The row the reader was brought here to see. It fades out on its own rather
+   than staying lit: the highlight answers "which one" and then gets out of the
+   way of reading the note. `both` holds the final, transparent frame, so a
+   block that has already flashed carries no colour of its own. */
+.note-prose__revealed {
+	border-radius: var(--radius-sm);
+	animation: note-prose-reveal 2600ms ease-out both;
+}
+
+@keyframes note-prose-reveal {
+	0%,
+	45% {
+		background: color-mix(in oklab, var(--accent) 22%, transparent);
+		box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 22%, transparent);
+	}
+
+	100% {
+		background: transparent;
+		box-shadow: 0 0 0 4px transparent;
+	}
+}
+
+/* With motion turned down the highlight simply STAYS, rather than flashing
+   quickly or not at all: the reader still has to be able to see which row they
+   were brought here for. */
+@media (prefers-reduced-motion: reduce) {
+	.note-prose__revealed {
+		background: color-mix(in oklab, var(--accent) 16%, transparent);
+		animation: none;
+	}
+}
+
 /* ── a note's properties ── */
 
 /* Frontmatter, shown the way Obsidian shows it: a small labelled table under
@@ -6705,7 +6762,10 @@ ol.note-prose__list {
 	width: 100%;
 	align-items: center;
 	gap: 6px;
-	padding: 5px 8px 4px;
+	/* 10px matches the row's own left padding below: a day heading whose left
+	   edge misses the checkbox under it by two pixels is the kind of thing you
+	   cannot un-see once you have seen it. */
+	padding: 5px 10px 4px;
 	border: 0;
 	background: transparent;
 	cursor: pointer;
@@ -6725,11 +6785,16 @@ ol.note-prose__list {
 	color: var(--red);
 }
 
+/* The TASK is the row: the sentence is set as prose and everything else in
+   here — the address, the owner, the provenance — is a caption under it, at a
+   size and a colour a reader scanning twenty-five rows can skip without
+   effort. A little more air than a tree row, because this is a paragraph for
+   the eye as well as a hit target for the checkbox. */
 .wiki-tasks__row {
 	display: flex;
 	align-items: flex-start;
-	gap: 8px;
-	padding: 5px 8px;
+	gap: 10px;
+	padding: 7px 10px 8px;
 	border-radius: var(--radius-sm);
 	font-family: var(--font-sans);
 }
@@ -6745,20 +6810,29 @@ ol.note-prose__list {
 	text-decoration: line-through;
 }
 
+/* The one control in this row that WRITES to somebody's vault, so it is the
+   one that gets the space: 16px, with a hit area that runs past its own edge. */
 .wiki-tasks__box {
+	position: relative;
 	display: inline-flex;
-	width: 14px;
-	height: 14px;
+	width: 16px;
+	height: 16px;
 	flex: none;
 	align-items: center;
 	justify-content: center;
 	margin-top: 2px;
 	padding: 0;
 	border: 1px solid var(--border-1);
-	border-radius: 3px;
+	border-radius: 4px;
 	background: transparent;
 	color: var(--fg);
 	cursor: pointer;
+}
+
+.wiki-tasks__box::after {
+	position: absolute;
+	content: "";
+	inset: -6px;
 }
 
 .wiki-tasks__box:hover:not(:disabled) {
@@ -6770,8 +6844,8 @@ ol.note-prose__list {
 }
 
 .wiki-tasks__box svg {
-	width: 10px;
-	height: 10px;
+	width: 11px;
+	height: 11px;
 }
 
 .wiki-tasks__spin {
@@ -6792,19 +6866,28 @@ ol.note-prose__list {
 	gap: 2px;
 }
 
+/* The one thing here that got BIGGER. 13px is the smallest step that reads as
+   prose rather than as a list label, and the 1.55 leading is set by the THAI,
+   not the Latin — Thai stacks a tone mark above and a vowel below the same
+   glyph, and 1.45 at 12px was already the floor. Do not retune this against
+   English. */
 .wiki-tasks__text {
 	color: var(--fg);
-	font-size: 12px;
-	line-height: 1.45;
+	font-size: 13px;
+	line-height: 1.55;
 	overflow-wrap: anywhere;
 }
 
+/* …and the caption that pays for it. One line, quiet at rest, and the first
+   thing given up when the rail is narrow. */
 .wiki-tasks__meta {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 7px;
+	margin-top: 3px;
 	color: var(--fg-passive);
-	font-size: 10.5px;
+	font-size: 10px;
+	letter-spacing: 0.01em;
 }
 
 .wiki-tasks__owner {
@@ -6818,16 +6901,48 @@ ol.note-prose__list {
 	border: 0;
 	background: transparent;
 	color: var(--fg-passive);
-	font-size: 10.5px;
+	font-size: 10px;
+	opacity: 0.85;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	cursor: pointer;
 }
 
+.wiki-tasks__row:hover .wiki-tasks__where {
+	opacity: 1;
+}
+
 .wiki-tasks__where:hover {
 	color: var(--fg);
 	text-decoration: underline;
+}
+
+/* Provenance, demoted. `(from: …)` is lifted out of the sentence always and
+   comes back here only when it still says something the row does not — a chip,
+   so the eye reads it as a label and moves on. `from` is set smaller still,
+   because the word is grammar rather than content. */
+.wiki-tasks__from {
+	display: inline-flex;
+	max-width: 60%;
+	flex: none;
+	align-items: baseline;
+	gap: 4px;
+	padding: 1px 6px 2px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--fg) 7%, transparent);
+	color: var(--fg-passive);
+	font-size: 10px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.wiki-tasks__from-label {
+	font-size: 9px;
+	opacity: 0.7;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
 }
 
 .wiki-tasks__note {

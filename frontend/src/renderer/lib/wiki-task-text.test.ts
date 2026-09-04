@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fromTagAddsSomething, sourceLabel, splitFromTags, splitWikilinks } from "./task-text";
+import { fromTagAddsSomething, sourceLabel, splitFromTags, splitWikilinks } from "./wiki-task-text";
 
 describe("splitFromTags", () => {
 	it("lifts the tag and leaves the sentence reading as a sentence", () => {

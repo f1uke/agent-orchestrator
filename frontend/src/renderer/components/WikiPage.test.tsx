@@ -56,9 +56,15 @@ function wikiStatus(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+/** The Tasks tab's two GETs, off by default so no other test grows a tab. */
+let taskRoutes: Record<string, unknown> | null = null;
+
 function routeGets(status = wikiStatus(), note?: Record<string, unknown>, notes: { path: string }[] = NOTES) {
 	getMock.mockImplementation((path: string) => {
 		if (path === "/api/v1/wiki") return Promise.resolve(status);
+		if (taskRoutes && path === "/api/v1/wiki/tasks") return Promise.resolve({ data: taskRoutes });
+		if (taskRoutes && path === "/api/v1/settings/wiki/tasks")
+			return Promise.resolve({ data: { folders: ["Areas"], sections: [], cutoff: "", ownerAliases: [] } });
 		if (path === "/api/v1/wiki/files") return Promise.resolve({ data: { notes, truncated: false } });
 		if (path === "/api/v1/wiki/file")
 			return Promise.resolve({
@@ -92,6 +98,7 @@ beforeEach(() => {
 	getMock.mockReset();
 	postMock.mockReset().mockResolvedValue({ data: wikiStatus().data });
 	deleteMock.mockReset().mockResolvedValue({ data: wikiStatus({ running: false, handleId: "" }).data });
+	taskRoutes = null;
 	localStorage.clear();
 });
 
@@ -426,5 +433,81 @@ describe("runningFor", () => {
 
 	it("degrades without a start time rather than showing a wrong number", () => {
 		expect(runningFor(undefined, now)).toBe("Running");
+	});
+});
+
+/**
+ * The two navigations out of a Tasks row, end to end through the page: the one
+ * that opens a `[[wikilink]]`, and the one that lands on the row's own LINE.
+ *
+ * 🗝 The line is checked against the row's own text before anything scrolls —
+ * see `lib/note/reveal.ts`. These cover both halves of that: the row that is
+ * still where the list said, and the row that has moved since.
+ */
+describe("WikiPage — the Tasks tab's navigations", () => {
+	const NOTE_PATH = "Areas/frontier/_tasks.md";
+	const NOTE_BODY = "# Frontier\n\n## Release\n\n- [ ] first row\n- [ ] chase the train [[index]] today\n";
+
+	function withTasks(line: number) {
+		taskRoutes = {
+			configured: true,
+			folders: ["Areas"],
+			sections: [],
+			ownerAliases: [],
+			owners: [],
+			scannedNotes: 1,
+			truncated: false,
+			tasks: [
+				{
+					id: "row-1",
+					path: NOTE_PATH,
+					line,
+					raw: "- [ ] chase the train [[index]] today",
+					text: "chase the train [[index]] today (from: 2026-05-07 standup)",
+					section: "Release",
+				},
+			],
+		};
+		routeGets(wikiStatus(), { path: NOTE_PATH, content: NOTE_BODY, size: NOTE_BODY.length, backlinks: [] }, [
+			...NOTES,
+			{ path: NOTE_PATH },
+		]);
+	}
+
+	async function openTasks() {
+		renderPage();
+		await userEvent.click(await screen.findByRole("button", { name: "Tasks" }));
+		return screen.findByRole("button", { name: "frontier · Release" });
+	}
+
+	it("opens the note at the row, and says nothing when the row is where it said", async () => {
+		withTasks(6);
+		await userEvent.click(await openTasks());
+
+		const revealed = await waitFor(() => {
+			const node = document.querySelector("[data-reveal]");
+			if (!node) throw new Error("nothing revealed yet");
+			return node;
+		});
+		expect(revealed.textContent).toContain("chase the train");
+		// The happy path is silent: there is nothing to warn the reader about.
+		expect(screen.queryByRole("status")).toBeNull();
+	});
+
+	it("finds a row that has moved since the list was read, and says so", async () => {
+		withTasks(2);
+		await userEvent.click(await openTasks());
+
+		expect(await screen.findByText(/had moved — it is on line 6 now/)).toBeInTheDocument();
+		expect(document.querySelector("[data-reveal]")?.textContent).toContain("chase the train");
+	});
+
+	it("opens the note a [[wikilink]] in a row names", async () => {
+		withTasks(6);
+		await openTasks();
+		await userEvent.click(screen.getByRole("button", { name: "index" }));
+		await waitFor(() =>
+			expect(getMock).toHaveBeenCalledWith("/api/v1/wiki/file", { params: { query: { path: "index.md" } } }),
+		);
 	});
 });

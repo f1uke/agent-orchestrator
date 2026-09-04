@@ -1,5 +1,5 @@
 /**
- * The pure text passes the redesigned Tasks row needs.
+ * The pure text passes the Tasks row needs.
  *
  * Both of these are RENDERER-ONLY on purpose. The daemon's `Task.Raw` — the
  * byte-exact line a tick is written to — is untouched by anything here, and
