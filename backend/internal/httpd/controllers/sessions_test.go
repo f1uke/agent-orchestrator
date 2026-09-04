@@ -31,23 +31,26 @@ type fakeSessionService struct {
 	crewReviewErr  error
 	// killInputs records what each kill asked for, so a test can prove the
 	// discard opt-in reached the service instead of being dropped in the body.
-	killInputs            []sessionsvc.KillInput
-	killErr               error
-	discarded             []ports.UncommittedFile
-	crewDev               map[domain.SessionID]domain.SessionID
-	crewWoken             []domain.SessionID
-	crewAdded             []domain.CrewRole
-	crewAddedFrom         []domain.SessionID
-	crewAddErr            error
-	sendOutcome           ports.SendOutcome
-	sessions              map[domain.SessionID]domain.Session
-	previewDisabled       bool
-	previewFromAgent      []domain.SessionID
-	sent                  string
-	sentFrom              domain.SessionID
-	sentAbout             string
-	sentRole              domain.CrewRole
-	sentStillWorking      bool
+	killInputs       []sessionsvc.KillInput
+	killErr          error
+	discarded        []ports.UncommittedFile
+	crewDev          map[domain.SessionID]domain.SessionID
+	crewWoken        []domain.SessionID
+	crewAdded        []domain.CrewRole
+	crewAddedFrom    []domain.SessionID
+	crewAddErr       error
+	sendOutcome      ports.SendOutcome
+	sessions         map[domain.SessionID]domain.Session
+	previewDisabled  bool
+	previewFromAgent []domain.SessionID
+	sent             string
+	sentFrom         domain.SessionID
+	sentAbout        string
+	sentRole         domain.CrewRole
+	sentStillWorking bool
+	// sentWire is the per-send delivery override the handler put on the context,
+	// which is the only place it travels: the transport reads it from there.
+	sentWire              msgdelivery.Wire
 	handback              sessionsvc.HandbackCompleteness
 	crewSendErr           error
 	dispatchedPR          string
@@ -391,18 +394,20 @@ func (f *fakeSessionService) Send(_ context.Context, _ domain.SessionID, message
 	return f.sendOutcome, nil
 }
 
-func (f *fakeSessionService) SendFrom(_ context.Context, _ domain.SessionID, message string, talk sessionsvc.CrewTalk) (sessionsvc.SendResult, error) {
+func (f *fakeSessionService) SendFrom(ctx context.Context, _ domain.SessionID, message string, talk sessionsvc.CrewTalk) (sessionsvc.SendResult, error) {
 	f.sent = message
+	f.sentWire = msgdelivery.WireOf(ctx)
 	f.sentFrom = talk.From
 	f.sentAbout = talk.Subject
 	return sessionsvc.SendResult{Outcome: f.sendOutcome, Unreviewed: f.sendUnreviewed}, nil
 }
 
-func (f *fakeSessionService) SendToCrewmate(_ context.Context, from domain.SessionID, in sessionsvc.CrewSend) (sessionsvc.CrewSendResult, error) {
+func (f *fakeSessionService) SendToCrewmate(ctx context.Context, from domain.SessionID, in sessionsvc.CrewSend) (sessionsvc.CrewSendResult, error) {
 	if f.crewSendErr != nil {
 		return sessionsvc.CrewSendResult{}, f.crewSendErr
 	}
 	f.sent = in.Message
+	f.sentWire = msgdelivery.WireOf(ctx)
 	f.sentFrom = from
 	f.sentAbout = in.Subject
 	f.sentRole = in.Role
@@ -2471,6 +2476,69 @@ func TestSessionsAPI_SendReportsTheDeliveryPath(t *testing.T) {
 	}
 	if got.Delivery.Path != "pane" || got.Delivery.Reason != "no-descriptor" {
 		t.Fatalf("delivery = %+v, want the transport's own answer", *got.Delivery)
+	}
+}
+
+// The caller's per-send override has to REACH the transport, which reads it off
+// the context. This is the half that was missing: the daemon-wide env var is
+// read in the daemon, so the operator's own shell could never set it.
+func TestSessionsAPI_SendCarriesThePerSendWireToTheTransport(t *testing.T) {
+	for _, tc := range []struct {
+		wire string
+		want msgdelivery.Wire
+	}{
+		{wire: "pane", want: msgdelivery.WirePane},
+		{wire: "socket", want: msgdelivery.WireSocket},
+		{wire: "", want: msgdelivery.WireAuto},
+	} {
+		t.Run("wire="+tc.wire, func(t *testing.T) {
+			svc := newFakeSessionService()
+			srv := newSessionTestServer(t, svc)
+
+			body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send",
+				`{"message":"hi","wire":"`+tc.wire+`"}`)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", status, body)
+			}
+			if svc.sentWire != tc.want {
+				t.Fatalf("the transport would have seen wire %q, want %q", svc.sentWire, tc.want)
+			}
+		})
+	}
+}
+
+// The crew leg is an ordinary send once the caps have had their say, so the
+// override rides it too - a flag that works on one of the two ways to send is
+// the same trap as one that works on neither.
+func TestSessionsAPI_CrewSendCarriesThePerSendWire(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/crew/send",
+		`{"role":"qa","message":"hi","wire":"pane"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", status, body)
+	}
+	if svc.sentWire != msgdelivery.WirePane {
+		t.Fatalf("the transport would have seen wire %q, want pane", svc.sentWire)
+	}
+}
+
+// A wire nobody can honour is REFUSED, not accepted and quietly ignored: being
+// told your choice did nothing is the entire point.
+func TestSessionsAPI_SendRefusesAWireItCannotHonour(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/send", `{"message":"hi","wire":"tmux"}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body = %s", status, body)
+	}
+	if !strings.Contains(string(body), "INVALID_WIRE") {
+		t.Fatalf("body = %s, want it to name the refusal", body)
+	}
+	if svc.sent != "" {
+		t.Fatalf("the message went out anyway: %q", svc.sent)
 	}
 }
 

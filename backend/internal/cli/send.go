@@ -19,6 +19,10 @@ type sendOptions struct {
 	message      string
 	messageFile  string
 	stillWorking bool
+	// paneOnly and socketOnly are the two per-send delivery overrides. They are
+	// mutually exclusive and neither is sticky: each governs this one message.
+	paneOnly   bool
+	socketOnly bool
 }
 
 // sendAPIRequest mirrors the daemon's SendSessionMessageRequest body for
@@ -32,6 +36,9 @@ type sendAPIRequest struct {
 	// About is the commit SHA or smoke case id the message concerns. Required
 	// between crewmates.
 	About string `json:"about,omitempty"`
+	// Wire pins this one message to a delivery path: "pane", "socket", or empty
+	// for the default. See wireFor.
+	Wire string `json:"wire,omitempty"`
 }
 
 // crewSendAPIRequest mirrors the daemon's CrewSendRequest for
@@ -43,6 +50,8 @@ type crewSendAPIRequest struct {
 	// StillWorking says this message is a mid-run update rather than the end of
 	// qa's run, which is what exempts it from the handback check.
 	StillWorking bool `json:"stillWorking,omitempty"`
+	// Wire pins this one message to a delivery path; see sendAPIRequest.Wire.
+	Wire string `json:"wire,omitempty"`
 }
 
 // sendAPIResponse mirrors the daemon's SendSessionMessageResponse.
@@ -109,7 +118,13 @@ func newSendCommand(ctx *commandContext) *cobra.Command {
 			"should be in one of two states: DRIVEN (`ao smoke record`, a verdict or\n" +
 			"evidence-only) or declared UNDRIVEABLE (`--verdict skip --note \"<why you could\n" +
 			"not run it>\"`, and the why has to come from an attempt). If you are not finished,\n" +
-			"say so with --still-working rather than skipping cases to quiet the count.",
+			"say so with --still-working rather than skipping cases to quiet the count.\n\n" +
+			"WHICH WIRE IT TAKES. AO hands a message to claude's own message channel when it\n" +
+			"can and types it into the terminal when it cannot, and the `delivered:` line says\n" +
+			"which, with the reason. --pane-only and --socket-only pin ONE message to one of\n" +
+			"those paths: they are the per-send form of AO_CLAUDE_NATIVE_SEND, which is read\n" +
+			"from the DAEMON's environment and so does nothing at all when you set it in front\n" +
+			"of this command.",
 		Example: `  ao send --session agent-orchestrator-59 --message "CI is green"
   ao send --crew dev --about 1185d0b4 --message "tests pass on this commit; 2 cases recorded"
   ao send --crew qa --about tab-stays-live --message "fixed and pushed"`,
@@ -124,6 +139,8 @@ func newSendCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().StringVar(&opts.message, "message", "", "Message body (required unless --message-file)")
 	cmd.Flags().BoolVar(&opts.stillWorking, "still-working", false, "qa only: this message is a mid-run update, NOT the end of your run. Without it a message to dev is read as your handback and AO reports which checklist cases carry nothing from any machine. Use it when you mean it; declaring cases undriveable to quiet the count is the one thing that makes the check worthless.")
 	cmd.Flags().StringVar(&opts.messageFile, "message-file", "", "Read the message from a file, or '-' for stdin; mutually exclusive with --message. Use for large messages that would be awkward to quote on the command line.")
+	cmd.Flags().BoolVar(&opts.paneOnly, "pane-only", false, "Deliver THIS message by typing it into the session's terminal, never over claude's own message channel. The per-send form of AO_CLAUDE_NATIVE_SEND=0, which only works in the DAEMON's environment. Nothing is remembered: the next send takes the default again.")
+	cmd.Flags().BoolVar(&opts.socketOnly, "socket-only", false, "Deliver THIS message over claude's own message channel or not at all: if it cannot be used, the send FAILS naming the reason and nothing is typed at anybody. The per-send form of AO_CLAUDE_NATIVE_SEND=strict. Use it to hunt fallbacks; a message HELD for a sleeping agent is delivered later by the daemon, under whatever the daemon is set to.")
 	return cmd
 }
 
@@ -141,6 +158,10 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 	}
 	if opts.stillWorking && role == "" {
 		return usageError{errors.New("--still-working is about your own crew run, so it only means something with --crew")}
+	}
+	wire, err := wireFor(opts)
+	if err != nil {
+		return err
 	}
 	message, err := resolveMessage(opts.message, opts.messageFile, stdin)
 	if err != nil {
@@ -164,7 +185,7 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 		// because the sender cannot.
 		path := "sessions/" + url.PathEscape(sender) + "/crew/send"
 		if err := c.postJSON(ctx, path, crewSendAPIRequest{
-			Role: role, Message: message, About: opts.about, StillWorking: opts.stillWorking,
+			Role: role, Message: message, About: opts.about, StillWorking: opts.stillWorking, Wire: wire,
 		}, &res); err != nil {
 			return err
 		}
@@ -180,7 +201,7 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 	// PathEscape: session ids are already "-"/digit safe, but may later come
 	// from sanitized issue refs; keep the URL well-formed regardless.
 	path := "sessions/" + url.PathEscape(session) + "/send"
-	if err := c.postJSON(ctx, path, sendAPIRequest{Message: message, From: sender, About: opts.about}, &res); err != nil {
+	if err := c.postJSON(ctx, path, sendAPIRequest{Message: message, From: sender, About: opts.about, Wire: wire}, &res); err != nil {
 		return err
 	}
 	if err := reportUnreviewed(c.deps.Out, res); err != nil {
@@ -315,6 +336,34 @@ func orFallback(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// wireFor turns the two override flags into the `wire` the daemon understands.
+//
+// They exist because AO_CLAUDE_NATIVE_SEND is read from the DAEMON's
+// environment, so the thing an operator naturally types -
+// `AO_CLAUDE_NATIVE_SEND=0 ao send ...` - sets it in this process, which never
+// touches the transport, and the message goes out the default way while the
+// operator believes they pinned it.
+//
+// The two are refused together rather than ranked: "pane only" and "socket or
+// nothing" are opposite demands, and picking one of them for the caller would be
+// the same silent disobedience.
+//
+// The strings must match msgdelivery.Wire's values, and the flag names must
+// match msgdelivery.Wire.Flag(), which is what the daemon quotes back when a
+// send is refused. The CLI is a thin HTTP client and imports none of the
+// daemon's packages, so this pair is kept in step by hand.
+func wireFor(opts sendOptions) (string, error) {
+	switch {
+	case opts.paneOnly && opts.socketOnly:
+		return "", usageError{errors.New("--pane-only and --socket-only ask for opposite things; pass only one")}
+	case opts.paneOnly:
+		return "pane", nil
+	case opts.socketOnly:
+		return "socket", nil
+	}
+	return "", nil
 }
 
 // resolveMessage returns the effective message body from --message /

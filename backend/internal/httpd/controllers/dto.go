@@ -599,6 +599,10 @@ type SendSessionMessageRequest struct {
 	// between crewmates (a message with no subject is refused, so there is no
 	// "what do you think?" to answer) and ignored otherwise.
 	About string `json:"about,omitempty"`
+	// Wire pins THIS message to one delivery path, overriding the daemon-wide
+	// AO_CLAUDE_NATIVE_SEND for this send and nothing else. Absent is the
+	// default and must stay it: prefer the socket, fall back to the pane.
+	Wire string `json:"wire,omitempty" enum:"pane,socket" description:"Pin this one message to a path: pane (type it into the terminal, never touch the socket) or socket (socket or nothing - the send FAILS rather than fall back). Absent means the default, prefer the socket and fall back to the pane."`
 }
 
 // CrewSendRequest is the body of POST /api/v1/sessions/{sessionId}/send to a
@@ -613,6 +617,10 @@ type CrewSendRequest struct {
 	// what exempts it from the handback completeness check. Absent means the
 	// message is a handback, because that is the shape qa is told to use.
 	StillWorking bool `json:"stillWorking,omitempty" description:"qa only: this message is a mid-run update, not the end of the run, so the handback completeness check does not apply."`
+	// Wire pins THIS message to one delivery path; see
+	// SendSessionMessageRequest.Wire. A crewmate message is an ordinary send once
+	// the caps have had their say, so it takes the same override.
+	Wire string `json:"wire,omitempty" enum:"pane,socket" description:"Pin this one message to a path: pane (type it into the terminal, never touch the socket) or socket (socket or nothing - the send FAILS rather than fall back). Absent means the default, prefer the socket and fall back to the pane."`
 }
 
 // SendSessionMessageResponse is the body of POST /api/v1/sessions/{sessionId}/send.

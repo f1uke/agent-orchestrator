@@ -6612,6 +6612,15 @@ components:
           description: 'qa only: this message is a mid-run update, not the end of
             the run, so the handback completeness check does not apply.'
           type: boolean
+        wire:
+          description: 'Pin this one message to a path: pane (type it into the terminal,
+            never touch the socket) or socket (socket or nothing - the send FAILS
+            rather than fall back). Absent means the default, prefer the socket and
+            fall back to the pane.'
+          enum:
+          - pane
+          - socket
+          type: string
       required:
       - role
       - message
@@ -8591,6 +8600,15 @@ components:
         message:
           maxLength: 131072
           minLength: 1
+          type: string
+        wire:
+          description: 'Pin this one message to a path: pane (type it into the terminal,
+            never touch the socket) or socket (socket or nothing - the send FAILS
+            rather than fall back). Absent means the default, prefer the socket and
+            fall back to the pane.'
+          enum:
+          - pane
+          - socket
           type: string
       required:
       - message
