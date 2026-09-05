@@ -31,6 +31,7 @@ export function WikiTasksSettingsForm({
 	const [sections, setSections] = useState((settings?.sections ?? []).join(", "));
 	const [cutoff, setCutoff] = useState(settings?.cutoff ?? "");
 	const [aliases, setAliases] = useState((settings?.ownerAliases ?? []).join(", "));
+	const [requireCreated, setRequireCreated] = useState(settings?.requireCreated === true);
 
 	// The saved values arrive after the first render, so the draft has to pick
 	// them up — but only while it is untouched, or typing would be overwritten
@@ -42,6 +43,7 @@ export function WikiTasksSettingsForm({
 		setSections((settings.sections ?? []).join(", "));
 		setCutoff(settings.cutoff ?? "");
 		setAliases((settings.ownerAliases ?? []).join(", "));
+		setRequireCreated(settings.requireCreated === true);
 	}, [settings, touched]);
 
 	const edit =
@@ -61,6 +63,7 @@ export function WikiTasksSettingsForm({
 					sections: splitList(sections),
 					cutoff: cutoff.trim(),
 					ownerAliases: splitList(aliases),
+					requireCreated,
 				});
 			}}
 		>
@@ -106,10 +109,48 @@ export function WikiTasksSettingsForm({
 					value={cutoff}
 					onChange={(event) => edit(setCutoff)(event.target.value)}
 				/>
+				{/*
+				 * Which date this is judged by is the checkbox below's business,
+				 * so the hint reads the checkbox rather than describing one rule
+				 * while the tab applies the other.
+				 */}
 				<span className="wiki-tasks__hint">
-					Rows older than this are hidden from the list — never changed and never deleted. A row's date is its{" "}
-					<code>created:</code> field, or the date in its <code>(from: …)</code> tag; a row with neither has no date and
-					stays. The tab says how many of each, and shows the hidden ones on request.
+					Rows older than this are hidden from the list — never changed and never deleted.{" "}
+					{requireCreated ? (
+						<>
+							A row's date is its <code>created:</code> field, and only that.
+						</>
+					) : (
+						<>
+							A row's date is its <code>created:</code> field, or the date in its <code>(from: …)</code> tag; a row with
+							neither has no date and stays.
+						</>
+					)}{" "}
+					The tab says how many of each, and shows the hidden ones on request.
+				</span>
+			</label>
+
+			{/*
+			 * The one control here that can hide a lot of work at once, so it
+			 * says what it will cost before it is used rather than after. It is
+			 * off unless the reader turns it on, and it still only hides: the
+			 * count stays on screen and “Show them” brings the rows back.
+			 */}
+			<label className="wiki-tasks__check">
+				<input
+					type="checkbox"
+					className="wiki-tasks__checkbox"
+					checked={requireCreated}
+					onChange={(event) => edit(setRequireCreated)(event.target.checked)}
+				/>
+				<span className="wiki-tasks__check-body">
+					<span className="wiki-tasks__label">Only rows with a “created:” date</span>
+					<span className="wiki-tasks__hint">
+						Judge “Start from” by <code>created:</code> alone, and hide every row that does not carry one. For a vault
+						where <code>created:</code> is written as rows are captured, an untagged row is old rather than undatable.
+						Leave it off while you are still adding the field — it hides everything not yet tagged, which at the start
+						is almost everything.
+					</span>
 				</span>
 			</label>
 

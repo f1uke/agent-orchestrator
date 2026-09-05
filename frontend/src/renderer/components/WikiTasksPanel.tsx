@@ -88,10 +88,15 @@ export function WikiTasksPanel({
 	const rows = useMemo(() => tasks?.tasks ?? [], [tasks]);
 	const aliases = useMemo(() => tasks?.ownerAliases ?? [], [tasks]);
 	const cutoff = tasks?.cutoff ?? "";
+	// Read from the tab's own answer rather than from the settings query, so
+	// the rule the list is drawn under and the rows it is drawn from always
+	// came back together. It defaults to false, which fails OPEN: a tab still
+	// loading shows too much for an instant, never too little.
+	const requireCreated = tasks?.requireCreated === true;
 
 	const view = useMemo(
-		() => partitionTasks(rows, { ownerFilter, ownerAliases: aliases, cutoff, showHidden }),
-		[rows, ownerFilter, aliases, cutoff, showHidden],
+		() => partitionTasks(rows, { ownerFilter, ownerAliases: aliases, cutoff, requireCreated, showHidden }),
+		[rows, ownerFilter, aliases, cutoff, requireCreated, showHidden],
 	);
 
 	// A row that has been ticked and confirmed is gone from the list the moment
@@ -224,7 +229,7 @@ export function WikiTasksPanel({
 			 * so the reader learns that the cutoff has an edge rather than
 			 * wondering why the list never empties.
 			 */}
-			{cutoff !== "" && (view.hiddenByCutoff > 0 || view.undated > 0) && (
+			{(cutoff !== "" || requireCreated) && (view.hiddenByCutoff > 0 || view.undated > 0) && (
 				<div className="wiki-tasks__cutoff">
 					<EyeOff aria-hidden="true" className="wiki-tasks__cutoff-icon" />
 					<span>
@@ -235,15 +240,28 @@ export function WikiTasksPanel({
 								{view.hiddenByCutoff === 1 ? "It is" : "They are"} still in your notes.{" "}
 							</>
 						)}
-						{view.undated > 0 && (
-							<>
-								{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no date of{" "}
-								{view.undated === 1 ? "its" : "their"} own, so the cutoff leaves {view.undated === 1 ? "it" : "them"}{" "}
-								here.
-							</>
-						)}
+						{/*
+						 * The same count, said the way it actually behaves. Under
+						 * `requireCreated` an untagged row is HIDDEN, and the
+						 * sentence has to say that plainly — the reader turned the
+						 * rule on, but they still get told what it cost.
+						 */}
+						{view.undated > 0 &&
+							(view.undatedHidden ? (
+								<>
+									{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no <code>created:</code> date, so{" "}
+									{view.undated === 1 ? "it is" : "they are"} {showHidden ? "shown" : "hidden"}.{" "}
+									{view.undated === 1 ? "It is" : "They are"} still in your notes.
+								</>
+							) : (
+								<>
+									{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no date of{" "}
+									{view.undated === 1 ? "its" : "their"} own, so the cutoff leaves {view.undated === 1 ? "it" : "them"}{" "}
+									here.
+								</>
+							))}
 					</span>
-					{view.hiddenByCutoff > 0 && (
+					{(view.hiddenByCutoff > 0 || view.undatedHidden) && (
 						<button type="button" className="wiki-tasks__cutoff-toggle" onClick={toggleHidden}>
 							{showHidden ? "Hide them" : "Show them"}
 						</button>

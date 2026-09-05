@@ -30,7 +30,13 @@ function tasks(over: Partial<WikiTasks> = {}): WikiTasks {
 	};
 }
 
-const SETTINGS: WikiTasksSettings = { folders: ["Areas"], sections: [], cutoff: "", ownerAliases: [] };
+const SETTINGS: WikiTasksSettings = {
+	folders: ["Areas"],
+	sections: [],
+	cutoff: "",
+	ownerAliases: [],
+	requireCreated: false,
+};
 
 function panel(over: Partial<Parameters<typeof WikiTasksPanel>[0]> = {}) {
 	return (
@@ -358,5 +364,64 @@ describe("a [[wikilink]] in a row", () => {
 	it("does not turn anything else in the row into markup", () => {
 		render(panel({ tasks: tasks({ tasks: [row({ text: "a <script>alert(1)</script> row" })] }) }));
 		expect(screen.getByText("a <script>alert(1)</script> row")).toBeTruthy();
+	});
+});
+
+/**
+ * The `created:`-only rule, from the tab's side: what it hides, what it still
+ * says out loud, and the escape hatch that proves nothing was lost.
+ */
+describe("only rows with a created: date", () => {
+	const mixed = tasks({
+		requireCreated: true,
+		tasks: [
+			row({ id: "tagged", text: "tagged row", created: "2026-09-03" }),
+			row({ id: "from-only", text: "provenance only", fromDate: "2026-09-03" }),
+			row({ id: "bare", text: "no date at all" }),
+		],
+	});
+
+	it("lists only the tagged row, and says how many it hid", () => {
+		render(panel({ tasks: mixed }));
+		expect(screen.getByText("tagged row")).toBeTruthy();
+		expect(screen.queryByText("provenance only")).toBeNull();
+		expect(screen.queryByText("no date at all")).toBeNull();
+		expect(screen.getByText(/2 rows carry no/)).toBeTruthy();
+		expect(screen.getByText(/still in your notes/)).toBeTruthy();
+	});
+
+	/**
+	 * 🗝 The property this tab exists to hold, under the one setting that can
+	 * hide most of a vault at once: the rows are HIDDEN, never lost, and one
+	 * click brings them all back.
+	 */
+	it("gives every hidden row back on Show them", async () => {
+		const user = userEvent.setup();
+		render(panel({ tasks: mixed }));
+		await user.click(screen.getByRole("button", { name: "Show them" }));
+		expect(screen.getByText("provenance only")).toBeTruthy();
+		expect(screen.getByText("no date at all")).toBeTruthy();
+	});
+
+	it("says nothing and hides nothing while the setting is off", () => {
+		render(panel({ tasks: tasks({ tasks: [row({ text: "no date at all" })] }) }));
+		expect(screen.getByText("no date at all")).toBeTruthy();
+		expect(screen.queryByText(/created:/)).toBeNull();
+	});
+});
+
+describe("the settings form", () => {
+	it("round-trips the created:-only setting", async () => {
+		const user = userEvent.setup();
+		const onSaveSettings = vi.fn().mockResolvedValue(undefined);
+		render(panel({ tasks: tasks({ configured: false, folders: [], tasks: [] }), onSaveSettings }));
+
+		const toggle = screen.getByRole("checkbox", { name: /created:/ });
+		expect((toggle as HTMLInputElement).checked).toBe(false);
+		await user.click(toggle);
+		await user.click(screen.getByRole("button", { name: "Save" }));
+
+		await waitFor(() => expect(onSaveSettings).toHaveBeenCalledTimes(1));
+		expect(onSaveSettings.mock.calls[0][0].requireCreated).toBe(true);
 	});
 });

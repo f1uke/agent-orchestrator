@@ -9281,6 +9281,10 @@ components:
           items:
             type: string
           type: array
+        requireCreated:
+          description: Show only rows carrying their own 'created:' date, and judge
+            the cutoff by that date alone. Hides, never modifies.
+          type: boolean
         sections:
           description: Only rows under these '## ' headings. Empty means every section.
           items:
@@ -10192,6 +10196,8 @@ components:
           items:
             type: string
           type: array
+        requireCreated:
+          type: boolean
         scannedNotes:
           type: integer
         sections:
@@ -10226,6 +10232,8 @@ components:
           items:
             type: string
           type: array
+        requireCreated:
+          type: boolean
         sections:
           items:
             type: string
@@ -10235,6 +10243,7 @@ components:
       - sections
       - cutoff
       - ownerAliases
+      - requireCreated
       type: object
     WorkspaceChangesResponse:
       properties:

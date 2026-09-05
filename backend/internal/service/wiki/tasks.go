@@ -119,7 +119,11 @@ type Tasks struct {
 	Sections     []string
 	Cutoff       string
 	OwnerAliases []string
-	Rows         []Task
+	// RequireCreated echoes the setting the renderer applies: only rows with a
+	// `created:` date of their own count, and that date is the only one the
+	// cutoff judges by.
+	RequireCreated bool
+	Rows           []Task
 	// Owners are the distinct owner tokens seen in the scan, sorted, so the
 	// filter can offer real names without this package knowing any.
 	Owners       []string
@@ -141,12 +145,13 @@ func (s *Service) ListTasks(ctx context.Context) (Tasks, error) {
 	}
 	cfg := s.taskSettings()
 	out := Tasks{
-		Folders:      cfg.Folders,
-		Sections:     cfg.Sections,
-		Cutoff:       cfg.Cutoff,
-		OwnerAliases: cfg.OwnerAliases,
-		Rows:         []Task{},
-		Owners:       []string{},
+		Folders:        cfg.Folders,
+		Sections:       cfg.Sections,
+		Cutoff:         cfg.Cutoff,
+		OwnerAliases:   cfg.OwnerAliases,
+		RequireCreated: cfg.RequireCreated,
+		Rows:           []Task{},
+		Owners:         []string{},
 	}
 	if len(cfg.Folders) == 0 {
 		return out, nil

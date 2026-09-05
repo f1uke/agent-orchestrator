@@ -61,6 +61,18 @@ type TaskSettings struct {
 	// OwnerAliases are the owner tokens that mean "me", so the tab can offer a
 	// mine/others filter without this repo knowing anyone's name.
 	OwnerAliases []string `json:"ownerAliases,omitempty"`
+	// RequireCreated narrows the tab to rows that carry a `created:` date of
+	// their own, and makes that date the only one the cutoff judges by.
+	//
+	// It is OFF by default, and it must stay that way: turning it on hides
+	// every row that has not been tagged yet, which in a vault part-way
+	// through adopting `created:` is nearly all of them. That is a legitimate
+	// thing to ask for — a reader who tags as they capture wants the untagged
+	// backlog out of the way — but it is never something to assume, so a
+	// settings file written before this field existed reads as false.
+	//
+	// Like Cutoff, it HIDES and never modifies: the rows stay in the notes.
+	RequireCreated bool `json:"requireCreated,omitempty"`
 }
 
 // Default is the unconfigured state: no vault, no remembered agent, no tasks.

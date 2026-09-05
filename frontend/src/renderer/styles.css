@@ -7049,6 +7049,31 @@ ol.note-prose__list {
 	color: var(--fg-passive);
 }
 
+/* A checkbox field: the box on the baseline of its own label, with the hint
+   under both rather than beside them — a hint indented to clear the box would
+   sit in a column of its own and read as a second control. */
+.wiki-tasks__check {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.wiki-tasks__checkbox {
+	width: 14px;
+	height: 14px;
+	flex: none;
+	margin: 2px 0 0;
+	accent-color: var(--accent);
+	cursor: pointer;
+}
+
+.wiki-tasks__check-body {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	gap: 4px;
+}
+
 .wiki-tasks__hint {
 	color: var(--fg-passive);
 	font-size: 10.5px;

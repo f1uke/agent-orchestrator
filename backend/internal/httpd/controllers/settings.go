@@ -321,10 +321,11 @@ func (c *SettingsController) setWikiTasks(w http.ResponseWriter, r *http.Request
 	}
 	next := c.Wiki.Get()
 	next.Tasks = wikisettings.TaskSettings{
-		Folders:      in.Folders,
-		Sections:     in.Sections,
-		Cutoff:       in.Cutoff,
-		OwnerAliases: in.OwnerAliases,
+		Folders:        in.Folders,
+		Sections:       in.Sections,
+		Cutoff:         in.Cutoff,
+		OwnerAliases:   in.OwnerAliases,
+		RequireCreated: in.RequireCreated,
 	}
 	folders := wikisettings.NormalizeFolders(in.Folders)
 	if len(folders) > 0 {
@@ -358,10 +359,11 @@ func (c *SettingsController) setWikiTasks(w http.ResponseWriter, r *http.Request
 
 func wikiTasksSettingsResponse(t wikisettings.TaskSettings) WikiTasksSettingsResponse {
 	return WikiTasksSettingsResponse{
-		Folders:      nonNil(t.Folders),
-		Sections:     nonNil(t.Sections),
-		Cutoff:       t.Cutoff,
-		OwnerAliases: nonNil(t.OwnerAliases),
+		Folders:        nonNil(t.Folders),
+		Sections:       nonNil(t.Sections),
+		Cutoff:         t.Cutoff,
+		OwnerAliases:   nonNil(t.OwnerAliases),
+		RequireCreated: t.RequireCreated,
 	}
 }
 
