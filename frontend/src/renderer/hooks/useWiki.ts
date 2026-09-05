@@ -299,17 +299,22 @@ export function useWikiTasksSettings(enabled: boolean) {
 	});
 }
 
+/**
+ * Write the Tasks tab's configuration.
+ *
+ * 🗝 The settings object goes out WHOLE. Every field on the wire is optional and
+ * a missing key reads as its zero value, so a hand-listed body does not merely
+ * fail to save a field it forgot - it writes the zero over whatever was stored.
+ * That is how `requireCreated` came to untick itself on every save. Listing the
+ * fields here again would re-open that hole for the next field added, so the
+ * request is the validated object the form handed us, unpicked by nobody.
+ */
 export function useSaveWikiTasksSettings() {
 	const queryClient = useQueryClient();
 	return useMutation<WikiTasksSettings, Error, WikiTasksSettings>({
 		mutationFn: async (input) => {
 			const { data, error } = await apiClient.PUT("/api/v1/settings/wiki/tasks", {
-				body: {
-					folders: input.folders,
-					sections: input.sections,
-					cutoff: input.cutoff,
-					ownerAliases: input.ownerAliases,
-				},
+				body: input,
 			});
 			if (error) throw new Error(apiErrorMessage(error));
 			return data as WikiTasksSettings;
