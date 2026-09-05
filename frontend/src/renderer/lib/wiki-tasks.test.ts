@@ -197,3 +197,84 @@ describe("partitionTasks cutoff", () => {
 		expect(view.visible).toBe(4);
 	});
 });
+
+/**
+ * `requireCreated` is the reader deliberately overriding the rule above: in a
+ * vault where `created:` is written at capture time, an untagged row is not
+ * "undatable", it is old.
+ *
+ * 🗝 It only ever HIDES. The count is still reported and `showHidden` still
+ * brings every row back, so the property the tab exists to hold — a filtered
+ * list can never be mistaken for a destroyed backlog — survives the override.
+ */
+describe("partitionTasks requireCreated", () => {
+	const mixed = [
+		row({ id: "tagged", created: "2026-09-03" }),
+		row({ id: "tagged-old", created: "2026-01-01" }),
+		row({ id: "from-only", fromDate: "2026-09-03" }),
+		row({ id: "bare" }),
+	];
+
+	it("keeps only the rows carrying a created: date, and counts the rest", () => {
+		const view = partitionTasks(mixed, { ownerFilter: "all", ownerAliases: [], requireCreated: true, now: NOW });
+		expect(view.visible).toBe(2);
+		expect(view.undated).toBe(2);
+		expect(view.undatedHidden).toBe(true);
+		expect(view.groups.flatMap((g) => g.rows.map((r) => r.id)).sort()).toEqual(["tagged", "tagged-old"]);
+	});
+
+	/**
+	 * A `(from: …)` date says when the CONVERSATION was, not when the row was
+	 * taken on. Under this rule it stops standing in for `created:` — a row
+	 * carrying only provenance is judged untagged, not judged by the wrong day.
+	 */
+	it("stops a (from: …) date standing in for created:", () => {
+		expect(rowDate(row({ fromDate: "2026-05-07" }), true)).toBeNull();
+		expect(rowDate(row({ created: "2026-08-20", fromDate: "2026-05-07" }), true)).toBe("2026-08-20");
+		const view = partitionTasks([row({ id: "from-only", fromDate: "2026-09-03" })], {
+			ownerFilter: "all",
+			ownerAliases: [],
+			cutoff: "2026-06-01",
+			requireCreated: true,
+			now: NOW,
+		});
+		// Hidden for having no created:, NOT counted as hidden by the cutoff —
+		// the cutoff never got to judge it.
+		expect(view.visible).toBe(0);
+		expect(view.hiddenByCutoff).toBe(0);
+		expect(view.undated).toBe(1);
+	});
+
+	it("still applies the cutoff to the rows it did keep", () => {
+		const view = partitionTasks(mixed, {
+			ownerFilter: "all",
+			ownerAliases: [],
+			cutoff: "2026-06-01",
+			requireCreated: true,
+			now: NOW,
+		});
+		expect(view.visible).toBe(1);
+		expect(view.hiddenByCutoff).toBe(1);
+		expect(view.undated).toBe(2);
+	});
+
+	it("gives every row back under showHidden, both kinds at once", () => {
+		const view = partitionTasks(mixed, {
+			ownerFilter: "all",
+			ownerAliases: [],
+			cutoff: "2026-06-01",
+			requireCreated: true,
+			showHidden: true,
+			now: NOW,
+		});
+		expect(view.visible).toBe(4);
+		expect(view.hiddenByCutoff).toBe(1);
+		expect(view.undated).toBe(2);
+	});
+
+	it("changes nothing at all when it is off", () => {
+		const view = partitionTasks(mixed, { ownerFilter: "all", ownerAliases: [], now: NOW });
+		expect(view.visible).toBe(4);
+		expect(view.undatedHidden).toBe(false);
+	});
+});

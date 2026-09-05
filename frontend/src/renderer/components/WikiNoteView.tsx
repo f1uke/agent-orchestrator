@@ -1,9 +1,10 @@
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Link2, X } from "lucide-react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, CornerDownRight, Link2, X } from "lucide-react";
 import { NoteMarkdown, type NoteEditing } from "./NoteMarkdown";
 import { NoteProperties } from "./NoteProperties";
 import { type Drift, FileDriftBanner } from "./FileDriftBanner";
 import { parseNote, splitTags } from "../lib/note/parse";
+import { locateRow, type RowLocation } from "../lib/note/reveal";
 import { type EditableBlock, spliceBlock, type TaskMarker, toggleTask } from "../lib/note/edit";
 import { addProperty, type NoteProperty, readFrontmatter, writeProperty } from "../lib/note/frontmatter";
 import { useSaveWikiNote, type WikiNote } from "../hooks/useWiki";
@@ -43,6 +44,7 @@ export function WikiNoteView({
 	onReload,
 	onOpenNote,
 	onOpenTag,
+	reveal,
 }: {
 	note: WikiNote | undefined;
 	loading: boolean;
@@ -55,6 +57,11 @@ export function WikiNoteView({
 	onReload: () => void;
 	onOpenNote: (target: string) => void;
 	onOpenTag: (tag: string) => void;
+	/**
+	 * One row to scroll to, as the Tasks tab last read it. `at` is a nonce, so
+	 * clicking the same source line twice scrolls to it twice.
+	 */
+	reveal?: { line: number; raw: string; at: number } | null;
 }) {
 	const parsed = useMemo(() => (note ? parseNote(note.content) : null), [note]);
 	const save = useSaveWikiNote();
@@ -154,6 +161,41 @@ export function WikiNoteView({
 	const title = titleOf(note, parsed);
 	const refused = save.error && save.error.failure.kind !== "conflict" ? save.error.failure : null;
 
+	/*
+	 * The row the reader clicked in the Tasks tab, found in the note as it is
+	 * NOW. It is deliberately re-derived from the note's own bytes rather than
+	 * trusted from the list: see `lib/note/reveal.ts`.
+	 */
+	const located = useMemo(
+		() => (note && reveal ? locateRow(note.content, reveal.line, reveal.raw) : null),
+		[note, reveal],
+	);
+	const scroll = useRef<HTMLDivElement | null>(null);
+	// Whether the located line actually became a block on screen. It usually
+	// does; a note whose bytes could not be mapped at all (see `indexNote`) is
+	// the case where it does not, and the reader is told rather than left
+	// wondering why nothing moved.
+	const [pinned, setPinned] = useState(true);
+	useEffect(() => {
+		if (!located) {
+			setPinned(true);
+			return;
+		}
+		const found = located.kind === "found" || located.kind === "done";
+		const element = found ? (scroll.current?.querySelector("[data-reveal]") ?? null) : null;
+		setPinned(!found || element !== null);
+		if (!(element instanceof HTMLElement)) return;
+		element.scrollIntoView({ block: "center", behavior: "smooth" });
+		// Re-clicking the same source line asks to be shown the row again, so the
+		// flash is replayed rather than sitting finished on an element that never
+		// changed.
+		for (const animation of element.getAnimations?.() ?? []) {
+			animation.cancel();
+			animation.play();
+		}
+		// `reveal.at` is the nonce that makes a repeated click a new request.
+	}, [located, reveal?.at]);
+
 	return (
 		<div className="wiki-note">
 			<div className="wiki-note__bar">
@@ -184,7 +226,9 @@ export function WikiNoteView({
 				</div>
 			)}
 
-			<div className="wiki-note__scroll">
+			{located && <RevealNotice located={located} pinned={pinned} />}
+
+			<div className="wiki-note__scroll" ref={scroll}>
 				<div className="wiki-note__measure">
 					{error && <div className="wiki-note__message">{error}</div>}
 					{!error && loading && !note && <div className="wiki-note__message">Opening…</div>}
@@ -236,6 +280,7 @@ export function WikiNoteView({
 									theme={theme}
 									navigation={{ onOpenWikilink: onOpenNote, onOpenTag }}
 									editing={editing}
+									reveal={located?.kind === "found" || located?.kind === "done" ? located.span : null}
 								/>
 							</div>
 
@@ -264,6 +309,38 @@ export function WikiNoteView({
 					)}
 				</div>
 			</div>
+		</div>
+	);
+}
+
+/**
+ * What became of the row the reader clicked, when it is not simply "here it is".
+ *
+ * 🗝 Every one of these says something TRUE about a note that has changed since
+ * the list was read. The alternative — scrolling to the old line number and
+ * saying nothing — puts the reader in front of somebody else's row while
+ * looking certain, which is the one outcome worth this much prose to avoid.
+ */
+function RevealNotice({ located, pinned }: { located: RowLocation; pinned: boolean }) {
+	const message =
+		located.kind === "gone"
+			? "That row is no longer in this note with the text it was listed with — it has been reworded or removed. The note is open; the list will catch up when it is re-read."
+			: located.kind === "ambiguous"
+				? `This note has ${located.matches} rows reading exactly alike, so there is no way to tell which one you clicked. Nothing is highlighted.`
+				: located.kind === "done"
+					? `That row has already been ticked off, on line ${located.line}.`
+					: located.moved
+						? `That row had moved — it is on line ${located.line} now.`
+						: "";
+	const unpinned = pinned ? "" : " It could not be pointed at on screen, so nothing was scrolled to.";
+	if (message === "" && unpinned === "") return null;
+	return (
+		<div className="wiki-note__reveal" role="status">
+			<CornerDownRight aria-hidden="true" />
+			<span>
+				{message}
+				{unpinned}
+			</span>
 		</div>
 	);
 }

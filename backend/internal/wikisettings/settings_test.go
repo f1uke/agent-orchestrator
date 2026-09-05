@@ -118,6 +118,38 @@ func TestTasks_PersistAndReload(t *testing.T) {
 	}
 }
 
+// RequireCreated hides every row that has not been tagged yet, so the one
+// property worth a test of its own is that it is never ON unless somebody
+// asked: a settings file written before the field existed must reload as
+// false, not as "whatever the zero value happened to be this release".
+func TestTasks_RequireCreated_DefaultsOffAndPersistsWhenSet(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := NewStore(dir)
+	if err := st.SetTasks(TaskSettings{Folders: []string{"Areas"}}); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded, _ := NewStore(dir); reloaded.Tasks().RequireCreated {
+		t.Fatal("a settings file that never mentioned requireCreated reloaded as true")
+	}
+
+	if err := st.SetTasks(TaskSettings{Folders: []string{"Areas"}, RequireCreated: true}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, _ := NewStore(dir)
+	if !reloaded.Tasks().RequireCreated {
+		t.Fatal("requireCreated did not survive a reload")
+	}
+
+	// And it must be turn-off-able: `omitempty` drops the key on the way out,
+	// which is only correct because absent reads as false above.
+	if err := st.SetTasks(TaskSettings{Folders: []string{"Areas"}, RequireCreated: false}); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := NewStore(dir); again.Tasks().RequireCreated {
+		t.Fatal("requireCreated could not be turned back off")
+	}
+}
+
 func TestNormalizeTasks_TrimsFolderSlashesAndDropsBlankEntries(t *testing.T) {
 	st, _ := NewStore(t.TempDir())
 	if err := st.SetTasks(TaskSettings{

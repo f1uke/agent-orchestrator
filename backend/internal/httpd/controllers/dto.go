@@ -2055,8 +2055,11 @@ type WikiTasksResponse struct {
 	// apply. Empty means no cutoff.
 	Cutoff string `json:"cutoff,omitempty"`
 	// OwnerAliases are the owner tokens that mean "me".
-	OwnerAliases []string      `json:"ownerAliases"`
-	Tasks        []WikiTaskRow `json:"tasks"`
+	OwnerAliases []string `json:"ownerAliases"`
+	// RequireCreated echoes the setting: only rows carrying their own
+	// `created:` date count, and the cutoff judges by that date alone.
+	RequireCreated bool          `json:"requireCreated,omitempty"`
+	Tasks          []WikiTaskRow `json:"tasks"`
 	// Owners are the distinct owner tokens seen in the scan, sorted, so the
 	// filter can offer real names without the app knowing any.
 	Owners       []string `json:"owners"`
@@ -2099,18 +2102,20 @@ type CompleteWikiTaskResponse struct {
 // section name and no person: a vault's task convention belongs to whoever
 // writes the vault.
 type WikiTasksSettingsResponse struct {
-	Folders      []string `json:"folders"`
-	Sections     []string `json:"sections"`
-	Cutoff       string   `json:"cutoff"`
-	OwnerAliases []string `json:"ownerAliases"`
+	Folders        []string `json:"folders"`
+	Sections       []string `json:"sections"`
+	Cutoff         string   `json:"cutoff"`
+	OwnerAliases   []string `json:"ownerAliases"`
+	RequireCreated bool     `json:"requireCreated"`
 }
 
 // SetWikiTasksSettingsRequest replaces the whole Tasks configuration. It is
 // separate from SetWikiSettingsRequest for the same reason `harness` is: three
 // surfaces write these settings and none of them may blank the others.
 type SetWikiTasksSettingsRequest struct {
-	Folders      []string `json:"folders,omitempty" description:"Vault-relative subtrees to scan. An empty list scans nothing and the tab says so."`
-	Sections     []string `json:"sections,omitempty" description:"Only rows under these '## ' headings. Empty means every section."`
-	Cutoff       string   `json:"cutoff,omitempty" description:"YYYY-MM-DD. Rows older than this are hidden by the tab, never modified or deleted."`
-	OwnerAliases []string `json:"ownerAliases,omitempty" description:"Owner tokens that mean 'me', for the mine/others filter."`
+	Folders        []string `json:"folders,omitempty" description:"Vault-relative subtrees to scan. An empty list scans nothing and the tab says so."`
+	Sections       []string `json:"sections,omitempty" description:"Only rows under these '## ' headings. Empty means every section."`
+	Cutoff         string   `json:"cutoff,omitempty" description:"YYYY-MM-DD. Rows older than this are hidden by the tab, never modified or deleted."`
+	OwnerAliases   []string `json:"ownerAliases,omitempty" description:"Owner tokens that mean 'me', for the mine/others filter."`
+	RequireCreated bool     `json:"requireCreated,omitempty" description:"Show only rows carrying their own 'created:' date, and judge the cutoff by that date alone. Hides, never modifies."`
 }

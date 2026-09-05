@@ -37,10 +37,16 @@ export type TaskView = {
 	/** Rows the owner filter hid. */
 	hiddenByOwner: number;
 	/**
-	 * Rows the cutoff could not judge because they carry no date at all. They
-	 * are shown, and the tab says so — see `partitionTasks`.
+	 * Rows the cutoff could not judge because they carry no date it can read.
+	 *
+	 * Normally they are SHOWN and merely counted, so the tab can say the
+	 * cutoff has an edge. Under `requireCreated` they are the rows being
+	 * hidden, and `undatedHidden` says which of the two happened — the count
+	 * means the same thing either way, so the tab does not need two.
 	 */
 	undated: number;
+	/** Whether those undated rows were hidden rather than kept. */
+	undatedHidden: boolean;
 };
 
 /** Today as YYYY-MM-DD in the reader's own timezone, not UTC. */
@@ -73,6 +79,12 @@ export function isMine(row: WikiTaskRow, aliases: string[]): boolean {
  *   2. the date inside the row's `(from: …)` provenance tag.
  *   3. nothing: the row has no date, and `null` says exactly that.
  *
+ * `strict` drops step 2. A `(from: …)` date says when the CONVERSATION was, not
+ * when the row was taken on, and a reader who tags `created:` as they capture
+ * is asking to be judged by the second — so for them the provenance date is a
+ * near miss rather than a fallback, and a near miss is what this returns
+ * `null` for.
+ *
  * 🗝 The note's mtime is NOT in this list, and the daemon no longer sends it.
  * mtime is a property of the FILE: editing one line of a task note would push
  * every row in it to today at once, so a backlog could never go quiet while the
@@ -83,8 +95,8 @@ export function isMine(row: WikiTaskRow, aliases: string[]): boolean {
  * date is not a promise, and grouping by one would file a row under a day on
  * which nothing is actually due.
  */
-export function rowDate(row: WikiTaskRow): string | null {
-	return row.created || row.fromDate || null;
+export function rowDate(row: WikiTaskRow, strict = false): string | null {
+	return row.created || (strict ? null : row.fromDate) || null;
 }
 
 /**
@@ -103,12 +115,17 @@ export function partitionTasks(
 		ownerAliases: string[];
 		/** YYYY-MM-DD. Rows dated before it are hidden. Empty means no cutoff. */
 		cutoff?: string;
+		/**
+		 * Only rows carrying their own `created:` count, and that date is the
+		 * only one the cutoff judges by. Off by default — see below.
+		 */
+		requireCreated?: boolean;
 		/** When true the cutoff is reported but not applied. */
 		showHidden?: boolean;
 		now?: Date;
 	},
 ): TaskView {
-	const { ownerFilter, ownerAliases, cutoff, showHidden = false, now = new Date() } = options;
+	const { ownerFilter, ownerAliases, cutoff, requireCreated = false, showHidden = false, now = new Date() } = options;
 	const stamp = today(now);
 	let hiddenByCutoff = 0;
 	let hiddenByOwner = 0;
@@ -121,15 +138,25 @@ export function partitionTasks(
 			hiddenByOwner += 1;
 			continue;
 		}
-		// A row with no date at all is never hidden by the cutoff. "We do not
-		// know how old this is" is not the claim "it is older than the cutoff",
-		// and hiding a row on a field it never carried would lose real work —
-		// the one failure this tab exists to rule out. It is counted instead,
-		// and the tab names the count, so the exception is visible rather than
-		// a silent asterisk on the cutoff.
-		const at = rowDate(row);
-		if (at === null) undated += 1;
-		else if (cutoff && at < cutoff) {
+		// A row with no date at all is never hidden by the cutoff BY DEFAULT.
+		// "We do not know how old this is" is not the claim "it is older than
+		// the cutoff", and hiding a row on a field it never carried would lose
+		// real work — the one failure this tab exists to rule out. It is
+		// counted instead, and the tab names the count, so the exception is
+		// visible rather than a silent asterisk on the cutoff.
+		//
+		// 🗝 `requireCreated` is the reader OVERRIDING that default on purpose:
+		// in a vault where `created:` is written at capture time, an untagged
+		// row is not "undatable", it is old. It still only ever HIDES — the
+		// count is reported, "Show them" brings them back, and nothing in the
+		// notes is touched — so the guarantee that survives is the one that
+		// matters: a filtered list can never be mistaken for a destroyed
+		// backlog.
+		const at = rowDate(row, requireCreated);
+		if (at === null) {
+			undated += 1;
+			if (requireCreated && !showHidden) continue;
+		} else if (cutoff && at < cutoff) {
 			hiddenByCutoff += 1;
 			if (!showHidden) continue;
 		}
@@ -156,7 +183,7 @@ export function partitionTasks(
 	}
 	push("undated");
 
-	return { groups, visible: kept.length, hiddenByCutoff, hiddenByOwner, undated };
+	return { groups, visible: kept.length, hiddenByCutoff, hiddenByOwner, undated, undatedHidden: requireCreated };
 }
 
 /**

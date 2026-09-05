@@ -222,15 +222,16 @@ func (c *WikiController) tasks(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	envelope.WriteJSON(w, http.StatusOK, WikiTasksResponse{
-		Configured:   res.Configured,
-		Folders:      nonNil(res.Folders),
-		Sections:     nonNil(res.Sections),
-		Cutoff:       res.Cutoff,
-		OwnerAliases: nonNil(res.OwnerAliases),
-		Tasks:        rows,
-		Owners:       nonNil(res.Owners),
-		ScannedNotes: res.ScannedNotes,
-		Truncated:    res.Truncated,
+		Configured:     res.Configured,
+		Folders:        nonNil(res.Folders),
+		Sections:       nonNil(res.Sections),
+		Cutoff:         res.Cutoff,
+		OwnerAliases:   nonNil(res.OwnerAliases),
+		RequireCreated: res.RequireCreated,
+		Tasks:          rows,
+		Owners:         nonNil(res.Owners),
+		ScannedNotes:   res.ScannedNotes,
+		Truncated:      res.Truncated,
 	})
 }
 

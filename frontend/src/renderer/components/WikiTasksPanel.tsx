@@ -3,6 +3,7 @@ import { AlertTriangle, Check, EyeOff, Loader2, RefreshCw, Settings2, X } from "
 import type { WikiTaskRow, WikiTasks, WikiTasksSettings } from "../hooks/useWiki";
 import { WikiTaskTickError } from "../hooks/useWiki";
 import { partitionTasks, type OwnerFilter } from "../lib/wiki-tasks";
+import { fromTagAddsSomething, sourceLabel, splitFromTags, splitWikilinks } from "../lib/wiki-task-text";
 import {
 	loadCollapsedGroups,
 	loadOwnerFilter,
@@ -50,7 +51,8 @@ export function WikiTasksPanel({
 	onSaveSettings,
 	savingSettings,
 	settingsError,
-	onOpenNote,
+	onOpenSource,
+	onOpenWikilink,
 }: {
 	tasks: WikiTasks | undefined;
 	settings: WikiTasksSettings | undefined;
@@ -61,8 +63,13 @@ export function WikiTasksPanel({
 	onSaveSettings: (next: WikiTasksSettings) => Promise<unknown>;
 	savingSettings: boolean;
 	settingsError: string | null;
-	/** Opening the row's note is the way back out of every refusal. */
-	onOpenNote: (path: string) => void;
+	/**
+	 * Open the row's note AT the row. The line is a hint the note view checks
+	 * against `raw` before it scrolls anywhere — see `lib/note/reveal.ts`.
+	 */
+	onOpenSource: (path: string, line: number, raw: string) => void;
+	/** Open the note a `[[wikilink]]` in a row names, as the Notes tab does. */
+	onOpenWikilink: (target: string) => void;
 }) {
 	const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>(loadOwnerFilter);
 	const [showHidden, setShowHidden] = useState<boolean>(loadShowHidden);
@@ -81,10 +88,15 @@ export function WikiTasksPanel({
 	const rows = useMemo(() => tasks?.tasks ?? [], [tasks]);
 	const aliases = useMemo(() => tasks?.ownerAliases ?? [], [tasks]);
 	const cutoff = tasks?.cutoff ?? "";
+	// Read from the tab's own answer rather than from the settings query, so
+	// the rule the list is drawn under and the rows it is drawn from always
+	// came back together. It defaults to false, which fails OPEN: a tab still
+	// loading shows too much for an instant, never too little.
+	const requireCreated = tasks?.requireCreated === true;
 
 	const view = useMemo(
-		() => partitionTasks(rows, { ownerFilter, ownerAliases: aliases, cutoff, showHidden }),
-		[rows, ownerFilter, aliases, cutoff, showHidden],
+		() => partitionTasks(rows, { ownerFilter, ownerAliases: aliases, cutoff, requireCreated, showHidden }),
+		[rows, ownerFilter, aliases, cutoff, requireCreated, showHidden],
 	);
 
 	// A row that has been ticked and confirmed is gone from the list the moment
@@ -217,7 +229,7 @@ export function WikiTasksPanel({
 			 * so the reader learns that the cutoff has an edge rather than
 			 * wondering why the list never empties.
 			 */}
-			{cutoff !== "" && (view.hiddenByCutoff > 0 || view.undated > 0) && (
+			{(cutoff !== "" || requireCreated) && (view.hiddenByCutoff > 0 || view.undated > 0) && (
 				<div className="wiki-tasks__cutoff">
 					<EyeOff aria-hidden="true" className="wiki-tasks__cutoff-icon" />
 					<span>
@@ -228,15 +240,28 @@ export function WikiTasksPanel({
 								{view.hiddenByCutoff === 1 ? "It is" : "They are"} still in your notes.{" "}
 							</>
 						)}
-						{view.undated > 0 && (
-							<>
-								{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no date of{" "}
-								{view.undated === 1 ? "its" : "their"} own, so the cutoff leaves {view.undated === 1 ? "it" : "them"}{" "}
-								here.
-							</>
-						)}
+						{/*
+						 * The same count, said the way it actually behaves. Under
+						 * `requireCreated` an untagged row is HIDDEN, and the
+						 * sentence has to say that plainly — the reader turned the
+						 * rule on, but they still get told what it cost.
+						 */}
+						{view.undated > 0 &&
+							(view.undatedHidden ? (
+								<>
+									{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no <code>created:</code> date, so{" "}
+									{view.undated === 1 ? "it is" : "they are"} {showHidden ? "shown" : "hidden"}.{" "}
+									{view.undated === 1 ? "It is" : "They are"} still in your notes.
+								</>
+							) : (
+								<>
+									{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no date of{" "}
+									{view.undated === 1 ? "its" : "their"} own, so the cutoff leaves {view.undated === 1 ? "it" : "them"}{" "}
+									here.
+								</>
+							))}
 					</span>
-					{view.hiddenByCutoff > 0 && (
+					{(view.hiddenByCutoff > 0 || view.undatedHidden) && (
 						<button type="button" className="wiki-tasks__cutoff-toggle" onClick={toggleHidden}>
 							{showHidden ? "Hide them" : "Show them"}
 						</button>
@@ -277,7 +302,8 @@ export function WikiTasksPanel({
 										pending={pending[row.id]}
 										onTick={() => void tick(row)}
 										onDismiss={() => settleTick(row.id)}
-										onOpenNote={() => onOpenNote(row.path)}
+										onOpenSource={() => onOpenSource(row.path, row.line, row.raw)}
+										onOpenWikilink={onOpenWikilink}
 									/>
 								))}
 						</div>
@@ -298,13 +324,15 @@ function TaskRow({
 	pending,
 	onTick,
 	onDismiss,
-	onOpenNote,
+	onOpenSource,
+	onOpenWikilink,
 }: {
 	row: WikiTaskRow;
 	pending: Pending | undefined;
 	onTick: () => void;
 	onDismiss: () => void;
-	onOpenNote: () => void;
+	onOpenSource: () => void;
+	onOpenWikilink: (target: string) => void;
 }) {
 	// A confirmed tick clears itself after a beat, so the row does not sit
 	// struck through until the next poll. A refusal does NOT: it stays until
@@ -318,6 +346,23 @@ function TaskRow({
 	const done = pending?.state === "done";
 	const saving = pending?.state === "saving";
 	const failed = pending?.state === "failed";
+
+	/*
+	 * The TASK is the row, so `(from: …)` is lifted out of the sentence before
+	 * anything is drawn — it is provenance somebody appended, not part of what
+	 * is to be done. It comes back as a chip on the meta line only when it
+	 * still says something the row does not already say: a tag reading
+	 * `My active items` directly above a source line reading `· My active
+	 * items` is noise, and so is one whose only content is the date that put
+	 * the row under its day heading.
+	 *
+	 * `row.raw` — the byte-exact key a tick is written by — is untouched by any
+	 * of this. Only where the reader sees the words changes.
+	 */
+	const { text, tags } = splitFromTags(row.text);
+	const section = row.section ?? "";
+	const from = tags.filter((tag) => fromTagAddsSomething(tag, section, row.subsection ?? ""));
+	const where = sourceLabel(row.path) + (section ? ` · ${section}` : "");
 
 	return (
 		<div className={`wiki-tasks__row${done ? " is-done" : ""}${failed ? " is-failed" : ""}`}>
@@ -336,17 +381,46 @@ function TaskRow({
 			</button>
 			<div className="wiki-tasks__body">
 				{/*
-				 * Vault content is untrusted, and this is a plain text node —
-				 * no markdown pass, no HTML, nothing evaluated. A row that
-				 * contains angle brackets shows angle brackets.
+				 * Vault content is untrusted, and this is still not markup:
+				 * `splitWikilinks` hands back TOKENS and each one becomes an
+				 * element here, so a row containing angle brackets shows angle
+				 * brackets. Only `[[…]]` becomes a link, and it borrows the Notes
+				 * tab's own class rather than growing a second treatment for the
+				 * same thing.
 				 */}
-				<span className="wiki-tasks__text">{row.text}</span>
+				<span className="wiki-tasks__text">
+					{splitWikilinks(text).map((part, index) =>
+						part.kind === "text" ? (
+							<span key={index}>{part.value}</span>
+						) : (
+							<button
+								key={index}
+								type="button"
+								className="note-prose__wikilink note-prose__wikilink--active"
+								title={part.anchor ? `${part.target} › ${part.anchor}` : part.target}
+								onClick={() => onOpenWikilink(part.target)}
+							>
+								{part.label}
+							</button>
+						),
+					)}
+				</span>
 				<span className="wiki-tasks__meta">
 					{row.owner && <span className="wiki-tasks__owner">@{row.owner}</span>}
-					<button type="button" className="wiki-tasks__where" onClick={onOpenNote} title={row.path}>
-						{noteLabel(row.path)}
-						{row.section ? ` · ${row.section}` : ""}
+					{/*
+					 * The address, and the quietest thing in the row. It goes to the
+					 * row's own LINE, not merely the file — a reader who clicks it is
+					 * asking "what does this sit next to", and a note scrolled to the
+					 * top does not answer that.
+					 */}
+					<button type="button" className="wiki-tasks__where" onClick={onOpenSource} title={`${row.path}:${row.line}`}>
+						{where}
 					</button>
+					{from.map((tag) => (
+						<span key={tag} className="wiki-tasks__from" title={`from: ${tag}`}>
+							<span className="wiki-tasks__from-label">from</span> {tag}
+						</span>
+					))}
 				</span>
 				{pending?.state === "done" && pending.moved && (
 					<span className="wiki-tasks__note">The row had moved in the note — ticked where it is now.</span>
@@ -365,19 +439,4 @@ function TaskRow({
 			</div>
 		</div>
 	);
-}
-
-/**
- * Where a row lives, short enough for the meta line.
- *
- * The note's own folder is included, because a vault that keeps one task note
- * per project names them all the same thing — every row would otherwise read
- * `_tasks` and the column would say nothing. The full path is on the button's
- * title, so this is a label rather than the address.
- */
-export function noteLabel(path: string): string {
-	const segments = path.split("/");
-	const base = (segments.pop() ?? path).replace(/\.md$/i, "");
-	const folder = segments.pop();
-	return folder ? `${folder}/${base}` : base;
 }

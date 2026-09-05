@@ -82,6 +82,16 @@ export function WikiPage() {
 	const [switching, setSwitching] = useState(false);
 	const showPicker = !running || switching;
 
+	/**
+	 * The row a click on the Tasks tab's source line asked for, kept beside the
+	 * history rather than inside it: it is about ONE opening of a note, not
+	 * about where the reader is, so going Back does not re-scroll.
+	 *
+	 * `at` is a nonce so that clicking the same source line twice — the reader
+	 * scrolled away and wants to be shown the row again — is two requests.
+	 */
+	const [reveal, setReveal] = useState<{ path: string; line: number; raw: string; at: number } | null>(null);
+
 	const openNote = useCallback((path: string) => {
 		setHistory((current) => {
 			if (current.paths[current.index] === path) return current;
@@ -90,7 +100,23 @@ export function WikiPage() {
 		});
 	}, []);
 
-	const closeNote = useCallback(() => setHistory({ paths: [], index: -1 }), []);
+	const closeNote = useCallback(() => {
+		setReveal(null);
+		setHistory({ paths: [], index: -1 });
+	}, []);
+
+	/**
+	 * Open a task row's note AT the row. The line is only a hint — the note may
+	 * have changed since the list read it — so it travels with the row's own
+	 * text, which is what `WikiNoteView` actually locates it by.
+	 */
+	const openSource = useCallback(
+		(path: string, line: number, raw: string) => {
+			openNote(path);
+			setReveal({ path, line, raw, at: Date.now() });
+		},
+		[openNote],
+	);
 
 	// A `[[wikilink]]` names a note, not a path: resolve it against the vault
 	// index the way the vault's own editor does — an exact path first, then a
@@ -205,6 +231,7 @@ export function WikiPage() {
 							onReload={() => void queryClient.invalidateQueries({ queryKey: wikiNoteQueryKey(openPath) })}
 							onOpenNote={resolveWikilink}
 							onOpenTag={openTag}
+							reveal={reveal && reveal.path === openPath ? reveal : null}
 						/>
 					) : showPicker ? (
 						<WikiAgentPicker
@@ -253,7 +280,8 @@ export function WikiPage() {
 							onSaveSettings={(next) => saveTasksSettings.mutateAsync(next)}
 							savingSettings={saveTasksSettings.isPending}
 							settingsError={saveTasksSettings.error ? saveTasksSettings.error.message : null}
-							onOpenNote={openNote}
+							onOpenSource={openSource}
+							onOpenWikilink={resolveWikilink}
 						/>
 					}
 				/>

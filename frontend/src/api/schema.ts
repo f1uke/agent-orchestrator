@@ -3268,6 +3268,8 @@ export interface components {
             folders?: string[];
             /** @description Owner tokens that mean 'me', for the mine/others filter. */
             ownerAliases?: string[];
+            /** @description Show only rows carrying their own 'created:' date, and judge the cutoff by that date alone. Hides, never modifies. */
+            requireCreated?: boolean;
             /** @description Only rows under these '## ' headings. Empty means every section. */
             sections?: string[];
         };
@@ -3642,6 +3644,7 @@ export interface components {
             folders: string[];
             ownerAliases: string[];
             owners: string[];
+            requireCreated?: boolean;
             scannedNotes: number;
             sections: string[];
             tasks: components["schemas"]["WikiTaskRow"][];
@@ -3651,6 +3654,7 @@ export interface components {
             cutoff: string;
             folders: string[];
             ownerAliases: string[];
+            requireCreated: boolean;
             sections: string[];
         };
         WorkspaceChangesResponse: {
