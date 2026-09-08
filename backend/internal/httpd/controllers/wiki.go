@@ -27,6 +27,7 @@ type WikiService interface {
 	WriteNote(ctx context.Context, in wikisvc.WriteNoteInput) (wikisvc.WriteNoteResult, error)
 	ListTasks(ctx context.Context) (wikisvc.Tasks, error)
 	CompleteTask(ctx context.Context, in wikisvc.CompleteTaskInput) (wikisvc.CompleteTaskResult, error)
+	DeleteTask(ctx context.Context, in wikisvc.DeleteTaskInput) (wikisvc.DeleteTaskResult, error)
 }
 
 // WikiController owns the /wiki routes. A nil service keeps them mounted and
@@ -46,6 +47,7 @@ func (c *WikiController) Register(r chi.Router) {
 	r.Put("/wiki/file", c.writeNote)
 	r.Get("/wiki/tasks", c.tasks)
 	r.Post("/wiki/tasks/complete", c.completeTask)
+	r.Post("/wiki/tasks/delete", c.deleteTask)
 }
 
 func (c *WikiController) status(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +237,47 @@ func (c *WikiController) tasks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// taskRowBody is the body BOTH row writes take: one row, addressed by its note,
+// its line and its exact text. It is the only place that body is parsed, so the
+// two endpoints cannot drift apart in how they read a row's identity — which is
+// the one thing they must agree on, since one of them deletes what it matches.
+//
+// CompleteWikiTaskRequest and DeleteWikiTaskRequest describe this same shape for
+// the OpenAPI spec, each carrying the warning a client author needs for its own
+// operation. The conversions below are a compile-time proof that all three stay
+// the same shape: add a field to one and the build stops.
+type taskRowBody struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Raw  string `json:"raw"`
+}
+
+var (
+	_ = taskRowBody(CompleteWikiTaskRequest{})
+	_ = taskRowBody(DeleteWikiTaskRequest{})
+)
+
+// decodeTaskRow reads that body and checks the one field the route itself can
+// judge. It writes the refusal itself: false means a response has already gone
+// out.
+//
+// `raw` is deliberately NOT trimmed and NOT checked for emptiness here. The
+// row's identity is its exact bytes, so trimming would make a row with trailing
+// whitespace unmatchable, and "the row text is required" is the service's rule
+// to state — with its own code — rather than one this layer guesses at.
+func decodeTaskRow(w http.ResponseWriter, r *http.Request) (taskRowBody, bool) {
+	var in taskRowBody
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return taskRowBody{}, false
+	}
+	if strings.TrimSpace(in.Path) == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PATH_REQUIRED", "path is required", nil)
+		return taskRowBody{}, false
+	}
+	return in, true
+}
+
 // completeTask ticks one row off in the note it lives in. The body carries the
 // row's exact text, and a line whose text no longer matches is refused rather
 // than written to.
@@ -243,27 +286,46 @@ func (c *WikiController) completeTask(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "POST", "/api/v1/wiki/tasks/complete")
 		return
 	}
-	var in CompleteWikiTaskRequest
-	if err := decodeJSON(r, &in); err != nil {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+	in, ok := decodeTaskRow(w, r)
+	if !ok {
 		return
 	}
-	if strings.TrimSpace(in.Path) == "" {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PATH_REQUIRED", "path is required", nil)
-		return
-	}
-	res, err := c.Svc.CompleteTask(r.Context(), wikisvc.CompleteTaskInput{
-		Path: in.Path,
-		Line: in.Line,
-		// NOT trimmed: the row's identity is its exact bytes, and trimming here
-		// would make a row with trailing whitespace unmatchable.
-		Raw: in.Raw,
-	})
+	res, err := c.Svc.CompleteTask(r.Context(), wikisvc.CompleteTaskInput{Path: in.Path, Line: in.Line, Raw: in.Raw})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, CompleteWikiTaskResponse{
+		Path:           res.Path,
+		Line:           res.Line,
+		Raw:            res.Raw,
+		Moved:          res.Moved,
+		NoteModifiedAt: res.NoteModifiedAt,
+	})
+}
+
+// deleteTask removes one row from the note it lives in. The body carries the
+// row's exact text, and a line whose text no longer matches is refused rather
+// than deleted.
+//
+// 🗝 The only thing this endpoint adds over the tick is that what it does
+// cannot be undone from the app. It buys nothing extra in leniency for it: the
+// same body, the same key, the same refusals.
+func (c *WikiController) deleteTask(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/wiki/tasks/delete")
+		return
+	}
+	in, ok := decodeTaskRow(w, r)
+	if !ok {
+		return
+	}
+	res, err := c.Svc.DeleteTask(r.Context(), wikisvc.DeleteTaskInput{Path: in.Path, Line: in.Line, Raw: in.Raw})
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, DeleteWikiTaskResponse{
 		Path:           res.Path,
 		Line:           res.Line,
 		Raw:            res.Raw,

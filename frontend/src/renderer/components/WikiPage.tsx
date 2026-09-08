@@ -4,6 +4,7 @@ import { BookText } from "lucide-react";
 import { useDaemonStatus } from "../hooks/useDaemonStatus";
 import {
 	useCompleteWikiTask,
+	useDeleteWikiTask,
 	useSaveWikiTasksSettings,
 	useWikiAgentControls,
 	useWikiFiles,
@@ -70,6 +71,7 @@ export function WikiPage() {
 	const tasksSettingsQuery = useWikiTasksSettings(configured);
 	const saveTasksSettings = useSaveWikiTasksSettings();
 	const completeTask = useCompleteWikiTask();
+	const deleteTask = useDeleteWikiTask();
 
 	// The reading history behind the file bar's chevrons: a stack of note paths
 	// with a cursor, so Back returns to the note you came FROM.
@@ -275,6 +277,12 @@ export function WikiPage() {
 							onRefresh={() => void queryClient.invalidateQueries({ queryKey: wikiTasksQueryKey })}
 							onComplete={async (row) => {
 								const result = await completeTask.mutateAsync({ path: row.path, line: row.line, raw: row.raw });
+								return { moved: result.moved };
+							}}
+							onDelete={async (row) => {
+								// The same three values the tick sends, for the same
+								// reason: `raw` is the key, `line` is only a hint.
+								const result = await deleteTask.mutateAsync({ path: row.path, line: row.line, raw: row.raw });
 								return { moved: result.moved };
 							}}
 							onSaveSettings={(next) => saveTasksSettings.mutateAsync(next)}

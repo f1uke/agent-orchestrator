@@ -7,7 +7,6 @@
  * never appears on the board.
  */
 
-import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
@@ -260,6 +259,7 @@ export function useSaveWikiNote() {
 export type WikiTasks = components["schemas"]["WikiTasksResponse"];
 export type WikiTaskRow = components["schemas"]["WikiTaskRow"];
 export type WikiTaskCompleted = components["schemas"]["CompleteWikiTaskResponse"];
+export type WikiTaskDeleted = components["schemas"]["DeleteWikiTaskResponse"];
 export type WikiTasksSettings = components["schemas"]["WikiTasksSettingsResponse"];
 
 export const wikiTasksQueryKey = ["wiki", "tasks"] as const;
@@ -343,56 +343,71 @@ export function useSaveWikiTasksSettings() {
 	});
 }
 
-/** Why a tick was refused, in words the reader can act on. */
-export type TaskTickFailure = {
+/** Why a write to a row was refused, in words the reader can act on. */
+export type TaskWriteFailure = {
 	/** `stale` is the reader's to resolve; `refused` is everything else. */
 	kind: "stale" | "refused";
 	title: string;
 	detail: string;
 };
 
-/** Thrown by the tick so the tab can branch without reparsing the body. */
-export class WikiTaskTickError extends Error {
-	readonly failure: TaskTickFailure;
+/** Thrown by a tick or a delete so the tab can branch without reparsing the body. */
+export class WikiTaskWriteError extends Error {
+	readonly failure: TaskWriteFailure;
 
-	constructor(failure: TaskTickFailure) {
+	constructor(failure: TaskWriteFailure) {
 		super(`${failure.title} ${failure.detail}`);
-		this.name = "WikiTaskTickError";
+		this.name = "WikiTaskWriteError";
 		this.failure = failure;
 	}
 }
 
 /**
- * What went wrong with a tick.
+ * Which write was refused. The daemon's refusal CODES are the same for both —
+ * both are the same identity question asked of the same note — but what the
+ * reader has to be told is not: after a refused delete the sentence that
+ * matters is "nothing was deleted", and telling somebody nothing was *written*
+ * about a row they had just asked to destroy leaves the one question they
+ * actually have unanswered.
+ */
+export type TaskWriteAction = "tick" | "delete";
+
+/**
+ * What went wrong with a tick or a delete.
  *
- * Every one of these means NOTHING WAS WRITTEN, and each says which of the
+ * Every one of these means NOTHING CHANGED ON DISK, and each says which of the
  * "we did not touch your note" cases happened — the whole point of matching on
  * the row's exact text is that a mismatch can be explained rather than guessed
  * at, so the wording here has to carry that through instead of flattening the
- * three cases into one shrug.
+ * cases into one shrug.
  */
-export function taskTickFailure(error: unknown): TaskTickFailure {
+export function taskWriteFailure(error: unknown, action: TaskWriteAction = "tick"): TaskWriteFailure {
 	const body: ErrorBody = typeof error === "object" && error !== null ? (error as ErrorBody) : {};
+	// The one clause every refusal ends on, and the only thing that changes
+	// between the two writes.
+	const untouched = action === "delete" ? "Nothing was deleted." : "Nothing was written.";
 	switch (str(body.code)) {
 		case "WIKI_TASK_NOT_FOUND":
 			return {
 				kind: "stale",
 				title: "This row has changed in the note.",
-				detail: "Nothing was written. Re-read the vault to see what it says now.",
+				detail: `${untouched} It was edited${action === "delete" ? ", ticked off or already removed" : " or removed"}. Re-read the vault to see what it says now.`,
 			};
 		case "WIKI_TASK_AMBIGUOUS":
 			return {
 				kind: "stale",
 				title: "This note has more than one row with exactly this text.",
-				detail: "Nothing was written, because there is no way to tell which one you meant. Tick it in the note itself.",
+				detail: `${untouched} There is no way to tell which one you meant, so ${action === "delete" ? "delete it" : "tick it"} in the note itself.`,
 			};
 		case "WIKI_TASK_ALREADY_DONE":
-			return { kind: "stale", title: "This was already ticked off.", detail: "Nothing was written." };
+			return { kind: "stale", title: "This was already ticked off.", detail: untouched };
+		case "WIKI_TASK_NOT_A_TASK":
+			return { kind: "refused", title: "That line is not an unchecked task row.", detail: untouched };
 		case "WIKI_NOTE_CONFLICT":
 			return {
 				kind: "stale",
 				title: "The note changed while this was being written.",
-				detail: "Nothing was written. Re-read the vault and try again.",
+				detail: `${untouched} Re-read the vault and try again.`,
 			};
 		case "WIKI_NOTE_NOT_FOUND":
 			return { kind: "refused", title: "This note is no longer there.", detail: "It was moved or deleted." };
@@ -401,48 +416,51 @@ export function taskTickFailure(error: unknown): TaskTickFailure {
 			// actually said rather than a sentence that hides it.
 			return {
 				kind: "refused",
-				title: "This couldn’t be ticked off.",
+				title: action === "delete" ? "This couldn’t be deleted." : "This couldn’t be ticked off.",
 				detail: apiErrorMessage(error, "The daemon refused the write."),
 			};
 	}
 }
 
 /**
- * Tick one row off.
+ * Every write the Tasks tab makes, through ONE promise chain, module-wide.
  *
- * 🗝 Ticks are SERIALIZED through one promise chain. Two ticks in the same note
- * otherwise race on the note's content hash and the second is refused with a
- * conflict the reader did nothing to cause. They are rare enough — one click
- * each — that a queue costs nothing and removes the whole class of failure.
+ * 🗝 Ticks and deletes both rewrite a whole note under its content hash, so two
+ * of them landing together in the same note make the second fail a conflict the
+ * reader did nothing to cause. They are rare enough — one click each — that a
+ * queue costs nothing and removes the whole class of failure.
  *
- * The caller owns the pending/optimistic state, because it is what must
- * survive the list being refetched underneath it.
+ * The chain is a MODULE-LEVEL value rather than a ref inside one hook, because
+ * a ref per hook is one queue per hook: a tick and a delete would each have
+ * their own and could still race each other. There is one vault, so there is
+ * one queue.
  */
+let taskWrites: Promise<unknown> = Promise.resolve();
+
+function queueTaskWrite<T>(send: () => Promise<T>): Promise<T> {
+	// `then(send, send)` rather than `then(send)`: a write that failed must not
+	// poison the queue for every write behind it.
+	const run = taskWrites.then(send, send);
+	// The chain itself never rejects, or the next `.then` would skip.
+	taskWrites = run.catch(() => undefined);
+	return run;
+}
+
 export function useCompleteWikiTask() {
 	const queryClient = useQueryClient();
-	// One chain for the whole app. A ref rather than state: it is a lock, and
-	// re-rendering because the lock moved would be noise.
-	const chain = useRef<Promise<unknown>>(Promise.resolve());
 
-	return useMutation<WikiTaskCompleted, WikiTaskTickError, { path: string; line: number; raw: string }>({
-		mutationFn: async (input) => {
-			const send = async (): Promise<WikiTaskCompleted> => {
+	return useMutation<WikiTaskCompleted, WikiTaskWriteError, { path: string; line: number; raw: string }>({
+		mutationFn: (input) =>
+			queueTaskWrite(async () => {
 				const { data, error } = await apiClient.POST("/api/v1/wiki/tasks/complete", {
 					// `raw` goes out exactly as it came in. Trimming or
 					// re-rendering it here would break the one guarantee this
 					// whole path rests on.
 					body: { path: input.path, line: input.line, raw: input.raw },
 				});
-				if (error) throw new WikiTaskTickError(taskTickFailure(error));
+				if (error) throw new WikiTaskWriteError(taskWriteFailure(error, "tick"));
 				return data as WikiTaskCompleted;
-			};
-			// `then(send, send)` rather than `then(send)`: a tick that failed
-			// must not poison the queue for every tick behind it.
-			const run = chain.current.then(send, send);
-			// The chain itself never rejects, or the next `.then` would skip.
-			chain.current = run.catch(() => undefined);
-			return run;
-		},
+			}),
 		onSuccess: (_result, input) => {
 			// The note aged, and the rail shows each note's age.
 			void queryClient.invalidateQueries({ queryKey: wikiFilesQueryKey });
@@ -454,6 +472,42 @@ export function useCompleteWikiTask() {
 			// however long the reader was elsewhere. Re-reading here is safe
 			// BECAUSE the panel holds its pending rows itself (`mergeHeldRows`):
 			// the row it removes is one the daemon has already written.
+			void queryClient.invalidateQueries({ queryKey: wikiTasksQueryKey });
+		},
+	});
+}
+
+/**
+ * Delete one row from the note it lives in.
+ *
+ * 🗝 This is the only call in the app that DESTROYS something a person wrote,
+ * and the app keeps no copy: once the daemon has written the note back without
+ * that line, the line exists nowhere this code can reach. The protection lives
+ * one layer up, in the tab, as a confirm step the reader passes through before
+ * this is ever called — and the daemon's own rule, that a line is only removed
+ * when its full text still equals the `raw` sent here, is what stops a confirmed
+ * delete from landing on a different row than the one that was confirmed.
+ *
+ * Everything else is the tick's shape exactly: the same key, the same queue,
+ * the same three invalidations. A delete is not a special kind of write; it is
+ * the same write with a worse consequence for getting it wrong.
+ */
+export function useDeleteWikiTask() {
+	const queryClient = useQueryClient();
+
+	return useMutation<WikiTaskDeleted, WikiTaskWriteError, { path: string; line: number; raw: string }>({
+		mutationFn: (input) =>
+			queueTaskWrite(async () => {
+				const { data, error } = await apiClient.POST("/api/v1/wiki/tasks/delete", {
+					body: { path: input.path, line: input.line, raw: input.raw },
+				});
+				if (error) throw new WikiTaskWriteError(taskWriteFailure(error, "delete"));
+				return data as WikiTaskDeleted;
+			}),
+		onSuccess: (_result, input) => {
+			void queryClient.invalidateQueries({ queryKey: wikiFilesQueryKey });
+			// The note is one line shorter, and the note view may be showing it.
+			void queryClient.invalidateQueries({ queryKey: wikiNoteQueryKey(input.path) });
 			void queryClient.invalidateQueries({ queryKey: wikiTasksQueryKey });
 		},
 	});

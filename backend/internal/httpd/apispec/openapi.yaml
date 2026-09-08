@@ -6152,6 +6152,56 @@ paths:
         refused
       tags:
       - wiki
+  /api/v1/wiki/tasks/delete:
+    post:
+      operationId: deleteWikiTask
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteWikiTaskRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteWikiTaskResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Delete one task row from its note, matched on its exact text so a stale
+        row is refused
+      tags:
+      - wiki
 components:
   schemas:
     APIError:
@@ -7240,6 +7290,42 @@ components:
       required:
       - ok
       - sessionId
+      type: object
+    DeleteWikiTaskRequest:
+      properties:
+        line:
+          description: '1-based line the row was read from. A hint: the row may have
+            moved, and raw decides.'
+          type: integer
+        path:
+          description: Vault-relative path of the note holding the row.
+          type: string
+        raw:
+          description: The row's line byte for byte as it was displayed. Required;
+            a line whose text differs is never deleted.
+          type: string
+      required:
+      - path
+      - line
+      - raw
+      type: object
+    DeleteWikiTaskResponse:
+      properties:
+        line:
+          type: integer
+        moved:
+          type: boolean
+        noteModifiedAt:
+          type: string
+        path:
+          type: string
+        raw:
+          type: string
+      required:
+      - path
+      - line
+      - raw
+      - moved
       type: object
     DiffContextLineDTO:
       properties:
