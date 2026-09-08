@@ -213,3 +213,48 @@ export function byNoteThenLine(a: WikiTaskRow, b: WikiTaskRow): number {
 	if (a.path !== b.path) return a.path.localeCompare(b.path);
 	return a.line - b.line;
 }
+
+/**
+ * A row's IDENTITY, as the tick path already defines it: the note it lives in
+ * and its text, byte for byte.
+ *
+ * 🗝 Deliberately NOT `row.id`, which hashes the LINE NUMBER as well and so
+ * changes the moment an edit above the row renumbers it. A row that merely
+ * moved is still the same row, and a tick in flight against it has to survive a
+ * re-read that renumbered it. Two rows reading exactly alike in one note share
+ * a key - which is the case the daemon refuses as ambiguous anyway, so both of
+ * them carrying the same refusal is the truth rather than a collision.
+ */
+export function taskKey(row: WikiTaskRow): string {
+	return `${row.path}\n${row.raw}`;
+}
+
+/**
+ * The rows to DRAW: what the daemon last returned, plus any row the tab is
+ * still holding on screen that the daemon no longer returns.
+ *
+ * 🗝 This is what turns "a re-read never discards a tick" from a rule about
+ * TIMING into a property of the data. A row being ticked, and a row whose tick
+ * was refused, are held by the panel together with their own copy of the row,
+ * so a re-read that lands mid-write - or the one that lands just after it, with
+ * the row already gone from the vault - replaces the list underneath without
+ * taking the reader's own click off the screen. Nothing has to be suspended for
+ * that to hold.
+ *
+ * A held row is INSERTED at its own place in the daemon's order (note path,
+ * then position in it) rather than appended, so a row on its way out does not
+ * jump to the bottom of its day first. The daemon's own ordering of the rows it
+ * returned is left exactly as it sent it.
+ */
+export function mergeHeldRows(rows: WikiTaskRow[], held: WikiTaskRow[]): WikiTaskRow[] {
+	if (held.length === 0) return rows;
+	const known = new Set(rows.map(taskKey));
+	const missing = held.filter((row) => !known.has(taskKey(row)));
+	if (missing.length === 0) return rows;
+	const out = [...rows];
+	for (const row of missing) {
+		const at = out.findIndex((existing) => byNoteThenLine(row, existing) < 0);
+		out.splice(at < 0 ? out.length : at, 0, row);
+	}
+	return out;
+}

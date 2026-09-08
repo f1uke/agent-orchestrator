@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, EyeOff, Loader2, RefreshCw, Settings2, X } from "lucide-react";
 import type { WikiTaskRow, WikiTasks, WikiTasksSettings } from "../hooks/useWiki";
 import { WikiTaskTickError } from "../hooks/useWiki";
-import { partitionTasks, type OwnerFilter } from "../lib/wiki-tasks";
+import { mergeHeldRows, partitionTasks, taskKey, type OwnerFilter } from "../lib/wiki-tasks";
 import { fromTagAddsSomething, sourceLabel, splitFromTags, splitWikilinks } from "../lib/wiki-task-text";
 import {
 	loadCollapsedGroups,
@@ -27,9 +27,15 @@ import { WikiTasksSettingsForm } from "./WikiTasksSettingsForm";
  *     wrong row is impossible by construction and a mismatch is a visible,
  *     explained refusal rather than a silent write.
  *  2. A refresh NEVER discards a tick. Ticked rows are held in `pending` here,
- *     outside the query cache, so a poll or a manual re-read replaces the rows
- *     underneath without touching what the reader just did. A row leaves
- *     `pending` only when the daemon has answered.
+ *     outside the query cache, WITH THEIR OWN COPY OF THE ROW, so a poll or a
+ *     manual re-read replaces the rows underneath without touching what the
+ *     reader just did - and without needing the re-read to be held off. A row
+ *     leaves `pending` only when the daemon has answered.
+ *
+ *     That second half is the fix for a list that froze: holding the ROW, not
+ *     just its state, is what lets the list re-read as often as it likes. The
+ *     older shape held only the state, so it needed refetching suspended while
+ *     a tick was in flight, and a tick that never settled suspended it forever.
  *
  * Ticking only ever TICKS. There is no un-tick here: this tab collects
  * unchecked rows, so a ticked one leaves the list and there is nothing left to
@@ -37,9 +43,17 @@ import { WikiTasksSettingsForm } from "./WikiTasksSettingsForm";
  * tab never showed anyone. The note itself is one click away for that.
  */
 
-/** A tick the daemon has not answered yet, or has refused. */
+/**
+ * A tick the daemon has not answered yet, or has refused.
+ *
+ * It carries `row` because the row it belongs to may be gone from the daemon's
+ * next answer - a written tick means exactly that - and the reader still has to
+ * see their own click land. `mergeHeldRows` puts it back on screen.
+ */
 type Pending =
-	{ state: "saving" } | { state: "done"; moved: boolean } | { state: "failed"; title: string; detail: string };
+	| { state: "saving"; row: WikiTaskRow }
+	| { state: "done"; moved: boolean; row: WikiTaskRow }
+	| { state: "failed"; title: string; detail: string; row: WikiTaskRow };
 
 export function WikiTasksPanel({
 	tasks,
@@ -79,13 +93,22 @@ export function WikiTasksPanel({
 	// 🗝 Ticks live HERE, not in the query cache, and that is the whole point:
 	// the cache is replaced wholesale by every refetch, and a tick that lived
 	// in it would be thrown away by a poll that happened to land mid-write.
+	//
+	// Keyed by the row's IDENTITY (`taskKey`: note + text) rather than by
+	// `row.id`, which hashes the line number too. An edit above the row
+	// renumbers it and gives it a new id, and a tick must not lose its place on
+	// screen because somebody else's edit moved the row a line down.
 	const [pending, setPending] = useState<Record<string, Pending>>({});
-	// A ref beside it so the refetch guard reads the current value without
+	// A ref beside it so a click reads the current value without the callback
 	// re-subscribing every render.
 	const pendingRef = useRef(pending);
 	pendingRef.current = pending;
 
-	const rows = useMemo(() => tasks?.tasks ?? [], [tasks]);
+	const served = useMemo(() => tasks?.tasks ?? [], [tasks]);
+	// The rows the tab is still holding on screen: a tick being written, or one
+	// the daemon refused and the reader has not read yet.
+	const held = useMemo(() => Object.values(pending).map((p) => p.row), [pending]);
+	const rows = useMemo(() => mergeHeldRows(served, held), [served, held]);
 	const aliases = useMemo(() => tasks?.ownerAliases ?? [], [tasks]);
 	const cutoff = tasks?.cutoff ?? "";
 	// Read from the tab's own answer rather than from the settings query, so
@@ -94,31 +117,52 @@ export function WikiTasksPanel({
 	// loading shows too much for an instant, never too little.
 	const requireCreated = tasks?.requireCreated === true;
 
-	const view = useMemo(
-		() => partitionTasks(rows, { ownerFilter, ownerAliases: aliases, cutoff, requireCreated, showHidden }),
-		[rows, ownerFilter, aliases, cutoff, requireCreated, showHidden],
+	/*
+	 * Two readings of the same rule, and they answer two different questions.
+	 *
+	 * `view` is what is DRAWN, held rows and all, so a tick keeps its place on
+	 * screen while it settles. `truth` is what the VAULT says, so the counts and
+	 * the hidden-rows notice describe the notes rather than the animation: a row
+	 * that has been ticked is not an open task the moment the daemon says it was
+	 * written, even though it is still on screen for another beat.
+	 *
+	 * With nothing pending - the whole time the reader is just reading - the two
+	 * are the same object and the second pass never runs.
+	 */
+	const rule = useMemo(
+		() => ({ ownerFilter, ownerAliases: aliases, cutoff, requireCreated, showHidden }),
+		[ownerFilter, aliases, cutoff, requireCreated, showHidden],
 	);
+	const truth = useMemo(() => partitionTasks(served, rule), [served, rule]);
+	const view = useMemo(() => (rows === served ? truth : partitionTasks(rows, rule)), [rows, served, truth, rule]);
 
 	// A row that has been ticked and confirmed is gone from the list the moment
 	// the daemon re-reads the vault. Until then it stays on screen, struck
 	// through, so the click has somewhere to land — a row vanishing the instant
 	// it is clicked reads as a bug even when it is correct.
-	const settleTick = useCallback((id: string) => {
+	const settleTick = useCallback((key: string) => {
 		setPending((current) => {
-			if (!current[id]) return current;
+			if (!current[key]) return current;
 			const next = { ...current };
-			delete next[id];
+			delete next[key];
 			return next;
 		});
 	}, []);
 
 	const tick = useCallback(
 		async (row: WikiTaskRow) => {
-			if (pendingRef.current[row.id]) return;
-			setPending((current) => ({ ...current, [row.id]: { state: "saving" } }));
+			const key = taskKey(row);
+			// A tick already in flight is not clicked twice, and a row already
+			// ticked has nothing left to do. A REFUSED one, though, is exactly
+			// the row the reader is most likely to click again - they read the
+			// reason, fixed the note, and want to try. Swallowing that click is
+			// what made a failure look like a wedged list.
+			const already = pendingRef.current[key];
+			if (already && already.state !== "failed") return;
+			setPending((current) => ({ ...current, [key]: { state: "saving", row } }));
 			try {
 				const result = await onComplete(row);
-				setPending((current) => ({ ...current, [row.id]: { state: "done", moved: result.moved } }));
+				setPending((current) => ({ ...current, [key]: { state: "done", moved: result.moved, row } }));
 			} catch (caught) {
 				const failure =
 					caught instanceof WikiTaskTickError
@@ -126,7 +170,7 @@ export function WikiTasksPanel({
 						: { title: "This couldn’t be ticked off.", detail: String(caught) };
 				setPending((current) => ({
 					...current,
-					[row.id]: { state: "failed", title: failure.title, detail: failure.detail },
+					[key]: { state: "failed", title: failure.title, detail: failure.detail, row },
 				}));
 			}
 		},
@@ -153,12 +197,6 @@ export function WikiTasksPanel({
 		});
 	}, []);
 
-	// A tick that is still saving must not be raced by a re-read: the refresh
-	// button is disabled while one is in flight, which is the one moment where
-	// a re-read could arrive between the daemon's write and this list learning
-	// about it.
-	const saving = Object.values(pending).some((p) => p.state === "saving");
-
 	if (configuring || (tasks && !tasks.configured && !loading)) {
 		return (
 			<WikiTasksSettingsForm
@@ -180,9 +218,9 @@ export function WikiTasksPanel({
 		<>
 			<div className="wiki-rail__summary">
 				<span className="wiki-rail__count">
-					{loading && rows.length === 0
+					{loading && served.length === 0
 						? "Reading the tasks…"
-						: `${view.visible} open${view.hiddenByOwner > 0 ? ` · ${view.hiddenByOwner} filtered out` : ""}`}
+						: `${truth.visible} open${truth.hiddenByOwner > 0 ? ` · ${truth.hiddenByOwner} filtered out` : ""}`}
 				</span>
 				<div className="wiki-rail__actions">
 					<button
@@ -194,12 +232,19 @@ export function WikiTasksPanel({
 					>
 						<Settings2 aria-hidden="true" />
 					</button>
+					{/*
+					 * Always live. It used to be disabled while a tick was in
+					 * flight, to stop a re-read racing the write - but the rows
+					 * being ticked are now held on screen by the panel itself,
+					 * so there is nothing left for a re-read to take away, and
+					 * a tick that never came back took the reader's only way of
+					 * refreshing the list down with it.
+					 */}
 					<button
 						type="button"
 						className="wiki-rail__action"
 						aria-label="Re-read the tasks"
-						title={saving ? "Waiting for a tick to be written…" : "Re-read the tasks"}
-						disabled={saving}
+						title="Re-read the tasks"
 						onClick={onRefresh}
 					>
 						<RefreshCw aria-hidden="true" />
@@ -229,15 +274,15 @@ export function WikiTasksPanel({
 			 * so the reader learns that the cutoff has an edge rather than
 			 * wondering why the list never empties.
 			 */}
-			{(cutoff !== "" || requireCreated) && (view.hiddenByCutoff > 0 || view.undated > 0) && (
+			{(cutoff !== "" || requireCreated) && (truth.hiddenByCutoff > 0 || truth.undated > 0) && (
 				<div className="wiki-tasks__cutoff">
 					<EyeOff aria-hidden="true" className="wiki-tasks__cutoff-icon" />
 					<span>
-						{view.hiddenByCutoff > 0 && (
+						{truth.hiddenByCutoff > 0 && (
 							<>
-								{view.hiddenByCutoff} row{view.hiddenByCutoff === 1 ? " " : "s "}
-								before {cutoff} {view.hiddenByCutoff === 1 ? "is" : "are"} {showHidden ? "shown" : "hidden"}.{" "}
-								{view.hiddenByCutoff === 1 ? "It is" : "They are"} still in your notes.{" "}
+								{truth.hiddenByCutoff} row{truth.hiddenByCutoff === 1 ? " " : "s "}
+								before {cutoff} {truth.hiddenByCutoff === 1 ? "is" : "are"} {showHidden ? "shown" : "hidden"}.{" "}
+								{truth.hiddenByCutoff === 1 ? "It is" : "They are"} still in your notes.{" "}
 							</>
 						)}
 						{/*
@@ -246,22 +291,22 @@ export function WikiTasksPanel({
 						 * sentence has to say that plainly — the reader turned the
 						 * rule on, but they still get told what it cost.
 						 */}
-						{view.undated > 0 &&
-							(view.undatedHidden ? (
+						{truth.undated > 0 &&
+							(truth.undatedHidden ? (
 								<>
-									{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no <code>created:</code> date, so{" "}
-									{view.undated === 1 ? "it is" : "they are"} {showHidden ? "shown" : "hidden"}.{" "}
-									{view.undated === 1 ? "It is" : "They are"} still in your notes.
+									{truth.undated} row{truth.undated === 1 ? " carries" : "s carry"} no <code>created:</code> date, so{" "}
+									{truth.undated === 1 ? "it is" : "they are"} {showHidden ? "shown" : "hidden"}.{" "}
+									{truth.undated === 1 ? "It is" : "They are"} still in your notes.
 								</>
 							) : (
 								<>
-									{view.undated} row{view.undated === 1 ? " carries" : "s carry"} no date of{" "}
-									{view.undated === 1 ? "its" : "their"} own, so the cutoff leaves {view.undated === 1 ? "it" : "them"}{" "}
-									here.
+									{truth.undated} row{truth.undated === 1 ? " carries" : "s carry"} no date of{" "}
+									{truth.undated === 1 ? "its" : "their"} own, so the cutoff leaves{" "}
+									{truth.undated === 1 ? "it" : "them"} here.
 								</>
 							))}
 					</span>
-					{(view.hiddenByCutoff > 0 || view.undatedHidden) && (
+					{(truth.hiddenByCutoff > 0 || truth.undatedHidden) && (
 						<button type="button" className="wiki-tasks__cutoff-toggle" onClick={toggleHidden}>
 							{showHidden ? "Hide them" : "Show them"}
 						</button>
@@ -277,7 +322,7 @@ export function WikiTasksPanel({
 					</div>
 				)}
 				{!error && rows.length > 0 && view.visible === 0 && (
-					<div className="wiki-rail__empty">Every row is filtered out. {view.hiddenByOwner > 0 && "Try “All”."}</div>
+					<div className="wiki-rail__empty">Every row is filtered out. {truth.hiddenByOwner > 0 && "Try “All”."}</div>
 				)}
 				{view.groups.map((group) => {
 					const shut = collapsed[group.key] === true;
@@ -299,9 +344,9 @@ export function WikiTasksPanel({
 									<TaskRow
 										key={row.id}
 										row={row}
-										pending={pending[row.id]}
+										pending={pending[taskKey(row)]}
 										onTick={() => void tick(row)}
-										onDismiss={() => settleTick(row.id)}
+										onDismiss={() => settleTick(taskKey(row))}
 										onOpenSource={() => onOpenSource(row.path, row.line, row.raw)}
 										onOpenWikilink={onOpenWikilink}
 									/>
@@ -311,7 +356,7 @@ export function WikiTasksPanel({
 				})}
 				{tasks?.truncated && (
 					<div className="wiki-rail__empty">
-						Only the first {rows.length} rows are listed — this folder holds more than a task list.
+						Only the first {served.length} rows are listed — this folder holds more than a task list.
 					</div>
 				)}
 			</div>

@@ -2,12 +2,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useSaveWikiTasksSettings, type WikiTasksSettings } from "./useWiki";
+import {
+	useCompleteWikiTask,
+	useSaveWikiNote,
+	useSaveWikiTasksSettings,
+	wikiTasksQueryKey,
+	type WikiTasksSettings,
+} from "./useWiki";
 
-const { putMock } = vi.hoisted(() => ({ putMock: vi.fn() }));
+const { putMock, postMock } = vi.hoisted(() => ({ putMock: vi.fn(), postMock: vi.fn() }));
 
 vi.mock("../lib/api-client", () => ({
-	apiClient: { PUT: putMock },
+	apiClient: { PUT: putMock, POST: postMock },
 	apiErrorMessage: (_error: unknown, fallback?: string) => fallback ?? "failed",
 }));
 
@@ -31,6 +37,52 @@ function echo(next: WikiTasksSettings) {
 
 beforeEach(() => {
 	putMock.mockReset();
+	postMock.mockReset();
+});
+
+/**
+ * 🗝 A write the APP made is the one vault change the tab can know about
+ * instantly, and it used to be the one it ignored. Nothing re-read the task
+ * list after a tick, so the row the reader had just ticked off stayed on the
+ * list until the next poll - and the poll does not run while the window is
+ * hidden, which is how a ticked row survived for as long as the reader was
+ * looking somewhere else.
+ */
+describe("re-reading the tasks after a write the app made", () => {
+	function withClient() {
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+		const invalidated = vi.spyOn(client, "invalidateQueries");
+		const wrap = ({ children }: { children: ReactNode }) => (
+			<QueryClientProvider client={client}>{children}</QueryClientProvider>
+		);
+		const askedForTasks = () =>
+			invalidated.mock.calls.some((call) => String(call[0]?.queryKey) === String(wikiTasksQueryKey));
+		return { wrap, askedForTasks };
+	}
+
+	it("re-reads the list once a tick has been written", async () => {
+		postMock.mockResolvedValue({ data: { moved: false }, error: undefined });
+		const { wrap, askedForTasks } = withClient();
+
+		const { result } = renderHook(() => useCompleteWikiTask(), { wrapper: wrap });
+		result.current.mutate({ path: "Areas/a.md", line: 4, raw: "- [ ] the row" });
+
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+		expect(askedForTasks()).toBe(true);
+	});
+
+	// Task rows live in notes, so saving a note in the editor can tick one off,
+	// reword it or remove it. The Tasks tab has no other way to hear about it.
+	it("re-reads the list once a note has been saved", async () => {
+		putMock.mockResolvedValue({ data: { contentHash: "h2", size: 12, modifiedAt: "now" }, error: undefined });
+		const { wrap, askedForTasks } = withClient();
+
+		const { result } = renderHook(() => useSaveWikiNote(), { wrapper: wrap });
+		result.current.mutate({ path: "Areas/a.md", content: "- [x] the row", baseHash: "h1" });
+
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+		expect(askedForTasks()).toBe(true);
+	});
 });
 
 /**
