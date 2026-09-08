@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WikiTaskRow } from "../hooks/useWiki";
-import { isMine, partitionTasks, rowDate } from "./wiki-tasks";
+import { isMine, mergeHeldRows, partitionTasks, rowDate, taskKey } from "./wiki-tasks";
 
 const NOW = new Date("2026-09-04T12:00:00");
 
@@ -276,5 +276,42 @@ describe("partitionTasks requireCreated", () => {
 		const view = partitionTasks(mixed, { ownerFilter: "all", ownerAliases: [], now: NOW });
 		expect(view.visible).toBe(4);
 		expect(view.undatedHidden).toBe(false);
+	});
+});
+
+describe("holding a row the daemon no longer returns", () => {
+	const served = [
+		row({ id: "a1", path: "Areas/a.md", line: 3, raw: "- [ ] first", text: "first" }),
+		row({ id: "a2", path: "Areas/a.md", line: 9, raw: "- [ ] third", text: "third" }),
+		row({ id: "b1", path: "Projects/b.md", line: 2, raw: "- [ ] fourth", text: "fourth" }),
+	];
+
+	it("identifies a row by its note and its text, not by its line", () => {
+		// The id hashes the line number, so an edit above the row changes it.
+		// The row is still the same row, and a tick against it still applies.
+		const moved = row({ id: "different", path: "Areas/a.md", line: 40, raw: "- [ ] first", text: "first" });
+		expect(taskKey(moved)).toBe(taskKey(served[0]));
+		expect(taskKey(row({ path: "Areas/other.md", raw: "- [ ] first" }))).not.toBe(taskKey(served[0]));
+	});
+
+	it("gives the same list back when nothing is held", () => {
+		expect(mergeHeldRows(served, [])).toBe(served);
+	});
+
+	it("gives the same list back when the held row is still in it", () => {
+		const moved = row({ id: "renumbered", path: "Areas/a.md", line: 3, raw: "- [ ] first", text: "first" });
+		expect(mergeHeldRows(served, [moved])).toBe(served);
+	});
+
+	it("puts a held row back where it was, not on the end", () => {
+		const gone = row({ id: "a15", path: "Areas/a.md", line: 6, raw: "- [ ] second", text: "second" });
+		expect(mergeHeldRows(served, [gone]).map((r) => r.text)).toEqual(["first", "second", "third", "fourth"]);
+	});
+
+	it("leaves the daemon's own ordering of what it did return alone", () => {
+		const gone = row({ id: "z", path: "Zzz/z.md", line: 1, raw: "- [ ] last", text: "last" });
+		const merged = mergeHeldRows(served, [gone]);
+		expect(merged.slice(0, 3)).toEqual(served);
+		expect(merged[3].text).toBe("last");
 	});
 });

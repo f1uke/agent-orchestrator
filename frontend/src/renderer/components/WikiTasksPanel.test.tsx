@@ -118,15 +118,69 @@ describe("ticking a row", () => {
 		expect(box.hasAttribute("disabled")).toBe(true);
 	});
 
-	it("disables the refresh button while a tick is unwritten", async () => {
+	/**
+	 * 🗝 The invariant #293 was built around, now held by the DATA rather than
+	 * by suspending the re-read: a list that is replaced underneath a tick in
+	 * flight must not take that tick off the screen. The refresh button stays
+	 * live throughout, because a tick that never comes back must not be able to
+	 * take the reader's only way of refreshing down with it.
+	 */
+	it("keeps a tick in flight on screen when the list is re-read underneath it", async () => {
 		const user = userEvent.setup();
-		render(panel({ onComplete: vi.fn().mockReturnValue(new Promise(() => {})) }));
+		const { rerender } = render(panel({ onComplete: vi.fn().mockReturnValue(new Promise(() => {})) }));
 
-		expect(screen.getByRole("button", { name: "Re-read the tasks" }).hasAttribute("disabled")).toBe(false);
 		await user.click(screen.getByRole("button", { name: /^Tick off:/ }));
-		await waitFor(() =>
-			expect(screen.getByRole("button", { name: "Re-read the tasks" }).hasAttribute("disabled")).toBe(true),
-		);
+		await waitFor(() => expect(screen.getByRole("button", { name: /^Tick off:/ }).hasAttribute("disabled")).toBe(true));
+		expect(screen.getByRole("button", { name: "Re-read the tasks" }).hasAttribute("disabled")).toBe(false);
+
+		// A re-read lands and the row is already gone from it - the write went
+		// through on the daemon's side before this list was scanned.
+		rerender(panel({ tasks: tasks({ tasks: [] }), onComplete: vi.fn().mockReturnValue(new Promise(() => {})) }));
+
+		expect(screen.getByText("the row")).toBeTruthy();
+		expect(screen.getByRole("button", { name: /^Tick off:/ }).hasAttribute("disabled")).toBe(true);
+		expect(screen.getByRole("button", { name: "Re-read the tasks" }).hasAttribute("disabled")).toBe(false);
+	});
+
+	/**
+	 * A row whose line moved comes back from the daemon with a different `id`
+	 * (the id hashes the line number). The tick in flight is keyed by the row's
+	 * TEXT, so it stays attached to the row rather than being orphaned.
+	 */
+	it("keeps a tick in flight attached to a row an outside edit renumbered", async () => {
+		const user = userEvent.setup();
+		const held = vi.fn().mockReturnValue(new Promise(() => {}));
+		const { rerender } = render(panel({ onComplete: held }));
+
+		await user.click(screen.getByRole("button", { name: /^Tick off:/ }));
+		await waitFor(() => expect(held).toHaveBeenCalledTimes(1));
+
+		rerender(panel({ tasks: tasks({ tasks: [row({ id: "moved", line: 9 })] }), onComplete: held }));
+
+		// One row, still saving. Not two, and not one that forgot it was clicked.
+		expect(screen.getAllByText("the row")).toHaveLength(1);
+		expect(screen.getByRole("button", { name: /^Tick off:/ }).hasAttribute("disabled")).toBe(true);
+	});
+
+	/**
+	 * A confirmed tick keeps its beat on screen, and the count tells the truth
+	 * about the VAULT while it does: the row is drawn, struck through, but it is
+	 * no longer open. Then it goes, and it does not come back.
+	 */
+	it("keeps a confirmed row on screen for its beat, then lets it go", async () => {
+		const user = userEvent.setup();
+		const done = vi.fn().mockResolvedValue({ moved: false });
+		const { rerender } = render(panel({ onComplete: done }));
+
+		await user.click(screen.getByRole("button", { name: /^Tick off:/ }));
+		await waitFor(() => expect(screen.getByRole("button", { name: /^Ticked off:/ })).toBeTruthy());
+
+		// The re-read the tick asked for lands: the vault no longer has the row.
+		rerender(panel({ tasks: tasks({ tasks: [] }), onComplete: done }));
+		expect(screen.getByText("the row")).toBeTruthy();
+		expect(screen.getByText("0 open")).toBeTruthy();
+
+		await waitFor(() => expect(screen.queryByText("the row")).toBeNull(), { timeout: 4_000 });
 	});
 
 	/** A refusal is shown and stays shown — it is never a silent no-op. */
@@ -146,6 +200,66 @@ describe("ticking a row", () => {
 		expect(screen.getByText("Nothing was written.")).toBeTruthy();
 		// Still tickable: nothing was written, so the row is exactly as it was.
 		expect(screen.getByRole("button", { name: /^Tick off:/ }).hasAttribute("disabled")).toBe(false);
+	});
+
+	/**
+	 * A refusal must not wedge the row. The reader reads it, fixes the note,
+	 * and clicks again - and that second click has to reach the daemon.
+	 */
+	it("lets a refused row be ticked again", async () => {
+		const user = userEvent.setup();
+		const onComplete = vi
+			.fn()
+			.mockRejectedValueOnce(
+				new WikiTaskTickError({
+					kind: "stale",
+					title: "This row has changed in the note.",
+					detail: "Nothing was written.",
+				}),
+			)
+			.mockResolvedValueOnce({ moved: false });
+		render(panel({ onComplete }));
+
+		await user.click(screen.getByRole("button", { name: /^Tick off:/ }));
+		expect(await screen.findByText("This row has changed in the note.")).toBeTruthy();
+
+		await user.click(screen.getByRole("button", { name: /^Tick off:/ }));
+		await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(2));
+		expect(await screen.findByRole("button", { name: /^Ticked off:/ })).toBeTruthy();
+		// The refusal it replaced does not linger beside the tick that worked.
+		expect(screen.queryByText("This row has changed in the note.")).toBeNull();
+	});
+
+	/** A refused row stays readable even after the list is re-read without it. */
+	it("keeps a refusal on screen when the row is gone from the next read", async () => {
+		const user = userEvent.setup();
+		const onComplete = vi.fn().mockRejectedValue(
+			new WikiTaskTickError({
+				kind: "stale",
+				title: "This row has changed in the note.",
+				detail: "Nothing was written.",
+			}),
+		);
+		const { rerender } = render(panel({ onComplete }));
+
+		await user.click(screen.getByRole("button", { name: /^Tick off:/ }));
+		expect(await screen.findByText("This row has changed in the note.")).toBeTruthy();
+
+		rerender(
+			panel({
+				tasks: tasks({ tasks: [row({ id: "reworded", raw: "- [ ] the row, reworded", text: "the row, reworded" })] }),
+				onComplete,
+			}),
+		);
+
+		expect(screen.getByText("This row has changed in the note.")).toBeTruthy();
+		expect(screen.getByText("the row, reworded")).toBeTruthy();
+		// The vault has one open row; the refused one is on screen but not open.
+		expect(screen.getByText("1 open")).toBeTruthy();
+
+		await user.click(screen.getByRole("button", { name: "Dismiss" }));
+		expect(screen.queryByText("This row has changed in the note.")).toBeNull();
+		expect(screen.queryByText("the row")).toBeNull();
 	});
 
 	it("says so when the row had moved", async () => {

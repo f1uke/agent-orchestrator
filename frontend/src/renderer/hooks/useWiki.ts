@@ -236,6 +236,11 @@ export function useSaveWikiNote() {
 			);
 			// The rail shows each note's age, and this note just aged.
 			void queryClient.invalidateQueries({ queryKey: wikiFilesQueryKey });
+			// A note the reader edited in place is where task rows live, so this
+			// save may well have ticked one off, reworded it or removed it. The
+			// Tasks tab has no other way to hear about a write the app itself
+			// made, and it is one query over one configured subtree.
+			void queryClient.invalidateQueries({ queryKey: wikiTasksQueryKey });
 		},
 	});
 }
@@ -282,6 +287,17 @@ export function useWikiTasks(enabled: boolean) {
 		},
 		staleTime: 15_000,
 		refetchInterval: TASKS_POLL_MS,
+		// 🗝 The interval alone is NOT a live list, and believing it was is what
+		// let a ticked row sit on screen for as long as the reader cared to look
+		// at it. React Query runs `refetchInterval` only while the document is
+		// VISIBLE, and this app turns `refetchOnWindowFocus` off globally
+		// (`lib/query-client.ts`), so a window that was occluded, minimised or on
+		// another Space stopped re-reading and never caught up on the way back.
+		// Coming back to the window is the one moment the reader is certain to
+		// produce, and it is the moment the list is most likely to be wrong, so
+		// it is where the missing re-read belongs. `staleTime` bounds what that
+		// costs: alt-tabbing back and forth re-reads at most once every 15s.
+		refetchOnWindowFocus: true,
 		retry: 1,
 	});
 }
@@ -431,6 +447,14 @@ export function useCompleteWikiTask() {
 			// The note aged, and the rail shows each note's age.
 			void queryClient.invalidateQueries({ queryKey: wikiFilesQueryKey });
 			void queryClient.invalidateQueries({ queryKey: wikiNoteQueryKey(input.path) });
+			// 🗝 And the row this tick just wrote is no longer an open task. The
+			// list has to be told, or the only thing that can remove the row is
+			// the next poll - which does not run while the window is hidden, so
+			// "the row I just ticked is still listed" outlived the click by
+			// however long the reader was elsewhere. Re-reading here is safe
+			// BECAUSE the panel holds its pending rows itself (`mergeHeldRows`):
+			// the row it removes is one the daemon has already written.
+			void queryClient.invalidateQueries({ queryKey: wikiTasksQueryKey });
 		},
 	});
 }
