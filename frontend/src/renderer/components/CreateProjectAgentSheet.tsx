@@ -207,6 +207,7 @@ export const RequiredAgentField = memo(function RequiredAgentField({
 	invalid = false,
 	installed,
 	label,
+	hideLabel = false,
 	onChange,
 	placeholder,
 	supported,
@@ -218,6 +219,10 @@ export const RequiredAgentField = memo(function RequiredAgentField({
 	invalid?: boolean;
 	installed?: AgentInfo[];
 	label: string;
+	// Settings renders this inside a SettingRow whose heading already IS the
+	// label, so the visible copy would be printed twice. Hiding it keeps the
+	// accessible name (and every by-label query) exactly as it was.
+	hideLabel?: boolean;
 	onChange: (value: string) => void;
 	placeholder: string;
 	supported?: AgentInfo[];
@@ -249,7 +254,7 @@ export const RequiredAgentField = memo(function RequiredAgentField({
 
 	return (
 		<div className="flex flex-col gap-1.5">
-			<Label htmlFor={id} className="text-[12px] font-medium text-muted-foreground">
+			<Label htmlFor={id} className={hideLabel ? "sr-only" : "text-[12px] font-medium text-muted-foreground"}>
 				{label}
 			</Label>
 			<Select value={value} onValueChange={onChange} disabled={disabled}>

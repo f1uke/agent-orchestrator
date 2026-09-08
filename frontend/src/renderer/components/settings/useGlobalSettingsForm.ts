@@ -23,7 +23,9 @@ const systemPromptsQueryKey = ["settings", "systemPrompts"] as const;
 const messageTemplatesQueryKey = ["settings", "messageTemplates"] as const;
 const spawnConfirmQueryKey = ["settings", "spawnConfirm"] as const;
 const autoNudgeQueryKey = ["settings", "autoNudge"] as const;
-const responseLanguageQueryKey = ["settings", "responseLanguage"] as const;
+// Exported because the PROJECT scope reads the same value to show what its own
+// override is overriding - the one true Global -> Project override on the page.
+export const responseLanguageQueryKey = ["settings", "responseLanguage"] as const;
 export const wikiSettingsQueryKey = ["settings", "wiki"] as const;
 const reclaimSettingsQueryKey = ["settings", "reclaim"] as const;
 export const evidenceRetentionQueryKey = ["settings", "evidenceRetention"] as const;

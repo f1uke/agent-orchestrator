@@ -36,7 +36,7 @@ export function SettingsShell({
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background text-foreground">
 			<DashboardSubhead title={title} subtitle={subtitle} />
-			<div className="relative grid min-h-0 flex-1 grid-cols-[218px_minmax(0,1fr)]">
+			<div className="relative grid min-h-0 flex-1 grid-cols-[236px_minmax(0,1fr)]">
 				<SettingsNav
 					scope={scope}
 					projectName={projectName}
@@ -47,9 +47,12 @@ export function SettingsShell({
 					onSearch={onSearch}
 				/>
 				<section className="min-h-0 overflow-y-auto px-6 pb-24 pt-2">
-					<div className="mx-auto max-w-[680px]">{children}</div>
+					{/* Left-aligned, not centred: with a section nav on the left, centring the
+					    column opens a dead gap the eye has to jump every time it looks from a
+					    section name to the rows it selected. */}
+					<div className="max-w-[760px]">{children}</div>
 				</section>
-				{saveBar && <div className="absolute inset-x-0 bottom-0 left-[218px]">{saveBar}</div>}
+				{saveBar && <div className="absolute inset-x-0 bottom-0 left-[236px]">{saveBar}</div>}
 			</div>
 		</div>
 	);

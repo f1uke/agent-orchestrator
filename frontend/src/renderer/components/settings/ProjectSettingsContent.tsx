@@ -1,19 +1,23 @@
-import { Bot } from "lucide-react";
 import type { components } from "../../../api/schema";
 import { RequiredAgentField } from "../CreateProjectAgentSheet";
 import { IntakeFields } from "../IntakeFields";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { ModelField, nextModelOnAgentChange } from "./ModelField";
-import { SettingsGroup, ActionRow } from "./SettingsGroup";
-import { SettingsField } from "./SettingsField";
+import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
+import { SettingEditorControl } from "./SettingEditorControl";
 import { SettingsReadOnlyPanel, ReadonlyRow } from "./SettingsReadOnlyPanel";
-import { SettingEditorRow } from "./SettingEditorRow";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
+import { PROJECT_SECTIONS } from "./settings-sections";
 import type { useProjectSettingsForm } from "./useProjectSettingsForm";
 
 type Project = components["schemas"]["Project"];
 type AgentInfo = components["schemas"]["AgentInfo"];
 
+// "" is stored as unset. The visible option used to read "Project default", which
+// is wrong twice over: we ARE standing in the project's settings, and there is no
+// project-wide value behind it - the agent's own default mode applies.
+const PERMISSION_UNSET_LABEL = "Agent's default mode";
 const PERMISSION_MODE_OPTIONS = [
 	{ value: "default", label: "Default" },
 	{ value: "accept-edits", label: "Accept edits" },
@@ -21,6 +25,9 @@ const PERMISSION_MODE_OPTIONS = [
 	{ value: "bypass-permissions", label: "Bypass permissions" },
 ] as const;
 
+// Same correction for the reviewer: unset does not mean "whatever the project
+// says", it means claude-code (domain.FallbackReviewerHarness).
+const REVIEWER_UNSET_LABEL = "claude-code (default)";
 const REVIEWER_OPTIONS = ["claude-code", "codex", "opencode"] as const;
 
 // "none" is the UI spelling of the default (unset) convention; it maps to an
@@ -32,14 +39,18 @@ const GIT_WORKFLOW_OPTIONS = [
 ] as const;
 
 const INPUT_CLASS =
-	"h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak";
+	"h-8 w-full max-w-[340px] rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak";
 
 type ProjectForm = ReturnType<typeof useProjectSettingsForm>;
 
+function hint(key: string): string {
+	return PROJECT_SECTIONS.find((s) => s.key === key)?.hint ?? "";
+}
+
 // ProjectSettingsContent renders the active Project section against the shared
-// form hook. Only one section shows at a time (the two-pane surface), but the
-// draft lives in the hook above it, so navigating between sections never loses
-// an edit and one save bar commits the whole config.
+// form hook. Only one section shows at a time, but the draft lives in the hook
+// above it, so navigating between sections never loses an edit and one save bar
+// commits the whole config.
 export function ProjectSettingsContent({
 	project,
 	form,
@@ -50,31 +61,23 @@ export function ProjectSettingsContent({
 	activeSection: string;
 }) {
 	switch (activeSection) {
-		case "agents":
-			return <AgentsSection form={form} />;
-		case "prompts":
-			return <PromptsSection form={form} />;
-		case "automation":
-			return <AutomationSection form={form} />;
+		case "start":
+			return <StartingATaskSection form={form} />;
+		case "told":
+			return <WhatAgentsAreToldSection form={form} />;
+		case "flow":
+			return <IncomingOutgoingSection form={form} />;
 		default:
-			return <GeneralSection project={project} form={form} />;
+			return <RepositorySection project={project} form={form} />;
 	}
 }
 
-function SectionTitle({ title, hint }: { title: string; hint: string }) {
-	return (
-		<div className="mb-4 flex items-center gap-2.5 border-b border-border pb-3 pt-2.5">
-			<h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{title}</h2>
-			<span className="text-[12px] font-normal text-passive">· {hint}</span>
-		</div>
-	);
-}
-
-function GeneralSection({ project, form }: { project: Project; form: ProjectForm }) {
+function RepositorySection({ project, form }: { project: Project; form: ProjectForm }) {
 	const { form: draft, setField, isFieldDirty } = form;
+	const conventionActive = draft.gitWorkflow === "gitflow" || draft.gitWorkflow === "custom";
 	return (
 		<>
-			<SectionTitle title="General" hint="repository, worktrees & branch naming" />
+			<SectionHeading title="Repository & branches" hint={hint("repo")} />
 
 			<SettingsReadOnlyPanel title="Identity · read-only">
 				<ReadonlyRow label="id" value={project.id} copyable />
@@ -104,82 +107,17 @@ function GeneralSection({ project, form }: { project: Project; form: ProjectForm
 				</SettingsReadOnlyPanel>
 			)}
 
-			<SettingsGroup title="Web UI">
-				<label className="flex items-center gap-2.5 text-[13px] text-foreground">
-					<input
-						type="checkbox"
-						className="h-4 w-4 accent-accent"
-						checked={draft.hasWebUI}
-						onChange={(e) => setField("hasWebUI", e.target.checked)}
-					/>
-					This project has a web UI
-				</label>
-				<p className="text-[11px] text-passive">
-					Off by default. When on, a session's inspector gains a Browser tab and its agents are told how to use{" "}
-					<code>ao preview</code> to show a change there. When off there is nothing to preview, so the tab is hidden and{" "}
-					<code>ao preview</code> reports that the project has it disabled.
-				</p>
-			</SettingsGroup>
-
-			<SettingsGroup title="iOS Simulator">
-				<label className="flex items-center gap-2.5 text-[13px] text-foreground">
-					<input
-						type="checkbox"
-						className="h-4 w-4 accent-accent"
-						checked={draft.hasIOSSimulator}
-						onChange={(e) => setField("hasIOSSimulator", e.target.checked)}
-					/>
-					This project targets iOS
-				</label>
-				<p className="text-[11px] text-passive">
-					Off by default. When on, a session's inspector gains a Simulator tab that shows a booted iOS Simulator's
-					screen live and can drive it under the same lease and gesture hold <code>ao sim tap</code> uses. Nothing
-					captures unless that tab is open and this window is focused.
-				</p>
-			</SettingsGroup>
-
-			<SettingsGroup title="Crew">
-				<label className="flex items-center gap-2.5 text-[13px] text-foreground">
-					<input
-						type="checkbox"
-						className="h-4 w-4 accent-accent"
-						checked={draft.disableAutoCrew}
-						onChange={(e) => setField("disableAutoCrew", e.target.checked)}
-					/>
-					Never form a crew automatically
-				</label>
-				<p className="text-[11px] text-passive">
-					Off by default. Normally a task's dev asks AO for a qa itself, with <code>ao crew review</code>, once it
-					believes the change is done. When this is on, no agent here may ask - not at any task size - so every task on
-					this project is one agent unless you say otherwise. You can still add a qa to a single task by hand, with{" "}
-					<code>+ qa</code> in its topbar or <code>ao crew add</code> in your own shell; a request from inside a session
-					here is refused, so the choice stays yours. This changes the number of agents only: a standard or deep task
-					still gets the full ceremony, and tasks already running with a qa keep it.
-				</p>
-			</SettingsGroup>
-
-			<SettingsGroup title="Check-in">
-				<label className="flex items-center gap-2.5 text-[13px] text-foreground">
-					<input
-						type="checkbox"
-						className="h-4 w-4 accent-accent"
-						checked={draft.pauseBeforeImplementing}
-						onChange={(e) => setField("pauseBeforeImplementing", e.target.checked)}
-					/>
-					Check in with me before implementing
-				</label>
-				<p className="text-[11px] text-passive">
-					Off by default. When on, a worker here reads the code and works out what the task means, then stops and hands
-					back to you before it changes anything - with what it understood, what it plans to do, and what it needs you
-					to decide. The task moves to <strong>Needs you</strong> on the board while it waits, and it implements only
-					after you reply. Mechanical tasks never stop: they are already authorized to go straight to the edit. Your
-					orchestrator is told the gate is on here, so it briefs workers to fit it rather than telling them to run
-					straight through to a merged PR.
-				</p>
-			</SettingsGroup>
-
-			<SettingsGroup title="Worktrees">
-				<SettingsField label="Default branch" htmlFor="defaultBranch" modified={isFieldDirty("defaultBranch")}>
+			<SettingRows>
+				<SettingRow
+					name="Default branch"
+					summary="The branch a new worktree is cut from when a worker starts here."
+					detail="It is also the branch named in the convention text injected into orchestrator and worker prompts, so it is what they treat as the base when nothing else is said."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={draft.defaultBranch || "main"}
+					modified={isFieldDirty("defaultBranch")}
+					controlId="defaultBranch"
+				>
 					<input
 						id="defaultBranch"
 						className={INPUT_CLASS}
@@ -187,37 +125,54 @@ function GeneralSection({ project, form }: { project: Project; form: ProjectForm
 						onChange={(e) => setField("defaultBranch", e.target.value)}
 						placeholder="main"
 					/>
-				</SettingsField>
-				<SettingsField label="Session prefix" htmlFor="sessionPrefix" modified={isFieldDirty("sessionPrefix")}>
+				</SettingRow>
+
+				<SettingRow
+					name="Session prefix"
+					summary="The prefix in front of every session id here - and, when AO names a branch itself, the namespace that branch goes under."
+					detail="Empty falls back to the first 12 characters of the project id. The label says session, but branch names follow it too."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={draft.sessionPrefix || `${project.id.slice(0, 12)} (default)`}
+					modified={isFieldDirty("sessionPrefix")}
+					controlId="sessionPrefix"
+				>
 					<input
 						id="sessionPrefix"
 						className={INPUT_CLASS}
 						value={draft.sessionPrefix}
 						onChange={(e) => setField("sessionPrefix", e.target.value)}
-						placeholder="ao"
+						placeholder={project.id.slice(0, 12)}
 					/>
-				</SettingsField>
-			</SettingsGroup>
+				</SettingRow>
 
-			<SettingsGroup title="Git convention">
-				<SettingsField
-					label="Branch workflow"
-					htmlFor="gitWorkflow"
+				<SettingRow
+					name="Branch workflow"
+					summary="Prefixes the branches AO names itself, and tells the orchestrator and its workers how branches are named here."
+					detail="None keeps the current behaviour. gitflow still picks bugfix/ or hotfix/ per task, with the prefix below as the default type. custom forces every branch under the prefix you give, and then the prefix is required."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={draft.gitWorkflow || "None"}
 					modified={isFieldDirty("gitWorkflow")}
-					help="Prefixes auto-named worker branches and tells the orchestrator how to name them. None keeps the current behavior."
+					controlId="gitWorkflow"
 				>
 					<GitWorkflowSelect id="gitWorkflow" value={draft.gitWorkflow} onChange={(v) => setField("gitWorkflow", v)} />
-				</SettingsField>
-				{(draft.gitWorkflow === "gitflow" || draft.gitWorkflow === "custom") && (
-					<SettingsField
-						label="Branch prefix"
-						htmlFor="branchPrefix"
-						modified={isFieldDirty("branchPrefix")}
-						help={
+				</SettingRow>
+
+				{conventionActive && (
+					<SettingRow
+						name="Branch prefix"
+						summary="The prefix every auto-named branch here is put under."
+						detail={
 							draft.gitWorkflow === "custom"
 								? "Required. Every branch is forced under this prefix (e.g. feat/, story/)."
 								: "Optional. Default type prefix; gitflow still picks bugfix/ or hotfix/ per task."
 						}
+						ownership={{ kind: "project-only" }}
+						timing="next-worker"
+						value={draft.branchPrefix || "none"}
+						modified={isFieldDirty("branchPrefix")}
+						controlId="branchPrefix"
 					>
 						<input
 							id="branchPrefix"
@@ -226,14 +181,14 @@ function GeneralSection({ project, form }: { project: Project; form: ProjectForm
 							onChange={(e) => setField("branchPrefix", e.target.value)}
 							placeholder="feature/"
 						/>
-					</SettingsField>
+					</SettingRow>
 				)}
-			</SettingsGroup>
+			</SettingRows>
 		</>
 	);
 }
 
-function AgentsSection({ form }: { form: ProjectForm }) {
+function StartingATaskSection({ form }: { form: ProjectForm }) {
 	const {
 		form: draft,
 		setField,
@@ -265,50 +220,53 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 	};
 	return (
 		<>
-			<SectionTitle title="Agents" hint="who runs, on which model & permission" />
+			<SectionHeading title="Starting a task" hint={hint("start")} />
 
-			{/* Section-level instant action. Kept out of the Worker/Orchestrator
-			    blocks below so refreshing never splits an agent from its model. */}
-			<ActionRow className="mb-4 justify-between text-[12px] leading-5 text-muted-foreground">
-				<span>Agent availability is cached.</span>
-				<button
-					type="button"
-					className="shrink-0 rounded text-foreground underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
-					disabled={refreshAgentsMutation.isPending}
-					onClick={() => refreshAgentsMutation.mutate()}
-				>
-					{refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents"}
-				</button>
-			</ActionRow>
 			{refreshAgentsMutation.isError && (
-				<p className="mb-4 text-[12px] leading-5 text-error">
+				<p className="mb-3 text-[12px] leading-5 text-error">
 					{refreshAgentsMutation.error instanceof Error
 						? refreshAgentsMutation.error.message
 						: "Could not refresh agent catalog."}
 				</p>
 			)}
 			{missingRequiredAgent && (
-				<p className="mb-4 text-[12px] leading-5 text-error">Worker and orchestrator agents are required.</p>
+				<p className="mb-3 text-[12px] leading-5 text-error">Worker and orchestrator agents are required.</p>
 			)}
 
-			<SettingsGroup title="Worker">
-				<RequiredAgentField
-					id="workerAgent"
-					value={draft.workerAgent}
-					placeholder="Select worker agent"
-					label="Worker agent"
-					authorized={agentCatalog?.authorized}
-					installed={agentCatalog?.installed}
-					supported={agentCatalog?.supported}
-					disabled={agentsQuery.isFetching && agentCatalog === undefined}
-					invalid={validationError !== null && draft.workerAgent === ""}
-					onChange={(v) => changeAgent("workerAgent", "workerModel", v)}
-				/>
-				<SettingsField
-					label="Worker model"
-					htmlFor="workerModel"
+			<SettingRows>
+				<SettingRow
+					name="Worker agent"
+					summary="Which coding agent a worker on this project runs."
+					detail="Required. Availability is cached - use Refresh agents at the bottom of this section after installing one."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={draft.workerAgent || "not set"}
+					modified={isFieldDirty("workerAgent")}
+				>
+					<RequiredAgentField
+						id="workerAgent"
+						value={draft.workerAgent}
+						placeholder="Select worker agent"
+						label="Worker agent"
+						hideLabel
+						authorized={agentCatalog?.authorized}
+						installed={agentCatalog?.installed}
+						supported={agentCatalog?.supported}
+						disabled={agentsQuery.isFetching && agentCatalog === undefined}
+						invalid={validationError !== null && draft.workerAgent === ""}
+						onChange={(v) => changeAgent("workerAgent", "workerModel", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Worker model"
+					summary="The model a worker here runs on."
+					detail="Default falls back to a project-wide model if one was set with the CLI, and only then to the agent's own default - the project-wide one is not shown on this page."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={draft.workerModel || "Default"}
 					modified={isFieldDirty("workerModel")}
-					help="Model for this project's worker sessions. Default keeps the agent's own default."
+					controlId="workerModel"
 				>
 					<ModelField
 						id="workerModel"
@@ -316,27 +274,44 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 						agent={agentEntry(draft.workerAgent)}
 						onChange={(v) => setField("workerModel", v)}
 					/>
-				</SettingsField>
-			</SettingsGroup>
+				</SettingRow>
 
-			<SettingsGroup title="Orchestrator">
-				<RequiredAgentField
-					id="orchestratorAgent"
-					value={draft.orchestratorAgent}
-					placeholder="Select orchestrator agent"
-					label="Orchestrator agent"
-					authorized={agentCatalog?.authorized}
-					installed={agentCatalog?.installed}
-					supported={agentCatalog?.supported}
-					disabled={agentsQuery.isFetching && agentCatalog === undefined}
-					invalid={validationError !== null && draft.orchestratorAgent === ""}
-					onChange={(v) => changeAgent("orchestratorAgent", "orchestratorModel", v)}
-				/>
-				<SettingsField
-					label="Orchestrator model"
-					htmlFor="orchestratorModel"
+				<SettingRow
+					name="Orchestrator agent"
+					summary="Which agent runs this project's orchestrator."
+					detail="Changing this restarts the orchestrator as soon as you save - the running one is replaced."
+					ownership={{ kind: "project-only" }}
+					timing="on-save"
+					value={draft.orchestratorAgent || "not set"}
+					modified={isFieldDirty("orchestratorAgent")}
+				>
+					<RequiredAgentField
+						id="orchestratorAgent"
+						value={draft.orchestratorAgent}
+						placeholder="Select orchestrator agent"
+						label="Orchestrator agent"
+						hideLabel
+						authorized={agentCatalog?.authorized}
+						installed={agentCatalog?.installed}
+						supported={agentCatalog?.supported}
+						disabled={agentsQuery.isFetching && agentCatalog === undefined}
+						invalid={validationError !== null && draft.orchestratorAgent === ""}
+						onChange={(v) => changeAgent("orchestratorAgent", "orchestratorModel", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Orchestrator model"
+					summary="The model the orchestrator here runs on."
+					// The form respawns the orchestrator only when the AGENT changed, so a
+					// model-only change waits for the next start. The old note said nothing
+					// about that and read as though both restarted.
+					detail="Unlike the agent above, changing only the model does not restart the orchestrator - it is picked up the next time that session starts."
+					ownership={{ kind: "project-only" }}
+					timing="next-orchestrator"
+					value={draft.orchestratorModel || "Default"}
 					modified={isFieldDirty("orchestratorModel")}
-					help="Model for this project's orchestrator session. Default keeps the agent's own default."
+					controlId="orchestratorModel"
 				>
 					<ModelField
 						id="orchestratorModel"
@@ -344,106 +319,216 @@ function AgentsSection({ form }: { form: ProjectForm }) {
 						agent={agentEntry(draft.orchestratorAgent)}
 						onChange={(v) => setField("orchestratorModel", v)}
 					/>
-				</SettingsField>
-				<p className="text-[11px] text-passive">Changing the orchestrator agent restarts the orchestrator on save.</p>
-			</SettingsGroup>
+				</SettingRow>
 
-			<SettingsGroup title="Permissions">
-				<SettingsField
-					label="Permission mode"
-					htmlFor="permissionMode"
+				<SettingRow
+					name="Permission mode"
+					summary="How much a worker or orchestrator here may do without asking you first."
+					detail="Applies to both roles. Unset means the agent's own default mode, not a project-wide value - and a per-role mode set with the CLI wins over this and is not shown here."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={PERMISSION_MODE_OPTIONS.find((o) => o.value === draft.permissions)?.label ?? PERMISSION_UNSET_LABEL}
 					modified={isFieldDirty("permissions")}
-					help="Applies to both worker and orchestrator sessions."
+					controlId="permissionMode"
 				>
 					<PermissionModeSelect
 						id="permissionMode"
 						value={draft.permissions}
 						onChange={(v) => setField("permissions", v)}
 					/>
-				</SettingsField>
-			</SettingsGroup>
+				</SettingRow>
 
-			<SettingsGroup title="Reviewer">
-				<SettingsField
-					label="Default reviewer agent"
-					htmlFor="reviewerHarness"
-					modified={isFieldDirty("reviewerHarness")}
-					help="Agent that runs AO's code reviews on this project's pull requests."
+				<SettingRow
+					name="Never form a crew automatically"
+					summary="No qa is ever created on its own here, whatever the task size - and an agent asking for one is refused."
+					detail="You can still add a qa to a single task by hand, from + qa in its topbar or ao crew add in your own shell; that hatch is a person's. This changes the number of agents only: a standard or deep task still gets the full ceremony. A qa already mid-task keeps working."
+					ownership={{ kind: "project-only" }}
+					// Read at the eligibility seam, so it applies to future spawns and
+					// touches on sessions that are already running.
+					timing="live"
+					value={draft.disableAutoCrew ? "On" : "Off"}
+					modified={isFieldDirty("disableAutoCrew")}
 				>
-					<ReviewerSelect
-						id="reviewerHarness"
-						value={draft.reviewerHarness}
-						onChange={(v) => setField("reviewerHarness", v)}
-					/>
-				</SettingsField>
-			</SettingsGroup>
+					<div className="flex items-center gap-3">
+						<Switch
+							id="disableAutoCrew"
+							checked={draft.disableAutoCrew}
+							onCheckedChange={(v) => setField("disableAutoCrew", v)}
+						/>
+						<label htmlFor="disableAutoCrew" className="text-[12px] text-muted-foreground">
+							Never form a crew automatically
+						</label>
+					</div>
+				</SettingRow>
+
+				<SettingRow
+					name="Check in with me before implementing"
+					summary="A worker here stops once it understands the task and hands back to you before it changes anything."
+					detail="The task moves to Needs you on the board while it waits, and it implements only after you reply. Mechanical tasks never stop - they are already authorised to go straight to the edit. Your orchestrator is told the gate is on here, so it briefs workers to fit it. A worker already running keeps the prompt it was born with; a restore recomputes it."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={draft.pauseBeforeImplementing ? "On" : "Off"}
+					modified={isFieldDirty("pauseBeforeImplementing")}
+				>
+					<div className="flex items-center gap-3">
+						<Switch
+							id="pauseBeforeImplementing"
+							checked={draft.pauseBeforeImplementing}
+							onCheckedChange={(v) => setField("pauseBeforeImplementing", v)}
+						/>
+						<label htmlFor="pauseBeforeImplementing" className="text-[12px] text-muted-foreground">
+							Check in with me before implementing
+						</label>
+					</div>
+				</SettingRow>
+
+				<SettingRow
+					name="Refresh agents"
+					summary="Re-reads which agents are installed and authorised on this Mac."
+					detail="The agent lists above are cached, so one you installed since AO started will not appear until this runs."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+				>
+					<button
+						type="button"
+						className="!text-[12px] rounded text-foreground underline-offset-2 hover:underline disabled:pointer-events-none disabled:opacity-50"
+						disabled={refreshAgentsMutation.isPending}
+						onClick={() => refreshAgentsMutation.mutate()}
+					>
+						{refreshAgentsMutation.isPending ? "Refreshing..." : "Refresh agents"}
+					</button>
+				</SettingRow>
+			</SettingRows>
 		</>
 	);
 }
 
-function PromptsSection({ form }: { form: ProjectForm }) {
-	const { form: draft, setField, isFieldDirty } = form;
+function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
+	const { form: draft, setField, isFieldDirty, globalResponseLanguage } = form;
 	return (
 		<>
-			<SectionTitle title="Prompts" hint="additional system prompts appended for this project" />
-
-			<SettingsGroup title="Human-facing response language">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					Overrides the global default for this project's agents (orchestrator, worker, reviewer). They write their
-					human-facing output - status updates, reports, questions, PR/MR review comments - in this language; code,
-					commits, PR/MR titles and bodies, branch names, and identifiers always stay English. Inherit global default
-					keeps whatever the Global settings specify.
-				</p>
-				<SettingsField label="Response language" htmlFor="responseLanguage" modified={isFieldDirty("responseLanguage")}>
+			<SectionHeading title="What agents are told" hint={hint("told")} />
+			<SettingRows>
+				<SettingRow
+					name="Response language"
+					summary="The language this project's agents write their human-facing prose in."
+					detail="The one setting on this page where a project genuinely overrides a global value. Code, commit messages, PR/MR titles and bodies, branch names and identifiers always stay English."
+					ownership={{
+						kind: "project-override",
+						globalValue: globalResponseLanguage,
+						overriding: draft.responseLanguage !== "",
+					}}
+					timing="next-worker"
+					value={draft.responseLanguage || `${globalResponseLanguage} (inherited)`}
+					modified={isFieldDirty("responseLanguage")}
+					controlId="responseLanguage"
+					onUseGlobal={() => setField("responseLanguage", "")}
+				>
 					<ProjectLanguageSelect
 						id="responseLanguage"
 						value={draft.responseLanguage}
 						onChange={(v) => setField("responseLanguage", v)}
 					/>
-				</SettingsField>
-			</SettingsGroup>
+				</SettingRow>
 
-			<p className="mb-4 mt-6 text-[12px] leading-relaxed text-passive">
-				Extra text appended on top of the global base for this project. Leave blank to append nothing.
-			</p>
-			<SettingEditorRow
-				icon={Bot}
-				name="Orchestrator additional prompt"
-				purpose="Appended to the orchestrator's base for this project"
-				textareaLabel="Orchestrator additional prompt"
-				value={draft.orchestratorPrompt}
-				defaultValue=""
-				modified={isFieldDirty("orchestratorPrompt")}
-				onChange={(v) => setField("orchestratorPrompt", v)}
-			/>
-			<SettingEditorRow
-				icon={Bot}
-				name="Worker additional prompt"
-				purpose="Appended to each worker's base for this project"
-				textareaLabel="Worker additional prompt"
-				value={draft.workerPrompt}
-				defaultValue=""
-				modified={isFieldDirty("workerPrompt")}
-				onChange={(v) => setField("workerPrompt", v)}
-			/>
-			<SettingEditorRow
-				icon={Bot}
-				name="Reviewer additional prompt"
-				purpose="Appended to the reviewer's base for this project"
-				textareaLabel="Reviewer additional prompt"
-				value={draft.reviewerPrompt}
-				defaultValue=""
-				modified={isFieldDirty("reviewerPrompt")}
-				onChange={(v) => setField("reviewerPrompt", v)}
-			/>
+				<SettingRow
+					name="Orchestrator additional prompt"
+					summary="Extra text added on top of the global orchestrator base for this project."
+					ownership={{ kind: "project-appends", base: "Orchestrator base prompt" }}
+					timing="next-orchestrator"
+					value={draft.orchestratorPrompt ? "Customised" : "None"}
+					modified={isFieldDirty("orchestratorPrompt")}
+				>
+					<SettingEditorControl
+						name="Orchestrator additional prompt"
+						textareaLabel="Orchestrator additional prompt"
+						value={draft.orchestratorPrompt}
+						defaultValue=""
+						onChange={(v) => setField("orchestratorPrompt", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Worker additional prompt"
+					summary="Extra text added on top of the global worker base for this project's workers."
+					ownership={{ kind: "project-appends", base: "Worker base prompt" }}
+					timing="next-worker"
+					value={draft.workerPrompt ? "Customised" : "None"}
+					modified={isFieldDirty("workerPrompt")}
+				>
+					<SettingEditorControl
+						name="Worker additional prompt"
+						textareaLabel="Worker additional prompt"
+						value={draft.workerPrompt}
+						defaultValue=""
+						onChange={(v) => setField("workerPrompt", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Reviewer additional prompt"
+					summary="Extra text added on top of the global reviewer base for this project."
+					ownership={{ kind: "project-appends", base: "Reviewer base prompt" }}
+					timing="next-worker"
+					value={draft.reviewerPrompt ? "Customised" : "None"}
+					modified={isFieldDirty("reviewerPrompt")}
+				>
+					<SettingEditorControl
+						name="Reviewer additional prompt"
+						textareaLabel="Reviewer additional prompt"
+						value={draft.reviewerPrompt}
+						defaultValue=""
+						onChange={(v) => setField("reviewerPrompt", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="This project has a web UI"
+					summary="One switch, three effects: the inspector gains a Browser tab, agents here are told to use ao preview, and ao preview is accepted at all."
+					detail="The tab appears and ao preview starts being accepted straight away; the guidance in an agent's prompt only reaches the next worker. Off by default - a project with nothing to preview never shows a permanently empty panel."
+					ownership={{ kind: "project-only" }}
+					timing="live"
+					value={draft.hasWebUI ? "On" : "Off"}
+					modified={isFieldDirty("hasWebUI")}
+				>
+					<div className="flex items-center gap-3">
+						<Switch id="hasWebUI" checked={draft.hasWebUI} onCheckedChange={(v) => setField("hasWebUI", v)} />
+						<label htmlFor="hasWebUI" className="text-[12px] text-muted-foreground">
+							This project has a web UI
+						</label>
+					</div>
+				</SettingRow>
+
+				<SettingRow
+					name="This project targets iOS"
+					summary="The inspector gains a Simulator tab, and workers here are told how to drive a booted simulator."
+					detail="The tab shows a booted iOS Simulator's screen live and can drive it under the same lease and gesture hold ao sim tap uses. Nothing captures unless that tab is open and this window is focused. The tab appears at once; the prompt guidance reaches the next worker."
+					ownership={{ kind: "project-only" }}
+					timing="live"
+					value={draft.hasIOSSimulator ? "On" : "Off"}
+					modified={isFieldDirty("hasIOSSimulator")}
+				>
+					<div className="flex items-center gap-3">
+						<Switch
+							id="hasIOSSimulator"
+							checked={draft.hasIOSSimulator}
+							onCheckedChange={(v) => setField("hasIOSSimulator", v)}
+						/>
+						<label htmlFor="hasIOSSimulator" className="text-[12px] text-muted-foreground">
+							This project targets iOS
+						</label>
+					</div>
+				</SettingRow>
+			</SettingRows>
 		</>
 	);
 }
 
-function AutomationSection({ form }: { form: ProjectForm }) {
+function IncomingOutgoingSection({ form }: { form: ProjectForm }) {
 	const {
 		form: draft,
 		setField,
+		isFieldDirty,
 		isGitLabProject,
 		hasKnownRemote,
 		intakeForm,
@@ -451,58 +536,89 @@ function AutomationSection({ form }: { form: ProjectForm }) {
 		effectiveIntakeRepo,
 		intakeRepoURL,
 	} = form;
+	const approvalGate = !hasKnownRemote
+		? "AO couldn't detect a git remote for this project, so it can't tell which forge it lives on and forge-specific settings stay unavailable. Add a remote to the repository, then reopen this page."
+		: !isGitLabProject
+			? "Approvals are counted for GitLab only in this version, and this project is not on GitLab."
+			: undefined;
 	return (
 		<>
-			<SectionTitle title="Automation" hint="things AO does on its own for this project" />
+			<SectionHeading title="Incoming & outgoing" hint={hint("flow")} />
+			<SettingRows>
+				<SettingRow
+					name="Tracker intake"
+					summary="AO watches the tracker and spawns a worker itself when an issue matching your rule appears."
+					detail="Read-only toward the tracker: matching issues spawn sessions, but AO does not comment on them or move them. Enabling it requires an assignee - a username, or * for any."
+					ownership={{ kind: "project-only" }}
+					timing="on-save"
+					value={draft.intakeEnabled ? "On" : "Off"}
+					modified={isFieldDirty("intakeEnabled") || isFieldDirty("intakeRepo") || isFieldDirty("intakeAssignee")}
+				>
+					<IntakeFields
+						form={intakeForm}
+						onChange={patchIntake}
+						repoPreview={{ value: effectiveIntakeRepo, url: intakeRepoURL }}
+					/>
+				</SettingRow>
 
-			<SettingsGroup title="Tracker intake">
-				<IntakeFields
-					form={intakeForm}
-					onChange={patchIntake}
-					repoPreview={{ value: effectiveIntakeRepo, url: intakeRepoURL }}
-				/>
-			</SettingsGroup>
+				<SettingRow
+					name="Default reviewer agent"
+					summary="The agent that runs AO's code review on this project's pull requests."
+					detail="Unset means claude-code, not whatever the project says - there is no project-wide reviewer behind this one."
+					ownership={{ kind: "project-only" }}
+					timing="on-save"
+					value={draft.reviewerHarness || REVIEWER_UNSET_LABEL}
+					modified={isFieldDirty("reviewerHarness")}
+					controlId="reviewerHarness"
+				>
+					<ReviewerSelect
+						id="reviewerHarness"
+						value={draft.reviewerHarness}
+						onChange={(v) => setField("reviewerHarness", v)}
+					/>
+				</SettingRow>
 
-			{isGitLabProject && (
-				<SettingsGroup title="Approval rule">
-					<label className="flex items-center gap-2.5 text-[13px] text-foreground">
-						<input
-							type="checkbox"
-							className="h-4 w-4 accent-accent"
-							checked={draft.approvalRuleEnabled}
-							onChange={(e) => setField("approvalRuleEnabled", e.target.checked)}
-						/>
-						Require approvals before Ready to merge
-					</label>
-					<p className="text-[11px] text-passive">
-						When enabled, a merge request is only marked Ready to merge once it has at least the required number of
-						approvals. Off by default; applies only when the GitLab repo has no approval rule of its own.
-					</p>
-					{draft.approvalRuleEnabled && (
-						<SettingsField label="Required approvals" htmlFor="approvalThreshold" help="Default 2.">
-							<input
-								id="approvalThreshold"
-								type="number"
-								min={1}
-								className={INPUT_CLASS}
-								value={draft.approvalThreshold}
-								onChange={(e) => setField("approvalThreshold", e.target.value)}
-								placeholder="2"
+				<SettingRow
+					name="Require approvals before Ready to merge"
+					summary="A merge request is only reported as Ready to merge once it has the required number of approvals."
+					detail="Off by default; applies only when the GitLab repo has no approval rule of its own."
+					ownership={{ kind: "project-only" }}
+					timing="on-save"
+					value={draft.approvalRuleEnabled ? "On" : "Off"}
+					modified={isFieldDirty("approvalRuleEnabled") || isFieldDirty("approvalThreshold")}
+					gate={approvalGate}
+				>
+					<div className="flex flex-col gap-3">
+						<div className="flex items-center gap-3">
+							<Switch
+								id="approvalRuleEnabled"
+								checked={draft.approvalRuleEnabled}
+								onCheckedChange={(v) => setField("approvalRuleEnabled", v)}
 							/>
-						</SettingsField>
-					)}
-				</SettingsGroup>
-			)}
-
-			{!hasKnownRemote && (
-				<SettingsGroup title="Approval rule">
-					<p className="text-[11px] text-passive">
-						AO couldn&apos;t detect a git remote for this project, so it can&apos;t tell which forge it lives on and
-						forge-specific settings (like the GitLab approval rule) stay hidden. Add a remote to the repository, then
-						reopen this page.
-					</p>
-				</SettingsGroup>
-			)}
+							<label htmlFor="approvalRuleEnabled" className="text-[12px] text-muted-foreground">
+								Require approvals before Ready to merge
+							</label>
+						</div>
+						{draft.approvalRuleEnabled && (
+							<div className="flex flex-col gap-1.5">
+								<label htmlFor="approvalThreshold" className="text-[12px] text-muted-foreground">
+									Required approvals
+								</label>
+								<input
+									id="approvalThreshold"
+									type="number"
+									min={1}
+									className={INPUT_CLASS}
+									value={draft.approvalThreshold}
+									onChange={(e) => setField("approvalThreshold", e.target.value)}
+									placeholder="2"
+								/>
+								<span className="text-[11px] text-passive">Default 2.</span>
+							</div>
+						)}
+					</div>
+				</SettingRow>
+			</SettingRows>
 		</>
 	);
 }
@@ -518,11 +634,11 @@ function PermissionModeSelect({
 }) {
 	return (
 		<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+			<SelectTrigger id={id} className="h-8 w-full max-w-[340px] text-[13px]">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
-				<SelectItem value="__default__">Project default</SelectItem>
+				<SelectItem value="__default__">{PERMISSION_UNSET_LABEL}</SelectItem>
 				{PERMISSION_MODE_OPTIONS.map((opt) => (
 					<SelectItem key={opt.value} value={opt.value}>
 						{opt.label}
@@ -537,7 +653,7 @@ function GitWorkflowSelect({ id, value, onChange }: { id: string; value: string;
 	// Empty (unset) maps to the "none" option; selecting "none" clears the value.
 	return (
 		<Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
-			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+			<SelectTrigger id={id} className="h-8 w-full max-w-[340px] text-[13px]">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
@@ -567,7 +683,7 @@ function ProjectLanguageSelect({
 	const extra = value && !known ? [value] : [];
 	return (
 		<Select value={value || "__inherit__"} onValueChange={(v) => onChange(v === "__inherit__" ? "" : v)}>
-			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+			<SelectTrigger id={id} className="h-8 w-full max-w-[340px] text-[13px]">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
@@ -585,11 +701,11 @@ function ProjectLanguageSelect({
 function ReviewerSelect({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
 	return (
 		<Select value={value || "__default__"} onValueChange={(v) => onChange(v === "__default__" ? "" : v)}>
-			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+			<SelectTrigger id={id} className="h-8 w-full max-w-[340px] text-[13px]">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
-				<SelectItem value="__default__">Project default</SelectItem>
+				<SelectItem value="__default__">{REVIEWER_UNSET_LABEL}</SelectItem>
 				{REVIEWER_OPTIONS.map((reviewer) => (
 					<SelectItem key={reviewer} value={reviewer}>
 						{reviewer}

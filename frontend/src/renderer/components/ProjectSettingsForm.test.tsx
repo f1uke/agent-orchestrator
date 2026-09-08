@@ -54,12 +54,26 @@ function renderSettings(projectId = "proj-1", workspaces?: WorkspaceSummary[]) {
 	return queryClient;
 }
 
+// Every setting is a collapsed row (SettingRow): its control is not in the DOM
+// until the row is opened. These tests are about the controls, not about the
+// disclosure, so open every row in whichever section is currently showing.
+async function openRows() {
+	await screen.findAllByTestId("setting-row");
+	for (const row of screen.getAllByTestId("setting-row")) {
+		if (row.getAttribute("aria-expanded") === "false") await userEvent.click(row);
+	}
+}
+
 // The two-pane shell shows one section at a time; navigate to a section's nav
 // button before interacting with its fields. The draft lives above the sections
 // so edits survive navigation and one save bar commits the whole config.
-async function goToSection(name: "General" | "Agents" | "Prompts" | "Automation") {
+// Section names follow the variant-B cut: sections are named for what a setting
+// acts on rather than for the shape of the config file.
+type ProjectSection = "Repository & branches" | "Starting a task" | "What agents are told" | "Incoming & outgoing";
+async function goToSection(name: ProjectSection) {
 	// findByRole waits for the shell (and its nav) to mount after the project loads.
-	await userEvent.click(await screen.findByRole("button", { name }));
+	await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${name}`) }));
+	await openRows();
 }
 
 async function chooseOption(trigger: HTMLElement, optionName: string) {
@@ -169,8 +183,9 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 
-		// General is the default section.
+		// Repository & branches is the default section.
 		expect(await screen.findByText("git@github.com:acme/project-one.git")).toBeInTheDocument();
+		await openRows();
 		expect(screen.getByLabelText("Default branch")).toHaveValue("develop");
 		expect(screen.getByLabelText("Session prefix")).toHaveValue("po");
 
@@ -179,23 +194,28 @@ describe("ProjectSettingsForm", () => {
 		await userEvent.clear(screen.getByLabelText("Session prefix"));
 		await userEvent.type(screen.getByLabelText("Session prefix"), "rel");
 
-		await goToSection("Agents");
+		await goToSection("Starting a task");
 		const workerAgent = screen.getByRole("combobox", { name: "Worker agent" });
 		const orchestratorAgent = screen.getByRole("combobox", { name: "Orchestrator agent" });
 		const permissionMode = screen.getByRole("combobox", { name: "Permission mode" });
-		const reviewerAgent = screen.getByRole("combobox", { name: "Default reviewer agent" });
 		// Once the agent catalog resolves the combobox shows the catalog label.
 		await waitFor(() => expect(workerAgent).toHaveTextContent("Codex"));
 		expect(orchestratorAgent).toHaveTextContent("Claude Code");
 		expect(permissionMode).toHaveTextContent("Auto");
-		expect(reviewerAgent).toHaveTextContent("claude-code");
+		// The reviewer is about what leaves the project, so it sits with intake and
+		// the approval rule rather than with the agents that start a task.
+		await goToSection("Incoming & outgoing");
+		expect(screen.getByRole("combobox", { name: "Default reviewer agent" })).toHaveTextContent("claude-code");
+		await goToSection("Starting a task");
 
+		// Navigating away unmounted this section, so the earlier element handles are
+		// detached - re-query them before driving the selects.
 		// OpenCode is open-ended (free-form model), so switching the worker to it
 		// preserves the stored value rather than clearing it — only a fixed target
 		// that can't run the value resets to default.
-		await chooseOption(workerAgent, "OpenCode");
-		await chooseOption(orchestratorAgent, "Goose");
-		await chooseOption(permissionMode, "Bypass permissions");
+		await chooseOption(screen.getByRole("combobox", { name: "Worker agent" }), "OpenCode");
+		await chooseOption(screen.getByRole("combobox", { name: "Orchestrator agent" }), "Goose");
+		await chooseOption(screen.getByRole("combobox", { name: "Permission mode" }), "Bypass permissions");
 
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -247,7 +267,7 @@ describe("ProjectSettingsForm", () => {
 			},
 		});
 		renderSettings();
-		await goToSection("Agents");
+		await goToSection("Starting a task");
 
 		const orchestratorModel = await screen.findByRole("combobox", { name: "Orchestrator model" });
 		const workerModel = screen.getByRole("combobox", { name: "Worker model" });
@@ -281,7 +301,7 @@ describe("ProjectSettingsForm", () => {
 			},
 		});
 		renderSettings();
-		await goToSection("Agents");
+		await goToSection("Starting a task");
 
 		// An open-ended agent's model is an editable input, not a fixed Select.
 		const workerModel = await screen.findByRole("combobox", { name: "Worker model" });
@@ -312,7 +332,7 @@ describe("ProjectSettingsForm", () => {
 			},
 		});
 		renderSettings();
-		await goToSection("Agents");
+		await goToSection("Starting a task");
 
 		// Switching to claude-code (fixed tiers) can't run the free-form value, so
 		// the model resets to that agent's default rather than carrying it over.
@@ -338,7 +358,7 @@ describe("ProjectSettingsForm", () => {
 			},
 		});
 		renderSettings();
-		await goToSection("Agents");
+		await goToSection("Starting a task");
 		// The claude-code orchestrator offers tiers...
 		expect(await screen.findByRole("combobox", { name: "Orchestrator model" })).toBeInTheDocument();
 		// ...but Goose exposes none, so the worker model is a hint, not a selector.
@@ -362,7 +382,7 @@ describe("ProjectSettingsForm", () => {
 			},
 		});
 		renderSettings();
-		await goToSection("Prompts");
+		await goToSection("What agents are told");
 
 		// The overridden Worker row reads Customized; open its drawer to edit.
 		await userEvent.click(await screen.findByRole("button", { name: "Edit Worker additional prompt" }));
@@ -400,7 +420,7 @@ describe("ProjectSettingsForm", () => {
 			},
 		});
 		renderSettings();
-		await goToSection("Prompts");
+		await goToSection("What agents are told");
 
 		// The stored override shows on the select; changing it dirties the bar.
 		const language = await screen.findByRole("combobox", { name: "Response language" });
@@ -429,7 +449,7 @@ describe("ProjectSettingsForm", () => {
 			},
 		});
 		renderSettings();
-		await goToSection("Prompts");
+		await goToSection("What agents are told");
 
 		const language = await screen.findByRole("combobox", { name: "Response language" });
 		await chooseOption(language, "Inherit global default");
@@ -458,7 +478,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await screen.findByText("git@github.com:acme/project-one.git");
+		await goToSection("What agents are told");
 
 		// Opt-in: off for a project that never configured it.
 		const toggle = await screen.findByLabelText("This project has a web UI");
@@ -490,6 +510,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("What agents are told");
 		const toggle = await screen.findByLabelText("This project has a web UI");
 		expect(toggle).toBeChecked();
 
@@ -519,7 +540,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await screen.findByText("git@github.com:acme/project-one.git");
+		await goToSection("Starting a task");
 
 		// Opt-in: a project that never configured it keeps forming crews.
 		const toggle = await screen.findByLabelText("Never form a crew automatically");
@@ -549,6 +570,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Starting a task");
 		const toggle = await screen.findByLabelText("Never form a crew automatically");
 		expect(toggle).toBeChecked();
 
@@ -577,7 +599,7 @@ describe("ProjectSettingsForm", () => {
 
 		renderSettings();
 		await screen.findByText("git@gitlab.com:acme/project-one.git");
-		await goToSection("Automation");
+		await goToSection("Incoming & outgoing");
 
 		// Off by default: the toggle is present and unchecked, the threshold hidden.
 		const toggle = await screen.findByLabelText("Require approvals before Ready to merge");
@@ -612,6 +634,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Repository & branches");
 
 		// A benign edit reveals the save bar; the approval rule stays off/omitted.
 		await userEvent.type(await screen.findByLabelText("Session prefix"), "x");
@@ -637,8 +660,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await screen.findByText("git@github.com:acme/project-one.git");
-		await goToSection("Automation");
+		await goToSection("Incoming & outgoing");
 		expect(screen.queryByLabelText("Require approvals before Ready to merge")).not.toBeInTheDocument();
 	});
 
@@ -657,7 +679,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await goToSection("Automation");
+		await goToSection("Incoming & outgoing");
 		// The card still cannot be offered (provider unknown), but its absence is
 		// no longer silent — that silence is what made a GitLab project look like
 		// it simply had no approval-rule setting.
@@ -680,7 +702,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await goToSection("Automation");
+		await goToSection("Incoming & outgoing");
 		expect(screen.queryByText(/couldn't detect a git remote/i)).not.toBeInTheDocument();
 	});
 
@@ -703,6 +725,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Repository & branches");
 
 		await userEvent.type(await screen.findByLabelText("Default branch"), "x");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -724,7 +747,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await goToSection("Agents");
+		await goToSection("Starting a task");
 
 		expect(await screen.findByText("Worker and orchestrator agents are required.")).toBeInTheDocument();
 		expect(screen.getByRole("combobox", { name: "Worker agent" })).toHaveTextContent("Select worker agent");
@@ -754,7 +777,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await goToSection("Agents");
+		await goToSection("Starting a task");
 		const workerAgent = screen.getByRole("combobox", { name: "Worker agent" });
 		await userEvent.click(workerAgent);
 		const options = await screen.findAllByRole("option");
@@ -783,7 +806,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await goToSection("Automation");
+		await goToSection("Incoming & outgoing");
 		await userEvent.click(await screen.findByLabelText("Enable issue intake"));
 
 		// Repository is display-only, derived from the project's own git origin — no
@@ -820,7 +843,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await goToSection("Automation");
+		await goToSection("Incoming & outgoing");
 		await userEvent.click(await screen.findByLabelText("Enable issue intake"));
 
 		// Nested GitLab group path is preserved (not truncated to two segments) and
@@ -857,7 +880,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await goToSection("Automation");
+		await goToSection("Incoming & outgoing");
 		await userEvent.click(await screen.findByLabelText("Enable issue intake"));
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -881,6 +904,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Repository & branches");
 
 		const workflow = await screen.findByRole("combobox", { name: "Branch workflow" });
 		expect(workflow).toHaveTextContent("gitflow");
@@ -912,6 +936,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Repository & branches");
 
 		// None selected by default → no prefix input.
 		await screen.findByLabelText("Branch workflow");
@@ -940,6 +965,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Repository & branches");
 
 		const workflow = await screen.findByRole("combobox", { name: "Branch workflow" });
 		await chooseOption(workflow, "custom");
@@ -965,6 +991,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Repository & branches");
 
 		const branch = await screen.findByLabelText("Default branch");
 		await userEvent.clear(branch);
@@ -1024,7 +1051,8 @@ describe("ProjectSettingsForm", () => {
 
 		// A benign edit reveals the save bar; saving restarts because the running
 		// orchestrator's provider differs from the saved orchestrator agent.
-		await userEvent.type(await screen.findByLabelText("Default branch"), "x");
+		await goToSection("Repository & branches");
+		await userEvent.type(screen.getByLabelText("Default branch"), "x");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
@@ -1056,7 +1084,7 @@ describe("ProjectSettingsForm", () => {
 		const queryClient = renderSettings();
 		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-		await goToSection("Agents");
+		await goToSection("Starting a task");
 		const orchestratorAgent = await screen.findByRole("combobox", { name: "Orchestrator agent" });
 		await chooseOption(orchestratorAgent, "Goose");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -1082,7 +1110,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
-		await screen.findByText("git@github.com:acme/project-one.git");
+		await goToSection("Starting a task");
 
 		// Opt-in: a project that never configured it runs straight from brief to code.
 		const toggle = await screen.findByLabelText("Check in with me before implementing");
@@ -1109,6 +1137,7 @@ describe("ProjectSettingsForm", () => {
 		});
 
 		renderSettings();
+		await goToSection("Starting a task");
 		const toggle = await screen.findByLabelText("Check in with me before implementing");
 		expect(toggle).toBeChecked();
 
