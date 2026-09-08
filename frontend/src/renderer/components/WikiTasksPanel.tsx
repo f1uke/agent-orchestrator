@@ -50,11 +50,10 @@ import { WikiTasksSettingsForm } from "./WikiTasksSettingsForm";
  * next answer - a written tick means exactly that - and the reader still has to
  * see their own click land. `mergeHeldRows` puts it back on screen.
  */
-type Pending = { row: WikiTaskRow } & (
-	| { state: "saving" }
-	| { state: "done"; moved: boolean }
-	| { state: "failed"; title: string; detail: string }
-);
+type Pending =
+	| { state: "saving"; row: WikiTaskRow }
+	| { state: "done"; moved: boolean; row: WikiTaskRow }
+	| { state: "failed"; title: string; detail: string; row: WikiTaskRow };
 
 export function WikiTasksPanel({
 	tasks,
