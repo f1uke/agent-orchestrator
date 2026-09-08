@@ -21,6 +21,9 @@ import { TodayShape } from "./TodayShape";
 // exists so Fluke can flip between the structures being compared, switch scope,
 // and check both themes without reloading. Everything below the strip is the
 // proposal.
+//
+// B was chosen on 2026-09-08. Today and A are kept in the switcher as the
+// comparison whoever implements B will want to see, not as live options.
 
 export type Variant = "today" | "a" | "b";
 
@@ -31,7 +34,12 @@ const VARIANTS: { id: Variant; label: string; blurb: string }[] = [
 		label: "A · Same sections, calmer rows",
 		blurb: "today's taxonomy, prose folded, scope + timing on every row",
 	},
-	{ id: "b", label: "B · Re-cut by what it acts on", blurb: "sections named for when a setting bites" },
+	{
+		id: "b",
+		label: "B · Re-cut by what it acts on",
+		blurb:
+			'CHOSEN (2026-09-08) - sections named for what a setting acts on, so the heading answers "where is it" before the chips do',
+	},
 ];
 
 export function SettingsPreviewApp() {
