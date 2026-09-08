@@ -78,11 +78,24 @@ function renderForm() {
 	return qc;
 }
 
+// Every setting is a collapsed row (SettingRow): its control is not in the DOM
+// until the row is opened. These tests are about the controls, not about the
+// disclosure, so open every row in whichever section is currently showing.
+async function openRows() {
+	await screen.findAllByTestId("setting-row");
+	for (const row of screen.getAllByTestId("setting-row")) {
+		if (row.getAttribute("aria-expanded") === "false") await userEvent.click(row);
+	}
+}
+
 // The two-pane shell shows one section at a time; navigate to a section's nav
 // button before interacting with its fields. The draft lives above the sections
 // so edits survive navigation and one save bar commits the whole global config.
-async function goToSection(name: "Prompts" | "Messages" | "Automation" | "System") {
-	await userEvent.click(await screen.findByRole("button", { name }));
+// Section names follow the variant-B cut: sections are named for what a setting
+// acts on rather than for the shape of the config file.
+async function goToSection(name: "Every agent" | "While work runs" | "Cleaning up" | "This Mac") {
+	await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${name}`) }));
+	await openRows();
 }
 
 async function chooseOption(trigger: HTMLElement, optionName: string) {
@@ -167,17 +180,21 @@ beforeEach(() => {
 });
 
 describe("GlobalSettingsForm", () => {
-	it("shows Prompts by default and the System section on demand", async () => {
+	it("shows Every agent by default and This Mac on demand", async () => {
 		renderForm();
-		// Prompts is the default section: the per-kind editor rows are visible.
-		expect(await screen.findByRole("button", { name: "Edit Orchestrator" })).toBeInTheDocument();
-		await goToSection("System");
-		expect(await screen.findByText("Updates")).toBeInTheDocument();
-		expect(screen.getByText("Migration")).toBeInTheDocument();
+		await openRows();
+		// Every agent is the default section: one row per prompt kind, collapsed.
+		expect(await screen.findByRole("button", { name: /^Worker/ })).toBeInTheDocument();
+		await goToSection("This Mac");
+		expect(await screen.findByRole("button", { name: /^Updates/ })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /^Migration/ })).toBeInTheDocument();
 	});
 
 	it("edits a system prompt in the drawer and saves it via one bar (PUT)", async () => {
 		renderForm();
+		// The prompt rows only exist once the prompts query resolves.
+		await screen.findByRole("button", { name: /^Orchestrator/ });
+		await openRows();
 		await userEvent.click(await screen.findByRole("button", { name: "Edit Orchestrator" }));
 		const drawer = await screen.findByRole("dialog");
 		const textbox = within(drawer).getByRole("textbox") as HTMLTextAreaElement;
@@ -199,7 +216,9 @@ describe("GlobalSettingsForm", () => {
 	it("resetting an overridden prompt to default saves a DELETE", async () => {
 		mockGet({ data: { available: true, legacyRoot: "/x" }, error: undefined }, { orchestrator: "an override" });
 		renderForm();
-		// The overridden row reads Customized; open its drawer and reset to default.
+		await screen.findByRole("button", { name: /^Orchestrator/ });
+		await openRows();
+		// The overridden row reads Customised; open its drawer and reset to default.
 		await userEvent.click(await screen.findByRole("button", { name: "Edit Orchestrator" }));
 		const drawer = await screen.findByRole("dialog");
 		await waitFor(() => expect((within(drawer).getByRole("textbox") as HTMLTextAreaElement).value).toBe("an override"));
@@ -216,7 +235,8 @@ describe("GlobalSettingsForm", () => {
 
 	it("routes the response-language default through the save bar (PUT response-language)", async () => {
 		renderForm();
-		// Prompts is the default section; the language select lives at its top.
+		await openRows();
+		// Every agent is the default section; the language row sits at its top.
 		const language = await screen.findByRole("combobox", { name: "Default response language" });
 		expect(language).toHaveTextContent("English");
 		await chooseOption(language, "Thai");
@@ -228,7 +248,7 @@ describe("GlobalSettingsForm", () => {
 
 	it("routes the Auto-send toggle through the save bar (PUT auto-nudge)", async () => {
 		renderForm();
-		await goToSection("Automation");
+		await goToSection("While work runs");
 		const toggle = await screen.findByLabelText("Enabled by default");
 		expect(toggle).not.toBeChecked();
 		await userEvent.click(toggle);
@@ -244,7 +264,7 @@ describe("GlobalSettingsForm", () => {
 	// which is the part that actually deletes files a rebuild has to recreate.
 	it("routes the build-output clearing toggle through the save bar (PUT reclaim)", async () => {
 		renderForm();
-		await goToSection("Automation");
+		await goToSection("Cleaning up");
 		const toggle = await screen.findByRole("combobox", { name: "Clear build output" });
 		expect(toggle).toHaveTextContent("Enabled");
 		await chooseOption(toggle, "Disabled");
@@ -260,7 +280,7 @@ describe("GlobalSettingsForm", () => {
 	// drop the other reclaim settings from the request body.
 	it("switches auto-reclaim off without dropping the other reclaim fields", async () => {
 		renderForm();
-		await goToSection("Automation");
+		await goToSection("Cleaning up");
 		const toggle = await screen.findByRole("combobox", { name: "Auto-reclaim" });
 		expect(toggle).toHaveTextContent("Enabled");
 		await chooseOption(toggle, "Disabled");
@@ -274,7 +294,7 @@ describe("GlobalSettingsForm", () => {
 
 	it("routes the wiki vault path through the save bar (PUT settings/wiki)", async () => {
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		await userEvent.type(await screen.findByLabelText("Vault folder"), "~/Notes");
 		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 		await waitFor(() =>
@@ -288,7 +308,7 @@ describe("GlobalSettingsForm", () => {
 	it("pushes the wiki status so the sidebar row appears and disappears with the path", async () => {
 		const qc = renderForm();
 		const invalidate = vi.spyOn(qc, "invalidateQueries");
-		await goToSection("System");
+		await goToSection("This Mac");
 		await userEvent.type(await screen.findByLabelText("Vault folder"), "~/Notes");
 		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 		await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["wiki", "status"] }));
@@ -296,7 +316,7 @@ describe("GlobalSettingsForm", () => {
 
 	it("routes the evidence-retention TTL through the save bar (PUT evidence-retention)", async () => {
 		renderForm();
-		await goToSection("Automation");
+		await goToSection("Cleaning up");
 		const days = await screen.findByLabelText("Delete evidence older than (days)");
 		expect(days).toHaveValue(30);
 		fireEvent.change(days, { target: { value: "7" } });
@@ -316,7 +336,7 @@ describe("GlobalSettingsForm", () => {
 			return { data: {}, error: undefined };
 		});
 		renderForm();
-		await goToSection("Automation");
+		await goToSection("Cleaning up");
 		await userEvent.click(await screen.findByRole("button", { name: "Purge now" }));
 		await waitFor(() => expect(postMock).toHaveBeenCalledWith("/api/v1/settings/evidence-retention/sweep", {}));
 		expect(await screen.findByText(/Purged 2 items · freed 2 KB\./)).toBeInTheDocument();
@@ -324,7 +344,7 @@ describe("GlobalSettingsForm", () => {
 
 	it("changes the update channel and saves it through the bar", async () => {
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		await screen.findByText("Updates");
 		expect(screen.queryByText(/Nightly builds are cut every day/i)).not.toBeInTheDocument();
 
@@ -341,14 +361,14 @@ describe("GlobalSettingsForm", () => {
 
 	it("shows migration status and the available legacy root", async () => {
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		expect(await screen.findByText("Not migrated yet")).toBeInTheDocument();
 		expect(await screen.findByText("/home/u/.agent-orchestrator")).toBeInTheDocument();
 	});
 
 	it("Run migration imports and marks completed", async () => {
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		await userEvent.click(await screen.findByRole("button", { name: "Run migration" }));
 		await waitFor(() => expect(postMock).toHaveBeenCalledWith("/api/v1/import"));
 		expect(setMigration).toHaveBeenCalledWith(expect.objectContaining({ status: "completed" }));
@@ -358,7 +378,7 @@ describe("GlobalSettingsForm", () => {
 	it("lets a declined user re-run the migration", async () => {
 		getMigration.mockResolvedValue({ status: "declined", lastAttemptAt: "2026-06-01T00:00:00.000Z" });
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		expect(await screen.findByText("Declined")).toBeInTheDocument();
 		const btn = await screen.findByRole("button", { name: "Run migration" });
 		expect(btn).toBeEnabled();
@@ -369,20 +389,20 @@ describe("GlobalSettingsForm", () => {
 	it("disables Run when no legacy install is available", async () => {
 		mockGet({ data: { available: false, legacyRoot: "" }, error: undefined });
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		expect(await screen.findByText("None found")).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Run migration" })).toBeDisabled();
 	});
 
 	it("shows the current app version", async () => {
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		expect(await screen.findByText("v1.4.0")).toBeInTheDocument();
 	});
 
 	it("Check for updates triggers a manual check", async () => {
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		await userEvent.click(await screen.findByRole("button", { name: "Check for updates" }));
 		expect(updCheck).toHaveBeenCalled();
 	});
@@ -394,7 +414,7 @@ describe("GlobalSettingsForm", () => {
 			return () => undefined;
 		});
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		await screen.findByRole("button", { name: "Check for updates" });
 		act(() => emit({ state: "available", version: "1.2.3" }));
 		await userEvent.click(await screen.findByRole("button", { name: "Update to v1.2.3" }));
@@ -408,7 +428,7 @@ describe("GlobalSettingsForm", () => {
 			return () => undefined;
 		});
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		await screen.findByRole("button", { name: "Check for updates" });
 		act(() => emit({ state: "downloaded", version: "1.2.3" }));
 		await userEvent.click(await screen.findByRole("button", { name: /Restart & install/ }));
@@ -418,7 +438,7 @@ describe("GlobalSettingsForm", () => {
 	it("a failed import surfaces the error and marks failed", async () => {
 		postMock.mockResolvedValue({ data: undefined, error: { message: "disk full" } });
 		renderForm();
-		await goToSection("System");
+		await goToSection("This Mac");
 		await userEvent.click(await screen.findByRole("button", { name: "Run migration" }));
 		expect(await screen.findByText(/disk full/i)).toBeInTheDocument();
 		expect(setMigration).toHaveBeenCalledWith(expect.objectContaining({ status: "failed", error: "disk full" }));

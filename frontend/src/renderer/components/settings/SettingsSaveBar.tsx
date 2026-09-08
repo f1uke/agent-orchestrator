@@ -54,6 +54,12 @@ export function SettingsSaveBar({
 					<span className="flex shrink-0 items-center gap-2 text-[12px] text-passive">
 						<Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />
 						All changes saved
+						{/* Standing, not per-section: nine controls across this page act on click,
+						    and a note that only appeared on two of eight sections taught nothing. */}
+						<span>
+							· rows marked <span className="text-warning">Instant, not saved</span> act on click and never wait for
+							Save
+						</span>
 						{idleNote && <span>· {idleNote}</span>}
 					</span>
 					<div className="ml-auto flex min-w-0 items-center gap-3">{status}</div>

@@ -1,17 +1,21 @@
 import type { LucideIcon } from "lucide-react";
-import { Bot, FileText, FolderGit2, MessageSquare, Monitor, Workflow } from "lucide-react";
+import { Bot, FolderGit2, GitBranch, Inbox, Laptop, MessagesSquare, Trash2, Users } from "lucide-react";
 
-// The two settings scopes share one two-pane shell; each scope shows only its
-// own section set (proposal §3). Keys are stable ids used for nav selection and
-// (later) deep links; keywords back the in-settings search so a field-level term
-// (e.g. "branch") surfaces the section that holds it.
+// The two settings scopes share one two-pane shell; each scope shows only its own
+// section set. Under variant B (chosen 2026-09-08) the sections are cut by WHAT A
+// SETTING ACTS ON rather than by the shape of the config file, so the heading
+// itself answers "where will I find this" and "when does it bite" before a chip
+// has to. Keys are stable ids used for nav selection and (later) deep links;
+// keywords back the in-settings search so a field-level term surfaces the section
+// that holds it.
 export type SettingsScope = "project" | "global";
 
 export type SectionMeta = {
 	key: string;
 	label: string;
 	Icon: LucideIcon;
-	// One-line "· …" suffix next to the section title (mirrors the mockups' hints).
+	// One-line "· …" suffix next to the section title: the section's promise about
+	// what lives in it.
 	hint: string;
 	// Extra terms the search field matches on beyond the label.
 	keywords: string;
@@ -19,69 +23,83 @@ export type SectionMeta = {
 
 export const PROJECT_SECTIONS: SectionMeta[] = [
 	{
-		key: "general",
-		label: "General",
-		Icon: FolderGit2,
-		hint: "repository, worktrees & branch naming",
+		key: "repo",
+		label: "Repository & branches",
+		Icon: GitBranch,
+		hint: "where the work lands",
 		keywords:
-			"identity id kind path repo workspace repos default branch session prefix git convention workflow prefix web ui browser preview crew qa check-in pause before implementing plan approval needs you",
+			"identity id kind path repo remote origin workspace repos child default branch base main session prefix namespace git convention workflow gitflow custom branch prefix feature naming",
 	},
 	{
-		key: "agents",
-		label: "Agents",
+		key: "start",
+		label: "Starting a task",
+		Icon: Users,
+		hint: "who AO puts on it, and how far it may go",
+		keywords:
+			"worker orchestrator agent harness claude code codex opencode model opus sonnet haiku permission mode accept edits auto bypass crew qa tester automatic check-in pause before implementing needs you refresh agents availability cache",
+	},
+	{
+		key: "told",
+		label: "What agents are told",
 		Icon: Bot,
-		hint: "who runs, on which model & permission",
-		keywords: "worker orchestrator agent refresh model override permission mode reviewer",
-	},
-	{
-		key: "prompts",
-		label: "Prompts",
-		Icon: FileText,
-		hint: "additional system prompts appended for this project",
+		hint: "language, extra prompts, and what this project has",
 		keywords:
-			"orchestrator worker reviewer additional system prompt response language thai english localization override",
+			"response language thai english japanese german localization override inherit additional system prompt append orchestrator worker reviewer web ui browser preview ao preview ios simulator xcode device",
 	},
 	{
-		key: "automation",
-		label: "Automation",
-		Icon: Workflow,
-		hint: "things AO does on its own for this project",
-		keywords: "tracker intake issue assignee approval rule required approvals",
+		key: "flow",
+		label: "Incoming & outgoing",
+		Icon: Inbox,
+		hint: "issues in, reviews and merges out",
+		keywords:
+			"tracker intake issue assignee github gitlab jira reviewer agent code review approval rule required approvals ready to merge threshold",
 	},
 ];
 
 export const GLOBAL_SECTIONS: SectionMeta[] = [
 	{
-		key: "prompts",
-		label: "Prompts",
-		Icon: FileText,
-		hint: "the global base each session kind starts from",
-		keywords: "orchestrator worker reviewer system prompt base response language thai english localization default",
-	},
-	{
-		key: "messages",
-		label: "Messages",
-		Icon: MessageSquare,
-		hint: "runtime nudge messages sent into a worker",
-		keywords: "review comment dispatch ci failing merge conflict tracker bot ao reviewer batch single template",
-	},
-	{
-		key: "automation",
-		label: "Automation",
-		Icon: Workflow,
-		hint: "orchestrator & daemon automatic behaviour",
+		key: "every-agent",
+		label: "Every agent",
+		Icon: Bot,
+		hint: "what every session starts from",
 		keywords:
-			"confirm spawning workers auto-send unresolved pr comments auto-reclaim grace period evidence retention ttl purge smoke test screenshots delete age",
+			"response language thai english default localization system prompt base orchestrator worker qa reviewer coordination floor confidentiality placeholder project id",
 	},
 	{
-		key: "system",
-		label: "System",
-		Icon: Monitor,
-		hint: "wiki vault, notifications, updates, companion & migration",
+		key: "running",
+		label: "While work runs",
+		Icon: MessagesSquare,
+		hint: "what AO says and does to a worker mid-task",
 		keywords:
-			"wiki vault obsidian notes knowledge base folder path notifications test updates channel version check migration import legacy companion desktop pet overlay procs library creature species animal character look appearance colour color",
+			"message template review comment dispatch ci failing merge conflict pr base mismatch tracker bot comment ao reviewer batch single nudge confirm before spawning workers approval auto-send unresolved pr comments",
+	},
+	{
+		key: "cleanup",
+		label: "Cleaning up",
+		Icon: Trash2,
+		hint: "what AO deletes once work is finished",
+		keywords:
+			"auto-reclaim reclaim finished sessions grace period tmux worktree build output derived data pods node_modules smoke test evidence retention screenshots clips delete age days purge sweep",
+	},
+	{
+		key: "mac",
+		label: "This Mac",
+		Icon: Laptop,
+		hint: "the app itself, not the agents",
+		keywords:
+			"updates automatic channel stable nightly version check install restart wiki vault obsidian notes knowledge base folder path notifications test banner companion desktop pet overlay procs library creature species migration import legacy",
 	},
 ];
+
+// Where the project scope's read-only identity panel lives. Kept as a constant so
+// the panel and its section cannot drift apart.
+export const PROJECT_IDENTITY_SECTION = "repo";
+
+// The scope switcher's own icon, reused by the nav header.
+export const SCOPE_ICON: Record<SettingsScope, LucideIcon> = {
+	project: FolderGit2,
+	global: Bot,
+};
 
 export function sectionsForScope(scope: SettingsScope): SectionMeta[] {
 	return scope === "project" ? PROJECT_SECTIONS : GLOBAL_SECTIONS;

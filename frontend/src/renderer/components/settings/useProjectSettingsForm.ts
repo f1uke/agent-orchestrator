@@ -4,6 +4,7 @@ import type { components } from "../../../api/schema";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../../hooks/useAgentsQuery";
 import { useWorkspaceQuery } from "../../hooks/useWorkspaceQuery";
 import { apiClient, apiErrorMessage } from "../../lib/api-client";
+import { responseLanguageQueryKey } from "./useGlobalSettingsForm";
 import { captureRendererEvent } from "../../lib/telemetry";
 import { spawnOrchestrator } from "../../lib/spawn-orchestrator";
 import { newestActiveOrchestrator } from "../../types/workspace";
@@ -149,6 +150,18 @@ export function useProjectSettingsForm({
 	const initialOrchestratorAgent = config.orchestrator?.agent ?? "";
 	const missingRequiredAgent = form.workerAgent === "" || form.orchestratorAgent === "";
 	const agentsQuery = useQuery(agentsQueryOptions);
+	// The global default this project's response-language field may override. It is
+	// read here so the override can be stated AT the field ("Global default:
+	// English · this project overrides it") instead of only in the Global pane.
+	const globalResponseLanguageQuery = useQuery({
+		queryKey: responseLanguageQueryKey,
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/response-language", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as { language: string };
+		},
+	});
+	const globalResponseLanguage = globalResponseLanguageQuery.data?.language || "English";
 	const agentCatalog = agentsQuery.data;
 	const refreshAgentsMutation = useMutation({
 		mutationFn: refreshAgents,
@@ -306,6 +319,7 @@ export function useProjectSettingsForm({
 		agentsQuery,
 		refreshAgentsMutation,
 		missingRequiredAgent,
+		globalResponseLanguage,
 		intakeForm,
 		patchIntake,
 		effectiveIntakeRepo,

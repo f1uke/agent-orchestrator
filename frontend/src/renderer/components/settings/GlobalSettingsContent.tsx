@@ -1,25 +1,24 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Bot, MessageSquare } from "lucide-react";
 import type { UpdateChannel } from "../../../main/update-settings";
 import { apiClient, apiErrorMessage } from "../../lib/api-client";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { SettingsGroup } from "./SettingsGroup";
-import { SettingsField } from "./SettingsField";
-import { SettingEditorRow } from "./SettingEditorRow";
+import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
+import { SettingEditorControl } from "./SettingEditorControl";
 import { CompanionControls } from "./CompanionControls";
 import { CompanionPreview } from "./CompanionPreview";
 import { PetLibrary } from "./PetLibrary";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
+import { GLOBAL_SECTIONS } from "./settings-sections";
 import type { PromptKind } from "./useGlobalSettingsForm";
 import type { useGlobalSettingsForm } from "./useGlobalSettingsForm";
 
 const INPUT_CLASS =
-	"h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak";
+	"h-8 w-full max-w-[340px] rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak";
 
 const PROMPT_LABELS: Record<PromptKind, string> = {
 	orchestrator: "Orchestrator",
@@ -27,14 +26,28 @@ const PROMPT_LABELS: Record<PromptKind, string> = {
 	qa: "QA",
 	reviewer: "Reviewer",
 };
-const PROMPT_PURPOSE: Record<PromptKind, string> = {
-	orchestrator: "Global base the orchestrator starts from",
-	worker: "Global base each worker starts from",
+
+// One honest sentence per prompt kind: what that base is, not what a prompt is.
+const PROMPT_SUMMARY: Record<PromptKind, string> = {
+	orchestrator: "The editable text every orchestrator session starts from.",
+	worker: "The editable text every worker session starts from.",
 	// The qa member of a crew is a worker SESSION doing a different job, so it has
-	// a base of its own. The daemon has shipped it since crews existed; this row
-	// was drawing with no name at all because the label map had never learned it.
-	qa: "Global base the qa member of a crew starts from",
-	reviewer: "Global base the reviewer starts from",
+	// a base of its own.
+	qa: "The base the qa member of a crew starts from - a worker session doing a different job.",
+	reviewer: "The base the agent that reviews a worker's pull request starts from.",
+};
+
+// What each runtime message is FOR. The template name alone says when it is sent
+// to a machine, not to a person.
+const TEMPLATE_SUMMARY: Record<string, string> = {
+	"review-comment-dispatch": "What AO types into a worker's terminal when its pull request picks up review feedback.",
+	"ci-failing": "Sent when the worker's pull request goes red.",
+	"merge-conflict": "Sent when the worker's branch stops merging cleanly into its target.",
+	"pr-base-mismatch":
+		"Sent when a pull request would merge somewhere other than where the session was spawned to land.",
+	"tracker-bot-comment": "Sent when the tracker issue behind a session gets a new comment.",
+	"ao-reviewer-batch": "Sent when AO's own reviewer returns more than one finding at once.",
+	"ao-reviewer-single": "Sent when AO's own reviewer returns exactly one finding.",
 };
 
 const CHANNEL_OPTIONS: { value: UpdateChannel; label: string }[] = [
@@ -44,176 +57,211 @@ const CHANNEL_OPTIONS: { value: UpdateChannel; label: string }[] = [
 
 type GlobalForm = ReturnType<typeof useGlobalSettingsForm>;
 
+function hint(key: string): string {
+	return GLOBAL_SECTIONS.find((s) => s.key === key)?.hint ?? "";
+}
+
 // GlobalSettingsContent renders the active Global section against the shared form
-// hook. Only one section shows at a time (the two-pane surface), but the draft
-// lives in the hook above it, so navigating between sections never loses an edit
-// and one save bar commits the whole global config. The System section is the
-// exception the save bar tolerates: its update channel routes through Save, while
-// Send test / Check for updates / Run migration are instant actions (SystemActions).
+// hook. Only one section shows at a time, but the draft lives in the hook above
+// it, so navigating between sections never loses an edit and one save bar commits
+// the whole global config. Rows marked "Instant, not saved" (Send test, Check for
+// updates, Run migration, Purge now, the companion switch, the pet library) act on
+// click and are outside the bar by design.
 export function GlobalSettingsContent({ form, activeSection }: { form: GlobalForm; activeSection: string }) {
 	switch (activeSection) {
-		case "messages":
-			return <MessagesSection form={form} />;
-		case "automation":
-			return <AutomationSection form={form} />;
-		case "system":
-			return <SystemSection form={form} />;
+		case "running":
+			return <WhileWorkRunsSection form={form} />;
+		case "cleanup":
+			return <CleaningUpSection form={form} />;
+		case "mac":
+			return <ThisMacSection form={form} />;
 		default:
-			return <PromptsSection form={form} />;
+			return <EveryAgentSection form={form} />;
 	}
 }
 
-function SectionTitle({ title, hint }: { title: string; hint: string }) {
-	return (
-		<div className="mb-4 flex items-center gap-2.5 border-b border-border pb-3 pt-2.5">
-			<h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">{title}</h2>
-			<span className="text-[12px] font-normal text-passive">· {hint}</span>
-		</div>
-	);
-}
-
-function PromptsSection({ form }: { form: GlobalForm }) {
+function EveryAgentSection({ form }: { form: GlobalForm }) {
 	const { draft, setField, isFieldDirty } = form;
 	return (
 		<>
-			<SectionTitle title="Prompts" hint="the global base each session kind starts from" />
-
-			<SettingsGroup title="Human-facing response language">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					The language every agent (orchestrator, worker, reviewer) writes its human-facing output in - status updates,
-					reports, questions, and PR/MR review comments. Code, commit messages, PR/MR titles and bodies, branch names,
-					and identifiers always stay English. English (the default) injects no directive. A project can override this
-					from its own Settings.
-				</p>
-				<SettingsField
-					label="Default response language"
-					htmlFor="responseLanguage"
+			<SectionHeading title="Every agent" hint={hint("every-agent")} />
+			<SettingRows>
+				<SettingRow
+					name="Default response language"
+					summary="The language every agent writes its human-facing prose in - status updates, reports, questions, PR review comments."
+					detail="Code, commit messages, PR/MR titles and bodies, branch names and identifiers always stay English; only prose addressed to a person changes. English is the shipped default and injects no directive at all, so the default path is byte-for-byte the prompt it always was."
+					ownership={{ kind: "global-overridable" }}
+					timing="next-worker"
+					value={draft.responseLanguage || "English"}
 					modified={isFieldDirty("responseLanguage")}
+					controlId="responseLanguage"
 				>
 					<LanguageSelect
 						id="responseLanguage"
 						value={draft.responseLanguage}
 						onChange={(v) => setField("responseLanguage", v)}
 					/>
-				</SettingsField>
-			</SettingsGroup>
+				</SettingRow>
 
-			<p className="mb-4 mt-6 text-[12px] leading-relaxed text-passive">
-				Edit the global base each session kind starts from. AO always appends a protected coordination floor, the
-				confidentiality guard, and dynamic context (git convention, spawn-confirm, session and project ids) — those are
-				not shown here. Use <code>{"{{.ProjectID}}"}</code> in any base to insert the project id.
-			</p>
-			{form.prompts.map((p) => (
-				<SettingEditorRow
-					key={p.kind}
-					icon={Bot}
-					name={PROMPT_LABELS[p.kind]}
-					purpose={PROMPT_PURPOSE[p.kind]}
-					textareaLabel={`${PROMPT_LABELS[p.kind]} system prompt`}
-					value={form.draft.prompts[p.kind] ?? p.override ?? p.default}
-					defaultValue={p.default}
-					modified={form.isPromptDirty(p.kind)}
-					onChange={(v) => form.setPrompt(p.kind, v)}
-				/>
-			))}
+				{form.prompts.map((p) => {
+					const value = form.draft.prompts[p.kind] ?? p.override ?? p.default;
+					return (
+						<SettingRow
+							key={p.kind}
+							name={PROMPT_LABELS[p.kind]}
+							summary={PROMPT_SUMMARY[p.kind]}
+							detail={
+								<>
+									AO always appends a protected coordination floor, the confidentiality guard, and dynamic context (git
+									convention, spawn-confirm, session and project ids) on top of whatever you write here - those are not
+									shown and cannot be removed. Use <code>{"{{.ProjectID}}"}</code> to insert the project id.
+								</>
+							}
+							ownership={{ kind: "global-appendable" }}
+							timing={p.kind === "orchestrator" ? "next-orchestrator" : "next-worker"}
+							value={value === p.default ? "Default" : "Customised"}
+							modified={form.isPromptDirty(p.kind)}
+						>
+							<SettingEditorControl
+								name={PROMPT_LABELS[p.kind]}
+								textareaLabel={`${PROMPT_LABELS[p.kind]} system prompt`}
+								value={value}
+								defaultValue={p.default}
+								onChange={(v) => form.setPrompt(p.kind, v)}
+							/>
+						</SettingRow>
+					);
+				})}
+			</SettingRows>
 		</>
 	);
 }
 
-function MessagesSection({ form }: { form: GlobalForm }) {
-	return (
-		<>
-			<SectionTitle title="Messages" hint="runtime nudge messages sent into a worker" />
-			<p className="mb-4 text-[12px] leading-relaxed text-passive">
-				Edit the runtime messages AO sends into a worker's terminal. Dynamic values are inserted via each message's
-				placeholders (Go text/template). A bad edit falls back to the built-in default.
-			</p>
-			{form.templates.map((t) => (
-				<SettingEditorRow
-					key={t.name}
-					icon={MessageSquare}
-					name={t.name}
-					purpose={
-						(t.placeholders ?? []).length > 0 ? `Placeholders: ${(t.placeholders ?? []).join(" ")}` : "No placeholders"
-					}
-					description={
-						(t.placeholders ?? []).length > 0
-							? `Placeholders (Go text/template): ${(t.placeholders ?? []).join(" ")}`
-							: undefined
-					}
-					textareaLabel={`${t.name} message template`}
-					value={form.draft.templates[t.name] ?? t.override ?? t.default}
-					defaultValue={t.default}
-					modified={form.isTemplateDirty(t.name)}
-					onChange={(v) => form.setTemplate(t.name, v)}
-					placeholders={t.placeholders}
-				/>
-			))}
-		</>
-	);
-}
-
-function AutomationSection({ form }: { form: GlobalForm }) {
+function WhileWorkRunsSection({ form }: { form: GlobalForm }) {
 	const { draft, setField, isFieldDirty } = form;
 	return (
 		<>
-			<SectionTitle title="Automation" hint="orchestrator & daemon automatic behaviour" />
+			<SectionHeading title="While work runs" hint={hint("running")} />
+			<SettingRows>
+				{form.templates.map((t) => {
+					const value = form.draft.templates[t.name] ?? t.override ?? t.default;
+					const placeholders = t.placeholders ?? [];
+					return (
+						<SettingRow
+							key={t.name}
+							name={t.name}
+							summary={TEMPLATE_SUMMARY[t.name] ?? "A runtime message AO sends into a worker's terminal."}
+							detail={
+								<>
+									Dynamic values are inserted with Go text/template. A bad edit is caught when the message is sent and
+									falls back to the built-in default, so a broken template never blocks a nudge.
+								</>
+							}
+							ownership={{ kind: "global-only" }}
+							// Read at send time: the very next nudge uses whatever is saved.
+							timing="live"
+							value={value === t.default ? "Default" : "Customised"}
+							modified={form.isTemplateDirty(t.name)}
+						>
+							<SettingEditorControl
+								name={t.name}
+								description={
+									placeholders.length > 0 ? `Placeholders (Go text/template): ${placeholders.join(" ")}` : undefined
+								}
+								textareaLabel={`${t.name} message template`}
+								value={value}
+								defaultValue={t.default}
+								onChange={(v) => form.setTemplate(t.name, v)}
+								placeholders={t.placeholders}
+							/>
+						</SettingRow>
+					);
+				})}
 
-			<SettingsGroup title="Confirm before spawning workers">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					When on, the orchestrator shows a summary — the task, the source branch, the new branch, and the pull-request
-					target — and waits for your approval in chat before it runs <code>ao spawn</code>. When off, it spawns workers
-					directly.
-				</p>
-				<SettingsField
-					label="Confirm before spawning"
-					htmlFor="spawnConfirmEnabled"
+				<SettingRow
+					name="Confirm before spawning workers"
+					summary="The orchestrator shows you the task, the source branch, the new branch and the PR target, and waits for your yes before it spawns."
+					detail="This is rendered into the orchestrator's own system prompt when that session starts, so the orchestrator you have open right now keeps behaving the way it was started until it is restarted. Turning it off lets the orchestrator spawn workers directly."
+					ownership={{ kind: "global-only" }}
+					timing="next-orchestrator"
+					value={draft.spawnConfirm ? "On" : "Off"}
 					modified={isFieldDirty("spawnConfirm")}
+					controlId="spawnConfirmEnabled"
 				>
 					<OnOffSelect
 						id="spawnConfirmEnabled"
 						value={draft.spawnConfirm}
 						onChange={(v) => setField("spawnConfirm", v)}
 					/>
-				</SettingsField>
-			</SettingsGroup>
+				</SettingRow>
 
-			<SettingsGroup title="Auto-send unresolved PR comments to the worker">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					When on, a session whose pull request gets an unresolved review comment (or a changes-requested review)
-					automatically nudges its worker. This is the default for new sessions — each session can override it from its
-					Reviews tab.
-				</p>
-				<div className="flex items-center gap-3">
-					<Switch
-						id="autoNudgeEnabled"
-						checked={draft.autoNudge}
-						onCheckedChange={(checked) => setField("autoNudge", checked)}
-					/>
-					<label htmlFor="autoNudgeEnabled" className="text-[12px] text-muted-foreground">
-						Enabled by default
-					</label>
-					{isFieldDirty("autoNudge") && (
-						<span className="font-mono text-[10px] tracking-[0.04em] text-warning" aria-label="modified">
-							● Modified
-						</span>
-					)}
-				</div>
-			</SettingsGroup>
+				<SettingRow
+					name="Auto-send unresolved PR comments"
+					summary="A session whose pull request gets review feedback nudges its worker on its own, instead of waiting for you to send it."
+					// The old copy called this "the default for new sessions". It is read at
+					// the moment the feedback arrives (lifecycle/reactions.go), so it also
+					// changes sessions that are already running.
+					detail="This is read at the moment the feedback arrives, not when a session starts - so changing it here changes what every session already running does, unless that session set its own answer in its Reviews tab. AO fetches and stores the comments either way; this only decides whether the worker is told."
+					ownership={{ kind: "global-session-override" }}
+					timing="live"
+					value={draft.autoNudge ? "On" : "Off"}
+					modified={isFieldDirty("autoNudge")}
+				>
+					<div className="flex items-center gap-3">
+						<Switch
+							id="autoNudgeEnabled"
+							checked={draft.autoNudge}
+							onCheckedChange={(checked) => setField("autoNudge", checked)}
+						/>
+						<label htmlFor="autoNudgeEnabled" className="text-[12px] text-muted-foreground">
+							Enabled by default
+						</label>
+					</div>
+				</SettingRow>
+			</SettingRows>
+		</>
+	);
+}
 
-			<SettingsGroup title="Auto-reclaim finished sessions">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					When a session is merged or terminated, AO tears down its tmux and worktree after the grace period. The git
-					branch is kept, so the session can still be restored.
-				</p>
-				<SettingsField label="Auto-reclaim" htmlFor="reclaimEnabled" modified={isFieldDirty("reclaimEnabled")}>
+function CleaningUpSection({ form }: { form: GlobalForm }) {
+	const { draft, setField, isFieldDirty } = form;
+	return (
+		<>
+			<SectionHeading title="Cleaning up" hint={hint("cleanup")} />
+			<SettingRows>
+				<SettingRow
+					name="Auto-reclaim"
+					summary="Once a session is merged or terminated, AO tears down its tmux window and its worktree."
+					detail={
+						<>
+							The git branch is always kept, so a reclaimed session can still be restored, and a worktree with
+							uncommitted or untracked changes is never reclaimed. Every reclaim and every refusal is recorded in{" "}
+							<code>~/.ao/data/reclaim.jsonl</code>, with what was removed, why it qualified, how much it freed, and the
+							branch it left behind.
+						</>
+					}
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.reclaimEnabled ? "Enabled" : "Disabled"}
+					modified={isFieldDirty("reclaimEnabled")}
+					controlId="reclaimEnabled"
+				>
 					<OnOffSelect
 						id="reclaimEnabled"
 						value={draft.reclaimEnabled}
 						onChange={(v) => setField("reclaimEnabled", v)}
 					/>
-				</SettingsField>
-				<SettingsField label="Grace period (minutes)" htmlFor="reclaimGrace" modified={isFieldDirty("reclaimGrace")}>
+				</SettingRow>
+
+				<SettingRow
+					name="Grace period (minutes)"
+					summary="How long AO waits after a session finishes before it reclaims anything."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={`${draft.reclaimGrace} min`}
+					modified={isFieldDirty("reclaimGrace")}
+					controlId="reclaimGrace"
+				>
 					<input
 						id="reclaimGrace"
 						type="number"
@@ -222,51 +270,56 @@ function AutomationSection({ form }: { form: GlobalForm }) {
 						value={draft.reclaimGrace}
 						onChange={(e) => setField("reclaimGrace", Math.max(0, Number(e.target.value) || 0))}
 					/>
-				</SettingsField>
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					A worktree with uncommitted or untracked changes is never reclaimed. Build output is the exception: an
-					untracked <code>derivedDataPath</code>, <code>Pods</code> or <code>node_modules</code> would otherwise keep a
-					finished worktree on disk forever, so AO clears those out of the way — and only ever when nothing else in the
-					worktree has changed. Turn this off to treat build output as work too.
-				</p>
-				<SettingsField
-					label="Clear build output"
-					htmlFor="reclaimArtifacts"
+				</SettingRow>
+
+				<SettingRow
+					name="Clear build output"
+					summary="Treat derivedDataPath, Pods and node_modules as disposable rather than as work worth keeping."
+					detail={
+						<>
+							Untracked build output would otherwise keep a finished worktree on disk for ever, so AO clears it out of
+							the way - and only ever when nothing else in the worktree has changed. Turn this off to treat build output
+							as work too.
+						</>
+					}
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.reclaimArtifacts ? "Enabled" : "Disabled"}
 					modified={isFieldDirty("reclaimArtifacts")}
+					controlId="reclaimArtifacts"
 				>
 					<OnOffSelect
 						id="reclaimArtifacts"
 						value={draft.reclaimArtifacts}
 						onChange={(v) => setField("reclaimArtifacts", v)}
 					/>
-				</SettingsField>
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					Every reclaim and every refusal is recorded in <code>~/.ao/data/reclaim.jsonl</code>, with what was removed,
-					why it qualified, how much it freed, and the branch it left behind.
-				</p>
-			</SettingsGroup>
+				</SettingRow>
 
-			<SettingsGroup title="Smoke-test evidence retention">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					Screenshots and clips you attach in the Tests tab are stored on disk under <code>~/.ao</code>. AO
-					automatically deletes evidence older than the age below, measured from when it was captured. Set Retention to
-					Disabled to keep evidence forever.
-				</p>
-				<SettingsField
-					label="Retention"
-					htmlFor="evidenceRetentionEnabled"
+				<SettingRow
+					name="Retention"
+					summary="Screenshots and clips you attach in the Tests tab are deleted once they pass the age below."
+					detail="Evidence is stored on disk under ~/.ao and the age is measured from when it was captured. Set this to Disabled to keep evidence for ever."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.evidenceRetentionEnabled ? "Enabled" : "Disabled"}
 					modified={isFieldDirty("evidenceRetentionEnabled")}
+					controlId="evidenceRetentionEnabled"
 				>
 					<OnOffSelect
 						id="evidenceRetentionEnabled"
 						value={draft.evidenceRetentionEnabled}
 						onChange={(v) => setField("evidenceRetentionEnabled", v)}
 					/>
-				</SettingsField>
-				<SettingsField
-					label="Delete evidence older than (days)"
-					htmlFor="evidenceRetentionDays"
+				</SettingRow>
+
+				<SettingRow
+					name="Delete evidence older than (days)"
+					summary="The age at which an attached screenshot or clip is swept."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={`${draft.evidenceRetentionDays} days`}
 					modified={isFieldDirty("evidenceRetentionDays")}
+					controlId="evidenceRetentionDays"
 				>
 					<input
 						id="evidenceRetentionDays"
@@ -279,9 +332,18 @@ function AutomationSection({ form }: { form: GlobalForm }) {
 							setField("evidenceRetentionDays", Math.max(1, Math.min(3650, Number(e.target.value) || 1)))
 						}
 					/>
-				</SettingsField>
-				<EvidenceRetentionPurgeButton />
-			</SettingsGroup>
+				</SettingRow>
+
+				<SettingRow
+					name="Purge evidence now"
+					summary="Runs the age sweep immediately and reports what it removed."
+					detail="It uses the SAVED retention age, not the number in the box above - save a change first for it to count."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+				>
+					<EvidenceRetentionPurgeButton />
+				</SettingRow>
+			</SettingRows>
 		</>
 	);
 }
@@ -306,7 +368,7 @@ function EvidenceRetentionPurgeButton() {
 		onError: (e) => setStatus(apiErrorMessage(e, "Sweep failed.")),
 	});
 	return (
-		<div className="mt-1 flex items-center gap-3">
+		<div className="flex items-center gap-3">
 			<Button type="button" variant="outline" onClick={() => purge.mutate()} disabled={purge.isPending}>
 				{purge.isPending ? "Purging…" : "Purge now"}
 			</Button>
@@ -327,27 +389,56 @@ function formatBytes(n: number): string {
 	return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-function SystemSection({ form }: { form: GlobalForm }) {
+function ThisMacSection({ form }: { form: GlobalForm }) {
 	const { draft, setField, isFieldDirty } = form;
 	return (
 		<>
-			<SectionTitle title="System" hint="wiki vault, notifications, updates, companion & migration" />
-
-			<SettingsGroup title="Updates">
-				<SettingsField label="Automatic updates" htmlFor="updatesEnabled" modified={isFieldDirty("updatesEnabled")}>
+			<SectionHeading title="This Mac" hint={hint("mac")} />
+			<SettingRows>
+				<SettingRow
+					name="Automatic updates"
+					summary="AO downloads and installs new builds of the desktop app on its own."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.updatesEnabled ? "Enabled" : "Disabled"}
+					modified={isFieldDirty("updatesEnabled")}
+					controlId="updatesEnabled"
+				>
 					<OnOffSelect
 						id="updatesEnabled"
 						value={draft.updatesEnabled}
 						onChange={(v) => setField("updatesEnabled", v)}
 					/>
-				</SettingsField>
-				<SettingsField label="Update channel" htmlFor="updateChannel" modified={isFieldDirty("updateChannel")}>
+				</SettingRow>
+
+				<SettingRow
+					name="Update channel"
+					summary="Which build stream automatic updates follow."
+					detail={
+						<>
+							Stable follows tagged releases.{" "}
+							{/* The warning appears only while Nightly is actually selected: a caution
+							    printed on every visit stops being read as a caution. */}
+							{draft.updateChannel === "nightly" && draft.updatesEnabled && (
+								<span className="text-warning">
+									Nightly builds are cut every day and can be unstable or lose data. Only use Nightly if you are
+									comfortable with that.
+								</span>
+							)}
+						</>
+					}
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={CHANNEL_OPTIONS.find((c) => c.value === draft.updateChannel)?.label ?? draft.updateChannel}
+					modified={isFieldDirty("updateChannel")}
+					controlId="updateChannel"
+				>
 					<Select
 						value={draft.updateChannel}
 						onValueChange={(v) => setField("updateChannel", v as UpdateChannel)}
 						disabled={!draft.updatesEnabled}
 					>
-						<SelectTrigger id="updateChannel" className="h-8 w-full text-[13px]">
+						<SelectTrigger id="updateChannel" className="h-8 w-full max-w-[340px] text-[13px]">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
@@ -358,72 +449,83 @@ function SystemSection({ form }: { form: GlobalForm }) {
 							))}
 						</SelectContent>
 					</Select>
-				</SettingsField>
-				{draft.updateChannel === "nightly" && draft.updatesEnabled && (
-					<p className="text-[12px] leading-5 text-warning">
-						Nightly builds are cut every day and can be unstable or lose data. Only use Nightly if you are comfortable
-						with that.
-					</p>
-				)}
-				{/* Instant, out of the save bar: version + Check / Update / Restart. */}
-				<div className="border-t border-border pt-4">
-					<UpdateActions />
-				</div>
-			</SettingsGroup>
+				</SettingRow>
 
-			{/* The Wiki is one personal note vault, not a project — so its path is a
-          global setting, and an empty path hides the destination entirely. */}
-			<SettingsGroup title="Wiki vault">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					A folder of markdown notes — an Obsidian vault, say — that you can ask an agent about. Setting a path adds a
-					Wiki entry above Projects in the sidebar; leaving it empty removes it. The agent runs with your notes as its
-					working directory and can edit and create them.
-				</p>
-				<SettingsField
-					label="Vault folder"
-					htmlFor="wikiVaultPath"
+				<SettingRow
+					name="Updates"
+					summary="Looks for a newer build right now, downloads it, and restarts into it - even when automatic updates are off."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+				>
+					<UpdateActions />
+				</SettingRow>
+
+				{/* The Wiki is one personal note vault, not a project - so its path is a
+				    global setting, and an empty path hides the destination entirely. */}
+				<SettingRow
+					name="Vault folder"
+					summary="A folder of markdown notes you can ask an agent about. Setting a path adds a Wiki entry above Projects in the sidebar."
+					detail="An absolute path, or one starting with ~/. The agent runs with your notes as its working directory and can edit and create them. Leave it empty to turn the Wiki off and remove the sidebar entry."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.wikiVaultPath || "Off"}
 					modified={isFieldDirty("wikiVaultPath")}
-					help="An absolute path, or one starting with ~/. Leave empty to turn the Wiki off."
+					controlId="wikiVaultPath"
 				>
 					<Input
 						id="wikiVaultPath"
-						className="h-8 font-mono text-[12.5px]"
+						className="h-8 max-w-[340px] font-mono text-[12.5px]"
 						placeholder="~/Notes"
 						spellCheck={false}
 						value={draft.wikiVaultPath}
 						onChange={(e) => setField("wikiVaultPath", e.target.value)}
 					/>
-				</SettingsField>
-			</SettingsGroup>
+				</SettingRow>
 
-			<SettingsGroup title="Notifications">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					Send a test banner to confirm macOS notifications are working. The banner should appear whether or not the
-					Agent Orchestrator window is focused.
-				</p>
-				<NotificationsControls />
-			</SettingsGroup>
+				<SettingRow
+					name="Notifications"
+					summary="Sends a native banner down the exact path a real notification takes, so you can confirm macOS is letting them through."
+					detail="The banner should appear whether or not the Agent Orchestrator window is focused."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+				>
+					<NotificationsControls />
+				</SettingRow>
 
-			<SettingsGroup title="Desktop companion">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					Shows one small character per session along the bottom of your screen — working, waiting on you, or done. It
-					sits above the Dock and clicks pass straight through it, except on a character itself.
-				</p>
-				<CompanionControls />
-				<CompanionPreview />
-			</SettingsGroup>
+				<SettingRow
+					name="Desktop companion"
+					summary="Shows one small character per session along the bottom of your screen - working, waiting on you, or done."
+					detail="It sits above the Dock and clicks pass straight through it, except on a character itself. The switch opens or closes a window immediately; a control with a visible consequence that waited for Save would read as broken."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+				>
+					<div className="flex flex-col gap-3">
+						<CompanionControls />
+						<CompanionPreview />
+					</div>
+				</SettingRow>
 
-			<SettingsGroup title="Pet library">
-				<PetLibrary />
-			</SettingsGroup>
+				<SettingRow
+					name="Pet library"
+					summary="Which creature each project's sessions appear as in the companion."
+					detail="Also reachable by right-clicking a character on the desktop, which is where most people find it."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+					defaultOpen
+				>
+					<PetLibrary />
+				</SettingRow>
 
-			<SettingsGroup title="Migration">
-				<p className="text-[12px] leading-5 text-muted-foreground">
-					Import projects and orchestrator sessions from an earlier Agent Orchestrator install. Your old files are never
-					modified, and this is safe to run more than once.
-				</p>
-				<MigrationControls />
-			</SettingsGroup>
+				<SettingRow
+					name="Migration"
+					summary="Imports projects and orchestrator sessions from an earlier Agent Orchestrator install."
+					detail="Your old files are never modified, and this is safe to run more than once."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+				>
+					<MigrationControls />
+				</SettingRow>
+			</SettingRows>
 		</>
 	);
 }
@@ -436,7 +538,7 @@ function LanguageSelect({ id, value, onChange }: { id: string; value: string; on
 		: [value, ...RESPONSE_LANGUAGE_OPTIONS];
 	return (
 		<Select value={value || "English"} onValueChange={onChange}>
-			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+			<SelectTrigger id={id} className="h-8 w-full max-w-[340px] text-[13px]">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
@@ -453,7 +555,7 @@ function LanguageSelect({ id, value, onChange }: { id: string; value: string; on
 function OnOffSelect({ id, value, onChange }: { id: string; value: boolean; onChange: (value: boolean) => void }) {
 	return (
 		<Select value={value ? "on" : "off"} onValueChange={(v) => onChange(v === "on")}>
-			<SelectTrigger id={id} className="h-8 w-full text-[13px]">
+			<SelectTrigger id={id} className="h-8 w-full max-w-[340px] text-[13px]">
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>

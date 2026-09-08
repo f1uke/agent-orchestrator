@@ -64,7 +64,7 @@ function ProjectSettingsBody({
 	onSaved: () => void;
 }) {
 	const form = useProjectSettingsForm({ project, projectId, onSaved });
-	const [activeSection, setActiveSection] = useState<string>("general");
+	const [activeSection, setActiveSection] = useState<string>("repo");
 	const [search, setSearch] = useState("");
 	const { dirty, mutation, savedAt, replacementError, validationError, submit, discard } = form;
 
@@ -100,7 +100,6 @@ function ProjectSettingsBody({
 				<SettingsSaveBar
 					dirty={dirty}
 					saving={mutation.isPending}
-					idleNote={activeSection === "agents" ? "Refresh agents runs immediately — it isn't part of Save" : undefined}
 					status={status}
 					onDiscard={discard}
 					onSave={submit}

@@ -7,23 +7,24 @@ import { SettingsShell } from "./settings/SettingsShell";
 import { useGlobalSettingsForm } from "./settings/useGlobalSettingsForm";
 
 // GlobalSettingsForm is the Global-scope container: the unified two-pane
-// SettingsShell (scope=global) with the four global sections — Prompts, Messages,
-// Automation, System — and one sticky save bar. Every editable setting (system
+// SettingsShell (scope=global) with the four global sections — Every agent, While
+// work runs, Cleaning up, This Mac — and one sticky save bar. Every editable setting (system
 // prompts, message templates, confirm-before-spawn, auto-send, auto-reclaim,
 // update channel) routes through useGlobalSettingsForm's single dirty/save model
 // (locked decision 3); its save FANS OUT across the several daemon + bridge
 // endpoints. True actions (Send test, Check for updates, Run migration) live in
-// the System section and fire instantly, separate from Save.
+// This Mac and fire instantly, separate from Save - the save bar says so
+// permanently rather than only while that section is open.
 export function GlobalSettingsForm() {
 	const form = useGlobalSettingsForm();
-	const [activeSection, setActiveSection] = useState<string>("prompts");
+	const [activeSection, setActiveSection] = useState<string>("every-agent");
 	const [search, setSearch] = useState("");
 	// Right-clicking a Proc on the desktop lands here asking for the Pet library,
-	// which lives in System. The request is left standing for the library itself to
+	// which lives in This Mac. The request is left standing for the library itself to
 	// consume and clear: it is what knows whether the session is one it can show.
 	const petLibraryRequest = useUiStore((state) => state.petLibraryRequest);
 	useEffect(() => {
-		if (petLibraryRequest) setActiveSection("system");
+		if (petLibraryRequest) setActiveSection("mac");
 	}, [petLibraryRequest]);
 	const { dirty, mutation, savedAt, save, discard } = form;
 
@@ -49,18 +50,7 @@ export function GlobalSettingsForm() {
 			search={search}
 			onSearch={setSearch}
 			saveBar={
-				<SettingsSaveBar
-					dirty={dirty}
-					saving={mutation.isPending}
-					idleNote={
-						activeSection === "system"
-							? "Send test, Check for updates & Run migration run immediately — they aren't part of Save"
-							: undefined
-					}
-					status={status}
-					onDiscard={discard}
-					onSave={save}
-				/>
+				<SettingsSaveBar dirty={dirty} saving={mutation.isPending} status={status} onDiscard={discard} onSave={save} />
 			}
 		>
 			<GlobalSettingsContent form={form} activeSection={activeSection} />
