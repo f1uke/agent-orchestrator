@@ -128,7 +128,7 @@ export function WikiTasksPanel({
 	// screen because somebody else's edit moved the row a line down.
 	const [pending, setPending] = useState<Record<string, Pending>>({});
 	/**
-	 * The one row whose delete is armed, by `taskKey`, or null.
+	 * The one row whose delete is armed, by `row.id`, or null.
 	 *
 	 * 🗝 ONE. Arming a second row disarms the first, so there is never a screen
 	 * with two live "Delete" buttons on it, and a reader who walked away from a
@@ -136,6 +136,16 @@ export function WikiTasksPanel({
 	 * cleared by Cancel, by Escape, by arming another row, and by the delete
 	 * itself — never on a timer: a confirm that disarms itself turns a deliberate
 	 * click into nothing happening, which is its own kind of lie.
+	 *
+	 * 🗝 By `row.id`, NOT by `taskKey`, and this is the one place the two must
+	 * differ. `taskKey` is note + text, so two rows reading exactly alike share
+	 * it — which is right for `pending`, where the daemon cannot tell them apart
+	 * either and both honestly carry the same refusal, and wrong here: arming one
+	 * lit up BOTH, putting two live "Delete" buttons on screen, which is exactly
+	 * what "only one at a time" exists to prevent. `row.id` hashes the line as
+	 * well, so it names one DRAWN row. Its cost is that an edit renumbering the
+	 * row disarms the confirm — which is the right way for that to fail: the
+	 * reader reads the row again and arms it again.
 	 */
 	const [confirming, setConfirming] = useState<string | null>(null);
 	// A ref beside it so a click reads the current value without the callback
@@ -408,9 +418,9 @@ export function WikiTasksPanel({
 										key={row.id}
 										row={row}
 										pending={pending[taskKey(row)]}
-										confirming={confirming === taskKey(row)}
+										confirming={confirming === row.id}
 										onTick={() => void tick(row)}
-										onArmDelete={() => setConfirming(taskKey(row))}
+										onArmDelete={() => setConfirming(row.id)}
 										onCancelDelete={() => setConfirming(null)}
 										onConfirmDelete={() => void drop(row)}
 										onDismiss={() => settleTick(taskKey(row))}

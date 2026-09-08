@@ -630,6 +630,31 @@ describe("deleting a row", () => {
 		expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
 	});
 
+	/**
+	 * 🗝 The case the "arming another row disarms the first" test above could not
+	 * see: two rows reading EXACTLY alike. They share the tick's `taskKey`, so
+	 * arming by that key lit up both confirms at once and left two live "Delete"
+	 * buttons on screen. Caught live on a real vault, not by a green test.
+	 */
+	it("arms only the row that was clicked, even when another reads identically", async () => {
+		const user = userEvent.setup();
+		render(
+			panel({
+				tasks: tasks({
+					tasks: [
+						row({ id: "dup-6", line: 6, raw: "- [ ] duplicate", text: "duplicate" }),
+						row({ id: "dup-7", line: 7, raw: "- [ ] duplicate", text: "duplicate" }),
+					],
+				}),
+			}),
+		);
+
+		const drops = screen.getAllByRole("button", { name: "Delete this row from the note: duplicate" });
+		expect(drops).toHaveLength(2);
+		await user.click(drops[0]);
+		expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
+	});
+
 	/** The row leaves the way a ticked one does: held on screen, then gone. */
 	it("keeps the deleted row on screen for a beat, then drops it", async () => {
 		const user = userEvent.setup();
