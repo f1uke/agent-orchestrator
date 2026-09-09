@@ -1956,6 +1956,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/wiki/tasks/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete one task row from its note, matched on its exact text so a stale row is refused */
+        post: operations["deleteWikiTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2436,6 +2453,21 @@ export interface components {
         DeleteSessionResponse: {
             ok: boolean;
             sessionId: string;
+        };
+        DeleteWikiTaskRequest: {
+            /** @description 1-based line the row was read from. A hint: the row may have moved, and raw decides. */
+            line: number;
+            /** @description Vault-relative path of the note holding the row. */
+            path: string;
+            /** @description The row's line byte for byte as it was displayed. Required; a line whose text differs is never deleted. */
+            raw: string;
+        };
+        DeleteWikiTaskResponse: {
+            line: number;
+            moved: boolean;
+            noteModifiedAt?: string;
+            path: string;
+            raw: string;
         };
         DiffContextLineDTO: {
             kind: string;
@@ -11194,6 +11226,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CompleteWikiTaskResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    deleteWikiTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteWikiTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteWikiTaskResponse"];
                 };
             };
             /** @description Bad Request */

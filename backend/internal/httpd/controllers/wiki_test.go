@@ -36,6 +36,9 @@ type fakeWikiSvc struct {
 	completed []wikisvc.CompleteTaskInput
 	completeR wikisvc.CompleteTaskResult
 	completeE error
+	deleted   []wikisvc.DeleteTaskInput
+	deleteR   wikisvc.DeleteTaskResult
+	deleteE   error
 }
 
 func (f *fakeWikiSvc) ListTasks(context.Context) (wikisvc.Tasks, error) {
@@ -48,6 +51,14 @@ func (f *fakeWikiSvc) CompleteTask(_ context.Context, in wikisvc.CompleteTaskInp
 		return wikisvc.CompleteTaskResult{}, f.completeE
 	}
 	return f.completeR, nil
+}
+
+func (f *fakeWikiSvc) DeleteTask(_ context.Context, in wikisvc.DeleteTaskInput) (wikisvc.DeleteTaskResult, error) {
+	f.deleted = append(f.deleted, in)
+	if f.deleteE != nil {
+		return wikisvc.DeleteTaskResult{}, f.deleteE
+	}
+	return f.deleteR, nil
 }
 
 func (f *fakeWikiSvc) Status(context.Context) (wikisvc.Status, error) {
@@ -529,6 +540,74 @@ func TestWikiCompleteTask_ReportsAMovedRow(t *testing.T) {
 	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
 
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/complete", `{"path":"a.md","line":2,"raw":"- [ ] x"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var got struct {
+		Line  int  `json:"line"`
+		Moved bool `json:"moved"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Moved || got.Line != 9 {
+		t.Fatalf("body = %+v, want moved to line 9", got)
+	}
+}
+
+// --- the delete -----------------------------------------------------------
+
+// Same rule as the tick, and it matters more here: the row's exact text is its
+// identity, and the route hands it through untouched.
+func TestWikiDeleteTask_PassesTheRawRowThroughVerbatim(t *testing.T) {
+	raw := "  - [ ] a row with trailing space  "
+	svc := &fakeWikiSvc{deleteR: wikisvc.DeleteTaskResult{Path: "Areas/a.md", Line: 4, Raw: raw}}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	payload, err := json.Marshal(map[string]any{"path": "Areas/a.md", "line": 4, "raw": raw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/delete", string(payload))
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	if len(svc.deleted) != 1 {
+		t.Fatalf("deleted = %v", svc.deleted)
+	}
+	if svc.deleted[0].Raw != raw {
+		t.Fatalf("Raw = %q, want it verbatim (%q)", svc.deleted[0].Raw, raw)
+	}
+	if svc.deleted[0].Line != 4 || svc.deleted[0].Path != "Areas/a.md" {
+		t.Fatalf("input = %+v", svc.deleted[0])
+	}
+}
+
+func TestWikiDeleteTask_RequiresAPath(t *testing.T) {
+	svc := &fakeWikiSvc{}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, headers := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/delete", `{"raw":"- [ ] x"}`)
+	assertJSON(t, headers)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "PATH_REQUIRED")
+	if len(svc.deleted) != 0 {
+		t.Fatal("a pathless delete reached the service")
+	}
+}
+
+func TestWikiDeleteTask_SurfacesTheRefusalCode(t *testing.T) {
+	svc := &fakeWikiSvc{deleteE: apierr.Conflict("WIKI_TASK_AMBIGUOUS", "two rows match", nil)}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/delete", `{"path":"a.md","line":1,"raw":"- [ ] x"}`)
+	assertErrorCode(t, body, status, http.StatusConflict, "WIKI_TASK_AMBIGUOUS")
+}
+
+func TestWikiDeleteTask_ReportsAMovedRow(t *testing.T) {
+	svc := &fakeWikiSvc{deleteR: wikisvc.DeleteTaskResult{Path: "a.md", Line: 9, Raw: "- [ ] x", Moved: true}}
+	srv := newWikiTestServer(t, httpd.APIDeps{Wiki: svc})
+
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/wiki/tasks/delete", `{"path":"a.md","line":2,"raw":"- [ ] x"}`)
 	if status != http.StatusOK {
 		t.Fatalf("status = %d: %s", status, body)
 	}

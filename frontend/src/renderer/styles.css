@@ -6803,11 +6803,19 @@ ol.note-prose__list {
 	background: var(--interactive-hover);
 }
 
-/* A ticked row stays on screen for a beat before the list drops it: a row that
-   vanishes the instant it is clicked reads as a bug even when it is correct. */
+/* A written row stays on screen for a beat before the list drops it: a row that
+   vanishes the instant it is clicked reads as a bug even when it is correct.
+   The same treatment covers a tick and a delete — in both cases the row is on
+   its way out and the sentence beside it says which. */
 .wiki-tasks__row.is-done .wiki-tasks__text {
 	color: var(--fg-passive);
 	text-decoration: line-through;
+}
+
+/* An armed row keeps the hover ground under it, so the confirm does not appear
+   to be floating over a row the pointer has already left. */
+.wiki-tasks__row.is-confirming {
+	background: var(--interactive-hover);
 }
 
 /* The one control in this row that WRITES to somebody's vault, so it is the
@@ -6949,6 +6957,113 @@ ol.note-prose__list {
 	color: var(--fg-muted);
 	font-size: 10.5px;
 	line-height: 1.5;
+}
+
+/* ── deleting a row ──
+   The only control in this app that destroys something a person wrote, so it
+   is the only one that has to be looked for. It rests at zero opacity AND
+   without pointer events, which is the part that matters: a list of 25 rows
+   otherwise carries 25 live delete targets a stray click can find, and the
+   pointer only has to be over the row for one of them to be the wrong one. */
+.wiki-tasks__drop {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	margin-top: 1px;
+	padding: 0;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--fg-passive);
+	opacity: 0;
+	pointer-events: none;
+	cursor: pointer;
+}
+
+/* `focus-within` rather than a `:focus` on the button itself: at opacity 0 a
+   focused button is an invisible focus ring, and revealing the whole row's
+   controls is what a keyboard reader needs anyway. */
+.wiki-tasks__row:hover .wiki-tasks__drop,
+.wiki-tasks__row:focus-within .wiki-tasks__drop,
+.wiki-tasks__row.is-confirming .wiki-tasks__drop {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.wiki-tasks__drop:hover {
+	background: color-mix(in srgb, var(--red) 14%, transparent);
+	color: var(--red);
+}
+
+.wiki-tasks__drop svg {
+	width: 12px;
+	height: 12px;
+}
+
+/* The step between a stray click and a line that is gone. Deliberately the
+   same quiet strip a refusal uses — 10.5px, hover ground, one icon — because
+   the row's own sentence has to stay the loudest thing in the row. What makes
+   it safe is not that it shouts; it is that it is a second click, on a
+   different target, with the note named. */
+.wiki-tasks__confirm {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 4px;
+	padding: 5px 6px 5px 8px;
+	border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--red) 8%, transparent);
+	color: var(--fg-muted);
+	font-size: 10.5px;
+	line-height: 1.5;
+}
+
+.wiki-tasks__confirm svg {
+	width: 12px;
+	height: 12px;
+	flex: none;
+	color: var(--red);
+}
+
+.wiki-tasks__confirm strong {
+	color: var(--fg);
+	font-weight: 500;
+}
+
+.wiki-tasks__confirm-go,
+.wiki-tasks__confirm-stop {
+	flex: none;
+	padding: 2px 8px 3px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	font-family: inherit;
+	font-size: 10.5px;
+	cursor: pointer;
+}
+
+.wiki-tasks__confirm-go {
+	margin-left: auto;
+	border-color: color-mix(in srgb, var(--red) 45%, transparent);
+	background: color-mix(in srgb, var(--red) 16%, transparent);
+	color: var(--red);
+}
+
+.wiki-tasks__confirm-go:hover {
+	background: color-mix(in srgb, var(--red) 26%, transparent);
+}
+
+.wiki-tasks__confirm-stop {
+	background: transparent;
+	color: var(--fg-muted);
+}
+
+.wiki-tasks__confirm-stop:hover {
+	border-color: var(--border-1);
+	color: var(--fg);
 }
 
 /* A refusal stays until it is read. Nothing was written, and the reader has to

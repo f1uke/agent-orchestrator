@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WikiTaskRow, WikiTasks, WikiTasksSettings } from "../hooks/useWiki";
-import { WikiTaskTickError } from "../hooks/useWiki";
+import { WikiTaskWriteError } from "../hooks/useWiki";
 import { WikiTasksPanel } from "./WikiTasksPanel";
 
 function row(over: Partial<WikiTaskRow> = {}): WikiTaskRow {
@@ -47,6 +47,7 @@ function panel(over: Partial<Parameters<typeof WikiTasksPanel>[0]> = {}) {
 			error={null}
 			onRefresh={vi.fn()}
 			onComplete={vi.fn().mockResolvedValue({ moved: false })}
+			onDelete={vi.fn().mockResolvedValue({ moved: false })}
 			onSaveSettings={vi.fn().mockResolvedValue(undefined)}
 			savingSettings={false}
 			settingsError={null}
@@ -187,7 +188,7 @@ describe("ticking a row", () => {
 	it("shows a refusal in place, and the row stays unticked", async () => {
 		const user = userEvent.setup();
 		const onComplete = vi.fn().mockRejectedValue(
-			new WikiTaskTickError({
+			new WikiTaskWriteError({
 				kind: "stale",
 				title: "This row has changed in the note.",
 				detail: "Nothing was written.",
@@ -211,7 +212,7 @@ describe("ticking a row", () => {
 		const onComplete = vi
 			.fn()
 			.mockRejectedValueOnce(
-				new WikiTaskTickError({
+				new WikiTaskWriteError({
 					kind: "stale",
 					title: "This row has changed in the note.",
 					detail: "Nothing was written.",
@@ -234,7 +235,7 @@ describe("ticking a row", () => {
 	it("keeps a refusal on screen when the row is gone from the next read", async () => {
 		const user = userEvent.setup();
 		const onComplete = vi.fn().mockRejectedValue(
-			new WikiTaskTickError({
+			new WikiTaskWriteError({
 				kind: "stale",
 				title: "This row has changed in the note.",
 				detail: "Nothing was written.",
@@ -537,5 +538,193 @@ describe("the settings form", () => {
 
 		await waitFor(() => expect(onSaveSettings).toHaveBeenCalledTimes(1));
 		expect(onSaveSettings.mock.calls[0][0].requireCreated).toBe(true);
+	});
+});
+
+/**
+ * 🗝 Deleting is the only thing this tab does that cannot be walked back, so
+ * these tests are about what has to be true BEFORE the daemon is called at all.
+ * The daemon's own guarantees (the row's exact text, the refusals) are pinned
+ * in `backend/internal/service/wiki/tasks_delete_test.go`.
+ */
+describe("deleting a row", () => {
+	const drop = { name: /^Delete this row from the note:/ };
+
+	/** One click arms. It must never be the click that destroys the line. */
+	it("does not delete on the first click — it asks", async () => {
+		const user = userEvent.setup();
+		const onDelete = vi.fn().mockResolvedValue({ moved: false });
+		render(panel({ onDelete }));
+
+		await user.click(screen.getByRole("button", drop));
+		expect(onDelete).not.toHaveBeenCalled();
+		expect(screen.getByText(/It cannot be undone here\./)).toBeTruthy();
+		// And it names the note the line is coming out of, inside the confirm
+		// itself — the source line already reads "Areas/a", so the assertion is
+		// that the confirm carries its own copy rather than relying on it.
+		const confirm = screen.getByRole("group", { name: "Confirm deleting: the row" });
+		expect(confirm.textContent).toContain("Areas/a");
+	});
+
+	it("deletes on the confirm, with the row's exact raw line", async () => {
+		const user = userEvent.setup();
+		const onDelete = vi.fn().mockResolvedValue({ moved: false });
+		render(
+			panel({
+				tasks: tasks({ tasks: [row({ raw: "  - [ ] the row  ", text: "the row" })] }),
+				onDelete,
+			}),
+		);
+
+		await user.click(screen.getByRole("button", drop));
+		await user.click(screen.getByRole("button", { name: "Delete" }));
+		await waitFor(() => expect(onDelete).toHaveBeenCalledTimes(1));
+		expect(onDelete.mock.calls[0][0].raw).toBe("  - [ ] the row  ");
+		expect(onDelete.mock.calls[0][0].line).toBe(4);
+		expect(onDelete.mock.calls[0][0].path).toBe("Areas/a.md");
+	});
+
+	it("cancelling calls nothing and leaves the row alone", async () => {
+		const user = userEvent.setup();
+		const onDelete = vi.fn().mockResolvedValue({ moved: false });
+		render(panel({ onDelete }));
+
+		await user.click(screen.getByRole("button", drop));
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(onDelete).not.toHaveBeenCalled();
+		expect(screen.queryByText(/It cannot be undone here\./)).toBeNull();
+		expect(screen.getByText("the row")).toBeTruthy();
+		expect(screen.getByText("1 open")).toBeTruthy();
+	});
+
+	it("Escape backs out of an armed delete", async () => {
+		const user = userEvent.setup();
+		const onDelete = vi.fn().mockResolvedValue({ moved: false });
+		render(panel({ onDelete }));
+
+		await user.click(screen.getByRole("button", drop));
+		await user.keyboard("{Escape}");
+		expect(screen.queryByText(/It cannot be undone here\./)).toBeNull();
+		expect(onDelete).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * 🗝 Only ONE row can be armed. A reader who armed a row, thought better of
+	 * it and moved on must not leave a live Delete button behind them.
+	 */
+	it("arming another row disarms the first", async () => {
+		const user = userEvent.setup();
+		render(
+			panel({
+				tasks: tasks({
+					tasks: [
+						row({ id: "a", raw: "- [ ] first", text: "first" }),
+						row({ id: "b", raw: "- [ ] second", text: "second" }),
+					],
+				}),
+			}),
+		);
+
+		await user.click(screen.getByRole("button", { name: "Delete this row from the note: first" }));
+		await user.click(screen.getByRole("button", { name: "Delete this row from the note: second" }));
+		expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
+	});
+
+	/**
+	 * 🗝 The case the "arming another row disarms the first" test above could not
+	 * see: two rows reading EXACTLY alike. They share the tick's `taskKey`, so
+	 * arming by that key lit up both confirms at once and left two live "Delete"
+	 * buttons on screen. Caught live on a real vault, not by a green test.
+	 */
+	it("arms only the row that was clicked, even when another reads identically", async () => {
+		const user = userEvent.setup();
+		render(
+			panel({
+				tasks: tasks({
+					tasks: [
+						row({ id: "dup-6", line: 6, raw: "- [ ] duplicate", text: "duplicate" }),
+						row({ id: "dup-7", line: 7, raw: "- [ ] duplicate", text: "duplicate" }),
+					],
+				}),
+			}),
+		);
+
+		const drops = screen.getAllByRole("button", { name: "Delete this row from the note: duplicate" });
+		expect(drops).toHaveLength(2);
+		await user.click(drops[0]);
+		expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
+	});
+
+	/** The row leaves the way a ticked one does: held on screen, then gone. */
+	it("keeps the deleted row on screen for a beat, then drops it", async () => {
+		const user = userEvent.setup();
+		const onDelete = vi.fn().mockResolvedValue({ moved: false });
+		const { rerender } = render(panel({ onDelete }));
+
+		await user.click(screen.getByRole("button", drop));
+		await user.click(screen.getByRole("button", { name: "Delete" }));
+		expect(await screen.findByText("Deleted from the note.")).toBeTruthy();
+
+		// The daemon has re-read the vault and the row is gone from it. The row
+		// stays drawn, but the header already describes the vault.
+		rerender(panel({ tasks: tasks({ tasks: [] }), onDelete }));
+		expect(screen.getByText("the row")).toBeTruthy();
+		expect(screen.getByText("0 open")).toBeTruthy();
+
+		await waitFor(() => expect(screen.queryByText("the row")).toBeNull(), { timeout: 4_000 });
+	});
+
+	it("says so when the row had moved in the note", async () => {
+		const user = userEvent.setup();
+		const onDelete = vi.fn().mockResolvedValue({ moved: true });
+		render(panel({ onDelete }));
+
+		await user.click(screen.getByRole("button", drop));
+		await user.click(screen.getByRole("button", { name: "Delete" }));
+		expect(await screen.findByText(/The row had moved in the note — deleted where it was\./)).toBeTruthy();
+	});
+
+	/** A refused delete says nothing was deleted, and the row stays listed. */
+	it("shows a refusal in place, and the row survives", async () => {
+		const user = userEvent.setup();
+		const onDelete = vi.fn().mockRejectedValue(
+			new WikiTaskWriteError({
+				kind: "stale",
+				title: "This row has changed in the note.",
+				detail: "Nothing was deleted.",
+			}),
+		);
+		render(panel({ onDelete }));
+
+		await user.click(screen.getByRole("button", drop));
+		await user.click(screen.getByRole("button", { name: "Delete" }));
+		expect(await screen.findByText("This row has changed in the note.")).toBeTruthy();
+		expect(screen.getByText("Nothing was deleted.")).toBeTruthy();
+		expect(screen.getByText("the row")).toBeTruthy();
+		// And still tickable: nothing was written, so the row is as it was.
+		expect(screen.getByRole("button", { name: /^Tick off:/ }).hasAttribute("disabled")).toBe(false);
+	});
+
+	/** Ticking is untouched by any of this — the checkbox still ticks. */
+	it("leaves ticking exactly as it was", async () => {
+		const user = userEvent.setup();
+		const onComplete = vi.fn().mockResolvedValue({ moved: false });
+		const onDelete = vi.fn().mockResolvedValue({ moved: false });
+		render(panel({ onComplete, onDelete }));
+
+		await user.click(screen.getByRole("button", { name: /^Tick off:/ }));
+		await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+		expect(onDelete).not.toHaveBeenCalled();
+		expect(await screen.findByRole("button", { name: /^Ticked off:/ })).toBeTruthy();
+	});
+
+	/** A row already being written has nothing to arm. */
+	it("takes the delete control away while a tick is in flight", async () => {
+		const user = userEvent.setup();
+		const onComplete = vi.fn().mockReturnValue(new Promise(() => {}));
+		render(panel({ onComplete }));
+
+		await user.click(screen.getByRole("button", { name: /^Tick off:/ }));
+		await waitFor(() => expect(screen.queryByRole("button", drop)).toBeNull());
 	});
 });

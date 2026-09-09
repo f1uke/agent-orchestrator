@@ -2095,6 +2095,36 @@ type CompleteWikiTaskResponse struct {
 	NoteModifiedAt string `json:"noteModifiedAt,omitempty"`
 }
 
+// DeleteWikiTaskRequest is the body of POST /api/v1/wiki/tasks/delete: one row
+// to be removed from its note, addressed exactly as a tick is.
+//
+// 🗝 This REMOVES A LINE from somebody's notes and there is no undo on the
+// daemon side. `raw` is REQUIRED and it is the real key; `line` is only a hint.
+// The daemon deletes only a line whose full text equals `raw`, and only when
+// that line is still an unchecked task row. Zero matches or more than one is a
+// refusal, never a guess. Exactly one line leaves the note; every other byte is
+// written back as it was read.
+type DeleteWikiTaskRequest struct {
+	Path string `json:"path" description:"Vault-relative path of the note holding the row."`
+	Line int    `json:"line" description:"1-based line the row was read from. A hint: the row may have moved, and raw decides."`
+	Raw  string `json:"raw" description:"The row's line byte for byte as it was displayed. Required; a line whose text differs is never deleted."`
+}
+
+// DeleteWikiTaskResponse says what was actually removed.
+type DeleteWikiTaskResponse struct {
+	Path string `json:"path"`
+	// Line is where the row was removed FROM, which is not always where it was
+	// asked for.
+	Line int `json:"line"`
+	// Raw is the line that was removed, as it read on disk.
+	Raw string `json:"raw"`
+	// Moved reports that the row was found somewhere other than the line named.
+	// Not an error - the text matched exactly, so it is provably the same row -
+	// but the tab shows it rather than hiding it.
+	Moved          bool   `json:"moved"`
+	NoteModifiedAt string `json:"noteModifiedAt,omitempty"`
+}
+
 // WikiTasksSettingsResponse is the Tasks tab's configuration on the wire, the
 // body of GET/PUT /api/v1/settings/wiki/tasks.
 //

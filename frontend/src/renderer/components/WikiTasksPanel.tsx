@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, EyeOff, Loader2, RefreshCw, Settings2, X } from "lucide-react";
+import { AlertTriangle, Check, EyeOff, Loader2, RefreshCw, Settings2, Trash2, X } from "lucide-react";
 import type { WikiTaskRow, WikiTasks, WikiTasksSettings } from "../hooks/useWiki";
-import { WikiTaskTickError } from "../hooks/useWiki";
+import { WikiTaskWriteError } from "../hooks/useWiki";
 import { mergeHeldRows, partitionTasks, taskKey, type OwnerFilter } from "../lib/wiki-tasks";
 import { fromTagAddsSomething, sourceLabel, splitFromTags, splitWikilinks } from "../lib/wiki-task-text";
 import {
@@ -16,8 +16,9 @@ import { WikiTasksSettingsForm } from "./WikiTasksSettingsForm";
 
 /**
  * The Tasks tab: the unchecked rows in the configured corners of the vault,
- * grouped by the day they are due, and one click to tick a row off in the note
- * it actually lives in.
+ * grouped by the day they are due, one click to tick a row off in the note it
+ * actually lives in, and one confirmed click to delete a row he is never going
+ * to do.
  *
  * 🗝 Two properties this component exists to hold, both of which cost the
  * markdown version that came before it:
@@ -41,6 +42,24 @@ import { WikiTasksSettingsForm } from "./WikiTasksSettingsForm";
  * unchecked rows, so a ticked one leaves the list and there is nothing left to
  * un-tick from — and the guarantee above does not extend to a `- [x]` line the
  * tab never showed anyone. The note itself is one click away for that.
+ *
+ * 🗝 DELETING is the same write with a consequence nothing here can walk back:
+ * the line leaves the note and this app keeps no copy of it. Property (1) above
+ * is what stops a delete landing on the wrong row; the confirm step below is
+ * what stops it landing at all on a row nobody meant to touch.
+ *
+ * The confirm, and why it is a confirm rather than an undo. The two ways to put
+ * something between a stray click and a destroyed line are a confirm before, or
+ * an undo after. An undo would have to REWRITE the line back into a note that
+ * may have changed since — and it would have to refuse when it has, which is
+ * exactly the case where the reader needs it most: the agent that edits these
+ * notes every night is the likeliest thing to change the note out from under an
+ * undo. An undo that can fail is not a safety net, it is a second thing to be
+ * disappointed by. Worse, an undo only helps a reader who NOTICED: this control
+ * sits beside a checkbox that is clicked quickly, twenty-five rows at a time,
+ * and the whole danger is a delete nobody saw happen. A confirm cannot be
+ * missed, cannot fail, needs no window of time, and names the row it is about
+ * to destroy while the reader can still read it.
  */
 
 /**
@@ -51,9 +70,12 @@ import { WikiTasksSettingsForm } from "./WikiTasksSettingsForm";
  * see their own click land. `mergeHeldRows` puts it back on screen.
  */
 type Pending =
-	| { state: "saving"; row: WikiTaskRow }
-	| { state: "done"; moved: boolean; row: WikiTaskRow }
-	| { state: "failed"; title: string; detail: string; row: WikiTaskRow };
+	| { state: "saving"; action: RowAction; row: WikiTaskRow }
+	| { state: "done"; action: RowAction; moved: boolean; row: WikiTaskRow }
+	| { state: "failed"; action: RowAction; title: string; detail: string; row: WikiTaskRow };
+
+/** Which write a `Pending` belongs to. Both go through the same states. */
+type RowAction = "tick" | "delete";
 
 export function WikiTasksPanel({
 	tasks,
@@ -62,6 +84,7 @@ export function WikiTasksPanel({
 	error,
 	onRefresh,
 	onComplete,
+	onDelete,
 	onSaveSettings,
 	savingSettings,
 	settingsError,
@@ -74,6 +97,11 @@ export function WikiTasksPanel({
 	error: Error | null;
 	onRefresh: () => void;
 	onComplete: (row: WikiTaskRow) => Promise<{ moved: boolean }>;
+	/**
+	 * Remove the row's line from its note. Reached only through the confirm
+	 * below, and it does not come back.
+	 */
+	onDelete: (row: WikiTaskRow) => Promise<{ moved: boolean }>;
 	onSaveSettings: (next: WikiTasksSettings) => Promise<unknown>;
 	savingSettings: boolean;
 	settingsError: string | null;
@@ -99,6 +127,27 @@ export function WikiTasksPanel({
 	// renumbers it and gives it a new id, and a tick must not lose its place on
 	// screen because somebody else's edit moved the row a line down.
 	const [pending, setPending] = useState<Record<string, Pending>>({});
+	/**
+	 * The one row whose delete is armed, by `row.id`, or null.
+	 *
+	 * 🗝 ONE. Arming a second row disarms the first, so there is never a screen
+	 * with two live "Delete" buttons on it, and a reader who walked away from a
+	 * confirm cannot come back and hit a stale one two rows further down. It is
+	 * cleared by Cancel, by Escape, by arming another row, and by the delete
+	 * itself — never on a timer: a confirm that disarms itself turns a deliberate
+	 * click into nothing happening, which is its own kind of lie.
+	 *
+	 * 🗝 By `row.id`, NOT by `taskKey`, and this is the one place the two must
+	 * differ. `taskKey` is note + text, so two rows reading exactly alike share
+	 * it — which is right for `pending`, where the daemon cannot tell them apart
+	 * either and both honestly carry the same refusal, and wrong here: arming one
+	 * lit up BOTH, putting two live "Delete" buttons on screen, which is exactly
+	 * what "only one at a time" exists to prevent. `row.id` hashes the line as
+	 * well, so it names one DRAWN row. Its cost is that an edit renumbering the
+	 * row disarms the confirm — which is the right way for that to fail: the
+	 * reader reads the row again and arms it again.
+	 */
+	const [confirming, setConfirming] = useState<string | null>(null);
 	// A ref beside it so a click reads the current value without the callback
 	// re-subscribing every render.
 	const pendingRef = useRef(pending);
@@ -149,32 +198,56 @@ export function WikiTasksPanel({
 		});
 	}, []);
 
-	const tick = useCallback(
-		async (row: WikiTaskRow) => {
+	/**
+	 * One row, one write. Ticking and deleting differ in what they ask the
+	 * daemon and in nothing else here: the same key, the same held row, the same
+	 * three states, the same rule about which click is worth sending.
+	 */
+	const write = useCallback(
+		async (row: WikiTaskRow, action: RowAction, send: (row: WikiTaskRow) => Promise<{ moved: boolean }>) => {
 			const key = taskKey(row);
-			// A tick already in flight is not clicked twice, and a row already
-			// ticked has nothing left to do. A REFUSED one, though, is exactly
+			// A write already in flight is not clicked twice, and a row already
+			// written has nothing left to do. A REFUSED one, though, is exactly
 			// the row the reader is most likely to click again - they read the
 			// reason, fixed the note, and want to try. Swallowing that click is
 			// what made a failure look like a wedged list.
 			const already = pendingRef.current[key];
 			if (already && already.state !== "failed") return;
-			setPending((current) => ({ ...current, [key]: { state: "saving", row } }));
+			setPending((current) => ({ ...current, [key]: { state: "saving", action, row } }));
 			try {
-				const result = await onComplete(row);
-				setPending((current) => ({ ...current, [key]: { state: "done", moved: result.moved, row } }));
+				const result = await send(row);
+				setPending((current) => ({ ...current, [key]: { state: "done", action, moved: result.moved, row } }));
 			} catch (caught) {
 				const failure =
-					caught instanceof WikiTaskTickError
+					caught instanceof WikiTaskWriteError
 						? caught.failure
-						: { title: "This couldn’t be ticked off.", detail: String(caught) };
+						: {
+								title: action === "delete" ? "This couldn’t be deleted." : "This couldn’t be ticked off.",
+								detail: String(caught),
+							};
 				setPending((current) => ({
 					...current,
-					[key]: { state: "failed", title: failure.title, detail: failure.detail, row },
+					[key]: { state: "failed", action, title: failure.title, detail: failure.detail, row },
 				}));
 			}
 		},
-		[onComplete],
+		[],
+	);
+
+	const tick = useCallback((row: WikiTaskRow) => write(row, "tick", onComplete), [write, onComplete]);
+
+	/**
+	 * 🗝 Only ever reached from the confirm step. Nothing else in this file
+	 * calls it, and nothing else should: the click that opens the confirm and
+	 * the click that destroys the line have to be two different clicks on two
+	 * different targets.
+	 */
+	const drop = useCallback(
+		(row: WikiTaskRow) => {
+			setConfirming(null);
+			return write(row, "delete", onDelete);
+		},
+		[write, onDelete],
 	);
 
 	const toggleGroup = useCallback((key: string) => {
@@ -345,7 +418,11 @@ export function WikiTasksPanel({
 										key={row.id}
 										row={row}
 										pending={pending[taskKey(row)]}
+										confirming={confirming === row.id}
 										onTick={() => void tick(row)}
+										onArmDelete={() => setConfirming(row.id)}
+										onCancelDelete={() => setConfirming(null)}
+										onConfirmDelete={() => void drop(row)}
 										onDismiss={() => settleTick(taskKey(row))}
 										onOpenSource={() => onOpenSource(row.path, row.line, row.raw)}
 										onOpenWikilink={onOpenWikilink}
@@ -367,19 +444,28 @@ export function WikiTasksPanel({
 function TaskRow({
 	row,
 	pending,
+	confirming,
 	onTick,
+	onArmDelete,
+	onCancelDelete,
+	onConfirmDelete,
 	onDismiss,
 	onOpenSource,
 	onOpenWikilink,
 }: {
 	row: WikiTaskRow;
 	pending: Pending | undefined;
+	/** Whether this row's delete is armed — see `confirming` in the panel. */
+	confirming: boolean;
 	onTick: () => void;
+	onArmDelete: () => void;
+	onCancelDelete: () => void;
+	onConfirmDelete: () => void;
 	onDismiss: () => void;
 	onOpenSource: () => void;
 	onOpenWikilink: (target: string) => void;
 }) {
-	// A confirmed tick clears itself after a beat, so the row does not sit
+	// A settled write clears itself after a beat, so the row does not sit
 	// struck through until the next poll. A refusal does NOT: it stays until
 	// the reader has read it.
 	useEffect(() => {
@@ -391,6 +477,10 @@ function TaskRow({
 	const done = pending?.state === "done";
 	const saving = pending?.state === "saving";
 	const failed = pending?.state === "failed";
+	const dropping = pending?.action === "delete";
+	// Nothing to arm on a row that is already being written, and nothing to arm
+	// on a row that has just left. A refused one can be armed again.
+	const armable = !saving && !done;
 
 	/*
 	 * The TASK is the row, so `(from: …)` is lifted out of the sentence before
@@ -410,7 +500,20 @@ function TaskRow({
 	const where = sourceLabel(row.path) + (section ? ` · ${section}` : "");
 
 	return (
-		<div className={`wiki-tasks__row${done ? " is-done" : ""}${failed ? " is-failed" : ""}`}>
+		<div
+			className={`wiki-tasks__row${done ? " is-done" : ""}${failed ? " is-failed" : ""}${
+				dropping ? " is-dropping" : ""
+			}${confirming ? " is-confirming" : ""}`}
+			// Escape gets out of an armed delete from anywhere in the row,
+			// including from the Delete button itself. A confirm the keyboard
+			// cannot back out of is a trap.
+			onKeyDown={(event) => {
+				if (event.key === "Escape" && confirming) {
+					event.stopPropagation();
+					onCancelDelete();
+				}
+			}}
+		>
 			<button
 				type="button"
 				className="wiki-tasks__box"
@@ -418,9 +521,9 @@ function TaskRow({
 				disabled={saving || done}
 				onClick={onTick}
 			>
-				{saving ? (
+				{saving && !dropping ? (
 					<Loader2 aria-hidden="true" className="wiki-tasks__spin" />
-				) : done ? (
+				) : done && !dropping ? (
 					<Check aria-hidden="true" />
 				) : null}
 			</button>
@@ -467,8 +570,41 @@ function TaskRow({
 						</span>
 					))}
 				</span>
-				{pending?.state === "done" && pending.moved && (
-					<span className="wiki-tasks__note">The row had moved in the note — ticked where it is now.</span>
+				{pending?.state === "done" &&
+					(pending.action === "delete" ? (
+						<span className="wiki-tasks__note">
+							{pending.moved ? "The row had moved in the note — deleted where it was." : "Deleted from the note."}
+						</span>
+					) : (
+						pending.moved && (
+							<span className="wiki-tasks__note">The row had moved in the note — ticked where it is now.</span>
+						)
+					))}
+				{/*
+				 * The confirm. It says which note the line is coming out of and
+				 * that nothing here can put it back, because those are the two
+				 * facts a reader needs and cannot see from the row alone. The
+				 * row's own text is still the loudest thing above it: this is
+				 * 10.5px, the same quiet strip a refusal uses.
+				 */}
+				{confirming && (
+					<span className="wiki-tasks__confirm" role="group" aria-label={`Confirm deleting: ${row.text}`}>
+						<AlertTriangle aria-hidden="true" />
+						<span>
+							Delete this line from <strong>{sourceLabel(row.path)}</strong>? It cannot be undone here.
+						</span>
+						{/*
+						 * Its accessible name is the word on it. The control that
+						 * armed this says "Delete this row from the note: …", so
+						 * the two are never the same target by name either.
+						 */}
+						<button type="button" className="wiki-tasks__confirm-go" onClick={onConfirmDelete}>
+							Delete
+						</button>
+						<button type="button" className="wiki-tasks__confirm-stop" onClick={onCancelDelete}>
+							Cancel
+						</button>
+					</span>
 				)}
 				{failed && (
 					<span className="wiki-tasks__error">
@@ -482,6 +618,27 @@ function TaskRow({
 					</span>
 				)}
 			</div>
+			{/*
+			 * The one control here that DESTROYS something, so it is the one
+			 * kept out of the way: at the far end of the row from the checkbox,
+			 * invisible and unclickable until the row is hovered or something
+			 * in it has focus. A resting list shows twenty-five sentences and
+			 * twenty-five checkboxes, and no rank of delete buttons at all.
+			 *
+			 * It ARMS the confirm. It never deletes.
+			 */}
+			{armable && (
+				<button
+					type="button"
+					className="wiki-tasks__drop"
+					aria-label={`Delete this row from the note: ${row.text}`}
+					title="Delete this row from the note"
+					aria-expanded={confirming}
+					onClick={confirming ? onCancelDelete : onArmDelete}
+				>
+					<Trash2 aria-hidden="true" />
+				</button>
+			)}
 		</div>
 	);
 }
