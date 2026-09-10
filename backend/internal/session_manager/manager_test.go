@@ -2019,7 +2019,7 @@ func TestSpawnOrchestrator_UsesCoordinatorPrompt(t *testing.T) {
 	systemPrompt := agent.lastLaunch.SystemPrompt
 	for _, want := range []string{
 		"You are the human-facing coordinator for project mer",
-		`ao spawn --project mer --from <base-branch> --name "<label, max 20 chars>" --prompt "<clear worker task>"`,
+		`ao spawn --project mer --from <base-branch> --name "<label, max 22 chars>" --prompt "<clear worker task>"`,
 		"`--agent <name>`",
 		"`ao spawn --help`",
 		"Add `--todo` to stage the worker as a TODO", // deferred-TODO staging is documented

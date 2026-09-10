@@ -21,8 +21,11 @@ import (
 )
 
 // maxDisplayNameLen caps the sidebar label set by `--name`. Mirrored by the
-// daemon's spawn handler so a direct API call is held to the same limit.
-const maxDisplayNameLen = 20
+// daemon's spawn handler so a direct API call is held to the same limit, and by
+// the renderer's rename input. The number is what the sidebar's name column can
+// actually render in full at the rail's default width - see the comment on the
+// controller's copy in internal/httpd/controllers/sessions.go.
+const maxDisplayNameLen = 22
 
 type spawnOptions struct {
 	project        string
@@ -253,7 +256,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.prompt, "prompt", "", "Initial prompt for the agent")
 	f.StringVar(&opts.promptFile, "prompt-file", "", "Read the initial prompt from a file, or '-' for stdin; mutually exclusive with --prompt. Use for large prompts that would exceed the shell's argument-length limit.")
 	f.StringVar(&opts.issue, "issue", "", "Issue id to associate with the session")
-	f.StringVar(&opts.name, "name", "", "Display name shown in the sidebar (default: derived from --prompt, max 20 characters)")
+	f.StringVar(&opts.name, "name", "", fmt.Sprintf("Display name shown in the sidebar (default: derived from --prompt, max %d characters)", maxDisplayNameLen))
 	f.StringVar(&opts.claimPR, "claim-pr", "", "Immediately claim an existing PR for the spawned session: a github.com PR URL/number, or a full GitLab merge-request URL")
 	f.BoolVar(&opts.noTakeover, "no-takeover", false, "Refuse if another active session owns the claimed PR (requires --claim-pr)")
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip advisory agent catalog install/auth preflight before spawning")

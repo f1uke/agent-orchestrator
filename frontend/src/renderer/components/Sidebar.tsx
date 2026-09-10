@@ -40,6 +40,7 @@ import {
 } from "../types/workspace";
 import { type QaPresence, qaPresence, tasksFrom } from "../lib/crew";
 import { aoBridge } from "../lib/bridge";
+import { MAX_DISPLAY_NAME_LEN } from "../lib/display-name";
 import { CopyButton } from "./CopyButton";
 import { LANE_ORDER, laneForZone } from "../lib/lane-indicator";
 import { moveProject } from "../lib/project-order";
@@ -162,10 +163,6 @@ const ORCHESTRATOR_SEG_CLASS = "relative";
 // the two states plainly distinguishable.
 const ORCHESTRATOR_BUSY_DOT_CLASS =
 	"pointer-events-none absolute top-[5px] right-[6px] size-[5px] rounded-full bg-working";
-
-// Mirrors the daemon's display-name cap (maxDisplayNameLen) and the spawn
-// `--name` flag, so inline edits never round-trip a value the API would reject.
-const MAX_DISPLAY_NAME_LEN = 20;
 
 type SidebarProps = {
 	daemonStatus: { state: string; message?: string };
@@ -1083,7 +1080,17 @@ function SessionRow({
 			/>
 			<div
 				className={cn(
-					"relative flex h-auto w-full items-center gap-[9px] rounded-[4px] py-[5px] pl-2.5 pr-7 text-left transition-[color]",
+					"relative flex h-auto w-full items-center gap-[9px] rounded-[4px] py-[5px] pl-2.5 text-left",
+					// The rename pencil is an absolute overlay, so the row has to keep
+					// its lane clear or the name would run underneath it. It used to be
+					// reserved permanently (pr-7), which cost the name 22px on EVERY row
+					// including all the time no pencil is showing - a sixth of the name
+					// column at the rail's default width. agent-orchestrator's own
+					// sidebar reserves it on hover/focus only ("at rest the link spans
+					// the row so the label gets full width"), and this follows it: at
+					// rest the name gets the width, and pointing at a row re-truncates a
+					// name long enough to reach the pencil rather than hiding it.
+					"pr-1.5 transition-[color,padding] group-hover/menu-sub-item:pr-7 group-focus-within/menu-sub-item:pr-7",
 					"group-hover/menu-sub-item:text-foreground",
 					active && "text-foreground",
 				)}
@@ -1099,6 +1106,7 @@ function SessionRow({
 							"block truncate text-[12.5px] font-medium",
 							active ? "text-foreground" : "text-muted-foreground",
 						)}
+						title={session.title}
 					>
 						{session.title}
 					</span>
@@ -1125,10 +1133,14 @@ function SessionRow({
 					</span>
 				</span>
 				{/* Idle affordance: a paused glyph or an escalating near-expiry countdown
-				(most rows show nothing). Sits left of the pr-7 rename zone so the
-				hover pencil never collides with it; hidden while collapsed to the icon
-				rail. */}
-				<span className="flex shrink-0 items-center gap-1 group-data-[collapsible=icon]:hidden">
+				(most rows show nothing). Sits left of the rename zone the row opens up
+				on hover, so the pencil never collides with it; hidden while collapsed to
+				the icon rail.
+
+				`empty:hidden` matters: every chip in here renders null on a row with
+				nothing to report, and a zero-width flex item still pays the row's 9px
+				gap - 9px of the name column spent on a chip that is not there. */}
+				<span className="flex shrink-0 items-center gap-1 empty:hidden group-data-[collapsible=icon]:hidden">
 					<QueuedMessagesChip session={session} compact />
 					{isMergeSuspended(session) ? (
 						<MergeSuspendChip session={session} compact />

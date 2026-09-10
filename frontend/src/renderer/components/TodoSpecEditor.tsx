@@ -11,6 +11,7 @@ import { agentsQueryOptions } from "../hooks/useAgentsQuery";
 import { useProjectBranches } from "../hooks/useProjectBranches";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import type { AgentProvider, WorkspaceSession } from "../types/workspace";
+import { MAX_DISPLAY_NAME_LEN, clampDisplayName } from "../lib/display-name";
 
 type TodoSpecEditorProps = {
 	/** The TODO session to inspect/edit. Always a non-null, `isTodo` session. */
@@ -106,7 +107,7 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 	}, [session, draft]);
 
 	const patchBody = (d: Draft): components["schemas"]["UpdateTodoSpecRequest"] => ({
-		displayName: d.name.slice(0, 20),
+		displayName: clampDisplayName(d.name),
 		baseBranch: d.baseBranch,
 		branch: d.branch,
 		prTarget: d.prTarget,
@@ -202,7 +203,7 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 				</div>
 				<input
 					aria-label="Task name"
-					maxLength={20}
+					maxLength={MAX_DISPLAY_NAME_LEN}
 					spellCheck={false}
 					value={draft.name}
 					onChange={(e) => setField("name", e.target.value)}
@@ -215,7 +216,7 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 						{session.createdBy ? " by " : ""}
 					</span>
 					{session.createdBy ? <span className="font-mono text-accent">{session.createdBy}</span> : null}
-					<span className="ml-auto text-[11px] text-passive">name · max 20 chars</span>
+					<span className="ml-auto text-[11px] text-passive">name · max {MAX_DISPLAY_NAME_LEN} chars</span>
 				</div>
 			</div>
 

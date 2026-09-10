@@ -7,6 +7,7 @@ import { Sidebar } from "./Sidebar";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 import { agentsQueryKey } from "../hooks/useAgentsQuery";
 import { useUiStore } from "../stores/ui-store";
+import { MAX_DISPLAY_NAME_LEN } from "../lib/display-name";
 
 const { getMock, navigateMock, mockParams, renameSessionMock, apiReady } = vi.hoisted(() => ({
 	getMock: vi.fn(),
@@ -1127,13 +1128,13 @@ describe("Sidebar", () => {
 		await waitFor(() => expect(renameSessionMock).toHaveBeenCalledWith("proj-1-1", "polish login"));
 	});
 
-	it("caps the inline rename input at 20 characters", async () => {
+	it("caps the inline rename input at the display-name cap", async () => {
 		const user = userEvent.setup();
 		const workspaceWithSession = { ...workspace, sessions: [session] };
 		renderSidebar({ workspaces: [workspaceWithSession] });
 
 		await user.click(screen.getByLabelText("Rename fix login"));
-		expect(screen.getByLabelText("Rename fix login")).toHaveAttribute("maxlength", "20");
+		expect(screen.getByLabelText("Rename fix login")).toHaveAttribute("maxlength", String(MAX_DISPLAY_NAME_LEN));
 	});
 
 	it("cancels the inline rename on Escape without calling the daemon", async () => {

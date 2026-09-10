@@ -17,6 +17,7 @@ import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../hooks/useA
 import { useProjectBranches } from "../hooks/useProjectBranches";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { cn } from "../lib/utils";
+import { clampDisplayName } from "../lib/display-name";
 
 type Project = components["schemas"]["Project"];
 
@@ -204,11 +205,12 @@ export function NewTaskDialog({
 					kind: "worker",
 					harness: agentTouched && agent ? (agent as AgentProvider) : undefined,
 					// A Jira-linked task binds issueId to the key and keeps the human
-					// title as the sidebar label (displayName, capped at 20 by the API);
+					// title as the sidebar label (displayName, capped by the API at
+					// MAX_DISPLAY_NAME_LEN);
 					// an unlinked task keeps the existing behavior of storing the title
 					// in issueId.
 					issueId: jiraLinked ? `jira:${boundKey}` : cleanTitle,
-					displayName: jiraLinked ? cleanTitle.slice(0, 20) : undefined,
+					displayName: jiraLinked ? clampDisplayName(cleanTitle) : undefined,
 					prompt: cleanPrompt,
 					branch: cleanBranch || undefined,
 					baseBranch: cleanBase || undefined,
