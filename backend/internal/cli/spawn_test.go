@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -209,11 +210,21 @@ func TestSpawnNoTakeoverRequiresClaimPR(t *testing.T) {
 }
 
 // TestSpawnCommand_RejectsOverlongName asserts `ao spawn` rejects a --name
-// longer than 20 characters without contacting the daemon.
+// longer than the display-name cap without contacting the daemon.
 func TestSpawnCommand_RejectsOverlongName(t *testing.T) {
-	_, _, err := executeCLI(t, Deps{}, "spawn", "--project", "demo", "--name", strings.Repeat("x", 21))
-	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), "20 characters or fewer") {
-		t.Fatalf("err=%v exit=%d, want 20 characters or fewer", err, ExitCode(err))
+	want := fmt.Sprintf("%d characters or fewer", maxDisplayNameLen)
+	_, _, err := executeCLI(t, Deps{}, "spawn", "--project", "demo", "--name", strings.Repeat("x", maxDisplayNameLen+1))
+	if err == nil || ExitCode(err) != 2 || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err=%v exit=%d, want %s", err, ExitCode(err), want)
+	}
+	// One rune under the wire: a name AT the cap must clear the length gate, so
+	// whatever it fails on next, it is never the length. Counted in runes, so a
+	// Thai name of the same rune count clears it too.
+	for _, name := range []string{strings.Repeat("x", maxDisplayNameLen), strings.Repeat("\u0e01", maxDisplayNameLen)} {
+		_, _, err := executeCLI(t, Deps{}, "spawn", "--project", "demo", "--name", name)
+		if err != nil && strings.Contains(err.Error(), "characters or fewer") {
+			t.Fatalf("name of %d runes rejected on length: %v", maxDisplayNameLen, err)
+		}
 	}
 }
 

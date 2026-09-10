@@ -9897,7 +9897,7 @@ components:
         createdBy:
           type: string
         displayName:
-          maxLength: 20
+          maxLength: 22
           type: string
         harness:
           enum:
@@ -10100,7 +10100,7 @@ components:
           - "null"
           - string
         displayName:
-          maxLength: 20
+          maxLength: 22
           type:
           - "null"
           - string

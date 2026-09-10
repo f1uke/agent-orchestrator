@@ -20,6 +20,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
@@ -1248,14 +1249,28 @@ func TestSessionsAPI_SpawnRejectsInvalidTaskSize(t *testing.T) {
 }
 
 // TestSessionsAPI_SpawnRejectsOverlongDisplayName asserts the spawn endpoint
-// caps displayName at 20 characters even though the field itself is optional
-// (the desktop new-task dialog omits it). `ao spawn` enforces the same limit
-// CLI-side before the request is sent.
+// caps displayName at the display-name limit even though the field itself is
+// optional (the desktop new-task dialog omits it). `ao spawn` enforces the same
+// limit CLI-side before the request is sent.
 func TestSessionsAPI_SpawnRejectsOverlongDisplayName(t *testing.T) {
 	srv := newSessionTestServer(t, newFakeSessionService())
 
-	overlong := strings.Repeat("x", 21)
+	overlong := strings.Repeat("x", controllers.MaxDisplayNameLen+1)
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","harness":"codex","displayName":"`+overlong+`"}`)
+	assertErrorCode(t, body, status, http.StatusBadRequest, "DISPLAY_NAME_TOO_LONG")
+
+	// The cap counts RUNES, so a Thai name of the same character count is worth
+	// the same as a Latin one - and a name AT the cap must still be accepted, in
+	// either script. Widening the cap may never turn an accepted name away.
+	for _, name := range []string{strings.Repeat("x", controllers.MaxDisplayNameLen), strings.Repeat("\u0e01", controllers.MaxDisplayNameLen)} {
+		_, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","harness":"codex","displayName":"`+name+`"}`)
+		if status != http.StatusCreated {
+			t.Fatalf("displayName of %d runes: status = %d, want %d", controllers.MaxDisplayNameLen, status, http.StatusCreated)
+		}
+	}
+	// And a Thai name one rune over is still refused — rune-counting must not
+	// become byte-counting in either direction.
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions", `{"projectId":"ao","harness":"codex","displayName":"`+strings.Repeat("\u0e01", controllers.MaxDisplayNameLen+1)+`"}`)
 	assertErrorCode(t, body, status, http.StatusBadRequest, "DISPLAY_NAME_TOO_LONG")
 }
 

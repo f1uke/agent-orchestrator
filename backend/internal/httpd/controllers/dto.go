@@ -341,10 +341,11 @@ type SpawnSessionRequest struct {
 	// maxPromptLen in sessions.go — a defensive bound well under ARG_MAX, not an
 	// agent/model context limit. Keep the two in sync.
 	Prompt string `json:"prompt,omitempty" maxLength:"131072"`
-	// DisplayName is the sidebar label for the session, capped at 20 characters.
+	// DisplayName is the sidebar label for the session, capped at 22 characters
+	// (maxDisplayNameLen in sessions.go - keep the tag below in sync with it).
 	// `ao spawn --name` always sets it; other clients (e.g. the desktop new-task
 	// dialog) may omit it and fall back to the session id in the read model.
-	DisplayName string `json:"displayName,omitempty" maxLength:"20"`
+	DisplayName string `json:"displayName,omitempty" maxLength:"22"`
 	// StartImmediately controls deferral. Absent/null (the default) or true
 	// spawns the session now — the unchanged behavior. false stages it as a
 	// prepared TODO on the board (no branch/worktree/tmux until Start).
@@ -376,7 +377,7 @@ type SpawnSessionRequest struct {
 // — an absent field is left unchanged; a present field is set (including to
 // empty). Rejected once the task has started.
 type UpdateTodoSpecRequest struct {
-	DisplayName    *string              `json:"displayName,omitempty" maxLength:"20"`
+	DisplayName    *string              `json:"displayName,omitempty" maxLength:"22"`
 	Harness        *domain.AgentHarness `json:"harness,omitempty" enum:"claude-code,codex,aider,opencode,grok,droid,amp,agy,crush,cursor,qwen,copilot,goose,auggie,continue,devin,cline,kimi,kiro,kilocode,vibe,pi,autohand"`
 	Branch         *string              `json:"branch,omitempty"`
 	BaseBranch     *string              `json:"baseBranch,omitempty"`

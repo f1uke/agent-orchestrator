@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -50,7 +51,15 @@ const (
 	// documented comment-body ceiling (65536 characters) instead of the agent
 	// message cap — rejecting it here beats a confusing failure from the SCM.
 	maxCommentBodyLen = 65536
-	maxDisplayNameLen = 20
+	// maxDisplayNameLen caps a session's sidebar label. The number is MEASURED,
+	// not chosen: it is how many runes the sidebar's name column can render in
+	// full at the rail's default 240px width (a 143px column at 12.5px/500 in the
+	// UI font) without the row's `truncate` cutting the tail off. Counted in
+	// RUNES, so Thai spends its budget on characters rather than UTF-8 bytes.
+	// Mirrored by the CLI (internal/cli/spawn.go), the renderer's rename input
+	// (frontend/src/renderer/lib/display-name.ts, which carries the measurement)
+	// and the orchestrator prompt in internal/prompts/prompts.go.
+	maxDisplayNameLen = 22
 )
 
 var errPreviewFileNotFound = errors.New("preview file not found")
@@ -263,7 +272,7 @@ func (c *SessionsController) spawn(w http.ResponseWriter, r *http.Request) {
 	// a direct API call cannot exceed it.
 	displayName := strings.TrimSpace(in.DisplayName)
 	if utf8.RuneCountInString(displayName) > maxDisplayNameLen {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "DISPLAY_NAME_TOO_LONG", "displayName must be 20 characters or fewer", nil)
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "DISPLAY_NAME_TOO_LONG", fmt.Sprintf("displayName must be %d characters or fewer", maxDisplayNameLen), nil)
 		return
 	}
 	if in.Kind == "" {
@@ -319,7 +328,7 @@ func (c *SessionsController) updateSpec(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if in.DisplayName != nil && utf8.RuneCountInString(strings.TrimSpace(*in.DisplayName)) > maxDisplayNameLen {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "DISPLAY_NAME_TOO_LONG", "displayName must be 20 characters or fewer", nil)
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "DISPLAY_NAME_TOO_LONG", fmt.Sprintf("displayName must be %d characters or fewer", maxDisplayNameLen), nil)
 		return
 	}
 	if in.Prompt != nil && len(*in.Prompt) > maxPromptLen {

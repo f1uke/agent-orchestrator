@@ -5,6 +5,7 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { registerTerminalFocus } from "../lib/terminal-focus";
+import { MAX_DISPLAY_NAME_LEN } from "../lib/display-name";
 
 const { getMock, postMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
@@ -374,7 +375,7 @@ describe("NewTaskDialog", () => {
 		expect(body.prompt).toBe("Build the sample UI.");
 	});
 
-	it("caps displayName at 20 characters for a Jira-linked task", async () => {
+	it("caps displayName at the display-name cap for a Jira-linked task", async () => {
 		renderDialog();
 		const user = userEvent.setup();
 		await waitForAgentCatalog();
@@ -385,7 +386,7 @@ describe("NewTaskDialog", () => {
 		await user.click(screen.getByRole("button", { name: "Start now" }));
 
 		await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
-		expect((spawnBody().displayName as string).length).toBe(20);
+		expect([...(spawnBody().displayName as string)].length).toBe(MAX_DISPLAY_NAME_LEN);
 	});
 
 	it("keeps the title in issueId (no displayName) when no Jira key is linked", async () => {

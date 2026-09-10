@@ -19,7 +19,7 @@ ao spawn [flags]
 | `--harness string` | Agent harness to use (see list below) | Project `worker.agent`; required if the project has none |
 | `--issue string` | Issue id to associate with the session | - |
 | `--keep-warm` | Keep the worker on the board (suspend in place, resumable) instead of archiving it to Done when its PR merges — for a worker that will open more PRs | - |
-| `--name string` | Display name shown in the sidebar (max 20 characters) | Derived from `--prompt` when omitted |
+| `--name string` | Display name shown in the sidebar (max 22 characters) | Derived from `--prompt` when omitted |
 | `--no-takeover` | Refuse if another active session owns the claimed PR (requires `--claim-pr`) | - |
 | `--project string` | Project id to spawn the session in | `AO_PROJECT_ID` or the current registered repo |
 | `--prompt string` | Initial prompt for the agent | - |
