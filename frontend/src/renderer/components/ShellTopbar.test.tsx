@@ -267,3 +267,40 @@ describe("ShellTopbar — the member switcher, and where it has to live", () => 
 		expect(document.querySelector("[data-crew-switcher]")).toBeNull();
 	});
 });
+
+// The two agents whose ids a person most often has to type into
+// `ao send --session <id>` were the two they could not copy: the sidebar's id
+// line exists only on a WORKER row, an orchestrator is a button on the project
+// card rather than a row, and a qa has no row at all - it is a pip on its dev's.
+// The topbar is per-route, so putting it here covers every session by
+// construction.
+describe("ShellTopbar — copying the session's id", () => {
+	it("offers it on an ORCHESTRATOR, which has no sidebar row to carry one", () => {
+		renderTopbar(sessionWith({ id: "proj-1-orc", kind: "orchestrator" }));
+
+		expect(screen.getByRole("button", { name: "Copy session id proj-1-orc" })).toBeInTheDocument();
+		expect(screen.getByText("@proj-1-orc")).toBeInTheDocument();
+	});
+
+	it("offers it on a QA, which is drawn as a pip on its dev's row", () => {
+		renderTopbar(sessionWith({ id: "proj-1-2", crew: { id: "proj-1-1", role: "qa", hasRun: true } }));
+
+		expect(screen.getByRole("button", { name: "Copy session id proj-1-2" })).toBeInTheDocument();
+	});
+
+	// The BARE id, not the `@` form: the sigil is for prose, every CLI that takes
+	// a session wants `<project>-<num>`, and pasting the sigil into a shell fails.
+	it("puts the bare canonical id on the clipboard, without the @ sigil", async () => {
+		const writeText = vi.fn().mockResolvedValue(undefined);
+		// Mutated in place rather than stubbed: the shared bridge captures
+		// `window.ao` once at module load, so replacing the object would leave the
+		// button writing to the one it already holds.
+		window.ao!.clipboard.writeText = writeText;
+		renderTopbar(sessionWith({ id: "proj-1-orc", kind: "orchestrator" }));
+
+		await userEvent.click(screen.getByRole("button", { name: "Copy session id proj-1-orc" }));
+
+		expect(writeText).toHaveBeenCalledWith("proj-1-orc");
+		expect(writeText).not.toHaveBeenCalledWith("@proj-1-orc");
+	});
+});

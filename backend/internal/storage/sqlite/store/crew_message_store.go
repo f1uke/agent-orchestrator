@@ -28,12 +28,17 @@ func (s *Store) InsertCrewMessage(ctx context.Context, msg domain.CrewMessage) e
 }
 
 // CrewMessagesOnSubject counts what one member has already DELIVERED about one
-// subject - the per-subject cap's counter.
-func (s *Store) CrewMessagesOnSubject(ctx context.Context, crewID domain.SessionID, subject string, from domain.SessionID) (int, error) {
+// subject IN THE CURRENT ROUND - the per-subject cap's counter.
+//
+// `since` is when that round began: the zero time counts every row, which is
+// every crew that has never had a member restored. Earlier rounds' rows are
+// never deleted, they simply stop being counted (see migration 0060).
+func (s *Store) CrewMessagesOnSubject(ctx context.Context, crewID domain.SessionID, subject string, from domain.SessionID, since time.Time) (int, error) {
 	n, err := s.qw.CountCrewMessagesOnSubject(ctx, gen.CountCrewMessagesOnSubjectParams{
 		CrewID:      string(crewID),
 		Subject:     subject,
 		FromSession: string(from),
+		CreatedAt:   since,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("count crew messages on subject: %w", err)

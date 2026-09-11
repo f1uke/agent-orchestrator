@@ -182,6 +182,25 @@ type SessionRecord struct {
 	// reaches the board through the curated crew wire object, which is what turns
 	// it into the join line under the crew strip.
 	CrewJoinReason CrewJoinReason `json:"-"`
+	// CrewRoundStartedAt is when this member's CURRENT round began: the moment a
+	// finished member was restored, and zero for every member that has never been.
+	//
+	// It exists for the per-subject message cap, which is right inside a round and
+	// wrong across one. The cap refuses a fourth message about one commit with
+	// "nothing has moved" - and a second round is asked for precisely when nothing
+	// HAS moved in the code: cases written after the first round closed, a
+	// simulator erased so the first round's evidence proves nothing, a case that
+	// expected the wrong thing. Counting from here makes each round's budget its
+	// own without deleting a single row of what the last one said.
+	//
+	// A round belongs to the TASK, so the cap reads the LATER of the two parties'
+	// values: either member coming back starts a round for both. Zero means "count
+	// from the beginning", which is what the cap always did.
+	//
+	// Written only by a deliberate revival (`ao session restore`, `ao crew wake`,
+	// Restart on a finished session) - never by the daemon's boot restore sweep,
+	// because a machine that rebooted has not asked anybody for anything.
+	CrewRoundStartedAt time.Time `json:"-"`
 	// RuntimeTouch is what this task DID with a running app: it took the
 	// simulator, or it pointed `ao preview` at what it built. Recorded on the
 	// session that did it (dev, or a solo worker), written once by the first

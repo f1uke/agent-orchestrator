@@ -40,6 +40,36 @@ func TestCrewWake_PostsToTheCrewRoute(t *testing.T) {
 	}
 }
 
+// A member that had FINISHED comes back, and the command SAYS SO rather than
+// printing the same line a paused member gets.
+//
+// Un-terminating a session is a bigger act than the word "wake" promises - it
+// revives a torn-down agent rather than resuming a paused one - and somebody who
+// meant only "start it" has to be able to see what actually happened without
+// going to look.
+func TestCrewWake_SaysWhenItRestoredAFinishedMember(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/internal/") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-3","restored":true,"session":{"id":"demo-3","crew":{"id":"demo-2","role":"qa"}}}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "crew", "wake", "demo-3")
+	if err != nil {
+		t.Fatalf("ao crew wake: %v stderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "restored") {
+		t.Fatalf("a restore passed for an ordinary start: %q", out)
+	}
+}
+
 // `ao crew status` groups the board's sessions by crew and says which member
 // holds the slot - and says so plainly when there are no crews at all, rather
 // than printing an empty table.

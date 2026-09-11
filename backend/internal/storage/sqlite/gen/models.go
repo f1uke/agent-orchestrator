@@ -249,6 +249,7 @@ type Session struct {
 	WokenBy                   string
 	CrewJoinReason            string
 	RuntimeTouch              string
+	CrewRoundStartedAt        sql.NullTime
 }
 
 type SessionMessageQueue struct {

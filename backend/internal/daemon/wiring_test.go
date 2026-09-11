@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -460,6 +461,58 @@ func TestWiring_SessionMessengerRejectsTerminatedSession(t *testing.T) {
 	}
 	if runtime.handle.ID != "" || runtime.message != "" {
 		t.Fatalf("runtime should not be called for terminated sessions, got handle=%q message=%q", runtime.handle.ID, runtime.message)
+	}
+	// The refusal NAMES THE WAY OUT. A finished session is restorable and the
+	// message goes through the moment it is back; what made this a dead end was a
+	// refusal that reported a state and left the reader to guess whether any state
+	// followed it.
+	if !strings.Contains(err.Error(), "ao session restore "+string(rec.ID)) {
+		t.Fatalf("the refusal does not name the command that makes the message deliverable:\n%s", err)
+	}
+}
+
+// A finished CREW MEMBER is pointed at `ao crew wake` instead, because that is
+// the verb for its situation: it restores the member onto the same task, in the
+// same worktree, keeping its seat. This is the exact door dev found locked when
+// it needed a qa that had closed its round to look at a simulator that had been
+// wiped since.
+func TestWiring_SessionMessengerPointsAFinishedCrewMemberAtCrewWake(t *testing.T) {
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx := context.Background()
+	if err := store.UpsertProject(ctx, domain.ProjectRecord{ID: "p", Path: "/repo/p", RegisteredAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	dev, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "p", Kind: domain.KindWorker,
+		Activity: domain.Activity{State: domain.ActivityIdle, LastActivityAt: time.Now()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qa, err := store.CreateSession(ctx, domain.SessionRecord{
+		ProjectID: "p", Kind: domain.KindWorker,
+		IsTerminated: true,
+		Activity:     domain.Activity{State: domain.ActivityExited, LastActivityAt: time.Now()},
+		Metadata:     domain.SessionMetadata{RuntimeHandleID: "ao-1/terminal_0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetSessionCrew(ctx, qa.ID, dev.ID, domain.CrewRoleQA, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = newSessionMessenger(store, &captureRuntimeSender{}, nil, nil).Send(ctx, qa.ID, "another round, please")
+	if !errors.Is(err, sessionmanager.ErrTerminated) {
+		t.Fatalf("finished crew member should wrap ErrTerminated, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ao crew wake "+string(qa.ID)) {
+		t.Fatalf("a finished crew member is not pointed at the verb that brings it back:\n%s", err)
 	}
 }
 

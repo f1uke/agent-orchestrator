@@ -263,6 +263,33 @@ type messageHolder interface {
 	Enqueue(ctx context.Context, id domain.SessionID, body string) (domain.QueuedMessage, int, error)
 }
 
+// terminatedSendRemedy is the sentence a refused send ends with: what this
+// session is, and the one command that makes the message deliverable.
+//
+// It is worded for a CREW MEMBER first because that is where the dead end was
+// found. A qa that closed a round is the single most common terminated session
+// anybody still has something to say to, and the three refusals it hits - this
+// one, `ao sim claim`, `ao crew wake` - all used to report a state and stop.
+// A crew member gets `ao crew wake`, which is the verb for its situation and
+// restores it; everything else gets `ao session restore`, which is the same
+// capability under the name a solo session is filed as.
+func terminatedSendRemedy(rec domain.SessionRecord) string {
+	if rec.InCrew() {
+		return fmt.Sprintf(
+			"%s has finished its round, so nothing was delivered and nothing is being held. "+
+				"It is not gone: `ao crew wake %s` brings it back into the same worktree, on the same task, "+
+				"and your message goes through once it is up. A finished member can be asked for another look "+
+				"with no new commit at all - new test cases, a device that was reset, a case that turned out "+
+				"to expect the wrong thing",
+			rec.ID, rec.ID)
+	}
+	return fmt.Sprintf(
+		"session %s has ended, so nothing was delivered and nothing is being held. "+
+			"It is not gone: `ao session restore %s` brings it back in its own worktree, "+
+			"and your message goes through once it is up",
+		rec.ID, rec.ID)
+}
+
 // runtimeMessenger sends the user's message directly to the session's live
 // runtime pane, or hands it to the queue when the session is asleep. The HTTP
 // controller has already validated and sanitized the message body; this adapter
@@ -287,7 +314,13 @@ func (m runtimeMessenger) Send(ctx context.Context, id domain.SessionID, message
 		// nobody's plan. Holding a message for it would turn a clear, immediate
 		// "this session is over" into a silent wait for a delivery that never
 		// happens - the exact confusion the queue exists to remove.
-		return ports.SendOutcome{}, fmt.Errorf("session %s: %w", id, sessionmanager.ErrTerminated)
+		//
+		// The refusal NAMES THE WAY OUT, because there is one and it was findable
+		// only by someone who already knew: a finished session is restorable, and
+		// the message goes through the moment it is back. What made this a dead end
+		// was never the refusal - it was a refusal that reported a STATE and left
+		// the reader to guess whether any state followed it.
+		return ports.SendOutcome{}, sessionmanager.TerminatedError{Remedy: terminatedSendRemedy(rec)}
 	}
 	if !rec.CanReceiveMessage() && m.queue != nil {
 		// The session cannot take the message right now, for one of two reasons:

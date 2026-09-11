@@ -52,7 +52,10 @@ type Store interface {
 	// The crew conversation's counters. Every one of them reads a table that
 	// stays empty unless two members of one task actually message each other.
 	InsertCrewMessage(ctx context.Context, msg domain.CrewMessage) error
-	CrewMessagesOnSubject(ctx context.Context, crewID domain.SessionID, subject string, from domain.SessionID) (int, error)
+	// `since` is the start of the crew's current ROUND: rows from a round that
+	// closed stay in the table and stop counting, so a member brought back for a
+	// second look can be briefed about the same unchanged commit.
+	CrewMessagesOnSubject(ctx context.Context, crewID domain.SessionID, subject string, from domain.SessionID, since time.Time) (int, error)
 	CrewMessagesSince(ctx context.Context, crewID domain.SessionID, since time.Time) (int, error)
 	LatestCrewMessageFrom(ctx context.Context, from domain.SessionID) (domain.CrewMessage, bool, error)
 	// OpenCrewRunForSession and ConsecutiveCrewRunDiscards are the bracketed-run
@@ -124,10 +127,12 @@ type commander interface {
 	// (design §1.12.1). Best effort and silent: a preview must not fail because a
 	// crew could not be formed.
 	NoteRuntimeTouch(ctx context.Context, id domain.SessionID, touch domain.RuntimeTouch)
-	// WakeCrewMember gives the crew slot to one member of a task, standing the
-	// current holder down first. It is the human's (and the orchestrator's) way of
-	// saying "qa's turn now" while automatic handover is deliberately not built.
-	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	// WakeCrewMember brings one member of a task up, leaving its crewmate exactly
+	// as it is. It is the human's (and the orchestrator's) way of saying "get qa
+	// going". `restored` reports that the member had FINISHED and was brought back
+	// rather than merely resumed - a bigger thing than the caller asked for by
+	// name, so it is said rather than done quietly.
+	WakeCrewMember(ctx context.Context, id domain.SessionID) (rec domain.SessionRecord, restored bool, err error)
 	// Kill is the teardown a PERSON ordered: it may REFUSE (a worktree holding
 	// work nobody has seen), and it discards that work only when explicitly told
 	// to. Its result says what actually happened - including whether the session
@@ -557,19 +562,37 @@ func (s *Service) Wake(ctx context.Context, id domain.SessionID) (domain.Session
 	return s.toSession(ctx, rec)
 }
 
-// WakeCrewMember hands the task's one awake slot to `id`: whoever holds it is
-// stood down (suspended, tmux reaped) and `id` is resumed in its place. It goes
-// through the same exclusion every other wake route does, so it can only ever
-// leave one member of a crew running.
+// CrewWakeResult is what came of waking one member: the fresh read model, and
+// whether the member had to be RESTORED to get there.
 //
-// A member that already holds the slot is returned unchanged - "qa's turn" when
-// it is already qa's turn is a no-op, not an error.
-func (s *Service) WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error) {
-	rec, err := s.manager.WakeCrewMember(ctx, id)
+// Restored is a separate fact rather than something the caller infers from the
+// session view, because by the time the view is built the member is awake and
+// looks no different from one that was merely asleep. It is the difference
+// between "started it" and "brought a finished agent back", and only the caller
+// that asked can be told.
+type CrewWakeResult struct {
+	Session  domain.Session
+	Restored bool
+}
+
+// WakeCrewMember brings `id` up in its task's worktree and TOUCHES NOBODY ELSE:
+// the crewmate keeps running, keeps its terminal and is not interrupted, because
+// both members of a crew work at the same time.
+//
+// A member that is already awake is returned unchanged - "wake qa" when qa is
+// already up is a no-op, not an error - and a member that has FINISHED is
+// restored, which is what makes a second round askable for by the same verb the
+// first one used.
+func (s *Service) WakeCrewMember(ctx context.Context, id domain.SessionID) (CrewWakeResult, error) {
+	rec, restored, err := s.manager.WakeCrewMember(ctx, id)
 	if err != nil {
-		return domain.Session{}, toAPIError(err)
+		return CrewWakeResult{}, toAPIError(err)
 	}
-	return s.toSession(ctx, rec)
+	sess, err := s.toSession(ctx, rec)
+	if err != nil {
+		return CrewWakeResult{}, err
+	}
+	return CrewWakeResult{Session: sess, Restored: restored}, nil
 }
 
 // TaskDevOf resolves any session id to the id of the TASK it belongs to, which
@@ -1290,6 +1313,20 @@ func (s *Service) Get(ctx context.Context, id domain.SessionID) (domain.Session,
 	return s.toSession(ctx, rec)
 }
 
+// terminatedMessage renders ErrTerminated for the wire: the remedy when the
+// refusal carried one, and the bare fact when it did not.
+//
+// It reads the remedy with errors.As rather than off the error's text, because
+// the error is wrapped on its way here and the sentinel's own string
+// ("session: terminated") is a Go-internal token that must never reach a person.
+func terminatedMessage(err error) string {
+	var terminated sessionmanager.TerminatedError
+	if errors.As(err, &terminated) && strings.TrimSpace(terminated.Remedy) != "" {
+		return terminated.Remedy
+	}
+	return "Session is terminated"
+}
+
 // toAPIError maps the session engine's sentinel errors to their REST API
 // equivalents; an unrecognized error passes through and surfaces as a 500.
 func toAPIError(err error) error {
@@ -1301,7 +1338,12 @@ func toAPIError(err error) error {
 	case errors.Is(err, sessionmanager.ErrNotRestorable):
 		return apierr.Conflict("SESSION_NOT_RESTORABLE", "Session is not restorable", nil)
 	case errors.Is(err, sessionmanager.ErrTerminated):
-		return apierr.Conflict("SESSION_TERMINATED", "Session is terminated", nil)
+		// The wrapped text, not a fixed "Session is terminated". Only one place
+		// produces this error - a send to a session that has ended - and it writes
+		// the remedy into the message, naming the session and the command that
+		// brings it back. Flattening it here is what made three separate refusals
+		// report a state with no way out of it.
+		return apierr.Conflict("SESSION_TERMINATED", terminatedMessage(err), nil)
 	case errors.Is(err, msgdelivery.ErrNotDelivered):
 		// Nothing was delivered, and the caller has to be told WHY in the same
 		// breath - the reason is the only thing that makes a refused send

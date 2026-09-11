@@ -8,12 +8,14 @@ import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery
 import { useUiStore } from "../stores/ui-store";
 import { OrchestratorIcon } from "./icons";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { CopyButton } from "./CopyButton";
 import { CrewSwitcher } from "./CrewSwitcher";
 import { useAddCrewRole } from "../hooks/useAddCrewRole";
+import { useCheckAgain } from "../hooks/useCheckAgain";
 import { useSessionTask } from "../hooks/useSessionTask";
 import { useSessionScmSummary } from "../hooks/useSessionScmSummary";
 import { useSimDevices } from "../hooks/useSimDevices";
-import { reviewGateState } from "../lib/crew";
+import { qaToCheckAgain, reviewGateState } from "../lib/crew";
 import { cn } from "../lib/utils";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
@@ -105,7 +107,13 @@ export function ShellTopbar() {
 			.filter((holder): holder is string => Boolean(holder)),
 	);
 	const addRole = useAddCrewRole(task?.dev);
-	const addRoleError = addRole.error instanceof Error ? addRole.error.message : null;
+	// The other half of the same slot: the qa this task already has, asked for
+	// another round. `qaToCheckAgain` returns one only when there is something to
+	// ask, so the two controls can never both be offered.
+	const checkAgain = useCheckAgain(task ? qaToCheckAgain(task) : undefined);
+	const crewActionError =
+		(addRole.error instanceof Error ? addRole.error.message : null) ??
+		(checkAgain.error instanceof Error ? checkAgain.error.message : null);
 	const requestInspectorView = useUiStore((state) => state.requestInspectorView);
 
 	const openMember = (member: WorkspaceSession) => {
@@ -149,6 +157,7 @@ export function ShellTopbar() {
 								<OrchestratorIcon className="size-3 shrink-0" aria-hidden="true" />
 								Orchestrator
 							</span>
+							{session ? <SessionRef session={session} /> : null}
 						</div>
 					</div>
 				) : isSessionRoute ? (
@@ -157,6 +166,7 @@ export function ShellTopbar() {
 							<GitBranch className="h-3 w-3 shrink-0" aria-hidden="true" />
 							<span className="truncate">{session?.branch || `session/${session?.id ?? ""}`}</span>
 						</div>
+						{session ? <SessionRef session={session} /> : null}
 						{session ? <SessionStatusPill session={session} /> : null}
 						{/* AFTER the pill, deliberately: on a solo task this appends one
 						    quiet `+ qa` and moves nothing that is already on screen, which
@@ -167,7 +177,9 @@ export function ShellTopbar() {
 								addRolePending={addRole.isPending}
 								autoCrewDisabled={Boolean(project?.disableAutoCrew)}
 								deviceHolders={deviceHolders}
+								checkAgainPending={checkAgain.isPending}
 								onAddRole={() => addRole.mutate()}
+								onCheckAgain={() => checkAgain.mutate()}
 								onOpenMember={openMember}
 								onOpenReviews={() => requestInspectorView("reviews")}
 								review={reviewGateState(reviewPRs)}
@@ -176,9 +188,9 @@ export function ShellTopbar() {
 								task={task}
 							/>
 						) : null}
-						{addRoleError ? (
+						{crewActionError ? (
 							<span className="truncate text-[11px] text-destructive" role="status">
-								{addRoleError}
+								{crewActionError}
 							</span>
 						) : null}
 					</div>
@@ -250,6 +262,35 @@ export function ShellTopbar() {
 				onOpenChange={setIsNewTaskOpen}
 			/>
 		</header>
+	);
+}
+
+/**
+ * `@<project>-<num>`, with click-to-copy, for the session the route is on.
+ *
+ * It is the sidebar's id line, in the one place that answers for EVERY session.
+ * The sidebar only ever had it for a worker: an orchestrator is a button on the
+ * project card rather than a row, and a qa has no row at all - it is a pip on its
+ * dev's. So the two agents whose ids a person most often has to type into
+ * `ao send --session <id>` were the two they could not copy, and the only way to
+ * get one was to read it off a terminal and retype it.
+ *
+ * Here it covers both by construction, because the topbar is per-ROUTE: open the
+ * orchestrator and it is the orchestrator's, click the qa chip and it is qa's.
+ *
+ * The copied value is the BARE id, not the `@` form. The sigil is for prose; the
+ * CLI takes `<project>-<num>`, and pasting the sigil into a shell just fails -
+ * which is the mistake this affordance exists to prevent. Same rule, and the same
+ * shared control, as the sidebar's.
+ */
+function SessionRef({ session }: { session: WorkspaceSession }) {
+	return (
+		<span className="inline-flex min-w-0 shrink items-center gap-1" style={noDragStyle}>
+			<span className="min-w-0 truncate font-mono text-[10.5px] leading-tight text-passive" title={`@${session.id}`}>
+				@{session.id}
+			</span>
+			<CopyButton value={session.id} what="session id" />
+		</span>
 	);
 }
 

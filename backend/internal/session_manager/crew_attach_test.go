@@ -198,8 +198,16 @@ func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 		if _, err := m.Teardown(ctx, qa.ID, "test: stand qa down"); err != nil {
 			t.Fatalf("Teardown(qa): %v", err)
 		}
-		if _, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, ""); !errors.Is(err, ErrCrewRoleTaken) {
+		_, err = m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
+		if !errors.Is(err, ErrCrewRoleTaken) {
 			t.Fatalf("a replacement qa was accepted: %v - restore the original id instead", err)
+		}
+		// ONE TASK, ONE QA still holds - and the refusal now says what to do with
+		// the one it has. This is the door dev reached for first when it needed a
+		// second round, and "you already have one" was a true answer to a question
+		// nobody was asking.
+		if !strings.Contains(err.Error(), "ao crew wake "+string(qa.ID)) {
+			t.Fatalf("the refusal does not point at the qa this task already has:\n%s", err)
 		}
 		if len(st.sessions) != 2 {
 			t.Fatalf("a refused attach left %d rows, want 2", len(st.sessions))
@@ -354,7 +362,7 @@ func TestAttachCrewMember_StartingTheAttachedMemberLeavesDevRunning(t *testing.T
 	}
 
 	// Starting a member that is already up is a no-op, not an error.
-	if _, err := m.WakeCrewMember(ctx, qa.ID); err != nil {
+	if _, _, err := m.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("WakeCrewMember: %v", err)
 	}
 
