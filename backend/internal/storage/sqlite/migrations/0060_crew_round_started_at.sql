@@ -1,0 +1,44 @@
+-- Summary: when this crew member's CURRENT round began - the boundary the
+-- per-subject message cap counts from.
+--
+-- A crew's conversation is capped per SUBJECT: CappedRepeat messages from one
+-- member about one commit SHA or smoke case id, and the next is refused with
+-- "nothing has moved; answer with the artifact instead" (0050). That is right
+-- inside a round and wrong across one.
+--
+-- A finished qa can be brought back for a SECOND ROUND, and the reasons it is
+-- asked for are not code changes: test cases written after the first round
+-- closed, a simulator erased so the first round's evidence proves nothing about
+-- this build, a case that turned out to expect the wrong thing. The subject is
+-- the same commit because the commit did not move - which is exactly what the
+-- cap reads as a stalled conversation. So the member came back able to be
+-- messaged and immediately unable to be briefed: the same dead end, one door
+-- further in.
+--
+-- The boundary is the RESTORE. Bringing a member back is a deliberate, durable
+-- act by a person or by dev, and it is the thing the cap's "nothing has moved"
+-- was actually asking about. Rows before it stay exactly where they are - no
+-- history is deleted and no refusal is rewritten - they simply belong to a round
+-- that is over, and the counter for the new round starts at zero.
+--
+-- Written on the member's own row by the (re)launch that revives a terminated
+-- crew session, and read as the MAX across the two parties to a message, because
+-- a round belongs to the TASK and either member coming back starts one. Solo
+-- sessions never reach the cap at all and are unaffected.
+--
+-- Zero = no round boundary has ever been recorded, which is every row written
+-- before this existed and every member that has never been restored. The cap
+-- then counts from the beginning, exactly as it did.
+--
+-- No CDC trigger change is needed: nothing on screen reads this, and every write
+-- goes through the same UpdateSession the sessions_cdc_update trigger already
+-- watches.
+-- +goose Up
+-- +goose StatementBegin
+ALTER TABLE sessions ADD COLUMN crew_round_started_at TIMESTAMP;
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+ALTER TABLE sessions DROP COLUMN crew_round_started_at;
+-- +goose StatementEnd

@@ -196,6 +196,28 @@ func (s *Store) SetSessionCrew(ctx context.Context, id, crewID domain.SessionID,
 	return rows > 0, nil
 }
 
+// StartCrewRound records that this crew member's CURRENT round begins now: the
+// moment a finished member was deliberately brought back.
+//
+// It is the boundary the per-subject message cap counts from, and it moves only
+// on a revival somebody ASKED for - `ao session restore`, `ao crew wake`, a
+// restart of a finished session. The daemon's boot restore sweep deliberately
+// does not call it: a machine that rebooted has not asked anybody to look again.
+//
+// ok=false means no such session, which is a benign race on a purged row.
+func (s *Store) StartCrewRound(ctx context.Context, id domain.SessionID, at time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.StartCrewRound(ctx, gen.StartCrewRoundParams{
+		ID:                 id,
+		CrewRoundStartedAt: sql.NullTime{Time: at, Valid: true},
+	})
+	if err != nil {
+		return false, fmt.Errorf("start crew round: %w", err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionRuntimeTouch records what this task DID with a running app - it took
 // the simulator, or it pointed `ao preview` at what it built.
 //
@@ -420,6 +442,7 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		CrewID:             domain.SessionID(row.CrewID),
 		CrewRole:           domain.CrewRole(row.CrewRole),
 		CrewJoinReason:     domain.CrewJoinReason(row.CrewJoinReason),
+		CrewRoundStartedAt: nullTimeToTime(row.CrewRoundStartedAt),
 		RuntimeTouch:       domain.RuntimeTouch(row.RuntimeTouch),
 		Metadata: domain.SessionMetadata{
 			Branch:          row.Branch,

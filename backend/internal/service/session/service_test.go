@@ -223,10 +223,10 @@ func (f *fakeStore) InsertCrewMessage(_ context.Context, msg domain.CrewMessage)
 	return nil
 }
 
-func (f *fakeStore) CrewMessagesOnSubject(_ context.Context, crewID domain.SessionID, subject string, from domain.SessionID) (int, error) {
+func (f *fakeStore) CrewMessagesOnSubject(_ context.Context, crewID domain.SessionID, subject string, from domain.SessionID, since time.Time) (int, error) {
 	n := 0
 	for _, msg := range f.crewMessages {
-		if msg.CrewID == crewID && msg.Subject == subject && msg.From == from && !msg.Refused() {
+		if msg.CrewID == crewID && msg.Subject == subject && msg.From == from && !msg.Refused() && !msg.CreatedAt.Before(since) {
 			n++
 		}
 	}
@@ -499,40 +499,41 @@ type fakeCommander struct {
 
 	// killOptions records what each Kill asked for: the discard opt-in has to
 	// reach the manager, not stop at the service.
-	killOptions     []sessionmanager.KillOptions
-	sendOutcome     ports.SendOutcome
-	teardownCauses  []string
-	killed          []domain.SessionID
-	restarted       []domain.SessionID
-	retired         []domain.SessionID
-	sent            []domain.SessionID
-	lastMessage     string
-	cleanupProjects []domain.ProjectID
-	purged          []domain.SessionID
-	purgedForce     []bool
-	killErr         error
-	teardownResult  *sessionmanager.TeardownResult
-	restartErr      error
-	retireErr       error
-	sendErr         error
-	cleanupErr      error
-	spawnErr        error
-	purgeErr        error
-	spawnRecord     domain.SessionRecord
-	restartRecord   domain.SessionRecord
-	woken           []domain.SessionID
-	crewWoken       []domain.SessionID
-	crewMembers     map[crewSeat]domain.SessionRecord
-	crewWakeErr     error
-	crewAttached    []domain.SessionID
-	runtimeTouches  []crewTouch
-	crewDevOf       map[domain.SessionID]domain.SessionRecord
-	wakeRecord      domain.SessionRecord
-	spawned         bool
-	killsAtSpawn    int
-	preparedTodo    bool
-	startedTodo     []domain.SessionID
-	updatedTodo     []domain.SessionID
+	killOptions      []sessionmanager.KillOptions
+	sendOutcome      ports.SendOutcome
+	teardownCauses   []string
+	killed           []domain.SessionID
+	restarted        []domain.SessionID
+	retired          []domain.SessionID
+	sent             []domain.SessionID
+	lastMessage      string
+	cleanupProjects  []domain.ProjectID
+	purged           []domain.SessionID
+	purgedForce      []bool
+	killErr          error
+	teardownResult   *sessionmanager.TeardownResult
+	restartErr       error
+	retireErr        error
+	sendErr          error
+	cleanupErr       error
+	spawnErr         error
+	purgeErr         error
+	spawnRecord      domain.SessionRecord
+	restartRecord    domain.SessionRecord
+	woken            []domain.SessionID
+	crewWoken        []domain.SessionID
+	crewMembers      map[crewSeat]domain.SessionRecord
+	crewWakeErr      error
+	crewWakeRestored bool
+	crewAttached     []domain.SessionID
+	runtimeTouches   []crewTouch
+	crewDevOf        map[domain.SessionID]domain.SessionRecord
+	wakeRecord       domain.SessionRecord
+	spawned          bool
+	killsAtSpawn     int
+	preparedTodo     bool
+	startedTodo      []domain.SessionID
+	updatedTodo      []domain.SessionID
 }
 
 func (f *fakeCommander) Spawn(_ context.Context, cfg ports.SpawnConfig) (domain.SessionRecord, error) {
@@ -618,9 +619,9 @@ func (f *fakeCommander) NoteRuntimeTouch(_ context.Context, id domain.SessionID,
 	f.runtimeTouches = append(f.runtimeTouches, crewTouch{id: id, touch: touch})
 }
 
-func (f *fakeCommander) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+func (f *fakeCommander) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
 	f.crewWoken = append(f.crewWoken, id)
-	return f.wakeRecord, f.crewWakeErr
+	return f.wakeRecord, f.crewWakeRestored, f.crewWakeErr
 }
 func (f *fakeCommander) Kill(ctx context.Context, id domain.SessionID, opts sessionmanager.KillOptions) (sessionmanager.TeardownResult, error) {
 	f.killOptions = append(f.killOptions, opts)

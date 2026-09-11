@@ -168,6 +168,17 @@ func (f *fakeStore) SetSessionCrew(_ context.Context, id, crewID domain.SessionI
 	return true, nil
 }
 
+// StartCrewRound mirrors the real store's sole writer of the round boundary.
+func (f *fakeStore) StartCrewRound(_ context.Context, id domain.SessionID, at time.Time) (bool, error) {
+	rec, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	rec.CrewRoundStartedAt = at
+	f.sessions[id] = rec
+	return true, nil
+}
+
 // SetSessionRuntimeTouch mirrors the real store, including the part that matters:
 // it is WRITE-ONCE. A row that already carries a touch is left alone and reports
 // false, so the FIRST surface a task drove is the one recorded.

@@ -127,7 +127,7 @@ func TestCrewAttach_TheNewMemberIsReachableBeforeItWakes(t *testing.T) {
 	}
 
 	// And it is not lost: it lands when the member is started.
-	if _, err := s.mgr.WakeCrewMember(ctx, qa.ID); err != nil {
+	if _, _, err := s.mgr.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("wake the attached member: %v", err)
 	}
 	for range 3 {
@@ -153,7 +153,7 @@ func TestCrewAttach_StartingItLeavesDevRunning(t *testing.T) {
 	dev, qa := s.attachedCrewNeverStarted(t)
 	devHandle := s.record(t, dev.ID).Metadata.RuntimeHandleID
 
-	if _, err := s.mgr.WakeCrewMember(ctx, qa.ID); err != nil {
+	if _, _, err := s.mgr.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("WakeCrewMember: %v", err)
 	}
 	s.assertBothAwake(t, dev.ID, qa.ID)
@@ -182,7 +182,7 @@ func TestCrewAttach_StartingItLeavesDevRunning(t *testing.T) {
 
 	// Asking for the member that is already running is a no-op, not an error and
 	// not a stand-down of anybody.
-	if _, err := s.mgr.WakeCrewMember(ctx, dev.ID); err != nil {
+	if _, _, err := s.mgr.WakeCrewMember(ctx, dev.ID); err != nil {
 		t.Fatalf("start the member that is already running: %v", err)
 	}
 	s.assertBothAwake(t, dev.ID, qa.ID)

@@ -50,7 +50,15 @@ func (m *Manager) resolveCrewDev(ctx context.Context, project domain.ProjectReco
 		return domain.SessionRecord{}, fmt.Errorf("%w: %s is an orchestrator, not a task", ErrInvalidCrew, devID)
 	}
 	if dev.IsTerminated {
-		return domain.SessionRecord{}, fmt.Errorf("%w: dev %s is terminated", ErrInvalidCrew, devID)
+		// The same rule the rest of this capability is built on: a crew lives in
+		// ONE worktree and it is dev's, so a task whose dev has ended has no tree
+		// for a member to be born into. Restoring dev is what puts one back, and
+		// naming it here keeps this from being the third refusal in a row that
+		// reports a state and stops.
+		return domain.SessionRecord{}, fmt.Errorf(
+			"%w: dev %s has finished, so this task has no live worktree for a %s to work in. "+
+				"Bring the task back with `ao session restore %s` first, and then ask for the %s",
+			ErrInvalidCrew, devID, role, devID, role)
 	}
 	if dev.Metadata.Branch == "" || dev.Metadata.WorkspacePath == "" {
 		return domain.SessionRecord{}, fmt.Errorf("%w: dev %s has no materialized worktree to share", ErrInvalidCrew, devID)

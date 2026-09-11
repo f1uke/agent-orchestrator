@@ -407,7 +407,24 @@ func (s *Service) requireLiveSession(ctx context.Context, sessionID domain.Sessi
 		return fmt.Errorf("%w: session %s does not exist", ErrNotFound, sessionID)
 	}
 	if rec.IsTerminated {
-		return fmt.Errorf("%w: session %s has ended and cannot hold a simulator", ErrInvalid, sessionID)
+		// The refusal stands - an ended session still cannot be trusted to release
+		// a lease - but it NAMES THE WAY OUT, because there is one. A finished
+		// session can read the screen (`ao sim ax`, `ao sim shot` need no lease) and
+		// can be messaged, so it can be handed work and accept it and only find out
+		// here that it cannot touch anything. Saying what makes it able to is the
+		// difference between a refusal and a dead end.
+		if rec.InCrew() {
+			return fmt.Errorf(
+				"%w: %s has finished its round, so it cannot hold a simulator: a lease is released by the session "+
+					"that took it, and an ended session releases nothing. It is not gone - `ao crew wake %s` brings it "+
+					"back onto the same task, and it can claim a device again once it is up",
+				ErrInvalid, sessionID, sessionID)
+		}
+		return fmt.Errorf(
+			"%w: session %s has ended, so it cannot hold a simulator: a lease is released by the session that took "+
+				"it, and an ended session releases nothing. It is not gone - `ao session restore %s` brings it back, "+
+				"and it can claim a device again once it is up",
+			ErrInvalid, sessionID, sessionID)
 	}
 	return nil
 }

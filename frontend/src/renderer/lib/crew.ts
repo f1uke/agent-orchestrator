@@ -256,6 +256,33 @@ export function canAttachRole(task: Task): boolean {
 }
 
 /**
+ * The qa this task could ask for ANOTHER ROUND, or undefined when there is
+ * nothing to ask.
+ *
+ * It is {@link canAttachRole}'s other half, and between them they cover a task's
+ * whole life in one slot: no qa yet and dev still going, offer one; a qa that
+ * finished while dev carries on, offer another round. A task can never be in
+ * both states, so the control never doubles up.
+ *
+ * Two conditions, and each is the one the daemon would refuse on anyway:
+ *
+ * - the qa has FINISHED. A working or merely paused one needs nothing - it is
+ *   already on the task and can be messaged.
+ * - dev is still LIVE. A crew shares one worktree and it is dev's by ownership,
+ *   so a finished qa beside a working dev is a row without a runtime next to a
+ *   tree that is still standing, and bringing it back re-attaches to that tree.
+ *   Once dev has finished too the tree came down with it, and reviving a member
+ *   into a task that is over is a much bigger act than this button promises -
+ *   that is `ao session restore`, and it is deliberately not offered here.
+ */
+export function qaToCheckAgain(task: Task): WorkspaceSession | undefined {
+	if (!task.qa) return undefined;
+	if (crewChipState(task.qa) !== "done") return undefined;
+	if (crewChipState(task.dev) === "done") return undefined;
+	return task.qa;
+}
+
+/**
  * One quiet sentence under the crew strip, and it answers whichever of two
  * questions this card raises.
  *

@@ -201,8 +201,17 @@ func TestAcquire_UnknownOrEndedSessionCannotHoldADevice(t *testing.T) {
 	if err := store.UpdateSession(ctx, rec); err != nil {
 		t.Fatalf("terminate: %v", err)
 	}
-	if _, err := svc.Acquire(ctx, owner, udidProMax, 0); !errors.Is(err, sim.ErrInvalid) {
+	_, err := svc.Acquire(ctx, owner, udidProMax, 0)
+	if !errors.Is(err, sim.ErrInvalid) {
 		t.Fatalf("ended session must not take a lease, got %v", err)
+	}
+	// And the refusal SAYS WHAT TO DO. An ended session can still read the screen
+	// (`ao sim ax` and `ao sim shot` need no lease) and can still be messaged, so
+	// it can be handed device work, accept it, and discover only here that it
+	// cannot touch anything. A refusal that reports a state and stops is what made
+	// that a dead end.
+	if !strings.Contains(err.Error(), "ao session restore "+string(owner)) {
+		t.Fatalf("the refusal does not name the command that gets past it:\n%s", err)
 	}
 }
 
@@ -378,5 +387,42 @@ func TestTakeOver_OnAFreeDeviceIsAnOrdinaryClaim(t *testing.T) {
 	}
 	if lease.SessionID != owner || !lease.ExpiresAt.After(now) {
 		t.Fatalf("lease = %+v", lease)
+	}
+}
+
+// TestAcquire_AFinishedCrewMemberIsPointedAtCrewWake: the same refusal, worded
+// for the session that actually hits it.
+//
+// A qa that closed its round is by far the most common ended session anyone
+// still wants to drive a device with - it is the one somebody asks to look again
+// after the simulator was wiped or the cases changed - and its way back is
+// `ao crew wake`, which restores it onto the same task. Sending it to
+// `ao session restore` instead would work, but it is the general verb for a solo
+// session and it does not say that the member keeps its seat.
+func TestAcquire_AFinishedCrewMemberIsPointedAtCrewWake(t *testing.T) {
+	now := time.Date(2026, 8, 13, 7, 41, 2, 0, time.UTC)
+	svc, store := newService(t, fixedClock(now))
+	ctx := context.Background()
+
+	dev := newSession(t, store, now)
+	qa := newSession(t, store, now)
+	if _, err := store.SetSessionCrew(ctx, dev, dev, domain.CrewRoleDev, now); err != nil {
+		t.Fatalf("mark dev: %v", err)
+	}
+	if _, err := store.SetSessionCrew(ctx, qa, dev, domain.CrewRoleQA, now); err != nil {
+		t.Fatalf("mark qa: %v", err)
+	}
+	rec, _, _ := store.GetSession(ctx, qa)
+	rec.IsTerminated = true
+	if err := store.UpdateSession(ctx, rec); err != nil {
+		t.Fatalf("terminate: %v", err)
+	}
+
+	_, err := svc.Acquire(ctx, qa, udidProMax, 0)
+	if !errors.Is(err, sim.ErrInvalid) {
+		t.Fatalf("a finished qa took a lease, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ao crew wake "+string(qa)) {
+		t.Fatalf("a finished crew member is not pointed at the verb that brings it back:\n%s", err)
 	}
 }
