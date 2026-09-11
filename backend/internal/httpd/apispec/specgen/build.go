@@ -298,6 +298,9 @@ var schemaNames = map[string]string{
 	"ControllersStartSimRecordingInput":        "StartSimRecordingInput",
 	"ControllersSimRecordingResponse":          "SimRecordingResponse",
 	"ControllersSimRecordingWithStepsResponse": "SimRecordingWithStepsResponse",
+	"ControllersStartSimVideoInput":            "StartSimVideoInput",
+	"ControllersSimVideoResponse":              "SimVideoResponse",
+	"ControllersSimVideoView":                  "SimVideoView",
 	// domain simulator entities
 	"DomainSimLease":         "SimLease",
 	"DomainSimHold":          "SimHold",
@@ -944,6 +947,43 @@ func simOperations() []operation {
 			pathParams: []any{controllers.SimLeaseParam{}, controllers.StopSimRecordingQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SimRecordingWithStepsResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-videos/{udid}", id: "startSimVideo", tag: "sim",
+			summary:    "Start recording a simulator's screen to a video file for this session",
+			pathParams: []any{controllers.SimLeaseParam{}},
+			reqBody:    controllers.StartSimVideoInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimVideoResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/sim-videos/{udid}", id: "getSimVideo", tag: "sim",
+			summary:    "Read a simulator's open screen recording",
+			pathParams: []any{controllers.SimLeaseParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimVideoResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/sim-videos/{udid}", id: "stopSimVideo", tag: "sim",
+			summary:    "Stop this session's screen recording on a simulator and return the finished video",
+			pathParams: []any{controllers.SimLeaseParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimVideoResponse{}},
+				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},

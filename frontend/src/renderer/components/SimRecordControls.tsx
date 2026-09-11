@@ -22,7 +22,7 @@ import { SimpleTooltip } from "./ui/tooltip";
  * Everything here already worked from a terminal. What did not work was doing
  * it while dragging on the screen with your own hand - which is exactly who
  * recording is for. So this is a control surface over the same daemon routes
- * `ao sim record start/status/stop` drive; there is no second recording
+ * `ao sim flow record start/status/stop` drive; there is no second recording
  * mechanism, and a recording started in a terminal is the one shown here.
  *
  * ## The two invariants this file exists to hold
@@ -211,7 +211,7 @@ function RecordButton({
 		disabledReason ||
 		(recording
 			? "Stop recording and write the Maestro flow. Everything you drag on the screen is being captured."
-			: "Record what you do on this device as a Maestro flow, the same recording `ao sim record start` opens.");
+			: "Record what you do on this device as a Maestro flow, the same recording `ao sim flow record start` opens.");
 
 	return (
 		<SimpleTooltip label={<span className="block max-w-[240px]">{tooltip}</span>}>

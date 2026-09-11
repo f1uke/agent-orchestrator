@@ -1,7 +1,12 @@
 package daemon
 
 import (
+	"context"
+	"log/slog"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simvideo"
 )
 
 // newSimService builds the simulator lease service the daemon mounts at
@@ -28,4 +33,34 @@ import (
 // `ao crew review`; the fact is what the unreviewed-work warning reads.
 func newSimService(store simsvc.Store, screen simsvc.ScreenReader, crew simsvc.RuntimeWatcher) *simsvc.Service {
 	return simsvc.New(store, simsvc.WithRecorder(screen), simsvc.WithRuntimeWatcher(crew))
+}
+
+// newSimVideoRecorder builds the screen recorder behind `ao sim record`, and
+// teaches it the one question it cannot answer for itself: whether the session
+// that owns an open recording is still running.
+//
+// Asking the store for the session is what makes "a recording never outlives
+// its session" true for EVERY path that ends one - terminate, purge, replace,
+// restart, the crew fan-out - because all of them land on the same
+// is_terminated bit. A set of hooks on those paths would have to be extended by
+// whoever adds the next one, and would fail silently when they did not.
+//
+// A session that cannot be READ answers live: a failed probe is not proof a
+// session is dead (the hard rule in AGENTS.md), and acting on one would delete
+// the recording somebody asked for. The duration cap bounds the other side of
+// that choice.
+//
+// Constructing it sweeps orphaned recorders left by a previous daemon, which is
+// why it is built during startup rather than lazily.
+func newSimVideoRecorder(dataDir string, store simsvc.Store, log *slog.Logger) *simvideo.Recorder {
+	return simvideo.New(dataDir,
+		simvideo.WithLogger(log),
+		simvideo.WithSessionLiveness(func(ctx context.Context, id domain.SessionID) bool {
+			rec, found, err := store.GetSession(ctx, id)
+			if err != nil {
+				return true
+			}
+			return found && !rec.IsTerminated
+		}),
+	)
 }

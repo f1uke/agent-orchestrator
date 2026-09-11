@@ -20,9 +20,9 @@ export type SimFlow = components["schemas"]["ControllersSimFlowView"];
  * otherwise drag its whole history back over the wire every second to call
  * length on it.
  *
- * A recording is per DEVICE, not per surface: one started from `ao sim record
+ * A recording is per DEVICE, not per surface: one started from `ao sim flow record
  * start` in a terminal is the same recording this reports, and one started here
- * is the one `ao sim record status` sees. That is why this reads the device's
+ * is the one `ao sim flow record status` sees. That is why this reads the device's
  * recording rather than anything the panel remembers locally.
  */
 export const simRecordingQueryKey = (udid: string | null) => ["sim", "recording", udid] as const;
@@ -61,7 +61,7 @@ export function useSimRecording(sessionId: string, udid: string | null, enabled:
 			});
 			if (error || !data) {
 				// Nothing has ever been recorded on this device. That is an
-				// answer, not a failure - the same one `ao sim record status`
+				// answer, not a failure - the same one `ao sim flow record status`
 				// gives, and it must not read as an error in the panel.
 				if (response?.status === 404) return NOTHING;
 				if (response?.status === 501) return NOTHING;
@@ -87,7 +87,7 @@ export function useSimFlows(sessionId: string, enabled: boolean) {
 		enabled,
 		// The count on the trigger is on screen at all times, so a stale one is
 		// a wrong answer to "how many attempts do I have at this path". Flows
-		// appear from outside this panel - `ao sim record stop` in a terminal
+		// appear from outside this panel - `ao sim flow record stop` in a terminal
 		// writes into the same directory - so noticing them cannot depend on
 		// this panel having been the one to create them. A directory read every
 		// ten seconds while somebody is looking at the tab is the cheap half of

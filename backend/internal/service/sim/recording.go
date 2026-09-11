@@ -252,7 +252,7 @@ func (s *Service) GetRecording(ctx context.Context, udid string) (domain.SimReco
 //
 // Done on READ rather than on write on purpose: the stored log stays a faithful
 // record of what was requested, and every reader (the live step count in the
-// tab, `ao sim record status`, and the flow a stop emits) sees the same
+// tab, `ao sim flow record status`, and the flow a stop emits) sees the same
 // coalesced view, so they cannot disagree about how many steps there are.
 //
 // Only ADJACENT typing merges. Anything else between two runs - a tap, a key, a

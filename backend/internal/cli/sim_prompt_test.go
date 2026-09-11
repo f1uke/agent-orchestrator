@@ -83,11 +83,21 @@ var simPromptDecisions = map[string]bool{
 	// pointer names zooming among the things the skill page covers - one word,
 	// paid for out of the existing budget rather than by raising it.
 	"pinch": false,
-	// `flow` and `record` are multi-step surfaces (start/status/stop,
-	// check/run, entry points, Maestro) reached only when a task asks for a
-	// replayable flow. That is a task instruction, not a standing hazard, and
-	// an agent that reaches for one will read the page that explains it.
-	"flow":   false,
+	// `flow` is a multi-step surface (check/run, and `flow record`'s
+	// start/status/stop, entry points, Maestro) reached only when a task asks
+	// for a replayable flow. That is a task instruction, not a standing hazard,
+	// and an agent that reaches for one will read the page that explains it.
+	"flow": false,
+	// `record` - the SCREEN recorder - is omitted for the same reason and with
+	// the same caveat `pinch` carries: keeping a video is something a task asks
+	// for, never something an agent gets wrong unprompted, but an agent that
+	// cannot FIND it concludes the capability does not exist. So the closing
+	// pointer names "recording the screen as a video" in prose, without the
+	// command, paid for out of the existing budget rather than by raising it.
+	//
+	// It is also the surface whose NAME moved: `ao sim record` was the gesture
+	// recorder until this became the screen recorder, and the prompt must not
+	// teach either spelling as the other.
 	"record": false,
 
 	// Flags, keyed "<command> --<flag>", for prompt-worthy commands only: a

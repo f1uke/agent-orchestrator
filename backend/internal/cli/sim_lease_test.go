@@ -40,6 +40,20 @@ type simDaemon struct {
 	recordStopStatus  int
 	recordStopBody    string
 
+	// The screen-recording routes `ao sim record` drives. Separate from the
+	// gesture-recording ones above because they are a separate surface with a
+	// separate path, which is the whole point of the rename.
+	videoStartStatus int
+	videoStartBody   string
+	videoGetStatus   int
+	videoGetBody     string
+	videoStopStatus  int
+	videoStopBody    string
+	// videoStartRequest is the body of the last screen-recording start. Kept
+	// apart from `body` because the CLI reads the lease list AFTER starting, so
+	// the last body seen is not the one a test means.
+	videoStartRequest string
+
 	mu          sync.Mutex
 	calls       []string // "METHOD path"
 	body        string   // last request body
@@ -155,6 +169,42 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 					`"startedAt":"2026-08-13T07:41:02Z","stoppedAt":"2026-08-13T07:45:02Z","updatedAt":"2026-08-13T07:45:02Z"},"steps":[]}`
 			}
 			_, _ = io.WriteString(w, respBody)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/sim-videos/"):
+			d.mu.Lock()
+			d.videoStartRequest = string(body)
+			d.mu.Unlock()
+			if d.videoStartStatus != 0 && d.videoStartStatus != http.StatusOK {
+				w.WriteHeader(d.videoStartStatus)
+				_, _ = io.WriteString(w, d.videoStartBody)
+				return
+			}
+			respBody := d.videoStartBody
+			if respBody == "" {
+				respBody = simVideoBody("")
+			}
+			_, _ = io.WriteString(w, respBody)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/sim-videos/"):
+			if d.videoGetStatus != 0 && d.videoGetStatus != http.StatusOK {
+				w.WriteHeader(d.videoGetStatus)
+				_, _ = io.WriteString(w, d.videoGetBody)
+				return
+			}
+			respBody := d.videoGetBody
+			if respBody == "" {
+				respBody = simVideoBody("")
+			}
+			_, _ = io.WriteString(w, respBody)
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/sim-videos/"):
+			if d.videoStopStatus != 0 && d.videoStopStatus != http.StatusOK {
+				w.WriteHeader(d.videoStopStatus)
+				_, _ = io.WriteString(w, d.videoStopBody)
+				return
+			}
+			respBody := d.videoStopBody
+			if respBody == "" {
+				respBody = simVideoBody(`,"stoppedAt":"2026-08-13T07:45:02Z","stopReason":"requested","bytes":2737311`)
+			}
+			_, _ = io.WriteString(w, respBody)
 		default:
 			http.NotFound(w, r)
 		}
@@ -165,6 +215,14 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 }
 
 var simFixedNow = time.Date(2026, 8, 13, 7, 41, 2, 417_000_000, time.UTC)
+
+// simVideoBody is one screen recording on the wire. extra appends the keys a
+// finished recording carries and an open one does not.
+func simVideoBody(extra string) string {
+	return `{"video":{"udid":"` + simUDIDProMax + `","sessionId":"mer-9",` +
+		`"path":"/data/sim/mer-9/videos/20260813-074102.417Z-` + simUDIDProMax + `.mov",` +
+		`"startedAt":"2026-08-13T07:40:02Z","maxDurationSeconds":600,"bytes":0` + extra + `}}`
+}
 
 // simLeaseDeps is simDeps plus a live daemon (ProcessAlive true).
 func simLeaseDeps(t *testing.T, listJSON string, screenshot []byte) Deps {

@@ -150,7 +150,7 @@ func TestBuildSystemPrompt_OnlyQAGetsTheRecordedFlowLoop(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## Turning a played scenario into a test (AO)",
-		"ao sim record start --name",
+		"ao sim flow record start --name",
 		"ao smoke retire",
 	} {
 		if !strings.Contains(qa, want) {

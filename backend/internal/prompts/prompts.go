@@ -191,7 +191,7 @@ const qaDefault = "## QA role\n\n" + `You are the **qa** member of a crew of two
 2. Will that assertion still mean something next month? If no -> an ad-hoc check you run now and do not commit.
 3. Is it cheap to automate, or has this task already looped once? If no -> ad-hoc now, promote later.
 
-All of 1-3 yes -> **a committed test** (Go test, vitest, playwright, a Maestro flow from ` + "`ao sim record`" + `). That is the highest-value output you have: it runs forever, in CI, for everyone.
+All of 1-3 yes -> **a committed test** (Go test, vitest, playwright, a Maestro flow from ` + "`ao sim flow record`" + `). That is the highest-value output you have: it runs forever, in CI, for everyone.
 
 **Push as much as you can into committed tests, so the human's checklist SHRINKS.** What is left for a person has a shape, and it is only these four: **paint** (does it look right), **focus** (does the keyboard/pointer land where it should), **timing** (latency, races, a tab that pauses), **feel** (does driving it feel wrong). A check a machine can execute was never a checklist entry.
 
@@ -532,11 +532,12 @@ ao sim release` + "\n```" + `
 - **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap.
 - **An empty ` + "`ao sim ax`" + ` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so ` + "`ao sim tap`" + ` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.
 
-Everything else - naming an element by its identifier, typing, buttons, zooming, recording what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
+Everything else - naming an element by its identifier, typing, buttons, zooming, recording the screen as a video, or what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.`
 
 // RecordedFlowLoop is the record -> flow -> retire loop, and it is qa's alone.
 //
-// The tooling for it shipped long ago - `ao sim record start|status|stop`,
+// The tooling for it shipped long ago - `ao sim flow record start|status|stop`
+// (which was `ao sim record` until screen recording took that name),
 // `--name`, `--entry`, `--out`, then `ao sim flow check|run` - and NOTHING said
 // whose job it was: Maestro is named a dozen times across the skill page and the
 // prompts, always as a capability and never as an assignment. So it was nobody's,
@@ -559,15 +560,15 @@ func RecordedFlowLoop() string { return recordedFlowLoop }
 
 const recordedFlowLoop = "\n\n" + `## Turning a played scenario into a test (AO)
 
-The cheapest committed UI test is not one you write from scratch - it is the one somebody already played. ` + "`ao sim record`" + ` hooks the hold lifecycle, so **a human's tap in YOUR Device tab and your own ` + "`ao sim tap`" + ` are captured identically**: one play, by the person who knows the scenario, becomes a flow that runs forever. This loop is YOURS - nobody else on this task does it.
+The cheapest committed UI test is not one you write from scratch - it is the one somebody already played. ` + "`ao sim flow record`" + ` hooks the hold lifecycle, so **a human's tap in YOUR Device tab and your own ` + "`ao sim tap`" + ` are captured identically**: one play, by the person who knows the scenario, becomes a flow that runs forever. This loop is YOURS - nobody else on this task does it.
 
-` + "```bash\n" + `ao sim claim                                   # a recording never claims a device for you
-ao sim record start --name "<the case>"        # then drive it yourself, or ask the human to
-                                               # play it ONCE in your Device tab
-ao sim record status                           # what it has captured, without stopping it
-ao sim record stop --entry <entry flow>        # writes the Maestro flow
-ao sim flow check <flow.yaml>                  # parses it; needs no device at all
-ao sim flow run <flow.yaml> --udid <scratch>   # a flow relaunches the app: never the human's device
+` + "```bash\n" + `ao sim claim                                        # a recording never claims a device for you
+ao sim flow record start --name "<the case>"        # then drive it yourself, or ask the human to
+                                                    # play it ONCE in your Device tab
+ao sim flow record status                           # what it has captured, without stopping it
+ao sim flow record stop --entry <entry flow>        # writes the Maestro flow
+ao sim flow check <flow.yaml>                       # parses it; needs no device at all
+ao sim flow run <flow.yaml> --udid <scratch>        # a flow relaunches the app: never the human's device
 ao smoke retire "$AO_CREW_ID" --case <id> --reason "now covered by <flow>"` + "\n```" + `
 
 - ` + "`--entry`" + ` answers *how do you even reach that screen*: a recording starts wherever the app already was, and ` + "`--entry`" + ` prepends a shared entry-point flow as ` + "`runFlow`" + ` rather than re-recording the way in every time.

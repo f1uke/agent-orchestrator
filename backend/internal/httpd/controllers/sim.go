@@ -423,7 +423,7 @@ func (c *SimController) writeFlow(r *http.Request, recording domain.SimRecording
 		return nil, err
 	}
 
-	// `out` is how `ao sim record stop --out` still writes wherever it was
+	// `out` is how `ao sim flow record stop --out` still writes wherever it was
 	// told to. It is resolved by the CLI before it gets here, so this side
 	// never has to guess which working directory a relative path meant.
 	if out := strings.TrimSpace(r.URL.Query().Get("out")); out != "" {

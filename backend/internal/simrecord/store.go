@@ -46,6 +46,15 @@ func ShotsDir(dataDir, sessionID string) string {
 	return filepath.Join(SessionDir(dataDir, sessionID), "shots")
 }
 
+// VideosDir is where `ao sim record` writes screen recordings. It is a third
+// sibling rather than a second use of ShotsDir for the reason the flows/shots
+// split already records: these are used differently, and a video is orders of
+// magnitude larger than a PNG, so what prunes one must not be able to reach the
+// other.
+func VideosDir(dataDir, sessionID string) string {
+	return filepath.Join(SessionDir(dataDir, sessionID), "videos")
+}
+
 // Flow is one recorded flow on disk, as a list needs to describe it.
 //
 // There is deliberately nothing here about what the flow CONTAINS beyond its
@@ -213,7 +222,7 @@ func Write(dataDir, sessionID, name string, recordedAt time.Time, body string) (
 }
 
 // WriteTo puts an emitted flow at an exact path a caller named, for
-// `ao sim record stop --out`. The path is resolved to an absolute one by the
+// `ao sim flow record stop --out`. The path is resolved to an absolute one by the
 // caller that knows which working directory a relative path meant; this side
 // refuses to guess.
 func WriteTo(path, body string) (Flow, error) {

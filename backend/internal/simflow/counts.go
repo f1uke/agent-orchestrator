@@ -13,7 +13,7 @@ import (
 // A generated flow is read twice: once by the human who opens it, and once by
 // AO listing what a session has recorded. The second reader has only the file
 // - the recording it came from may be long gone, and on a machine where the
-// flows were written by `ao sim record stop` from a terminal there was never a
+// flows were written by `ao sim flow record stop` from a terminal there was never a
 // row to read in the first place. So the flow has to be able to answer "how
 // many steps, and how many of them are guesses" from its own bytes.
 //

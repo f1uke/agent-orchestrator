@@ -3727,6 +3727,167 @@ paths:
       summary: Start capturing this session's gestures on a simulator it already leases
       tags:
       - sim
+  /api/v1/sessions/{sessionId}/sim-videos/{udid}:
+    delete:
+      operationId: stopSimVideo
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimVideoResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Stop this session's screen recording on a simulator and return the
+        finished video
+      tags:
+      - sim
+    get:
+      operationId: getSimVideo
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimVideoResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read a simulator's open screen recording
+      tags:
+      - sim
+    post:
+      operationId: startSimVideo
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartSimVideoInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimVideoResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Start recording a simulator's screen to a video file for this session
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/smoke-checks:
     get:
       operationId: listSmokeChecks
@@ -9674,6 +9835,50 @@ components:
       - stepCount
       - steps
       type: object
+    SimVideoResponse:
+      properties:
+        video:
+          $ref: '#/components/schemas/SimVideoView'
+      required:
+      - video
+      type: object
+    SimVideoView:
+      properties:
+        bytes:
+          description: Size of the finished file. Zero while it is still recording.
+          format: int64
+          type: integer
+        maxDurationSeconds:
+          description: When this recording stops itself, in seconds from startedAt.
+          type: integer
+        path:
+          description: Absolute path of the video file, under the session's own artifact
+            directory.
+          type: string
+        sessionId:
+          description: The session that started it; only that session may stop it.
+          type: string
+        startedAt:
+          description: RFC3339 timestamp of when the first frame was recorded.
+          type: string
+        stopReason:
+          description: 'What ended it: requested, max-duration, session-ended or daemon-stopped.'
+          type: string
+        stoppedAt:
+          description: RFC3339 timestamp of when it stopped. Absent while it is still
+            recording.
+          type: string
+        udid:
+          description: The simulator being recorded.
+          type: string
+      required:
+      - udid
+      - sessionId
+      - path
+      - startedAt
+      - maxDurationSeconds
+      - bytes
+      type: object
     SmokeAuthoredCaseInput:
       properties:
         expected:
@@ -9991,6 +10196,13 @@ components:
         name:
           description: Optional label for the recording, e.g. the flow it will become.
           type: string
+      type: object
+    StartSimVideoInput:
+      properties:
+        maxDurationSeconds:
+          description: Stop the recording automatically after this many seconds. Omit
+            for the 10 minute default; at least 5 seconds and at most 30 minutes.
+          type: integer
       type: object
     StartWikiAgentRequest:
       properties:
