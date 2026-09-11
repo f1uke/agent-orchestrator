@@ -36,10 +36,19 @@ ao sim type   <text>           [flags]
 ao sim button <name>           [flags]
 ao sim flow check <file>       [flags]
 ao sim flow run   <file>       [flags]
+ao sim flow record start       [flags]
+ao sim flow record status      [flags]
+ao sim flow record stop        [flags]
 ao sim record start            [flags]
 ao sim record status           [flags]
 ao sim record stop             [flags]
 ```
+
+**Two different recorders, and the names say which is which.** `ao sim record`
+records the **screen**, as a video file. `ao sim flow record` records the
+**gestures** you drive, as a replayable Maestro flow. `ao sim flow record` was
+called `ao sim record` until the screen recorder took that name, and there is no
+alias - the old spelling fails.
 
 ## The loop that works
 
@@ -557,7 +566,67 @@ ao sim ax                              # confirm what actually happened
 
 ### ao sim record
 
-Capture the gestures this session drives on a claimed simulator and turn them into a Maestro flow: `ao sim record start` opens the capture, `ao sim record status` reports what it has captured so far without stopping it, and `ao sim record stop` closes it and writes the flow. It requires a live claim on the device (`ao sim claim`) and never claims one itself - `start` is refused, naming why, on a device this session has not claimed, one someone else holds, or one that already has a recording open.
+Record a booted simulator's **screen** to a video file: `ao sim record start` opens a recording, `ao sim record status` says whether one is open and for how long, and `ao sim record stop` closes it and prints the video's path. This is the moving sibling of `ao sim shot` - reach for it when a still frame cannot show what you need: an animation, a transition, a cold launch, a bug that only appears in motion.
+
+To record the **gestures** you drive as a replayable Maestro flow instead, see `ao sim flow record` below. The two are different commands on purpose.
+
+**Flags:**
+
+| Command   | Flag                     | Description                                                               |
+| --------- | ------------------------ | ------------------------------------------------------------------------- |
+| `start`   | `--udid <udid>`          | Record this simulator instead of the booted one                           |
+| `start`   | `--max-duration <dur>`   | Stop automatically after this long (default `10m`, at most `30m`)         |
+| `status`  | `--udid <udid>`          | Report this simulator instead of the booted one                           |
+| `stop`    | `--udid <udid>`          | Stop recording this simulator instead of the booted one                   |
+| all three | `--json`                 | Output the result as JSON                                                 |
+
+**The loop:**
+
+```bash
+ao sim record start                    # returns once the device is actually being recorded
+ao sim launch --terminate-first        # then drive it, or ask the human to
+ao sim tap --label "Continue"
+ao sim record status                   # still recording? for how long?
+ao sim record stop                     # finalizes the file and prints its path
+```
+
+**It takes no lease, exactly as `ao sim shot` takes none.** Recording a screen
+cannot corrupt anybody's gesture, and filming a device while a human drives it is
+one of the things this is for. Every output still carries the `Lease:` line, so
+you know whose gestures you are filming.
+
+**A recording belongs to the session that started it.** Only that session can
+stop it, and a second `start` on a device already being recorded is refused,
+naming the holder - two recorders writing one device is not something you can get
+by accident.
+
+**Nothing is ever left recording.** `simctl` records until it is signalled, so the
+daemon owns the recorder process rather than the command that asked for it. It
+stops when you stop it, when `--max-duration` elapses, when this session ends, and
+when the daemon stops - and a recorder left behind by a daemon that was killed is
+found and stopped the next time the daemon starts. A stop always *interrupts*
+rather than kills, because that is the difference between a playable video and a
+truncated file that opens in nothing.
+
+**What it costs, and what bounds it.** Video is not a screenshot: a screen with
+real UI motion in it runs about **30 MB a minute**, while an idle screen costs
+almost nothing (`simctl` writes a frame only when the picture changes - which is
+also why a recording of a device that sat still comes back empty, and why the
+video's own length is not the wall-clock time it ran). Three bounds keep that in
+check: h264, a 10-minute default cap, and pruning - after every stop your
+session's `videos/` directory is trimmed to the newest **10** recordings and at
+most **1 GiB**, oldest first.
+
+**Where the video lands.** `<AO data dir>/sim/<session id>/videos/`, beside the
+`shots/` and `flows/` directories and outside every repository, so a recording
+can never be committed by accident. It is a QuickTime `.mov` carrying h264, which
+plays in QuickTime Player, in Finder's Quick Look, and in any browser.
+
+---
+
+### ao sim flow record
+
+Capture the GESTURES this session drives on a claimed simulator and turn them into a Maestro flow (to record the SCREEN as a video instead, see `ao sim record` above): `ao sim flow record start` opens the capture, `ao sim flow record status` reports what it has captured so far without stopping it, and `ao sim flow record stop` closes it and writes the flow. It requires a live claim on the device (`ao sim claim`) and never claims one itself - `start` is refused, naming why, on a device this session has not claimed, one someone else holds, or one that already has a recording open.
 
 **Flags:**
 
@@ -575,12 +644,12 @@ Capture the gestures this session drives on a claimed simulator and turn them in
 
 ```bash
 ao sim claim
-ao sim record start --name "sign up flow"
+ao sim flow record start --name "sign up flow"
 ao sim tap --label "Continue"          # every ao sim tap/swipe/drag/type/button, and
 ao sim swipe 0.5 0.8 0.5 0.2           # every hand-driven gesture in the Device tab,
                                         # becomes a step while a recording is open
-ao sim record status                   # how many steps so far, without stopping it
-ao sim record stop                     # closes it, writes the flow, prints its path
+ao sim flow record status                   # how many steps so far, without stopping it
+ao sim flow record stop                     # closes it, writes the flow, prints its path
 ```
 
 **What gets captured, and by what.** `ao sim tap`/`swipe`/`drag`/`type`/`button` all
@@ -592,14 +661,14 @@ a typed command from a click, and does not need to. A gesture that was
 attempted and failed - the hold released as not performed - is never recorded;
 only what actually reached the device becomes a step.
 
-**Where the flow lands.** `ao sim record stop` writes everything captured into
+**Where the flow lands.** `ao sim flow record stop` writes everything captured into
 this session's own artifact directory (`<AO data dir>/sim/<session id>/`),
 outside any repository, by the same rule `ao sim shot` uses for screenshots -
 so a generated flow can never be committed by accident. `--out` writes it
 somewhere else instead.
 
 **No `launchApp` is ever invented.** A recording begins wherever the app
-already was when `ao sim record start` ran - mid-session, on whatever screen
+already was when `ao sim flow record start` ran - mid-session, on whatever screen
 happened to be open - and the emitted flow's header says so in a comment
 rather than fabricating the step that got there. Nothing here can know, or
 guess, how the app was launched.
@@ -613,10 +682,12 @@ that otherwise tells a human to add their own. It changes nothing about the
 recorded steps - only what runs before them.
 
 ```bash
-ao sim record stop --entry ../flows/sign-in.yaml
+ao sim flow record stop --entry ../flows/sign-in.yaml
 ```
 
 Run what comes out the same way as any other flow - see `ao sim flow` below.
+
+**It used to be `ao sim record`.** That name now belongs to the screen recorder, and there is no alias: the old spelling fails with an unknown-command error.
 
 ---
 

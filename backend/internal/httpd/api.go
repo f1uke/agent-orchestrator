@@ -50,6 +50,11 @@ type APIDeps struct {
 	// click goes through. nil on a machine that cannot capture or touch a
 	// simulator, and every route then answers 501.
 	SimScreen SimScreen
+	// SimVideo records a simulator's screen to a file, behind `ao sim record`.
+	// It is its own dependency rather than part of Sim because it owns a
+	// process that outlives every request: nil answers 501, which is what a
+	// daemon that cannot spawn a recorder should say.
+	SimVideo controllers.SimVideoService
 	// SimDrags is the touches currently held down by the desktop pane. It is
 	// per-daemon because one drag spans several requests, and the daemon owns
 	// its lifetime so no finger is left down when the process goes away.
@@ -98,6 +103,7 @@ type API struct {
 	crewRuns      *controllers.CrewRunsController
 	sim           *controllers.SimController
 	simFlows      *controllers.SimFlowsController
+	simVideo      *controllers.SimVideoController
 	simScreen     *controllers.SimScreenController
 	notifications *controllers.NotificationsController
 	activity      *controllers.ActivityController
@@ -136,6 +142,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		crewRuns:      &controllers.CrewRunsController{Svc: deps.CrewRuns},
 		sim:           &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen)},
 		simFlows:      &controllers.SimFlowsController{DataDir: cfg.DataDir},
+		simVideo:      &controllers.SimVideoController{Svc: deps.SimVideo},
 		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
@@ -180,6 +187,7 @@ func (a *API) Register(root chi.Router) {
 			a.crewRuns.Register(r)
 			a.sim.Register(r)
 			a.simFlows.Register(r)
+			a.simVideo.Register(r)
 			a.simScreen.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)

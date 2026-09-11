@@ -35,16 +35,23 @@ const maestroMissing = "`maestro` is not on PATH. `ao sim flow` shells out to it
 func newSimFlowCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "flow",
-		Short: "Check and run Maestro flows against a simulator this session holds",
+		Short: "Record, check and run Maestro flows against a simulator this session holds",
 		Long: "Work with Maestro flow files.\n\n" +
-			"`check` parses a flow and needs no device at all. `run` executes one, and " +
-			"requires a claim on the target simulator: a flow relaunches the app under " +
-			"test and resets its permissions, which is fine on a device set aside for " +
-			"testing and destructive on one somebody is using.\n\n" +
-			"AO never installs `maestro`.",
+			"`record` captures what this session drives on a claimed device and writes it " +
+			"out as a flow. `check` parses a flow and needs no device at all. `run` " +
+			"executes one, and requires a claim on the target simulator: a flow relaunches " +
+			"the app under test and resets its permissions, which is fine on a device set " +
+			"aside for testing and destructive on one somebody is using.\n\n" +
+			"AO never installs `maestro`. To record the SCREEN as a video rather than the " +
+			"gestures as a flow, see `ao sim record`.",
 	}
 	cmd.AddCommand(newSimFlowCheckCommand(ctx))
 	cmd.AddCommand(newSimFlowRunCommand(ctx))
+	// Recording a flow belongs here for the same reason checking and running
+	// one does: the noun is the flow. It lived at `ao sim record` until that
+	// name was needed by the command that records the screen - see
+	// sim_flow_record.go.
+	cmd.AddCommand(newSimFlowRecordCommand(ctx))
 	return cmd
 }
 

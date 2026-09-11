@@ -651,9 +651,9 @@ func TestRecordedFlowLoop_IsQAsAndTeachesTheWholeLoop(t *testing.T) {
 	loop := RecordedFlowLoop()
 	for _, want := range []string{
 		"ao sim claim",
-		"ao sim record start --name",
-		"ao sim record status",
-		"ao sim record stop --entry",
+		"ao sim flow record start --name",
+		"ao sim flow record status",
+		"ao sim flow record stop --entry",
 		"ao sim flow check",
 		"ao sim flow run",
 		`ao smoke retire "$AO_CREW_ID" --case <id> --reason`,

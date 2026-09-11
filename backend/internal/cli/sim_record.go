@@ -6,96 +6,79 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"path/filepath"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simvideo"
 )
 
-// `ao sim record` turns what a session drives on a device - through
-// `ao sim tap`/`swipe`/`drag`/`type`/`button`, and through a human driving the
-// same session's Device tab - into a Maestro flow it can hand back to the
-// team's suite.
+// `ao sim record` records a simulator's SCREEN to a video file.
 //
-// It never boots, claims or drives a device on its own: `start` requires a
-// live claim this session already holds and refuses rather than take one,
-// `status` only reads what has been captured, and `stop` writes the flow
-// wherever `ao sim shot` would put a screenshot - a session's own artifact
-// directory, outside every repository - so a generated flow can never be
-// committed by accident.
+// It is the moving sibling of `ao sim shot`, and it is deliberately built to
+// feel like one: the same device rule (`--udid`, else the device this session
+// was assigned, else the only booted one), the same `Lease:` line saying who is
+// driving, the same session artifact directory outside every repository, and a
+// path on a line of its own so it can be read straight off the terminal.
+//
+// Like `ao sim shot`, and unlike `ao sim flow record`, it takes NO LEASE. A
+// recording cannot corrupt anybody's gesture any more than a screenshot can,
+// and filming a device while a human drives it is one of the things this is
+// for. What it does have is ownership: the session that started a recording is
+// the only one that can stop it, and a second start on the same device is
+// refused naming the holder rather than letting two recorders fight over one
+// file.
+//
+// Start and stop are separate invocations because `simctl io recordVideo` runs
+// until it is signalled. The process itself belongs to the DAEMON (see
+// internal/simvideo), which is the only part of AO alive between two commands -
+// and the only part that can promise nothing is left recording when a session
+// ends or the daemon stops.
+//
+// It used to be the gesture recorder. That moved to `ao sim flow record`, where
+// the noun it produces already lives, and there is no alias for the old
+// spelling: a name that still works is the confusion the move exists to remove.
 
-// simRecordingClient mirrors domain.SimRecording on the wire.
-type simRecordingClient struct {
-	UDID      string     `json:"udid"`
-	SessionID string     `json:"sessionId"`
-	Name      string     `json:"name"`
-	StartedAt time.Time  `json:"startedAt"`
-	StoppedAt *time.Time `json:"stoppedAt,omitempty"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+// simVideoClient mirrors controllers.SimVideoView on the wire.
+type simVideoClient struct {
+	UDID               string `json:"udid"`
+	SessionID          string `json:"sessionId"`
+	Path               string `json:"path"`
+	StartedAt          string `json:"startedAt"`
+	MaxDurationSeconds int    `json:"maxDurationSeconds"`
+	StoppedAt          string `json:"stoppedAt,omitempty"`
+	StopReason         string `json:"stopReason,omitempty"`
+	Bytes              int64  `json:"bytes"`
 }
 
-// simRecordingStepClient mirrors domain.SimRecordingStep on the wire.
-type simRecordingStepClient struct {
-	Seq               int64     `json:"seq"`
-	At                time.Time `json:"at"`
-	Kind              string    `json:"kind"`
-	Selector          string    `json:"selector,omitempty"`
-	SelectorRung      int64     `json:"selectorRung,omitempty"`
-	SelectorIndex     int64     `json:"selectorIndex,omitempty"`
-	SelectorAnchor    string    `json:"selectorAnchor,omitempty"`
-	SelectorAnchorRel string    `json:"selectorAnchorRel,omitempty"`
-	Ambiguity         int64     `json:"ambiguity,omitempty"`
-	OffScreen         bool      `json:"offScreen,omitempty"`
-	ScreenChange      bool      `json:"screenChange,omitempty"`
-	X                 float64   `json:"x"`
-	Y                 float64   `json:"y"`
-	ToX               float64   `json:"toX"`
-	ToY               float64   `json:"toY"`
-	DurationMS        int64     `json:"durationMs,omitempty"`
-	Text              string    `json:"text,omitempty"`
-	Detail            string    `json:"detail,omitempty"`
+// startSimVideoRequest mirrors controllers.StartSimVideoInput.
+type startSimVideoRequest struct {
+	MaxDurationSeconds int `json:"maxDurationSeconds,omitempty"`
 }
 
-// startSimRecordingRequest mirrors controllers.StartSimRecordingInput.
-type startSimRecordingRequest struct {
-	Name string `json:"name,omitempty"`
-}
-
-// simRecordingResponse mirrors controllers.SimRecordingResponse.
-type simRecordingResponse struct {
-	Recording simRecordingClient `json:"recording"`
-}
-
-// simRecordingWithStepsResponse mirrors controllers.SimRecordingWithStepsResponse.
-type simRecordingWithStepsResponse struct {
-	Recording simRecordingClient       `json:"recording"`
-	StepCount int                      `json:"stepCount"`
-	Steps     []simRecordingStepClient `json:"steps"`
-	Flow      *simFlowClient           `json:"flow,omitempty"`
-}
-
-// simFlowClient mirrors controllers.SimFlowView - the file a stopped
-// recording became.
-type simFlowClient struct {
-	Name     string `json:"name"`
-	FileName string `json:"fileName"`
-	Path     string `json:"path"`
-	Steps    int    `json:"steps"`
-	Review   int    `json:"review"`
-	Bytes    int64  `json:"bytes"`
+// simVideoResponse mirrors controllers.SimVideoResponse.
+type simVideoResponse struct {
+	Video simVideoClient `json:"video"`
 }
 
 func newSimRecordCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "record",
-		Short: "Capture this session's gestures on a claimed simulator as a Maestro flow",
-		Long: "Record everything this session drives on a device - `ao sim tap`, `swipe`, " +
-			"`drag`, `type`, `button`, and a human driving the same session's Device tab - and " +
-			"turn it into a Maestro flow.\n\n" +
-			"A recording needs a live claim on the device (`ao sim claim`); `start` never takes " +
-			"one itself. `status` reports what has been captured without stopping it. `stop` " +
-			"closes the recording and writes the flow.",
+		Short: "Record a simulator's screen to a video file",
+		Long: "Record what a booted simulator shows, and write it to a video file this " +
+			"session can read.\n\n" +
+			"Recording is explicit at both ends: `start` opens one and returns, `status` " +
+			"says whether one is open and for how long, and `stop` closes it and prints " +
+			"the file's path. Nothing starts a recording for you, and no `ao sim flow run` " +
+			"is filmed unless you asked for it.\n\n" +
+			"It takes no lease, exactly as `ao sim shot` takes none: a recording cannot " +
+			"corrupt anyone's gesture, and filming a device a human is driving is the " +
+			"point. It does report who holds the device, and only the session that " +
+			"started a recording can stop it.\n\n" +
+			"To record the GESTURES you drive as a replayable Maestro flow instead, see " +
+			"`ao sim flow record`.",
 	}
 	cmd.AddCommand(newSimRecordStartCommand(ctx))
 	cmd.AddCommand(newSimRecordStatusCommand(ctx))
@@ -107,49 +90,61 @@ func newSimRecordCommand(ctx *commandContext) *cobra.Command {
 
 // simRecordStartResult is the `ao sim record start --json` payload.
 type simRecordStartResult struct {
-	UDID          string    `json:"udid"`
-	DeviceName    string    `json:"deviceName"`
-	Runtime       string    `json:"runtime"`
-	RecordingName string    `json:"recordingName,omitempty"`
-	StartedAt     time.Time `json:"startedAt"`
+	UDID               string `json:"udid"`
+	DeviceName         string `json:"deviceName"`
+	Runtime            string `json:"runtime"`
+	Path               string `json:"path"`
+	StartedAt          string `json:"startedAt"`
+	MaxDurationSeconds int    `json:"maxDurationSeconds"`
+	// Lease is reported and never required, the same way `ao sim shot` reports
+	// it: a recording of somebody else's device is legitimate, and knowing
+	// whose gestures are being filmed is the thing a reader needs.
+	Lease simLeaseView `json:"lease"`
 }
 
 func newSimRecordStartCommand(ctx *commandContext) *cobra.Command {
 	var opts struct {
-		udid string
-		name string
-		json bool
+		udid        string
+		maxDuration time.Duration
+		json        bool
 	}
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start recording this session's gestures on a claimed simulator",
-		Long: "Open a recording on a device this session already holds.\n\n" +
-			"It never claims the device itself, and it is refused - naming why - on a device " +
-			"this session has not claimed, on one someone else holds, or on one that already has " +
-			"a recording open. Run `ao sim claim` first.",
-		Example: `  ao sim claim
-  ao sim record start
-  ao sim record start --name "sign up flow"`,
+		Short: "Start recording a booted simulator's screen",
+		Long: "Open a screen recording on a booted simulator.\n\n" +
+			"It returns once the device is actually being recorded, not merely once the " +
+			"recorder has been spawned, so whatever you drive next is in the video.\n\n" +
+			"A device that is already being recorded is refused, naming the session that " +
+			"holds it. The recording stops itself after --max-duration (10 minutes by " +
+			"default) if nothing stops it first, and it never outlives this session.\n\n" +
+			"The video lands under this session's own artifact directory " +
+			"(<AO data dir>/sim/<session id>/videos/), outside any repository, so it can " +
+			"never be committed by accident.",
+		Example: `  ao sim record start
+  ao sim record start --max-duration 2m
+  ao sim record start --udid 00000000-0000-0000-0000-000000000000 --json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result, err := ctx.startSimRecording(cmd.Context(), opts.udid, opts.name)
+			result, err := ctx.startSimVideo(cmd.Context(), opts.udid, opts.maxDuration)
 			if err != nil {
 				return err
 			}
 			if opts.json {
 				return writeJSON(cmd.OutOrStdout(), result)
 			}
-			return writeSimRecordStart(cmd.OutOrStdout(), result)
+			return writeSimRecordStart(cmd.OutOrStdout(), result, strings.TrimSpace(os.Getenv("AO_SESSION_ID")))
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(&opts.udid, "udid", "", "Record this simulator instead of the booted one")
-	f.StringVar(&opts.name, "name", "", "Optional label for the recording, e.g. the flow it will become")
+	f.DurationVar(&opts.maxDuration, "max-duration", 0,
+		fmt.Sprintf("Stop the recording automatically after this long (default %s, at most %s)",
+			simvideo.DefaultMaxDuration, simvideo.MaxMaxDuration))
 	f.BoolVar(&opts.json, "json", false, "Output the recording as JSON")
 	return cmd
 }
 
-func (c *commandContext) startSimRecording(ctx context.Context, udid, name string) (simRecordStartResult, error) {
+func (c *commandContext) startSimVideo(ctx context.Context, udid string, maxDuration time.Duration) (simRecordStartResult, error) {
 	sessionID, err := simSessionID("`ao sim record start`")
 	if err != nil {
 		return simRecordStartResult{}, err
@@ -159,28 +154,42 @@ func (c *commandContext) startSimRecording(ctx context.Context, udid, name strin
 		return simRecordStartResult{}, err
 	}
 
-	var res simRecordingResponse
-	path := "sessions/" + url.PathEscape(sessionID) + "/sim-recordings/" + url.PathEscape(device.UDID)
-	body := startSimRecordingRequest{Name: strings.TrimSpace(name)}
-	if err := c.postJSON(ctx, path, body, &res); err != nil {
-		return simRecordStartResult{}, c.explainSimRecordingRefusal(device, err)
+	var res simVideoResponse
+	body := startSimVideoRequest{MaxDurationSeconds: int(maxDuration.Seconds())}
+	if err := c.postJSON(ctx, simVideoPath(sessionID, device.UDID), body, &res); err != nil {
+		return simRecordStartResult{}, explainSimVideoRefusal(device, err)
 	}
+
+	views, reachable := c.simLeaseViews(ctx)
 	return simRecordStartResult{
-		UDID:          res.Recording.UDID,
-		DeviceName:    device.Name,
-		Runtime:       device.Runtime,
-		RecordingName: res.Recording.Name,
-		StartedAt:     res.Recording.StartedAt.UTC(),
+		UDID:               res.Video.UDID,
+		DeviceName:         device.Name,
+		Runtime:            device.Runtime,
+		Path:               res.Video.Path,
+		StartedAt:          res.Video.StartedAt,
+		MaxDurationSeconds: res.Video.MaxDurationSeconds,
+		Lease:              simLeaseFor(views, device.UDID, reachable),
 	}, nil
 }
 
-func writeSimRecordStart(out io.Writer, r simRecordStartResult) error {
-	if _, err := fmt.Fprintf(out, "Recording started on %s (%s, %s) at %s.\n",
-		r.DeviceName, r.Runtime, r.UDID, r.StartedAt.Format(time.RFC3339)); err != nil {
+func writeSimRecordStart(out io.Writer, r simRecordStartResult, sessionID string) error {
+	if _, err := fmt.Fprintf(out, "Recording the screen of %s (%s, %s) from %s.\n",
+		r.DeviceName, r.Runtime, r.UDID, r.StartedAt); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintln(out,
-		"Drive it with `ao sim tap`/`swipe`/`drag`/`type`/`button`, or the Device tab. Stop it with `ao sim record stop`.")
+	// The path is printed at START as well as at stop, because the one thing a
+	// reader wants from an open recording is where it will be - and an agent
+	// that only learns the path from `stop` cannot mention it to anyone before
+	// then. The file is not readable yet, and the line below says so.
+	if _, err := fmt.Fprintln(out, r.Path); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out,
+		"The file is written when the recording stops - `ao sim record stop`. It stops itself after %s.\n",
+		simRecordDuration(r.MaxDurationSeconds)); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(out, "Lease: %s\n", r.Lease.captureLine(sessionID))
 	return err
 }
 
@@ -191,17 +200,28 @@ type simRecordStatusResult struct {
 	UDID       string `json:"udid"`
 	DeviceName string `json:"deviceName"`
 	Runtime    string `json:"runtime"`
-	// Found: a recording exists on this device, open or stopped. False means
-	// nothing has ever been started - which is an answer, not an error.
-	Found         bool       `json:"found"`
-	Open          bool       `json:"open"`
-	SessionID     string     `json:"sessionId,omitempty"`
-	RecordingName string     `json:"recordingName,omitempty"`
-	StartedAt     *time.Time `json:"startedAt,omitempty"`
-	StoppedAt     *time.Time `json:"stoppedAt,omitempty"`
-	StepCount     int        `json:"stepCount"`
+	// Recording: something is being recorded right now. False is an answer, not
+	// an error - the command says so plainly and exits 0.
+	Recording          bool   `json:"recording"`
+	SessionID          string `json:"sessionId,omitempty"`
+	Path               string `json:"path,omitempty"`
+	StartedAt          string `json:"startedAt,omitempty"`
+	MaxDurationSeconds int    `json:"maxDurationSeconds,omitempty"`
+	// ElapsedSeconds is how long it has been recording. Reported because the
+	// question an agent actually has is "how much of my scenario is in this",
+	// and it is the number the cap is measured against.
+	ElapsedSeconds int `json:"elapsedSeconds,omitempty"`
 }
 
+// This is the same SHAPE as `ao sim flow record status` - resolve a device, ask
+// the daemon, print prose or JSON - and none of the same meaning: two different
+// commands, on two different routes, with help text a reader has to find beside
+// the command it belongs to. Folding them into one factory to satisfy a
+// token-similarity count would make both harder to read AND couple the screen
+// recorder to the flow recorder, which is the confusion this change exists to
+// remove.
+//
+//nolint:dupl // structurally alike, unrelated commands - see the note above.
 func newSimRecordStatusCommand(ctx *commandContext) *cobra.Command {
 	var opts struct {
 		udid string
@@ -209,15 +229,15 @@ func newSimRecordStatusCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show what a device's recording has captured so far, without stopping it",
-		Long: "Report a device's recording: whether one is open, when it started, and how many " +
-			"steps it has captured.\n\n" +
-			"A device with nothing being recorded is not an error - the command says so plainly " +
-			"and exits 0.",
+		Short: "Say whether a simulator's screen is being recorded, and for how long",
+		Long: "Report a device's screen recording: whether one is open, who holds it, where " +
+			"its file will land and how long it has been running.\n\n" +
+			"A device with nothing being recorded is not an error - the command says so " +
+			"plainly and exits 0.",
 		Example: `  ao sim record status`,
 		Args:    noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result, err := ctx.simRecordingStatus(cmd.Context(), opts.udid)
+			result, err := ctx.simVideoStatus(cmd.Context(), opts.udid)
 			if err != nil {
 				return err
 			}
@@ -233,7 +253,7 @@ func newSimRecordStatusCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
-func (c *commandContext) simRecordingStatus(ctx context.Context, udid string) (simRecordStatusResult, error) {
+func (c *commandContext) simVideoStatus(ctx context.Context, udid string) (simRecordStatusResult, error) {
 	sessionID, err := simSessionID("`ao sim record status`")
 	if err != nil {
 		return simRecordStatusResult{}, err
@@ -243,47 +263,40 @@ func (c *commandContext) simRecordingStatus(ctx context.Context, udid string) (s
 		return simRecordStatusResult{}, err
 	}
 
-	var res simRecordingWithStepsResponse
-	// `steps=none`: this command reports how many steps there are, never what
-	// they were, so asking for them would be pulling every captured selector
-	// back over the wire to call len() on it.
-	path := "sessions/" + url.PathEscape(sessionID) + "/sim-recordings/" + url.PathEscape(device.UDID) + "?steps=none"
-	if err := c.getJSON(ctx, path, &res); err != nil {
-		var apiErr apiResponseError
-		if errors.As(err, &apiErr) && apiErr.ErrorBody.Code == "SIM_NOT_FOUND" {
-			return simRecordStatusResult{UDID: device.UDID, DeviceName: device.Name, Runtime: device.Runtime}, nil
+	result := simRecordStatusResult{UDID: device.UDID, DeviceName: device.Name, Runtime: device.Runtime}
+	var res simVideoResponse
+	if err := c.getJSON(ctx, simVideoPath(sessionID, device.UDID), &res); err != nil {
+		if isSimVideoNotFound(err) {
+			return result, nil
 		}
 		return simRecordStatusResult{}, err
 	}
-
-	result := simRecordStatusResult{
-		UDID: device.UDID, DeviceName: device.Name, Runtime: device.Runtime,
-		Found: true, SessionID: res.Recording.SessionID, RecordingName: res.Recording.Name,
-		StepCount: res.StepCount,
-	}
-	startedAt := res.Recording.StartedAt.UTC()
-	result.StartedAt = &startedAt
-	if res.Recording.StoppedAt != nil {
-		stoppedAt := res.Recording.StoppedAt.UTC()
-		result.StoppedAt = &stoppedAt
-	} else {
-		result.Open = true
+	result.Recording = true
+	result.SessionID = res.Video.SessionID
+	result.Path = res.Video.Path
+	result.StartedAt = res.Video.StartedAt
+	result.MaxDurationSeconds = res.Video.MaxDurationSeconds
+	if startedAt, err := time.Parse(time.RFC3339, res.Video.StartedAt); err == nil {
+		if elapsed := c.deps.Now().UTC().Sub(startedAt); elapsed > 0 {
+			result.ElapsedSeconds = int(elapsed.Seconds())
+		}
 	}
 	return result, nil
 }
 
 func writeSimRecordStatus(out io.Writer, r simRecordStatusResult) error {
-	if !r.Found {
-		_, err := fmt.Fprintf(out, "Nothing is being recorded on %s (%s, %s).\n", r.DeviceName, r.Runtime, r.UDID)
+	if !r.Recording {
+		_, err := fmt.Fprintf(out, "Nothing is recording the screen of %s (%s, %s).\n",
+			r.DeviceName, r.Runtime, r.UDID)
 		return err
 	}
-	if r.Open {
-		_, err := fmt.Fprintf(out, "Recording open on %s (%s, %s), held by @%s, since %s - %d step(s) captured so far.\n",
-			r.DeviceName, r.Runtime, r.UDID, r.SessionID, r.StartedAt.Format(time.RFC3339), r.StepCount)
+	if _, err := fmt.Fprintf(out,
+		"Recording the screen of %s (%s, %s), held by @%s, for %s of at most %s.\n",
+		r.DeviceName, r.Runtime, r.UDID, r.SessionID,
+		simRecordDuration(r.ElapsedSeconds), simRecordDuration(r.MaxDurationSeconds)); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(out, "Recording on %s (%s, %s) stopped at %s - %d step(s) were captured before it was stopped.\n",
-		r.DeviceName, r.Runtime, r.UDID, r.StoppedAt.Format(time.RFC3339), r.StepCount)
+	_, err := fmt.Fprintln(out, r.Path)
 	return err
 }
 
@@ -295,39 +308,34 @@ type simRecordStopResult struct {
 	DeviceName string `json:"deviceName"`
 	Runtime    string `json:"runtime"`
 	Path       string `json:"path"`
-	StepCount  int    `json:"stepCount"`
-	// ReviewCount is how many of those steps the generator could not resolve
-	// to one element with confidence. It is the number a reader has to act on,
-	// and it comes from the flow the daemon wrote rather than being counted a
-	// second time here.
-	ReviewCount int `json:"reviewCount"`
-	Bytes       int `json:"bytes"`
+	Bytes      int64  `json:"bytes"`
+	StartedAt  string `json:"startedAt"`
+	StoppedAt  string `json:"stoppedAt"`
+	// StopReason is what actually ended it. It matters because a recording that
+	// hit its cap looks exactly like one you stopped, and the difference is
+	// whether the end of the scenario is in the file.
+	StopReason     string `json:"stopReason"`
+	ElapsedSeconds int    `json:"elapsedSeconds"`
 }
 
 func newSimRecordStopCommand(ctx *commandContext) *cobra.Command {
 	var opts struct {
-		udid  string
-		out   string
-		entry string
-		json  bool
+		udid string
+		json bool
 	}
 	cmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop recording and write what was captured as a Maestro flow",
-		Long: "Close this device's open recording and emit everything it captured as a Maestro " +
-			"flow.\n\n" +
-			"The flow never invents an entry point: a recording begins wherever the app already " +
-			"was, and the header says so unless --entry names a shared entry-point flow, which is " +
-			"prepended as `runFlow`. Nothing here ever fabricates `launchApp`.\n\n" +
-			"The flow lands under this session's own artifact directory " +
-			"(<AO data dir>/sim/<session id>/), outside any repository, so it can never be " +
-			"committed by accident. Use --out to write somewhere else.",
+		Short: "Stop recording a simulator's screen and print the video's path",
+		Long: "Close this device's open screen recording and print where the video landed.\n\n" +
+			"It waits for the recorder to finalize the file rather than killing it: an " +
+			"interrupted recording is a playable video, and a killed one is a truncated " +
+			"file that opens in nothing.\n\n" +
+			"Only the session that started a recording may stop it.",
 		Example: `  ao sim record stop
-  ao sim record stop --entry ../flows/sign-in.yaml
-  ao sim record stop --out /tmp/flow.yaml --json`,
+  ao sim record stop --json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result, err := ctx.stopSimRecording(cmd.Context(), opts.udid, opts.out, opts.entry)
+			result, err := ctx.stopSimVideo(cmd.Context(), opts.udid)
 			if err != nil {
 				return err
 			}
@@ -339,14 +347,11 @@ func newSimRecordStopCommand(ctx *commandContext) *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&opts.udid, "udid", "", "Stop recording this simulator instead of the booted one")
-	f.StringVar(&opts.out, "out", "", "Write the flow here instead of the session artifact directory")
-	f.StringVar(&opts.entry, "entry", "",
-		"Path to a shared entry-point flow, emitted as `runFlow` before the recorded steps")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
 	return cmd
 }
 
-func (c *commandContext) stopSimRecording(ctx context.Context, udid, out, entry string) (simRecordStopResult, error) {
+func (c *commandContext) stopSimVideo(ctx context.Context, udid string) (simRecordStopResult, error) {
 	sessionID, err := simSessionID("`ao sim record stop`")
 	if err != nil {
 		return simRecordStopResult{}, err
@@ -356,103 +361,121 @@ func (c *commandContext) stopSimRecording(ctx context.Context, udid, out, entry 
 		return simRecordStopResult{}, err
 	}
 
-	// The flow is built and written by the daemon, not here. It used to be
-	// built here, and moving it was not tidying: the Device tab stops
-	// recordings too, has no Go in it, and a second emitter on that side would
-	// be a second answer to "how many of these steps need review" - the one
-	// number a human is asked to act on. This command reports what the daemon
-	// wrote.
-	query := url.Values{}
-	if trimmed := strings.TrimSpace(out); trimmed != "" {
-		// Resolved here, because this is the side that knows which working
-		// directory a relative path meant.
-		abs, err := filepath.Abs(trimmed)
-		if err != nil {
-			return simRecordStopResult{}, fmt.Errorf("resolve --out path: %w", err)
+	var res simVideoResponse
+	if err := c.deleteJSON(ctx, simVideoPath(sessionID, device.UDID), &res); err != nil {
+		if isSimVideoNotFound(err) {
+			return simRecordStopResult{}, fmt.Errorf(
+				"nothing is recording the screen of %s, so there is nothing to stop.\n"+
+					"Run `ao sim record start` first", device.Label())
 		}
-		query.Set("out", abs)
-	}
-	if trimmed := strings.TrimSpace(entry); trimmed != "" {
-		query.Set("entry", trimmed)
+		return simRecordStopResult{}, explainSimVideoRefusal(device, err)
 	}
 
-	var res simRecordingWithStepsResponse
-	path := "sessions/" + url.PathEscape(sessionID) + "/sim-recordings/" + url.PathEscape(device.UDID)
-	if encoded := query.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
-	if err := c.deleteJSON(ctx, path, &res); err != nil {
-		return simRecordStopResult{}, c.explainSimRecordingStopFailure(device, err)
-	}
-	if res.Flow == nil {
-		return simRecordStopResult{}, fmt.Errorf(
-			"recording stopped on %s with %d step(s) captured, but the daemon wrote no flow file",
-			device.Label(), res.StepCount)
-	}
-	return simRecordStopResult{
+	result := simRecordStopResult{
 		UDID: device.UDID, DeviceName: device.Name, Runtime: device.Runtime,
-		Path: res.Flow.Path, StepCount: res.Flow.Steps, ReviewCount: res.Flow.Review, Bytes: int(res.Flow.Bytes),
-	}, nil
+		Path: res.Video.Path, Bytes: res.Video.Bytes,
+		StartedAt: res.Video.StartedAt, StoppedAt: res.Video.StoppedAt,
+		StopReason: res.Video.StopReason,
+	}
+	startedAt, startErr := time.Parse(time.RFC3339, res.Video.StartedAt)
+	stoppedAt, stopErr := time.Parse(time.RFC3339, res.Video.StoppedAt)
+	if startErr == nil && stopErr == nil {
+		if elapsed := stoppedAt.Sub(startedAt); elapsed > 0 {
+			result.ElapsedSeconds = int(elapsed.Seconds())
+		}
+	}
+	return result, nil
 }
 
 func writeSimRecordStop(out io.Writer, r simRecordStopResult) error {
-	summary := fmt.Sprintf("Stopped recording on %s (%s, %s): %d step(s) captured",
-		r.DeviceName, r.Runtime, r.UDID, r.StepCount)
-	// The review count is stated only when there is one, for the same reason
-	// the flow's own banner is: a line that always reads "0 need review" is a
-	// line nobody reads on the day it says 3.
-	if r.ReviewCount > 0 {
-		summary += fmt.Sprintf(", %d needing review - see the \"# REVIEW:\" markers", r.ReviewCount)
+	summary := fmt.Sprintf("Stopped recording %s (%s, %s): %s of screen, %s",
+		r.DeviceName, r.Runtime, r.UDID, simRecordDuration(r.ElapsedSeconds), simRecordBytes(r.Bytes))
+	// The cap is only mentioned when it fired, for the same reason the flow's
+	// review count is: a line that always reads "stopped as asked" is a line
+	// nobody reads on the day it says something else.
+	if r.StopReason == string(simvideo.StopReasonMaxDuration) {
+		summary += " - it reached its maximum duration and stopped itself, so the end of what you drove may not be in it"
 	}
 	if _, err := fmt.Fprintln(out, summary+"."); err != nil {
 		return err
 	}
-	// The path gets a line of its own, the same way `ao sim shot` prints it, so
-	// it can be read straight off the terminal and handed to a file read.
-	_, err := fmt.Fprintln(out, r.Path)
-	return err
-}
-
-// explainSimRecordingRefusal turns the daemon's SIM_RECORDING_REFUSED 409
-// into the sentence that says what to do about it. `ao sim record start`
-// never claims a device itself - this only explains why the daemon declined.
-func (c *commandContext) explainSimRecordingRefusal(device simDevice, err error) error {
-	var apiErr apiResponseError
-	if !errors.As(err, &apiErr) || apiErr.ErrorBody.Code != "SIM_RECORDING_REFUSED" {
+	// The path gets a line of its own, the same way `ao sim shot` prints it.
+	if _, err := fmt.Fprintln(out, r.Path); err != nil {
 		return err
 	}
-	reason, _ := apiErr.ErrorBody.Details["reason"].(string)
-	switch reason {
-	case "already_open":
-		return fmt.Errorf("%s already has a recording open, so nothing was started.\n"+
-			"Run `ao sim record status` to see what it has captured, or `ao sim record stop` to close it first",
+	// Said once, at the only moment it is actionable: the video is on disk now,
+	// and an empty one means the screen never changed rather than that
+	// recording failed.
+	if r.Bytes == 0 {
+		_, err := fmt.Fprintln(out,
+			"The file is empty: simctl records a frame only when the screen changes, so a device that sat still produces nothing.")
+		return err
+	}
+	return nil
+}
+
+// --- shared -----------------------------------------------------------------
+
+func simVideoPath(sessionID, udid string) string {
+	return "sessions/" + url.PathEscape(sessionID) + "/sim-videos/" + url.PathEscape(udid)
+}
+
+// isSimVideoNotFound is "no recording is open on this device", which is an
+// answer for `status` and a refusal for `stop`.
+func isSimVideoNotFound(err error) bool {
+	var apiErr apiResponseError
+	return errors.As(err, &apiErr) && apiErr.ErrorBody.Code == "SIM_VIDEO_NOT_FOUND"
+}
+
+// explainSimVideoRefusal turns the daemon's 409 into the sentence that says
+// what to do about it. Anything else passes through untouched.
+func explainSimVideoRefusal(device simDevice, err error) error {
+	var apiErr apiResponseError
+	if !errors.As(err, &apiErr) || apiErr.ErrorBody.Code != "SIM_VIDEO_HELD" {
+		return err
+	}
+	holder, _ := apiErr.ErrorBody.Details["holder"].(string)
+	path, _ := apiErr.ErrorBody.Details["path"].(string)
+	var msg string
+	// Telling somebody to ask THEMSELVES to stop it is the kind of sentence
+	// that makes a reader doubt everything else the command says. The common
+	// case - a session that forgot it already had one open - gets the
+	// instruction it can actually follow.
+	if holder != "" && holder == strings.TrimSpace(os.Getenv("AO_SESSION_ID")) {
+		msg = fmt.Sprintf("%s already has a recording open, started by this session, so nothing was started or stopped.\n"+
+			"Run `ao sim record stop` to close it, or `ao sim record status` to see how long it has been running",
 			device.Label())
-	case "leased_by_other":
-		holder, _ := apiErr.ErrorBody.Details["holder"].(string)
-		left := ""
-		if raw, ok := apiErr.ErrorBody.Details["expiresAt"].(string); ok {
-			if expiresAt, parseErr := time.Parse(time.RFC3339, raw); parseErr == nil {
-				expiresAt = expiresAt.UTC()
-				left = fmt.Sprintf(" for another %s", simRemaining(&expiresAt, c.deps.Now().UTC()))
-			}
-		}
-		return fmt.Errorf("%s is leased by @%s%s, so this session may not record it.\n"+
-			"`ao sim record start` never claims a device - wait for the lease to lapse, or ask @%s to run `ao sim release`",
-			device.Label(), holder, left, holder)
+	} else {
+		msg = fmt.Sprintf("%s is already being recorded by @%s, so nothing was started or stopped.\n"+
+			"A recording belongs to the session that opened it: ask @%s to run `ao sim record stop`, "+
+			"or wait for it to reach its maximum duration",
+			device.Label(), holder, holder)
+	}
+	if path != "" {
+		msg += "\nIts video will land at " + path
+	}
+	return errors.New(msg)
+}
+
+// simRecordDuration renders seconds the way a person reads them, and never as
+// a bare "0s" where a count of seconds is the whole point.
+func simRecordDuration(seconds int) string {
+	if seconds <= 0 {
+		return "less than a second"
+	}
+	return (time.Duration(seconds) * time.Second).String()
+}
+
+// simRecordBytes renders a file size. Video sizes are the one number here a
+// reader compares against their disk, so they are printed in the units they
+// think in rather than as a raw byte count.
+func simRecordBytes(bytes int64) string {
+	switch {
+	case bytes <= 0:
+		return "an empty file"
+	case bytes < 1<<20:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/(1<<10))
 	default:
-		return fmt.Errorf("%s is not claimed by this session, so it may not be recorded.\n"+
-			"Run `ao sim claim` first - `ao sim record start` never claims a device on your behalf",
-			device.Label())
+		return fmt.Sprintf("%.1f MB", float64(bytes)/(1<<20))
 	}
-}
-
-// explainSimRecordingStopFailure turns "no open recording" into plain advice
-// instead of a generic daemon error.
-func (c *commandContext) explainSimRecordingStopFailure(device simDevice, err error) error {
-	var apiErr apiResponseError
-	if !errors.As(err, &apiErr) || apiErr.ErrorBody.Code != "SIM_NOT_FOUND" {
-		return err
-	}
-	return fmt.Errorf("nothing is being recorded on %s, so there is nothing to stop.\n"+
-		"Run `ao sim record start` first", device.Label())
 }

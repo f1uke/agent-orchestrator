@@ -154,6 +154,12 @@ func Run() error {
 	// out rather than leaving it to the watchdog it will not be alive to run.
 	simDrags := simgesture.NewDrags()
 	defer simDrags.Shutdown()
+	// The screen recorders behind `ao sim record`. Constructing it reaps any
+	// recorder a previous daemon left running, and the deferred Shutdown
+	// finalizes every open recording on the way out - a video killed rather
+	// than interrupted is a file no player will open.
+	simVideo := newSimVideoRecorder(cfg.DataDir, store, log)
+	defer simVideo.Shutdown()
 
 	// The durable inbox for sessions that cannot receive a message right now: a
 	// suspended session's tmux is gone, so typing at its stored handle fails and
@@ -401,6 +407,7 @@ func Run() error {
 		CrewRuns:           crewRunSvc,
 		Sim:                newSimService(store, simScreen, sessMgr),
 		SimScreen:          simScreen,
+		SimVideo:           simVideo,
 		SimDrags:           simDrags,
 		Notifications:      notifier,
 		NotificationStream: notificationHub,

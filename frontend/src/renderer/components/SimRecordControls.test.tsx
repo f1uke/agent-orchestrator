@@ -142,7 +142,7 @@ afterEach(() => {
 });
 
 describe("starting and stopping", () => {
-	it("starts a recording through the same route `ao sim record start` uses", async () => {
+	it("starts a recording through the same route `ao sim flow record start` uses", async () => {
 		serve({ lease: heldByUs, recording: noRecording, flows: [] });
 		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
 

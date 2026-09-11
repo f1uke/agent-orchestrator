@@ -1175,6 +1175,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/sim-videos/{udid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a simulator's open screen recording */
+        get: operations["getSimVideo"];
+        put?: never;
+        /** Start recording a simulator's screen to a video file for this session */
+        post: operations["startSimVideo"];
+        /** Stop this session's screen recording on a simulator and return the finished video */
+        delete: operations["stopSimVideo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/smoke-checks": {
         parameters: {
             query?: never;
@@ -3440,6 +3459,30 @@ export interface components {
             stepCount: number;
             steps: components["schemas"]["SimRecordingStep"][];
         };
+        SimVideoResponse: {
+            video: components["schemas"]["SimVideoView"];
+        };
+        SimVideoView: {
+            /**
+             * Format: int64
+             * @description Size of the finished file. Zero while it is still recording.
+             */
+            bytes: number;
+            /** @description When this recording stops itself, in seconds from startedAt. */
+            maxDurationSeconds: number;
+            /** @description Absolute path of the video file, under the session's own artifact directory. */
+            path: string;
+            /** @description The session that started it; only that session may stop it. */
+            sessionId: string;
+            /** @description RFC3339 timestamp of when the first frame was recorded. */
+            startedAt: string;
+            /** @description What ended it: requested, max-duration, session-ended or daemon-stopped. */
+            stopReason?: string;
+            /** @description RFC3339 timestamp of when it stopped. Absent while it is still recording. */
+            stoppedAt?: string;
+            /** @description The simulator being recorded. */
+            udid: string;
+        };
         SmokeAuthoredCaseInput: {
             /** @description Expected result. */
             expected?: string;
@@ -3565,6 +3608,10 @@ export interface components {
         StartSimRecordingInput: {
             /** @description Optional label for the recording, e.g. the flow it will become. */
             name?: string;
+        };
+        StartSimVideoInput: {
+            /** @description Stop the recording automatically after this many seconds. Omit for the 10 minute default; at least 5 seconds and at most 30 minutes. */
+            maxDurationSeconds?: number;
         };
         StartWikiAgentRequest: {
             harness?: string;
@@ -8289,6 +8336,193 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSimVideo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimVideoResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startSimVideo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartSimVideoInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimVideoResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopSimVideo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimVideoResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
