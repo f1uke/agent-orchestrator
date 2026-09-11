@@ -675,6 +675,18 @@ describe("SmokeTestView", () => {
 			expect(screen.getByLabelText("Drop or paste evidence")).toBeInTheDocument();
 		});
 
+		it("keeps the line breaks of a three-line recorded note", async () => {
+			// A note is written as Saw: / On: / Full: on their own lines. Plain HTML
+			// collapses those breaks into one paragraph, which is the wall of prose
+			// the shape exists to replace, so the block renders it pre-wrapped.
+			const note = "Saw: the popup opened on its own\nOn: iPhone 17 Pro Max - iOS 26.3 - 0.9.24(32)";
+			checks = [check({ agentRanAt: RAN, agentVerdict: "fail", agentSha: HEAD, agentNote: note })];
+			renderView();
+			const rendered = await screen.findByText(/Saw: the popup opened on its own/);
+			expect(rendered).toHaveStyle({ whiteSpace: "pre-wrap" });
+			expect(rendered.textContent).toContain("\nOn: iPhone 17 Pro Max");
+		});
+
 		it("marks a run stale when the commit it ran against is no longer head", async () => {
 			checks = [check({ prNum: 322, agentRanAt: RAN, agentVerdict: "pass", agentSha: OLD })];
 			prs = [{ number: 322, headSha: HEAD }];

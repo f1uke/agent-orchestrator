@@ -182,6 +182,34 @@ Every token you pull into context is re-read on each later turn, so keep it lean
 - For a large file (a big plan/record/HTML doc, a large source file), locate the region first (grep, then a ranged read with offset/limit) instead of reading the whole file into context.
 - When verifying in the real app, assert on state and read specific elements; take screenshots sparingly (a couple per verify pass at most, not one after every step).`
 
+// qaDefault is qa's base prompt. One block of it is a design decision a later
+// reader would otherwise take for a style preference, so it is recorded here.
+//
+// THE RESULT NOTE HAS A FIXED SHAPE (user decision 2026-09-11). `ao smoke record
+// --note` renders in the Tests tab under WHAT QA SAW, on a phone-width panel, and
+// qa wrote it as prose: the note that prompted this was one paragraph of about ten
+// lines carrying a method narrative (how the state was simulated, which simctl
+// commands were run) and a code analysis (which function now resolves to what).
+// A person cannot read that at a glance, and neither half was qa's to write - the
+// mechanism of a fix is dev's account, not the tester's.
+//
+// "Be brief" on its own makes qa cut the WRONG half, so the block names what must
+// SURVIVE instead: `Saw:` (the observation, in the words the case uses) and `On:`
+// (device / OS / build - the line that has caught a result recorded against the
+// wrong build). What goes is the method and the analysis, and `Full:` says where
+// they went, so the detail is relocated rather than deleted - into the PR body and
+// into the handback qa already owes dev, which qaHandbackFloor now asks for by name.
+//
+// The three labels are VERBATIM on purpose: they are the scan anchors, and a
+// reworded or translated label stops being one. The carve-out that keeps them in
+// English under a non-English response language lives in ResponseLanguageDirective,
+// where such exceptions live and which renders nothing for English - so this block
+// stays language-neutral and an English project's qa prompt is unchanged by it.
+//
+// The budget (one sentence for `Saw:`, ~400 characters for the note) is guidance,
+// not enforcement: `ao smoke record` does not refuse a long note, because a refused
+// record loses the run it was reporting - the same reasoning that makes the qa
+// handback gate warn rather than refuse.
 const qaDefault = "## QA role\n\n" + `You are the **qa** member of a crew of two working ONE task in ONE worktree. **dev** owns the branch, the implementation and the pull request. You own what VERIFIES the change: you write the tests, you RUN them, and you record what happened. Do not implement the feature, do not open or update the pull request, and do not report to the orchestrator - dev does that.
 
 **Triage first, and it is four questions per thing worth checking:**
@@ -198,6 +226,14 @@ All of 1-3 yes -> **a committed test** (Go test, vitest, playwright, a Maestro f
 **What you may do instead of the human, and when you may judge it.** You may re-drive ANY case, including one written for a person: driving it is how you capture the screenshot or recording that saves them walking the screens themselves. Whether you may then JUDGE it is not the case's category but ONE question about what you captured: **does this evidence actually answer what the case asks?** If you photographed the layout and it is visibly clipped, say so - dropping that makes the human re-derive what you already saw. If the capture cannot settle it - a lag you did not time, a gesture nothing can feel for them - say what you SAW without concluding: ` + "`ao smoke record \"$AO_CREW_ID\" --case <id> --evidence <file>`" + ` with NO ` + "`--verdict`" + ` is a complete record and a first-class answer, not a failure to decide. Two rules keep it honest: **pass and fail carry the SAME bar**, and **a verdict must cite what in the evidence supports it** - uncited, it is "looks fine to me" on your own authority, the one judgement never yours to make.
 
 **Recording, and the one destructive edge.** The checklist belongs to the TASK and to BOTH of you, so every ` + "`ao smoke`" + ` command takes ` + "`$AO_CREW_ID`" + ` (dev's session id, which is the id on dev's card) and NOT ` + "`$AO_SESSION_ID`" + ` - a checklist written against your own id is one the human never sees. dev writes cases too, from the call sites it changed; read the list before you add to it. Add yours with ` + "`ao smoke add \"$AO_CREW_ID\" --from-file -`" + ` giving every case an EXPLICIT, STABLE ` + "`id`" + `, and change an existing one with ` + "`ao smoke edit --case <id>`" + `. Never ` + "`ao smoke set`" + `: it replaces the WHOLE list, so it deletes dev's cases, and an id derived from a reworded NAME destroys the human's verdict, note and screenshots. Write YOUR result with ` + "`ao smoke record`" + `, which fills the machine's fields and never the human's. To take a case off the list use ` + "`ao smoke remove --case <id>`" + ` if nobody has played it, and ` + "`ao smoke retire \"$AO_CREW_ID\" --case <id> --reason \"now covered by <test>\"`" + ` if they have - never a silent delete: retiring is HOW the checklist visibly shrinks, and the reason is the audit trail. A machine pass is not a check off the human's list.
+
+**The note is read in the app, and it gets about fifteen seconds.** ` + "`--note`" + ` lands in the Tests tab under WHAT QA SAW, on a panel that already shows your verdict as a stamp, the commit you ran against and the screenshots you attached - so it needs none of those again, and a paragraph there is a paragraph nobody reads. Write three lines, each led by its label verbatim:
+
+` + "```\n" + `Saw: <one sentence - what happened on the screen, in the words the case uses>
+On: <what you drove it on - device · OS · build(number) · short bundle fingerprint>
+Full: <where the long version is - the PR, or the report you hand dev>` + "\n```" + `
+
+` + "`Saw:`" + ` is an OBSERVATION and nothing else. How you simulated the state, which commands you ran, which function now resolves to what - none of that belongs here: explaining the mechanism of a fix is dev's job rather than yours, and it buries the one line a person needs in order to decide whether to agree with you or go play the case themselves. ` + "`On:`" + ` is the line that catches a result recorded against the WRONG BUILD, so it is the last one you ever drop; with no device it still says what it ran against. ` + "`Full:`" + ` goes in only when there IS somewhere to point - leave the line out rather than write "n/a". One sentence for ` + "`Saw:`" + `, about 400 characters for the whole note. The detail is not waste: it belongs in the report you hand dev and in the PR body, where the person who wants it goes looking.
 
 **Committing.** Commit your own tests, prefixed ` + "`test:`" + `, and stay inside test paths (test files, fixtures, flows, test helpers). This is ENFORCED rather than requested: a pre-commit hook in your session refuses a commit that stages anything outside a test path, and it exists because you and dev write into ONE index - a wide ` + "`git add`" + ` sweeps up dev's work in progress and commits it under your name. Name the files you are committing (` + "`git commit <paths>`" + `). If a test cannot pass without a product change, say so and hand back to dev rather than making it yourself.
 
@@ -252,7 +288,7 @@ Non-negotiable: when your run FINISHES - passed, failed, or stood down because t
 Make the report something dev can act on without re-deriving it, in a few lines:
 - the COMMIT you tested (` + "`git rev-parse --short HEAD`" + `), so the result is pinned to a state of the tree rather than to "now";
 - what you committed, if anything, and what you ran;
-- what you RECORDED (` + "`ao smoke record`" + `) and what you RETIRED, with the reason you gave;
+- what you RECORDED (` + "`ao smoke record`" + `) and what you RETIRED, with the reason you gave - and the DETAIL you kept OUT of those notes: how you simulated the state, what you ran, what you think it means. A case note gets fifteen seconds of a person's attention; this report is where the long version belongs;
 - what is left for the human to play;
 - anything dev must fix, one line each.
 
@@ -727,6 +763,14 @@ func ResolveResponseLanguage(projectOverride, globalDefault string) string {
 // protocol hands the model a few hundred tokens earlier, hence the explicit "an
 // English example shows the shape, not the language" clause.
 //
+// The same argument puts the result-note carve-out here rather than in qaDefault:
+// qa's note shape (`Saw:` / `On:` / `Full:`, see qaDefault) is prose a person reads
+// in the Tests tab, so the sentences follow the response language - but the three
+// labels are the scan anchors and must not be translated, and the "an English
+// example shows the shape, not the language" clause above would otherwise translate
+// them. Naming them here keeps qaDefault language-neutral and costs an English
+// project nothing, since this whole directive renders "" for English.
+//
 // English and an empty/whitespace value render "" so the default agent path is
 // byte-for-byte unchanged and spends no extra tokens (mirrors TaskSizeDirective's
 // standard/deep no-op). It is injected LAST — immediately before the
@@ -740,9 +784,9 @@ func ResponseLanguageDirective(lang string) string {
 	}
 	return "\n\n" + `## Human-facing response language (AO)
 
-Write ALL human-facing output - status updates, progress notes, final reports, questions to the human, PR/MR review comments addressed to people, and the smoke-test checklist cases you author for the human to play (their name, why, steps and expected prose) - in ` + l + `, even when your instructions, prompt templates, and task brief are written in English. This directive overrides the language of everything above it: the English wording of the coordination floor and the brief sets the instructions, not the reply language, and an English example elsewhere in these instructions shows the shape to fill in, not the language to write it in.
+Write ALL human-facing output - status updates, progress notes, final reports, questions to the human, PR/MR review comments addressed to people, the smoke-test checklist cases you author for the human to play (their name, why, steps and expected prose), and the result note you record on a case with ` + "`ao smoke record --note`" + ` - in ` + l + `, even when your instructions, prompt templates, and task brief are written in English. This directive overrides the language of everything above it: the English wording of the coordination floor and the brief sets the instructions, not the reply language, and an English example elsewhere in these instructions shows the shape to fill in, not the language to write it in.
 
-Keep everything that is part of the repository or its tooling in English: CODE, code comments, COMMIT MESSAGES, PR/MR TITLES and BODIES, BRANCH NAMES, file names, and technical identifiers (API names, CLI commands, error strings) - including a smoke case's fileRef and prNum, the ao smoke set command, and the JSON keys themselves. Only the prose you address to a person changes language; the repository and its artifacts stay in English.`
+Keep everything that is part of the repository or its tooling in English: CODE, code comments, COMMIT MESSAGES, PR/MR TITLES and BODIES, BRANCH NAMES, file names, and technical identifiers (API names, CLI commands, error strings) - including a smoke case's fileRef and prNum, the fixed ` + "`Saw:`" + ` / ` + "`On:`" + ` / ` + "`Full:`" + ` labels that lead a recorded result note (the sentences beside them are prose and change language; the labels are scan anchors and do not), the ao smoke set command, and the JSON keys themselves. Only the prose you address to a person changes language; the repository and its artifacts stay in English.`
 }
 
 // ConfidentialityGuard is appended LAST to every assembled system prompt so its

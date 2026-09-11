@@ -130,3 +130,35 @@ func TestResolveResponseLanguage_Precedence(t *testing.T) {
 		})
 	}
 }
+
+// TestResponseLanguageDirective_CoversTheResultNoteNotItsLabels. A qa result note
+// is human-facing prose - it renders in the Tests tab under WHAT QA SAW - so the
+// sentences follow the configured language. Its three leading labels do not: they
+// are the scan anchors of a fixed shape (see qaDefault), and a translated anchor
+// stops being one. Both halves have to be said HERE, because this directive
+// explicitly out-argues every English example above it, so without the carve-out
+// the labels would be translated along with the prose - and because qaDefault is
+// injected in every language, where language wording does not belong.
+func TestResponseLanguageDirective_CoversTheResultNoteNotItsLabels(t *testing.T) {
+	got := ResponseLanguageDirective("Thai")
+	if !strings.Contains(got, "ao smoke record --note") {
+		t.Fatalf("directive must scope the recorded result note into the language:\n%s", got)
+	}
+	for _, want := range []string{"`Saw:`", "`On:`", "`Full:`"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("directive must keep the result-note label %s in English:\n%s", want, got)
+		}
+	}
+	// The labels must be named on the English side of the directive, after the
+	// "Keep everything ... in English" sentence - not merely mentioned somewhere.
+	english := strings.Index(got, "in English:")
+	if english < 0 || strings.Index(got, "`Saw:`") < english {
+		t.Fatalf("the result-note labels must sit in the English carve-out, not in the human-facing list:\n%s", got)
+	}
+	// And none of this may break the English no-op.
+	for _, lang := range []string{"", "English"} {
+		if ResponseLanguageDirective(lang) != "" {
+			t.Fatalf("adding result-note wording must not break the English no-op for %q", lang)
+		}
+	}
+}
