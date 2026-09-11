@@ -637,8 +637,29 @@ content (name/why/steps/expected), cannot touch the user's verdict, note or
 evidence, and cannot remove a case. Running it again re-records this machine's
 result, which is what re-running a case means.
 
+--note is read in the app, under WHAT QA SAW, and it gets about fifteen seconds
+of a person's attention. That panel ALREADY shows the verdict as a stamp, the
+commit and the screenshots, so the note repeats none of them. Three lines, each
+led by its label verbatim:
+
+  Saw:  one sentence - what happened on the screen, in the words the case uses
+  On:   what you drove it on - device, OS, build(number), short fingerprint
+  Full: where the long version is - the PR, or the report you hand dev
+
+"Saw:" is an OBSERVATION and nothing else. How you simulated the state, which
+commands you ran, which function now resolves to what: that is the author's
+account of a fix rather than a tester's, it belongs in the PR body or the
+handback, and in the note it buries the one line a person needs in order to
+decide whether to agree with you or go play the case themselves. "On:" is the
+line that catches a result recorded against the WRONG BUILD, so it is the last
+one to drop - with no device it still says what it ran against. "Full:" goes in
+only when there IS somewhere to point. One sentence for "Saw:", about 400
+characters for the whole note. Nothing here is enforced: a refused record would
+lose the run it was reporting.
+
   ao smoke record "$AO_SESSION_ID" --case mr-appears --verdict pass \
-      --note "3 runs, MR listed within 40s each time"
+      --note "Saw: the MR appeared in the list within 40s on all three runs
+On: desktop app 0.10.3 (mac.2) - main-fluke 9f10c22"
 
 --sha is the commit the case was run against, so a reader can tell a fresh
 result from one that predates the current head. It defaults to the HEAD of the
@@ -660,7 +681,9 @@ reasonless skip is indistinguishable from the case nobody got to - and the reaso
 has to come from an ATTEMPT. "The agent cannot press and hold" is a finding after
 you have tried it and a guess before it, and the note is where a person can tell
 which one they are reading. It is not a way out of judging a case you DID drive:
-that one is --evidence with no --verdict.
+that one is --evidence with no --verdict. Its note answers a different question
+from a result note, so it is not written in the three lines above: one or two
+sentences saying what you tried and what happened, within the same budget.
 
   ao smoke record "$AO_CREW_ID" --case press-hold --verdict skip \
       --note "tried ao sim drag with a 1.2s hold; the menu never opened, so nothing was exercised"`
@@ -686,9 +709,9 @@ func newSmokeRecordCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().SetNormalizeFunc(underscoreFlagNames)
 	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
-	cmd.Flags().StringVar(&caseID, "case", "", "Case id to record against (required; see `ao smoke list`)")
-	cmd.Flags().StringVar(&verdict, "verdict", "", "pass | fail | skip. Omit for an evidence-only record. `skip` means THIS MACHINE could not run the case and needs --note saying why.")
-	cmd.Flags().StringVar(&note, "note", "", "What the machine saw")
+	cmd.Flags().StringVar(&caseID, "case", "", "Case id to record against (required; see 'ao smoke list')")
+	cmd.Flags().StringVar(&verdict, "verdict", "", "pass | fail | skip. Omit for an evidence-only record. 'skip' means THIS MACHINE could not run the case and needs --note saying why.")
+	cmd.Flags().StringVar(&note, "note", "", "What the machine saw, in three short lines led by Saw: / On: / Full: (see the long help)")
 	cmd.Flags().StringVar(&sha, "sha", "", "Commit the case was run against (default: HEAD of the repo in the current directory)")
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "Path to a screenshot/clip the machine captured (repeatable)")
 	return cmd
@@ -862,7 +885,7 @@ func newSmokeRetireCommand(ctx *commandContext) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
-	cmd.Flags().StringVar(&caseID, "case", "", "Case id to retire (required; see `ao smoke list`)")
+	cmd.Flags().StringVar(&caseID, "case", "", "Case id to retire (required; see 'ao smoke list')")
 	cmd.Flags().StringVar(&reason, "reason", "", "Why it is no longer worth playing (required)")
 	return cmd
 }

@@ -184,7 +184,7 @@ func newSmokeEditCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().SetNormalizeFunc(underscoreFlagNames)
 	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
-	cmd.Flags().StringVar(&caseID, "case", "", "Case id to edit (required; see `ao smoke list`)")
+	cmd.Flags().StringVar(&caseID, "case", "", "Case id to edit (required; see 'ao smoke list')")
 	cmd.Flags().StringVar(&name, "name", "", "One-line 'what to verify'")
 	cmd.Flags().StringVar(&why, "why", "", "Why the case matters")
 	cmd.Flags().StringArrayVar(&steps, "step", nil, "One play step; repeat for each, REPLACING the stored list")
@@ -229,7 +229,7 @@ func newSmokeRemoveCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().SetNormalizeFunc(underscoreFlagNames)
 	cmd.Flags().StringVar(&session, "session", "", "Session id (or pass it as the positional argument)")
-	cmd.Flags().StringVar(&caseID, "case", "", "Case id to remove (required; see `ao smoke list`)")
+	cmd.Flags().StringVar(&caseID, "case", "", "Case id to remove (required; see 'ao smoke list')")
 	return cmd
 }
 

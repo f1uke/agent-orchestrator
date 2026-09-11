@@ -249,12 +249,40 @@ the Tests tab instead of being something you have to explain in a note.
 | `--session string` | Session id (or pass it as the positional argument) | - |
 | `--case string` | Case id to record against (see `ao smoke list`) | Required |
 | `--verdict string` | `pass`, `fail`, or `skip`. Omit for an evidence-only record | - |
-| `--note string` | What the machine saw. **Required with `--verdict skip`** | - |
+| `--note string` | What the machine saw, in the three lines below. **Required with `--verdict skip`** | - |
 | `--sha string` | Commit the case was run against | HEAD of the repo in the current directory |
 | `--evidence string` | Screenshot/clip the machine captured; repeatable | - |
 
 `--sha` is what lets a reader tell a fresh result from one that predates the
 current head, so let it default rather than omitting it.
+
+**The note has a fixed shape, because it is read in fifteen seconds.** It renders
+in the Tests tab under WHAT QA SAW, on a panel that already shows the verdict as a
+stamp, the commit and the screenshots - so it repeats none of them. Three lines,
+each led by its label verbatim:
+
+```
+Saw: <one sentence - what happened on the screen, in the words the case uses>
+On: <what you drove it on - device · OS · build(number) · short fingerprint>
+Full: <where the long version is - the PR, or the report you hand dev>
+```
+
+`Saw:` is an **observation and nothing else**. How you simulated the state, which
+commands you ran, which function now resolves to what - that is the author's
+account of a fix rather than a tester's, and in the note it buries the one line a
+person needs in order to decide whether to agree with you or go play the case
+themselves. Put it in the PR body or the handback instead, and let `Full:` point
+there. `On:` is the line that catches a result recorded against the
+**wrong build**, so it is the last one to drop; with no device it still says what
+it ran against. `Full:` goes in only when there is somewhere to point. One
+sentence for `Saw:`, about 400 characters for the whole note - guidance, not
+validation: a refused record would lose the run it was reporting.
+
+```bash
+ao smoke record "$AO_CREW_ID" --case mr-appears --verdict pass \
+  --note "Saw: the MR appeared in the list within 40s on all three runs
+On: desktop app 0.10.3 (mac.2) - main-fluke 9f10c22"
+```
 
 Omitting `--verdict` while attaching `--evidence` is a legitimate record: it says
 "I ran it and captured this, I am not the one who can judge it". It is the right
@@ -268,7 +296,9 @@ because a reasonless skip is indistinguishable from the case nobody got to - and
 the reason has to come from an **attempt**, not an assumption. It is not a way
 out of judging a case you DID drive; that one is `--evidence` with no
 `--verdict`. Declaring a case undriveable is what takes it out of the handback
-gap (see `ao send`).
+gap (see `ao send`). Its note answers a different question from a result note, so
+it is not written in the three lines above: one or two sentences saying what you
+tried and what happened, within the same budget.
 
 ```bash
 ao smoke record "$AO_CREW_ID" --case press-hold --verdict skip \
@@ -319,7 +349,8 @@ ao smoke list "$AO_CREW_ID"
 ```bash
 # Record that a machine ran a case (the user's verdict is untouched)
 ao smoke record "$AO_CREW_ID" --case gitlab-mr-appears --verdict pass \
-    --note "3 runs, MR listed within 40s each time"
+    --note "Saw: the MR appeared in the list within 40s on all three runs
+On: desktop app 0.10.3 (mac.2) - main-fluke 9f10c22"
 ```
 
 ```bash

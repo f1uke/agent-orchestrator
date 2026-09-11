@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // smokeRequest is one call the CLI made, kept in order so a command that has to
@@ -328,5 +331,32 @@ func TestSmokeRecordIgnoresNonSHAGitOutput(t *testing.T) {
 	}
 	if body.SHA != "" {
 		t.Fatalf("sha = %q, want empty rather than something that only looks like a commit", body.SHA)
+	}
+}
+
+// TestSmokeFlags_PlaceholdersAreTheValueType. pflag reads the FIRST backquoted
+// word of a usage string as the flag's value placeholder, so an `ao smoke list`
+// written as a code span inside the sentence rendered as `--case ao smoke list`,
+// and `skip` as `--verdict skip` - help that names one legal value as if it were
+// the argument. The sentences keep their emphasis with plain quotes; the
+// placeholder has to stay the value type.
+func TestSmokeFlags_PlaceholdersAreTheValueType(t *testing.T) {
+	root := NewRootCommand(Deps{})
+	var smoke *cobra.Command
+	for _, cmd := range root.Commands() {
+		if cmd.Name() == "smoke" {
+			smoke = cmd
+		}
+	}
+	if smoke == nil {
+		t.Fatal("no `ao smoke` command")
+	}
+	for _, sub := range smoke.Commands() {
+		sub.Flags().VisitAll(func(f *pflag.Flag) {
+			name, _ := pflag.UnquoteUsage(f)
+			if strings.ContainsAny(name, " ") {
+				t.Errorf("ao smoke %s --%s renders its placeholder as %q: a backquoted phrase in the usage string becomes the argument name", sub.Name(), f.Name, name)
+			}
+		})
 	}
 }

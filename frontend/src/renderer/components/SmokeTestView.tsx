@@ -1014,7 +1014,9 @@ function QaRunRow({
 			</button>
 			{open && (
 				<div style={{ paddingBottom: 8 }}>
-					{run.note && <div style={{ fontSize: 12, lineHeight: 1.5, color: P.qaFg }}>{run.note}</div>}
+					{run.note && (
+						<div style={{ fontSize: 12, lineHeight: 1.5, color: P.qaFg, whiteSpace: "pre-wrap" }}>{run.note}</div>
+					)}
 					<QaShotStrip
 						sessionId={sessionId}
 						checkId={check.id}
@@ -1164,8 +1166,14 @@ function QaBlock({
 						<div style={{ marginTop: 3, fontSize: 11.5, lineHeight: 1.5, color: P.secondary2 }}>{meta.caption}</div>
 					</div>
 
+					{/* A recorded note is three labelled LINES (Saw: / On: / Full:), and
+					    HTML would collapse them into one paragraph - which is the wall of
+					    prose the shape exists to replace. pre-wrap keeps the breaks the
+					    agent wrote and still wraps a long line at the panel's width. */}
 					{check.agentNote && (
-						<div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.5, color: P.qaFg }}>{check.agentNote}</div>
+						<div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.5, color: P.qaFg, whiteSpace: "pre-wrap" }}>
+							{check.agentNote}
+						</div>
 					)}
 				</>
 			) : (

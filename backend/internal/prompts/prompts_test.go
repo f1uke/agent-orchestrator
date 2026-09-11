@@ -1006,3 +1006,74 @@ func TestCheckInGate_NamesNoSkillOrPlugin(t *testing.T) {
 		}
 	}
 }
+
+// TestQADefault_ResultNoteHasAFixedShape. A qa result note is read in the app,
+// under WHAT QA SAW, on a phone-width panel - and it used to arrive as a
+// paragraph of method narrative and code analysis that no person reads at a
+// glance. "Be brief" alone makes qa cut the wrong half, so the block is pinned by
+// what must SURVIVE (what it ran on, what it saw) as much as by what must go.
+func TestQADefault_ResultNoteHasAFixedShape(t *testing.T) {
+	base := DefaultBase(KindQA)
+	for _, want := range []string{
+		// The skeleton, labels verbatim - they are the scan anchors.
+		"Saw: <one sentence",
+		"On: <what you drove it on",
+		"Full: <where the long version is",
+		"each led by its label verbatim",
+		// Survivor 1: the observation, and only the observation.
+		"is an OBSERVATION and nothing else",
+		// What must go, named so it cannot be mistaken for brevity in general.
+		"How you simulated the state, which commands you ran, which function now resolves to what",
+		"explaining the mechanism of a fix is dev's job rather than yours",
+		// Survivor 2: the build line, and WHY it is the last one to drop.
+		"catches a result recorded against the WRONG BUILD",
+		// The detail is relocated, not deleted.
+		"it belongs in the report you hand dev and in the PR body",
+		// A budget, so "short" is not left to taste.
+		"about 400 characters for the whole note",
+		// The panel already carries the verdict/sha/shots, so the note repeats none.
+		"already shows your verdict as a stamp",
+	} {
+		if !strings.Contains(base, want) {
+			t.Fatalf("the qa base does not pin the result-note shape: missing %q:\n%s", want, base)
+		}
+	}
+}
+
+// TestQADefault_StaysLanguageNeutral. qaDefault is injected for EVERY qa in every
+// language, so response-language wording must not land here - it would change the
+// prompt for every English project. The result note's labels stay English under a
+// non-English language, and that carve-out belongs in ResponseLanguageDirective,
+// which is already a no-op for English. Same rule as
+// TestSmokeChecklistProtocol_StaysLanguageNeutral.
+func TestQADefault_StaysLanguageNeutral(t *testing.T) {
+	base := DefaultBase(KindQA)
+	for _, forbidden := range []string{
+		"response language",
+		"Human-facing response language",
+		"in that language",
+		"configured language",
+		"Thai",
+	} {
+		if strings.Contains(strings.ToLower(base), strings.ToLower(forbidden)) {
+			t.Fatalf("the qa base must stay language-neutral but mentions %q:\n%s", forbidden, base)
+		}
+	}
+}
+
+// TestCoordinationFloor_QAHandbackTakesTheDetailCutFromTheNotes. Shortening the
+// case note only works if the detail has somewhere to go: the handback to dev and
+// the PR body. The floor is where that is stated, because the note block can be
+// edited out of the base and this cannot.
+func TestCoordinationFloor_QAHandbackTakesTheDetailCutFromTheNotes(t *testing.T) {
+	qa := CoordinationFloor(KindQA)
+	for _, want := range []string{
+		"the DETAIL you kept OUT of those notes",
+		"how you simulated the state, what you ran, what you think it means",
+		"this report is where the long version belongs",
+	} {
+		if !strings.Contains(qa, want) {
+			t.Fatalf("the qa floor does not take the detail cut from the case notes: missing %q:\n%s", want, qa)
+		}
+	}
+}
