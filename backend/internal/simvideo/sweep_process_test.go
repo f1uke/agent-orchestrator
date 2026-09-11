@@ -1,10 +1,16 @@
+//go:build !windows
+
 package simvideo
 
 import (
+	"encoding/json"
+	"os"
 	"os/exec"
-	"syscall"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrecord"
 )
 
 // The sweep is the one path that cannot be tested through the Runner seam: it
@@ -26,7 +32,7 @@ func startSleeper(t *testing.T) *sleeper {
 	// `sleep` terminates on SIGINT by default, which is all this needs to
 	// observe: a signal that arrived.
 	cmd := exec.Command("sleep", "30")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	isolateProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Skipf("cannot spawn a process to reap on this machine: %v", err)
 	}
@@ -51,5 +57,39 @@ func (s *sleeper) interrupted(t *testing.T) bool {
 		return true
 	case <-time.After(2 * time.Second):
 		return false
+	}
+}
+
+func TestSweep_ReapsARecorderAPreviousDaemonLeftRunning(t *testing.T) {
+	dir := t.TempDir()
+	videos := simrecord.VideosDir(dir, "sess-1")
+	if err := os.MkdirAll(videos, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	video := filepath.Join(videos, "20260101-000000.000Z-"+testUDID+Extension)
+	if err := os.WriteFile(video, []byte("truncated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A process that is alive and ours to signal, standing in for the simctl a
+	// SIGKILLed daemon left recording.
+	orphan := startSleeper(t)
+	body, err := json.Marshal(handle{
+		PID: orphan.pid, UDID: testUDID, SessionID: "sess-1", Path: video, StartedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(handlePath(video), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	v := New(dir, WithRunner(&fakeRunner{}), WithReconcileInterval(0))
+	t.Cleanup(v.Shutdown)
+
+	if !orphan.interrupted(t) {
+		t.Error("a recorder left running by a previous daemon must be signalled at startup, not left filling the disk")
+	}
+	if _, err := os.Stat(handlePath(video)); !os.IsNotExist(err) {
+		t.Error("the handle of a reaped recorder must be removed, or every later startup reaps it again")
 	}
 }

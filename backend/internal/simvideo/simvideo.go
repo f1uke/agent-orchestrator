@@ -57,7 +57,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -708,10 +707,7 @@ func (simctlRunner) Start(ctx context.Context, udid, path string) (Process, erro
 	// nothing. Its lifetime is this package's business, not the request's.
 	cmd := exec.Command(bin, "simctl", "io", udid, "recordVideo",
 		"--codec", Codec, "--force", path)
-	// Its own process group, so a signal aimed at the daemon's terminal (a
-	// Ctrl-C in a foreground `ao daemon`) cannot reach a recorder and kill it
-	// the one way that truncates the file.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	isolateProcessGroup(cmd)
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
@@ -797,15 +793,4 @@ func (p *simctlProcess) Wait() error {
 	})
 	<-p.waited
 	return p.waitErr
-}
-
-// interruptPID signals one process. Measured on macOS 26.4 / Xcode 26.3, xcrun
-// EXECS simctl rather than forking it, so the pid we started is the recorder
-// and this reaches it directly.
-func interruptPID(pid int) error {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	return proc.Signal(syscall.SIGINT)
 }

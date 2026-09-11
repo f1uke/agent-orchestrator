@@ -351,40 +351,6 @@ func TestShutdown_StopsEveryOpenRecording(t *testing.T) {
 	}
 }
 
-func TestSweep_ReapsARecorderAPreviousDaemonLeftRunning(t *testing.T) {
-	dir := t.TempDir()
-	videos := simrecord.VideosDir(dir, "sess-1")
-	if err := os.MkdirAll(videos, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	video := filepath.Join(videos, "20260101-000000.000Z-"+testUDID+Extension)
-	if err := os.WriteFile(video, []byte("truncated"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// A process that is alive and ours to signal, standing in for the simctl a
-	// SIGKILLed daemon left recording.
-	orphan := startSleeper(t)
-	body, err := json.Marshal(handle{
-		PID: orphan.pid, UDID: testUDID, SessionID: "sess-1", Path: video, StartedAt: time.Now().UTC(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(handlePath(video), body, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	v := New(dir, WithRunner(&fakeRunner{}), WithReconcileInterval(0))
-	t.Cleanup(v.Shutdown)
-
-	if !orphan.interrupted(t) {
-		t.Error("a recorder left running by a previous daemon must be signalled at startup, not left filling the disk")
-	}
-	if _, err := os.Stat(handlePath(video)); !os.IsNotExist(err) {
-		t.Error("the handle of a reaped recorder must be removed, or every later startup reaps it again")
-	}
-}
-
 func TestSweep_SurvivesAHandleWhoseProcessIsLongGone(t *testing.T) {
 	dir := t.TempDir()
 	videos := simrecord.VideosDir(dir, "sess-1")
