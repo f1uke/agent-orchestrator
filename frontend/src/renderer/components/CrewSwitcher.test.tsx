@@ -290,4 +290,4 @@ describe("CrewSwitcher — the finished-qa half of the same slot", () => {
 
 		expect(onCheckAgain).toHaveBeenCalledTimes(1);
 	});
-})
+});

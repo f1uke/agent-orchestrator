@@ -1,7 +1,14 @@
 import { Check, Moon, Plus, RotateCcw, Smartphone } from "lucide-react";
 import { REVIEW_PIP } from "./CrewStrip";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-import { type ReviewGateState, type Task, canAttachRole, crewChipState, neverStarted, qaToCheckAgain } from "../lib/crew";
+import {
+	type ReviewGateState,
+	type Task,
+	canAttachRole,
+	crewChipState,
+	neverStarted,
+	qaToCheckAgain,
+} from "../lib/crew";
 import { statusGlyph, statusLabel } from "../lib/status-glyph";
 import { cn } from "../lib/utils";
 import type { WorkspaceSession } from "../types/workspace";
