@@ -274,9 +274,9 @@ person needs in order to decide whether to agree with you or go play the case
 themselves. Put it in the PR body or the handback instead, and let `Full:` point
 there. `On:` is the line that catches a result recorded against the
 **wrong build**, so it is the last one to drop; with no device it still says what
-it ran against. `Full:` goes in only when there is somewhere to point. One sentence for
-`Saw:`, about 400 characters for the whole note - guidance, not validation: a
-refused record would lose the run it was reporting.
+it ran against. `Full:` goes in only when there is somewhere to point. One
+sentence for `Saw:`, about 400 characters for the whole note - guidance, not
+validation: a refused record would lose the run it was reporting.
 
 ```bash
 ao smoke record "$AO_CREW_ID" --case mr-appears --verdict pass \
