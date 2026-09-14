@@ -3,12 +3,14 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
+	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
 
 // WHAT STOPS TWO AGENTS TALKING FOREVER.
@@ -398,5 +400,127 @@ func TestHandback_AnUnreadableChecklistStillDelivers(t *testing.T) {
 	}
 	if sent.Handback.Checked || fc.lastMessage != "run done" {
 		t.Fatalf("an unreadable checklist produced a verdict anyway: %+v / %q", sent.Handback, fc.lastMessage)
+	}
+}
+
+// TestCrewTalk_ARestoredMemberStartsAFreshSubjectBudget is the cap being right
+// across a ROUND rather than only inside one.
+//
+// The three reasons a finished qa is asked to look again - cases written after
+// it closed, a simulator erased so the old evidence proves nothing, a case that
+// turned out to expect the wrong thing - are all reasons to re-check code that
+// has NOT moved. So the brief for round two names the same commit round one used
+// its whole budget on, and the cap refused it with "nothing has moved" - which
+// was true of the commit and beside the point. Restoring the member is the
+// boundary: last round's rows stay in the table and stop counting.
+func TestCrewTalk_ARestoredMemberStartsAFreshSubjectBudget(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStore()
+	dev, qa := crewPair(st)
+	svc := crewService(st, &fakeCommander{})
+	roundOne := time.Unix(1000, 0).UTC()
+	roundTwo := roundOne.Add(time.Hour)
+
+	// ROUND ONE spends the whole per-subject budget on one commit.
+	for i := range domain.CappedRepeat {
+		if _, err := svc.SendFrom(ctx, qa.ID, "check this", CrewTalk{From: dev.ID, Subject: "4a1b2c3"}); err != nil {
+			t.Fatalf("round one message %d: %v", i+1, err)
+		}
+	}
+	if _, err := svc.SendFrom(ctx, qa.ID, "again", CrewTalk{From: dev.ID, Subject: "4a1b2c3"}); err == nil {
+		t.Fatal("the fourth message of one round went through; the cap is not working at all")
+	}
+
+	// qa closed its round and was brought back for another. Nothing in the code
+	// moved, so the subject is the same commit it always was.
+	rec := st.sessions[qa.ID]
+	rec.CrewRoundStartedAt = roundTwo
+	st.sessions[qa.ID] = rec
+	svc.clock = func() time.Time { return roundTwo }
+
+	if _, err := svc.SendFrom(ctx, qa.ID, "here is what round two is for", CrewTalk{From: dev.ID, Subject: "4a1b2c3"}); err != nil {
+		t.Fatalf("briefing a restored qa about the same unchanged commit: %v", err)
+	}
+	// The cap still terminates - a new round is a new budget, not no budget.
+	for i := 1; i < domain.CappedRepeat; i++ {
+		if _, err := svc.SendFrom(ctx, qa.ID, "more", CrewTalk{From: dev.ID, Subject: "4a1b2c3"}); err != nil {
+			t.Fatalf("round two message %d: %v", i+1, err)
+		}
+	}
+	_, err := svc.SendFrom(ctx, qa.ID, "and more", CrewTalk{From: dev.ID, Subject: "4a1b2c3"})
+	var e *apierr.Error
+	if !errors.As(err, &e) || e.Code != "CREW_MESSAGE_CAPPED" {
+		t.Fatalf("round two never terminates: the %d+1th message = %v, want CREW_MESSAGE_CAPPED", domain.CappedRepeat, err)
+	}
+	// Round one's rows are still there. The boundary stops them counting; it does
+	// not rewrite what the crew said.
+	roundOneRows := 0
+	for _, msg := range st.crewMessages {
+		if msg.CreatedAt.Equal(roundOne) {
+			roundOneRows++
+		}
+	}
+	if roundOneRows != domain.CappedRepeat+1 {
+		t.Fatalf("round one left %d rows, want %d - a new round must not delete the last one's history", roundOneRows, domain.CappedRepeat+1)
+	}
+}
+
+// TestCrewTalk_ARoundBelongsToTheTaskNotToOneSeat. Either member coming back
+// starts the round, and it starts for BOTH legs of the conversation: a qa
+// restored for a second look has findings to report about the same commit dev
+// briefed it on, and clearing only the leg that was addressed would leave qa
+// unable to answer.
+func TestCrewTalk_ARoundBelongsToTheTaskNotToOneSeat(t *testing.T) {
+	ctx := context.Background()
+	st := newFakeStore()
+	dev, qa := crewPair(st)
+	svc := crewService(st, &fakeCommander{})
+	roundTwo := time.Unix(1000, 0).UTC().Add(time.Hour)
+
+	// qa -> dev spends its budget on one commit in round one.
+	for i := range domain.CappedRepeat {
+		if _, err := svc.SendFrom(ctx, dev.ID, "found something", CrewTalk{From: qa.ID, Subject: "4a1b2c3"}); err != nil {
+			t.Fatalf("round one message %d: %v", i+1, err)
+		}
+	}
+	// QA is the member that was restored - the other seat entirely.
+	rec := st.sessions[qa.ID]
+	rec.CrewRoundStartedAt = roundTwo
+	st.sessions[qa.ID] = rec
+	svc.clock = func() time.Time { return roundTwo }
+
+	if _, err := svc.SendFrom(ctx, dev.ID, "round two found this", CrewTalk{From: qa.ID, Subject: "4a1b2c3"}); err != nil {
+		t.Fatalf("a restored qa cannot report on the commit it was brought back to re-check: %v", err)
+	}
+}
+
+// TestTerminatedMessage_SurvivesWrappingAndNeverLeaksTheSentinel.
+//
+// The refusal's whole value is the sentence that says what to do next, and it is
+// wrapped at least twice between where it is written and where a person reads
+// it. Recovering it by trimming the sentinel's own text off the front worked
+// until the first extra wrap, which put a bare Go token - "session: terminated:"
+// - in front of the English. The type is what makes the depth irrelevant.
+func TestTerminatedMessage_SurvivesWrappingAndNeverLeaksTheSentinel(t *testing.T) {
+	remedy := "vr-2 has finished its round. `ao crew wake vr-2` brings it back"
+	wrapped := fmt.Errorf("send vr-2: %w", fmt.Errorf("deliver: %w", sessionmanager.TerminatedError{Remedy: remedy}))
+
+	var e *apierr.Error
+	if !errors.As(toAPIError(wrapped), &e) || e.Code != "SESSION_TERMINATED" {
+		t.Fatalf("a wrapped TerminatedError no longer maps to SESSION_TERMINATED: %v", toAPIError(wrapped))
+	}
+	if e.Message != remedy {
+		t.Fatalf("the remedy did not survive two wraps:\ngot  %q\nwant %q", e.Message, remedy)
+	}
+	if strings.Contains(e.Message, sessionmanager.ErrTerminated.Error()) {
+		t.Fatalf("the Go sentinel token reached the wire: %q", e.Message)
+	}
+	// And an ErrTerminated raised without a remedy still says something true.
+	var bare *apierr.Error
+	if !errors.As(toAPIError(fmt.Errorf("x: %w", sessionmanager.ErrTerminated)), &bare) {
+		t.Fatal("a bare ErrTerminated no longer maps to an API error")
+	}
+	if bare.Message != "Session is terminated" {
+		t.Fatalf("bare ErrTerminated message = %q", bare.Message)
 	}
 }

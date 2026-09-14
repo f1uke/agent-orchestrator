@@ -1,6 +1,8 @@
 package sessionmanager
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -153,7 +155,7 @@ func TestWakeCrewMember_StartsItWithoutStoppingDev(t *testing.T) {
 		t.Fatalf("SuspendRuntime qa: %v", err)
 	}
 
-	woken, err := m.WakeCrewMember(ctx, qa.ID)
+	woken, _, err := m.WakeCrewMember(ctx, qa.ID)
 	if err != nil {
 		t.Fatalf("WakeCrewMember: %v", err)
 	}
@@ -178,7 +180,7 @@ func TestWakeCrewMember_StartsItWithoutStoppingDev(t *testing.T) {
 	}
 
 	// Starting a member that is already up is a no-op, not an error.
-	if _, err := m.WakeCrewMember(ctx, qa.ID); err != nil {
+	if _, _, err := m.WakeCrewMember(ctx, qa.ID); err != nil {
 		t.Fatalf("re-starting a running member: %v", err)
 	}
 	if st.sessions[qa.ID].IsSuspended {
@@ -197,7 +199,108 @@ func TestWakeCrewMember_RefusesASoloSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if _, err := m.WakeCrewMember(ctx, rec.ID); err == nil {
+	if _, _, err := m.WakeCrewMember(ctx, rec.ID); err == nil {
 		t.Fatalf("WakeCrewMember accepted a solo session")
+	}
+}
+
+// TestWakeCrewMember_RestoresAFinishedMember is the whole point of the second
+// round: a qa that closed its round is not a dead end.
+//
+// It is deliberately asserted through `wake` rather than through Restore. The
+// capability was always there - `ao session restore` does exactly this - and the
+// gap was that the verb a person reaches for ("bring qa up") refused, naming a
+// state and no way out of it. So the test is that the verb works, and that it
+// SAYS it did something bigger than start a paused agent.
+func TestWakeCrewMember_RestoresAFinishedMember(t *testing.T) {
+	m, st, rt, _ := newManager()
+	dev, err := m.Spawn(ctx, ports.SpawnConfig{
+		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "work", TaskSize: domain.TaskSizeStandard,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if rt.aliveByHandle == nil {
+		rt.aliveByHandle = map[string]bool{}
+	}
+	rt.aliveByHandle["h1"] = true
+	if _, err := m.RequestCrewReview(ctx, dev.ID, domain.CrewRoleQA); err != nil {
+		t.Fatalf("RequestCrewReview: %v", err)
+	}
+	_, qa := crewOf(t, st, dev.ID)
+
+	// qa finished its round. dev is still live, still in the worktree, and that
+	// worktree is what qa comes back into.
+	rec := st.sessions[qa.ID]
+	rec.IsTerminated = true
+	rec.Activity = domain.Activity{State: domain.ActivityExited}
+	st.sessions[qa.ID] = rec
+
+	woken, restored, err := m.WakeCrewMember(ctx, qa.ID)
+	if err != nil {
+		t.Fatalf("waking a finished qa: %v", err)
+	}
+	if !restored {
+		t.Fatalf("a finished qa came back without the caller being told it was a restore")
+	}
+	if woken.IsTerminated {
+		t.Fatalf("qa is still terminated after being woken")
+	}
+	if st.sessions[dev.ID].IsSuspended {
+		t.Fatalf("bringing qa back stood dev down; both members work at once")
+	}
+	// And the round boundary is recorded, which is what lets dev brief it about
+	// the same unchanged commit the last round used up its budget on.
+	if st.sessions[qa.ID].CrewRoundStartedAt.IsZero() {
+		t.Fatalf("a restored member starts no new round, so its next brief is still capped on last round's subject")
+	}
+}
+
+// TestWakeCrewMember_RefusesWhenEveryMemberHasFinished draws the line.
+//
+// A crew shares ONE worktree and it is dev's: a finished qa beside a live dev is
+// a row without a runtime next to a tree that is still standing, and restoring
+// it re-attaches. When every member has ended, that tree came down with the last
+// of them, and Restore would not re-attach to anything - it would cut the branch
+// a worktree again and stand a lone agent up in a task that is over. That is a
+// much bigger act than the word "wake" promises, so it is refused and left to
+// `ao session restore`, which the message names.
+func TestWakeCrewMember_RefusesWhenEveryMemberHasFinished(t *testing.T) {
+	m, st, rt, _ := newManager()
+	dev, err := m.Spawn(ctx, ports.SpawnConfig{
+		ProjectID: "mer", Kind: domain.KindWorker, Prompt: "work", TaskSize: domain.TaskSizeStandard,
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if rt.aliveByHandle == nil {
+		rt.aliveByHandle = map[string]bool{}
+	}
+	rt.aliveByHandle["h1"] = true
+	if _, err := m.RequestCrewReview(ctx, dev.ID, domain.CrewRoleQA); err != nil {
+		t.Fatalf("RequestCrewReview: %v", err)
+	}
+	_, qa := crewOf(t, st, dev.ID)
+	for _, id := range []domain.SessionID{dev.ID, qa.ID} {
+		rec := st.sessions[id]
+		rec.IsTerminated = true
+		rec.Activity = domain.Activity{State: domain.ActivityExited}
+		st.sessions[id] = rec
+	}
+
+	_, _, err = m.WakeCrewMember(ctx, qa.ID)
+	if err == nil {
+		t.Fatalf("wake resurrected a task every member of which had finished")
+	}
+	if !errors.Is(err, ErrInvalidCrew) {
+		t.Fatalf("refusal is %v, want ErrInvalidCrew", err)
+	}
+	// The refusal has to carry the way out, which is the whole reason this
+	// capability was unfindable: three errors reported a state and stopped.
+	if !strings.Contains(err.Error(), "ao session restore "+string(dev.ID)) {
+		t.Fatalf("refusal does not name the command that gets past it:\n%s", err)
+	}
+	if st.sessions[qa.ID].IsTerminated != true {
+		t.Fatalf("a refused wake changed the row anyway")
 	}
 }

@@ -20,7 +20,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
 FROM sessions WHERE id = ?
 `
 
@@ -77,6 +77,7 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.WokenBy,
 		&i.CrewJoinReason,
 		&i.RuntimeTouch,
+		&i.CrewRoundStartedAt,
 	)
 	return i, err
 }
@@ -196,7 +197,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
 FROM sessions ORDER BY project_id, num
 `
 
@@ -259,6 +260,7 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.WokenBy,
 			&i.CrewJoinReason,
 			&i.RuntimeTouch,
+			&i.CrewRoundStartedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -280,7 +282,7 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -343,6 +345,7 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.WokenBy,
 			&i.CrewJoinReason,
 			&i.RuntimeTouch,
+			&i.CrewRoundStartedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -630,6 +633,35 @@ func (q *Queries) SetSessionTokenUsage(ctx context.Context, arg SetSessionTokenU
 		arg.TokensUpdatedAt,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const startCrewRound = `-- name: StartCrewRound :execrows
+UPDATE sessions SET crew_round_started_at = ? WHERE id = ?
+`
+
+type StartCrewRoundParams struct {
+	CrewRoundStartedAt sql.NullTime
+	ID                 domain.SessionID
+}
+
+// Sole writer of crew_round_started_at: the moment a finished crew member was
+// deliberately brought back, which is the boundary the per-subject message cap
+// counts each round from (see migration 0060). Absent from UpdateSession's SET
+// list for the same reason crew_id is - a full-row lifecycle write must not be
+// able to move a round boundary as a side effect.
+//
+// It does NOT bump updated_at: reviving the session is what moved the row, and
+// that write has already happened by the time this runs. Bumping it again would
+// re-sort the board for a fact nothing on screen reads.
+//
+// Keep this ABOVE the trailing NOTE comment at the end of this file, for the
+// sqlc 1.31 dangling-comment reason documented on SetSessionCrew.
+func (q *Queries) StartCrewRound(ctx context.Context, arg StartCrewRoundParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, startCrewRound, arg.CrewRoundStartedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}

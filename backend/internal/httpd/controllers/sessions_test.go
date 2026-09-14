@@ -338,12 +338,14 @@ func (f *fakeSessionService) RequestCrewReview(_ context.Context, from domain.Se
 
 // crewWoken records the id the crew-wake route asked for, so a test can assert
 // the controller reached the handover rather than the ordinary wake.
-func (f *fakeSessionService) WakeCrewMember(_ context.Context, id domain.SessionID) (domain.Session, error) {
+func (f *fakeSessionService) WakeCrewMember(_ context.Context, id domain.SessionID) (sessionsvc.CrewWakeResult, error) {
 	f.crewWoken = append(f.crewWoken, id)
 	s := f.sessions[id]
+	restored := s.IsTerminated
 	s.IsSuspended = false
+	s.IsTerminated = false
 	f.sessions[id] = s
-	return s, nil
+	return sessionsvc.CrewWakeResult{Session: s, Restored: restored}, nil
 }
 
 func (f *fakeSessionService) Kill(_ context.Context, id domain.SessionID, in sessionsvc.KillInput) (sessionsvc.KillOutcome, error) {

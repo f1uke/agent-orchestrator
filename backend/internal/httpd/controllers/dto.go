@@ -555,6 +555,21 @@ type WakeSessionResponse struct {
 	Session   SessionView      `json:"session"`
 }
 
+// CrewWakeResponse is the body of POST /api/v1/sessions/{sessionId}/crew/wake.
+//
+// It is WakeSessionResponse plus the one fact only this route can produce:
+// whether the member had FINISHED and was restored to get here. A restore is a
+// bigger act than "wake" promises - it revives a torn-down agent rather than
+// resuming a paused one - so the response says it rather than letting it look
+// like an ordinary start.
+type CrewWakeResponse struct {
+	OK        bool             `json:"ok"`
+	SessionID domain.SessionID `json:"sessionId"`
+	Session   SessionView      `json:"session"`
+	// Restored is true when this member was finished and has been brought back.
+	Restored bool `json:"restored"`
+}
+
 // DeleteSessionResponse is the body of DELETE /api/v1/sessions/{sessionId}.
 type DeleteSessionResponse struct {
 	OK        bool             `json:"ok"`

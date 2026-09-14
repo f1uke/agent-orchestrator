@@ -48,6 +48,11 @@ type crewSessionView struct {
 
 type crewWakeResponse struct {
 	Session crewSessionView `json:"session"`
+	// Restored is the daemon saying this member had FINISHED and was brought
+	// back, rather than merely started. Waking is the smaller of the two and the
+	// one the command's name promises, so the bigger one is printed differently
+	// instead of passing for it.
+	Restored bool `json:"restored"`
 }
 
 type crewAddRequest struct {
@@ -228,13 +233,23 @@ func explainCrewAddRefusal(err error) error {
 func newCrewWakeCommand(ctx *commandContext) *cobra.Command {
 	return &cobra.Command{
 		Use:   "wake <session-id>",
-		Short: "Start one crew member, leaving its crewmate exactly as it is",
+		Short: "Start one crew member - or bring it back if it has finished - leaving its crewmate exactly as it is",
 		Long: "Brings the named member up in the task's worktree. It TOUCHES NOBODY ELSE: the\n" +
 			"other member keeps running, keeps its terminal and is not interrupted, because\n" +
 			"both members of a crew work at the same time.\n\n" +
-			"Waking a member that is already awake does nothing and is not an error.",
+			"Waking a member that is already awake does nothing and is not an error.\n\n" +
+			"A member that has FINISHED is RESTORED - it comes back into the same worktree\n" +
+			"and keeps its seat on the task, and the command says that is what it did. This\n" +
+			"is how a qa that closed a round is asked for another one, and a second round\n" +
+			"needs no new commit: new test cases, a simulator that was wiped, or a case that\n" +
+			"turned out to expect the wrong thing are all reasons to look again at code that\n" +
+			"has not moved. It stays one task and one qa - nothing here adds a second.\n\n" +
+			"The one member it will not bring back is one whose crewmates have ALL finished\n" +
+			"too: that task's worktree came down with them, so there is nothing to wake into.\n" +
+			"Revive the task with `ao session restore` first.",
 		Example: `  ao crew wake agent-orchestrator-231   # start qa; dev carries on
-  ao crew status                        # who is up, and who has not started`,
+  ao crew wake agent-orchestrator-231   # qa finished? it comes back for another round
+  ao crew status                        # who is up, who has not started, who has finished`,
 		Args: oneSessionIDArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id, err := normalizeSessionID(args[0])
@@ -244,6 +259,15 @@ func newCrewWakeCommand(ctx *commandContext) *cobra.Command {
 			var out crewWakeResponse
 			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(id)+"/crew/wake", nil, &out); err != nil {
 				return err
+			}
+			if out.Restored {
+				// Named, not silent. Un-terminating a session is a bigger act than the
+				// word "wake" promises, and a person who meant only "start it" has to be
+				// able to see what actually happened without going to look.
+				_, printErr := fmt.Fprintf(cmd.OutOrStdout(),
+					"%s (%s) had finished and has been restored - it is awake in the task's worktree\n",
+					out.Session.ID, crewRoleOf(out.Session))
+				return printErr
 			}
 			_, printErr := fmt.Fprintf(cmd.OutOrStdout(), "%s (%s) is awake\n", out.Session.ID, crewRoleOf(out.Session))
 			return printErr
@@ -261,7 +285,7 @@ func newCrewStatusCommand(ctx *commandContext) *cobra.Command {
 			"once, and normally are:\n\n" +
 			"  awake        this member has a running agent\n" +
 			"  asleep       suspended - `ao crew wake` (or opening its card) starts it\n" +
-			"  finished     torn down; `ao session restore` is what brings it back\n" +
+			"  finished     ended its round; `ao crew wake` brings it back for another\n" +
 			"  not started  a prepared TODO that has never been started\n\n" +
 			"A solo task is not a crew and is not listed here; use `ao session ls` for those.",
 		Args: noArgs,
@@ -324,10 +348,12 @@ func (c *commandContext) printCrewStatus(ctx context.Context, out io.Writer, pro
 //
 // A terminated member gets its OWN word rather than sharing "asleep" with a
 // suspended one. Both are true statements about a stopped agent, but they are
-// answers to different questions: an asleep member is waiting for its turn and
-// `ao crew wake` gives it one, while a finished member is gone and only
-// `ao session restore` brings it back. Collapsing them would leave a completed
-// task looking like one that is merely between turns.
+// answers to different questions: an asleep member has not run yet or is paused
+// between turns, while a finished member has ended its round and coming back is
+// a restore. `ao crew wake` reaches both - it resumes the first and restores the
+// second - but they are still two different things to have happened to a task,
+// and collapsing them would leave a completed task looking like one that is
+// merely between turns.
 func crewMemberState(s crewSessionView) string {
 	switch {
 	case s.IsTerminated:

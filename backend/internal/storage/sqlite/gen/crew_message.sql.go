@@ -13,18 +13,35 @@ import (
 const countCrewMessagesOnSubject = `-- name: CountCrewMessagesOnSubject :one
 SELECT COUNT(*) FROM crew_message
 WHERE crew_id = ? AND subject = ? AND from_session = ? AND refused_reason = ''
+  AND created_at >= ?
 `
 
 type CountCrewMessagesOnSubjectParams struct {
 	CrewID      string
 	Subject     string
 	FromSession string
+	CreatedAt   time.Time
 }
 
-// Delivered messages one member has sent about one subject. Refused attempts are
-// excluded: a refusal delivered nothing, so counting it would spend the cap twice.
+// Delivered messages one member has sent about one subject IN THE CURRENT ROUND.
+// Refused attempts are excluded: a refusal delivered nothing, so counting it
+// would spend the cap twice.
+//
+// The round bound is what keeps the cap right across a qa that closed a round
+// and was brought back for another. The cap's refusal says "nothing has moved",
+// and a second round is asked for exactly when nothing has moved in the CODE -
+// new cases, a wiped device, a case that expected the wrong thing - so the same
+// commit SHA comes round again with its budget already spent. Rows from earlier
+// rounds stay exactly where they are; they simply stop being counted. A crew
+// that has never been restored passes the zero time and counts everything, which
+// is what this always did. See migration 0060.
 func (q *Queries) CountCrewMessagesOnSubject(ctx context.Context, arg CountCrewMessagesOnSubjectParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countCrewMessagesOnSubject, arg.CrewID, arg.Subject, arg.FromSession)
+	row := q.db.QueryRowContext(ctx, countCrewMessagesOnSubject,
+		arg.CrewID,
+		arg.Subject,
+		arg.FromSession,
+		arg.CreatedAt,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

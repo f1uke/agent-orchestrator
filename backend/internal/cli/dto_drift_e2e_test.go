@@ -110,8 +110,8 @@ func (f *fakeSessionService) Wake(context.Context, domain.SessionID) (domain.Ses
 	return domain.Session{}, nil
 }
 
-func (f *fakeSessionService) WakeCrewMember(context.Context, domain.SessionID) (domain.Session, error) {
-	return domain.Session{}, nil
+func (f *fakeSessionService) WakeCrewMember(context.Context, domain.SessionID) (sessionsvc.CrewWakeResult, error) {
+	return sessionsvc.CrewWakeResult{}, nil
 }
 
 func (f *fakeSessionService) AttachCrewMember(context.Context, domain.SessionID, domain.CrewRole, domain.SessionID) (domain.Session, error) {

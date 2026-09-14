@@ -432,7 +432,7 @@ func TestCrewParallel_ConcurrentWakesBringUpBoth(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, errs[i] = s.mgr.WakeCrewMember(ctx, id)
+			_, _, errs[i] = s.mgr.WakeCrewMember(ctx, id)
 		}()
 	}
 	close(start)

@@ -296,19 +296,80 @@ func (m *Manager) CrewMember(ctx context.Context, id domain.SessionID, role doma
 //
 // A member that is already awake is returned unchanged: "wake qa" when qa is
 // already up is a no-op, not an error.
-func (m *Manager) WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
-	rec, err := m.getRecord(ctx, id)
+//
+// A member that has FINISHED is restored rather than refused, and `restored`
+// reports it. See crewWakeRestores for which finished members are brought back
+// and which are not.
+func (m *Manager) WakeCrewMember(ctx context.Context, id domain.SessionID) (rec domain.SessionRecord, restored bool, err error) {
+	rec, err = m.getRecord(ctx, id)
 	if err != nil {
-		return domain.SessionRecord{}, fmt.Errorf("wake crew member: %w", err)
+		return domain.SessionRecord{}, false, fmt.Errorf("wake crew member: %w", err)
 	}
 	if !rec.InCrew() {
-		return domain.SessionRecord{}, fmt.Errorf("%w: %s is not part of a crew", ErrInvalidCrew, id)
+		return domain.SessionRecord{}, false, fmt.Errorf("%w: %s is not part of a crew", ErrInvalidCrew, id)
 	}
 	if rec.IsTerminated {
-		return domain.SessionRecord{}, fmt.Errorf("%w: %s is terminated", ErrInvalidCrew, id)
+		if err := m.crewWakeRestores(ctx, rec); err != nil {
+			return domain.SessionRecord{}, false, err
+		}
+		// Through Restore, never a second hand-written un-terminate: reviving a
+		// session is workspace, runtime, system prompt and resumability, and a
+		// shortcut here would be a second answer to all four that could drift from
+		// the first.
+		out, err := m.Restore(ctx, id)
+		return out, true, err
 	}
 	if rec.Awake() {
-		return rec, nil
+		return rec, false, nil
 	}
-	return m.Resume(ctx, id, domain.WokenByWake)
+	out, err := m.Resume(ctx, id, domain.WokenByWake)
+	return out, false, err
+}
+
+// crewWakeRestores decides whether a FINISHED crew member may be woken back up.
+//
+// The capability was always there - `ao session restore` does exactly this - so
+// the question is not "can we" but "is waking this one meaningful and safe".
+// One test answers both risks the cases raise, because both have the same cause:
+// IS ANY CREWMATE STILL LIVE?
+//
+// A crew shares ONE worktree, and it is dev's by ownership. Ending a subordinate
+// removes no tree at all (workspaceOutlivesTeardownGiven), so a finished qa on a
+// live task is a row without a runtime sitting beside a tree that is still
+// standing: restoring it re-attaches to the tree its crewmate is working in, and
+// that is the whole of the ordinary case - the qa that closed a round and is
+// wanted for another.
+//
+// When every member has ended, the tree came down with the last of them. Restore
+// would not re-attach to anything: it would `git worktree add` dev's branch back
+// onto disk and stand a lone agent up in a task that is over, which is a far
+// bigger act than the word "wake" promises. That is refused here and left to
+// `ao session restore`, which is the verb for reviving a finished task and reads
+// like one.
+//
+// Note what this deliberately does NOT test: WHY the member ended. A round that
+// closed, a dev whose agent exited under it, a reaped runtime, a daemon
+// shutdown - all of them leave the same row beside the same tree, and all of
+// them are answered by the same question about that tree. Sorting terminations
+// into "fine to wake" and "not" would be a policy invented here with nothing
+// behind it, and it would refuse the reset-simulator and changed-pass-criteria
+// cases this exists to serve. The one termination that genuinely cannot be woken
+// - a session that never materialized a worktree - is refused by Restore's own
+// incomplete-handle guard rather than duplicated here.
+func (m *Manager) crewWakeRestores(ctx context.Context, rec domain.SessionRecord) error {
+	members, err := m.crewMembers(ctx, rec)
+	if err != nil {
+		return fmt.Errorf("wake crew member: %w", err)
+	}
+	for _, other := range members {
+		if !other.IsTerminated && !other.IsTodo {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"%w: %s has finished and so has every other member of this task, so there is no crew left to rejoin "+
+			"and no shared worktree still standing to wake into. Waking one member back into a task that is over "+
+			"would cut its worktree again from the branch: if that is really what you want, revive the task itself "+
+			"with `ao session restore %s` and then wake this member",
+		ErrInvalidCrew, rec.ID, rec.CrewID)
 }

@@ -667,7 +667,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start this crew member. Its crewmate keeps running: both members of a crew work at once */
+        /** Start this crew member, restoring it if it has finished. Its crewmate keeps running: both members of a crew work at once */
         post: operations["wakeCrewMember"];
         delete?: never;
         options?: never;
@@ -2461,6 +2461,12 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             worktreePath?: string;
+        };
+        CrewWakeResponse: {
+            ok: boolean;
+            restored: boolean;
+            session: components["schemas"]["ControllersSessionView"];
+            sessionId: string;
         };
         DegradedProject: {
             id: string;
@@ -6250,7 +6256,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WakeSessionResponse"];
+                    "application/json": components["schemas"]["CrewWakeResponse"];
                 };
             };
             /** @description Bad Request */

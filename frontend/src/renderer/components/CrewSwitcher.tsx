@@ -1,7 +1,14 @@
-import { Check, Moon, Plus, Smartphone } from "lucide-react";
+import { Check, Moon, Plus, RotateCcw, Smartphone } from "lucide-react";
 import { REVIEW_PIP } from "./CrewStrip";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-import { type ReviewGateState, type Task, canAttachRole, crewChipState, neverStarted } from "../lib/crew";
+import {
+	type ReviewGateState,
+	type Task,
+	canAttachRole,
+	crewChipState,
+	neverStarted,
+	qaToCheckAgain,
+} from "../lib/crew";
 import { statusGlyph, statusLabel } from "../lib/status-glyph";
 import { cn } from "../lib/utils";
 import type { WorkspaceSession } from "../types/workspace";
@@ -41,6 +48,23 @@ import type { WorkspaceSession } from "../types/workspace";
  * ({@link canAttachRole}). Solo and `mechanical` tasks are the overwhelming
  * majority of real traffic, so the topbar they see is today's topbar plus one
  * quiet ~46px button. A task that cannot gain a member draws nothing at all.
+ *
+ * ## One slot, two questions
+ *
+ * That slot holds `↻ check again` once the task HAS a qa and that qa has
+ * finished ({@link qaToCheckAgain}). It is the same button asking the task's
+ * next question: a task with no qa is offered one, a task whose qa closed a
+ * round is offered another. They are mutually exclusive by construction, so the
+ * bar never grows a second control, and neither creates a member — one task, one
+ * qa, and `check again` is that same session coming back into the same worktree.
+ *
+ * It exists because the finished state had no task-level control AT ALL: `+ qa`
+ * is hidden precisely when a qa is on the task, and the only way back was to
+ * open the finished member's own terminal and find a Restore button written in
+ * the language of session recovery. Every reason a second round is asked for —
+ * cases written after the round closed, a simulator erased, a case that expected
+ * the wrong thing — is a reason to look at code that has NOT changed, so nothing
+ * here is keyed to a commit.
  */
 export function CrewSwitcher({
 	task,
@@ -52,6 +76,8 @@ export function CrewSwitcher({
 	onOpenReviews,
 	onAddRole,
 	addRolePending,
+	onCheckAgain,
+	checkAgainPending,
 	autoCrewDisabled,
 	style,
 }: {
@@ -72,6 +98,9 @@ export function CrewSwitcher({
 	onOpenReviews?: () => void;
 	onAddRole?: () => void;
 	addRolePending?: boolean;
+	/** Ask the qa this task already has for another round. See {@link qaToCheckAgain}. */
+	onCheckAgain?: () => void;
+	checkAgainPending?: boolean;
 	/**
 	 * Whether this project has AUTOMATIC crew formation turned off
 	 * (ProjectConfig.disableAutoCrew). It changes nothing about what the button
@@ -89,6 +118,7 @@ export function CrewSwitcher({
 	style?: React.CSSProperties;
 }) {
 	const canAdd = Boolean(onAddRole) && canAttachRole(task);
+	const canCheckAgain = Boolean(onCheckAgain) && Boolean(qaToCheckAgain(task));
 	if (!task.isCrew && !canAdd) return null;
 	return (
 		<TooltipProvider delayDuration={200}>
@@ -109,6 +139,10 @@ export function CrewSwitcher({
 								showDevicePip={showDevicePip}
 							/>
 						))}
+						{/* BEFORE the divider, with the chips: it acts on a member, not on
+						    the review gate, and the divider is what separates those two
+						    kinds of thing. */}
+						{canCheckAgain ? <CheckAgainButton onCheckAgain={onCheckAgain!} pending={checkAgainPending} /> : null}
 						<span aria-hidden="true" className="mx-0.5 h-3 w-px shrink-0 bg-border-strong" />
 						<ReviewPip onOpen={onOpenReviews} state={review} />
 					</>
@@ -222,6 +256,43 @@ function ReviewPip({ state, onOpen }: { state: ReviewGateState; onOpen?: () => v
 			</TooltipTrigger>
 			<TooltipContent>
 				Review gate — {label}. Review has no session: each pass is a run that reports a verdict and closes.
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
+/**
+ * `↻ check again` — the finished-qa half of the `+ qa` slot.
+ *
+ * It is drawn exactly like {@link AddRoleButton} and for the same reason: it is
+ * the same weight of decision, asked of the same task, in the same place. A
+ * heavier control would claim this is a bigger act than adding a qa was, and it
+ * is a smaller one — no member is created, the task's existing qa comes back
+ * into the worktree it already worked in.
+ */
+function CheckAgainButton({ onCheckAgain, pending }: { onCheckAgain: () => void; pending?: boolean }) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<button
+					className="inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-[3px] text-[11px] leading-none text-passive transition-colors hover:bg-interactive-hover hover:text-foreground disabled:opacity-50"
+					data-crew-switcher-check-again="qa"
+					disabled={pending}
+					onClick={onCheckAgain}
+					type="button"
+				>
+					<RotateCcw aria-hidden="true" className="h-[10px] w-[10px] shrink-0" />
+					<span className="truncate">check again</span>
+				</button>
+			</TooltipTrigger>
+			{/* Capped for the same reason AddRoleButton's is: the shared popper sets
+			    no width, so an uncapped tooltip lays itself out as one line across the
+			    whole window and reads as a banner. */}
+			<TooltipContent className="max-w-[320px]">
+				Ask this task's qa to look again. It is the same agent coming back into the same worktree, keeping its seat -
+				this task still has one qa. A second round needs no new commit: cases written since it finished, a device that
+				was reset, or a case that turned out to expect the wrong thing are all reasons to re-check code that has not
+				moved.
 			</TooltipContent>
 		</Tooltip>
 	);

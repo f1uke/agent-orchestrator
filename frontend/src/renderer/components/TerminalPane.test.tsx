@@ -154,6 +154,23 @@ describe("terminalEndedMessage", () => {
 	it("always shows the reviewer message on the reviewer terminal", () => {
 		expect(terminalEndedMessage({ canRestore: false, status: "idle", variant: "reviewer" })).toBe(REVIEWER_COPY);
 	});
+
+	// A qa that closed its round did nothing wrong, so recovery language is the
+	// wrong answer: what is wanted is another look, and a person reading "restore
+	// the session ... and continue writing" does not recognise that as it. This is
+	// the copy half of the dead end - the button was already on screen.
+	it("asks a finished qa for another round rather than offering session recovery", () => {
+		const copy = terminalEndedMessage({ canRestore: true, crewRole: "qa", status: "terminated", variant: "session" });
+		expect(copy).toMatch(/another/i);
+		expect(copy).toMatch(/same worktree/i);
+		expect(copy).not.toBe(RESTORE_COPY);
+	});
+
+	it("still says restore for a finished dev, which is what it is", () => {
+		const copy = terminalEndedMessage({ canRestore: true, crewRole: "dev", status: "terminated", variant: "session" });
+		expect(copy).toMatch(/bring it back/i);
+		expect(copy).not.toMatch(/another round/i);
+	});
 });
 
 describe("TerminalEndedStrip", () => {
@@ -169,6 +186,23 @@ describe("TerminalEndedStrip", () => {
 		render(<TerminalEndedStrip canRestore={false} isRestoring={false} onRestore={() => {}} variant="session" />);
 		expect(screen.queryByRole("button", { name: "Restore session" })).not.toBeInTheDocument();
 		expect(screen.getByText(NOT_TERMINATED_COPY)).toBeInTheDocument();
+	});
+
+	// The same verb the topbar's control uses, so the two read as one action
+	// offered in two places rather than as two different things to try.
+	it("labels a finished qa's button Check again", () => {
+		render(
+			<TerminalEndedStrip
+				canRestore
+				crewRole="qa"
+				isRestoring={false}
+				onRestore={() => {}}
+				status="terminated"
+				variant="session"
+			/>,
+		);
+		expect(screen.getByRole("button", { name: "Check again" })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Restore session" })).not.toBeInTheDocument();
 	});
 });
 

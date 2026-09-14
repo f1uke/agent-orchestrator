@@ -207,7 +207,7 @@ func (s *Service) crewTalkCheck(ctx context.Context, to domain.SessionRecord, ta
 		msg.RefusedReason = "a message to your crewmate has to say what it is ABOUT - pass --about with the commit SHA or the smoke case id it concerns"
 		return msg, nil
 	}
-	sent, err := s.store.CrewMessagesOnSubject(ctx, to.CrewID, msg.Subject, sender.ID)
+	sent, err := s.store.CrewMessagesOnSubject(ctx, to.CrewID, msg.Subject, sender.ID, crewRoundStart(sender, to))
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +229,25 @@ func (s *Service) crewTalkCheck(ctx context.Context, to domain.SessionRecord, ta
 		return msg, nil
 	}
 	return msg, nil
+}
+
+// crewRoundStart is the moment this crew's CURRENT round began - the cutoff the
+// per-subject cap counts from.
+//
+// It is the LATER of the two members' boundaries because a round belongs to the
+// TASK, not to one seat: a qa brought back for a second look is a new round for
+// dev's briefs AND for qa's findings, and scoping it to the recipient alone
+// would clear one leg of the conversation while leaving the other refusing on a
+// commit nobody disputes.
+//
+// The zero time means no member has ever been restored, and a zero cutoff counts
+// every row - which is exactly what the cap did before rounds existed, so a crew
+// that has only ever had one round behaves identically.
+func crewRoundStart(a, b domain.SessionRecord) time.Time {
+	if b.CrewRoundStartedAt.After(a.CrewRoundStartedAt) {
+		return b.CrewRoundStartedAt
+	}
+	return a.CrewRoundStartedAt
 }
 
 // roleOrID names the recipient the way a human would - "qa" - falling back to

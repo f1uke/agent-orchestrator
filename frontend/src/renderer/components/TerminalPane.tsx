@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TerminalTarget } from "../types/terminal";
-import type { SessionStatus, WorkspaceSession } from "../types/workspace";
+import type { CrewRole, SessionStatus, WorkspaceSession } from "../types/workspace";
 import type { Theme } from "../stores/ui-store";
 import { useTerminalSession, type AttachableTerminal, type TerminalSessionState } from "../hooks/useTerminalSession";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
@@ -380,6 +380,7 @@ function AttachedTerminal({
 			{showExitedState && (
 				<TerminalEndedStrip
 					canRestore={canRestoreSession}
+					crewRole={session?.crew?.role}
 					error={restoreError}
 					isRestoring={isRestoring}
 					onRestore={restoreSession}
@@ -446,6 +447,7 @@ function AttachedTerminal({
 
 type TerminalEndedStripProps = {
 	canRestore: boolean;
+	crewRole?: CrewRole;
 	error?: string;
 	isRestoring: boolean;
 	onRestore: () => void;
@@ -458,12 +460,22 @@ type TerminalEndedStripProps = {
 // doesn't read as a dead end. A reviewer terminal points back to the agent; a
 // non-restorable session terminal is one whose process exited while the session
 // is not (yet) terminated, which the Restore action can't help.
+//
+// A CREW MEMBER gets its own sentence, because the default one answers the wrong
+// question. "Restore the session to attach a live terminal and continue writing"
+// is session RECOVERY language — something went wrong, put it back — and a qa
+// that closed its round did nothing wrong: it finished, and what is wanted is
+// another look. A person reading recovery language does not recognise it as the
+// answer to "check it again", which is how this became a dead end with the
+// button already on screen.
 export function terminalEndedMessage({
 	canRestore,
+	crewRole,
 	status,
 	variant,
 }: {
 	canRestore: boolean;
+	crewRole?: CrewRole;
 	status?: SessionStatus;
 	variant: "reviewer" | "session";
 }): string {
@@ -473,21 +485,39 @@ export function terminalEndedMessage({
 	if (!canRestore) {
 		return "This terminal process ended, but the session is not marked terminated yet.";
 	}
+	if (crewRole === "qa") {
+		return "This qa finished its round. Bring it back for another: it returns to the same worktree and keeps its seat on this task - no second qa is created, and nothing needs to have changed in the code.";
+	}
+	if (crewRole === "dev") {
+		return "This task's dev has finished. Bring it back to carry on in the same worktree, on the same branch and pull request.";
+	}
 	if (status === "merged") {
 		return "This session is done (PR merged). Restore it to attach a live terminal and continue.";
 	}
 	return "Restore the session to attach a live terminal and continue writing.";
 }
 
+// The button's own word. A qa is asked to CHECK AGAIN - the same verb the
+// topbar's control uses, so the two read as one action offered in two places -
+// and everything else is restored, which is what it is.
+function restoreLabel(crewRole?: CrewRole): string {
+	return crewRole === "qa" ? "Check again" : "Restore session";
+}
+
+function restoringLabel(crewRole?: CrewRole): string {
+	return crewRole === "qa" ? "Bringing it back..." : "Restoring...";
+}
+
 export function TerminalEndedStrip({
 	canRestore,
+	crewRole,
 	error,
 	isRestoring,
 	onRestore,
 	status,
 	variant,
 }: TerminalEndedStripProps) {
-	const message = terminalEndedMessage({ canRestore, status, variant });
+	const message = terminalEndedMessage({ canRestore, crewRole, status, variant });
 
 	return (
 		<div className="shrink-0 border-b border-border bg-surface/80 px-4 py-2">
@@ -506,7 +536,7 @@ export function TerminalEndedStrip({
 						disabled={isRestoring}
 						onClick={onRestore}
 					>
-						{isRestoring ? "Restoring..." : "Restore session"}
+						{isRestoring ? restoringLabel(crewRole) : restoreLabel(crewRole)}
 					</button>
 				)}
 			</div>

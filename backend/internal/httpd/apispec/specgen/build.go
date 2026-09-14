@@ -165,6 +165,7 @@ var schemaNames = map[string]string{
 	"ControllersRestoreSessionResponse":           "RestoreSessionResponse",
 	"ControllersRestartSessionResponse":           "RestartSessionResponse",
 	"ControllersWakeSessionResponse":              "WakeSessionResponse",
+	"ControllersCrewWakeResponse":                 "CrewWakeResponse",
 	"ControllersDeleteSessionQuery":               "DeleteSessionQuery",
 	"ControllersDeleteSessionResponse":            "DeleteSessionResponse",
 	"ControllersCleanupSessionsResponse":          "CleanupSessionsResponse",
@@ -1742,10 +1743,10 @@ func sessionOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/crew/wake", id: "wakeCrewMember", tag: "sessions",
-			summary:    "Start this crew member. Its crewmate keeps running: both members of a crew work at once",
+			summary:    "Start this crew member, restoring it if it has finished. Its crewmate keeps running: both members of a crew work at once",
 			pathParams: []any{controllers.SessionIDParam{}},
 			resps: []respUnit{
-				{http.StatusOK, controllers.WakeSessionResponse{}},
+				{http.StatusOK, controllers.CrewWakeResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusConflict, envelope.APIError{}},

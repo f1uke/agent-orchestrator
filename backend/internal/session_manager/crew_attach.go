@@ -146,9 +146,26 @@ func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionI
 	}
 	for _, other := range members {
 		if other.CrewRole == role {
-			// Counts a member that has been stood down: the seat is that session's,
-			// and `ao session restore` is how it comes back.
-			return domain.SessionRecord{}, fmt.Errorf("%w: %s already has a %s (%s)", ErrCrewRoleTaken, dev.ID, role, other.ID)
+			// ONE TASK, ONE QA - including a member that has stood down. The seat is
+			// that session's and asking again does not open a second one.
+			//
+			// What the refusal has to add is what to do instead, because the caller
+			// asking is not confused about the invariant: it wants the round, and the
+			// round is available. A FINISHED member is restorable, and saying so here
+			// is what turns "you already have one" from an answer into an instruction.
+			if other.IsTerminated {
+				return domain.SessionRecord{}, fmt.Errorf(
+					"%w: %s already has a %s (%s) and it has finished its round. This task gets one %s and that is "+
+						"still it, so nothing new is created here - ask the one it has to look again with "+
+						"`ao crew wake %s`, which brings it back into the same worktree. A second round needs no new "+
+						"commit: new cases, a device that was reset or a case that expected the wrong thing are all "+
+						"reasons to check code that has not moved",
+					ErrCrewRoleTaken, dev.ID, role, other.ID, role, other.ID)
+			}
+			return domain.SessionRecord{}, fmt.Errorf(
+				"%w: %s already has a %s (%s), and this task gets one. Talk to the one it has - "+
+					"`ao send --crew %s --about <commit-or-case-id>`",
+				ErrCrewRoleTaken, dev.ID, role, other.ID, role)
 		}
 	}
 

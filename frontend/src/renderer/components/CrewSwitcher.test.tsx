@@ -222,3 +222,72 @@ describe("CrewSwitcher — the device pip cannot shift the strip", () => {
 		}
 	});
 });
+
+describe("CrewSwitcher — the finished-qa half of the same slot", () => {
+	it("offers `check again` once the task's qa has finished and dev has not", () => {
+		render(
+			<CrewSwitcher
+				activeSessionId="dev-1"
+				onCheckAgain={vi.fn()}
+				onOpenMember={vi.fn()}
+				review="not run"
+				task={crewTask({}, { isTerminated: true, status: "terminated" })}
+			/>,
+		);
+
+		expect(document.querySelector("[data-crew-switcher-check-again='qa']")).not.toBeNull();
+		// And never beside `+ qa`: the two answer the same slot's question at two
+		// different moments in a task's life, so a task can only ever be in one.
+		expect(document.querySelector("[data-crew-switcher-add='qa']")).toBeNull();
+	});
+
+	it("offers nothing while the qa is still on the task and working", () => {
+		render(
+			<CrewSwitcher
+				activeSessionId="dev-1"
+				onCheckAgain={vi.fn()}
+				onOpenMember={vi.fn()}
+				review="not run"
+				task={crewTask()}
+			/>,
+		);
+
+		expect(document.querySelector("[data-crew-switcher-check-again='qa']")).toBeNull();
+	});
+
+	// A crew shares ONE worktree and it is dev's: once dev has finished too, that
+	// tree came down with it. Bringing a member back into a task that is over is a
+	// far bigger act than this button promises - it would cut the branch a worktree
+	// again - so it is deliberately not offered here, and `ao session restore` is
+	// the verb for it.
+	it("offers nothing once dev has finished too, because the shared worktree is gone", () => {
+		render(
+			<CrewSwitcher
+				activeSessionId="dev-1"
+				onCheckAgain={vi.fn()}
+				onOpenMember={vi.fn()}
+				review="not run"
+				task={crewTask({ isTerminated: true, status: "terminated" }, { isTerminated: true, status: "terminated" })}
+			/>,
+		);
+
+		expect(document.querySelector("[data-crew-switcher-check-again='qa']")).toBeNull();
+	});
+
+	it("asks for the round when clicked", async () => {
+		const onCheckAgain = vi.fn();
+		render(
+			<CrewSwitcher
+				activeSessionId="dev-1"
+				onCheckAgain={onCheckAgain}
+				onOpenMember={vi.fn()}
+				review="not run"
+				task={crewTask({}, { isTerminated: true, status: "terminated" })}
+			/>,
+		);
+
+		await userEvent.click(screen.getByRole("button", { name: /check again/i }));
+
+		expect(onCheckAgain).toHaveBeenCalledTimes(1);
+	});
+});

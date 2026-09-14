@@ -95,9 +95,10 @@ type SessionService interface {
 	// SendFrom is Send with the SENDER named, which is what lets the daemon cap a
 	// runaway conversation between two agents.
 	SendFrom(ctx context.Context, id domain.SessionID, message string, talk sessionsvc.CrewTalk) (sessionsvc.SendResult, error)
-	// WakeCrewMember hands the task's one awake slot to this member, standing the
-	// current holder down first.
-	WakeCrewMember(ctx context.Context, id domain.SessionID) (domain.Session, error)
+	// WakeCrewMember brings this member up in the task's worktree, leaving its
+	// crewmate exactly as it is. A member that has FINISHED is restored, and the
+	// result says so.
+	WakeCrewMember(ctx context.Context, id domain.SessionID) (sessionsvc.CrewWakeResult, error)
 	// Kill may REFUSE: a session whose worktree holds work no pull request
 	// carries comes back as a 409 naming the files, not as a success over an
 	// untouched row.
@@ -1005,17 +1006,28 @@ func (c *SessionsController) crewRequestReview(w http.ResponseWriter, r *http.Re
 //
 // It is a different verb from /wake on purpose. /wake is "I am looking at this
 // session"; this one is asked for by name.
+//
+// A member that has FINISHED is restored instead of refused - the same second
+// round a person asks for after a simulator was wiped, a test case was rewritten
+// or new cases were added, none of which is a code change. `restored` on the
+// response says it happened, so the caller can tell "started it" from "brought a
+// finished agent back".
 func (c *SessionsController) crewWake(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/crew/wake")
 		return
 	}
-	sess, err := c.Svc.WakeCrewMember(r.Context(), sessionID(r))
+	out, err := c.Svc.WakeCrewMember(r.Context(), sessionID(r))
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, WakeSessionResponse{OK: true, SessionID: sessionID(r), Session: sessionView(sess)})
+	envelope.WriteJSON(w, http.StatusOK, CrewWakeResponse{
+		OK:        true,
+		SessionID: sessionID(r),
+		Session:   sessionView(out.Session),
+		Restored:  out.Restored,
+	})
 }
 
 // crewSend delivers a message from one crew member to the other, addressed by

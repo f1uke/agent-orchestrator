@@ -24,6 +24,27 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 )
 
+// TerminatedError is ErrTerminated carrying the sentence that says what to DO
+// about it: which session ended, and the one command that brings it back.
+//
+// It is a type rather than a wrapped string because the remedy has to survive
+// every layer between the refusal and the person reading it. This error is
+// wrapped at least twice on the way out (the messenger, then the service), and a
+// reader that recovered the sentence by trimming the sentinel's own text off the
+// front worked only until somebody added a third wrap - which is how the leading
+// "session: terminated:" got in front of the remedy the first time. errors.As
+// finds it however deep it is buried.
+type TerminatedError struct {
+	// Remedy is the whole user-facing message, already a complete sentence.
+	Remedy string
+}
+
+func (e TerminatedError) Error() string { return e.Remedy }
+
+// Unwrap keeps every existing errors.Is(err, ErrTerminated) caller working: the
+// sentinel is still what this IS, and the remedy is what it adds.
+func (e TerminatedError) Unwrap() error { return ErrTerminated }
+
 // Sentinel errors returned by the Session Manager; callers match them with
 // errors.Is.
 var (
@@ -223,6 +244,11 @@ type Store interface {
 	// carried a touch (or does not exist), and both are ordinary outcomes: the
 	// only question asked of the column is "ever".
 	SetSessionRuntimeTouch(ctx context.Context, id domain.SessionID, touch domain.RuntimeTouch, updatedAt time.Time) (ok bool, err error)
+	// StartCrewRound records that this crew member's CURRENT round begins now -
+	// the boundary the per-subject message cap counts from, written by a revival
+	// somebody asked for. Sole writer of the column, for the same reason
+	// SetSessionCrew is. ok=false means the row is gone, a benign race on a purge.
+	StartCrewRound(ctx context.Context, id domain.SessionID, at time.Time) (ok bool, err error)
 }
 
 // Manager coordinates internal session spawn, restore, kill, and cleanup over
@@ -1630,7 +1656,35 @@ func (m *Manager) retireWorkspaceProjectForReplacement(ctx context.Context, rec 
 // Restore relaunches a torn-down session in its workspace. The fallible I/O runs
 // before any durable session write, so a failure never resurrects the row or destroys
 // the worktree (it may hold the agent's prior work).
+//
+// It is the ONE path a session is deliberately revived by - `ao session restore`,
+// `ao crew wake` on a finished member, a restart of a finished session all land
+// here - which is what makes it the right place to record a crew's new ROUND.
+// The daemon's boot sweep is deliberately not one of them: RestoreAll calls
+// relaunchRestoredSession directly, and a machine that rebooted has not asked
+// anybody to look at anything again.
 func (m *Manager) Restore(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
+	out, err := m.restore(ctx, id)
+	if err != nil {
+		return out, err
+	}
+	// AFTER the revival succeeded, never before: a restore that failed part-way
+	// leaves the member finished, and a round boundary written for a round that
+	// never began would silently hand the next one a fresh message budget it did
+	// not earn. Best effort - the session is up, and failing the whole restore
+	// over a cap counter would be the tail wagging the dog - but loud in the log,
+	// because the symptom it causes (a brief refused with "nothing has moved"
+	// about a commit that has not moved) is the exact dead end this fixes.
+	if out.InCrew() {
+		if _, err := m.store.StartCrewRound(ctx, id, m.clock()); err != nil {
+			m.logger.Error("restore: could not record the start of this crew round",
+				"sessionID", id, "crew", out.CrewID, "error", err)
+		}
+	}
+	return out, nil
+}
+
+func (m *Manager) restore(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", id, err)
