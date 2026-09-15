@@ -24,6 +24,7 @@ const file = (path: string, additions = 4, deletions = 1) => ({
 	deletions,
 	binary: false,
 	committed: true,
+	kind: "file",
 });
 
 const diffBody = {
@@ -255,5 +256,43 @@ describe("WorkspaceChangesView", () => {
 
 		expect(await screen.findByText(/Binary file/)).toBeInTheDocument();
 		expect(diffPaths).not.toContain("img.png");
+	});
+});
+
+// An untracked directory too large to expand stands in for its own contents.
+// It is a row so the reviewer knows the files are there, but it is not a file:
+// asking the diff endpoint for a folder is what produced the old dead end.
+describe("directory entries", () => {
+	const dirEntry = {
+		path: "derivedDataPath",
+		status: "added",
+		additions: 0,
+		deletions: 0,
+		binary: false,
+		committed: false,
+		kind: "directory",
+		entryCount: 12438,
+	};
+
+	it("never fetches a diff for a folder", async () => {
+		const diffPaths = serve([dirEntry, file("src/a.ts")]);
+		render(<WorkspaceChangesView sessionId="s1" focus={null} onClose={() => {}} />, { wrapper });
+
+		await waitFor(() => expect(diffPaths).toContain("src/a.ts"));
+		expect(diffPaths).not.toContain("derivedDataPath");
+	});
+
+	it("shows how many files it stands for instead of +0 -0", async () => {
+		serve([dirEntry]);
+		render(<WorkspaceChangesView sessionId="s1" focus={null} onClose={() => {}} />, { wrapper });
+
+		const row = await screen.findByRole("region", { name: "derivedDataPath" });
+		expect(within(row).getByText("12,438 files")).toBeTruthy();
+		expect(within(row).queryByText("+0")).toBeNull();
+	});
+
+	it("does not spend auto-expand budget on a folder", () => {
+		const expanded = autoExpandedPaths([{ ...dirEntry, additions: 9000, deletions: 9000 }, file("a.ts")]);
+		expect(expanded.has("a.ts")).toBe(true);
 	});
 });

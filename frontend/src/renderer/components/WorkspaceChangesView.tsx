@@ -32,13 +32,23 @@ export function autoExpandedPaths(files: readonly ChangedFile[]): ReadonlySet<st
 	const expanded = new Set<string>();
 	let budget = MAX_AUTO_TOTAL_LINES;
 	for (const file of files) {
-		const size = file.binary ? 0 : file.additions + file.deletions;
+		const size = file.binary || isDirectoryEntry(file) ? 0 : file.additions + file.deletions;
 		if (size > MAX_AUTO_FILE_LINES) continue;
 		if (size > budget) break;
 		budget -= size;
 		expanded.add(file.path);
 	}
 	return expanded;
+}
+
+/**
+ * A changed entry that is NOT a file: an untracked directory standing in for
+ * more files than the list will expand. It has no diff to fetch and no lines to
+ * render, so it is handled here the way a binary file is - with a note instead
+ * of a request.
+ */
+function isDirectoryEntry(file: ChangedFile): boolean {
+	return file.kind === "directory";
 }
 
 export type ChangesFocus = { path: string; nonce: number };
@@ -279,8 +289,9 @@ function FileDiffSection({
 	onToggle: () => void;
 	registerSection: (path: string, el: HTMLElement | null) => void;
 }) {
-	// A binary file has no diff to fetch, expanded or not.
-	const wantsDiff = expanded && !file.binary;
+	// A binary file and a directory both have no diff to fetch, expanded or not.
+	const isDir = isDirectoryEntry(file);
+	const wantsDiff = expanded && !file.binary && !isDir;
 	const q = useWorkspaceFileDiff(sessionId, file.path, wantsDiff);
 	const lines = q.data?.lines ?? [];
 
@@ -344,7 +355,11 @@ function FileDiffSection({
 				<span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: 1 }}>
 					<bdi>{file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}</bdi>
 				</span>
-				{file.binary ? (
+				{isDir ? (
+					<span style={{ flex: "none", color: P.muted2 }}>
+						{file.entryCount ? `${file.entryCount.toLocaleString()} files` : "folder"}
+					</span>
+				) : file.binary ? (
 					<span style={{ flex: "none", color: P.muted2 }}>bin</span>
 				) : (
 					<span style={{ flex: "none" }}>
@@ -354,7 +369,11 @@ function FileDiffSection({
 				)}
 			</button>
 
-			{file.binary ? (
+			{isDir ? (
+				<p style={{ padding: "10px 14px", fontSize: 11.5, color: P.muted2, margin: 0 }}>
+					Folder of untracked files - too many to list one by one, so there is no diff to show.
+				</p>
+			) : file.binary ? (
 				<p style={{ padding: "10px 14px", fontSize: 11.5, color: P.muted2, margin: 0 }}>
 					Binary file — no diff to show.
 				</p>

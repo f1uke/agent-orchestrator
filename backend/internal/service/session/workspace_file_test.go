@@ -5,9 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/diffhunk"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 // gitRepo builds a temp git repo with an initial commit of the given files and
@@ -722,5 +724,94 @@ func TestListWorkspaceFiles_UnknownSession(t *testing.T) {
 	svc := newServiceWithStore(t, newFakeStore())
 	if _, err := svc.ListWorkspaceFiles(context.Background(), "nope"); err == nil {
 		t.Fatal("want an error for an unknown session")
+	}
+}
+
+// A directory that exists must not be reported as a missing FILE. "File not
+// found" about a folder the reader is looking at is untrue and tells them
+// nothing to do next.
+func TestReadWorkspaceFile_DirectoryIsDescribedNotNotFound(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "x\n"})
+	writeRepoFile(t, dir, "assets/one.txt", "1\n")
+	writeRepoFile(t, dir, "assets/two.txt", "2\n")
+	svc := serviceForRepo(t, dir)
+
+	res, err := svc.ReadWorkspaceFile(context.Background(), "s1", "assets")
+	if err != nil {
+		t.Fatalf("a directory must not be an error: %v", err)
+	}
+	if res.Available || res.Reason != UnavailableDirectory {
+		t.Fatalf("res = %+v, want unavailable/directory", res)
+	}
+	if res.Path != "assets" {
+		t.Errorf("path = %q, want %q", res.Path, "assets")
+	}
+	if res.EntryCount != 2 {
+		t.Errorf("entryCount = %d, want 2", res.EntryCount)
+	}
+}
+
+// The trailing slash the old Changes list produced must resolve to the same
+// answer rather than to a 404, so an old client is not left with the bad error.
+func TestReadWorkspaceFile_TrailingSlashDirectory(t *testing.T) {
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "x\n"})
+	writeRepoFile(t, dir, "assets/one.txt", "1\n")
+	svc := serviceForRepo(t, dir)
+
+	res, err := svc.ReadWorkspaceFile(context.Background(), "s1", "assets/")
+	if err != nil {
+		t.Fatalf("a directory must not be an error: %v", err)
+	}
+	if res.Reason != UnavailableDirectory {
+		t.Fatalf("res = %+v, want unavailable/directory", res)
+	}
+}
+
+// A submodule bump IS the change a reviewer came for, so the row opens onto the
+// two commits rather than onto an error.
+func TestReadWorkspaceFile_SubmoduleReportsItsCommits(t *testing.T) {
+	sub := gitRepo(t, map[string]string{"s.txt": "one\n"})
+	dir := gitRepo(t, map[string]string{"pkg/a.go": "x\n"})
+	runGit := func(where string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = where
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, where, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit(dir, "branch", "-M", "main")
+	runGit(dir, "checkout", "-qb", "feature/bump")
+	runGit(dir, "-c", "protocol.file.allow=always", "-c", "user.email=t@t", "-c", "user.name=t",
+		"submodule", "add", "-q", sub, "vendor/sub")
+	runGit(dir, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "add submodule")
+	head := runGit(filepath.Join(dir, "vendor", "sub"), "rev-parse", "HEAD")
+
+	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
+	res, err := svc.ReadWorkspaceFile(context.Background(), "s1", "vendor/sub")
+	if err != nil {
+		t.Fatalf("a submodule must not be an error: %v", err)
+	}
+	if res.Available || res.Reason != UnavailableSubmodule {
+		t.Fatalf("res = %+v, want unavailable/submodule", res)
+	}
+	if res.SubmoduleTo != head {
+		t.Errorf("submoduleTo = %q, want %q", res.SubmoduleTo, head)
+	}
+	// Newly added: the target branch has no commit for it to have moved from.
+	if res.SubmoduleFrom != "" {
+		t.Errorf("submoduleFrom = %q, want empty for a newly added submodule", res.SubmoduleFrom)
+	}
+}
+
+// A path that genuinely is not there stays a NotFound - the new reasons are for
+// things that exist, not a blanket softening of the error.
+func TestReadWorkspaceFile_MissingRelativeStaysNotFound(t *testing.T) {
+	svc := serviceForRepo(t, gitRepo(t, map[string]string{"pkg/a.go": "x\n"}))
+
+	if _, err := svc.ReadWorkspaceFile(context.Background(), "s1", "pkg/nope.go"); err == nil {
+		t.Fatal("expected a NotFound for a path that does not exist")
 	}
 }

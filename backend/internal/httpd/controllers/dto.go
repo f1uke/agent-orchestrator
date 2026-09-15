@@ -1316,8 +1316,10 @@ type WorkspaceFileResponse struct {
 	Available bool                 `json:"available"`
 	Path      string               `json:"path"`
 	Lines     []DiffContextLineDTO `json:"lines"`
-	// Reason explains an available=false response: "too_large" or "binary".
-	// Empty when the file is displayable.
+	// Reason explains an available=false response: "too_large", "binary",
+	// "directory" (the path is a directory, not a file) or "submodule" (a git
+	// submodule, whose submoduleFrom/submoduleTo carry the commits it moved
+	// between). Empty when the file is displayable.
 	Reason       string          `json:"reason,omitempty"`
 	ChangedLines []LineChangeDTO `json:"changedLines"`
 	Truncated    bool            `json:"truncated"`
@@ -1329,6 +1331,13 @@ type WorkspaceFileResponse struct {
 	// express it, so without this a save cannot reproduce the file's exact bytes
 	// and would silently drop the last newline.
 	TrailingNewline bool `json:"trailingNewline"`
+	// EntryCount is how many untracked files a reason="directory" path holds.
+	EntryCount int `json:"entryCount,omitempty"`
+	// SubmoduleFrom and SubmoduleTo are the commits a reason="submodule" path
+	// moved between, target-branch merge-base to working tree. From is empty for
+	// a newly added submodule.
+	SubmoduleFrom string `json:"submoduleFrom,omitempty"`
+	SubmoduleTo   string `json:"submoduleTo,omitempty"`
 }
 
 // WriteWorkspaceFileRequest is the body of
@@ -1542,6 +1551,13 @@ type ChangedFileDTO struct {
 	// Committed is false when the file also carries working-tree changes that
 	// are not yet committed.
 	Committed bool `json:"committed"`
+	// Kind is "file" or "directory". A "directory" entry stands in for an
+	// untracked directory holding more files than the list will expand, and
+	// entryCount says how many. It is NOT openable in the file viewer, and the
+	// renderer must not route it there.
+	Kind string `json:"kind"`
+	// EntryCount is how many untracked files a "directory" entry stands for.
+	EntryCount int `json:"entryCount,omitempty"`
 }
 
 // workspaceChangesResponse maps the service result to the wire DTO.
@@ -1549,13 +1565,15 @@ func workspaceChangesResponse(res sessionsvc.WorkspaceChangesResult) WorkspaceCh
 	files := make([]ChangedFileDTO, 0, len(res.Files))
 	for _, f := range res.Files {
 		files = append(files, ChangedFileDTO{
-			Path:      f.Path,
-			OldPath:   f.OldPath,
-			Status:    f.Status,
-			Additions: f.Additions,
-			Deletions: f.Deletions,
-			Binary:    f.Binary,
-			Committed: f.Committed,
+			Path:       f.Path,
+			OldPath:    f.OldPath,
+			Status:     f.Status,
+			Additions:  f.Additions,
+			Deletions:  f.Deletions,
+			Binary:     f.Binary,
+			Committed:  f.Committed,
+			Kind:       f.Kind,
+			EntryCount: f.EntryCount,
 		})
 	}
 	return WorkspaceChangesResponse{
@@ -1598,6 +1616,9 @@ func workspaceFileResponse(res sessionsvc.WorkspaceFileResult) WorkspaceFileResp
 		Reason:          res.Reason,
 		ChangedLines:    changed,
 		Truncated:       res.Truncated,
+		EntryCount:      res.EntryCount,
+		SubmoduleFrom:   res.SubmoduleFrom,
+		SubmoduleTo:     res.SubmoduleTo,
 	}
 }
 

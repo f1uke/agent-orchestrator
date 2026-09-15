@@ -573,3 +573,171 @@ func TestConfinedWorkspacePath_SymlinkEscape(t *testing.T) {
 		t.Fatalf("a non-existent path must stay allowed, got ok=%v rel=%q", ok, rel)
 	}
 }
+
+// untrackedDirRepo builds a repo whose session work lives in a BRAND-NEW
+// directory, alongside a modified tracked file at the same depth.
+//
+// This is the shape that made the Changes tab lie: git's default `-unormal`
+// does not recurse into a directory holding nothing tracked, so the two new
+// files came back as one phantom record for the directory itself - trailing
+// slash, zero counts, marked ADDED - while the tracked file beside them, four
+// levels deep, listed perfectly. Depth was never the variable.
+func untrackedDirRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, body string) {
+		t.Helper()
+		full := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit("init", "-q")
+	runGit("config", "user.email", "t@t")
+	runGit("config", "user.name", "t")
+	write("App/Ext/Deep/Deeper/Tracked.swift", "l1\n")
+	write("project.yml", "name: App\n")
+	runGit("add", "-A")
+	runGit("commit", "-qm", "base")
+	runGit("branch", "-M", "main")
+	runGit("checkout", "-qb", "feature/voip")
+
+	// tracked, four levels deep - must keep listing correctly
+	write("App/Ext/Deep/Deeper/Tracked.swift", "l1\nl2\n")
+	// new files inside a NEW directory - the ones that used to vanish
+	write("App/Ext/VoIPPush/Sending.swift", "a\nb\nc\n")
+	write("App/Ext/VoIPPush/SenderError.swift", "a\n")
+	// a new file inside an ALREADY-TRACKED directory listed fine all along
+	write("App/Ext/Deep/NewInTrackedDir.swift", "a\nb\n")
+	return dir
+}
+
+func TestWorkspaceChanges_UntrackedDirectoryListsItsFiles(t *testing.T) {
+	dir := untrackedDirRepo(t)
+	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
+
+	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The two real files, by their real paths and their real line counts.
+	sending := fileByPath(t, res, "App/Ext/VoIPPush/Sending.swift")
+	if sending.Status != ChangeAdded || sending.Additions != 3 || sending.Kind != EntryFile {
+		t.Errorf("Sending.swift = %+v, want added/+3/file", sending)
+	}
+	if got := fileByPath(t, res, "App/Ext/VoIPPush/SenderError.swift"); got.Additions != 1 {
+		t.Errorf("SenderError.swift additions = %d, want 1", got.Additions)
+	}
+	// The tracked file four levels deep still lists - depth is not the variable.
+	if got := fileByPath(t, res, "App/Ext/Deep/Deeper/Tracked.swift"); got.Status != ChangeModified {
+		t.Errorf("Tracked.swift status = %q, want modified", got.Status)
+	}
+	fileByPath(t, res, "App/Ext/Deep/NewInTrackedDir.swift")
+
+	// And the directory itself is NOT a row. A path ending in "/" reaching the
+	// renderer is what made a folder clickable as a file.
+	for _, f := range res.Files {
+		if strings.HasSuffix(f.Path, "/") {
+			t.Errorf("changed path %q ends in a slash - a directory is posing as a file", f.Path)
+		}
+		if f.Path == "App/Ext/VoIPPush" {
+			t.Errorf("the directory is listed instead of the files inside it: %+v", f)
+		}
+		if f.Kind == "" {
+			t.Errorf("changed file %q has no kind", f.Path)
+		}
+	}
+}
+
+func TestWorkspaceChanges_HugeUntrackedDirectoryStaysOneRow(t *testing.T) {
+	dir := untrackedDirRepo(t)
+	for i := range maxUntrackedPerDir + 1 {
+		full := filepath.Join(dir, "derivedDataPath", "Build", fmt.Sprintf("a%d.o", i))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
+
+	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := fileByPath(t, res, "derivedDataPath")
+	if got.Kind != EntryDirectory {
+		t.Errorf("derivedDataPath kind = %q, want %q", got.Kind, EntryDirectory)
+	}
+	if got.EntryCount != maxUntrackedPerDir+1 {
+		t.Errorf("derivedDataPath entryCount = %d, want %d", got.EntryCount, maxUntrackedPerDir+1)
+	}
+	// The build tree must not bury the session's actual work.
+	for _, f := range res.Files {
+		if strings.HasPrefix(f.Path, "derivedDataPath/") {
+			t.Fatalf("a capped directory leaked its contents into the list: %q", f.Path)
+		}
+	}
+	fileByPath(t, res, "App/Ext/VoIPPush/Sending.swift")
+}
+
+func TestWorkspaceChanges_IgnoredOnlyDirectoryIsNotListed(t *testing.T) {
+	dir := untrackedDirRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("build/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "build"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "build", "out.o"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
+
+	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range res.Files {
+		if f.Path == "build" || strings.HasPrefix(f.Path, "build/") {
+			t.Errorf("ignored directory listed: %+v", f)
+		}
+	}
+}
+
+func TestParsePorcelainZ_SeparatesCollapsedDirectories(t *testing.T) {
+	dirty := map[string]bool{}
+	// Real `git status --porcelain=v1 -z` shape: a collapsed directory carries
+	// the trailing slash, a file does not.
+	out := "?? a/b/VoIPPush/\x00?? loose.swift\x00 M tracked.swift\x00"
+	got := parsePorcelainZ(out, dirty)
+
+	want := []untrackedEntry{{Path: "a/b/VoIPPush", Dir: true}, {Path: "loose.swift"}}
+	if len(got) != len(want) {
+		t.Fatalf("entries = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if dirty["a/b/VoIPPush/"] {
+		t.Error("a collapsed directory was marked dirty under its slash-suffixed path")
+	}
+	if !dirty["loose.swift"] || !dirty["tracked.swift"] {
+		t.Errorf("dirty = %+v, want both files", dirty)
+	}
+}

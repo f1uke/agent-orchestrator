@@ -101,6 +101,7 @@ export function FileTree<T>({
 	label,
 	renderLead,
 	renderMeta,
+	renderIcon,
 	getFileKey,
 	getFileLabel,
 	getTitle,
@@ -139,6 +140,13 @@ export function FileTree<T>({
 	label: string;
 	renderLead?: (item: T) => ReactNode;
 	renderMeta?: (item: T) => ReactNode;
+	/**
+	 * Replaces a leaf row's file-kind icon. Returning null keeps the icon the
+	 * path's extension implies. Changes mode uses it for the one leaf that is
+	 * NOT a file: an untracked directory too large to expand, which must not
+	 * wear a file icon when clicking it cannot open a file.
+	 */
+	renderIcon?: (item: T) => ReactNode;
 	/** Overrides the node key used for selection/`data-path` (defaults to the path). */
 	getFileKey?: (item: T) => string;
 	/**
@@ -231,6 +239,7 @@ export function FileTree<T>({
 					}
 					const kind = fileKindFor(node.key);
 					const KindIcon = KIND_ICON[kind];
+					const icon = renderIcon?.(node.item);
 					const key = getFileKey ? getFileKey(node.item) : node.key;
 					const selected = selectedKey != null && key === selectedKey;
 					return (
@@ -252,7 +261,7 @@ export function FileTree<T>({
 							title={getTitle ? getTitle(node.item) : node.key}
 						>
 							{guides}
-							<KindIcon aria-hidden="true" className={cn("file-tree__icon", `file-tree__icon--${kind}`)} />
+							{icon ?? <KindIcon aria-hidden="true" className={cn("file-tree__icon", `file-tree__icon--${kind}`)} />}
 							{renderLead ? <span className="file-tree__lead">{renderLead(node.item)}</span> : null}
 							<span className="file-tree__name">
 								<bdi>{getFileLabel ? getFileLabel(node.item, node.label) : node.label}</bdi>

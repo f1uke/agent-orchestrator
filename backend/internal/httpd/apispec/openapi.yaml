@@ -6655,6 +6655,10 @@ components:
           type: boolean
         deletions:
           type: integer
+        entryCount:
+          type: integer
+        kind:
+          type: string
         oldPath:
           type: string
         path:
@@ -6668,6 +6672,7 @@ components:
       - deletions
       - binary
       - committed
+      - kind
       type: object
     ClaimPRRequest:
       properties:
@@ -10596,6 +10601,8 @@ components:
           type: array
         contentHash:
           type: string
+        entryCount:
+          type: integer
         lines:
           items:
             $ref: '#/components/schemas/DiffContextLineDTO'
@@ -10603,6 +10610,10 @@ components:
         path:
           type: string
         reason:
+          type: string
+        submoduleFrom:
+          type: string
+        submoduleTo:
           type: string
         trailingNewline:
           type: boolean
