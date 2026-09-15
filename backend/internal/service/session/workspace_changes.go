@@ -29,6 +29,26 @@ const (
 	ChangeRenamed  = "renamed"
 )
 
+// Entry kinds. A changed entry is a plain file unless it says otherwise.
+const (
+	EntryFile      = "file"
+	EntryDirectory = "directory"
+)
+
+// maxUntrackedPerDir bounds how many files ONE untracked directory may
+// contribute to the list before it is shown as a single directory row instead.
+//
+// Untracked directories are the reason this cap exists at all. git's default
+// `-unormal` collapses a directory holding nothing tracked into one record and
+// never names the files inside it, so a session's brand-new source directory
+// arrived here as a phantom "file" and the real files were invisible. Asking
+// git for every untracked file (`ls-files --others`) fixes that, but an iOS
+// project carrying an uncommitted DerivedData tree would then push thousands of
+// build artefacts through the 2000-file cap and bury the three .swift files the
+// reviewer came for. So a directory is expanded when expanding it is useful and
+// stands in for its own contents when it is not.
+const maxUntrackedPerDir = 50
+
 // TargetSource records HOW the target branch was determined, so the UI can say
 // "vs main" when it is certain and "vs main (project default)" when inferred.
 const (
@@ -111,6 +131,16 @@ type ChangedFile struct {
 	// not yet committed. A worker mid-task is the common case, so hiding these
 	// would make the panel under-report its own session.
 	Committed bool
+	// Kind is EntryFile or EntryDirectory. A directory row is NOT a file the
+	// viewer can open: it stands in for an untracked directory too large to
+	// list (see maxUntrackedPerDir), and EntryCount says how many files it
+	// hides. Naming the kind on the wire is what stops the renderer from
+	// routing a directory to the file viewer, which is how a directory came to
+	// answer "File not found" for a path that plainly exists.
+	Kind string
+	// EntryCount is how many untracked files an EntryDirectory row stands for.
+	// Zero for a file.
+	EntryCount int
 }
 
 // WorkspaceChangesResult is the Changes-mode payload: the files differing
@@ -219,19 +249,16 @@ func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (Wo
 	// not staged yet is exactly what a reviewer is looking for.
 	dirty := map[string]bool{}
 	if stOut, err := gitOutput(ctx, workspace, "status", "--porcelain=v1", "-z"); err == nil {
-		untracked := parsePorcelainZ(string(stOut), dirty)
-		for _, p := range untracked {
-			if _, seen := indexOfPath(files, p); seen {
-				continue
-			}
-			cf := ChangedFile{Path: p, Status: ChangeAdded}
-			countUntracked(filepath.Join(absRoot(workspace), filepath.FromSlash(p)), &cf)
-			files = append(files, cf)
+		for _, u := range parsePorcelainZ(string(stOut), dirty) {
+			files = appendUntracked(ctx, workspace, files, u, dirty)
 		}
 	}
 	for i := range files {
 		// Committed = "this file has no pending working-tree work".
 		files[i].Committed = !dirty[files[i].Path] && !dirty[files[i].OldPath]
+		if files[i].Kind == "" {
+			files[i].Kind = EntryFile
+		}
 	}
 
 	sortChangedFiles(files)
@@ -394,14 +421,29 @@ func applyNumstatZ(files []ChangedFile, out string) {
 	}
 }
 
+// untrackedEntry is one `??` record from git status.
+//
+// Dir reports that git collapsed a whole untracked DIRECTORY into this single
+// record and never named the files inside it. That is git's default `-unormal`
+// behaviour for any directory holding nothing tracked, and the trailing slash
+// git puts on such a record is the ONLY thing distinguishing it from a file.
+// Carrying that distinction in a field rather than in a string suffix is the
+// point: the slash used to ride all the way to the renderer, where a directory
+// was drawn as a file and clicking it asked the file viewer to open a folder.
+type untrackedEntry struct {
+	// Path is repo-relative and slash-separated, with NO trailing slash.
+	Path string
+	Dir  bool
+}
+
 // parsePorcelainZ reads `git status --porcelain=v1 -z`, filling dirty with every
 // path that has working-tree or index changes, and returning the untracked ones.
 //
 // Each record is "XY<space>path". A rename record ("R  new") is followed by a
 // separate token holding the original path.
-func parsePorcelainZ(out string, dirty map[string]bool) []string {
+func parsePorcelainZ(out string, dirty map[string]bool) []untrackedEntry {
 	tok := splitNUL(out)
-	var untracked []string
+	var untracked []untrackedEntry
 	for i := 0; i < len(tok); i++ {
 		rec := tok[i]
 		if len(rec) < 4 {
@@ -409,7 +451,14 @@ func parsePorcelainZ(out string, dirty map[string]bool) []string {
 		}
 		x, y, path := rec[0], rec[1], rec[3:]
 		if x == '?' && y == '?' {
-			untracked = append(untracked, path)
+			if dir := strings.TrimSuffix(path, "/"); dir != path {
+				// A collapsed directory. It is NOT marked dirty: no file has
+				// that path, so the entry would never match anything, and the
+				// files it stands for are marked as they are expanded.
+				untracked = append(untracked, untrackedEntry{Path: dir, Dir: true})
+				continue
+			}
+			untracked = append(untracked, untrackedEntry{Path: path})
 			dirty[path] = true
 			continue
 		}
@@ -423,6 +472,76 @@ func parsePorcelainZ(out string, dirty map[string]bool) []string {
 		}
 	}
 	return untracked
+}
+
+// appendUntracked adds one `??` entry to the changed-file list, expanding a
+// collapsed directory into the files inside it.
+//
+// A directory small enough to list becomes its files - that is the whole fix:
+// the two .swift files a session just wrote inside a new directory are what the
+// reviewer needs to see, and git never named them. A directory too large to
+// list (maxUntrackedPerDir) becomes ONE directory-kind row carrying its file
+// count, so an uncommitted build tree says how big it is instead of flooding
+// the list with artefacts.
+func appendUntracked(
+	ctx context.Context, workspace string, files []ChangedFile, u untrackedEntry, dirty map[string]bool,
+) []ChangedFile {
+	if !u.Dir {
+		return appendUntrackedFile(workspace, files, u.Path, dirty)
+	}
+	paths, total := listUntrackedDir(ctx, workspace, u.Path)
+	if total == 0 || total > maxUntrackedPerDir {
+		if _, seen := indexOfPath(files, u.Path); seen {
+			return files
+		}
+		dirty[u.Path] = true
+		return append(files, ChangedFile{
+			Path: u.Path, Status: ChangeAdded, Kind: EntryDirectory, EntryCount: total,
+		})
+	}
+	for _, p := range paths {
+		if dir := strings.TrimSuffix(p, "/"); dir != p {
+			// git reports an EMBEDDED git repository as a directory rather than
+			// recursing into it, since its contents belong to another repo.
+			// Nothing here can open it, so it keeps its own directory row.
+			if _, seen := indexOfPath(files, dir); !seen {
+				dirty[dir] = true
+				files = append(files, ChangedFile{Path: dir, Status: ChangeAdded, Kind: EntryDirectory})
+			}
+			continue
+		}
+		files = appendUntrackedFile(workspace, files, p, dirty)
+	}
+	return files
+}
+
+// appendUntrackedFile adds one untracked FILE, skipping a path the diff already
+// reported.
+func appendUntrackedFile(workspace string, files []ChangedFile, path string, dirty map[string]bool) []ChangedFile {
+	if _, seen := indexOfPath(files, path); seen {
+		return files
+	}
+	dirty[path] = true
+	cf := ChangedFile{Path: path, Status: ChangeAdded, Kind: EntryFile}
+	countUntracked(filepath.Join(absRoot(workspace), filepath.FromSlash(path)), &cf)
+	return append(files, cf)
+}
+
+// listUntrackedDir names the untracked files inside one directory, honouring
+// .gitignore exactly as git status does, and returns them with the total count.
+//
+// `ls-files --others` is asked for the directory specifically rather than
+// switching the whole status call to `-uall`: expanding only the directories
+// git actually collapsed keeps the common case at one status call, and it is
+// the per-directory total - not a global one - that decides whether expanding
+// is useful (see maxUntrackedPerDir).
+func listUntrackedDir(ctx context.Context, workspace, dir string) ([]string, int) {
+	out, err := gitOutput(ctx, workspace, "ls-files", "--others", "--exclude-standard", "-z", "--", dir+"/")
+	if err != nil {
+		return nil, 0
+	}
+	paths := splitNUL(string(out))
+	return paths, len(paths)
 }
 
 // countUntracked fills in the line count for an untracked file, which git diff

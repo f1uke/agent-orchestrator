@@ -1716,6 +1716,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 6,
 				binary: false,
 				committed: true,
+				kind: "file",
 			},
 			{
 				path: "frontend/src/renderer/components/FilesPanel.tsx",
@@ -1724,6 +1725,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 0,
 				binary: false,
 				committed: true,
+				kind: "file",
 			},
 			{
 				path: "backend/internal/service/session/workspace_changes.go",
@@ -1732,6 +1734,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 0,
 				binary: false,
 				committed: true,
+				kind: "file",
 			},
 			{
 				path: "frontend/src/renderer/lib/legacy-diff.ts",
@@ -1740,6 +1743,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 38,
 				binary: false,
 				committed: true,
+				kind: "file",
 			},
 			{
 				path: "frontend/src/renderer/lib/tree.ts",
@@ -1749,6 +1753,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 3,
 				binary: false,
 				committed: true,
+				kind: "file",
 			},
 			{
 				path: "frontend/src/renderer/styles.css",
@@ -1757,6 +1762,40 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 2,
 				binary: false,
 				committed: true,
+				kind: "file",
+			},
+			// New files inside a directory git has nothing tracked in. Their own
+			// paths, their own counts - git's default status collapses the whole
+			// directory into one record and never names them.
+			{
+				path: "backend/internal/service/session/voippush/sending.go",
+				status: "added",
+				additions: 16,
+				deletions: 0,
+				binary: false,
+				committed: false,
+				kind: "file",
+			},
+			{
+				path: "backend/internal/service/session/voippush/sender_error.go",
+				status: "added",
+				additions: 12,
+				deletions: 0,
+				binary: false,
+				committed: false,
+				kind: "file",
+			},
+			// An uncommitted build tree: listed so the reviewer knows it is there,
+			// standing in for its own contents so it cannot bury the work above.
+			{
+				path: "derivedDataPath",
+				status: "added",
+				additions: 0,
+				deletions: 0,
+				binary: false,
+				committed: false,
+				kind: "directory",
+				entryCount: 12438,
 			},
 			{
 				path: "frontend/src/api/schema.ts",
@@ -1765,6 +1804,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 0,
 				binary: false,
 				committed: false,
+				kind: "file",
 			},
 			{
 				path: "frontend/ao-dashboard-preview.png",
@@ -1773,6 +1813,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 0,
 				binary: true,
 				committed: true,
+				kind: "file",
 			},
 			// A long SINGLE-CHILD path and an oversized diff: the cases the tree's
 			// chain-collapsing and the stacked view's collapsed-by-default budget
@@ -1786,6 +1827,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 0,
 				binary: false,
 				committed: false,
+				kind: "file",
 			},
 			// A BRANCHY deep tree, modelled on a real Swift app. Every level here
 			// forks, so chain-collapsing has nothing to merge and the rendered depth
@@ -1808,6 +1850,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 4,
 				binary: false,
 				committed: true,
+				kind: "file",
 			})),
 			{
 				path: "frontend/src/renderer/lib/generated-icons.ts",
@@ -1816,6 +1859,7 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 				deletions: 220,
 				binary: false,
 				committed: true,
+				kind: "file",
 			},
 		],
 	};
@@ -2251,6 +2295,18 @@ export function mockWorkspaceFile(path: string): WorkspaceFileResponse {
 		return {
 			available: false,
 			reason: "binary",
+			path,
+			lines: [],
+			changedLines: [],
+			trailingNewline: true,
+			truncated: false,
+		};
+	}
+	if (path === "derivedDataPath") {
+		return {
+			available: false,
+			reason: "directory",
+			entryCount: 12438,
 			path,
 			lines: [],
 			changedLines: [],

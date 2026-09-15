@@ -24,6 +24,7 @@ const file = (over: Partial<Record<string, unknown>> = {}) => ({
 	deletions: 6,
 	binary: false,
 	committed: true,
+	kind: "file",
 	...over,
 });
 
@@ -728,5 +729,51 @@ describe("FilesPanel follows the open file", () => {
 
 		rerender(<FilesPanel sessionId="s1" taskKey="task-1" selectedPath={deep} reveal={{ path: deep, nonce: 1 }} />);
 		expect(screen.getByRole("searchbox")).toHaveValue("Order");
+	});
+});
+
+// The Changes rail used to show a session's brand-new directory as though it
+// were a file, with "+0 -0" and a file icon, and route a click to the file
+// viewer. A directory now names itself as one.
+describe("FilesPanel directory entries", () => {
+	const dirEntry = file({
+		path: "derivedDataPath",
+		status: "added",
+		additions: 0,
+		deletions: 0,
+		committed: false,
+		kind: "directory",
+		entryCount: 12438,
+	});
+
+	it("names a folder with a trailing slash and its file count, not +0 -0", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			targetSource: "pr",
+			truncated: false,
+			files: [dirEntry, file()],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+
+		const target = await screen.findByRole("treeitem", { name: /derivedDataPath/ });
+		expect(within(target).getByText("derivedDataPath/")).toBeInTheDocument();
+		expect(within(target).getByText("12,438 files")).toBeInTheDocument();
+		expect(within(target).queryByText("+0")).toBeNull();
+	});
+
+	it("opens the folder at its own path, with no trailing slash to resolve", async () => {
+		const opened: { path: string }[] = [];
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			targetSource: "pr",
+			truncated: false,
+			files: [dirEntry],
+		});
+		render(<FilesPanel sessionId="s1" onOpenFile={(t) => opened.push(t)} />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("treeitem", { name: /derivedDataPath/ }));
+		expect(opened).toEqual([{ path: "derivedDataPath", status: "added", binary: false }]);
 	});
 });

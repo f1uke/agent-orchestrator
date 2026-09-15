@@ -33,6 +33,13 @@ const (
 	// has to REFUSE it, so the three "this file cannot be round-tripped"
 	// verdicts share one vocabulary.
 	UnavailableTruncated = "truncated"
+	// UnavailableDirectory and UnavailableSubmodule are paths that EXIST but are
+	// not files. They are reasons rather than a NotFound because "File not
+	// found" about a directory the reader is looking at is simply untrue, and it
+	// gives them nothing to do next. A reason says what the path is, which for a
+	// submodule is information a reviewer actively wants.
+	UnavailableDirectory = "directory"
+	UnavailableSubmodule = "submodule"
 )
 
 // WorkspaceFileResult is a file's content plus the per-line map of its
@@ -58,6 +65,18 @@ type WorkspaceFileResult struct {
 	// this a client cannot reconstruct the file's exact bytes, and a save would
 	// silently drop the last newline.
 	TrailingNewline bool
+	// EntryCount is how many untracked files a Reason==UnavailableDirectory path
+	// holds, so the viewer can say how much it is standing in for. Zero when the
+	// count is unknown.
+	EntryCount int
+	// SubmoduleFrom and SubmoduleTo are the commits a Reason==UnavailableSubmodule
+	// path moved between, measured the same way the Changes list is: merge-base
+	// with the target branch, to the working tree. From is empty for a newly
+	// added submodule. This is the whole reason a submodule click shows anything
+	// at all - a bumped submodule IS the change, and it is the one thing about
+	// it a reviewer needs.
+	SubmoduleFrom string
+	SubmoduleTo   string
 }
 
 // refTarget classifies a terminal file reference by SHAPE and, for the two
@@ -467,7 +486,81 @@ func (s *Service) ReadWorkspaceFile(ctx context.Context, id domain.SessionID, fi
 	if err != nil {
 		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found in workspace")
 	}
-	return readFileForViewer(ctx, confined, filepath.ToSlash(rel))
+	slashRel := filepath.ToSlash(rel)
+	if res, ok := s.describeNonFile(ctx, rec, workspace, confined, slashRel); ok {
+		return res, nil
+	}
+	return readFileForViewer(ctx, confined, slashRel)
+}
+
+// describeNonFile answers for a workspace path that exists but is not a file:
+// a git submodule, or a directory. It reports ok=false for anything the normal
+// reader should handle, including a path that is simply missing.
+//
+// It runs BEFORE readFileForViewer rather than inside it because naming what a
+// path is takes repository knowledge - the submodule's two commits are measured
+// against the session's target branch, exactly as the Changes list is - and
+// readFileForViewer is also used for files outside any workspace.
+func (s *Service) describeNonFile(
+	ctx context.Context, rec domain.SessionRecord, workspace, abs, rel string,
+) (WorkspaceFileResult, bool) {
+	info, err := os.Stat(abs)
+	if err != nil || !info.IsDir() {
+		return WorkspaceFileResult{}, false
+	}
+	if isSubmodulePath(ctx, workspace, rel) {
+		from, to := s.submoduleRange(ctx, rec, workspace, abs, rel)
+		return WorkspaceFileResult{
+			Path: rel, Reason: UnavailableSubmodule, SubmoduleFrom: from, SubmoduleTo: to,
+		}, true
+	}
+	_, count := listUntrackedDir(ctx, workspace, rel)
+	return WorkspaceFileResult{Path: rel, Reason: UnavailableDirectory, EntryCount: count}, true
+}
+
+// isSubmodulePath reports whether the index records rel as a gitlink (mode
+// 160000). The index is asked rather than the filesystem because a submodule's
+// directory looks like any other directory on disk.
+func isSubmodulePath(ctx context.Context, workspace, rel string) bool {
+	out, err := gitOutput(ctx, workspace, "ls-files", "-s", "-z", "--", rel)
+	if err != nil {
+		return false
+	}
+	for _, rec := range splitNUL(string(out)) {
+		if strings.HasPrefix(rec, "160000 ") {
+			return true
+		}
+	}
+	return false
+}
+
+// submoduleRange resolves the commits a submodule moved between: the gitlink
+// recorded at the merge-base with the session's target branch, and the commit
+// the submodule is actually checked out at now. From is empty when the target
+// branch has no such submodule (a newly added one) or cannot be resolved.
+func (s *Service) submoduleRange(
+	ctx context.Context, rec domain.SessionRecord, workspace, abs, rel string,
+) (from, to string) {
+	if out, err := gitOutput(ctx, abs, "rev-parse", "HEAD"); err == nil {
+		to = strings.TrimSpace(string(out))
+	}
+	branch, _ := s.resolveTargetBranch(ctx, rec, workspace)
+	if branch == "" {
+		return "", to
+	}
+	ref, ok := resolveBranchRef(ctx, workspace, branch)
+	if !ok {
+		return "", to
+	}
+	baseOut, err := gitOutput(ctx, workspace, "merge-base", ref, "HEAD")
+	if err != nil {
+		return "", to
+	}
+	base := strings.TrimSpace(string(baseOut))
+	if out, err := gitOutput(ctx, workspace, "rev-parse", base+":"+rel); err == nil {
+		from = strings.TrimSpace(string(out))
+	}
+	return from, to
 }
 
 // readFileForViewer turns a resolved file into viewer content: a size cap
@@ -477,7 +570,16 @@ func (s *Service) ReadWorkspaceFile(ctx context.Context, id domain.SessionID, fi
 // Reason, so the viewer can say why rather than failing.
 func readFileForViewer(ctx context.Context, abs, display string) (WorkspaceFileResult, error) {
 	info, err := os.Stat(abs)
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil {
+		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found")
+	}
+	if info.IsDir() {
+		// The path exists; it is just not a file. Callers inside a workspace are
+		// already answered in more detail by describeNonFile - this is the
+		// backstop for an absolute path typed in a terminal.
+		return WorkspaceFileResult{Path: display, Reason: UnavailableDirectory}, nil
+	}
+	if !info.Mode().IsRegular() {
 		return WorkspaceFileResult{}, apierr.NotFound("WORKSPACE_FILE_NOT_FOUND", "File not found")
 	}
 	if info.Size() > maxWorkspaceFileBytes {

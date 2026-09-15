@@ -2145,6 +2145,8 @@ export interface components {
             binary: boolean;
             committed: boolean;
             deletions: number;
+            entryCount?: number;
+            kind: string;
             oldPath?: string;
             path: string;
             status: string;
@@ -3757,9 +3759,12 @@ export interface components {
             available: boolean;
             changedLines: components["schemas"]["LineChangeDTO"][];
             contentHash?: string;
+            entryCount?: number;
             lines: components["schemas"]["DiffContextLineDTO"][];
             path: string;
             reason?: string;
+            submoduleFrom?: string;
+            submoduleTo?: string;
             trailingNewline: boolean;
             truncated: boolean;
         };

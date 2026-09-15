@@ -123,6 +123,57 @@ describe("WorkspaceFileView", () => {
 		await waitFor(() => expect(screen.getByText(/too large/i)).toBeInTheDocument());
 	});
 
+	// "File not found" about a folder that plainly exists is untrue and leaves
+	// the reader nothing to do. It says what the path is, and how much of it
+	// the list is standing in for.
+	it("says a folder is a folder, and how many files it holds", async () => {
+		body = {
+			available: false,
+			path: "derivedDataPath",
+			reason: "directory",
+			entryCount: 12438,
+			lines: [],
+			changedLines: [],
+			truncated: false,
+		};
+		renderView(vi.fn(), "derivedDataPath");
+		await waitFor(() => expect(screen.getByText(/folder, not a file/i)).toBeInTheDocument());
+		expect(screen.getByText(/12,438 untracked files/i)).toBeInTheDocument();
+		expect(screen.queryByTestId("monaco-file-editor")).toBeNull();
+	});
+
+	// A submodule bump IS the change a reviewer came for, so the row opens onto
+	// the two commits rather than onto an error.
+	it("shows the commits a submodule moved between", async () => {
+		body = {
+			available: false,
+			path: "vendor/sub",
+			reason: "submodule",
+			submoduleFrom: "898af474ff78b98d8b3509125f49009642283106",
+			submoduleTo: "4c1d90e2b7a3f5188d0cc1a0f4b2e9d7a6c5b4a3",
+			lines: [],
+			changedLines: [],
+			truncated: false,
+		};
+		renderView(vi.fn(), "vendor/sub");
+		await waitFor(() => expect(screen.getByText(/git submodule, not a file/i)).toBeInTheDocument());
+		expect(screen.getByText("898af47 → 4c1d90e")).toBeInTheDocument();
+	});
+
+	it("says where a newly added submodule starts", async () => {
+		body = {
+			available: false,
+			path: "vendor/sub",
+			reason: "submodule",
+			submoduleTo: "4c1d90e2b7a3f5188d0cc1a0f4b2e9d7a6c5b4a3",
+			lines: [],
+			changedLines: [],
+			truncated: false,
+		};
+		renderView(vi.fn(), "vendor/sub");
+		await waitFor(() => expect(screen.getByText("Added at 4c1d90e")).toBeInTheDocument());
+	});
+
 	it("passes no change markers for a file outside any git repo", async () => {
 		body = { ...response, path: "/Users/x/notes.md", changedLines: [] };
 		renderView(vi.fn(), "/Users/x/notes.md");

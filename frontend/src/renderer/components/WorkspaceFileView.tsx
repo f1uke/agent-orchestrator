@@ -2,7 +2,7 @@ import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, us
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, FolderOpen, GitCompare } from "lucide-react";
 import { useSaveWorkspaceFile } from "../hooks/useSaveWorkspaceFile";
-import { useWorkspaceFile, workspaceFileQueryKey } from "../hooks/useWorkspaceFile";
+import { type WorkspaceFile, useWorkspaceFile, workspaceFileQueryKey } from "../hooks/useWorkspaceFile";
 import { useWorkspaceFileDiff } from "../hooks/useWorkspaceFileDiff";
 import { apiErrorMessage } from "../lib/api-client";
 import { ACCENT, MONO, PALETTE as P, VIEWER as V, accentMix } from "../lib/comment-inbox";
@@ -30,7 +30,43 @@ const MonacoFileEditor = lazy(() => import("./MonacoFileEditor"));
 const UNAVAILABLE_MESSAGE: Record<string, string> = {
 	too_large: "This file is too large to display.",
 	binary: "This looks like a binary file, so it can’t be displayed.",
+	directory: "This is a folder, not a file.",
+	submodule: "This is a git submodule, not a file.",
 };
+
+/**
+ * What the header chip says when the path is not a file. A folder labelled FILE
+ * is the same small lie the old "File not found" told, one line higher up.
+ */
+const ENTRY_CHIP: Record<string, string> = {
+	directory: "FOLDER",
+	submodule: "SUBMODULE",
+};
+
+/** Short form of a commit sha, the length git itself abbreviates to. */
+const shortSha = (sha: string) => sha.slice(0, 7);
+
+/**
+ * The second line of an unavailable note: what the viewer is looking at, for
+ * the reasons where that is the information the reader actually came for.
+ *
+ * A submodule bump IS a change a reviewer needs to read, so its row opens onto
+ * the two commits rather than onto a dead end. A stood-in folder says how much
+ * it is standing in for. Saying "File not found" about either - which is what
+ * this viewer used to do - is both untrue and useless.
+ */
+function unavailableDetail(file: WorkspaceFile): string | null {
+	if (file.reason === "submodule") {
+		if (!file.submoduleTo) return null;
+		return file.submoduleFrom
+			? `${shortSha(file.submoduleFrom)} → ${shortSha(file.submoduleTo)}`
+			: `Added at ${shortSha(file.submoduleTo)}`;
+	}
+	if (file.reason === "directory" && file.entryCount) {
+		return `It holds ${file.entryCount.toLocaleString()} untracked ${file.entryCount === 1 ? "file" : "files"}, not listed here.`;
+	}
+	return null;
+}
 
 /** How long "Saved" stays before clearing. A persistent badge would compete with the dirty dot. */
 const SAVED_FLASH_MS = 1400;
@@ -561,7 +597,7 @@ export function WorkspaceFileView({
 							padding: "3px 7px",
 						}}
 					>
-						FILE
+						{ENTRY_CHIP[file?.reason ?? ""] ?? "FILE"}
 					</span>
 				)}
 				<PathLabel
@@ -718,9 +754,24 @@ export function WorkspaceFileView({
 				</p>
 			)}
 			{file && (!file.available || lines.length === 0) && (
-				<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>
-					{(file.reason && UNAVAILABLE_MESSAGE[file.reason]) || "This file can’t be displayed."}
-				</p>
+				<div style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>
+					<p style={{ margin: 0 }}>
+						{(file.reason && UNAVAILABLE_MESSAGE[file.reason]) || "This file can’t be displayed."}
+					</p>
+					{unavailableDetail(file) && (
+						<p
+							style={{
+								margin: "6px 0 0",
+								color: P.muted,
+								// Mono for a pair of shas, which the eye compares character by
+								// character; prose stays prose.
+								fontFamily: file.reason === "submodule" ? MONO : undefined,
+							}}
+						>
+							{unavailableDetail(file)}
+						</p>
+					)}
+				</div>
 			)}
 			{file && file.available && lines.length > 0 && (
 				<Suspense fallback={<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>Opening editor…</p>}>

@@ -1,6 +1,7 @@
 import {
 	FileStack,
 	FileText,
+	Folder,
 	FolderOpen,
 	GitBranch,
 	List,
@@ -518,6 +519,11 @@ export function FilesPanel({
 												getFileLabel={displayName}
 												renderLead={(f) => <UncommittedDot file={f} />}
 												renderMeta={(f) => <RowMeta file={f} />}
+												renderIcon={(f) =>
+													isDirectoryEntry(f) ? (
+														<Folder aria-hidden="true" className="file-tree__icon file-tree__icon--folder" />
+													) : null
+												}
 											/>
 										) : (
 											<div role="listbox" aria-label="Changed files" className="files-panel__flat">
@@ -626,6 +632,16 @@ const STATUS_TITLE: Record<string, string> = {
 	renamed: "Renamed",
 };
 
+/**
+ * A changed entry that is NOT a file: an untracked directory standing in for
+ * more files than the list will expand (see the server's maxUntrackedPerDir).
+ * Nothing about it can be opened in the file viewer, so every renderer that
+ * treats an entry as a file has to ask first.
+ */
+function isDirectoryEntry(file: ChangedFile): boolean {
+	return file.kind === "directory";
+}
+
 /** Our own signal, not GitLab's: this file's change is not committed yet. */
 function UncommittedDot({ file }: { file: ChangedFile }) {
 	if (file.committed) return null;
@@ -667,6 +683,10 @@ function RowMeta({ file, className }: { file: ChangedFile; className?: string })
  * path fragment in the tree.
  */
 function displayName(file: ChangedFile, label = file.path.slice(file.path.lastIndexOf("/") + 1)): string {
+	// A trailing slash is how a folder names itself. It used to arrive here from
+	// the server as part of the path, which is exactly what let a directory be
+	// clicked as a file; now it is a rendering choice made from a known kind.
+	if (isDirectoryEntry(file)) return `${label}/`;
 	if (!file.oldPath) return label;
 	return `${file.oldPath.slice(file.oldPath.lastIndexOf("/") + 1)} → ${label}`;
 }
@@ -714,6 +734,16 @@ function ChangedFileRow({
 }
 
 function Counts({ file, className }: { file: ChangedFile; className?: string }) {
+	// A directory has no lines, so "+0 −0" says nothing. Its size is the number
+	// of untracked files it stands in for - the one fact that tells the reader
+	// whether they are missing anything worth looking at.
+	if (isDirectoryEntry(file)) {
+		return (
+			<span className={cn(className, "files-panel__counts--binary")}>
+				{file.entryCount ? `${file.entryCount.toLocaleString()} files` : "folder"}
+			</span>
+		);
+	}
 	// git emits "-" counts for a binary file; rendering them arithmetically
 	// produces a nonsense "+0 −0".
 	if (file.binary) {
