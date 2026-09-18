@@ -4,9 +4,10 @@
 // It answers two questions and does one thing.
 //
 //   - Project: is there an Xcode project at the root of this session's worktree,
-//     and what can be built from it. The run bar's whole visibility test is the
-//     first half of that answer, so "not an iOS project" is an ordinary result
-//     here, not an error.
+//     and what can be built from it - its schemes AND its build configurations,
+//     which are two independent axes rather than one. The run bar's whole
+//     visibility test is the first half of that answer, so "not an iOS project"
+//     is an ordinary result here, not an error.
 //   - Start: run `ao sim run` in the session's worktree, in a pane the renderer
 //     attaches its terminal to.
 //
@@ -37,11 +38,17 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcodeproj"
 )
 
-// schemeTTL is how long a scheme listing is reused. `xcodebuild -list` takes
-// seconds on a real project and the answer changes when somebody edits the
-// project file, which is rarely - so the bar opens instantly on every visit
-// after the first, and a scheme added this morning appears within a minute.
-const schemeTTL = time.Minute
+// listingTTL is how long a project listing is reused. `xcodebuild -list` takes
+// seconds on a real project (~13 s cold on nter-ios-app) and the answer changes
+// when somebody edits the project file, which is rarely - so the bar opens
+// instantly on every visit after the first, and a scheme added this morning
+// appears within a minute.
+//
+// The cache is a floor on staleness, not a ceiling: a human who ran `xcodegen`
+// in the terminal and reached straight for the picker gets a fresh answer,
+// because opening either dropdown asks with refresh=true, which skips this
+// entirely. See Project.
+const listingTTL = time.Minute
 
 // Sessions is the slice of the session store this package needs: where a
 // session's worktree is. The SQLite store satisfies it.
@@ -64,12 +71,21 @@ type Project struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Kind string `json:"kind"`
-	// Schemes are the app environments, read live from the project.
+	// Schemes are what can be built, read live from the project.
 	Schemes []string `json:"schemes"`
 	// SchemesError says why the list is empty when the project itself was
 	// found. A bar that showed an empty picker with no explanation would be
 	// indistinguishable from one still loading.
 	SchemesError string `json:"schemesError,omitempty"`
+	// Configurations are which environment it is built FOR - Debug, Release,
+	// Dev, UAT, whatever this project defines. It is a separate axis from the
+	// scheme and is never derived from one: a project whose schemes are the app
+	// and a library keeps its entire environment here.
+	Configurations []string `json:"configurations"`
+	// ConfigurationsError says why THAT list is empty. It is its own field
+	// rather than sharing SchemesError because either question can fail on its
+	// own, and a picker must say which one did.
+	ConfigurationsError string `json:"configurationsError,omitempty"`
 }
 
 // Run is a build the bar started, and what became of it.
@@ -77,7 +93,10 @@ type Run struct {
 	// HandleID is the runtime handle the renderer attaches its terminal to.
 	HandleID string `json:"handleId"`
 	Scheme   string `json:"scheme"`
-	UDID     string `json:"udid"`
+	// Configuration is the environment it was built for. Recorded so the bar can
+	// re-select what is already running rather than resetting to a default.
+	Configuration string `json:"configuration"`
+	UDID          string `json:"udid"`
 	// Running is whether the pane is still there. It is not "the build
 	// succeeded": the pane's keep-alive shell outlives the command on purpose,
 	// so a failed build's output is still on screen to read.
@@ -87,8 +106,10 @@ type Run struct {
 
 // Manager is the surface the HTTP controller depends on.
 type Manager interface {
-	Project(ctx context.Context, id domain.SessionID) (Project, error)
-	Start(ctx context.Context, id domain.SessionID, scheme, udid string) (Run, error)
+	// Project reads what this session can build. refresh skips the cache, which
+	// is what opening a picker in the bar does.
+	Project(ctx context.Context, id domain.SessionID, refresh bool) (Project, error)
+	Start(ctx context.Context, id domain.SessionID, scheme, configuration, udid string) (Run, error)
 	Current(ctx context.Context, id domain.SessionID) (Run, bool, error)
 }
 
@@ -108,10 +129,10 @@ type Service struct {
 
 	mu     sync.Mutex
 	runs   map[domain.SessionID]Run
-	cached map[domain.SessionID]cachedSchemes
+	cached map[domain.SessionID]cachedListing
 }
 
-type cachedSchemes struct {
+type cachedListing struct {
 	project Project
 	at      time.Time
 }
@@ -134,7 +155,7 @@ func New(sessions Sessions, runtime Runtime, aoBinary string, opts ...Option) *S
 		aoBinary: aoBinary,
 		now:      time.Now,
 		runs:     map[domain.SessionID]Run{},
-		cached:   map[domain.SessionID]cachedSchemes{},
+		cached:   map[domain.SessionID]cachedListing{},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -156,18 +177,20 @@ func HandleID(id domain.SessionID) string { return "iosrun-" + string(id) }
 // Project answers what this session can build. A worktree with no Xcode project
 // yields a zero Project and no error: that is the run bar's visibility test, and
 // most worktrees answer it that way.
-func (s *Service) Project(ctx context.Context, id domain.SessionID) (Project, error) {
+func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool) (Project, error) {
 	dir, err := s.workspace(ctx, id)
 	if err != nil {
 		return Project{}, err
 	}
 	now := s.now()
-	s.mu.Lock()
-	if hit, ok := s.cached[id]; ok && now.Sub(hit.at) < schemeTTL {
+	if !refresh {
+		s.mu.Lock()
+		hit, ok := s.cached[id]
 		s.mu.Unlock()
-		return hit.project, nil
+		if ok && now.Sub(hit.at) < listingTTL {
+			return hit.project, nil
+		}
 	}
-	s.mu.Unlock()
 
 	found, err := xcodeproj.Find(dir)
 	if err != nil {
@@ -180,25 +203,77 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID) (Project, er
 		return Project{}, err
 	}
 	project := Project{Name: found.Name, Path: found.Path, Kind: string(found.Kind)}
-	schemes, err := xcodeproj.Schemes(ctx, s.run, dir, found)
+
+	// Both listings are separate `xcodebuild -list` invocations, and each takes
+	// seconds on a real project, so they run at the same time: asking them in
+	// sequence would double the wait a human sees when a dropdown opens.
+	var schemes, configurations []string
+	var schemesErr, configurationsErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		schemes, schemesErr = xcodeproj.Schemes(ctx, s.run, dir, found)
+	}()
+	go func() {
+		defer wg.Done()
+		configurations, configurationsErr = xcodeproj.Configurations(ctx, s.run, dir, found)
+	}()
+	wg.Wait()
+
 	switch {
-	case errors.Is(err, xcodeproj.ErrNoSchemes):
+	case errors.Is(schemesErr, xcodeproj.ErrNoSchemes):
 		project.SchemesError = "This project has no schemes, so there is nothing to build."
-	case err != nil:
+	case schemesErr != nil:
 		// The project is still real, and the bar still renders: saying which
 		// tool failed beats a picker that is silently empty.
-		project.SchemesError = firstLine(err.Error())
+		project.SchemesError = firstLine(schemesErr.Error())
 	default:
 		project.Schemes = schemes
+	}
+	switch {
+	case errors.Is(configurationsErr, xcodeproj.ErrNoConfigurations):
+		// Never "so Debug it is". Every Xcode project defines configurations, so
+		// an empty list means the question failed - and the project this feature
+		// was built for has no Debug at all, which is precisely the case a
+		// fallback would turn into a three-minute build that could not work.
+		project.ConfigurationsError = "No build configurations could be read from this project, so there is no safe one to build."
+	case configurationsErr != nil:
+		project.ConfigurationsError = firstLine(configurationsErr.Error())
+	default:
+		project.Configurations = configurations
 	}
 	s.remember(id, project, now)
 	return project, nil
 }
 
+// DefaultConfiguration is the configuration to build when nobody has said, or
+// "" when there is no safe answer and the human has to choose.
+//
+// 🗝 The whole rule, in one place, so the bar, the daemon and `ao sim run`
+// cannot disagree about what Run means:
+//
+//  1. exactly one configuration - use it, ask nothing (the scheme picker's rule);
+//  2. the list contains Debug - use the spelling the project used;
+//  3. otherwise - no default. nter-ios-app's configurations are Dev, Mock-api,
+//     Mock-local, Production, Release and UAT, and picking any of them for
+//     somebody would be picking their app's environment for them.
+func DefaultConfiguration(configurations []string) string {
+	if len(configurations) == 1 {
+		return configurations[0]
+	}
+	for _, configuration := range configurations {
+		if strings.EqualFold(configuration, "Debug") {
+			return configuration
+		}
+	}
+	return ""
+}
+
 func (s *Service) remember(id domain.SessionID, project Project, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cached[id] = cachedSchemes{project: project, at: at}
+	s.cached[id] = cachedListing{project: project, at: at}
 }
 
 // Start runs `ao sim run` in the session's worktree, in a pane of its own.
@@ -207,12 +282,12 @@ func (s *Service) remember(id domain.SessionID, project Project, at time.Time) {
 // run safe - the lease taken before the build, the build that names no device,
 // the boot cap - lives there and is exercised identically whether a human
 // pressed a button or an agent typed the command.
-func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, udid string) (Run, error) {
+func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, configuration, udid string) (Run, error) {
 	dir, err := s.workspace(ctx, id)
 	if err != nil {
 		return Run{}, err
 	}
-	project, err := s.Project(ctx, id)
+	project, err := s.Project(ctx, id, false)
 	if err != nil {
 		return Run{}, err
 	}
@@ -232,6 +307,21 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, udid s
 			fmt.Sprintf("%s has no scheme called %q.", project.Name, scheme),
 			map[string]any{"schemes": project.Schemes})
 	}
+	// The configuration is required, and it is not defaulted here. A build of
+	// the wrong environment installs an app pointed at the wrong backend, and
+	// `-configuration Debug` against a project that has no Debug fails after
+	// minutes with an error about an empty PODS_ROOT - which is the bug this
+	// picker exists to end.
+	configuration = strings.TrimSpace(configuration)
+	if configuration == "" {
+		return Run{}, apierr.Invalid("IOS_RUN_NO_CONFIGURATION", "Choose a build configuration to run.",
+			map[string]any{"configurations": project.Configurations})
+	}
+	if len(project.Configurations) > 0 && !contains(project.Configurations, configuration) {
+		return Run{}, apierr.Invalid("IOS_RUN_UNKNOWN_CONFIGURATION",
+			fmt.Sprintf("%s has no build configuration called %q.", project.Name, configuration),
+			map[string]any{"configurations": project.Configurations})
+	}
 
 	handle := HandleID(id)
 	// Tear down whatever is under the handle first. Destroy is idempotent, so
@@ -240,7 +330,7 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, udid s
 	if err := s.runtime.Destroy(ctx, ports.RuntimeHandle{ID: handle}); err != nil {
 		return Run{}, fmt.Errorf("ios run: clear the previous pane: %w", err)
 	}
-	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme}
+	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme, "--configuration", configuration}
 	if trimmed := strings.TrimSpace(udid); trimmed != "" {
 		argv = append(argv, "--udid", trimmed)
 	}
@@ -260,7 +350,14 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, udid s
 	}); err != nil {
 		return Run{}, fmt.Errorf("ios run: start the pane: %w", err)
 	}
-	run := Run{HandleID: handle, Scheme: scheme, UDID: strings.TrimSpace(udid), Running: true, StartedAt: s.now().UTC()}
+	run := Run{
+		HandleID:      handle,
+		Scheme:        scheme,
+		Configuration: configuration,
+		UDID:          strings.TrimSpace(udid),
+		Running:       true,
+		StartedAt:     s.now().UTC(),
+	}
 	s.mu.Lock()
 	s.runs[id] = run
 	s.mu.Unlock()

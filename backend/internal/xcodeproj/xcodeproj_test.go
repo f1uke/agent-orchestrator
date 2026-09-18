@@ -3,6 +3,7 @@ package xcodeproj
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -265,5 +266,178 @@ func TestSchemes_FallsBackToTheWholeListWhenTheFilterFindsNothing(t *testing.T) 
 	}
 	if strings.Join(schemes, ",") != "App,AppTests" {
 		t.Fatalf("schemes %v", schemes)
+	}
+}
+
+// workspaceAt writes a .xcworkspace whose contents.xcworkspacedata references
+// the given locations, in order - the same file Xcode writes.
+func workspaceAt(t *testing.T, dir, name string, locations ...string) Project {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(path, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	b.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Workspace version = \"1.0\">\n")
+	for _, location := range locations {
+		fmt.Fprintf(&b, "   <FileRef location = %q>\n   </FileRef>\n", location)
+	}
+	b.WriteString("</Workspace>\n")
+	if err := os.WriteFile(filepath.Join(path, "contents.xcworkspacedata"), []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return Project{Kind: KindWorkspace, Name: name, Path: path}
+}
+
+// byProject answers each `-list` per project path, so a test can give the app
+// and a pod different configuration lists and see which one is read.
+func byProject(t *testing.T, answers map[string]string) (Runner, *[]string) {
+	t.Helper()
+	var asked []string
+	return func(_ context.Context, _, _ string, args ...string) ([]byte, error) {
+		path := args[len(args)-1]
+		asked = append(asked, filepath.Base(path))
+		out, ok := answers[filepath.Base(path)]
+		if !ok {
+			return nil, errors.New("exit status 66")
+		}
+		return []byte(out), nil
+	}, &asked
+}
+
+// 🗝 The case this whole change exists for: a real project whose configurations
+// do not include Debug. nter-ios-app lists exactly these.
+func TestConfigurations_ReadsThemFromTheProjectInsideAWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	mkdirs(t, dir, filepath.Join("NterApp", "NterApp.xcodeproj"), filepath.Join("Pods", "Pods.xcodeproj"))
+	workspace := workspaceAt(t, dir, "NterWorkspace.xcworkspace",
+		"group:NterApp/NterApp.xcodeproj", "group:Pods/Pods.xcodeproj")
+	run, asked := byProject(t, map[string]string{
+		"NterApp.xcodeproj": `{"project":{"name":"NterApp","configurations":["Dev","Mock-api","Production","Release","UAT"],"schemes":["NterApp"]}}`,
+		"Pods.xcodeproj":    `{"project":{"name":"Pods","configurations":["Debug","Release"],"schemes":[]}}`,
+	})
+
+	configurations, err := Configurations(context.Background(), run, dir, workspace)
+	if err != nil {
+		t.Fatalf("configurations: %v", err)
+	}
+	if strings.Join(configurations, ",") != "Dev,Mock-api,Production,Release,UAT" {
+		t.Fatalf("configurations %v, want the app's own", configurations)
+	}
+	// The Pods project mirrors the app's configurations and adds CocoaPods' own.
+	// Reading it - or merging it in - would offer a configuration the app cannot
+	// be built with, which is the doomed build this feature exists to prevent.
+	if strings.Join(*asked, ",") != "NterApp.xcodeproj" {
+		t.Fatalf("asked %v; the first project that answers is the answer, and Pods is never asked", *asked)
+	}
+}
+
+// A workspace lists its schemes and nothing else, so asking the WORKSPACE for
+// configurations returns an empty list however the project is laid out.
+func TestConfigurations_NeverAsksTheWorkspaceItself(t *testing.T) {
+	dir := t.TempDir()
+	mkdirs(t, dir, filepath.Join("App", "App.xcodeproj"))
+	workspace := workspaceAt(t, dir, "App.xcworkspace", "group:App/App.xcodeproj")
+	run, asked := byProject(t, map[string]string{
+		"App.xcodeproj": `{"project":{"configurations":["Debug","Release"]}}`,
+	})
+
+	if _, err := Configurations(context.Background(), run, dir, workspace); err != nil {
+		t.Fatalf("configurations: %v", err)
+	}
+	for _, target := range *asked {
+		if strings.HasSuffix(target, ".xcworkspace") {
+			t.Fatalf("asked %v; a workspace listing has no configurations in it", *asked)
+		}
+	}
+}
+
+func TestConfigurations_ReadsAPlainProjectDirectly(t *testing.T) {
+	run, _ := runner(`{"project":{"name":"Weather","configurations":["Debug","Release"],"schemes":["Weather"]}}`, nil)
+
+	configurations, err := Configurations(context.Background(), run, "/w", Project{Kind: KindProject, Path: "/w/Weather.xcodeproj"})
+	if err != nil {
+		t.Fatalf("configurations: %v", err)
+	}
+	if strings.Join(configurations, ",") != "Debug,Release" {
+		t.Fatalf("configurations %v", configurations)
+	}
+}
+
+// A ref inside Pods/ is CocoaPods', and a workspace that holds nothing else has
+// no configuration list to give. Answering "Debug, Release" from Pods.xcodeproj
+// would be a confident wrong answer.
+func TestConfigurations_IgnoresProjectsADependencyManagerOwns(t *testing.T) {
+	dir := t.TempDir()
+	mkdirs(t, dir, filepath.Join("Pods", "Pods.xcodeproj"))
+	workspace := workspaceAt(t, dir, "App.xcworkspace", "group:Pods/Pods.xcodeproj")
+	run, asked := byProject(t, map[string]string{
+		"Pods.xcodeproj": `{"project":{"configurations":["Debug","Release"]}}`,
+	})
+
+	if _, err := Configurations(context.Background(), run, dir, workspace); !errors.Is(err, ErrNoConfigurations) {
+		t.Fatalf("configurations: %v, want ErrNoConfigurations", err)
+	}
+	if len(*asked) != 0 {
+		t.Fatalf("asked %v, want nothing", *asked)
+	}
+}
+
+// group: is relative to the enclosing Group, and a Group can nest. Getting this
+// wrong resolves a path that does not exist, which looks exactly like a project
+// with no configurations.
+func TestConfigurations_ResolvesARefNestedInAGroup(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "App.xcworkspace")
+	if err := os.MkdirAll(path, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	contents := `<?xml version="1.0" encoding="UTF-8"?>
+<Workspace version = "1.0">
+   <Group location = "group:apps" name = "apps">
+      <FileRef location = "group:Weather/Weather.xcodeproj"></FileRef>
+   </Group>
+</Workspace>`
+	if err := os.WriteFile(filepath.Join(path, "contents.xcworkspacedata"), []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	run := Runner(func(_ context.Context, _, _ string, args ...string) ([]byte, error) {
+		got = args[len(args)-1]
+		return []byte(`{"project":{"configurations":["Debug"]}}`), nil
+	})
+
+	if _, err := Configurations(context.Background(), run, dir, Project{Kind: KindWorkspace, Name: "App.xcworkspace", Path: path}); err != nil {
+		t.Fatalf("configurations: %v", err)
+	}
+	if want := filepath.Join(dir, "apps", "Weather", "Weather.xcodeproj"); got != want {
+		t.Fatalf("listed %q, want %q", got, want)
+	}
+}
+
+// "No answer" and "no configurations" are the same result here, and neither is
+// permission to fall back to Debug: every Xcode project defines configurations,
+// so an empty list means the question failed.
+func TestConfigurations_EmptyIsItsOwnAnswer(t *testing.T) {
+	run, _ := runner(`{"project":{"configurations":[]}}`, nil)
+
+	if _, err := Configurations(context.Background(), run, "/w", Project{Kind: KindProject}); !errors.Is(err, ErrNoConfigurations) {
+		t.Fatalf("configurations: %v, want ErrNoConfigurations", err)
+	}
+}
+
+// A generic simulator destination means EVERY architecture the SDK supports, and
+// on an Apple Silicon Mac that includes an x86_64 slice no simulator here runs.
+// Measured on nter-ios-app: the whole project compiles and then the x86_64 link
+// fails against an arm64-only xcframework, which is a doomed build dressed up as
+// a compiler error.
+func TestBuildArgs_BuildsOnlyThisMachinesArchitecture(t *testing.T) {
+	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev"), " ")
+
+	// ARCHS, not ONLY_ACTIVE_ARCH: a target that sets ONLY_ACTIVE_ARCH=NO of its
+	// own - which CocoaPods writes into the Pods project - beats the flag, and
+	// the x86_64 slice comes back.
+	if !strings.Contains(line, "ARCHS=$(NATIVE_ARCH_ACTUAL)") {
+		t.Fatalf("the build must not ask for architectures this machine cannot run: %q", line)
 	}
 }

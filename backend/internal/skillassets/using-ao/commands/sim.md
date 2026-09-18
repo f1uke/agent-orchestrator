@@ -422,12 +422,14 @@ Build this project from source, install what it produced, and launch it - the wh
 | Flag                    | Description                                                              |
 | ----------------------- | ------------------------------------------------------------------------ |
 | `--scheme <name>`       | Xcode scheme to build. Defaults to the project's only scheme             |
-| `--configuration <cfg>` | Build configuration (default `Debug`)                                    |
+| `--configuration <cfg>` | Build configuration. Debug when the project has one; asked about when not |
 | `--udid <udid>`         | Run on this simulator instead of this session's own                      |
 | `--ttl <dur>`           | How long to hold the device afterwards (default 30m)                     |
 | `--json`                | Output the result as JSON                                                |
 
 The project is whatever `.xcworkspace` or `.xcodeproj` sits at the **root of the current directory**; a workspace wins over a project when both are there. Only the top level is searched, so a monorepo that keeps its app in a subdirectory has to be run from that subdirectory. The schemes come from `xcodebuild -list` at the moment you run it - there is nothing to configure, and a scheme added to the project today is offered today.
+
+**The scheme and the configuration are two different axes, and both matter.** The scheme says WHAT to build, the configuration says WHICH ENVIRONMENT to build it for, and on a real app the environment is entirely in the configuration: `nter-ios-app`'s schemes are `NterApp` and `FNCore` - the app and a library - while its configurations are `Dev`, `Mock-api`, `Mock-local`, `Production`, `Release` and `UAT`. There is **no `Debug`** there, and building one produces an app that cannot work: CocoaPods generates no xcconfig for a configuration that does not exist, so `PODS_ROOT` expands to empty and the build dies minutes later on a file list whose path starts at `/`. So `--configuration` is resolved the same way `--scheme` is - the only one is used, `Debug` is taken when the project HAS one, and anything else is refused with the list. A name is matched case insensitively and the project's own spelling is what gets built, so `--configuration uat` builds `UAT`.
 
 **Why this exists rather than `xcodebuild -destination id=$AO_SIM_UDID`.** That call is the natural thing to reach for and it has two problems AO cannot fix from the outside: it consults no lease, and it aims a build at one named device. `ao sim run` splits those apart:
 
@@ -448,13 +450,13 @@ ao sim run
 ```
 
 ```bash
-# Pick the environment, on your own device ($AO_SIM_UDID)
-ao sim run --scheme NterDev
+# Pick the environment - scheme AND configuration - on your own device ($AO_SIM_UDID)
+ao sim run --scheme NterApp --configuration Dev
 ```
 
 ```bash
 # Build it, then drive what came up
-ao sim run --scheme NterDev && ao sim ax
+ao sim run --scheme NterApp --configuration UAT && ao sim ax
 ```
 
 ---

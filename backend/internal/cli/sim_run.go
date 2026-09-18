@@ -40,11 +40,16 @@ import (
 //     after three minutes of building something it turns out it may not install.
 
 const (
-	// simRunDefaultConfiguration is what "Run" means without being told. Debug
-	// is the build a human wants to look at: it has symbols, it is what Xcode's
-	// own Run button produces, and a Release build of most projects will not
-	// install on a simulator without signing configured.
-	simRunDefaultConfiguration = "Debug"
+	// simRunFallbackConfiguration is Debug - the configuration Xcode's own Run
+	// button produces, and the one this command used to pass unconditionally.
+	//
+	// ⚠ It is a FALLBACK for one case only: the project could not be asked what
+	// its configurations are. It is never a default over a list that was read.
+	// nter-ios-app's configurations are Dev, Mock-api, Mock-local, Production,
+	// Release and UAT - there is no Debug, and building it there dies after
+	// minutes with an xcfilelist path that starts at `/`, because CocoaPods
+	// generated no xcconfig for a configuration that does not exist.
+	simRunFallbackConfiguration = "Debug"
 	// simRunTTL is how long the device is held by default. Longer than
 	// install/launch's 10 minutes because a cold build of a real app spends
 	// most of it: a lease that lapses mid-build hands the device away in the
@@ -104,12 +109,16 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			"device that is shut down is booted on the way through, under the same " +
 			"two-simulator cap as `ao sim boot`.\n\n" +
 			"With no --scheme it builds the project's only scheme, and lists them rather " +
-			"than choosing when there are several. With no --udid it uses the simulator " +
-			"assigned to this session ($AO_SIM_UDID).",
+			"than choosing when there are several. --configuration works the same way, with " +
+			"one addition: a project that HAS a Debug configuration gets it by default, " +
+			"because that is what Xcode's Run button builds. A project without one - schemes " +
+			"for the app and its library, environments in the configurations - is asked " +
+			"about rather than guessed at. With no --udid it uses the simulator assigned to " +
+			"this session ($AO_SIM_UDID).",
 		Example: `  ao sim run
-  ao sim run --scheme NterDev
-  ao sim run --scheme Nter --configuration Release
-  ao sim run --scheme NterDev --udid 00000000-0000-0000-0000-000000000000 --json`,
+  ao sim run --scheme NterApp --configuration Dev
+  ao sim run --scheme NterApp --configuration UAT
+  ao sim run --scheme NterApp --configuration Dev --udid 00000000-0000-0000-0000-000000000000 --json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// The build's output goes to the terminal as it arrives, even under
@@ -129,7 +138,7 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&opts.scheme, "scheme", "", "Xcode scheme to build. Defaults to the project's only scheme")
-	f.StringVar(&opts.configuration, "configuration", simRunDefaultConfiguration, "Build configuration")
+	f.StringVar(&opts.configuration, "configuration", "", "Build configuration. Defaults to Debug when the project has one, and asks when it does not")
 	f.StringVar(&opts.udid, "udid", "", "Run on this simulator instead of this session's own")
 	f.StringVar(&opts.ttl, "ttl", "", "How long to hold the device afterwards (e.g. 30s, 10m, 1h). Default 30m")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
@@ -158,8 +167,9 @@ func (c *commandContext) runSimApp(
 	if err != nil {
 		return simRunResult{}, err
 	}
-	if strings.TrimSpace(configuration) == "" {
-		configuration = simRunDefaultConfiguration
+	configuration, err = c.resolveSimRunConfiguration(ctx, progress, dir, project, configuration)
+	if err != nil {
+		return simRunResult{}, err
 	}
 
 	// Boot first when the device is down: a lease on a shut-down simulator
@@ -267,6 +277,82 @@ func (c *commandContext) resolveSimRunScheme(ctx context.Context, dir string, pr
 		fmt.Fprintf(&b, "\n  ao sim run --scheme %s", s)
 	}
 	return "", usageError{errors.New(b.String())}
+}
+
+// resolveSimRunConfiguration decides which configuration to build.
+//
+// 🗝 Debug is a candidate here, never an assumption. The rule, in the order it
+// is applied:
+//
+//  1. a named configuration is matched against the project's own list, case
+//     insensitively, and the project's spelling is what gets passed on -
+//     `--configuration uat` builds `UAT`;
+//  2. one configuration in the project is used without asking, exactly as one
+//     scheme is;
+//  3. a project that HAS Debug gets Debug, because that is what Xcode's Run
+//     button builds;
+//  4. several, none of them Debug - refuse and list them. This is the
+//     nter-ios-app case, and choosing for somebody there is choosing which
+//     backend their app talks to.
+//
+// The one fallback: a project whose configurations cannot be READ at all builds
+// Debug and says so, which is what this command did before configurations were
+// listed. The run bar blocks instead of falling back, because a human waiting
+// on a doomed build has no error to read until it is over - a terminal has this
+// line and xcodebuild's own.
+func (c *commandContext) resolveSimRunConfiguration(
+	ctx context.Context, progress io.Writer, dir string, project xcodeproj.Project, configuration string,
+) (string, error) {
+	named := strings.TrimSpace(configuration)
+	configurations, err := xcodeproj.Configurations(ctx, c.deps.CommandOutputInDir, dir, project)
+	if err != nil {
+		if named != "" {
+			return named, nil
+		}
+		noteProgress(progress, "Could not read %s's build configurations (%v), so building %s.\n",
+			project.Name, firstLineOf(err), simRunFallbackConfiguration)
+		return simRunFallbackConfiguration, nil
+	}
+	if named != "" {
+		for _, candidate := range configurations {
+			if strings.EqualFold(candidate, named) {
+				return candidate, nil
+			}
+		}
+		return "", usageError{errors.New(listSimRunConfigurations(
+			fmt.Sprintf("%s has no build configuration called %q. It has:", project.Name, named), configurations))}
+	}
+	if len(configurations) == 1 {
+		return configurations[0], nil
+	}
+	for _, candidate := range configurations {
+		if strings.EqualFold(candidate, simRunFallbackConfiguration) {
+			return candidate, nil
+		}
+	}
+	return "", usageError{errors.New(listSimRunConfigurations(
+		fmt.Sprintf("%s has %d build configurations and no Debug, so there is no unambiguous default - "+
+			"a build of the wrong one installs an app pointed at the wrong environment. Re-run with one of:",
+			project.Name, len(configurations)), configurations))}
+}
+
+// listSimRunConfigurations prints a refusal with one runnable command per
+// configuration, in the project's own order - which is how Xcode shows them,
+// and sorting it would separate Dev from UAT for no reader's benefit.
+func listSimRunConfigurations(lead string, configurations []string) string {
+	var b strings.Builder
+	b.WriteString(lead)
+	for _, candidate := range configurations {
+		fmt.Fprintf(&b, "\n  ao sim run --configuration %s", candidate)
+	}
+	return b.String()
+}
+
+// firstLineOf keeps a listing failure to the sentence that fits on a progress
+// line; the rest of xcodebuild's complaint runs to pages.
+func firstLineOf(err error) string {
+	line, _, _ := strings.Cut(err.Error(), "\n")
+	return line
 }
 
 // bootSimRunDevice powers the target on when it is down, and reports whether it

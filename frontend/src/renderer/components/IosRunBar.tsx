@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, Loader2, Play, Terminal } from "lucide-react";
-import { useIosProject, useStartIosRun, type IosProject } from "../hooks/useIosProject";
+import { useIosProject, useRefreshIosProject, useStartIosRun, type IosProject } from "../hooks/useIosProject";
 import { useSimDevices } from "../hooks/useSimDevices";
 import { useSimPower } from "../hooks/useSimPower";
 import type { Task } from "../lib/crew";
@@ -28,8 +28,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
  * would eventually disagree - which is precisely the failure the lease exists to
  * prevent.
  *
- * The environments are Xcode SCHEMES, read live from the project. There is
- * nothing to configure: a scheme added this morning is offered this morning.
+ * The app environment is TWO axes, not one, which is why there are two pickers
+ * and not a merged one. The SCHEME says what to build; the CONFIGURATION says
+ * which environment it is built for. On nter-ios-app the schemes are the app and
+ * a library, and every environment it has - Dev, UAT, Production - is a
+ * configuration. Both lists are read live from the project: there is nothing to
+ * configure, and a scheme or configuration added this morning is offered this
+ * morning.
  */
 export function IosRunBar({
 	onShowRun,
@@ -52,6 +57,7 @@ export function IosRunBar({
 	const run = data?.run;
 	const [problem, setProblem] = useState("");
 	const [scheme, setScheme] = useState<string | null>(null);
+	const [configuration, setConfiguration] = useState<string | null>(null);
 	const [udid, setUdid] = useState<string | null>(null);
 
 	// The device list is only asked for once the bar is really rendering, which
@@ -61,6 +67,11 @@ export function IosRunBar({
 	const devices = useSimDevices(hasProject);
 	const power = useSimPower(sessionId, setProblem);
 	const start = useStartIosRun(sessionId, setProblem);
+	// Opening either picker re-reads the project. The human's workflow is
+	// `xcodegen` in the terminal and then straight to the dropdown, which the
+	// 30-second poll notices far too late; an idle window still costs nothing,
+	// because nothing calls this until a dropdown opens.
+	const refresh = useRefreshIosProject(sessionId);
 
 	// The ONE reading of the scheme list, and every use below goes through it.
 	// The `?? []` is not redundant with the spec's `string[]`: a daemon that
@@ -68,6 +79,8 @@ export function IosRunBar({
 	// cannot stop a payload from arriving malformed. Do not read
 	// `project.schemes` anywhere else in this file.
 	const schemes = useMemo(() => project?.schemes ?? [], [project?.schemes]);
+	// Same treatment, same reason: the ONE reading of the configuration list.
+	const configurations = useMemo(() => project?.configurations ?? [], [project?.configurations]);
 	const booted = useMemo(() => (devices.data?.devices ?? []).filter((d) => d.state === "Booted"), [devices.data]);
 	const allDevices = devices.data?.devices ?? [];
 
@@ -75,6 +88,9 @@ export function IosRunBar({
 	// the run that is already going wins over both, so re-pressing Run after a
 	// failed build rebuilds what failed rather than whatever was first in a list.
 	const chosenScheme = scheme ?? run?.scheme ?? (schemes.length === 1 ? schemes[0] : null);
+	// The configuration, in the same order of preference, ending at a default
+	// that exists rather than an assumed Debug - see defaultConfiguration.
+	const chosenConfiguration = configuration ?? run?.configuration ?? defaultConfiguration(configurations);
 	// The device, in the same order of preference: what was picked, what the last
 	// run used, then the machine's one obvious candidate.
 	//
@@ -94,13 +110,25 @@ export function IosRunBar({
 	useEffect(() => {
 		if (scheme && schemes.length > 0 && !schemes.includes(scheme)) setScheme(null);
 	}, [scheme, schemes]);
+	useEffect(() => {
+		if (configuration && configurations.length > 0 && !configurations.includes(configuration)) setConfiguration(null);
+	}, [configuration, configurations]);
 
 	if (isLoading && !data) return null;
 	if (!project?.name) return null;
 
 	const watchingRun = terminalTarget.kind === "run";
 	const noSimulators = !devices.isLoading && allDevices.length === 0;
-	const blocked = blockedReason({ project, schemes, chosenScheme, chosenUdid, noSimulators, booted: booted.length });
+	const blocked = blockedReason({
+		project,
+		schemes,
+		configurations,
+		chosenScheme,
+		chosenConfiguration,
+		chosenUdid,
+		noSimulators,
+		booted: booted.length,
+	});
 
 	return (
 		<div
@@ -115,13 +143,13 @@ export function IosRunBar({
 				)}
 				disabled={Boolean(blocked) || start.isPending}
 				onClick={() => {
-					if (!chosenScheme) return;
+					if (!chosenScheme || !chosenConfiguration) return;
 					start.mutate(
-						{ scheme: chosenScheme, udid: chosenUdid ?? undefined },
+						{ scheme: chosenScheme, configuration: chosenConfiguration, udid: chosenUdid ?? undefined },
 						{ onSuccess: (started) => onShowRun(started.handleId) },
 					);
 				}}
-				title={blocked ?? undefined}
+				title={blocked ?? `Build ${chosenScheme} (${chosenConfiguration}) and run it`}
 				type="button"
 			>
 				{start.isPending ? (
@@ -135,7 +163,30 @@ export function IosRunBar({
 				Run
 			</button>
 
-			<SchemePicker chosen={chosenScheme} onChoose={setScheme} reason={project.schemesError ?? ""} schemes={schemes} />
+			<ChoicePicker
+				chosen={chosenScheme}
+				choices={schemes}
+				empty="No schemes"
+				label="Scheme to run"
+				onChoose={setScheme}
+				onOpen={refresh.mutate}
+				placeholder="Choose a scheme"
+				reason={project.schemesError ?? ""}
+				refreshing={refresh.isPending}
+				width="w-[150px]"
+			/>
+			<ChoicePicker
+				chosen={chosenConfiguration}
+				choices={configurations}
+				empty="No configurations"
+				label="Build configuration to run"
+				onChoose={setConfiguration}
+				onOpen={refresh.mutate}
+				placeholder="Choose a configuration"
+				reason={project.configurationsError ?? ""}
+				refreshing={refresh.isPending}
+				width="w-[180px]"
+			/>
 
 			<span aria-hidden className="h-4 w-px shrink-0 bg-border" />
 
@@ -161,6 +212,10 @@ export function IosRunBar({
 							watchingRun ? "text-foreground" : "text-muted-foreground",
 						)}
 						onClick={() => (watchingRun ? onShowAgent() : onShowRun(run.handleId))}
+						// The configuration is in the title rather than the label: the
+						// chip sits at the end of a strip that already wraps, and a
+						// second name in it would push the pickers onto a second row.
+						title={run.configuration ? `${run.scheme} (${run.configuration})` : run.scheme}
 						type="button"
 					>
 						{run.running ? (
@@ -184,7 +239,9 @@ export function IosRunBar({
 function blockedReason({
 	project,
 	schemes,
+	configurations,
 	chosenScheme,
+	chosenConfiguration,
 	chosenUdid,
 	noSimulators,
 	booted,
@@ -192,7 +249,10 @@ function blockedReason({
 	project: IosProject;
 	/** The scheme list the component already normalised - never the raw payload. */
 	schemes: string[];
+	/** Likewise the configurations. */
+	configurations: string[];
 	chosenScheme: string | null;
+	chosenConfiguration: string | null;
 	chosenUdid: string | null;
 	noSimulators: boolean;
 	booted: number;
@@ -202,6 +262,17 @@ function blockedReason({
 		return project.schemesError || `${project.name} listed no schemes, so there is nothing to build.`;
 	}
 	if (!chosenScheme) return "Choose which scheme to run.";
+	// 🗝 No configuration, no build - never a fallback to Debug. nter-ios-app has
+	// no Debug configuration at all, and building one there fails three minutes
+	// in with an empty PODS_ROOT. A blocked button that says which choice is
+	// missing costs a click; a doomed build costs the whole wait.
+	if (configurations.length === 0) {
+		return (
+			project.configurationsError ||
+			`${project.name} listed no build configurations, so there is nothing safe to build.`
+		);
+	}
+	if (!chosenConfiguration) return "Choose which build configuration to run - it is the app's environment.";
 	if (!chosenUdid) {
 		// Several booted is the ambiguity; several installed and none booted is
 		// the other one, and they want different words - the second asks the
@@ -212,63 +283,120 @@ function blockedReason({
 }
 
 /**
- * The app environment: the project's Xcode schemes, read live.
+ * Which configuration to build when nobody has said, or null when there is no
+ * safe answer and the human has to choose.
  *
- * It is the same shape as the device picker beside it rather than a shadcn
- * Select, so the two controls in one strip read as a pair - and for the same
- * layout reason that picker gives: the trigger is a FIXED width, so choosing a
- * long scheme name cannot shift the device picker sideways underneath it.
+ * 🗝 The same rule the daemon and `ao sim run` apply, so all three agree about
+ * what Run means: the only one is used without asking, a project that HAS Debug
+ * gets Debug because that is what Xcode's Run button builds, and anything else
+ * is a question rather than a guess. Picking Dev over UAT for somebody is
+ * picking which backend their app talks to.
  */
-function SchemePicker({
+function defaultConfiguration(configurations: string[]): string | null {
+	if (configurations.length === 1) return configurations[0];
+	return configurations.find((configuration) => configuration.toLowerCase() === "debug") ?? null;
+}
+
+/**
+ * One of the run bar's two live lists: the scheme to build, or the
+ * configuration to build it for.
+ *
+ * It is one component used twice rather than two, because the pair has to read
+ * as a pair - and it is the same shape as the device picker beside it rather
+ * than a shadcn Select for the same reason. The trigger is a FIXED width, so
+ * choosing a long name cannot shift the controls after it sideways.
+ *
+ * Opening it re-reads the project (onOpen). That is the moment the answer
+ * matters: the human's loop is `xcodegen` in the terminal, then this dropdown.
+ */
+function ChoicePicker({
 	chosen,
+	choices,
+	empty,
+	label,
 	onChoose,
+	onOpen,
+	placeholder,
 	reason,
-	schemes,
+	refreshing,
+	width,
 }: {
 	chosen: string | null;
-	onChoose: (scheme: string) => void;
+	choices: string[];
+	/** What the trigger says when the list is empty. */
+	empty: string;
+	/** The control's name, for the trigger's aria-label. */
+	label: string;
+	onChoose: (choice: string) => void;
+	onOpen: () => void;
+	placeholder: string;
 	/** Why the list is empty, when it is. */
 	reason: string;
-	schemes: string[];
+	refreshing: boolean;
+	/**
+	 * The trigger's fixed width. Fixed so that choosing a long name cannot shift
+	 * the controls after it sideways, and per-picker because the two
+	 * placeholders are different lengths - "Choose a configuration" truncated to
+	 * "Choose a configur…" reads as a bug rather than as a prompt.
+	 */
+	width: string;
 }) {
 	const [open, setOpen] = useState(false);
 	return (
-		<Popover onOpenChange={setOpen} open={open}>
+		<Popover
+			onOpenChange={(next) => {
+				setOpen(next);
+				if (next) onOpen();
+			}}
+			open={open}
+		>
 			<PopoverTrigger asChild>
 				<button
-					aria-label="Scheme to run"
-					className="flex h-7 w-[150px] shrink-0 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay"
+					aria-label={label}
+					className={cn(
+						"flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay",
+						width,
+					)}
 					type="button"
 				>
 					<span className={cn("min-w-0 flex-1 truncate text-left", !chosen && "text-muted-foreground")}>
-						{chosen ?? (schemes.length === 0 ? "No schemes" : "Choose a scheme")}
+						{chosen ?? (choices.length === 0 ? empty : placeholder)}
 					</span>
 					<ChevronDown aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
 				</button>
 			</PopoverTrigger>
 			<PopoverContent align="start" className="w-[260px] p-1">
-				{schemes.length === 0 ? (
+				{choices.length === 0 ? (
 					<p className="px-2 py-3 text-[11px] leading-snug text-muted-foreground">
-						{reason || "This project listed no schemes."}
+						{refreshing ? "Reading the project…" : reason || "This project listed nothing to choose from."}
 					</p>
 				) : (
-					schemes.map((scheme) => (
+					choices.map((choice) => (
 						<button
 							className={cn(
 								"flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12px] text-foreground transition-colors hover:bg-overlay",
-								scheme === chosen && "bg-overlay",
+								choice === chosen && "bg-overlay",
 							)}
-							key={scheme}
+							key={choice}
 							onClick={() => {
-								onChoose(scheme);
+								onChoose(choice);
 								setOpen(false);
 							}}
 							type="button"
 						>
-							<span className="min-w-0 truncate">{scheme}</span>
+							<span className="min-w-0 truncate">{choice}</span>
 						</button>
 					))
 				)}
+				{choices.length > 0 && refreshing ? (
+					// Said out loud rather than left to a list that silently grows: the
+					// human opened this BECAUSE they just changed the project, so "is it
+					// looking?" is the question the control has to answer.
+					<p className="flex items-center gap-1.5 px-2 pt-1.5 pb-1 text-[11px] text-muted-foreground">
+						<Loader2 aria-hidden className="size-3 animate-spin motion-reduce:animate-none" />
+						Re-reading the project…
+					</p>
+				) : null}
 			</PopoverContent>
 		</Popover>
 	);

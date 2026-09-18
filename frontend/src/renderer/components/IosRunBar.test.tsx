@@ -32,6 +32,10 @@ const project = (over: Record<string, unknown> = {}) => ({
 	path: "/w/Nter.xcworkspace",
 	kind: "workspace",
 	schemes: ["Nter", "NterDev"],
+	// Debug and Release, so the tests that are about something else get a
+	// configuration without choosing one. The no-Debug project - which is the
+	// real one this feature exists for - is its own test below.
+	configurations: ["Debug", "Release"],
 	...over,
 });
 
@@ -74,7 +78,7 @@ describe("IosRunBar", () => {
 	// would be a row of controls that can never do anything, permanently above
 	// every terminal in the app.
 	it("does not render at all on a project with no Xcode project", async () => {
-		answer({ ios: { project: { name: "", path: "", kind: "", schemes: [] } } });
+		answer({ ios: { project: { name: "", path: "", kind: "", schemes: [], configurations: [] } } });
 		renderBar();
 
 		await waitFor(() => expect(getMock).toHaveBeenCalled());
@@ -106,7 +110,7 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterDev", udid: "UDID-A" } }),
+				expect.objectContaining({ body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A" } }),
 			),
 		);
 		// The build output has to be where the human is looking, or it is a
@@ -238,5 +242,114 @@ describe("IosRunBar", () => {
 		renderBar();
 
 		expect(await screen.findByRole("button", { name: /NterDev output/ })).toBeInTheDocument();
+	});
+
+	// 🗝 The regression this feature closes, at the control that caused it.
+	// nter-ios-app's configurations are Dev, Mock-api, Mock-local, Production,
+	// Release and UAT - there is no Debug - and pressing Run with the old bar
+	// started a build that could not work.
+	it("will not run a project that has no Debug until a configuration is chosen", async () => {
+		answer({
+			ios: {
+				project: project({
+					schemes: ["NterApp"],
+					configurations: ["Dev", "Mock-api", "Mock-local", "Production", "Release", "UAT"],
+				}),
+			},
+		});
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: "Run NterApp" });
+		await waitFor(() => expect(run.title).toMatch(/Choose which build configuration/i));
+		expect(run).toBeDisabled();
+
+		// And once the human chooses, it is that configuration that gets built.
+		await userEvent.click(screen.getByRole("button", { name: "Build configuration to run" }));
+		await userEvent.click(await screen.findByRole("button", { name: "UAT" }));
+		postMock.mockResolvedValue({
+			data: {
+				run: {
+					handleId: "iosrun-mer-9",
+					scheme: "NterApp",
+					configuration: "UAT",
+					udid: "UDID-A",
+					running: true,
+					startedAt: "2026-09-18T10:00:00Z",
+				},
+			},
+		});
+		await waitFor(() => expect(run).toBeEnabled());
+		await userEvent.click(run);
+
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A" } }),
+			),
+		);
+	});
+
+	// A project that HAS Debug keeps Xcode's own default, so the ordinary case
+	// is still one click.
+	it("defaults to Debug where the project has one", async () => {
+		answer({ ios: { project: project({ schemes: ["Nter"] }) } });
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: "Run Nter" });
+		await waitFor(() => expect(run).toBeEnabled());
+		expect(screen.getByRole("button", { name: "Build configuration to run" })).toHaveTextContent("Debug");
+	});
+
+	// The configuration list can fail on its own, and the bar must say which
+	// question failed rather than blaming the schemes.
+	it("says why there is nothing safe to build when no configuration could be read", async () => {
+		answer({
+			ios: {
+				project: project({
+					schemes: ["Nter"],
+					configurations: [],
+					configurationsError: "No build configurations could be read from this project.",
+				}),
+			},
+		});
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: "Run Nter" });
+		await waitFor(() => expect(run.title).toBe("No build configurations could be read from this project."));
+		expect(run).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Build configuration to run" })).toHaveTextContent("No configurations");
+	});
+
+	// Malformed payloads must not take the renderer down - `schemes: null` did
+	// exactly that once, and `configurations` is the same kind of field.
+	it("renders rather than throwing when configurations is null", async () => {
+		answer({ ios: { project: project({ configurations: null }) } });
+		renderBar();
+
+		await screen.findByTestId("ios-run-bar");
+		expect(screen.getByRole("button", { name: "Build configuration to run" })).toHaveTextContent("No configurations");
+	});
+
+	// The human's real loop is `xcodegen` in the terminal and then straight to
+	// the picker. A 30-second poll notices that far too late, so the click
+	// itself re-reads the project.
+	it("re-reads the project when a picker is opened", async () => {
+		answer({ ios: { project: project({ schemes: ["Nter"] }) } });
+		renderBar();
+
+		await screen.findByTestId("ios-run-bar");
+		const refreshes = () =>
+			getMock.mock.calls.filter(
+				(call: unknown[]) =>
+					call[0] === "/api/v1/sessions/{sessionId}/ios-project" &&
+					(call[1] as { params?: { query?: { refresh?: boolean } } })?.params?.query?.refresh === true,
+			).length;
+		expect(refreshes()).toBe(0);
+
+		await userEvent.click(screen.getByRole("button", { name: "Scheme to run" }));
+		await waitFor(() => expect(refreshes()).toBe(1));
+		await userEvent.keyboard("{Escape}");
+		await userEvent.click(screen.getByRole("button", { name: "Build configuration to run" }));
+		await waitFor(() => expect(refreshes()).toBe(2));
 	});
 });

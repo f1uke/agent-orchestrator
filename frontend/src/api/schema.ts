@@ -718,7 +718,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Build a scheme from source and run it on a simulator, in a pane of its own */
+        /** Build a scheme in a configuration from source and run it on a simulator, in a pane of its own */
         post: operations["startIOSRun"];
         delete?: never;
         options?: never;
@@ -2463,6 +2463,8 @@ export interface components {
             reason: string;
         };
         ControllersStartIOSRunInput: {
+            /** @description The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects. */
+            configuration: string;
             /** @description The Xcode scheme to build, as listed on the project. */
             scheme: string;
             /** @description The simulator to install and launch on. Omitted uses the one assigned to this session. */
@@ -2668,6 +2670,8 @@ export interface components {
             legacyRoot: string;
         };
         IosrunProject: {
+            configurations: string[];
+            configurationsError?: string;
             kind: string;
             name: string;
             path: string;
@@ -2675,6 +2679,7 @@ export interface components {
             schemesError?: string;
         };
         IosrunRun: {
+            configuration: string;
             handleId: string;
             running: boolean;
             scheme: string;
@@ -6427,7 +6432,10 @@ export interface operations {
     };
     getIOSProject: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Re-read the project from disk instead of serving the cached listing. The run bar sends it when a picker is opened, so a scheme or configuration added seconds ago in the terminal is there. */
+                refresh?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */

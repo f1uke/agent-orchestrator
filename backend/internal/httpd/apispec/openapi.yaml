@@ -2039,6 +2039,16 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
+      - description: Re-read the project from disk instead of serving the cached listing.
+          The run bar sends it when a picker is opened, so a scheme or configuration
+          added seconds ago in the terminal is there.
+        in: query
+        name: refresh
+        schema:
+          description: Re-read the project from disk instead of serving the cached
+            listing. The run bar sends it when a picker is opened, so a scheme or
+            configuration added seconds ago in the terminal is there.
+          type: boolean
       responses:
         "200":
           content:
@@ -2127,8 +2137,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: Build a scheme from source and run it on a simulator, in a pane of
-        its own
+      summary: Build a scheme in a configuration from source and run it on a simulator,
+        in a pane of its own
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/jira:
@@ -7447,6 +7457,10 @@ components:
       type: object
     ControllersStartIOSRunInput:
       properties:
+        configuration:
+          description: 'The build configuration - which environment to build for,
+            as listed on the project. Required: there is no safe default across projects.'
+          type: string
         scheme:
           description: The Xcode scheme to build, as listed on the project.
           type: string
@@ -7456,6 +7470,7 @@ components:
           type: string
       required:
       - scheme
+      - configuration
       type: object
     ControllersStartIOSRunResponse:
       properties:
@@ -7917,6 +7932,12 @@ components:
       type: object
     IosrunProject:
       properties:
+        configurations:
+          items:
+            type: string
+          type: array
+        configurationsError:
+          type: string
         kind:
           type: string
         name:
@@ -7934,9 +7955,12 @@ components:
       - path
       - kind
       - schemes
+      - configurations
       type: object
     IosrunRun:
       properties:
+        configuration:
+          type: string
         handleId:
           type: string
         running:
@@ -7951,6 +7975,7 @@ components:
       required:
       - handleId
       - scheme
+      - configuration
       - udid
       - running
       - startedAt
