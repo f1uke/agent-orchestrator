@@ -162,6 +162,20 @@ describe("IosRunBar", () => {
 		expect(run).toBeDisabled();
 	});
 
+	// A malformed payload must not take the whole renderer down. `schemes: null`
+	// is what a daemon before the array fix answers for a CocoaPods workspace
+	// with no `Pods/`, and every read of it in the bar has to survive that.
+	it("renders its no-schemes state rather than throwing when schemes is null", async () => {
+		answer({ ios: { project: project({ schemes: null, schemesError: "This project has no schemes." }) } });
+		renderBar();
+
+		await screen.findByTestId("ios-run-bar");
+		const run = await screen.findByRole("button", { name: "Run" });
+		await waitFor(() => expect(run.title).toBe("This project has no schemes."));
+		expect(run).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Scheme to run" })).toHaveTextContent("No schemes");
+	});
+
 	// A refusal from the daemon - a crewmate holding the device is the common
 	// one - is a fact about the control it sits beside, not a toast that goes.
 	it("keeps a refusal beside the control that caused it", async () => {

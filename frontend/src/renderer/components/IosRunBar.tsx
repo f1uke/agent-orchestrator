@@ -62,6 +62,11 @@ export function IosRunBar({
 	const power = useSimPower(sessionId, setProblem);
 	const start = useStartIosRun(sessionId, setProblem);
 
+	// The ONE reading of the scheme list, and every use below goes through it.
+	// The `?? []` is not redundant with the spec's `string[]`: a daemon that
+	// answered `null` once already took the whole renderer down, and a type
+	// cannot stop a payload from arriving malformed. Do not read
+	// `project.schemes` anywhere else in this file.
 	const schemes = useMemo(() => project?.schemes ?? [], [project?.schemes]);
 	const booted = useMemo(() => (devices.data?.devices ?? []).filter((d) => d.state === "Booted"), [devices.data]);
 	const allDevices = devices.data?.devices ?? [];
@@ -95,7 +100,7 @@ export function IosRunBar({
 
 	const watchingRun = terminalTarget.kind === "run";
 	const noSimulators = !devices.isLoading && allDevices.length === 0;
-	const blocked = blockedReason({ project, chosenScheme, chosenUdid, noSimulators, booted: booted.length });
+	const blocked = blockedReason({ project, schemes, chosenScheme, chosenUdid, noSimulators, booted: booted.length });
 
 	return (
 		<div
@@ -178,19 +183,22 @@ export function IosRunBar({
  */
 function blockedReason({
 	project,
+	schemes,
 	chosenScheme,
 	chosenUdid,
 	noSimulators,
 	booted,
 }: {
 	project: IosProject;
+	/** The scheme list the component already normalised - never the raw payload. */
+	schemes: string[];
 	chosenScheme: string | null;
 	chosenUdid: string | null;
 	noSimulators: boolean;
 	booted: number;
 }): string | null {
 	if (noSimulators) return "This machine has no iOS Simulators installed, so there is nothing to run the app on.";
-	if (project.schemes.length === 0) {
+	if (schemes.length === 0) {
 		return project.schemesError || `${project.name} listed no schemes, so there is nothing to build.`;
 	}
 	if (!chosenScheme) return "Choose which scheme to run.";
