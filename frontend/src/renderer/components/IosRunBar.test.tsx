@@ -1,0 +1,202 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { IosRunBar } from "./IosRunBar";
+
+const { getMock, postMock } = vi.hoisted(() => ({ getMock: vi.fn(), postMock: vi.fn() }));
+
+vi.mock("../lib/api-client", () => ({
+	apiClient: { GET: getMock, POST: postMock },
+	apiErrorMessage: (error: unknown, fallback = "Request failed") =>
+		(error as { message?: string } | null)?.message ?? fallback,
+	getApiBaseUrl: () => "http://127.0.0.1:3001",
+	subscribeApiBaseUrl: () => () => {},
+}));
+
+const SESSION = "mer-9";
+
+const device = (udid: string, name: string, state: string) => ({
+	udid,
+	name,
+	runtime: "iOS 26.3",
+	runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+	state,
+	available: true,
+	lease: { state: "free" },
+});
+
+const project = (over: Record<string, unknown> = {}) => ({
+	name: "Nter.xcworkspace",
+	path: "/w/Nter.xcworkspace",
+	kind: "workspace",
+	schemes: ["Nter", "NterDev"],
+	...over,
+});
+
+function answer(
+	{ ios, devices }: { ios?: Record<string, unknown>; devices?: unknown[] } = {},
+) {
+	getMock.mockImplementation((path: string) => {
+		if (path === "/api/v1/sessions/{sessionId}/ios-project") {
+			return Promise.resolve({ data: ios ?? { project: project() } });
+		}
+		return Promise.resolve({
+			data: { devices: devices ?? [device("UDID-A", "iPhone 17 Pro Max", "Booted")], defaultUdid: null },
+		});
+	});
+}
+
+function Wrapper({ children }: { children: ReactNode }) {
+	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+function renderBar(onShowRun = vi.fn(), onShowAgent = vi.fn()) {
+	render(
+		<IosRunBar
+			onShowAgent={onShowAgent}
+			onShowRun={onShowRun}
+			sessionId={SESSION}
+			terminalTarget={{ kind: "worker" }}
+		/>,
+		{ wrapper: Wrapper },
+	);
+	return { onShowRun, onShowAgent };
+}
+
+describe("IosRunBar", () => {
+	beforeEach(() => {
+		getMock.mockReset();
+		postMock.mockReset();
+	});
+
+	// The bar's whole visibility test. A disabled strip on every non-iOS session
+	// would be a row of controls that can never do anything, permanently above
+	// every terminal in the app.
+	it("does not render at all on a project with no Xcode project", async () => {
+		answer({ ios: { project: { name: "", path: "", kind: "", schemes: [] } } });
+		renderBar();
+
+		await waitFor(() => expect(getMock).toHaveBeenCalled());
+		expect(screen.queryByTestId("ios-run-bar")).not.toBeInTheDocument();
+		// And nothing asked simctl for a device list it has no control for.
+		expect(getMock).not.toHaveBeenCalledWith("/api/v1/sim/devices", expect.anything());
+	});
+
+	it("offers the project's schemes and runs the one that is chosen", async () => {
+		answer();
+		postMock.mockResolvedValue({ data: { run: { handleId: "iosrun-mer-9", scheme: "NterDev", udid: "UDID-A", running: true, startedAt: "2026-09-18T10:00:00Z" } } });
+		const { onShowRun } = renderBar();
+
+		await screen.findByTestId("ios-run-bar");
+		await userEvent.click(screen.getByRole("button", { name: "Scheme to run" }));
+		await userEvent.click(await screen.findByRole("button", { name: "NterDev" }));
+		await userEvent.click(screen.getByRole("button", { name: "Run NterDev" }));
+
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: { scheme: "NterDev", udid: "UDID-A" } }),
+			),
+		);
+		// The build output has to be where the human is looking, or it is a
+		// three-minute operation with no visible progress at all.
+		await waitFor(() => expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9"));
+	});
+
+	// The brief's case: no simulator on the machine. Run says WHY rather than
+	// being greyed out for a reason the human has to guess.
+	it("refuses to run when the machine has no simulators, and says so", async () => {
+		answer({ devices: [], ios: { project: project({ schemes: ["Nter"] }) } });
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: /^Run/ });
+		await waitFor(() => expect(run.title).toMatch(/no iOS Simulators installed/i));
+		expect(run).toBeDisabled();
+	});
+
+	// Two booted devices is the ambiguity `ao sim` refuses; the bar must not
+	// pre-empt it by guessing, because the wrong guess installs onto the device
+	// a crewmate is verifying on.
+	it("will not guess between two booted simulators", async () => {
+		answer({
+			devices: [device("UDID-A", "iPhone 17 Pro Max", "Booted"), device("UDID-B", "iPad Pro", "Booted")],
+			ios: { project: project({ schemes: ["Nter"] }) },
+		});
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: /^Run/ });
+		await waitFor(() => expect(run.title).toMatch(/Choose which simulator to run on/i));
+		expect(run).toBeDisabled();
+	});
+
+	// A single SHUT-DOWN device is fine: `ao sim run` boots it on the way
+	// through, so refusing here would be a dead end the CLI does not have.
+	it("runs on the machine's only simulator even when it is shut down", async () => {
+		answer({ devices: [device("UDID-A", "iPhone 17 Pro Max", "Shutdown")], ios: { project: project({ schemes: ["Nter"] }) } });
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: "Run Nter" });
+		await waitFor(() => expect(run).toBeEnabled());
+	});
+
+	it("says why there is nothing to build when the project listed no schemes", async () => {
+		answer({ ios: { project: project({ schemes: [], schemesError: "xcodebuild is not installed" }) } });
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: "Run" });
+		await waitFor(() => expect(run.title).toBe("xcodebuild is not installed"));
+		expect(run).toBeDisabled();
+	});
+
+	// A refusal from the daemon - a crewmate holding the device is the common
+	// one - is a fact about the control it sits beside, not a toast that goes.
+	it("keeps a refusal beside the control that caused it", async () => {
+		answer({ ios: { project: project({ schemes: ["Nter"] }) } });
+		postMock.mockResolvedValue({ error: { message: "simulator is leased by @agent-orchestrator-105" } });
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: "Run Nter" });
+		await waitFor(() => expect(run).toBeEnabled());
+		await userEvent.click(run);
+
+		expect(await screen.findByText(/leased by @agent-orchestrator-105/)).toBeInTheDocument();
+	});
+
+	// Without this, a run starts, the terminal switches, the human goes back to
+	// the agent, and the build output becomes unreachable.
+	it("offers a way back to a running build, and back to the agent from it", async () => {
+		const run = { handleId: "iosrun-mer-9", scheme: "NterDev", udid: "UDID-A", running: true, startedAt: "2026-09-18T10:00:00Z" };
+		answer({ ios: { project: project(), run } });
+		const { onShowRun } = renderBar();
+
+		await userEvent.click(await screen.findByRole("button", { name: /Running NterDev/ }));
+		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
+
+		const onShowAgent = vi.fn();
+		render(
+			<IosRunBar
+				onShowAgent={onShowAgent}
+				onShowRun={vi.fn()}
+				sessionId={SESSION}
+				terminalTarget={{ kind: "run", handleId: "iosrun-mer-9" }}
+			/>,
+			{ wrapper: Wrapper },
+		);
+		await userEvent.click(await screen.findByRole("button", { name: "Back to agent" }));
+		expect(onShowAgent).toHaveBeenCalled();
+	});
+
+	// A finished build's pane stays on screen on purpose - its keep-alive shell
+	// outlives the command - so a failed build is still readable afterwards.
+	it("still points at the output once the build has finished", async () => {
+		answer({
+			ios: { project: project(), run: { handleId: "iosrun-mer-9", scheme: "NterDev", udid: "UDID-A", running: false, startedAt: "2026-09-18T10:00:00Z" } },
+		});
+		renderBar();
+
+		expect(await screen.findByRole("button", { name: /NterDev output/ })).toBeInTheDocument();
+	});
+});

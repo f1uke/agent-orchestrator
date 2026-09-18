@@ -462,6 +462,7 @@ func operations() []operation {
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, smokeOperations()...)
 	ops = append(ops, crewRunOperations()...)
+	ops = append(ops, iosRunOperations()...)
 	ops = append(ops, simOperations()...)
 	ops = append(ops, notificationOperations()...)
 	ops = append(ops, activityOperations()...)
@@ -1071,6 +1072,39 @@ func crewRunOperations() []operation {
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
+}
+
+// iosRunOperations declares the run bar's session-scoped routes. Must stay 1:1
+// with the routes IOSRunController.Register mounts (enforced by the parity test).
+func iosRunOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/ios-project", id: "getIOSProject", tag: "sessions",
+			summary:    "What this session can build for iOS, and the run it already has",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.IOSProjectResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/ios-runs", id: "startIOSRun", tag: "sessions",
+			summary:    "Build a scheme from source and run it on a simulator, in a pane of its own",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.StartIOSRunInput{},
+			resps: []respUnit{
+				{http.StatusCreated, controllers.StartIOSRunResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

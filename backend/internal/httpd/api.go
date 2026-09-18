@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	crewrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crewrun"
+	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	prsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/pr"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
@@ -40,6 +41,10 @@ type APIDeps struct {
 	Reviews  reviewsvc.Manager
 	Smoke    smokesvc.Manager
 	Sim      simsvc.Manager
+	// IOSRun is the run bar above the terminal: what a session can build, and
+	// the pane `ao sim run` runs in. nil answers 501, which is right on a
+	// machine with no Xcode - the bar then renders nowhere.
+	IOSRun iosrunsvc.Manager
 	// CrewRuns is the bracket a crew member puts around a build or a test run -
 	// the tree-write detector's two readings, and the "this member is running
 	// something right now" signal that falls out of them. nil answers 501, which
@@ -100,6 +105,7 @@ type API struct {
 	prs           *controllers.PRsController
 	reviews       *controllers.ReviewsController
 	smoke         *controllers.SmokeController
+	iosRun        *controllers.IOSRunController
 	crewRuns      *controllers.CrewRunsController
 	sim           *controllers.SimController
 	simFlows      *controllers.SimFlowsController
@@ -139,6 +145,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		prs:           &controllers.PRsController{Svc: deps.PRs},
 		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
+		iosRun:        &controllers.IOSRunController{Svc: deps.IOSRun},
 		crewRuns:      &controllers.CrewRunsController{Svc: deps.CrewRuns},
 		sim:           &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen)},
 		simFlows:      &controllers.SimFlowsController{DataDir: cfg.DataDir},
@@ -193,6 +200,15 @@ func (a *API) Register(root chi.Router) {
 			a.imports.Register(r)
 			a.settings.Register(r)
 			a.wiki.Register(r)
+			// Agent-scoped deliberately, not task-scoped. A run takes the
+			// CALLING session's simulator lease and installs on the device that
+			// session was assigned, so a crew's dev and qa each run their own
+			// build on their own device. Task-scoping it would claim qa's
+			// device under dev's id, which is the one thing the lease exists to
+			// make impossible. The two members do share a worktree and so one
+			// DerivedData - that hazard is `ao crew run`'s to warn about, and
+			// turning it into a silent one-pane-per-task rule here would hide it.
+			a.iosRun.Register(r)
 			a.daemon.Register(r)
 			// Sibling REST controllers plug in here.
 

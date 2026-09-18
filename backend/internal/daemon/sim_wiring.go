@@ -3,8 +3,11 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simvideo"
 )
@@ -63,4 +66,34 @@ func newSimVideoRecorder(dataDir string, store simsvc.Store, log *slog.Logger) *
 			return found && !rec.IsTerminated
 		}),
 	)
+}
+
+// newIOSRunService builds the run bar's service: what a session can build, and
+// the pane `ao sim run` runs in.
+//
+// The binary is resolved to THIS daemon's own executable rather than left to
+// the pane's PATH, for the reason the session manager and the reviewer launcher
+// both pin theirs: a machine can have more than one `ao`, and a run bar in one
+// build of AO starting another build's CLI would take a lease through a
+// different daemon than the one that rendered the button. An executable that
+// cannot be resolved, or is not named `ao`, falls back to the bare name - the
+// pane then behaves exactly as an agent typing the command would.
+//
+// gatedRuntime is deliberately NOT used: the input gate exists to record and
+// pace messages TYPED INTO an agent, and a build pane has no agent in it.
+func newIOSRunService(store iosrunsvc.Sessions, runtime iosrunsvc.Runtime) *iosrunsvc.Service {
+	return iosrunsvc.New(store, runtime, aoBinaryPath())
+}
+
+// aoBinaryPath is this daemon's own `ao`, or the bare name when it cannot be
+// resolved or is not `ao` (a test binary, a renamed build).
+func aoBinaryPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "ao"
+	}
+	if name := filepath.Base(exe); name != "ao" && name != "ao.exe" {
+		return "ao"
+	}
+	return exe
 }

@@ -692,6 +692,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/ios-project": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What this session can build for iOS, and the run it already has */
+        get: operations["getIOSProject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/ios-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Build a scheme from source and run it on a simulator, in a pane of its own */
+        post: operations["startIOSRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/jira": {
         parameters: {
             query?: never;
@@ -2248,6 +2282,12 @@ export interface components {
             cases: number;
             notDriven: string[];
         };
+        ControllersIOSProjectResponse: {
+            /** @description The Xcode project at the root of this session's worktree. An empty name means there is none, and the run bar does not render. */
+            project: components["schemas"]["IosrunProject"];
+            /** @description The run this session started, if it has one. Its handleId is the terminal to attach. */
+            run?: components["schemas"]["IosrunRun"];
+        };
         ControllersKillSessionRequest: {
             /** @description Destroy the uncommitted work in the session's worktree (captured to refs/ao/preserved/<session-id> first). Without it, a session holding undelivered work refuses the kill with 409 SESSION_HAS_UNDELIVERED_WORK. */
             discardUncommitted?: boolean;
@@ -2421,6 +2461,15 @@ export interface components {
             from?: string;
             /** @description Why nothing here needs a person's eyes. Required - it is the whole content of standing down. */
             reason: string;
+        };
+        ControllersStartIOSRunInput: {
+            /** @description The Xcode scheme to build, as listed on the project. */
+            scheme: string;
+            /** @description The simulator to install and launch on. Omitted uses the one assigned to this session. */
+            udid?: string;
+        };
+        ControllersStartIOSRunResponse: {
+            run: components["schemas"]["IosrunRun"];
         };
         ControllersUncommittedFileDTO: {
             path: string;
@@ -2617,6 +2666,21 @@ export interface components {
         ImportStatusResponse: {
             available: boolean;
             legacyRoot: string;
+        };
+        IosrunProject: {
+            kind: string;
+            name: string;
+            path: string;
+            schemes: string[];
+            schemesError?: string;
+        };
+        IosrunRun: {
+            handleId: string;
+            running: boolean;
+            scheme: string;
+            /** Format: date-time */
+            startedAt: string;
+            udid: string;
         };
         JiraAttachment: {
             filename?: string;
@@ -6334,6 +6398,137 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getIOSProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersIOSProjectResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startIOSRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersStartIOSRunInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersStartIOSRunResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

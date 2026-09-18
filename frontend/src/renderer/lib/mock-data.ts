@@ -2500,3 +2500,23 @@ function mockGlobHit(path: string, spec: string): boolean {
 		}
 	});
 }
+
+/**
+ * An iOS project with several schemes, for the VITE_NO_ELECTRON harness.
+ *
+ * The run bar is invisible without one - its whole visibility test is a real
+ * `.xcworkspace` in a real worktree - so without this the harness could never
+ * show the control at all. The scheme names are the shape a real project has
+ * (an app plus its environments), because a picker holding one entry does not
+ * show what a picker holding several looks like.
+ */
+export function mockIosProject(): components["schemas"]["ControllersIOSProjectResponse"] {
+	return {
+		project: {
+			name: "DemoApp.xcworkspace",
+			path: "/demo/DemoApp.xcworkspace",
+			kind: "workspace",
+			schemes: ["DemoApp", "DemoAppDev", "DemoAppStaging"],
+		},
+	};
+}

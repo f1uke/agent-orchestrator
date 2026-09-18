@@ -63,6 +63,14 @@ var simPromptDecisions = map[string]bool{
 	// without the other teaches half an operation.
 	"install": true,
 	"launch":  true,
+	// `run` is here for the reason the budget note above it gives: this block has
+	// told agents twice that `xcodebuild -destination` walks past the lease, and
+	// has had nothing to offer instead, so the bullet two lines up was still
+	// recommending it. Building from source is also the FIRST thing an agent does
+	// on an iOS change - reaching for a raw xcodebuild is not a mistake it makes
+	// under pressure, it is the obvious move - which makes the always-seen layer
+	// the only layer that can catch it.
+	"run": true,
 
 	// Skill page only. Not "less useful" - just not what an agent gets WRONG
 	// without being told, which is the only thing the always-seen layer buys.
@@ -142,6 +150,18 @@ var simPromptDecisions = map[string]bool{
 	// `claim --ttl` does; the command's own output prints when the lease lapses.
 	"install --ttl": false,
 	"launch --ttl":  false,
+	"run --ttl":     false,
+	// `run --scheme` IS in the prompt because on a real project it is not
+	// optional: several schemes is the normal shape of an iOS app (Dev, Staging,
+	// Release), and `ao sim run` refuses rather than guesses between them. An
+	// agent that learns the command without the flag learns a command that fails.
+	"run --scheme": true,
+	// `run --configuration` names a build AO already picks correctly: Debug is
+	// what a simulator wants and what Xcode's own Run button produces, and a
+	// Release build of most projects will not install without signing set up.
+	// Nobody reaches for it until they have a reason, and by then the command's
+	// own help is in front of them.
+	"run --configuration": false,
 	// `shot --app` resolves an ambiguity that only exists on a device carrying
 	// more than one app, and the capture itself prints the flag with a line per
 	// candidate at the moment it happens. That is the definition of a hazard
@@ -174,7 +194,14 @@ var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 // takes the lease as part of installing, and the fact that a screenshot records
 // which build it saw. Three facts, replacing two longer bullets that only
 // described the hazard.
-const simGuidanceBudget = 3700
+// Raised 3700 -> 3900 for `ao sim run`. The two raises above both paid for
+// DESCRIBING a hazard this block could not fix: every version of the lease
+// bullet has said that `xcodebuild -destination` never asks the lease, while the
+// bullet above it went on recommending exactly that call, because until now
+// there was no other way to get a build onto a device. `ao sim run` is the way,
+// so the block can finally name a command instead of a rule to remember - and a
+// rule an agent can walk past is what the last two raises bought.
+const simGuidanceBudget = 3900
 
 func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 	guidance := prompts.SimulatorGuidance()

@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TerminalTarget } from "../types/terminal";
+import { targetHandleId, type TerminalTarget } from "../types/terminal";
 import type { CrewRole, SessionStatus, WorkspaceSession } from "../types/workspace";
 import type { Theme } from "../stores/ui-store";
 import { useTerminalSession, type AttachableTerminal, type TerminalSessionState } from "../hooks/useTerminalSession";
@@ -46,8 +46,7 @@ export function TerminalPane({
 	active,
 	onOpenWorkspaceFile,
 }: TerminalPaneProps) {
-	const terminalKey =
-		terminalTarget?.kind === "reviewer" ? terminalTarget.handleId : (session?.terminalHandleId ?? "empty");
+	const terminalKey = targetHandleId(terminalTarget) ?? session?.terminalHandleId ?? "empty";
 
 	if (!window.ao) {
 		const provider = terminalTarget?.kind === "reviewer" ? terminalTarget.harness : (session?.provider ?? "claude");
@@ -175,10 +174,8 @@ function AttachedTerminal({
 	onOpenWorkspaceFile,
 }: TerminalPaneProps) {
 	const isActivePane = active !== false;
-	const attachSession =
-		session && terminalTarget?.kind === "reviewer"
-			? { ...session, terminalHandleId: terminalTarget.handleId }
-			: session;
+	const targetHandle = targetHandleId(terminalTarget);
+	const attachSession = session && targetHandle ? { ...session, terminalHandleId: targetHandle } : session;
 	// One terminal instance per handle-scoped pane lifetime. TerminalPane keys this
 	// component by terminal handle, so session switches get a fresh xterm + mux
 	// hook state instead of reusing a potentially stale screen/input binding.
@@ -307,7 +304,11 @@ function AttachedTerminal({
 	// Done/merged sessions with a dead-end banner and no Restore button. This also
 	// matches the backend `Restore` precondition and excludes suspended/keep-warm
 	// sessions (resumed by wake-on-open, not terminated).
-	const canRestoreSession = terminalTarget?.kind !== "reviewer" && session?.isTerminated === true;
+	// Restore belongs to the SESSION, and neither the reviewer nor the run pane
+	// is one: restoring from either would relaunch the agent while the human was
+	// looking at a build. Phrased as "no target of its own" rather than
+	// "=== worker" because an absent target IS the worker terminal.
+	const canRestoreSession = !targetHandleId(terminalTarget) && session?.isTerminated === true;
 
 	const handleReady = useCallback((handle: AttachableTerminal) => {
 		setTerminal(handle);
