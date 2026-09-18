@@ -52,7 +52,16 @@ func runDeps(t *testing.T, schemes string) (Deps, *simDaemon, *[][]string, *[][]
 		case strings.Contains(line, "-list"):
 			return []byte(`{"workspace":{"name":"Nter","schemes":[` + schemes + `]}}`), nil
 		case strings.Contains(line, "-showBuildSettings"):
-			return []byte(`[{"buildSettings":{"TARGET_BUILD_DIR":"` + products + `","FULL_PRODUCT_NAME":"Nter.app"}}]`), nil
+			// Marshalled rather than concatenated: on Windows the products
+			// path is `C:\Users\…`, and pasting that into a JSON string
+			// literal makes `\U` - an invalid escape that fails to parse.
+			settings, err := json.Marshal([]map[string]any{{
+				"buildSettings": map[string]string{"TARGET_BUILD_DIR": products, "FULL_PRODUCT_NAME": "Nter.app"},
+			}})
+			if err != nil {
+				return nil, err
+			}
+			return settings, nil
 		}
 		return nil, errors.New("unexpected: " + line)
 	}
