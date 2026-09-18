@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Loader2, Play, Terminal } from "lucide-react";
-import { useIosProject, useRefreshIosProject, useStartIosRun, type IosProject } from "../hooks/useIosProject";
+import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Play, Terminal, XCircle } from "lucide-react";
+import {
+	useIosProject,
+	useRefreshIosProject,
+	useStartIosRun,
+	type IosProject,
+	type IosRun,
+} from "../hooks/useIosProject";
 import { useSimDevices } from "../hooks/useSimDevices";
 import { useSimPower } from "../hooks/useSimPower";
 import type { Task } from "../lib/crew";
@@ -202,30 +208,7 @@ export function IosRunBar({
 
 			<div className="ml-auto flex min-w-0 items-center gap-2">
 				{problem ? <Problem message={problem} /> : null}
-				{run ? (
-					// The one control that says where the build output IS. Without it,
-					// a run started, the terminal switched, the human went back to the
-					// agent and the build became unreachable.
-					<button
-						className={cn(
-							"flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors hover:bg-overlay",
-							watchingRun ? "text-foreground" : "text-muted-foreground",
-						)}
-						onClick={() => (watchingRun ? onShowAgent() : onShowRun(run.handleId))}
-						// The configuration is in the title rather than the label: the
-						// chip sits at the end of a strip that already wraps, and a
-						// second name in it would push the pickers onto a second row.
-						title={run.configuration ? `${run.scheme} (${run.configuration})` : run.scheme}
-						type="button"
-					>
-						{run.running ? (
-							<Loader2 aria-hidden className="size-3.5 animate-spin text-accent motion-reduce:animate-none" />
-						) : (
-							<Terminal aria-hidden className="size-3.5" />
-						)}
-						{watchingRun ? "Back to agent" : run.running ? `Running ${run.scheme}` : `${run.scheme} output`}
-					</button>
-				) : null}
+				{run ? <RunChip onShowAgent={onShowAgent} onShowRun={onShowRun} run={run} watching={watchingRun} /> : null}
 			</div>
 		</div>
 	);
@@ -399,6 +382,78 @@ function ChoicePicker({
 				) : null}
 			</PopoverContent>
 		</Popover>
+	);
+}
+
+/**
+ * How the run went, and the way to its output.
+ *
+ * 🗝 It says WHICH of four things happened, because "not running any more" is
+ * not an outcome: a build that succeeded and `building NterApp failed (exit
+ * status 65)` used to look identical here - a chip that had stopped spinning.
+ * The four are the daemon's, not this component's: running is the command still
+ * alive in its pane, succeeded and failed are what `ao sim run` reported as it
+ * exited, and stopped is a run that ended without reporting one.
+ *
+ * ⚠ It never restates the error. The compiler's output is in the pane, in a
+ * real terminal with scrollback, and this chip's job is to say a run failed and
+ * be the way back to it - which is also why it survives the human going to
+ * another session and coming back: the daemon keeps the verdict on disk.
+ */
+function RunChip({
+	onShowAgent,
+	onShowRun,
+	run,
+	watching,
+}: {
+	onShowAgent: () => void;
+	onShowRun: (handleId: string) => void;
+	run: IosRun;
+	/** Whether the terminal is already pointed at this run's pane. */
+	watching: boolean;
+}) {
+	// The configuration rides along with the scheme in the label: on a project
+	// whose environments ARE its configurations, "NterApp failed" leaves out
+	// half of what failed.
+	const built = run.configuration ? `${run.scheme} (${run.configuration})` : run.scheme;
+	const state = {
+		running: {
+			icon: <Loader2 aria-hidden className="size-3.5 animate-spin text-accent motion-reduce:animate-none" />,
+			label: `Running ${built}`,
+			tone: "text-muted-foreground",
+		},
+		succeeded: {
+			icon: <CheckCircle2 aria-hidden className="size-3.5 text-success" />,
+			label: `Ran ${built}`,
+			tone: "text-muted-foreground",
+		},
+		failed: {
+			icon: <XCircle aria-hidden className="size-3.5 text-error" />,
+			label: `${built} failed`,
+			tone: "text-error",
+		},
+		stopped: {
+			icon: <Terminal aria-hidden className="size-3.5" />,
+			label: `${built} stopped`,
+			tone: "text-muted-foreground",
+		},
+	}[run.state];
+	return (
+		<button
+			className={cn(
+				"flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors hover:bg-overlay",
+				watching ? "text-foreground" : state.tone,
+			)}
+			onClick={() => (watching ? onShowAgent() : onShowRun(run.handleId))}
+			// The one line the daemon carries up from the command - "building
+			// NterApp failed (exit status 65)" - rather than a tooltip that
+			// repeats the label.
+			title={run.summary || state.label}
+			type="button"
+		>
+			{state.icon}
+			{watching ? "Back to agent" : state.label}
+		</button>
 	);
 }
 

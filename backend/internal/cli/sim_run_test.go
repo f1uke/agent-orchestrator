@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 )
 
 // runDeps is `ao sim run`'s whole boundary: a worktree with an Xcode project in
@@ -481,5 +483,90 @@ func TestSimRun_SaysSoWhenItFallsBackToDebug(t *testing.T) {
 	}
 	if build := strings.Join((*builds)[0], " "); !strings.Contains(build, "-configuration Debug") {
 		t.Fatalf("built %q", build)
+	}
+}
+
+// readRunVerdict is the run bar reading what the command left behind.
+func readRunVerdict(t *testing.T, path string) iosrun.Result {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("no verdict was written to %s: %v", path, err)
+	}
+	var result iosrun.Result
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatalf("verdict is not readable: %v (%s)", err, body)
+	}
+	return result
+}
+
+// 🗝 The run bar starts this command in a pane nothing waits on, so this file is
+// the only way the outcome gets back to it. Without it, "not running" is the
+// whole story and a clean finish looks exactly like a failed build.
+func TestSimRun_ReportsASuccessfulRunToTheBar(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
+	verdict := filepath.Join(t.TempDir(), "iosrun", "result.json")
+	t.Setenv(iosrun.EnvResultFile, verdict)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run", "--configuration", "Dev"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+
+	result := readRunVerdict(t, verdict)
+	if result.State != iosrun.RunSucceeded {
+		t.Fatalf("state %q, want succeeded", result.State)
+	}
+	// It names both axes, so a bar showing it says WHICH environment ran.
+	if !strings.Contains(result.Summary, "Nter (Dev)") {
+		t.Fatalf("summary %q, want the scheme and the configuration", result.Summary)
+	}
+	if result.FinishedAt == nil {
+		t.Fatal("a finished run must say when it finished")
+	}
+}
+
+func TestSimRun_ReportsAFailedBuildToTheBar(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
+	deps.StartStream = func(context.Context, string, ...string) (ProcessStream, error) {
+		stream := newFakeStream()
+		stream.feed("Nter/AppDelegate.swift:12:5: error: cannot find 'foo' in scope\n** BUILD FAILED **\n")
+		stream.err = errors.New("exit status 65")
+		return stream, nil
+	}
+	verdict := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv(iosrun.EnvResultFile, verdict)
+
+	if _, _, err := executeCLI(t, deps, "sim", "run", "--configuration", "Dev"); err == nil {
+		t.Fatal("a failed build must fail the command")
+	}
+
+	result := readRunVerdict(t, verdict)
+	if result.State != iosrun.RunFailed {
+		t.Fatalf("state %q, want failed", result.State)
+	}
+	if !strings.Contains(result.Summary, "failed") {
+		t.Fatalf("summary %q, want the sentence that says what went wrong", result.Summary)
+	}
+	// One line, and NOT the compiler's output: that is in the pane the bar
+	// points at, and restating it in a strip 24 pixels tall helps nobody.
+	if strings.Contains(result.Summary, "\n") || strings.Contains(result.Summary, "cannot find 'foo'") {
+		t.Fatalf("the verdict must be one sentence, not the build log: %q", result.Summary)
+	}
+}
+
+// An agent or a human typing the command has the variable unset, and writes
+// nothing anywhere.
+func TestSimRun_WritesNoVerdictWhenNobodyAsked(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev"`)
+	dir := t.TempDir()
+	t.Setenv(iosrun.EnvResultFile, "")
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("something was written: %v (%v)", entries, err)
 	}
 }

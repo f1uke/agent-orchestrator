@@ -200,14 +200,15 @@ describe("IosRunBar", () => {
 		const run = {
 			handleId: "iosrun-mer-9",
 			scheme: "NterDev",
+			configuration: "Debug",
 			udid: "UDID-A",
-			running: true,
+			state: "running",
 			startedAt: "2026-09-18T10:00:00Z",
 		};
 		answer({ ios: { project: project(), run } });
 		const { onShowRun } = renderBar();
 
-		await userEvent.click(await screen.findByRole("button", { name: /Running NterDev/ }));
+		await userEvent.click(await screen.findByRole("button", { name: /Running NterDev \(Debug\)/ }));
 		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
 
 		const onShowAgent = vi.fn();
@@ -233,15 +234,72 @@ describe("IosRunBar", () => {
 				run: {
 					handleId: "iosrun-mer-9",
 					scheme: "NterDev",
+					configuration: "Debug",
 					udid: "UDID-A",
-					running: false,
+					state: "succeeded",
+					summary: "Built NterDev (Debug) and launched com.example.Nter on iPhone 17 Pro Max.",
+					startedAt: "2026-09-18T10:00:00Z",
+					finishedAt: "2026-09-18T10:03:00Z",
+				},
+			},
+		});
+		renderBar();
+
+		expect(await screen.findByRole("button", { name: /Ran NterDev \(Debug\)/ })).toBeInTheDocument();
+	});
+
+	// 🗝 The gap this closes: a build that succeeded and `building NterApp failed
+	// (exit status 65)` used to look identical here - a chip that had stopped
+	// spinning. The failure names BOTH axes, because on a project whose
+	// environments are configurations, "NterApp failed" is half a sentence.
+	it("says a run failed, names what it was building, and leads to the output", async () => {
+		const onShowRun = vi.fn();
+		answer({
+			ios: {
+				project: project({ schemes: ["NterApp"], configurations: ["Dev", "UAT"] }),
+				run: {
+					handleId: "iosrun-mer-9",
+					scheme: "NterApp",
+					configuration: "UAT",
+					udid: "UDID-A",
+					state: "failed",
+					summary: "building NterApp failed (exit status 65). The compiler's output is above.",
+					startedAt: "2026-09-18T10:00:00Z",
+					finishedAt: "2026-09-18T10:03:00Z",
+				},
+			},
+		});
+		renderBar(onShowRun);
+
+		const chip = await screen.findByRole("button", { name: /NterApp \(UAT\) failed/ });
+		// The bar says WHICH run failed and points at the output; the compiler's
+		// own errors stay in the terminal rather than being restated here.
+		expect(chip.title).toMatch(/exit status 65/);
+		await userEvent.click(chip);
+		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
+	});
+
+	// A run that ended without reporting - Ctrl-C in the pane, a tmux server
+	// that went away - is not a failed build, and must not be called one.
+	it("does not call a stopped run a failure", async () => {
+		answer({
+			ios: {
+				project: project(),
+				run: {
+					handleId: "iosrun-mer-9",
+					scheme: "NterDev",
+					configuration: "Debug",
+					udid: "UDID-A",
+					state: "stopped",
+					summary: "The run ended without reporting how it went. Its output is still in the pane.",
 					startedAt: "2026-09-18T10:00:00Z",
 				},
 			},
 		});
 		renderBar();
 
-		expect(await screen.findByRole("button", { name: /NterDev output/ })).toBeInTheDocument();
+		expect(await screen.findByRole("button", { name: /NterDev \(Debug\) stopped/ })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /failed/ })).not.toBeInTheDocument();
 	});
 
 	// 🗝 The regression this feature closes, at the control that caused it.

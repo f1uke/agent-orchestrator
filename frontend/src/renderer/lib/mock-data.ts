@@ -2522,5 +2522,20 @@ export function mockIosProject(): components["schemas"]["ControllersIOSProjectRe
 			schemes: ["DemoApp", "DemoCore"],
 			configurations: ["Dev", "Mock-api", "Production", "Release", "UAT"],
 		},
+		// A run that has ENDED, because that is the state the harness could not
+		// show before: while a build is going the bar is obviously busy, and the
+		// question this chip answers is what happened once it stopped.
+		run: {
+			handleId: "iosrun-demo-working",
+			scheme: "DemoApp",
+			configuration: "UAT",
+			// One of THIS harness's simulators, so the bar reads as one machine:
+			// a run names the device it ran on, and the picker shows that device.
+			udid: "MOCK-UDID-A",
+			state: "failed",
+			summary: "building DemoApp failed (exit status 65). The compiler's output is above.",
+			startedAt: "2026-09-18T10:00:00Z",
+			finishedAt: "2026-09-18T10:03:12Z",
+		},
 	};
 }

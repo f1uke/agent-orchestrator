@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,9 +11,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcodeproj"
 )
 
@@ -127,6 +130,11 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			// would make a three-minute build look like a hang. --json governs
 			// the RESULT, which is written last.
 			result, err := ctx.runSimApp(cmd.Context(), cmd.ErrOrStderr(), opts.scheme, opts.configuration, opts.udid, opts.ttl)
+			// Report the verdict before returning either way. The run bar
+			// started this command in a pane nothing waits on, so this file is
+			// the ONLY way the outcome gets back to it - and a failed run that
+			// reported nothing would leave the bar saying "running" for ever.
+			reportSimRunResult(result, err)
 			if err != nil {
 				return err
 			}
@@ -259,7 +267,7 @@ func (c *commandContext) resolveSimRunScheme(ctx context.Context, dir string, pr
 		sorted := append([]string(nil), schemes...)
 		sort.Strings(sorted)
 		var b strings.Builder
-		fmt.Fprintf(&b, "%s has no scheme called %q. It has:", project.Name, named)
+		fmt.Fprintf(&b, "%s has no scheme called %q.\nIt has:", project.Name, named)
 		for _, s := range sorted {
 			fmt.Fprintf(&b, "\n  ao sim run --scheme %s", s)
 		}
@@ -272,7 +280,7 @@ func (c *commandContext) resolveSimRunScheme(ctx context.Context, dir string, pr
 	sort.Strings(sorted)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s has %d schemes, so there is no unambiguous default - a build of the wrong one installs "+
-		"the wrong app. Re-run with one of:", project.Name, len(schemes))
+		"the wrong app.\nRe-run with one of:", project.Name, len(schemes))
 	for _, s := range sorted {
 		fmt.Fprintf(&b, "\n  ao sim run --scheme %s", s)
 	}
@@ -320,7 +328,7 @@ func (c *commandContext) resolveSimRunConfiguration(
 			}
 		}
 		return "", usageError{errors.New(listSimRunConfigurations(
-			fmt.Sprintf("%s has no build configuration called %q. It has:", project.Name, named), configurations))}
+			fmt.Sprintf("%s has no build configuration called %q.\nIt has:", project.Name, named), configurations))}
 	}
 	if len(configurations) == 1 {
 		return configurations[0], nil
@@ -332,7 +340,7 @@ func (c *commandContext) resolveSimRunConfiguration(
 	}
 	return "", usageError{errors.New(listSimRunConfigurations(
 		fmt.Sprintf("%s has %d build configurations and no Debug, so there is no unambiguous default - "+
-			"a build of the wrong one installs an app pointed at the wrong environment. Re-run with one of:",
+			"a build of the wrong one installs an app pointed at the wrong environment.\nRe-run with one of:",
 			project.Name, len(configurations)), configurations))}
 }
 
@@ -348,11 +356,16 @@ func listSimRunConfigurations(lead string, configurations []string) string {
 	return b.String()
 }
 
-// firstLineOf keeps a listing failure to the sentence that fits on a progress
-// line; the rest of xcodebuild's complaint runs to pages.
+// firstLineOf keeps a failure to the sentence that fits on a progress line, or
+// in a strip above a terminal; the rest of it - xcodebuild's complaint, or the
+// list of commands to run instead - runs to pages and is on screen anyway.
+//
+// A trailing colon is dropped because the line it introduced is not coming
+// along: "It has:" with nothing after it reads as truncation rather than as a
+// sentence.
 func firstLineOf(err error) string {
 	line, _, _ := strings.Cut(err.Error(), "\n")
-	return line
+	return strings.TrimSuffix(strings.TrimSpace(line), ":")
 }
 
 // bootSimRunDevice powers the target on when it is down, and reports whether it
@@ -515,4 +528,44 @@ func writeSimRun(out io.Writer, result simRunResult) error {
 	}
 	_, err := fmt.Fprintf(out, "Note: %s\n", result.Note)
 	return err
+}
+
+// reportSimRunResult writes how this run ended, when the run bar asked to be
+// told (iosrun.EnvResultFile). A human or an agent typing `ao sim run` has the
+// variable unset and nothing is written.
+//
+// 🗝 The command reports rather than the daemon inferring, because only the
+// command knows WHICH step failed: a compile error, a lease another session
+// holds, and a device that would not boot are three different sentences, and
+// the exit status nobody watched is the same for all three.
+//
+// It is one sentence, never the build log. The output is already in the pane
+// the bar points at, and a bar that restated compiler errors would be a worse
+// copy of the terminal underneath it.
+func reportSimRunResult(result simRunResult, runErr error) {
+	path := strings.TrimSpace(os.Getenv(iosrun.EnvResultFile))
+	if path == "" {
+		return
+	}
+	finished := time.Now().UTC()
+	verdict := iosrun.Result{State: iosrun.RunSucceeded, FinishedAt: &finished}
+	switch {
+	case runErr != nil:
+		verdict.State = iosrun.RunFailed
+		verdict.Summary = firstLineOf(runErr)
+	default:
+		verdict.Summary = fmt.Sprintf("Built %s (%s) and launched %s on %s.",
+			result.Scheme, result.Configuration, result.BundleID, result.Name)
+	}
+	body, err := json.Marshal(verdict)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return
+	}
+	// A verdict that cannot be written changes nothing about the run itself,
+	// which has already happened; the bar falls back to "stopped", which is
+	// what it says whenever a run ends without reporting.
+	_ = os.WriteFile(path, body, 0o600)
 }

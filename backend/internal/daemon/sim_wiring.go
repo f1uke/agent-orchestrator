@@ -81,8 +81,11 @@ func newSimVideoRecorder(dataDir string, store simsvc.Store, log *slog.Logger) *
 //
 // gatedRuntime is deliberately NOT used: the input gate exists to record and
 // pace messages TYPED INTO an agent, and a build pane has no agent in it.
-func newIOSRunService(store iosrunsvc.Sessions, runtime iosrunsvc.Runtime) *iosrunsvc.Service {
-	return iosrunsvc.New(store, runtime, aoBinaryPath())
+// dataDir is where a run's record and its verdict are kept, so the bar can
+// still say how a build went to somebody who pressed Run, walked away and came
+// back - across a daemon restart included. Under ~/.ao like all app state.
+func newIOSRunService(dataDir string, store iosrunsvc.Sessions, runtime iosrunsvc.Runtime) *iosrunsvc.Service {
+	return iosrunsvc.New(store, runtime, aoBinaryPath(), iosrunsvc.WithStateDir(dataDir))
 }
 
 // aoBinaryPath is this daemon's own `ao`, or the bare name when it cannot be

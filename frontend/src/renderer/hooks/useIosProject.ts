@@ -30,7 +30,9 @@ export function useIosProject(sessionId: string | undefined) {
 	return useQuery<IosProjectResponse, Error, IosProjectResponse, ReturnType<typeof iosProjectQueryKey>>({
 		queryKey: iosProjectQueryKey(sessionId ?? ""),
 		enabled: Boolean(sessionId),
-		refetchInterval: (query) => (query.state.data?.run?.running ? 2_000 : 30_000),
+		// Fast only while a build is actually going; a finished run's verdict does
+		// not change, so there is nothing to poll for afterwards.
+		refetchInterval: (query) => (query.state.data?.run?.state === "running" ? 2_000 : 30_000),
 		refetchIntervalInBackground: false,
 		queryFn: async ({ signal }): Promise<IosProjectResponse> => {
 			if (usePreviewData) return mockIosProject();

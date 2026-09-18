@@ -2680,11 +2680,19 @@ export interface components {
         };
         IosrunRun: {
             configuration: string;
+            /** Format: date-time */
+            finishedAt?: null | string;
             handleId: string;
-            running: boolean;
             scheme: string;
             /** Format: date-time */
             startedAt: string;
+            /**
+             * @description How the run is going, or how it went. running is the command still alive in the pane; succeeded and failed are what it reported as it exited; stopped is a run that ended without reporting - Ctrl-C, or a tmux server that went away.
+             * @enum {string}
+             */
+            state: "running" | "succeeded" | "failed" | "stopped";
+            /** @description One line saying how it ended, in the command's own words. Never the build log - that is in the pane this run's handleId names. */
+            summary?: string;
             udid: string;
         };
         JiraAttachment: {

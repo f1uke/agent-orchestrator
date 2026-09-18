@@ -2,6 +2,7 @@ package iosrun
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -56,6 +57,11 @@ func (f *fakeRuntime) Destroy(_ context.Context, h ports.RuntimeHandle) error {
 }
 
 func (f *fakeRuntime) IsAlive(context.Context, ports.RuntimeHandle) (bool, error) {
+	return f.alive, f.aliveErr
+}
+
+// AgentAlive is what the service actually asks: the COMMAND, not the pane.
+func (f *fakeRuntime) AgentAlive(context.Context, ports.RuntimeHandle) (bool, error) {
 	return f.alive, f.aliveErr
 }
 
@@ -264,21 +270,25 @@ func TestCurrent_ReadsLivenessFromTheRuntime(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 	run, ok, err := svc.Current(context.Background(), "mer-9")
-	if err != nil || !ok || !run.Running {
+	if err != nil || !ok || run.State != RunRunning {
 		t.Fatalf("current: %+v ok=%v err=%v", run, ok, err)
 	}
-	// The pane is gone - closed in tmux, or the machine restarted. The bar must
-	// stop saying it is running.
+	// The command is gone and left no verdict - Ctrl-C, or a tmux server that
+	// went away. That is "stopped": the bar must stop saying it is building,
+	// and must not claim a build failed when nothing said so.
 	rt.alive = false
 	run, _, _ = svc.Current(context.Background(), "mer-9")
-	if run.Running {
-		t.Fatal("a pane that is gone must not be reported as running")
+	if run.State != RunStopped {
+		t.Fatalf("state %q, want stopped", run.State)
+	}
+	if run.Summary == "" {
+		t.Fatal("a run that ended without reporting must say that is what happened")
 	}
 }
 
-// A failed probe is not proof the pane is dead (the hard rule), so the last
-// known answer stands rather than the bar flickering to "finished".
-func TestCurrent_AnUnreadableRuntimeIsNotADeadPane(t *testing.T) {
+// A failed probe is not proof anything died (the hard rule), so the last known
+// state stands rather than the bar flickering to "stopped".
+func TestCurrent_AnUnreadableRuntimeIsNotADeadRun(t *testing.T) {
 	rt := &fakeRuntime{alive: true, aliveErr: errors.New("tmux: server not found")}
 	svc := service(t, worktree(t, "Nter.xcodeproj"), `{"project":{"schemes":["Nter"]}}`, rt)
 	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Debug", ""); err != nil {
@@ -286,7 +296,7 @@ func TestCurrent_AnUnreadableRuntimeIsNotADeadPane(t *testing.T) {
 	}
 
 	run, ok, err := svc.Current(context.Background(), "mer-9")
-	if err != nil || !ok || !run.Running {
+	if err != nil || !ok || run.State != RunRunning {
 		t.Fatalf("current: %+v ok=%v err=%v", run, ok, err)
 	}
 }
@@ -402,5 +412,124 @@ func TestStart_RefusesAConfigurationTheProjectDoesNotHave(t *testing.T) {
 	}
 	if len(rt.created) != 0 {
 		t.Fatalf("a pane was opened anyway: %v", rt.created)
+	}
+}
+
+// stateful is a service that keeps its run records on disk, the way the daemon
+// wires it - which is the only way a verdict or a restart can be tested.
+func stateful(t *testing.T, dir, state string, rt *fakeRuntime) *Service {
+	t.Helper()
+	return New(fakeSessions{path: dir, found: true}, rt, "/usr/local/bin/ao",
+		WithStateDir(state),
+		WithRunner(func(context.Context, string, string, ...string) ([]byte, error) {
+			return []byte(`{"project":{"schemes":["Nter"],"configurations":["Dev","UAT"]}}`), nil
+		}))
+}
+
+// writeVerdict is `ao sim run` ending: the command writes what became of it to
+// the file the pane was told to report to.
+func writeVerdict(t *testing.T, path string, result Result) {
+	t.Helper()
+	body, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The gap this closes: when a run ends, "not running" used to be the whole
+// story, and a clean finish looked exactly like `building NterApp failed (exit
+// status 65)`.
+func TestCurrent_ReportsTheVerdictTheCommandWrote(t *testing.T) {
+	state := t.TempDir()
+	// Still alive as far as the runtime is concerned: the command writes its
+	// verdict on the way out, so the answer must come from the verdict rather
+	// than from a probe that has not caught up.
+	rt := &fakeRuntime{alive: true}
+	svc := stateful(t, worktree(t, "Nter.xcodeproj"), state, rt)
+	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	writeVerdict(t, svc.resultPath("mer-9"), Result{
+		State:   RunFailed,
+		Summary: "building Nter failed (exit status 65). The compiler's output is above.",
+	})
+
+	run, ok, err := svc.Current(context.Background(), "mer-9")
+	if err != nil || !ok {
+		t.Fatalf("current: ok=%v err=%v", ok, err)
+	}
+	if run.State != RunFailed {
+		t.Fatalf("state %q, want failed", run.State)
+	}
+	if !strings.Contains(run.Summary, "exit status 65") {
+		t.Fatalf("a failed run must say what failed: %q", run.Summary)
+	}
+	// And it still names what it was building, which is half the story on a
+	// project whose environments are configurations.
+	if run.Scheme != "Nter" || run.Configuration != "Dev" {
+		t.Fatalf("run %+v, want the scheme and configuration it was started with", run)
+	}
+}
+
+// Press Run, go to another session, come back - possibly after restarting AO -
+// and the bar still says how it went. The record is on disk for exactly this.
+func TestCurrent_SurvivesADaemonThatRestarted(t *testing.T) {
+	state, dir := t.TempDir(), worktree(t, "Nter.xcodeproj")
+	rt := &fakeRuntime{alive: true}
+	first := stateful(t, dir, state, rt)
+	if _, err := first.Start(context.Background(), "mer-9", "Nter", "UAT", "UDID-1"); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	writeVerdict(t, first.resultPath("mer-9"), Result{State: RunSucceeded, Summary: "Built Nter (UAT) and launched it."})
+
+	// A different Service over the same state dir: a daemon that started after
+	// the run did, and remembers nothing.
+	next := stateful(t, dir, state, &fakeRuntime{})
+	run, ok, err := next.Current(context.Background(), "mer-9")
+	if err != nil || !ok {
+		t.Fatalf("current: ok=%v err=%v", ok, err)
+	}
+	if run.State != RunSucceeded || run.Configuration != "UAT" || run.HandleID != "iosrun-mer-9" {
+		t.Fatalf("run %+v, want the finished run read back off disk", run)
+	}
+}
+
+// A stale verdict beside a fresh run would report the LAST build's failure
+// against this one - the most confusing thing the bar could say.
+func TestStart_ClearsThePreviousRunsVerdict(t *testing.T) {
+	state := t.TempDir()
+	svc := stateful(t, worktree(t, "Nter.xcodeproj"), state, &fakeRuntime{alive: true})
+	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunFailed, Summary: "building Nter failed"})
+
+	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "UAT", ""); err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+	run, _, _ := svc.Current(context.Background(), "mer-9")
+	if run.State != RunRunning {
+		t.Fatalf("state %q, want running - the verdict was the previous build's", run.State)
+	}
+}
+
+// The pane is told where to report, or nothing can ever tell a failed build
+// from a finished one.
+func TestStart_TellsTheCommandWhereToReport(t *testing.T) {
+	state := t.TempDir()
+	rt := &fakeRuntime{}
+	svc := stateful(t, worktree(t, "Nter.xcodeproj"), state, rt)
+	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	if got := rt.created[0].Env[EnvResultFile]; got != svc.resultPath("mer-9") {
+		t.Fatalf("%s=%q, want %q", EnvResultFile, got, svc.resultPath("mer-9"))
 	}
 }

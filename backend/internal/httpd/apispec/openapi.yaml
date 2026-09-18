@@ -7961,14 +7961,32 @@ components:
       properties:
         configuration:
           type: string
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
         handleId:
           type: string
-        running:
-          type: boolean
         scheme:
           type: string
         startedAt:
           format: date-time
+          type: string
+        state:
+          description: How the run is going, or how it went. running is the command
+            still alive in the pane; succeeded and failed are what it reported as
+            it exited; stopped is a run that ended without reporting - Ctrl-C, or
+            a tmux server that went away.
+          enum:
+          - running
+          - succeeded
+          - failed
+          - stopped
+          type: string
+        summary:
+          description: One line saying how it ended, in the command's own words. Never
+            the build log - that is in the pane this run's handleId names.
           type: string
         udid:
           type: string
@@ -7977,7 +7995,7 @@ components:
       - scheme
       - configuration
       - udid
-      - running
+      - state
       - startedAt
       type: object
     JiraAttachment:

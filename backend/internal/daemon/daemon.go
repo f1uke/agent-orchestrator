@@ -406,7 +406,7 @@ func Run() error {
 		Smoke:              smokeSvc,
 		CrewRuns:           crewRunSvc,
 		Sim:                newSimService(store, simScreen, sessMgr),
-		IOSRun:             newIOSRunService(store, runtimeAdapter),
+		IOSRun:             newIOSRunService(cfg.DataDir, store, runtimeAdapter),
 		SimScreen:          simScreen,
 		SimVideo:           simVideo,
 		SimDrags:           simDrags,

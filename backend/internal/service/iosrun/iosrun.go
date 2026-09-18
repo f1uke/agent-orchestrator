@@ -88,20 +88,52 @@ type Project struct {
 	ConfigurationsError string `json:"configurationsError,omitempty"`
 }
 
+// RunState is what became of a run. The bar shows one of these four and
+// nothing else, so each has to be a fact rather than a guess.
+type RunState string
+
+const (
+	// RunRunning is `ao sim run` still alive as a process in the pane.
+	RunRunning RunState = "running"
+	// RunSucceeded is a run that built, installed and launched.
+	RunSucceeded RunState = "succeeded"
+	// RunFailed is a run that ended badly and said why in one line. The
+	// compiler's own output is in the pane, which is where the bar sends the
+	// human.
+	RunFailed RunState = "failed"
+	// RunStopped is a run whose process is gone leaving no result - Ctrl-C in
+	// the pane, a killed tmux server, a machine that restarted mid-build. It is
+	// deliberately not "failed": nothing says the build was going to fail.
+	RunStopped RunState = "stopped"
+)
+
 // Run is a build the bar started, and what became of it.
 type Run struct {
 	// HandleID is the runtime handle the renderer attaches its terminal to.
 	HandleID string `json:"handleId"`
 	Scheme   string `json:"scheme"`
 	// Configuration is the environment it was built for. Recorded so the bar can
-	// re-select what is already running rather than resetting to a default.
+	// re-select what is already running rather than resetting to a default, and
+	// so a failed run says which environment failed.
 	Configuration string `json:"configuration"`
 	UDID          string `json:"udid"`
-	// Running is whether the pane is still there. It is not "the build
-	// succeeded": the pane's keep-alive shell outlives the command on purpose,
-	// so a failed build's output is still on screen to read.
-	Running   bool      `json:"running"`
+	// State is how it is going, or how it went.
+	//
+	// 🗝 It is NOT read from the pane's liveness. The pane's keep-alive shell
+	// outlives the command on purpose - so a failed build stays on screen - so
+	// "the pane is there" says nothing about the build. Running is
+	// `AgentAlive`, which sees the command itself; succeeded and failed are
+	// what `ao sim run` WROTE down as it exited, because only the command knows
+	// the difference between a build that failed and a lease that was refused.
+	State RunState `json:"state" enum:"running,succeeded,failed,stopped" description:"How the run is going, or how it went. running is the command still alive in the pane; succeeded and failed are what it reported as it exited; stopped is a run that ended without reporting - Ctrl-C, or a tmux server that went away."`
+	// Summary is one line saying how it ended, in the command's own words. It
+	// never restates compiler errors: those are in the pane, and the bar's job
+	// is to say a run failed and point at the output.
+	Summary   string    `json:"summary,omitempty" description:"One line saying how it ended, in the command's own words. Never the build log - that is in the pane this run's handleId names."`
 	StartedAt time.Time `json:"startedAt"`
+	// FinishedAt is when the command reported its result; absent while running,
+	// and absent for a run that was stopped without reporting one.
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
 // Manager is the surface the HTTP controller depends on.
@@ -125,6 +157,12 @@ type Service struct {
 	// cannot start the CLI of another - the same pin the session manager and
 	// the reviewer launcher apply for the same reason.
 	aoBinary string
+	// stateDir is where a run's record and its result live, under the app's own
+	// data dir. On disk rather than in memory only, so a human who pressed Run,
+	// went away and came back - or restarted AO in between - still learns how
+	// it went. Empty disables the record entirely, which is what a test that
+	// does not care gets.
+	stateDir string
 	now      func() time.Time
 
 	mu     sync.Mutex
@@ -146,6 +184,10 @@ func WithRunner(run xcodeproj.Runner) Option { return func(s *Service) { s.run =
 // WithClock replaces the clock, so a test can age the scheme cache.
 func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = now } }
 
+// WithStateDir is where runs are recorded. Production passes the daemon's data
+// dir; a test passes t.TempDir() or nothing.
+func WithStateDir(dir string) Option { return func(s *Service) { s.stateDir = dir } }
+
 // New builds the service. aoBinary is the absolute path to this daemon's `ao`.
 func New(sessions Sessions, runtime Runtime, aoBinary string, opts ...Option) *Service {
 	s := &Service{
@@ -161,6 +203,22 @@ func New(sessions Sessions, runtime Runtime, aoBinary string, opts ...Option) *S
 		opt(s)
 	}
 	return s
+}
+
+// liveness answers "is the build still going".
+//
+// 🗝 `ports.AgentLivenessProber` is what it wants: AgentAlive sees the COMMAND
+// under the pane leader, and IsAlive sees only the PANE - which the keep-alive
+// shell keeps alive long after the build ended, on purpose, so a failed build
+// stays readable. It is an OPTIONAL capability reached by type assertion (the
+// tmux runtime has it, conpty does not), so a runtime without it falls back to
+// the pane, which is what the bar reported before any of this. In practice the
+// fallback is unreachable: an Xcode build is a macOS build, and macOS is tmux.
+func (s *Service) live(ctx context.Context, handle string) (bool, error) {
+	if prober, ok := s.runtime.(ports.AgentLivenessProber); ok {
+		return prober.AgentAlive(ctx, ports.RuntimeHandle{ID: handle})
+	}
+	return s.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handle})
 }
 
 func commandOutputInDir(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
@@ -338,6 +396,12 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	// anonymous one, so a run started from the bar and a run an agent typed in
 	// the same session contend for the device exactly as two agents would.
 	env := map[string]string{"AO_SESSION_ID": string(id)}
+	// And this is how the command reports what became of it. Only `ao sim run`
+	// can tell a failed build from a refused lease, so it writes the verdict
+	// rather than the daemon inferring one from an exit nobody watched.
+	if path := s.resultPath(id); path != "" {
+		env[EnvResultFile] = path
+	}
 	if trimmed := strings.TrimSpace(udid); trimmed != "" {
 		env["AO_SIM_UDID"] = trimmed
 		env["AO_SIM_DESTINATION"] = domain.SimDestination(trimmed)
@@ -355,32 +419,58 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 		Scheme:        scheme,
 		Configuration: configuration,
 		UDID:          strings.TrimSpace(udid),
-		Running:       true,
+		State:         RunRunning,
 		StartedAt:     s.now().UTC(),
 	}
 	s.mu.Lock()
 	s.runs[id] = run
 	s.mu.Unlock()
+	s.record(id, run)
 	return run, nil
 }
 
-// Current is the session's run, if it has one, with liveness read from the
-// runtime rather than remembered - a pane the user closed in tmux is gone, and
-// a bar that still said "running" would be lying about the only thing it says.
+// Current is the session's run, if it has one, and how it is going.
+//
+// The state is assembled from two facts, in this order, because only the second
+// one can be wrong:
+//
+//  1. the RESULT the command wrote as it exited. That is terminal: a build that
+//     failed stays failed however long ago it was, which is what makes a run
+//     readable by somebody who pressed Run, went to another session and came
+//     back.
+//  2. otherwise, whether the COMMAND is still alive (`AgentAlive`, not
+//     `IsAlive` - the pane's keep-alive shell outlives the build by design).
+//     Alive is running; gone without a result is stopped, not failed: a
+//     Ctrl-C'd build is not a broken one.
+//
+// A failed probe leaves the last known state alone, per the hard rule that an
+// unreadable runtime is not proof anything died.
 func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, error) {
 	s.mu.Lock()
 	run, ok := s.runs[id]
 	s.mu.Unlock()
 	if !ok {
-		return Run{}, false, nil
+		// Not in memory is not "never happened": this daemon may have started
+		// after the run did, and the human is owed the answer either way.
+		run, ok = s.recalled(id)
+		if !ok {
+			return Run{}, false, nil
+		}
 	}
-	alive, err := s.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: run.HandleID})
+	if result, found := s.readResult(id); found {
+		run.State, run.Summary, run.FinishedAt = result.State, result.Summary, result.FinishedAt
+		return run, true, nil
+	}
+	alive, err := s.live(ctx, run.HandleID)
 	if err != nil {
-		// A failed probe is not proof the pane is dead (the hard rule), so the
-		// last known answer stands.
-		return run, true, nil //nolint:nilerr // intentional: an unreadable runtime is not a dead pane
+		return run, true, nil //nolint:nilerr // intentional: an unreadable runtime is not a dead run
 	}
-	run.Running = alive
+	if alive {
+		run.State = RunRunning
+		return run, true, nil
+	}
+	run.State = RunStopped
+	run.Summary = "The run ended without reporting how it went. Its output is still in the pane."
 	return run, true, nil
 }
 
