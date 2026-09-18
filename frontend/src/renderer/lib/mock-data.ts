@@ -2502,13 +2502,16 @@ function mockGlobHit(path: string, spec: string): boolean {
 }
 
 /**
- * An iOS project with several schemes, for the VITE_NO_ELECTRON harness.
+ * An iOS project with several schemes and several configurations, for the
+ * VITE_NO_ELECTRON harness.
  *
  * The run bar is invisible without one - its whole visibility test is a real
  * `.xcworkspace` in a real worktree - so without this the harness could never
- * show the control at all. The scheme names are the shape a real project has
- * (an app plus its environments), because a picker holding one entry does not
- * show what a picker holding several looks like.
+ * show the control at all. The names are the shape a real project has: an app
+ * and a library on the scheme axis, the environments on the configuration axis,
+ * and deliberately NO Debug among them - that is nter-ios-app's shape, and a
+ * preview that always has a safe default never shows the state where the bar
+ * has to ask.
  */
 export function mockIosProject(): components["schemas"]["ControllersIOSProjectResponse"] {
 	return {
@@ -2516,7 +2519,23 @@ export function mockIosProject(): components["schemas"]["ControllersIOSProjectRe
 			name: "DemoApp.xcworkspace",
 			path: "/demo/DemoApp.xcworkspace",
 			kind: "workspace",
-			schemes: ["DemoApp", "DemoAppDev", "DemoAppStaging"],
+			schemes: ["DemoApp", "DemoCore"],
+			configurations: ["Dev", "Mock-api", "Production", "Release", "UAT"],
+		},
+		// A run that has ENDED, because that is the state the harness could not
+		// show before: while a build is going the bar is obviously busy, and the
+		// question this chip answers is what happened once it stopped.
+		run: {
+			handleId: "iosrun-demo-working",
+			scheme: "DemoApp",
+			configuration: "UAT",
+			// One of THIS harness's simulators, so the bar reads as one machine:
+			// a run names the device it ran on, and the picker shows that device.
+			udid: "MOCK-UDID-A",
+			state: "failed",
+			summary: "building DemoApp failed (exit status 65). The compiler's output is above.",
+			startedAt: "2026-09-18T10:00:00Z",
+			finishedAt: "2026-09-18T10:03:12Z",
 		},
 	};
 }

@@ -22,10 +22,19 @@ type IOSProjectResponse struct {
 	Run     *iosrunsvc.Run    `json:"run,omitempty" description:"The run this session started, if it has one. Its handleId is the terminal to attach."`
 }
 
+// IOSProjectQuery is the query string of GET .../ios-project.
+type IOSProjectQuery struct {
+	Refresh bool `query:"refresh,omitempty" description:"Re-read the project from disk instead of serving the cached listing. The run bar sends it when a picker is opened, so a scheme or configuration added seconds ago in the terminal is there."`
+}
+
 // StartIOSRunInput is the body of POST /api/v1/sessions/{sessionId}/ios-runs.
 type StartIOSRunInput struct {
 	Scheme string `json:"scheme" description:"The Xcode scheme to build, as listed on the project."`
-	UDID   string `json:"udid,omitempty" description:"The simulator to install and launch on. Omitted uses the one assigned to this session."`
+	// Required, and deliberately not defaulted to Debug: a project with no Debug
+	// configuration (nter-ios-app has Dev, UAT, Production and no Debug) cannot
+	// build one, and the failure arrives minutes later as an empty PODS_ROOT.
+	Configuration string `json:"configuration" description:"The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects."`
+	UDID          string `json:"udid,omitempty" description:"The simulator to install and launch on. Omitted uses the one assigned to this session."`
 }
 
 // StartIOSRunResponse is the body of a started run (201).
@@ -51,17 +60,21 @@ func (c *IOSRunController) project(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := sessionID(r)
-	project, err := c.Svc.Project(r.Context(), id)
+	project, err := c.Svc.Project(r.Context(), id, queryBool(r.URL.Query().Get("refresh")))
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	// `schemes` is declared an array in the spec, so it must never be `null` on
-	// the wire: a project with none (a CocoaPods workspace with no `Pods/`, say)
-	// leaves the slice nil, and a renderer reading `.length` off that answer
-	// takes the whole view down.
+	// `schemes` and `configurations` are declared arrays in the spec, so neither
+	// may be `null` on the wire: a project with none (a CocoaPods workspace with
+	// no `Pods/`, say) leaves the slice nil, and a renderer reading `.length` off
+	// that answer takes the whole view down. Normalising in the handler is the
+	// convention the spec generator documents and assumes.
 	if project.Schemes == nil {
 		project.Schemes = []string{}
+	}
+	if project.Configurations == nil {
+		project.Configurations = []string{}
 	}
 	res := IOSProjectResponse{Project: project}
 	// The run rides on the project read rather than on a route of its own: the
@@ -83,7 +96,7 @@ func (c *IOSRunController) start(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
-	run, err := c.Svc.Start(r.Context(), sessionID(r), in.Scheme, in.UDID)
+	run, err := c.Svc.Start(r.Context(), sessionID(r), in.Scheme, in.Configuration, in.UDID)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

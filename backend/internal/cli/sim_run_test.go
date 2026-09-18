@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 )
 
 // runDeps is `ao sim run`'s whole boundary: a worktree with an Xcode project in
@@ -16,12 +18,33 @@ import (
 // about what did NOT run.
 func runDeps(t *testing.T, schemes string) (Deps, *simDaemon, *[][]string, *[][]string) {
 	t.Helper()
+	return configuredRunDeps(t, schemes, "")
+}
+
+// configuredRunDeps is runDeps with the project's build configurations decided
+// too. An empty list is a workspace that declares no project of its own - the
+// case where nothing can be listed, and `ao sim run` falls back to Debug.
+func configuredRunDeps(t *testing.T, schemes, configurations string) (Deps, *simDaemon, *[][]string, *[][]string) {
+	t.Helper()
 	deps, daemon, dataPath, calls := appDeps(t)
 	installFixture(t, dataPath, "Nter", "com.example.Nter", "1.0", "1", "build A")
 
 	worktree := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(worktree, "Nter.xcworkspace"), 0o750); err != nil {
 		t.Fatal(err)
+	}
+	if configurations != "" {
+		// The real shape: a workspace whose contents.xcworkspacedata names the
+		// app's project, which is the only thing that HAS configurations.
+		if err := os.MkdirAll(filepath.Join(worktree, "NterApp", "NterApp.xcodeproj"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		contents := "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Workspace version = \"1.0\">\n" +
+			"   <FileRef location = \"group:NterApp/NterApp.xcodeproj\"></FileRef>\n</Workspace>\n"
+		if err := os.WriteFile(filepath.Join(worktree, "Nter.xcworkspace", "contents.xcworkspacedata"),
+			[]byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Chdir(worktree)
 
@@ -49,6 +72,9 @@ func runDeps(t *testing.T, schemes string) (Deps, *simDaemon, *[][]string, *[][]
 		*calls = append(*calls, append([]string{name}, args...))
 		line := strings.Join(args, " ")
 		switch {
+		case strings.Contains(line, "-list") && strings.Contains(line, "-project"):
+			// Configurations are a PROJECT's; a workspace listing has none.
+			return []byte(`{"project":{"name":"NterApp","schemes":[` + schemes + `],"configurations":[` + configurations + `]}}`), nil
 		case strings.Contains(line, "-list"):
 			return []byte(`{"workspace":{"name":"Nter","schemes":[` + schemes + `]}}`), nil
 		case strings.Contains(line, "-showBuildSettings"):
@@ -341,5 +367,206 @@ func TestSimRun_RefusesToBootPastTheMemoryCap(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "iPhone 16") || !strings.Contains(err.Error(), "iPad Pro") {
 		t.Fatalf("the refusal must name what is already up: %v", err)
+	}
+}
+
+// 🗝 The bug this change closes, in the CLI. nter-ios-app's configurations are
+// Dev, Mock-api, Mock-local, Production, Release and UAT - there is no Debug,
+// and the `-configuration Debug` this command used to pass unconditionally
+// produced a build that could not work: CocoaPods generates no xcconfig for a
+// configuration that does not exist, so PODS_ROOT expands to empty and the
+// build dies on an xcfilelist path that starts at `/`.
+func TestSimRun_BuildsAConfigurationTheProjectActuallyHas(t *testing.T) {
+	deps, _, _, builds := configuredRunDeps(t, `"Nter"`, `"Dev","Mock-api","Production","Release","UAT"`)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run", "--configuration", "UAT"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+	build := strings.Join((*builds)[0], " ")
+	if !strings.Contains(build, "-configuration UAT") {
+		t.Fatalf("built %q, want the configuration that was asked for", build)
+	}
+	if strings.Contains(build, "-configuration Debug") {
+		t.Fatalf("Debug reached a project that has none: %q", build)
+	}
+}
+
+// Several configurations and no Debug: refuse and list them. Choosing here
+// would be choosing which backend the human's app talks to.
+func TestSimRun_NoDebugAndNoChoiceRefusesAndLists(t *testing.T) {
+	deps, _, _, builds := configuredRunDeps(t, `"Nter"`, `"Dev","Production","UAT"`)
+
+	_, _, err := executeCLI(t, deps, "sim", "run")
+	if err == nil {
+		t.Fatal("a project with three configurations and no Debug has no default")
+	}
+	for _, want := range []string{
+		"ao sim run --configuration Dev", "ao sim run --configuration Production", "ao sim run --configuration UAT",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal must print %q: %v", want, err)
+		}
+	}
+	if len(*builds) != 0 {
+		t.Fatalf("nothing should have been built: %v", *builds)
+	}
+}
+
+// Debug stays the default where it EXISTS: it is what Xcode's own Run button
+// builds, and asking about a two-configuration project would be a question with
+// an obvious answer.
+func TestSimRun_DefaultsToDebugWhenTheProjectHasOne(t *testing.T) {
+	deps, _, _, builds := configuredRunDeps(t, `"Nter"`, `"Debug","Release"`)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+	if build := strings.Join((*builds)[0], " "); !strings.Contains(build, "-configuration Debug") {
+		t.Fatalf("built %q, want Debug", build)
+	}
+}
+
+// A single configuration is used without asking, exactly as a single scheme is.
+func TestSimRun_UsesTheOnlyConfigurationWithoutAsking(t *testing.T) {
+	deps, _, _, builds := configuredRunDeps(t, `"Nter"`, `"Staging"`)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+	if build := strings.Join((*builds)[0], " "); !strings.Contains(build, "-configuration Staging") {
+		t.Fatalf("built %q, want the project's only configuration", build)
+	}
+}
+
+// Typed one way, defined another. xcodebuild wants the project's spelling, and
+// nobody types `Mock-api` the way the project spells it on the first go.
+func TestSimRun_MatchesTheConfigurationCaseInsensitivelyAndPassesTheProjectsSpelling(t *testing.T) {
+	deps, _, _, builds := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run", "--configuration", "uat"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+	if build := strings.Join((*builds)[0], " "); !strings.Contains(build, "-configuration UAT") {
+		t.Fatalf("built %q, want the project's own spelling", build)
+	}
+}
+
+func TestSimRun_AnUnknownConfigurationListsTheRealOnes(t *testing.T) {
+	deps, _, _, builds := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
+
+	_, _, err := executeCLI(t, deps, "sim", "run", "--configuration", "Debug")
+	if err == nil {
+		t.Fatal("a configuration the project does not have must not be built")
+	}
+	if !strings.Contains(err.Error(), `"Debug"`) || !strings.Contains(err.Error(), "ao sim run --configuration Dev") {
+		t.Fatalf("the refusal must name what was asked for and what exists: %v", err)
+	}
+	if len(*builds) != 0 {
+		t.Fatalf("nothing should have been built: %v", *builds)
+	}
+}
+
+// The one fallback, and it is narrow: a project whose configurations cannot be
+// read at all builds Debug and SAYS so, which is what this command did before
+// configurations were listed. The run bar blocks instead - a human waiting on a
+// doomed build has no error to read until it is over, and a terminal has this
+// line.
+func TestSimRun_SaysSoWhenItFallsBackToDebug(t *testing.T) {
+	deps, _, _, builds := runDeps(t, `"Nter"`)
+
+	_, errOut, err := executeCLI(t, deps, "sim", "run")
+	if err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(errOut, "build configurations") || !strings.Contains(errOut, "Debug") {
+		t.Fatalf("a silent fallback is the bug this feature closes:\n%s", errOut)
+	}
+	if build := strings.Join((*builds)[0], " "); !strings.Contains(build, "-configuration Debug") {
+		t.Fatalf("built %q", build)
+	}
+}
+
+// readRunVerdict is the run bar reading what the command left behind.
+func readRunVerdict(t *testing.T, path string) iosrun.Result {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("no verdict was written to %s: %v", path, err)
+	}
+	var result iosrun.Result
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatalf("verdict is not readable: %v (%s)", err, body)
+	}
+	return result
+}
+
+// 🗝 The run bar starts this command in a pane nothing waits on, so this file is
+// the only way the outcome gets back to it. Without it, "not running" is the
+// whole story and a clean finish looks exactly like a failed build.
+func TestSimRun_ReportsASuccessfulRunToTheBar(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
+	verdict := filepath.Join(t.TempDir(), "iosrun", "result.json")
+	t.Setenv(iosrun.EnvResultFile, verdict)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run", "--configuration", "Dev"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+
+	result := readRunVerdict(t, verdict)
+	if result.State != iosrun.RunSucceeded {
+		t.Fatalf("state %q, want succeeded", result.State)
+	}
+	// It names both axes, so a bar showing it says WHICH environment ran.
+	if !strings.Contains(result.Summary, "Nter (Dev)") {
+		t.Fatalf("summary %q, want the scheme and the configuration", result.Summary)
+	}
+	if result.FinishedAt == nil {
+		t.Fatal("a finished run must say when it finished")
+	}
+}
+
+func TestSimRun_ReportsAFailedBuildToTheBar(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
+	deps.StartStream = func(context.Context, string, ...string) (ProcessStream, error) {
+		stream := newFakeStream()
+		stream.feed("Nter/AppDelegate.swift:12:5: error: cannot find 'foo' in scope\n** BUILD FAILED **\n")
+		stream.err = errors.New("exit status 65")
+		return stream, nil
+	}
+	verdict := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv(iosrun.EnvResultFile, verdict)
+
+	if _, _, err := executeCLI(t, deps, "sim", "run", "--configuration", "Dev"); err == nil {
+		t.Fatal("a failed build must fail the command")
+	}
+
+	result := readRunVerdict(t, verdict)
+	if result.State != iosrun.RunFailed {
+		t.Fatalf("state %q, want failed", result.State)
+	}
+	if !strings.Contains(result.Summary, "failed") {
+		t.Fatalf("summary %q, want the sentence that says what went wrong", result.Summary)
+	}
+	// One line, and NOT the compiler's output: that is in the pane the bar
+	// points at, and restating it in a strip 24 pixels tall helps nobody.
+	if strings.Contains(result.Summary, "\n") || strings.Contains(result.Summary, "cannot find 'foo'") {
+		t.Fatalf("the verdict must be one sentence, not the build log: %q", result.Summary)
+	}
+}
+
+// An agent or a human typing the command has the variable unset, and writes
+// nothing anywhere.
+func TestSimRun_WritesNoVerdictWhenNobodyAsked(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev"`)
+	dir := t.TempDir()
+	t.Setenv(iosrun.EnvResultFile, "")
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("something was written: %v (%v)", entries, err)
 	}
 }

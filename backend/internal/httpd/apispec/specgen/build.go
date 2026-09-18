@@ -1086,7 +1086,7 @@ func iosRunOperations() []operation {
 		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/ios-project", id: "getIOSProject", tag: "sessions",
 			summary:    "What this session can build for iOS, and the run it already has",
-			pathParams: []any{controllers.SessionIDParam{}},
+			pathParams: []any{controllers.SessionIDParam{}, controllers.IOSProjectQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.IOSProjectResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},
@@ -1097,7 +1097,7 @@ func iosRunOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/ios-runs", id: "startIOSRun", tag: "sessions",
-			summary:    "Build a scheme from source and run it on a simulator, in a pane of its own",
+			summary:    "Build a scheme in a configuration from source and run it on a simulator, in a pane of its own",
 			pathParams: []any{controllers.SessionIDParam{}},
 			reqBody:    controllers.StartIOSRunInput{},
 			resps: []respUnit{

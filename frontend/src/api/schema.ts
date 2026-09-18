@@ -718,7 +718,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Build a scheme from source and run it on a simulator, in a pane of its own */
+        /** Build a scheme in a configuration from source and run it on a simulator, in a pane of its own */
         post: operations["startIOSRun"];
         delete?: never;
         options?: never;
@@ -2463,6 +2463,8 @@ export interface components {
             reason: string;
         };
         ControllersStartIOSRunInput: {
+            /** @description The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects. */
+            configuration: string;
             /** @description The Xcode scheme to build, as listed on the project. */
             scheme: string;
             /** @description The simulator to install and launch on. Omitted uses the one assigned to this session. */
@@ -2668,6 +2670,8 @@ export interface components {
             legacyRoot: string;
         };
         IosrunProject: {
+            configurations: string[];
+            configurationsError?: string;
             kind: string;
             name: string;
             path: string;
@@ -2675,11 +2679,20 @@ export interface components {
             schemesError?: string;
         };
         IosrunRun: {
+            configuration: string;
+            /** Format: date-time */
+            finishedAt?: null | string;
             handleId: string;
-            running: boolean;
             scheme: string;
             /** Format: date-time */
             startedAt: string;
+            /**
+             * @description How the run is going, or how it went. running is the command still alive in the pane; succeeded and failed are what it reported as it exited; stopped is a run that ended without reporting - Ctrl-C, or a tmux server that went away.
+             * @enum {string}
+             */
+            state: "running" | "succeeded" | "failed" | "stopped";
+            /** @description One line saying how it ended, in the command's own words. Never the build log - that is in the pane this run's handleId names. */
+            summary?: string;
             udid: string;
         };
         JiraAttachment: {
@@ -6427,7 +6440,10 @@ export interface operations {
     };
     getIOSProject: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Re-read the project from disk instead of serving the cached listing. The run bar sends it when a picker is opened, so a scheme or configuration added seconds ago in the terminal is there. */
+                refresh?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */
