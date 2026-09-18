@@ -8,9 +8,11 @@ import { KillSessionButton } from "./KillSessionButton";
 import { OpenInMenu } from "./OpenInMenu";
 import { RestartSessionButton } from "./RestartSessionButton";
 import { SessionGlyph } from "./SessionGlyph";
+import { IosRunBar } from "./IosRunBar";
 import { TerminalPane } from "./TerminalPane";
 import { startSplitDrag } from "../lib/split-drag";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
+import type { Task } from "../lib/crew";
 
 type CenterPaneProps = {
 	session?: WorkspaceSession;
@@ -40,6 +42,14 @@ type CenterPaneProps = {
 	splitControls?: ReactNode;
 	/** Whether this pane holds the caret (split view); see TerminalPane. */
 	active?: boolean;
+	/**
+	 * Point the terminal at a runtime handle that is not the agent's - today the
+	 * iOS run pane. Absent hides the run bar: a bar whose Run button could start
+	 * a build the pane has no way to show would be worse than no bar.
+	 */
+	onSelectRunTerminal?: (handleId: string) => void;
+	/** This session's task, so a device a crewmate holds is named by its role. */
+	task?: Task;
 	/** Open a workspace file clicked in the terminal (worker terminals only). */
 	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
 };
@@ -74,6 +84,8 @@ export function CenterPane({
 	splitControls,
 	active,
 	onOpenWorkspaceFile,
+	onSelectRunTerminal,
+	task,
 }: CenterPaneProps) {
 	const paneRef = useRef<HTMLDivElement | null>(null);
 	const wheelZoomRemainderRef = useRef(0);
@@ -266,6 +278,21 @@ export function CenterPane({
 					</span>
 					<span className="reviewer-terminal-header__harness">{target.harness}</span>
 				</div>
+			) : null}
+			{/* Directly above the terminal, and only on a session whose worktree
+			    holds an Xcode project - the bar returns null on every other one,
+			    so a Go repository's terminal starts exactly where it always did.
+			    Not rendered on the reviewer terminal: a reviewer pane is somebody
+			    else's checkout of the same worktree, and a Run button on it would
+			    build into the same DerivedData from two places at once. */}
+			{session && target.kind !== "reviewer" && onSelectRunTerminal ? (
+				<IosRunBar
+					onShowAgent={() => onSelectWorkerTerminal?.()}
+					onShowRun={onSelectRunTerminal}
+					sessionId={session.id}
+					task={task}
+					terminalTarget={target}
+				/>
 			) : null}
 			<div className="min-h-0 flex-1">
 				<TerminalPane

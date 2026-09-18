@@ -54,10 +54,37 @@ type simDaemon struct {
 	// the last body seen is not the one a test means.
 	videoStartRequest string
 
+	// The power route and the daemon's own device listing. They live here
+	// rather than in simPowerDaemon because `ao sim run` is the first command
+	// that needs BOTH a lease and a boot in one invocation, and a test that had
+	// to run two fake daemons could not assert the order it did them in.
+	//
+	// powerDevices empty means the route is not served at all, which is what
+	// every test that never boots anything wants.
+	powerDevices []simDeviceListing
+	powers       []string // the JSON body of every power request, in order
+	// onPower fires when a boot is asked for, so a test can make the MACHINE
+	// agree with the daemon - `ao sim run` reads both, and a device the daemon
+	// calls booted while simctl still calls it shut down is not writable.
+	onPower func()
+
 	mu          sync.Mutex
 	calls       []string // "METHOD path"
 	body        string   // last request body
 	holdRequest string   // body of the last gesture-hold request
+}
+
+// bootsOnPower marks a device the daemon will report as Booted once a boot has
+// been asked for, so a command that waits for one sees it come up.
+func (d *simDaemon) bootsOnPower(devices ...simDeviceListing) {
+	d.powerDevices = devices
+}
+
+// powerRequests is the body of every power request, in order.
+func (d *simDaemon) powerRequests() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.powers...)
 }
 
 // requestedHoldSeconds is the TTL the CLI asked the gesture hold for.
@@ -107,6 +134,26 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 			_, _ = io.WriteString(w, `{"hold":{"udid":"x","sessionId":"mer-9","token":"hold-token-1","expiresAt":"2026-08-13T07:41:32Z"}}`)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/hold/"):
 			_, _ = io.WriteString(w, `{"released":true}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sim/devices":
+			_ = json.NewEncoder(w).Encode(listSimDevicesResponse{Devices: d.powerDevices})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/power"):
+			d.mu.Lock()
+			d.powers = append(d.powers, string(body))
+			// The boot is over by the time the caller polls: `ao sim run` waits
+			// for the device, and a fake that never came up would test the
+			// timeout rather than the run.
+			for i := range d.powerDevices {
+				if strings.Contains(r.URL.Path, d.powerDevices[i].UDID) {
+					d.powerDevices[i].State = "Booted"
+					d.powerDevices[i].Power = nil
+				}
+			}
+			onPower := d.onPower
+			d.mu.Unlock()
+			if onPower != nil {
+				onPower()
+			}
+			_, _ = io.WriteString(w, `{"started":true}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sim/leases":
 			leases := []simLeaseClient{}
 			for _, l := range d.leases {

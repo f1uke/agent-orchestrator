@@ -759,10 +759,12 @@ export function SessionView({ sessionId }: SessionViewProps) {
 				daemonReady={daemonStatus.state === "ready"}
 				directory={directory}
 				onSelectWorkerTerminal={() => setTerminalTarget({ kind: "worker" })}
+				onSelectRunTerminal={(handleId) => setTerminalTarget({ kind: "run", handleId })}
 				onOpenWorkspaceFile={openWorkspaceFile}
 				pane={split ? { focused: true } : undefined}
 				session={session}
 				splitControls={session ? paneSplitControls(session.id) : undefined}
+				task={task}
 				terminalTarget={terminalTarget}
 				theme={theme}
 			/>

@@ -26,6 +26,7 @@ ao sim ax      [flags]
 ao sim log     [flags]
 ao sim claim   [flags]
 ao sim release [flags]
+ao sim run     [flags]
 ao sim install <path/to/App.app> [flags]
 ao sim launch  [bundle-id]       [flags]
 ao sim tap    <x> <y> | --label <name> | --id <identifier>  [flags]
@@ -408,6 +409,52 @@ With no `--udid` it releases the one device you hold, and fails if you hold none
 ```bash
 # Done driving the device
 ao sim release
+```
+
+---
+
+### ao sim run
+
+Build this project from source, install what it produced, and launch it - the whole loop in one lease-aware command.
+
+**Flags:**
+
+| Flag                    | Description                                                              |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `--scheme <name>`       | Xcode scheme to build. Defaults to the project's only scheme             |
+| `--configuration <cfg>` | Build configuration (default `Debug`)                                    |
+| `--udid <udid>`         | Run on this simulator instead of this session's own                      |
+| `--ttl <dur>`           | How long to hold the device afterwards (default 30m)                     |
+| `--json`                | Output the result as JSON                                                |
+
+The project is whatever `.xcworkspace` or `.xcodeproj` sits at the **root of the current directory**; a workspace wins over a project when both are there. Only the top level is searched, so a monorepo that keeps its app in a subdirectory has to be run from that subdirectory. The schemes come from `xcodebuild -list` at the moment you run it - there is nothing to configure, and a scheme added to the project today is offered today.
+
+**Why this exists rather than `xcodebuild -destination id=$AO_SIM_UDID`.** That call is the natural thing to reach for and it has two problems AO cannot fix from the outside: it consults no lease, and it aims a build at one named device. `ao sim run` splits those apart:
+
+- the **build** targets `generic/platform=iOS Simulator` and names **no device at all**, so the tool that cannot honour a lease is never pointed at a leased one. The same `.app` comes out for every simulator.
+- the **device** is taken before the build starts, not after it. A crewmate running this against the same simulator is refused in about a second, with the same "nothing was written to the device" wording `ao sim install` uses - rather than after three minutes of building something it may not be allowed to install.
+
+A device that is shut down is **booted on the way through**, under the same two-simulator cap as `ao sim boot`: past that it refuses and lists what is already up, because a third simulator has run this kind of machine out of memory.
+
+The app is always **terminated before it is launched**. A build that succeeds and a screen that does not change is the most confusing outcome this command could have, and that is exactly what `simctl launch` does to an app that was already running.
+
+With several schemes and no `--scheme`, it refuses and prints the command to run for each one. That refusal is the house rule, not an inconvenience: building the wrong scheme installs the wrong app, and the two look identical on the device.
+
+**Examples:**
+
+```bash
+# The project has one scheme, and this session has a device
+ao sim run
+```
+
+```bash
+# Pick the environment, on your own device ($AO_SIM_UDID)
+ao sim run --scheme NterDev
+```
+
+```bash
+# Build it, then drive what came up
+ao sim run --scheme NterDev && ao sim ax
 ```
 
 ---

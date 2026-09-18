@@ -146,7 +146,7 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 		newSimTapCommand(ctx), newSimSwipeCommand(ctx), newSimDragCommand(ctx),
 		newSimPinchCommand(ctx),
 		newSimTypeCommand(ctx), newSimButtonCommand(ctx),
-		newSimInstallCommand(ctx), newSimLaunchCommand(ctx),
+		newSimInstallCommand(ctx), newSimLaunchCommand(ctx), newSimRunCommand(ctx),
 		newSimFlowCommand(ctx),
 		newSimRecordCommand(ctx),
 	)

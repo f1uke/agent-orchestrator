@@ -2028,6 +2028,109 @@ paths:
       summary: Return the diff hunk or full file a review comment anchors to
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/ios-project:
+    get:
+      operationId: getIOSProject
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersIOSProjectResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: What this session can build for iOS, and the run it already has
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/ios-runs:
+    post:
+      operationId: startIOSRun
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersStartIOSRunInput'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersStartIOSRunResponse'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Build a scheme from source and run it on a simulator, in a pane of
+        its own
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/jira:
     delete:
       operationId: unlinkSessionJira
@@ -6923,6 +7026,19 @@ components:
       - cases
       - notDriven
       type: object
+    ControllersIOSProjectResponse:
+      properties:
+        project:
+          $ref: '#/components/schemas/IosrunProject'
+          description: The Xcode project at the root of this session's worktree. An
+            empty name means there is none, and the run bar does not render.
+        run:
+          $ref: '#/components/schemas/IosrunRun'
+          description: The run this session started, if it has one. Its handleId is
+            the terminal to attach.
+      required:
+      - project
+      type: object
     ControllersKillSessionRequest:
       properties:
         discardUncommitted:
@@ -7328,6 +7444,25 @@ components:
           type: string
       required:
       - reason
+      type: object
+    ControllersStartIOSRunInput:
+      properties:
+        scheme:
+          description: The Xcode scheme to build, as listed on the project.
+          type: string
+        udid:
+          description: The simulator to install and launch on. Omitted uses the one
+            assigned to this session.
+          type: string
+      required:
+      - scheme
+      type: object
+    ControllersStartIOSRunResponse:
+      properties:
+        run:
+          $ref: '#/components/schemas/IosrunRun'
+      required:
+      - run
       type: object
     ControllersUncommittedFileDTO:
       properties:
@@ -7779,6 +7914,46 @@ components:
       required:
       - available
       - legacyRoot
+      type: object
+    IosrunProject:
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        schemes:
+          items:
+            type: string
+          type: array
+        schemesError:
+          type: string
+      required:
+      - name
+      - path
+      - kind
+      - schemes
+      type: object
+    IosrunRun:
+      properties:
+        handleId:
+          type: string
+        running:
+          type: boolean
+        scheme:
+          type: string
+        startedAt:
+          format: date-time
+          type: string
+        udid:
+          type: string
+      required:
+      - handleId
+      - scheme
+      - udid
+      - running
+      - startedAt
       type: object
     JiraAttachment:
       properties:
