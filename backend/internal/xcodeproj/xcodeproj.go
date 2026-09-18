@@ -174,6 +174,10 @@ var dependencyDirs = map[string]bool{
 	"Checkouts":   true, // SPM, when a project vendors one
 	".build":      true,
 	"DerivedData": true,
+	// Not a source of schemes, but the largest directory in any JS project -
+	// and a React Native app is exactly the shape that has both. Walking it
+	// would spend seconds to find nothing.
+	"node_modules": true,
 }
 
 // own narrows xcodebuild's scheme list to the ones that belong to THIS app.
@@ -217,10 +221,13 @@ func own(dir string, schemes []string) []string {
 // cannot be walked, which own() reads as "no opinion".
 func definedOutsideDependencies(dir string) map[string]bool {
 	found := map[string]bool{}
-	// Depth is bounded because a scheme lives at a known depth from the project
-	// container, and an unbounded walk of a checkout with node_modules in it is
-	// seconds this answer does not have.
-	const maxDepth = 6
+	// Depth is bounded because a scheme lives at a known depth below its project
+	// container and an unbounded walk is seconds this answer does not have.
+	// Eight, not the five a top-level project needs: advisor-ios-app already
+	// keeps one at `FNCore/FNCoreProject/FNCore.xcodeproj/xcshareddata/xcschemes`,
+	// and a bound that only just fits the projects in front of me is a bound
+	// that silently drops the next one.
+	const maxDepth = 8
 	root := filepath.Clean(dir)
 	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
