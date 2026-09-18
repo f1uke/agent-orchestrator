@@ -230,7 +230,7 @@ func (c *commandContext) bootSimDevice(ctx context.Context, udid string, timeout
 	if err != nil {
 		return simBootResult{}, err
 	}
-	device, err := resolveSimBootTarget(devices, udid)
+	device, err := resolveSimBootTarget(devices, udid, "ao sim boot")
 	if err != nil {
 		return simBootResult{}, err
 	}
@@ -282,7 +282,13 @@ func (c *commandContext) bootSimDevice(ctx context.Context, udid string, timeout
 	return simBootedResult(device, false, &listing), nil
 }
 
-// resolveSimBootTarget decides which device an unqualified `ao sim boot` means.
+// resolveSimBootTarget decides which device an unqualified boot means.
+//
+// `command` is the verb the user actually typed, because this resolver now
+// serves two of them: `ao sim boot` and `ao sim run`, which boots a shut-down
+// device on its way through. A refusal that says "re-run with `ao sim boot
+// --udid X`" is the wrong instruction for somebody who typed `ao sim run` -
+// following it powers the device on and builds nothing.
 //
 // It is deliberately NOT resolveSimDevice: that rule answers "which booted
 // device did you mean", and boot's question is the opposite one. What is kept
@@ -290,7 +296,7 @@ func (c *commandContext) bootSimDevice(ctx context.Context, udid string, timeout
 // candidate it refuses and prints the command to run next, rather than
 // guessing. Guessing costs more here than anywhere else in this CLI: the wrong
 // guess starts a multi-gigabyte virtual machine nobody asked for.
-func resolveSimBootTarget(devices []simDevice, udid string) (simDevice, error) {
+func resolveSimBootTarget(devices []simDevice, udid, command string) (simDevice, error) {
 	// A session that owns a device means that device, even when others are
 	// booted or several are installed: booting is exactly where guessing costs
 	// the most, and the assignment is the one answer that is not a guess.
@@ -328,11 +334,11 @@ func resolveSimBootTarget(devices []simDevice, udid string) (simDevice, error) {
 		return booted[0], nil
 	case len(booted) > 1:
 		var b strings.Builder
-		fmt.Fprintf(&b, "%d simulators are already booted, so `ao sim boot` has no unambiguous default:", len(booted))
+		fmt.Fprintf(&b, "%d simulators are already booted, so `%s` has no unambiguous default:", len(booted), command)
 		for _, d := range booted {
 			fmt.Fprintf(&b, "\n  %s   # %s (%s)", d.UDID, d.Name, d.Runtime)
 		}
-		b.WriteString("\nDrive one of those, or name the device you mean with `ao sim boot --udid <udid>`.")
+		fmt.Fprintf(&b, "\nDrive one of those, or name the device you mean with `%s --udid <udid>`.", command)
 		return simDevice{}, errors.New(b.String())
 	case len(available) == 0:
 		return simDevice{}, errors.New("no simulators found on this machine; `ao sim` needs Xcode's simulator runtimes installed")
@@ -343,7 +349,7 @@ func resolveSimBootTarget(devices []simDevice, udid string) (simDevice, error) {
 		fmt.Fprintf(&b, "%d simulators are installed and none is booted, so there is no unambiguous default - "+
 			"booting one starts a virtual machine of several GB, which is not a choice to make for you. Re-run with one of:", len(available))
 		for _, d := range available {
-			fmt.Fprintf(&b, "\n  ao sim boot --udid %s   # %s (%s)", d.UDID, d.Name, d.Runtime)
+			fmt.Fprintf(&b, "\n  %s --udid %s   # %s (%s)", command, d.UDID, d.Name, d.Runtime)
 		}
 		return simDevice{}, errors.New(b.String())
 	}

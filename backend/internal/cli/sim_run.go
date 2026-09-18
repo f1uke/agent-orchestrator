@@ -285,7 +285,7 @@ func (c *commandContext) bootSimRunDevice(ctx context.Context, progress io.Write
 	if err == nil && device.Booted() {
 		return false, nil
 	}
-	target, bootErr := resolveSimBootTarget(devices, udid)
+	target, bootErr := resolveSimBootTarget(devices, udid, "ao sim run")
 	if bootErr != nil {
 		// The booted-device error is the better one whenever there was a real
 		// ambiguity among booted devices; boot's is better when nothing is up.

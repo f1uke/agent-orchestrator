@@ -106,9 +106,7 @@ export function IosRunBar({
 				aria-label={chosenScheme ? `Run ${chosenScheme}` : "Run"}
 				className={cn(
 					"flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium transition-colors",
-					blocked
-						? "cursor-not-allowed text-passive"
-						: "bg-accent text-accent-foreground hover:brightness-110",
+					blocked ? "cursor-not-allowed text-passive" : "bg-accent text-accent-foreground hover:brightness-110",
 				)}
 				disabled={Boolean(blocked) || start.isPending}
 				onClick={() => {
@@ -132,12 +130,7 @@ export function IosRunBar({
 				Run
 			</button>
 
-			<SchemePicker
-				chosen={chosenScheme}
-				onChoose={setScheme}
-				reason={project.schemesError ?? ""}
-				schemes={schemes}
-			/>
+			<SchemePicker chosen={chosenScheme} onChoose={setScheme} reason={project.schemesError ?? ""} schemes={schemes} />
 
 			<span aria-hidden className="h-4 w-px shrink-0 bg-border" />
 

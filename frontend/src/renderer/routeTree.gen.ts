@@ -11,13 +11,13 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ShellRouteImport } from './routes/_shell'
 import { Route as ShellIndexRouteImport } from './routes/_shell.index'
-import { Route as ShellPrsRouteImport } from './routes/_shell.prs'
-import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as ShellWikiRouteImport } from './routes/_shell.wiki'
-import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
+import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
+import { Route as ShellPrsRouteImport } from './routes/_shell.prs'
 import { Route as ShellSessionsSessionIdRouteImport } from './routes/_shell.sessions.$sessionId'
-import { Route as ShellProjectsProjectIdJiraRouteImport } from './routes/_shell.projects.$projectId_.jira'
+import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellProjectsProjectIdSettingsRouteImport } from './routes/_shell.projects.$projectId_.settings'
+import { Route as ShellProjectsProjectIdJiraRouteImport } from './routes/_shell.projects.$projectId_.jira'
 import { Route as ShellProjectsProjectIdSessionsSessionIdRouteImport } from './routes/_shell.projects.$projectId_.sessions.$sessionId'
 
 const ShellRoute = ShellRouteImport.update({
@@ -29,9 +29,9 @@ const ShellIndexRoute = ShellIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellPrsRoute = ShellPrsRouteImport.update({
-  id: '/prs',
-  path: '/prs',
+const ShellWikiRoute = ShellWikiRouteImport.update({
+  id: '/wiki',
+  path: '/wiki',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
@@ -39,14 +39,9 @@ const ShellSettingsRoute = ShellSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellWikiRoute = ShellWikiRouteImport.update({
-  id: '/wiki',
-  path: '/wiki',
-  getParentRoute: () => ShellRoute,
-} as any)
-const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
-  id: '/projects/$projectId',
-  path: '/projects/$projectId',
+const ShellPrsRoute = ShellPrsRouteImport.update({
+  id: '/prs',
+  path: '/prs',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellSessionsSessionIdRoute = ShellSessionsSessionIdRouteImport.update({
@@ -54,16 +49,21 @@ const ShellSessionsSessionIdRoute = ShellSessionsSessionIdRouteImport.update({
   path: '/sessions/$sessionId',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellProjectsProjectIdJiraRoute =
-  ShellProjectsProjectIdJiraRouteImport.update({
-    id: '/projects/$projectId_/jira',
-    path: '/projects/$projectId/jira',
-    getParentRoute: () => ShellRoute,
-  } as any)
+const ShellProjectsProjectIdRoute = ShellProjectsProjectIdRouteImport.update({
+  id: '/projects/$projectId',
+  path: '/projects/$projectId',
+  getParentRoute: () => ShellRoute,
+} as any)
 const ShellProjectsProjectIdSettingsRoute =
   ShellProjectsProjectIdSettingsRouteImport.update({
     id: '/projects/$projectId_/settings',
     path: '/projects/$projectId/settings',
+    getParentRoute: () => ShellRoute,
+  } as any)
+const ShellProjectsProjectIdJiraRoute =
+  ShellProjectsProjectIdJiraRouteImport.update({
+    id: '/projects/$projectId_/jira',
+    path: '/projects/$projectId/jira',
     getParentRoute: () => ShellRoute,
   } as any)
 const ShellProjectsProjectIdSessionsSessionIdRoute =
@@ -165,11 +165,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellIndexRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/prs': {
-      id: '/_shell/prs'
-      path: '/prs'
-      fullPath: '/prs'
-      preLoaderRoute: typeof ShellPrsRouteImport
+    '/_shell/wiki': {
+      id: '/_shell/wiki'
+      path: '/wiki'
+      fullPath: '/wiki'
+      preLoaderRoute: typeof ShellWikiRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/settings': {
@@ -179,18 +179,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/wiki': {
-      id: '/_shell/wiki'
-      path: '/wiki'
-      fullPath: '/wiki'
-      preLoaderRoute: typeof ShellWikiRouteImport
-      parentRoute: typeof ShellRoute
-    }
-    '/_shell/projects/$projectId': {
-      id: '/_shell/projects/$projectId'
-      path: '/projects/$projectId'
-      fullPath: '/projects/$projectId'
-      preLoaderRoute: typeof ShellProjectsProjectIdRouteImport
+    '/_shell/prs': {
+      id: '/_shell/prs'
+      path: '/prs'
+      fullPath: '/prs'
+      preLoaderRoute: typeof ShellPrsRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/sessions/$sessionId': {
@@ -200,11 +193,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSessionsSessionIdRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/projects/$projectId_/jira': {
-      id: '/_shell/projects/$projectId_/jira'
-      path: '/projects/$projectId/jira'
-      fullPath: '/projects/$projectId/jira'
-      preLoaderRoute: typeof ShellProjectsProjectIdJiraRouteImport
+    '/_shell/projects/$projectId': {
+      id: '/_shell/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof ShellProjectsProjectIdRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/projects/$projectId_/settings': {
@@ -212,6 +205,13 @@ declare module '@tanstack/react-router' {
       path: '/projects/$projectId/settings'
       fullPath: '/projects/$projectId/settings'
       preLoaderRoute: typeof ShellProjectsProjectIdSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/projects/$projectId_/jira': {
+      id: '/_shell/projects/$projectId_/jira'
+      path: '/projects/$projectId/jira'
+      fullPath: '/projects/$projectId/jira'
+      preLoaderRoute: typeof ShellProjectsProjectIdJiraRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/projects/$projectId_/sessions/$sessionId': {

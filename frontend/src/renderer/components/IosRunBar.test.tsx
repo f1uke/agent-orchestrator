@@ -35,9 +35,7 @@ const project = (over: Record<string, unknown> = {}) => ({
 	...over,
 });
 
-function answer(
-	{ ios, devices }: { ios?: Record<string, unknown>; devices?: unknown[] } = {},
-) {
+function answer({ ios, devices }: { ios?: Record<string, unknown>; devices?: unknown[] } = {}) {
 	getMock.mockImplementation((path: string) => {
 		if (path === "/api/v1/sessions/{sessionId}/ios-project") {
 			return Promise.resolve({ data: ios ?? { project: project() } });
@@ -87,7 +85,17 @@ describe("IosRunBar", () => {
 
 	it("offers the project's schemes and runs the one that is chosen", async () => {
 		answer();
-		postMock.mockResolvedValue({ data: { run: { handleId: "iosrun-mer-9", scheme: "NterDev", udid: "UDID-A", running: true, startedAt: "2026-09-18T10:00:00Z" } } });
+		postMock.mockResolvedValue({
+			data: {
+				run: {
+					handleId: "iosrun-mer-9",
+					scheme: "NterDev",
+					udid: "UDID-A",
+					running: true,
+					startedAt: "2026-09-18T10:00:00Z",
+				},
+			},
+		});
 		const { onShowRun } = renderBar();
 
 		await screen.findByTestId("ios-run-bar");
@@ -135,7 +143,10 @@ describe("IosRunBar", () => {
 	// A single SHUT-DOWN device is fine: `ao sim run` boots it on the way
 	// through, so refusing here would be a dead end the CLI does not have.
 	it("runs on the machine's only simulator even when it is shut down", async () => {
-		answer({ devices: [device("UDID-A", "iPhone 17 Pro Max", "Shutdown")], ios: { project: project({ schemes: ["Nter"] }) } });
+		answer({
+			devices: [device("UDID-A", "iPhone 17 Pro Max", "Shutdown")],
+			ios: { project: project({ schemes: ["Nter"] }) },
+		});
 		renderBar();
 
 		const run = await screen.findByRole("button", { name: "Run Nter" });
@@ -168,7 +179,13 @@ describe("IosRunBar", () => {
 	// Without this, a run starts, the terminal switches, the human goes back to
 	// the agent, and the build output becomes unreachable.
 	it("offers a way back to a running build, and back to the agent from it", async () => {
-		const run = { handleId: "iosrun-mer-9", scheme: "NterDev", udid: "UDID-A", running: true, startedAt: "2026-09-18T10:00:00Z" };
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			udid: "UDID-A",
+			running: true,
+			startedAt: "2026-09-18T10:00:00Z",
+		};
 		answer({ ios: { project: project(), run } });
 		const { onShowRun } = renderBar();
 
@@ -193,7 +210,16 @@ describe("IosRunBar", () => {
 	// outlives the command - so a failed build is still readable afterwards.
 	it("still points at the output once the build has finished", async () => {
 		answer({
-			ios: { project: project(), run: { handleId: "iosrun-mer-9", scheme: "NterDev", udid: "UDID-A", running: false, startedAt: "2026-09-18T10:00:00Z" } },
+			ios: {
+				project: project(),
+				run: {
+					handleId: "iosrun-mer-9",
+					scheme: "NterDev",
+					udid: "UDID-A",
+					running: false,
+					startedAt: "2026-09-18T10:00:00Z",
+				},
+			},
 		});
 		renderBar();
 
