@@ -56,6 +56,13 @@ func (c *IOSRunController) project(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteError(w, r, err)
 		return
 	}
+	// `schemes` is declared an array in the spec, so it must never be `null` on
+	// the wire: a project with none (a CocoaPods workspace with no `Pods/`, say)
+	// leaves the slice nil, and a renderer reading `.length` off that answer
+	// takes the whole view down.
+	if project.Schemes == nil {
+		project.Schemes = []string{}
+	}
 	res := IOSProjectResponse{Project: project}
 	// The run rides on the project read rather than on a route of its own: the
 	// bar asks this question on every poll anyway, and a second request for
