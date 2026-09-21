@@ -315,3 +315,78 @@ func TestSimInstallLaunch_JSONCarriesTheBuild(t *testing.T) {
 		t.Fatalf("id = %q, want %q", res.Build.ID, want)
 	}
 }
+
+// codesignLinkerSigned is what `codesign -dvv` really prints for a bundle built
+// with CODE_SIGNING_ALLOWED=NO - measured on Xcode 26.3. The `linker-signed`
+// flag is the whole tell: Xcode's CodeSign and ProcessProductPackaging steps
+// never ran, so the app carries no entitlements at all.
+const codesignLinkerSigned = `Executable=/tmp/MyApp.app/MyApp
+Identifier=MyApp
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20400 size=544 flags=0x20002(adhoc,linker-signed) hashes=14+0 location=embedded
+Signature=adhoc
+Info.plist=not bound
+TeamIdentifier=not set
+Sealed Resources=none
+`
+
+// signsAs puts one codesign answer in front of every bundle, so a test can hand
+// the install path a build made with signing disabled.
+func signsAs(deps *Deps, out string) {
+	inner := deps.CommandOutput
+	deps.CommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "codesign" {
+			return []byte(out), nil
+		}
+		return inner(ctx, name, args...)
+	}
+}
+
+// The guard this branch adds. An app built with code signing off installs,
+// launches and behaves normally until its first Keychain call, which fails with
+// -34018 and logs nothing that names the build. The fact is knowable from the
+// bundle, so the install says it out loud rather than leaving somebody to find
+// it three hours later in the app.
+func TestSimInstall_WarnsAboutAnAppThatWasNeverCodeSigned(t *testing.T) {
+	deps, _, dataPath, _ := appDeps(t)
+	signsAs(&deps, codesignLinkerSigned)
+	bundle := installFixture(t, t.TempDir(), "MyApp", "com.example.MyApp", "1.0", "1", "build A")
+	installFixture(t, dataPath, "MyApp", "com.example.MyApp", "1.0", "1", "build A")
+
+	out, errOut, err := executeCLI(t, deps, "sim", "install", bundle)
+	if err != nil {
+		t.Fatalf("install failed: %v\nstderr=%s", err, errOut)
+	}
+	// It is not a refusal: the app is on the device and may be perfectly usable
+	// for anything that does not need an entitlement.
+	if !strings.Contains(out, "Installed MyApp.app") {
+		t.Fatalf("the install still happened, and must still say so:\n%s", out)
+	}
+	for _, want := range []string{"Warning:", "MyApp.app was never code signed", "linker-signed", "-34018", "CODE_SIGNING_ALLOWED=NO"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the warning must say %q so a reader knows what broke and what to do:\n%s", want, out)
+		}
+	}
+}
+
+// The ordinary build says nothing. A warning on every install is a warning
+// nobody reads by the second week.
+func TestSimInstall_SaysNothingAboutAnOrdinarySimulatorBuild(t *testing.T) {
+	deps, _, dataPath, _ := appDeps(t)
+	signsAs(&deps, `Executable=/tmp/MyApp.app/MyApp
+Identifier=com.example.MyApp
+CodeDirectory v=20400 size=430 flags=0x2(adhoc) hashes=3+7 location=embedded
+Signature=adhoc
+Sealed Resources version=2 rules=10 files=1509
+`)
+	bundle := installFixture(t, t.TempDir(), "MyApp", "com.example.MyApp", "1.0", "1", "build A")
+	installFixture(t, dataPath, "MyApp", "com.example.MyApp", "1.0", "1", "build A")
+
+	out, errOut, err := executeCLI(t, deps, "sim", "install", bundle)
+	if err != nil {
+		t.Fatalf("install failed: %v\nstderr=%s", err, errOut)
+	}
+	if strings.Contains(out, "Warning:") {
+		t.Fatalf("an ordinary ad hoc simulator build is not worth a warning:\n%s", out)
+	}
+}

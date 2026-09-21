@@ -27,6 +27,15 @@ const EnvResultFile = "AO_IOS_RUN_RESULT_FILE"
 type Result struct {
 	State   RunState `json:"state"`
 	Summary string   `json:"summary,omitempty"`
+	// Warning is what is wrong with the app a SUCCEEDED run put on the device.
+	//
+	// 🗝 It is separate from Summary, and from State, because it is the one
+	// outcome neither of those can carry: the run worked, the app is on screen,
+	// and it is broken. That combination is exactly what shipped an app with no
+	// entitlements from the Run button for as long as `ao sim run` passed
+	// CODE_SIGNING_ALLOWED=NO - a success the bar had no way to qualify, and a
+	// failure that only showed up as a login that would not stick.
+	Warning string `json:"warning,omitempty"`
 	// FinishedAt is when the command ended, by the command's own clock.
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }

@@ -130,7 +130,10 @@ type Run struct {
 	// Summary is one line saying how it ended, in the command's own words. It
 	// never restates compiler errors: those are in the pane, and the bar's job
 	// is to say a run failed and point at the output.
-	Summary   string    `json:"summary,omitempty" description:"One line saying how it ended, in the command's own words. Never the build log - that is in the pane this run's handleId names."`
+	Summary string `json:"summary,omitempty" description:"One line saying how it ended, in the command's own words. Never the build log - that is in the pane this run's handleId names."`
+	// Warning is what is wrong with the app a run that SUCCEEDED installed. A
+	// run can work and still leave a broken app on the device; see Result.
+	Warning   string    `json:"warning,omitempty" description:"What is wrong with the app this run installed, when anything is - a run can succeed and still leave an app that cannot reach the Keychain. Empty is the ordinary case."`
 	StartedAt time.Time `json:"startedAt"`
 	// FinishedAt is when the command reported its result; absent while running,
 	// and absent for a run that was stopped without reporting one.
@@ -493,6 +496,7 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 	}
 	if result, found := s.readResult(id); found {
 		run.State, run.Summary, run.FinishedAt = result.State, result.Summary, result.FinishedAt
+		run.Warning = result.Warning
 		return run, true, nil
 	}
 	alive, err := s.live(ctx, run.HandleID)

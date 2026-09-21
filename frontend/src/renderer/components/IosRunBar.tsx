@@ -208,6 +208,16 @@ export function IosRunBar({
 
 			<div className="ml-auto flex min-w-0 items-center gap-2">
 				{problem ? <Problem message={problem} /> : null}
+				{/*
+				 * A run's own warning outranks the chip beside it: the run
+				 * WORKED, so the chip says "Ran NterApp (Dev)" in the ordinary
+				 * tone, and the only thing wrong is the app it left on the
+				 * device. That combination shipped a build with no entitlements
+				 * from this very button and took three hours to trace, so it
+				 * gets the same treatment as a refusal rather than a tooltip
+				 * nobody hovers.
+				 */}
+				{!problem && run?.warning ? <Problem message={run.warning} /> : null}
 				{run ? <RunChip onShowAgent={onShowAgent} onShowRun={onShowRun} run={run} watching={watchingRun} /> : null}
 			</div>
 		</div>

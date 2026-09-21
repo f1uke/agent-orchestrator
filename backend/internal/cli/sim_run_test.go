@@ -570,3 +570,126 @@ func TestSimRun_WritesNoVerdictWhenNobodyAsked(t *testing.T) {
 		t.Fatalf("something was written: %v (%v)", entries, err)
 	}
 }
+
+// A run that WORKED and installed an app with no entitlements is the exact
+// shape of the defect this branch fixes: the build was green, the app was on
+// screen, and every Keychain call in it failed silently. The command must say
+// so, and the bar must be told - a success the bar cannot qualify is how this
+// reached a real user through the Run button.
+func TestSimRun_WarnsWhenTheAppItBuiltHasNoEntitlements(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
+	signsAs(&deps, codesignLinkerSigned)
+	verdict := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv(iosrun.EnvResultFile, verdict)
+
+	out, errOut, err := executeCLI(t, deps, "sim", "run", "--configuration", "Dev")
+	if err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "Warning: Nter.app was never code signed") {
+		t.Fatalf("the run must say the app it just installed is missing its entitlements:\n%s", out)
+	}
+
+	result := readRunVerdict(t, verdict)
+	// Still a success - the build compiled and the app launched. Calling it
+	// failed would send the reader looking for a compiler error that is not in
+	// the pane.
+	if result.State != iosrun.RunSucceeded {
+		t.Fatalf("state %q, want succeeded", result.State)
+	}
+	if !strings.Contains(result.Warning, "was never code signed") {
+		t.Fatalf("warning %q, want the one line the bar shows beside the run", result.Warning)
+	}
+	if strings.Contains(result.Warning, "\n") {
+		t.Fatalf("the bar gets one line, not the whole note: %q", result.Warning)
+	}
+}
+
+// The other half of the same rule: after the fix, a run whose build signed
+// itself normally reports no warning at all.
+func TestSimRun_ReportsNoWarningForAnOrdinaryBuild(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev"`)
+	verdict := filepath.Join(t.TempDir(), "result.json")
+	t.Setenv(iosrun.EnvResultFile, verdict)
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+	if warning := readRunVerdict(t, verdict).Warning; warning != "" {
+		t.Fatalf("an ordinary run must warn about nothing, got %q", warning)
+	}
+}
+
+// A project that really cannot sign for the Simulator now fails the build,
+// where the old CODE_SIGNING_ALLOWED=NO turned that failure into an app with no
+// entitlements. The refusal has to say the change was deliberate, or the next
+// reader puts the flag back.
+func TestSimRun_ExplainsABuildThatFailedWhileCodeSigning(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev"`)
+	deps.StartStream = func(context.Context, string, ...string) (ProcessStream, error) {
+		stream := newFakeStream()
+		stream.feed("error: Build input file cannot be found: '/w/NterApp/Resources/NterApp.entitlements'. " +
+			"Did you forget to declare this file as an output of a script phase? (in target 'NterApp')\n** BUILD FAILED **\n")
+		stream.err = errors.New("exit status 65")
+		return stream, nil
+	}
+
+	_, errOut, err := executeCLI(t, deps, "sim", "run")
+	if err == nil {
+		t.Fatal("a failed build must fail the command")
+	}
+	for _, want := range []string{
+		"Nothing was installed",
+		"failed while code signing",
+		"CODE_SIGNING_ALLOWED=NO",
+		"signs itself ad hoc",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal must say %q:\n%s\nstderr=%s", want, err, errOut)
+		}
+	}
+}
+
+// A build that failed for an ordinary reason gets the ordinary refusal. The
+// signing hint is three sentences, and printing it under every compiler error
+// would make it furniture.
+func TestSimRun_KeepsTheSigningHintOutOfAnOrdinaryBuildFailure(t *testing.T) {
+	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev"`)
+	deps.StartStream = func(context.Context, string, ...string) (ProcessStream, error) {
+		stream := newFakeStream()
+		// A successful build says plenty about signing; none of it is an error.
+		stream.feed("CodeSign /dd/Build/Products/Dev-iphonesimulator/Nter.app\n" +
+			"    Signing Identity: -\n" +
+			"Nter/AppDelegate.swift:12:5: error: cannot find 'foo' in scope\n** BUILD FAILED **\n")
+		stream.err = errors.New("exit status 65")
+		return stream, nil
+	}
+
+	_, _, err := executeCLI(t, deps, "sim", "run")
+	if err == nil {
+		t.Fatal("a failed build must fail the command")
+	}
+	if strings.Contains(err.Error(), "failed while code signing") {
+		t.Fatalf("a compiler error is not a signing failure:\n%s", err)
+	}
+}
+
+// The watcher reads a stream, not a file: xcodebuild's output arrives in
+// whatever chunks the pipe hands over, and a marker split across two reads is
+// still a marker.
+func TestSigningWatch_SeesAMarkerSplitAcrossReads(t *testing.T) {
+	var out strings.Builder
+	watch := &signingWatch{out: &out}
+	for _, chunk := range []string{"compiling…\nerror: Code Sig", "ning Error: no ", "identity\n** BUILD FAILED **\n"} {
+		if _, err := watch.Write([]byte(chunk)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	if !watch.saw {
+		t.Fatal("a signing error written in three pieces is still a signing error")
+	}
+	// Everything it read still reached the terminal, byte for byte.
+	if out.String() != "compiling…\nerror: Code Signing Error: no identity\n** BUILD FAILED **\n" {
+		t.Fatalf("the build output must pass through untouched: %q", out.String())
+	}
+}

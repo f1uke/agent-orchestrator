@@ -2694,6 +2694,8 @@ export interface components {
             /** @description One line saying how it ended, in the command's own words. Never the build log - that is in the pane this run's handleId names. */
             summary?: string;
             udid: string;
+            /** @description What is wrong with the app this run installed, when anything is - a run can succeed and still leave an app that cannot reach the Keychain. Empty is the ordinary case. */
+            warning?: string;
         };
         JiraAttachment: {
             filename?: string;
