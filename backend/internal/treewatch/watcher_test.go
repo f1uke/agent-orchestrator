@@ -225,15 +225,60 @@ func TestIgnoredFileCreatedMidRunDoesNotCount(t *testing.T) {
 
 // A directory created mid-run is watched, so writes inside it count. Without
 // this the detector would miss an agent creating a new package and filling it.
+//
+// The mkdir itself does not count - see TestNewEmptyDirectoryDoesNotCount - so
+// this asserts the thing that matters: the FILE.
 func TestNewDirectoryIsWatched(t *testing.T) {
 	root := gitRepo(t)
 	_, lease := attach(t, root)
 	start := lease.StartGeneration()
 
 	mkdir(t, filepath.Join(root, "src", "fresh"))
-	afterMkdir := settle(t, lease, start+1)
+	// Settled first, so the directory is decided while it is still empty: a
+	// mkdir and the write that follows it in the same instant are one event,
+	// and this test is about the write.
+	quiet(t, lease, start)
 	write(t, filepath.Join(root, "src", "fresh", "file.go"), "package fresh\n")
-	settle(t, lease, afterMkdir+1)
+	settle(t, lease, start+1)
+	if changed := lease.Changed(); len(changed) != 1 || changed[0] != "src/fresh/file.go" {
+		t.Fatalf("changed = %v, want just the file inside the new directory", changed)
+	}
+}
+
+// A build that creates an empty directory has not moved the tree: git tracks
+// content and never directories, so a worktree with a new empty directory in it
+// still reports a clean `git status`.
+//
+// The real one this is about: nter-ios-app's GTM script phase fills
+// `NterApp/container`, whose only contents are gitignored - so the directory is
+// empty in git, git does not create it on checkout, and the first build in every
+// fresh worktree makes it. It discarded passing build results.
+func TestNewEmptyDirectoryDoesNotCount(t *testing.T) {
+	root := gitRepo(t)
+	_, lease := attach(t, root)
+	start := lease.StartGeneration()
+
+	mkdir(t, filepath.Join(root, "src", "container"))
+	quiet(t, lease, start)
+}
+
+// The reason the emptiness is read AFTER the watch is added, and the case that
+// makes "an empty directory is nothing" safe rather than a hole: a directory
+// that appears already full - moved in whole, which no watch inside it ever saw
+// being filled - is not empty when it is looked at, so it counts.
+func TestADirectoryThatArrivesWithContentCounts(t *testing.T) {
+	root := gitRepo(t)
+	staging := t.TempDir()
+	mkdir(t, filepath.Join(staging, "pkg"))
+	write(t, filepath.Join(staging, "pkg", "file.go"), "package pkg\n")
+
+	_, lease := attach(t, root)
+	start := lease.StartGeneration()
+
+	if err := os.Rename(filepath.Join(staging, "pkg"), filepath.Join(root, "src", "pkg")); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	settle(t, lease, start+1)
 }
 
 // Two overlapping runs in one worktree share one watcher and one counter, and

@@ -441,3 +441,36 @@ func TestBuildArgs_BuildsOnlyThisMachinesArchitecture(t *testing.T) {
 		t.Fatalf("the build must not ask for architectures this machine cannot run: %q", line)
 	}
 }
+
+// The state every freshly spawned worker starts in, and the two states it must
+// not be confused with: a project that uses no CocoaPods at all, and one whose
+// pods are already installed.
+func TestPodInstallPending(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		entries []string
+		files   []string
+		want    bool
+	}{
+		{name: "a fresh worktree: a Podfile and no Pods", files: []string{"Podfile"}, want: true},
+		{name: "pods installed", entries: []string{"Pods"}, files: []string{"Podfile"}, want: false},
+		{name: "no CocoaPods in this project at all", entries: []string{"Packages"}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, entry := range tc.entries {
+				if err := os.MkdirAll(filepath.Join(dir, entry), 0o750); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, file := range tc.files {
+				if err := os.WriteFile(filepath.Join(dir, file), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := PodInstallPending(dir); got != tc.want {
+				t.Fatalf("PodInstallPending = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

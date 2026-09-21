@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
@@ -164,6 +165,9 @@ type Service struct {
 	// does not care gets.
 	stateDir string
 	now      func() time.Time
+	// log is where a failed listing's real output goes. The run bar gets a
+	// sentence; this keeps the evidence behind it.
+	log *slog.Logger
 
 	mu     sync.Mutex
 	runs   map[domain.SessionID]Run
@@ -184,6 +188,9 @@ func WithRunner(run xcodeproj.Runner) Option { return func(s *Service) { s.run =
 // WithClock replaces the clock, so a test can age the scheme cache.
 func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = now } }
 
+// WithLogger replaces the logger. Production passes none and gets slog.Default.
+func WithLogger(l *slog.Logger) Option { return func(s *Service) { s.log = l } }
+
 // WithStateDir is where runs are recorded. Production passes the daemon's data
 // dir; a test passes t.TempDir() or nothing.
 func WithStateDir(dir string) Option { return func(s *Service) { s.stateDir = dir } }
@@ -196,6 +203,7 @@ func New(sessions Sessions, runtime Runtime, aoBinary string, opts ...Option) *S
 		run:      commandOutputInDir,
 		aoBinary: aoBinary,
 		now:      time.Now,
+		log:      slog.Default(),
 		runs:     map[domain.SessionID]Run{},
 		cached:   map[domain.SessionID]cachedListing{},
 	}
@@ -279,30 +287,56 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool
 	}()
 	wg.Wait()
 
-	switch {
-	case errors.Is(schemesErr, xcodeproj.ErrNoSchemes):
-		project.SchemesError = "This project has no schemes, so there is nothing to build."
-	case schemesErr != nil:
-		// The project is still real, and the bar still renders: saying which
-		// tool failed beats a picker that is silently empty.
-		project.SchemesError = firstLine(schemesErr.Error())
-	default:
+	// Asked once for both answers: the two listings fail together whenever the
+	// cause is the worktree rather than the project, and a filesystem question
+	// is not worth asking twice.
+	podsPending := xcodeproj.PodInstallPending(dir)
+	if schemesErr != nil {
+		project.SchemesError = s.explain(dir, found, "schemes", podsPending, schemesErr,
+			"This project has no schemes, so there is nothing to build.", xcodeproj.ErrNoSchemes)
+	} else {
 		project.Schemes = schemes
 	}
-	switch {
-	case errors.Is(configurationsErr, xcodeproj.ErrNoConfigurations):
+	if configurationsErr != nil {
 		// Never "so Debug it is". Every Xcode project defines configurations, so
 		// an empty list means the question failed - and the project this feature
 		// was built for has no Debug at all, which is precisely the case a
 		// fallback would turn into a three-minute build that could not work.
-		project.ConfigurationsError = "No build configurations could be read from this project, so there is no safe one to build."
-	case configurationsErr != nil:
-		project.ConfigurationsError = firstLine(configurationsErr.Error())
-	default:
+		project.ConfigurationsError = s.explain(dir, found, "build configurations", podsPending, configurationsErr,
+			"No build configurations could be read from this project, so there is no safe one to build.",
+			xcodeproj.ErrNoConfigurations)
+	} else {
 		project.Configurations = configurations
 	}
 	s.remember(id, project, now)
 	return project, nil
+}
+
+// explain turns a failed listing into ONE SENTENCE A PERSON CAN ACT ON, and
+// keeps xcodebuild's own output out of the run bar entirely.
+//
+// 🗝 The bar is a strip above a terminal, and what reached it before was the
+// tool's stderr: a temp path, a pid and a result-bundle name, none of which
+// tells the reader what to do. The detail is not thrown away - it goes to the
+// daemon log, where a developer chasing an odd project can still read it - but
+// the human reading the bar gets the answer instead of the evidence.
+//
+// Only one cause is ever NAMED, and only when it was detected: a worktree whose
+// pods have never been installed, which is the state every freshly spawned
+// worker starts in and the cause of nearly every empty listing here. Anything
+// else says plainly that the listing failed and hands over the one command that
+// shows why. Guessing at `pod install` for a project that has no Podfile would
+// send the reader off to fix something that was never wrong.
+func (s *Service) explain(dir string, found xcodeproj.Project, subject string, podsPending bool, err error, empty string, emptySentinel error) string {
+	s.log.Warn("iosrun: could not list "+subject,
+		"project", found.Name, "dir", dir, "podInstallPending", podsPending, "error", err)
+	if podsPending {
+		return "This worktree has a Podfile but no Pods directory, so `pod install` has not been run here yet."
+	}
+	if errors.Is(err, emptySentinel) {
+		return empty
+	}
+	return fmt.Sprintf("Xcode could not read the %s of %s. Run `xcodebuild -list` in this worktree to see why.", subject, found.Name)
 }
 
 // DefaultConfiguration is the configuration to build when nobody has said, or
@@ -497,13 +531,4 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
-}
-
-// firstLine keeps an error to the sentence a picker can show. xcodebuild's
-// failures run to pages, and the rest of them is in the terminal anyway.
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimSpace(s[:i])
-	}
-	return strings.TrimSpace(s)
 }

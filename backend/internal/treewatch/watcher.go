@@ -36,6 +36,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -267,9 +268,13 @@ func (w *watcher) addTree(root string, maxDirs int) error {
 // loop counts writes. Every non-ignored Create/Write/Remove/Rename bumps the
 // generation.
 //
-// Chmod is deliberately NOT counted: kqueue reports attribute touches that are
-// not content changes, and counting them would throw away good runs for no
-// detection gain.
+// Two kinds of event are deliberately NOT counted, both for the same reason -
+// they are not content, and a detector that throws away good runs for them buys
+// no detection:
+//
+//   - Chmod: kqueue reports attribute touches that change no bytes.
+//   - the creation of an EMPTY directory: git tracks no such thing, and
+//     whatever lands inside it later is counted on its own. See onEvent.
 func (w *watcher) loop() {
 	defer close(w.done)
 	for {
@@ -302,6 +307,25 @@ func (w *watcher) onEvent(ev fsnotify.Event) {
 	if ev.Has(fsnotify.Create) {
 		if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
 			w.addNewDir(ev.Name)
+			// 🗝 A directory that arrives EMPTY is not the tree moving. git
+			// tracks content, never directories: a worktree with a new empty
+			// directory in it still reports a clean `git status`, so there is
+			// nothing here a run could have read a half-written version of.
+			//
+			// Measured, and the reason this exists: nter-ios-app has a script
+			// phase that fills `NterApp/container` with a build-time file, and
+			// the directory holding it is empty in git - so git does not create
+			// it on checkout and the FIRST build in every fresh worktree makes
+			// it. That mkdir discarded real, passing build results.
+			//
+			// It is safe in both directions because the watch is established
+			// FIRST, on the line above: every file that lands inside afterwards
+			// arrives as its own event and is counted on its own merits, and
+			// anything already inside (a directory that appeared whole, by
+			// rename) makes it non-empty and counts here.
+			if emptyDir(ev.Name) {
+				return
+			}
 		}
 	}
 	rel, err := filepath.Rel(w.root, ev.Name)
@@ -338,6 +362,19 @@ func (w *watcher) addNewDir(path string) {
 	w.mu.Lock()
 	w.dirs[path] = struct{}{}
 	w.mu.Unlock()
+}
+
+// emptyDir reports whether path holds no entries. A directory that cannot be
+// read is NOT reported empty: an unreadable directory is an unknown, and an
+// unknown counts.
+func emptyDir(path string) bool {
+	dir, err := os.Open(path) //nolint:gosec // the path is an event from a directory this watcher added itself
+	if err != nil {
+		return false
+	}
+	defer func() { _ = dir.Close() }()
+	_, err = dir.ReadDir(1)
+	return errors.Is(err, io.EOF)
 }
 
 func (w *watcher) markDown(reason string) {

@@ -1,9 +1,12 @@
 package iosrun
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,6 +91,35 @@ func service(t *testing.T, dir string, listOutput string, rt *fakeRuntime) *Serv
 		}))
 }
 
+// touch writes an empty FILE in the worktree - worktree() makes directories.
+func touch(t *testing.T, dir, name string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rawXcodebuildFailure is what a worktree whose pods are missing actually
+// produced, verbatim from the report that prompted this: two lines, a temp path,
+// a pid and a result-bundle name.
+const rawXcodebuildFailure = "exit status 66: 2026-09-19 04:26:09.138 xcodebuild[51858:1727078] Writing error result bundle to " +
+	"/var/folders/3x/t0cyhz0d4f9_0000gn/T/ResultBundle_2026-19-09_04-26-0009.xcresult\nxcodebuild: error: Could not resolve package dependencies."
+
+// failingListing is a service whose `xcodebuild -list` fails the way a real one
+// does. logTo captures the daemon log; nil discards it.
+func failingListing(t *testing.T, dir string, logTo io.Writer) *Service {
+	t.Helper()
+	handler := slog.DiscardHandler
+	if logTo != nil {
+		handler = slog.NewTextHandler(logTo, nil)
+	}
+	return New(fakeSessions{path: dir, found: true}, &fakeRuntime{}, "/usr/local/bin/ao",
+		WithLogger(slog.New(handler)),
+		WithRunner(func(context.Context, string, string, ...string) ([]byte, error) {
+			return nil, errors.New(rawXcodebuildFailure)
+		}))
+}
+
 // The run bar's whole visibility test. A worktree with no Xcode project is the
 // ordinary case, not a failure, and the empty name is what makes the bar absent
 // rather than disabled.
@@ -136,6 +168,77 @@ func TestProject_SaysWhyTheSchemesAreMissing(t *testing.T) {
 	}
 	if strings.Contains(project.SchemesError, "\n") {
 		t.Fatalf("the reason must be one line a picker can show: %q", project.SchemesError)
+	}
+}
+
+// THE COMMON CASE ON A FRESHLY SPAWNED WORKER: the worktree has a Podfile and
+// no Pods, so nobody has run `pod install` in it. Both listings then fail for
+// that one reason, and the bar has to say it - a scheme picker that reports
+// "this project has no schemes" is true and useless.
+func TestProject_AWorktreeWithoutItsPodsSaysSo(t *testing.T) {
+	dir := worktree(t, "NterWorkspace.xcworkspace")
+	touch(t, dir, "Podfile")
+	svc := failingListing(t, dir, nil)
+
+	project, err := svc.Project(context.Background(), "mer-9", false)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	for _, reason := range []string{project.SchemesError, project.ConfigurationsError} {
+		if !strings.Contains(reason, "pod install") {
+			t.Fatalf("the reason must name the missing install: %q", reason)
+		}
+	}
+}
+
+// The same worktree once the pods ARE there: no guess at `pod install`, because
+// nothing detected one. A cause invented here sends the reader off to fix
+// something that was never wrong.
+func TestProject_DoesNotGuessAtPodInstall(t *testing.T) {
+	dir := worktree(t, "NterWorkspace.xcworkspace", "Pods")
+	touch(t, dir, "Podfile")
+	svc := failingListing(t, dir, nil)
+
+	project, err := svc.Project(context.Background(), "mer-9", false)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	if strings.Contains(project.SchemesError, "pod install") {
+		t.Fatalf("an installed Pods directory must not be reported as missing: %q", project.SchemesError)
+	}
+	if !strings.Contains(project.SchemesError, "NterWorkspace.xcworkspace") {
+		t.Fatalf("an unexplained failure must at least name the project: %q", project.SchemesError)
+	}
+}
+
+// What the bar must never show, and where it has to go instead. The raw dump is
+// a temp path, a pid and a result-bundle name; the reader can act on none of it.
+func TestProject_KeepsRawXcodebuildOutputOutOfTheBarAndInTheLog(t *testing.T) {
+	var logged bytes.Buffer
+	dir := worktree(t, "NterApp.xcodeproj")
+	svc := failingListing(t, dir, &logged)
+
+	project, err := svc.Project(context.Background(), "mer-9", false)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	for _, reason := range []string{project.SchemesError, project.ConfigurationsError} {
+		if reason == "" {
+			t.Fatal("an empty list must say why")
+		}
+		if strings.Contains(reason, "\n") {
+			t.Fatalf("the reason must be one line a picker can show: %q", reason)
+		}
+		for _, leak := range []string{"exit status", "/var/folders", "ResultBundle", "xcodebuild[51858"} {
+			if strings.Contains(reason, leak) {
+				t.Fatalf("raw xcodebuild output reached the bar: %q", reason)
+			}
+		}
+	}
+	// The detail is kept, not thrown away: a developer chasing an odd project
+	// reads it in the daemon log.
+	if !strings.Contains(logged.String(), "ResultBundle") {
+		t.Fatalf("xcodebuild's own output must survive in the log, got: %s", logged.String())
 	}
 }
 
