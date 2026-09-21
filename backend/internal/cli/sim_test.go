@@ -221,6 +221,82 @@ func TestSimList_NoDefaultWhenSeveralBooted(t *testing.T) {
 	}
 }
 
+// 🗝 The guard that makes the next rename visible before anybody reaches for a
+// gesture. Xcode 26.3 dropped lastBootedAt from `simctl list devices --json`,
+// and because a missing key looks exactly like an absent value, the only place
+// it ever showed was the refusal a tap printed - which said the device was not
+// booted, one line under a table saying Booted. The listing itself has to say
+// it, and has to say which keys were looked for.
+func TestSimList_WarnsWhenABootedDeviceHasNoBootSession(t *testing.T) {
+	setConfigEnv(t)
+	// A Booted device carrying neither key, which is what a toolchain that has
+	// renamed it again would hand us.
+	deps, _ := simDeps(t, simDevicesJSON(t,
+		simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
+		simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
+	), fakePNG)
+
+	out, errOut, err := executeCLI(t, deps, "sim", "list")
+	if err != nil {
+		t.Fatalf("sim list failed: %v\nstderr=%s", err, errOut)
+	}
+	for _, want := range []string{"Warning", "iPhone 17 Pro Max", "lastBootedAt", "lastUsedAt", "refused"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("listing does not mention %q:\n%s", want, out)
+		}
+	}
+	// The shut-down device is not part of it: a device that is down is an
+	// ordinary fact, not something AO has lost track of.
+	if strings.Count(out, "Warning:") != 1 {
+		t.Errorf("want exactly one warning, got:\n%s", out)
+	}
+
+	// And a reader parsing the JSON sees the same thing on the device itself.
+	out, _, err = executeCLI(t, deps, "sim", "list", "--json")
+	if err != nil {
+		t.Fatalf("sim list --json failed: %v", err)
+	}
+	var got struct {
+		Devices []struct {
+			UDID           string `json:"udid"`
+			BootUnreadable string `json:"bootUnreadable"`
+		} `json:"devices"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	for _, d := range got.Devices {
+		switch d.UDID {
+		case simUDIDProMax:
+			if !strings.Contains(d.BootUnreadable, "lastUsedAt") {
+				t.Errorf("booted device bootUnreadable = %q, want the keys named", d.BootUnreadable)
+			}
+		case simUDIDPro:
+			if d.BootUnreadable != "" {
+				t.Errorf("a shut-down device reported bootUnreadable = %q", d.BootUnreadable)
+			}
+		}
+	}
+}
+
+// The same listing on a healthy machine says nothing extra. A warning that
+// fires on the normal case is a warning nobody reads.
+func TestSimList_SaysNothingWhenTheBootSessionIsReadable(t *testing.T) {
+	setConfigEnv(t)
+	booted := simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted")
+	// What Xcode 26.3 actually emits for a booted device.
+	booted["lastUsedAt"] = "2026-09-21T07:25:51Z"
+	deps, _ := simDeps(t, simDevicesJSON(t, booted), fakePNG)
+
+	out, errOut, err := executeCLI(t, deps, "sim", "list")
+	if err != nil {
+		t.Fatalf("sim list failed: %v\nstderr=%s", err, errOut)
+	}
+	if strings.Contains(out, "Warning") {
+		t.Errorf("a healthy listing warned about something:\n%s", out)
+	}
+}
+
 func TestSimList_NoSimulatorsAtAll(t *testing.T) {
 	setConfigEnv(t)
 	deps, _ := simDeps(t, simDevicesJSON(t), fakePNG)

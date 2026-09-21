@@ -376,7 +376,7 @@ func (c *commandContext) simDriver(device simDevice) (simbridge.Driver, error) {
 	if c.deps.SimDriver != nil {
 		return c.deps.SimDriver(cfg.DataDir)
 	}
-	boot := func(context.Context, string) (string, error) { return device.Boot(), nil }
+	boot := func(context.Context, string) (string, error) { return device.Boot() }
 	return simbridge.NewNodeDriver(cfg.DataDir, c.deps.LookPath, boot, nil)
 }
 

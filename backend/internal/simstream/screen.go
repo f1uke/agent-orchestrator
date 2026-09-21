@@ -2,6 +2,7 @@ package simstream
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os/exec"
 	"strings"
@@ -156,10 +157,13 @@ func (s *Screen) Boot(ctx context.Context, udid string) (string, error) {
 	}
 	for _, device := range listing.Devices {
 		if strings.EqualFold(device.UDID, udid) {
-			return device.Boot(), nil
+			return device.Boot()
 		}
 	}
-	return "", nil
+	// A device that is not on this machine is not a device that is down, and
+	// answering with the empty name reserved for "shut down" would have the
+	// caller report the wrong one. See simbridge.BootFunc.
+	return "", fmt.Errorf("%w: %q is not a simulator on this machine", simctl.ErrUnknownUDID, udid)
 }
 
 // forgetListing drops the cached device listing so the next caller reads the

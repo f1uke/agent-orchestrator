@@ -49,6 +49,11 @@ var (
 	ErrNoBooted = errors.New("simctl: no booted simulator")
 	// ErrUnknownUDID: the requested udid is not on this machine.
 	ErrUnknownUDID = errors.New("simctl: unknown udid")
+	// ErrNoBootSession: a BOOTED device whose run CoreSimulator named nothing
+	// for. It is deliberately not the same answer as "that device is shut
+	// down": the device is up and can be read, and what is missing is the key
+	// this package identifies its boot by. See Boot.
+	ErrNoBootSession = errors.New("simctl: booted device has no boot session")
 )
 
 // Device is one simulator as simctl reports it, plus the runtime it was listed
@@ -77,17 +82,28 @@ type Device struct {
 	// reports it, so nothing has to reconstruct it out of $HOME - and it is
 	// readable whether or not the device is booted, unlike `simctl listapps`.
 	DataPath string `json:"dataPath,omitempty"`
-	// LastBootedAt is when this device was last started, as simctl reports it.
-	// It changes on every boot, which is what makes it an identity for the boot
-	// rather than for the device - see Boot.
+	// LastBootedAt is when this device was last started, as simctl reported it
+	// up to Xcode 26.2. Xcode 26.3 stopped emitting the key altogether, so it is
+	// empty on a current toolchain and LastUsedAt carries the same fact - see
+	// Boot.
 	LastBootedAt string `json:"lastBootedAt,omitempty"`
+	// LastUsedAt is CoreSimulator's own record of when this device was last
+	// brought up, which is what Xcode 26.3 reports in lastBootedAt's place. The
+	// name suggests it moves whenever the device is touched; measured on Xcode
+	// 26.3 it does not. It is written once, when the device boots, and holds
+	// still through launches, screenshots, openurl, spawn and appearance changes
+	// - it matched the device's launchd_sim start time to the second, and only
+	// changed on the next boot. That is exactly the identity Boot needs.
+	LastUsedAt string `json:"lastUsedAt,omitempty"`
 }
 
 // Booted reports whether the device can be captured or driven at all.
 func (d Device) Booted() bool { return d.State == BootedState }
 
-// Boot identifies the RUN of this device rather than the device, and is empty
-// for one that is not booted.
+// Boot identifies the RUN of this device rather than the device. It returns an
+// empty name and no error for a device that is not booted, and ErrNoBootSession
+// for a booted device CoreSimulator named no run for - which is a machine this
+// package cannot drive, not a device that is down.
 //
 // 🗝 It exists because a udid is not enough to touch a device safely. Anything
 // that attaches to a simulator's input attaches to one boot of it; the udid
@@ -95,11 +111,22 @@ func (d Device) Booted() bool { return d.State == BootedState }
 // attachment cannot tell - the simulator accepts its events and drops them
 // silently - so the only defence is to notice that the boot has changed, and
 // that needs a name for the boot. CoreSimulator already keeps one.
-func (d Device) Boot() string {
+//
+// WHICH one it keeps has moved once already: `simctl list devices -j` carried
+// lastBootedAt up to Xcode 26.2 and carries lastUsedAt in 26.3. Both are read,
+// newest vocabulary first, so one AO runs on either toolchain. If a third name
+// appears the third outcome below is what fires - loudly, where the listing is
+// read - rather than every gesture quietly reporting a booted device as down.
+func (d Device) Boot() (string, error) {
 	if !d.Booted() {
-		return ""
+		return "", nil
 	}
-	return d.LastBootedAt
+	for _, name := range []string{d.LastBootedAt, d.LastUsedAt} {
+		if stamp := strings.TrimSpace(name); stamp != "" {
+			return stamp, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %s is %s, but `simctl list devices --json` carried neither lastBootedAt nor lastUsedAt for it", ErrNoBootSession, d.Label(), d.State)
 }
 
 // Label is how a device is named back to a person: enough to recognise it, and
@@ -143,6 +170,7 @@ type listing struct {
 		DeviceTypeIdentifier string `json:"deviceTypeIdentifier"`
 		DataPath             string `json:"dataPath"`
 		LastBootedAt         string `json:"lastBootedAt"`
+		LastUsedAt           string `json:"lastUsedAt"`
 	} `json:"devices"`
 }
 
@@ -183,6 +211,7 @@ func List(ctx context.Context, lookPath LookPath, run Runner) ([]Device, error) 
 				DeviceTypeIdentifier: d.DeviceTypeIdentifier,
 				DataPath:             d.DataPath,
 				LastBootedAt:         d.LastBootedAt,
+				LastUsedAt:           d.LastUsedAt,
 			})
 		}
 	}

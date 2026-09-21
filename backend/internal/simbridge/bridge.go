@@ -149,8 +149,10 @@ const (
 // warning about a wedged device that nothing ever touched.
 var ErrNotSent = errors.New("nothing was sent to the device")
 
-// BootFunc names a device's current boot session - CoreSimulator's own
-// lastBootedAt - or returns empty for a device that is not booted.
+// BootFunc names a device's current boot session - the stamp CoreSimulator
+// keeps for the run, see simctl.Device.Boot. Its three answers are three
+// different facts and must stay apart: a name, an empty name for a device that
+// is NOT BOOTED, and an error for a boot session that COULD NOT BE READ.
 //
 // It is called immediately before each touch rather than resolved once with the
 // device, because a boot read at the start of a drag is a boot that may be over
@@ -260,16 +262,24 @@ func (d *NodeDriver) Hold(ctx context.Context, udid string, events []Event) erro
 }
 
 // bootOf names the boot session about to be touched, and refuses rather than
-// guessing. Every way of not knowing is the same answer, because they have the
-// same consequence: events posted into a port nothing is listening on, and an
-// `ok` for a gesture the screen never saw.
+// guessing. Every way of not knowing ends the same way - nothing is sent -
+// because they have the same consequence: events posted into a port nothing is
+// listening on, and an `ok` for a gesture the screen never saw.
+//
+// What they do NOT share is the answer a person needs. "That device is shut
+// down" is something the reader can fix in a second; "AO could not read this
+// booted device's boot session" is a fault in AO or in the toolchain under it,
+// and saying the first when the second is true sends whoever reads it to the
+// wrong place entirely. It did exactly that once: Xcode 26.3 dropped the
+// lastBootedAt key and every gesture on a running simulator answered "is not
+// booted" while `ao sim list` said Booted on the line above.
 func (d *NodeDriver) bootOf(ctx context.Context, udid string) (string, error) {
 	if d.Boot == nil {
 		return "", fmt.Errorf("%w: this driver cannot tell which boot of %s it would be touching", ErrNotSent, udid)
 	}
 	boot, err := d.Boot(ctx, udid)
 	if err != nil {
-		return "", fmt.Errorf("%w: the boot of %s could not be read: %w", ErrNotSent, udid, err)
+		return "", fmt.Errorf("%w: the boot session of %s could not be read, so there is no way to tell which run of it a gesture would reach: %w", ErrNotSent, udid, err)
 	}
 	if boot == "" {
 		return "", fmt.Errorf("%w: %s is not booted", ErrNotSent, udid)

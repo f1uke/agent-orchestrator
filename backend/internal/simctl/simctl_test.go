@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
@@ -174,13 +175,100 @@ func TestBootIdentifiesTheRunRatherThanTheDevice(t *testing.T) {
 		t.Fatalf("want 2 devices, got %d", len(devices))
 	}
 
-	if got := devices[0].Boot(); got != "2026-08-31T04:37:26Z" {
-		t.Fatalf("a booted device's boot = %q, want its lastBootedAt", got)
+	boot, err := devices[0].Boot()
+	if err != nil {
+		t.Fatalf("a booted device's boot: %v", err)
+	}
+	if boot != "2026-08-31T04:37:26Z" {
+		t.Fatalf("a booted device's boot = %q, want its lastBootedAt", boot)
 	}
 	// The shut-down one has a lastBootedAt too - it ran once. It still has no
 	// boot to name, because the run that timestamp refers to is over, and
 	// handing it out would be exactly the stale identity this exists to stop.
-	if got := devices[1].Boot(); got != "" {
-		t.Fatalf("a shut-down device's boot = %q, want empty", got)
+	// It is not an ERROR either: a device that is down is a plain fact about the
+	// machine, and the caller must be able to say so rather than reporting that
+	// something could not be read.
+	boot, err = devices[1].Boot()
+	if err != nil {
+		t.Fatalf("a shut-down device's boot errored: %v", err)
+	}
+	if boot != "" {
+		t.Fatalf("a shut-down device's boot = %q, want empty", boot)
+	}
+}
+
+// Xcode 26.3 stopped emitting lastBootedAt and reports lastUsedAt in its place.
+// Measured on a real device (Xcode 26.3, Build 17C529): the value is written
+// when the device boots, matches launchd_sim's start time to the second, does
+// NOT move for `simctl launch`, `io screenshot`, `openurl`, `spawn` or
+// `ui appearance`, and does change on the next boot - so it is an identity for
+// the run, which is the only thing Boot may hand out.
+func TestBootReadsLastUsedAtWhenSimctlDropsLastBootedAt(t *testing.T) {
+	out := `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+		`{"udid":"UDID-A","name":"iPhone 17 Pro Max","state":"Booted","isAvailable":true,` +
+		`"dataPath":"/Users/x/Devices/UDID-A/data","lastUsedAt":"2026-09-21T07:25:51Z"}]}}`
+	devices, err := simctl.List(context.Background(), found, lister(out, nil))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	boot, err := devices[0].Boot()
+	if err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	if boot != "2026-09-21T07:25:51Z" {
+		t.Fatalf("boot = %q, want the device's lastUsedAt", boot)
+	}
+}
+
+// Both keys together is the Xcode that has not dropped lastBootedAt yet. The
+// older, narrower name wins: it says only when the device was BOOTED, where
+// lastUsedAt's name leaves room for a toolchain that moves it on use.
+func TestBootPrefersLastBootedAtWhenSimctlStillEmitsIt(t *testing.T) {
+	out := `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+		`{"udid":"UDID-A","name":"iPhone 17","state":"Booted","isAvailable":true,` +
+		`"lastBootedAt":"2026-08-31T04:37:26Z","lastUsedAt":"2026-09-21T07:25:51Z"}]}}`
+	devices, err := simctl.List(context.Background(), found, lister(out, nil))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	boot, err := devices[0].Boot()
+	if err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	if boot != "2026-08-31T04:37:26Z" {
+		t.Fatalf("boot = %q, want lastBootedAt to win", boot)
+	}
+}
+
+// 🗝 The guard that catches the NEXT rename. A missing JSON key is
+// indistinguishable from an absent value, so when Apple renamed this one every
+// booted device silently read as having no boot - and the refusal a gesture
+// printed, "is not booted", was a sentence about a device that was demonstrably
+// up. A booted device with no readable boot session must be its own answer,
+// and it must name the keys that were looked for, so the next reader is sent to
+// simctl's output rather than to the power state.
+func TestBootedDeviceWithNoBootSessionIsItsOwnFailure(t *testing.T) {
+	out := `{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+		`{"udid":"UDID-A","name":"iPhone 17","state":"Booted","isAvailable":true,` +
+		`"lastRenamedKeyNobodyKnowsAbout":"2026-09-21T07:25:51Z"}]}}`
+	devices, err := simctl.List(context.Background(), found, lister(out, nil))
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	boot, err := devices[0].Boot()
+	if boot != "" {
+		t.Fatalf("boot = %q, want nothing to be handed out", boot)
+	}
+	if !errors.Is(err, simctl.ErrNoBootSession) {
+		t.Fatalf("err = %v, want ErrNoBootSession", err)
+	}
+	for _, want := range []string{"lastBootedAt", "lastUsedAt", "Booted", "UDID-A"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err %q does not mention %q", err.Error(), want)
+		}
+	}
+	// And it must not be mistakable for a device that is down.
+	if strings.Contains(err.Error(), "not booted") {
+		t.Fatalf("err %q reads as a shut-down device", err.Error())
 	}
 }

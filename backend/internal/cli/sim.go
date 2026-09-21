@@ -69,6 +69,17 @@ type simDevice struct {
 	// agent looking at a machine with several booted simulators can tell its own
 	// from its crewmate's without having to remember anything.
 	Assigned bool `json:"assigned"`
+	// BootUnreadable is why a BOOTED device cannot be touched: AO could not
+	// name the run it would be touching. Empty is the normal case, including for
+	// every shut-down device - a device that is down is not a device AO has lost
+	// track of.
+	//
+	// 🗝 It is reported HERE, on the listing everything starts from, because the
+	// last time this went wrong it was only visible at the moment of a tap, and
+	// then only as "is not booted" one line under a table saying Booted. A
+	// condition that makes every gesture on this machine impossible has to be
+	// legible before anybody reaches for a gesture.
+	BootUnreadable string `json:"bootUnreadable,omitempty"`
 }
 
 type simListResult struct {
@@ -335,6 +346,9 @@ func simList(devices []simDevice) simListResult {
 	for i := range result.Devices {
 		result.Devices[i].Assigned = assigned != "" &&
 			domain.NormalizeSimUDID(result.Devices[i].UDID) == domain.NormalizeSimUDID(assigned)
+		if _, err := result.Devices[i].Boot(); err != nil {
+			result.Devices[i].BootUnreadable = err.Error()
+		}
 	}
 	chosen, err := resolveSimDevice(devices, "")
 	if err != nil {
@@ -566,6 +580,18 @@ func writeSimList(out io.Writer, result simListResult, now time.Time) error {
 	// unknown, and printing the wrong one states something AO never checked.
 	if _, err := fmt.Fprintf(out, "\nLEASE is only what AO knows: `unknown` means %s.\n", result.unknownReason()); err != nil {
 		return err
+	}
+	for _, d := range result.Devices {
+		if d.BootUnreadable == "" {
+			continue
+		}
+		if _, err := fmt.Fprintf(out,
+			"Warning: %s\n"+
+				"  Nothing can tap, drag, pinch or type on it - every gesture will be refused - while reads\n"+
+				"  (`ao sim ax`, `ao sim shot`, `ao sim log`) still work, since those need no boot session.\n"+
+				"  A new Xcode has most likely renamed the key again; see simctl.Device.Boot.\n", d.BootUnreadable); err != nil {
+			return err
+		}
 	}
 	if result.DefaultUDID == nil {
 		_, err := fmt.Fprintf(out, "`ao sim shot` has no default here: %s\n", result.DefaultReason)
