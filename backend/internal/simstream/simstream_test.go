@@ -876,9 +876,58 @@ func TestScreen_BootNamesTheRunOfADeviceNotTheDevice(t *testing.T) {
 		t.Fatalf("a shut-down device named boot %q (err %v), want empty", boot, err)
 	}
 
-	// So does one this machine has never heard of.
-	if boot, err := booted.Boot(context.Background(), "UDID-GONE"); err != nil || boot != "" {
-		t.Fatalf("an unknown device named boot %q (err %v), want empty", boot, err)
+	// A device this machine has never heard of is a THIRD thing, and it may not
+	// borrow the empty name that means "shut down": the caller turns that name
+	// into the sentence a person reads, and "UDID-GONE is not booted" describes
+	// a device that does not exist here.
+	boot, err = booted.Boot(context.Background(), "UDID-GONE")
+	if boot != "" {
+		t.Fatalf("an unknown device named boot %q, want nothing", boot)
+	}
+	if !errors.Is(err, simctl.ErrUnknownUDID) {
+		t.Fatalf("an unknown device answered %v, want ErrUnknownUDID", err)
+	}
+}
+
+// 🗝 The regression this was written for. Xcode 26.3's `simctl list devices -j`
+// dropped lastBootedAt, so every booted device named no run, and every gesture
+// on this machine was refused with "is not booted" while the device was up and
+// readable. The screen must name the run from whatever key the toolchain in
+// front of it actually emits.
+func TestScreen_BootNamesTheRunOnAToolchainWithoutLastBootedAt(t *testing.T) {
+	// Exactly the keys Xcode 26.3 emits for a Booted device, in its own order.
+	lister := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte(`{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+			`{"dataPath":"/Users/x/Devices/UDID-A/data","dataPathSize":4165369856,` +
+			`"deviceTypeIdentifier":"com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max",` +
+			`"isAvailable":true,"lastUsedAt":"2026-09-21T07:25:51Z",` +
+			`"logPath":"/Users/x/Logs/CoreSimulator/UDID-A","logPathSize":552960,` +
+			`"name":"iPhone 17 Pro Max","state":"Booted","udid":"UDID-A"}]}}`), nil
+	}
+	screen := simstream.NewScreenForTest(nil, lister, nil)
+	boot, err := screen.Boot(context.Background(), "UDID-A")
+	if err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	if boot != "2026-09-21T07:25:51Z" {
+		t.Fatalf("boot = %q, want the run named from lastUsedAt", boot)
+	}
+}
+
+// And when a toolchain emits neither key, the daemon says THAT rather than
+// reporting a running device as down.
+func TestScreen_BootSaysTheSessionIsUnreadableRatherThanNotBooted(t *testing.T) {
+	lister := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte(`{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-3":[` +
+			`{"udid":"UDID-A","name":"iPhone","state":"Booted","isAvailable":true}]}}`), nil
+	}
+	screen := simstream.NewScreenForTest(nil, lister, nil)
+	boot, err := screen.Boot(context.Background(), "UDID-A")
+	if boot != "" {
+		t.Fatalf("boot = %q, want nothing to be handed out", boot)
+	}
+	if !errors.Is(err, simctl.ErrNoBootSession) {
+		t.Fatalf("err = %v, want ErrNoBootSession", err)
 	}
 }
 

@@ -206,6 +206,42 @@ func TestSimTap_ANameNothingAnswersToListsWhatIsOnScreen(t *testing.T) {
 	}
 }
 
+// 🗝 And it must READ as a failure to do what was asked. The help is the part
+// that misleads: this refusal spends most of its lines listing the screen, and
+// two agents in a row skimmed that, saw a screenful of elements where they
+// expected a tap, and concluded `ao sim tap` was working - while every gesture
+// on the machine was in fact being refused. The refusal has to come first, in
+// the command's own words, and the list has to read as commands to re-run
+// rather than as a picture of the screen.
+func TestSimTap_ANameNothingAnswersToCannotBeMistakenForATapThatHappened(t *testing.T) {
+	deps, _, _ := namedScreenDeps(t)
+
+	_, _, err := executeCLI(t, deps, "sim", "tap", "--label", "Ghost")
+	if err == nil {
+		t.Fatal("a name nothing answers to must fail")
+	}
+	got := err.Error()
+	first, _, _ := strings.Cut(got, "\n")
+	if !strings.HasPrefix(first, "could not tap") {
+		t.Fatalf("the refusal must lead with what it could not do:\n%v", got)
+	}
+	for _, want := range []string{"no gesture was sent", "has not changed"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("the first line must say nothing reached the device (%q):\n%v", want, got)
+		}
+	}
+	// Every alternative is a command, not a screen dump.
+	for _, line := range strings.Split(got, "\n")[2:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "...") {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "ao sim tap ") {
+			t.Fatalf("an alternative reads as a reading of the screen rather than a command to run: %q", line)
+		}
+	}
+}
+
 func TestSimTap_AnElementBelowTheFoldSaysToScrollToItFirst(t *testing.T) {
 	// Found but unreachable is a different answer from not found: the element
 	// exists, and the way to it is a scroll, not a different name.

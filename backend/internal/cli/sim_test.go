@@ -221,6 +221,130 @@ func TestSimList_NoDefaultWhenSeveralBooted(t *testing.T) {
 	}
 }
 
+// 🗝 The guard that makes the next rename visible before anybody reaches for a
+// gesture. Xcode 26.3 dropped lastBootedAt from `simctl list devices --json`,
+// and because a missing key looks exactly like an absent value, the only place
+// it ever showed was the refusal a tap printed - which said the device was not
+// booted, one line under a table saying Booted. The listing itself has to say
+// it, and has to say which keys were looked for.
+func TestSimList_WarnsWhenABootedDeviceHasNoBootSession(t *testing.T) {
+	setConfigEnv(t)
+	// A Booted device carrying neither key, which is what a toolchain that has
+	// renamed it again would hand us.
+	deps, _ := simDeps(t, simDevicesJSON(t,
+		simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
+		simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
+	), fakePNG)
+
+	out, errOut, err := executeCLI(t, deps, "sim", "list")
+	if err != nil {
+		t.Fatalf("sim list failed: %v\nstderr=%s", err, errOut)
+	}
+	for _, want := range []string{"Warning", "iPhone 17 Pro Max", "lastBootedAt", "lastUsedAt", "refused"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("listing does not mention %q:\n%s", want, out)
+		}
+	}
+	// The shut-down device is not part of it: a device that is down is an
+	// ordinary fact, not something AO has lost track of.
+	if strings.Count(out, "Warning:") != 1 {
+		t.Errorf("want exactly one warning, got:\n%s", out)
+	}
+
+	// And a reader parsing the JSON sees the same thing on the device itself.
+	out, _, err = executeCLI(t, deps, "sim", "list", "--json")
+	if err != nil {
+		t.Fatalf("sim list --json failed: %v", err)
+	}
+	var got struct {
+		Devices []struct {
+			UDID           string `json:"udid"`
+			BootUnreadable string `json:"bootUnreadable"`
+		} `json:"devices"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	for _, d := range got.Devices {
+		switch d.UDID {
+		case simUDIDProMax:
+			if !strings.Contains(d.BootUnreadable, "lastUsedAt") {
+				t.Errorf("booted device bootUnreadable = %q, want the keys named", d.BootUnreadable)
+			}
+		case simUDIDPro:
+			if d.BootUnreadable != "" {
+				t.Errorf("a shut-down device reported bootUnreadable = %q", d.BootUnreadable)
+			}
+		}
+	}
+}
+
+// The same listing on a healthy machine says nothing extra. A warning that
+// fires on the normal case is a warning nobody reads.
+func TestSimList_SaysNothingWhenTheBootSessionIsReadable(t *testing.T) {
+	setConfigEnv(t)
+	booted := simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted")
+	// What Xcode 26.3 actually emits for a booted device.
+	booted["lastUsedAt"] = "2026-09-21T07:25:51Z"
+	deps, _ := simDeps(t, simDevicesJSON(t, booted), fakePNG)
+
+	out, errOut, err := executeCLI(t, deps, "sim", "list")
+	if err != nil {
+		t.Fatalf("sim list failed: %v\nstderr=%s", err, errOut)
+	}
+	if strings.Contains(out, "Warning") {
+		t.Errorf("a healthy listing warned about something:\n%s", out)
+	}
+}
+
+// 🗝 The sharpest form of the bug, and the shape a regression would take again:
+// one binary, one udid, seconds apart, contradicting itself -
+//
+//	$ ao sim boot --udid 087D...    Already booted: iPhone 17 Pro Max (...)
+//	$ ao sim tap 0.5 0.5 --udid 087D...
+//	nothing was sent to the device: 087D... is not booted
+//
+// Both sides read the same listing. `boot` asks the state, `tap` asks for the
+// boot session, and on Xcode 26.3 the second came back empty for a device the
+// first called Booted. They must never disagree about one device, so both
+// questions are asked here of the exact keys that toolchain emits.
+func TestSimBootAndTapAgreeAboutWhetherADeviceIsBooted(t *testing.T) {
+	setConfigEnv(t)
+	// Exactly what Xcode 26.3 reports for a Booted device: lastUsedAt, and no
+	// lastBootedAt anywhere.
+	booted := simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted")
+	booted["lastUsedAt"] = "2026-09-21T07:25:51Z"
+	deps, _ := simDeps(t, simDevicesJSON(t, booted), fakePNG)
+
+	// What `ao sim boot` says.
+	out, errOut, err := executeCLI(t, deps, "sim", "list")
+	if err != nil {
+		t.Fatalf("sim list failed: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "Booted") {
+		t.Fatalf("the listing does not report the device as booted:\n%s", out)
+	}
+
+	// And what the touch commands ask of the same listing, one step before the
+	// bridge: resolution, then the boot session the gesture is keyed to.
+	c := &commandContext{deps: deps.withDefaults()}
+	devices, err := c.listSimDevices(context.Background())
+	if err != nil {
+		t.Fatalf("list devices: %v", err)
+	}
+	device, err := resolveSimDevice(devices, simUDIDProMax)
+	if err != nil {
+		t.Fatalf("a booted device must resolve for a touch: %v", err)
+	}
+	boot, err := device.Boot()
+	if err != nil {
+		t.Fatalf("a device the listing calls Booted named no boot session: %v", err)
+	}
+	if boot == "" {
+		t.Fatal("a booted device named an empty boot session, which every gesture reads as `is not booted`")
+	}
+}
+
 func TestSimList_NoSimulatorsAtAll(t *testing.T) {
 	setConfigEnv(t)
 	deps, _ := simDeps(t, simDevicesJSON(t), fakePNG)

@@ -385,6 +385,37 @@ func TestPerformRefusesADeviceWhoseBootIsUnknown(t *testing.T) {
 	}
 }
 
+// 🗝 Both refusals stop the gesture; they must not tell the same story. Sending
+// a reader to the power state for a device that is demonstrably up is what cost
+// a day of investigation the last time this broke: Xcode renamed the key the
+// boot session is read from, and every tap on every device answered "is not
+// booted" underneath an `ao sim list` that said Booted.
+func TestARefusalSaysWHICHWayTheBootWasUnknown(t *testing.T) {
+	down := newTestDriver(t, &fakeBridge{payload: `{"ok":true}`})
+	down.Boot = func(context.Context, string) (string, error) { return "", nil }
+	_, err := down.Perform(context.Background(), "UDID-A", []Event{{Kind: "button", Name: "home"}})
+	if err == nil || !strings.Contains(err.Error(), "is not booted") {
+		t.Fatalf("a shut-down device must be reported as such: err = %v", err)
+	}
+
+	unreadable := newTestDriver(t, &fakeBridge{payload: `{"ok":true}`})
+	unreadable.Boot = func(context.Context, string) (string, error) {
+		return "", errors.New("carried neither lastBootedAt nor lastUsedAt")
+	}
+	_, err = unreadable.Perform(context.Background(), "UDID-A", []Event{{Kind: "button", Name: "home"}})
+	if err == nil {
+		t.Fatal("a boot session that could not be read must refuse the gesture")
+	}
+	if strings.Contains(err.Error(), "is not booted") {
+		t.Fatalf("an unreadable boot session was reported as a shut-down device: %v", err)
+	}
+	for _, want := range []string{"could not be read", "carried neither lastBootedAt nor lastUsedAt"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err %q does not say %q", err.Error(), want)
+		}
+	}
+}
+
 // Hold is the drag's half-touch and takes the same refusal: a drag whose device
 // rebooted underneath it must end, not go on posting moves into a dead port.
 func TestHoldRefusesADeviceWhoseBootIsUnknown(t *testing.T) {

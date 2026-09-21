@@ -189,14 +189,23 @@ func simTapReachable(e simbridge.Element) error {
 
 // explainSimSelect phrases the two ways a name fails to pick one element. Both
 // refuse; neither is a dead end.
+//
+// 🗝 Both lead with the refusal, in the command's own words, before any of the
+// help. The help is the part that misleads: a name nothing answers to used to
+// open with a clause and then spend fifteen lines listing what IS on the screen,
+// which looks exactly like a successful read - two agents in a row read that
+// output, saw a screenful of elements, and concluded `ao sim tap` was working
+// while every gesture on the machine was in fact being refused. So the list is
+// written as commands to re-run rather than as a picture of the screen, and
+// nothing is printed that a caller could mistake for a tap that happened.
 func explainSimSelect(device simDevice, selector simbridge.Selector, err error) error {
 	var ambiguous *simbridge.AmbiguousMatchError
 	var missing *simbridge.NoMatchError
 	switch {
 	case errors.As(err, &ambiguous):
 		var b strings.Builder
-		fmt.Fprintf(&b, "%d elements on %s answer to %s, so there is no unambiguous target and nothing was tapped. Re-run with one of:",
-			len(ambiguous.Matches), device.Label(), selector)
+		fmt.Fprintf(&b, "could not tap %s: %d elements on %s answer to it, so there is no unambiguous target and nothing was tapped. Re-run with one of:",
+			selector, len(ambiguous.Matches), device.Label())
 		for _, e := range ambiguous.Matches {
 			if e.Tap == nil {
 				fmt.Fprintf(&b, "\n  (off screen)              # %s  [%s]", simTapTargetLabel(e), e.Path)
@@ -207,18 +216,19 @@ func explainSimSelect(device simDevice, selector simbridge.Selector, err error) 
 		return errors.New(b.String())
 	case errors.As(err, &missing):
 		var b strings.Builder
-		fmt.Fprintf(&b, "nothing on %s answers to %s, so nothing was tapped.", device.Label(), selector)
+		fmt.Fprintf(&b, "could not tap %s: nothing on %s answers to it, so no gesture was sent and the screen has not changed.",
+			selector, device.Label())
 		if len(missing.OnScreen) == 0 {
 			b.WriteString("\nNothing on this screen carries a name at all. Read it with `ao sim ax`.")
 			return errors.New(b.String())
 		}
-		b.WriteString("\nThese elements can be tapped right now:")
+		b.WriteString("\nThe names that ARE on it right now - re-run with one of:")
 		for i, e := range missing.OnScreen {
 			if i == maxSimTapAlternatives {
 				fmt.Fprintf(&b, "\n  ... and %d more - read them all with `ao sim ax`", len(missing.OnScreen)-i)
 				break
 			}
-			fmt.Fprintf(&b, "\n  %s  tap %.3f %.3f  [%s]", simTapTargetLabel(e), e.Tap.X, e.Tap.Y, e.Path)
+			fmt.Fprintf(&b, "\n  ao sim tap %.3f %.3f   # %s  [%s]", e.Tap.X, e.Tap.Y, simTapTargetLabel(e), e.Path)
 		}
 		return errors.New(b.String())
 	case errors.Is(err, simbridge.ErrEmptySelector):
