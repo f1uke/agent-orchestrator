@@ -528,7 +528,10 @@ func (c *SimScreenController) paste(
 	}
 	result, err := simpaste.Run(r.Context(), holder, driver, pb, udid, text)
 	if err != nil {
-		if errors.Is(err, simpaste.ErrNotDelivered) {
+		// Two different answers, kept apart on purpose: nothing arrived, or
+		// something may have arrived and could not be shown. The second must
+		// not be retried blindly, so it may not be phrased as the first.
+		if errors.Is(err, simpaste.ErrNotDelivered) || errors.Is(err, simpaste.ErrNotProven) {
 			envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID",
 				err.Error()+" ("+why+", so the text went through the pasteboard)", nil)
 			return
@@ -539,6 +542,12 @@ func (c *SimScreenController) paste(
 	response := SimGestureResponse{
 		UDID: udid, Kind: "type",
 		Detail: fmt.Sprintf("%d characters pasted (%s)", len([]rune(text)), why),
+	}
+	// Where it landed travels with the result: the Device tab's caller is owed
+	// the same evidence the CLI prints, for the same reason - a report that says
+	// only "pasted" is one nobody can check.
+	if line := result.Landing.String(); line != "" {
+		response.Detail += "; " + line
 	}
 	if !result.Restored {
 		// The payload is still on the guest pasteboard where any app on the
