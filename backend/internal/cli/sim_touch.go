@@ -64,8 +64,24 @@ type simGestureResult struct {
 	// PasteboardLeftBehind: the guest pasteboard could not be put back, so the
 	// text is still on it where any app on the device can read it. Never hidden:
 	// the text is a password often enough that it has to be said out loud.
-	PasteboardLeftBehind bool   `json:"pasteboardLeftBehind,omitempty"`
-	Note                 string `json:"note"`
+	PasteboardLeftBehind bool `json:"pasteboardLeftBehind,omitempty"`
+	// Landed is the field a paste was proven to have reached, and on what
+	// evidence. Absent for every other gesture: no other command on this device
+	// can say what its touch did, and one that cannot must not appear to.
+	Landed *simPasteLanding `json:"landed,omitempty"`
+	Note   string           `json:"note"`
+}
+
+// simPasteLanding is where a paste landed, in the `--json` payload. The same
+// four facts the terminal line carries: which field, where to find it with
+// `ao sim ax`, what it reads now, and on what evidence - "exact" is the text
+// itself, "masked" is a secure field's dots, and the caller is entitled to know
+// which of those it is being told.
+type simPasteLanding struct {
+	Field    string `json:"field,omitempty"`
+	Path     string `json:"path"`
+	Shown    string `json:"shown"`
+	Evidence string `json:"evidence"`
 }
 
 // acquireSimHoldRequest mirrors controllers.AcquireSimHoldInput.
@@ -375,9 +391,11 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 			"Keyboard > \"Use the Same Keyboard Language as macOS\" ticked, so a Mac on a Thai " +
 			"input source makes `type \"fa12345\"` arrive as \"\u0e14\u0e1f\u0e45/_\u0e20\u0e16\". " +
 			"Where that would happen the text goes through the simulator's PASTEBOARD instead, " +
-			"and is checked on screen afterwards - so the characters asked for are the " +
-			"characters that arrive, including in a secure field, where nothing can be read " +
-			"back to catch a mistake.\n\n" +
+			"and is checked on screen afterwards - the command names the field it landed in and " +
+			"what that field reads now, so the characters asked for are the characters that " +
+			"arrive, including in a secure field, which reports one dot per character and nothing " +
+			"more. Key presses are NOT checked that way: what a key produces is the simulator's " +
+			"to decide, so that route says what it sent and leaves the reading to you.\n\n" +
 			"Non-ASCII text also goes by pasteboard, because no US keyboard key can send it.\n\n" +
 			"`--paste` always uses the pasteboard. `--raw-keys` always sends key presses and " +
 			"promises only key presses, which is how Thai text is deliberately entered on a " +
@@ -490,7 +508,11 @@ func (c *commandContext) runSimPaste(
 		Detail:            strconv.Itoa(len([]rune(text))) + " characters",
 		Keyboard:          route.Keyboard.Identifier,
 		Route:             route.Why,
-		Note:              simSharedDeviceNote,
+		Landed: &simPasteLanding{
+			Field: result.Landing.Field, Path: result.Landing.Path,
+			Shown: result.Landing.Shown, Evidence: string(result.Landing.How),
+		},
+		Note: simSharedDeviceNote,
 	}
 	if !result.Restored {
 		out.PasteboardLeftBehind = true
@@ -498,7 +520,7 @@ func (c *commandContext) runSimPaste(
 	if opts.json {
 		return writeJSON(cmd.OutOrStdout(), out)
 	}
-	return writeSimPaste(cmd.OutOrStdout(), out, result.RestoreErr)
+	return writeSimPaste(cmd.OutOrStdout(), out, result.Landing, result.RestoreErr)
 }
 
 // explainSimPasteFailure says what went wrong AND what state the field is in,
@@ -519,6 +541,14 @@ func (c *commandContext) explainSimPasteFailure(
 		return fmt.Errorf("nothing was typed into %s (%s, so the text was sent through the pasteboard): %w\n"+
 			"Tap the field first with `ao sim tap` so it has keyboard focus. Some apps refuse paste outright - "+
 			"for those, fix the simulator's input mode and use key presses instead",
+			device.Label(), route.Why, err)
+	}
+	if errors.Is(err, simpaste.ErrNotProven) {
+		// Not a failure to deliver: a failure to SHOW that it delivered. The
+		// two read the same to a caller in a hurry, so the difference is the
+		// first thing this says.
+		return fmt.Errorf("the text may be in the field on %s, but `ao sim type` could not prove it (%s, "+
+			"so the text was sent through the pasteboard): %w",
 			device.Label(), route.Why, err)
 	}
 	return fmt.Errorf("`ao sim type` failed on %s (%s, so the text was sent through the pasteboard): %w",
@@ -796,12 +826,20 @@ func parseSimSpan(what, raw string) (float64, error) {
 // that route was taken: an app that reacts to each keystroke behaves differently
 // when it receives one paste instead, and a caller who is debugging that needs
 // to know which of the two happened without having to guess.
-func writeSimPaste(out io.Writer, result simGestureResult, restoreErr error) error {
+func writeSimPaste(out io.Writer, result simGestureResult, landing simpaste.Landing, restoreErr error) error {
 	if _, err := fmt.Fprintf(out, "Pasted %s into %s (%s, %s)\n%s, so the text went through the simulator's "+
-		"pasteboard rather than its keyboard, and was checked on screen afterwards.\n",
+		"pasteboard rather than its keyboard.\n",
 		result.Detail, result.Name, result.Runtime, result.UDID,
 		strings.ToUpper(result.Route[:1])+result.Route[1:]); err != nil {
 		return err
+	}
+	// Where it landed, every time. A command that says only "pasted" is asking
+	// to be believed; this one says which field on screen now holds the text and
+	// on what evidence, so the reader can check the claim rather than take it.
+	if line := landing.String(); line != "" {
+		if _, err := fmt.Fprintf(out, "Checked on screen: %s\n", line); err != nil {
+			return err
+		}
 	}
 	if result.PasteboardLeftBehind {
 		if _, err := fmt.Fprintf(out, "WARNING: the simulator's pasteboard could NOT be put back (%v), so the "+
@@ -837,7 +875,16 @@ func writeSimGesture(out io.Writer, result simGestureResult) error {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(out, "Read the result with `ao sim ax` - never assume a touch changed what you expected.")
+	tail := "Read the result with `ao sim ax` - never assume a touch changed what you expected."
+	if result.Action == "type" {
+		// Said out loud because the other route to this command DOES check, and
+		// prints the field it landed in. Two reports that look equally
+		// confident, one of which was verified and one of which was not, is how
+		// a caller learns to trust the wrong one.
+		tail = "The key presses were sent; nothing on this route checks what arrived in the field - " +
+			"a paste is verified on screen, this is not. Read it back with `ao sim ax`."
+	}
+	_, err := fmt.Fprintln(out, tail)
 	return err
 }
 

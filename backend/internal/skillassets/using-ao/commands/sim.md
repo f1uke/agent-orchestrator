@@ -595,7 +595,11 @@ ao sim ax                              # confirm what actually happened
 
   Two things this protects you from, and they are why the command is fussy: the failure is **selective** (fields that force an ASCII keyboard - email, URL - came out right while ordinary and secure fields did not, so it looked like bad test data rather than a broken tool), and in a **secure field the characters are hidden behind dots**, so you cannot see the damage or read it back. A worker already lost time concluding a perfectly good QA account was invalid.
 
-  **The paste is proven, never assumed.** The screen is read before and after, and the field must have grown by exactly the number of characters sent - which works even in a secure field, because it shows one dot per character. If an app refuses paste or the field never had focus, you get a loud failure, not a false success.
+  **The paste is proven, never assumed - and the proof is the text itself.** The screen is read before and after, and the paste counts as landed when a field on screen holds a copy of the text it did not hold before. The output then NAMES that field and quotes what it reads now (`Checked on screen: the field "email" [0.8] now reads "r8t3@a.com"`), so you can check the claim instead of taking it. A field is allowed to transform what it was given: capitalisation from an on-screen keyboard, a card or phone mask's punctuation, and a secure field's dots (one per character) all count, and the output says which kind of evidence it has. If an app refuses paste or the field never had focus, you get a loud failure, not a false success.
+
+  **"Could not prove it" is not "did not arrive", and the command keeps them apart.** A field with a length limit truncates silently, and a field that reports its value only once it loses focus shows nothing either way - both come back as `the text may be in the field ... but could not prove it`, naming the field and what it reads. Read it back with `ao sim ax`; do not send the text again, or you may end up with it twice.
+
+  **Key presses are not checked at all.** What a key produces is the simulator's decision, so that route says what it sent and tells you to read the field yourself. `Typed …` and `Pasted …` are not equally confident claims, and the output says so.
 
   **Two caveats worth knowing.** A pasted field receives one paste, not N keystrokes, so an app with live validation or a character counter behaves differently - use `--raw-keys` when you need real key presses. And while the paste happens, your text sits briefly on the **guest's** pasteboard, where any app on that simulator could read it; it is put back afterwards, and if it cannot be, the command says so loudly.
 
@@ -605,7 +609,6 @@ ao sim ax                              # confirm what actually happened
   | `--paste`    | Always the pasteboard.                                                                                                                  |
   | `--raw-keys` | Key presses, and only key presses - whatever the simulator makes of them. This is how you deliberately enter Thai text on a Thai guest. |
 
-  A field that reformats what it receives (a phone or card mask) can make the check fail on a paste that actually worked - the message says so and tells you to read it back with `ao sim ax`.
 
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.
