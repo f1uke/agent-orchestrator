@@ -490,15 +490,52 @@ func insideDependency(base, path string) bool {
 const GenericSimulatorDestination = "generic/platform=iOS Simulator"
 
 // BuildArgs is the xcodebuild invocation that produces an installable app.
+//
+// ⚠ It passes NOTHING about code signing, and that is load bearing. This used
+// to carry `CODE_SIGNING_ALLOWED=NO`, on the rationale that "the simulator has
+// no code signing" and that a project whose team is not configured on this
+// machine would otherwise fail at the end of an otherwise fine build. Both
+// halves were wrong, and between them they shipped every Run button build
+// without its entitlements - Keychain, associated domains and push failed
+// silently in the app, which on nter-ios-app read as a login that closed its
+// own auth page and left the user logged out with no error anywhere. It cost
+// one worker three hours, because nothing pointed at the build tool.
+//
+// What a simulator build actually does, measured on Xcode 26.3 (17C529) with a
+// fixture carrying DEVELOPMENT_TEAM=ZZ9ZZ9ZZ9Z, a team no account on this
+// machine has, and CODE_SIGN_IDENTITY="iPhone Developer":
+//
+//   - it IS signed. `-showBuildSettings` for a Simulator destination reports
+//     CODE_SIGN_CONTEXT_CLASS = XCiPhoneSimulatorCodeSignContext, with
+//     AD_HOC_CODE_SIGNING_ALLOWED = YES and PROVISIONING_PROFILE_REQUIRED = NO.
+//     That context signs ad hoc and never resolves the identity, the team or a
+//     profile against the machine, so the build succeeds in both Manual and
+//     Automatic style. Forbidding ad hoc is what fails: with
+//     AD_HOC_CODE_SIGNING_ALLOWED=NO the build dies at exit 65 with "Ad Hoc code
+//     signing is not allowed with SDK 'Simulator - iOS 26.2'". The failure the
+//     old comment was written against cannot happen this way.
+//   - entitlements do NOT ride in the signature. The embedded entitlements blob
+//     is an empty dict either way. ProcessProductPackaging generates
+//     Entitlements-Simulated.plist (ENTITLEMENTS_DESTINATION = __entitlements)
+//     and the linker writes it into the binary as a __TEXT,__entitlements
+//     section. CODE_SIGNING_ALLOWED=NO skips ProcessProductPackaging outright,
+//     so there is no plist, no section, and no CodeSign step - leaving a
+//     linker-signed stub with no entitlements at all. Measured on a fixture that
+//     stores a Keychain item on launch: SecItemAdd answered -34018
+//     (errSecMissingEntitlement) with the flag and 0 without it.
+//
+// One case the flag really was hiding: a project whose CODE_SIGN_ENTITLEMENTS
+// names a file that cannot be read now fails the build ("Build input file cannot
+// be found", exit 65) where it used to produce an app quietly missing the
+// entitlements that file was supposed to grant. That failure is the right
+// outcome and is deliberately not softened - see signingFailureHint in
+// cli/sim_run.go, which names it in the refusal. What this must never do again
+// is hand back an app that looks fine and cannot reach the Keychain.
 func BuildArgs(project Project, scheme, configuration string) []string {
 	return append(append([]string{"xcodebuild"}, project.Flag()...),
 		"-scheme", scheme,
 		"-configuration", configuration,
 		"-destination", GenericSimulatorDestination,
-		// The simulator has no code signing, and a project whose team is not
-		// configured on this machine would otherwise fail at the very end of a
-		// build that was otherwise fine.
-		"CODE_SIGNING_ALLOWED=NO",
 		// 🗝 One architecture: this machine's own, which is the one its
 		// simulators run. A GENERIC simulator destination otherwise means every
 		// architecture the SDK supports, so on an Apple Silicon Mac the build

@@ -207,3 +207,62 @@ func TestID_SeparatesTwoInstallsThatClaimTheSameVersion(t *testing.T) {
 		t.Fatalf("two different builds share one id %q", a.ID())
 	}
 }
+
+// LinkerSigned is the guard that makes an app with no entitlements announce
+// itself at the moment it is installed. The two flag strings are what codesign
+// really prints, measured on Xcode 26.3: a build made with
+// CODE_SIGNING_ALLOWED=NO against one made without it.
+func TestLinkerSigned(t *testing.T) {
+	const unsigned = `Executable=/tmp/SignProbe.app/SignProbe
+Identifier=SignProbe
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20400 size=418 flags=0x20002(adhoc,linker-signed) hashes=10+0 location=embedded
+Signature=adhoc
+Info.plist=not bound
+TeamIdentifier=not set
+Sealed Resources=none
+`
+	const properly = `Executable=/tmp/SignProbe.app/SignProbe
+Identifier=com.example.SignProbe
+Format=app bundle with Mach-O thin (arm64)
+CodeDirectory v=20400 size=430 flags=0x2(adhoc) hashes=3+7 location=embedded
+Signature=adhoc
+Info.plist entries=18
+TeamIdentifier=not set
+Sealed Resources version=2 rules=10 files=2
+`
+	for _, tc := range []struct {
+		name string
+		out  string
+		err  error
+		want bool
+	}{
+		{name: "built with signing disabled", out: unsigned, want: true},
+		{name: "ordinary ad hoc simulator build", out: properly, want: false},
+		// codesign writes to stderr and exits non-zero for an unsigned bundle,
+		// so output with an error is still an answer - but no output at all is
+		// not, and a warning on a guess is worse than no warning.
+		{name: "codesign complained but still reported", out: unsigned, err: errors.New("exit status 1"), want: true},
+		{name: "codesign said nothing", out: "", err: errors.New("exit status 1"), want: false},
+		{name: "not a bundle codesign understands", out: "/tmp/x.app: code object is not signed at all\n", err: errors.New("exit status 1"), want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := func(_ context.Context, name string, _ ...string) ([]byte, error) {
+				if name != "codesign" {
+					t.Fatalf("asked %q, not codesign", name)
+				}
+				return []byte(tc.out), tc.err
+			}
+			if got := LinkerSigned(context.Background(), run, "/tmp/SignProbe.app"); got != tc.want {
+				t.Fatalf("LinkerSigned = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// No runner is no answer, never a warning.
+func TestLinkerSigned_WithoutARunner(t *testing.T) {
+	if LinkerSigned(context.Background(), nil, "/tmp/SignProbe.app") {
+		t.Fatal("a bundle nothing could be asked about must not be reported as unsigned")
+	}
+}

@@ -62,10 +62,16 @@ const (
 	// _CodeSignature/CodeResources, every resource in the bundle. It costs
 	// about 15 ms regardless of how big the app is.
 	MethodCDHash = "cdhash"
-	// MethodSHA256 is a content hash over the whole bundle, used when the app
-	// is not signed - which simulator builds frequently are not, since
-	// CODE_SIGNING_ALLOWED=NO is a normal thing to build with. It is exact and
-	// always available, and costs about a second on a 500 MB app.
+	// MethodSHA256 is a content hash over the whole bundle, used when codesign
+	// can say nothing about the app at all. It is exact and always available,
+	// and costs about a second on a 500 MB app.
+	//
+	// ⚠ It is NOT the fallback for a build made with CODE_SIGNING_ALLOWED=NO.
+	// Such a bundle still carries the signature ld left on its executable, so
+	// codesign answers with a CDHash and MethodCDHash wins - a hash that seals
+	// the executable and nothing else, because a linker-signed bundle has no
+	// _CodeSignature/CodeResources. LinkerSigned is how that bundle is
+	// recognised.
 	MethodSHA256 = "sha256"
 )
 
@@ -350,6 +356,44 @@ func codeDirectoryHash(ctx context.Context, run Runner, bundle string) (string, 
 		hash = hash[:digestPrefix]
 	}
 	return hash, true
+}
+
+// linkerSignedPattern matches the flags codesign prints for a bundle whose only
+// signature is the one ld left behind: `flags=0x20002(adhoc,linker-signed)`.
+// The 0x2 adhoc bit is on for every simulator build and says nothing on its
+// own, so it is `linker-signed` inside the parentheses that is looked for.
+var linkerSignedPattern = regexp.MustCompile(`(?m)^CodeDirectory .*\bflags=0x[0-9a-f]+\([^)]*\blinker-signed\b`)
+
+// LinkerSigned reports whether a bundle was never actually code signed: the
+// executable carries only the ad-hoc signature the linker writes, and
+// Xcode's CodeSign and ProcessProductPackaging steps did not run.
+//
+// 🗝 This is the only cheap, certain way to see the defect that shipped every
+// `ao sim run` build without entitlements. A simulator app's entitlements are
+// NOT in its signature - they are a __TEXT,__entitlements section the linker
+// writes from the Entitlements-Simulated.plist that ProcessProductPackaging
+// generates - and CODE_SIGNING_ALLOWED=NO skips that step along with CodeSign.
+// The app installs, launches and behaves normally right up to the first
+// Keychain call, which returns -34018 (errSecMissingEntitlement) with nothing
+// logged anywhere that names the build. See xcodeproj.BuildArgs.
+//
+// Absence of a __entitlements section cannot be the test, because a project
+// that declares no entitlements legitimately has none. "CodeSign never ran" is
+// unambiguous, and it is never what anybody installing an app wants.
+//
+// false means "no" OR "could not tell" - an unreadable bundle, no runner, a
+// codesign that printed nothing. A warning on a guess would be worse than none:
+// this is read on the path of every install, and the first false alarm is the
+// one that teaches people to ignore it.
+func LinkerSigned(ctx context.Context, run Runner, bundle string) bool {
+	if run == nil {
+		return false
+	}
+	out, err := run(ctx, "codesign", "-d", "--verbose=2", bundle)
+	if err != nil && len(out) == 0 {
+		return false
+	}
+	return linkerSignedPattern.Match(out)
 }
 
 // bundleContentHash hashes every regular file in the bundle, in sorted path

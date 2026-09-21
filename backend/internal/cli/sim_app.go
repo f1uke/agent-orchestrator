@@ -43,7 +43,36 @@ const (
 	// `ao sim claim` uses, because it is the same lease.
 	simAppLeaseNote = "This session now holds the device, so no other AO session can write to it. " +
 		"Run `ao sim release` when you are done with it."
+	// simUnentitledWarning is said about a bundle that was never code signed.
+	//
+	// 🗝 It is loud, and long, because the thing it describes is a TOTAL,
+	// SILENT failure of a whole class of API. An app built this way installs,
+	// launches and behaves normally in every way except that Keychain,
+	// associated domains and push do not work, and nothing logs a word that
+	// names the build - on nter-ios-app it read as a login that closed its own
+	// auth page and left the user logged out with no error anywhere, and it
+	// cost one worker three hours to trace back to xcodebuild. The fact is
+	// knowable from the bundle in about 15 ms, so it is said at the one moment
+	// somebody is looking: the install.
+	simUnentitledWarning = "%s was never code signed - codesign reports its executable as linker-signed, " +
+		"so Xcode's ProcessProductPackaging and CodeSign steps did not run.\n" +
+		"  A simulator app carries its entitlements in the __TEXT,__entitlements section those steps produce, " +
+		"so this bundle has NONE. Keychain calls will return -34018 (errSecMissingEntitlement) and associated " +
+		"domains and push will not work - silently, with nothing in the log that names the build. A login that " +
+		"appears to succeed and leaves the user logged out is what this looks like from the app.\n" +
+		"  Rebuild it without CODE_SIGNING_ALLOWED=NO: a Simulator build signs itself ad hoc and needs no team " +
+		"and no certificate. `codesign -dvv <path/to/App.app>` confirms the fix - a good build reads " +
+		"flags=0x2(adhoc) with Sealed Resources, a bad one flags=0x20002(adhoc,linker-signed)."
 )
+
+// unentitledWarning is what to say about the bundle at path before it is
+// installed, or "" when there is nothing to say. See simUnentitledWarning.
+func (c *commandContext) unentitledWarning(ctx context.Context, bundle string) string {
+	if !simbuild.LinkerSigned(ctx, simbuild.Runner(c.deps.CommandOutput), bundle) {
+		return ""
+	}
+	return fmt.Sprintf(simUnentitledWarning, filepath.Base(bundle))
+}
 
 // simInstallResult is the `ao sim install --json` payload.
 type simInstallResult struct {
@@ -58,8 +87,11 @@ type simInstallResult struct {
 	// happened, not the one that was asked for.
 	Build        *simBuildView `json:"build,omitempty"`
 	BuildUnknown string        `json:"buildUnknown,omitempty"`
-	Lease        simLeaseView  `json:"lease"`
-	Note         string        `json:"note"`
+	// Warning is what is wrong with the bundle that was installed, when
+	// anything is. Empty is the ordinary case. See simUnentitledWarning.
+	Warning string       `json:"warning,omitempty"`
+	Lease   simLeaseView `json:"lease"`
+	Note    string       `json:"note"`
 }
 
 // simLaunchResult is the `ao sim launch --json` payload.
@@ -176,6 +208,11 @@ func (c *commandContext) installSimApp(ctx context.Context, udid, source, rawTTL
 	if err != nil {
 		return simInstallResult{}, err
 	}
+	// Read the bundle BEFORE it goes on the device: what is asked is a question
+	// about the build, and the answer is the same either way - but a check that
+	// ran after the install would go unanswered on every install that failed,
+	// which is the moment somebody is most likely reading.
+	warning := c.unentitledWarning(ctx, bundle)
 	out, err := c.deps.CommandOutput(ctx, simctl.Binary, "simctl", "install", device.UDID, bundle)
 	if err != nil {
 		return simInstallResult{}, fmt.Errorf("`simctl install` failed on %s: %w: %s",
@@ -187,6 +224,7 @@ func (c *commandContext) installSimApp(ctx context.Context, udid, source, rawTTL
 		Runtime:           device.Runtime,
 		RuntimeIdentifier: device.RuntimeIdentifier,
 		Source:            bundle,
+		Warning:           warning,
 		Lease:             lease,
 		Note:              simInstallNote,
 	}
@@ -360,6 +398,9 @@ func writeSimInstall(out io.Writer, result simInstallResult) error {
 	if err := writeSimBuildLine(out, result.Build, result.BuildUnknown); err != nil {
 		return err
 	}
+	if err := writeSimWarning(out, result.Warning); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprintf(out, "Lease: held by @%s until %s. %s\n",
 		result.Lease.Holder, expiryOf(result.Lease), simAppLeaseNote); err != nil {
 		return err
@@ -411,4 +452,15 @@ func expiryOf(lease simLeaseView) string {
 		return "an unreported time"
 	}
 	return lease.ExpiresAt.Format(time.RFC3339)
+}
+
+// writeSimWarning prints a warning about the app, or nothing when there is
+// none. It sits above the lease and the note rather than at the end: the lines
+// after it are housekeeping, and the last thing printed is the thing read.
+func writeSimWarning(out io.Writer, warning string) error {
+	if warning == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(out, "Warning: %s\n", warning)
+	return err
 }

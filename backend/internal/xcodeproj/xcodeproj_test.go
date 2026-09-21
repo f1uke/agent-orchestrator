@@ -474,3 +474,24 @@ func TestPodInstallPending(t *testing.T) {
 		})
 	}
 }
+
+// The regression this branch exists for: `CODE_SIGNING_ALLOWED=NO` produced an
+// app with no entitlements, so Keychain, associated domains and push failed
+// silently in every build the Run button made. Nothing about signing belongs on
+// this command line - a Simulator build signs itself ad hoc, needing no team and
+// no certificate - and a build setting that turns signing off is the one thing
+// that must never come back. See the comment on BuildArgs for the measurements.
+func TestBuildArgs_NeverDisablesCodeSigning(t *testing.T) {
+	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev"), " ")
+
+	for _, forbidden := range []string{
+		"CODE_SIGNING_ALLOWED=NO",
+		"CODE_SIGNING_REQUIRED=NO",
+		"CODE_SIGN_IDENTITY=",
+		"AD_HOC_CODE_SIGNING_ALLOWED=NO",
+	} {
+		if strings.Contains(line, forbidden) {
+			t.Fatalf("a simulator build must sign itself; %q disables or overrides that: %q", forbidden, line)
+		}
+	}
+}

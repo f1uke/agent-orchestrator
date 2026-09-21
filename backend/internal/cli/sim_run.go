@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,8 +86,15 @@ type simRunResult struct {
 	PID          string        `json:"pid,omitempty"`
 	Build        *simBuildView `json:"build,omitempty"`
 	BuildUnknown string        `json:"buildUnknown,omitempty"`
-	Lease        simLeaseView  `json:"lease"`
-	Note         string        `json:"note"`
+	// Warning is what is wrong with the app this run built, when anything is.
+	// Empty is the ordinary case, and after the CODE_SIGNING_ALLOWED=NO fix it
+	// is the only one this command produces on its own - it is kept because a
+	// project can disable signing in its OWN settings, and because a run that
+	// installs an app with no entitlements must never again be reported as a
+	// plain success. See simUnentitledWarning.
+	Warning string       `json:"warning,omitempty"`
+	Lease   simLeaseView `json:"lease"`
+	Note    string       `json:"note"`
 }
 
 func newSimRunCommand(ctx *commandContext) *cobra.Command {
@@ -195,8 +203,9 @@ func (c *commandContext) runSimApp(
 	}
 
 	noteProgress(progress, "Building %s (%s) from %s…\n", scheme, configuration, project.Name)
-	if err := c.streamBuild(ctx, progress, xcodeproj.Binary, xcodeproj.BuildArgs(project, scheme, configuration)...); err != nil {
-		return simRunResult{}, explainSimBuildFailure(err, scheme, device)
+	watch := &signingWatch{out: progress}
+	if err := c.streamBuild(ctx, watch, xcodeproj.Binary, xcodeproj.BuildArgs(project, scheme, configuration)...); err != nil {
+		return simRunResult{}, explainSimBuildFailure(err, scheme, device, watch.saw)
 	}
 	app, err := xcodeproj.ProductPath(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
 	if err != nil {
@@ -213,6 +222,7 @@ func (c *commandContext) runSimApp(
 		Runtime:           device.Runtime,
 		RuntimeIdentifier: device.RuntimeIdentifier,
 		Booted:            booted,
+		Warning:           c.unentitledWarning(ctx, app),
 		Lease:             lease,
 		Note:              simRunNote,
 	}
@@ -364,7 +374,13 @@ func listSimRunConfigurations(lead string, configurations []string) string {
 // along: "It has:" with nothing after it reads as truncation rather than as a
 // sentence.
 func firstLineOf(err error) string {
-	line, _, _ := strings.Cut(err.Error(), "\n")
+	return firstLine(err.Error())
+}
+
+// firstLine is firstLineOf for text that is not an error - the app warning the
+// bar shows beside a run that succeeded.
+func firstLine(text string) string {
+	line, _, _ := strings.Cut(text, "\n")
 	return strings.TrimSuffix(strings.TrimSpace(line), ":")
 }
 
@@ -452,6 +468,90 @@ func (c *commandContext) streamBuild(ctx context.Context, out io.Writer, name st
 	return stream.Err()
 }
 
+// signingWatch passes a build's output straight through and remembers whether
+// xcodebuild complained about code signing on the way past.
+//
+// It exists because explainSimBuildFailure has nothing else to go on: the build
+// is STREAMED to the terminal rather than captured, precisely so a three-minute
+// build does not look like a hang, and by the time it fails its output is gone.
+// Re-running the build to find out why it failed would cost another three
+// minutes, and scrolling back is what the human is already doing.
+//
+// It keeps no log - only a bool and at most one partial line - so watching a
+// build of any size costs the same.
+type signingWatch struct {
+	out io.Writer
+	// partial is the tail of a write that did not end in a newline, carried
+	// into the next one so a marker split across two reads is still seen. It is
+	// capped: a build that emits a megabyte without a newline is not a build
+	// whose signing error is in that megabyte.
+	partial []byte
+	// saw is whether any line so far was an error about code signing.
+	saw bool
+}
+
+// maxSigningWatchPartial bounds the carried tail. Long enough for any single
+// line xcodebuild writes, short enough that it is not a buffer.
+const maxSigningWatchPartial = 8192
+
+// signingErrorMarkers are what a code signing failure says. Matched only on a
+// line that is also an error, so the ordinary signing CHATTER of a successful
+// build - "Signing Identity: -", the CodeSign step itself - cannot trip it.
+var signingErrorMarkers = []string{
+	"code sign",     // "Code Signing Error", "Ad Hoc code signing is not allowed with SDK ..."
+	"codesign",      // codesign's own diagnostics, relayed by xcodebuild
+	"entitlement",   // "Build input file cannot be found: '.../App.entitlements'"
+	"provisioning",  // "requires a provisioning profile"
+	"signing certi", // "No signing certificate ... found"
+}
+
+func (w *signingWatch) Write(p []byte) (int, error) {
+	n, err := w.out.Write(p)
+	if !w.saw && n > 0 {
+		w.scan(p[:n])
+	}
+	return n, err
+}
+
+func (w *signingWatch) scan(p []byte) {
+	// Appended onto partial itself rather than into a new slice, so a build
+	// that writes a thousand chunks does not allocate a thousand times.
+	w.partial = append(w.partial, p...)
+	rest := w.partial
+	for {
+		end := bytes.IndexByte(rest, '\n')
+		if end < 0 {
+			break
+		}
+		if isSigningError(string(rest[:end])) {
+			w.saw = true
+			w.partial = nil
+			return
+		}
+		rest = rest[end+1:]
+	}
+	if len(rest) > maxSigningWatchPartial {
+		rest = rest[len(rest)-maxSigningWatchPartial:]
+	}
+	// rest is a tail of partial's own buffer; copying it to the front is what
+	// keeps the carried remainder from growing by one build's worth of output.
+	w.partial = append(w.partial[:0], rest...)
+}
+
+// isSigningError is whether one line of build output is an error about signing.
+func isSigningError(line string) bool {
+	lower := strings.ToLower(line)
+	if !strings.Contains(lower, "error") {
+		return false
+	}
+	for _, marker := range signingErrorMarkers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // noteProgress narrates one step to the terminal. The error is dropped on
 // purpose: these lines are PROGRESS, not results, and a run that could not
 // print "Building…" is still a run worth finishing - failing it would let the
@@ -480,11 +580,32 @@ func explainNoXcodeProject(err error, dir string) error {
 // output does not: the device was not touched. Measured on a real failure - the
 // repeated tail was xcodebuild's own `IDERunDestination` warning, not the
 // compiler error anybody needed.
-func explainSimBuildFailure(err error, scheme string, device simDevice) error {
-	return fmt.Errorf("building %s failed (%v). The compiler's output is above.\n"+
+func explainSimBuildFailure(err error, scheme string, device simDevice, signing bool) error {
+	failure := fmt.Errorf("building %s failed (%v). The compiler's output is above.\n"+
 		"Nothing was installed on %s, so the app on it is whatever was there before; "+
 		"this session still holds the device", scheme, buildExit(err), device.Name)
+	if !signing {
+		return failure
+	}
+	return fmt.Errorf("%w\n%s", failure, simSigningFailureHint)
 }
+
+// simSigningFailureHint is the one thing a reader cannot get from the build
+// output: why AO is letting a signing failure through at all.
+//
+// 🗝 `ao sim run` used to pass CODE_SIGNING_ALLOWED=NO, which made every
+// signing failure disappear - along with the app's entitlements, silently. A
+// project that really cannot sign for the Simulator is now a failed build
+// rather than a working-looking app that cannot reach the Keychain, and
+// somebody who remembers the old behaviour deserves to be told that the change
+// was deliberate rather than reaching for the flag again.
+const simSigningFailureHint = "This build failed while code signing. AO deliberately no longer passes " +
+	"CODE_SIGNING_ALLOWED=NO: that flag skips ProcessProductPackaging, which is what puts a simulator " +
+	"app's entitlements into it, so it turned every failure here into an app that launched and then " +
+	"failed every Keychain call with -34018 and said nothing.\n" +
+	"A Simulator build signs itself ad hoc and needs no team and no certificate, so what failed is this " +
+	"project's own signing settings - most often a CODE_SIGN_ENTITLEMENTS file that is not where the " +
+	"target says it is. Fix it in the project; do not disable signing for the build."
 
 // buildExit is how the build ended, in as few words as carry the fact.
 //
@@ -518,6 +639,9 @@ func writeSimRun(out io.Writer, result simRunResult) error {
 		return err
 	}
 	if err := writeSimBuildLine(out, result.Build, result.BuildUnknown); err != nil {
+		return err
+	}
+	if err := writeSimWarning(out, result.Warning); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "App: %s\n", result.App); err != nil {
@@ -556,6 +680,11 @@ func reportSimRunResult(result simRunResult, runErr error) {
 	default:
 		verdict.Summary = fmt.Sprintf("Built %s (%s) and launched %s on %s.",
 			result.Scheme, result.Configuration, result.BundleID, result.Name)
+		// A run that WORKED and installed a broken app is still a run that
+		// worked - the pane's output is not an error and calling the run failed
+		// would send the reader looking for a compiler error that is not there.
+		// The warning rides beside the verdict instead, so the bar can say both.
+		verdict.Warning = firstLine(result.Warning)
 	}
 	body, err := json.Marshal(verdict)
 	if err != nil {

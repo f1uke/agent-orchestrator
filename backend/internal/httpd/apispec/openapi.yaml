@@ -7990,6 +7990,11 @@ components:
           type: string
         udid:
           type: string
+        warning:
+          description: What is wrong with the app this run installed, when anything
+            is - a run can succeed and still leave an app that cannot reach the Keychain.
+            Empty is the ordinary case.
+          type: string
       required:
       - handleId
       - scheme

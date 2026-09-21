@@ -279,6 +279,58 @@ describe("IosRunBar", () => {
 		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
 	});
 
+	// The defect this guard exists for reached a real user through this button:
+	// the build was green, the app was on screen, and it had no entitlements, so
+	// logging in closed its own auth page and left them logged out with no error
+	// anywhere. A success the bar could not qualify is how that stayed invisible.
+	it("says so when a run that succeeded installed an app that cannot reach the Keychain", async () => {
+		answer({
+			ios: {
+				project: project({ schemes: ["NterApp"], configurations: ["Dev", "UAT"] }),
+				run: {
+					handleId: "iosrun-mer-9",
+					scheme: "NterApp",
+					configuration: "Dev",
+					udid: "UDID-A",
+					state: "succeeded",
+					summary: "Built NterApp (Dev) and launched com.finnomena.app.finnomena on iPhone 17 Pro Max.",
+					warning: "NterApp.app was never code signed - codesign reports its executable as linker-signed.",
+					startedAt: "2026-09-18T10:00:00Z",
+					finishedAt: "2026-09-18T10:03:00Z",
+				},
+			},
+		});
+		renderBar();
+
+		// The run still reads as the success it was - the build compiled and the
+		// app launched - and the warning sits beside it rather than replacing it.
+		expect(await screen.findByRole("button", { name: /Ran NterApp \(Dev\)/ })).toBeInTheDocument();
+		expect(await screen.findByText(/was never code signed/)).toBeInTheDocument();
+	});
+
+	// The ordinary run says nothing. A warning that is always there is furniture.
+	it("shows no warning for a run that installed a properly signed app", async () => {
+		answer({
+			ios: {
+				project: project(),
+				run: {
+					handleId: "iosrun-mer-9",
+					scheme: "NterDev",
+					configuration: "Debug",
+					udid: "UDID-A",
+					state: "succeeded",
+					summary: "Built NterDev (Debug) and launched com.example.Nter on iPhone 17 Pro Max.",
+					startedAt: "2026-09-18T10:00:00Z",
+					finishedAt: "2026-09-18T10:03:00Z",
+				},
+			},
+		});
+		renderBar();
+
+		await screen.findByRole("button", { name: /Ran NterDev \(Debug\)/ });
+		expect(screen.queryByText(/never code signed/)).not.toBeInTheDocument();
+	});
+
 	// A run that ended without reporting - Ctrl-C in the pane, a tmux server
 	// that went away - is not a failed build, and must not be called one.
 	it("does not call a stopped run a failure", async () => {
