@@ -1,6 +1,7 @@
-// Package xcodeproj answers three questions about a worktree, and nothing else:
-// is there an Xcode project in it, what can be built from that project, and
-// where did a build put the app.
+// Package xcodeproj answers four questions about a worktree, and nothing else:
+// is there an Xcode project in it, what can be built from that project, where
+// did a build put the app, and - when none of that works - have its CocoaPods
+// dependencies ever been installed here.
 //
 // It exists because three surfaces now need the same answers and they must not
 // give different ones: the run bar above the terminal (is this an iOS project,
@@ -134,6 +135,30 @@ func Find(dir string) (Project, error) {
 		return Project{Kind: KindProject, Name: projects[0], Path: filepath.Join(abs, projects[0])}, nil
 	}
 	return Project{}, ErrNoProject
+}
+
+// PodInstallPending reports whether dir declares CocoaPods dependencies that
+// have never been installed into it: a Podfile at the root and no Pods
+// directory beside it.
+//
+// 🗝 This is the ordinary state of a FRESHLY SPAWNED WORKER, not an exotic
+// failure. `Pods/` is gitignored in every CocoaPods project, so a new worktree
+// has none until somebody runs `pod install` in it - and until they do,
+// `xcodebuild` cannot open the workspace: it lists no schemes, and asking it for
+// build configurations fails outright. Both answers are then about a missing
+// checkout rather than about the project, and a caller that cannot say so
+// leaves the human reading xcodebuild's exit status instead.
+//
+// It answers "nobody has installed the pods here", never "the pods are stale".
+// A Pods directory that is out of date with the Podfile.lock is a different
+// question with a different remedy, and xcodebuild's own sandbox check already
+// says that one in words.
+func PodInstallPending(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, "Podfile")); err != nil {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(dir, "Pods"))
+	return err != nil || !info.IsDir()
 }
 
 // listOutput is the shape of `xcodebuild -list -json`. A workspace reports its
