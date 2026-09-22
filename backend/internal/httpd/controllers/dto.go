@@ -1533,6 +1533,32 @@ type WorkspaceChangesResponse struct {
 	// remote to be behind. TargetFetchError carries the reason for "failed".
 	TargetFetch      string `json:"targetFetch,omitempty"`
 	TargetFetchError string `json:"targetFetchError,omitempty"`
+	// Branch is the session's OWN branch — what the board, the pull request and
+	// the human all mean by "this task's changes", and what this list is measured
+	// from. BranchMissing reports that it is named but has no ref in this
+	// worktree, in which case the list falls back to the worktree's HEAD.
+	Branch        string `json:"branch,omitempty"`
+	BranchMissing bool   `json:"branchMissing,omitempty"`
+	// DiffSubject is what the list was measured FROM: "branch" (the branch's tip)
+	// or "head" (the worktree's HEAD, when no branch ref could be used).
+	DiffSubject string `json:"diffSubject,omitempty"`
+	// IncludesWorktree reports whether uncommitted and untracked work is folded
+	// into files. It is false when the worktree is NOT standing on the subject:
+	// those edits are measured against another baseline, so pendingPaths counts
+	// them instead of the list inventing changes the branch does not carry.
+	IncludesWorktree bool `json:"includesWorktree"`
+	// PendingPaths counts the worktree paths carrying uncommitted, staged or
+	// untracked work that this list does NOT include. Zero when
+	// includesWorktree is true.
+	PendingPaths int `json:"pendingPaths,omitempty"`
+	// HeadState says where the worktree's HEAD stands relative to branch:
+	// "on_branch", "detached", or "other_branch". headLabel names it — the short
+	// sha for a detached HEAD, the branch name for another branch. A detached
+	// worktree is a normal thing for a session to do (testing an upgrade from a
+	// base build, say), so this is reported rather than prevented — but it must
+	// be reported, or an empty list reads as "this session did nothing".
+	HeadState string `json:"headState,omitempty"`
+	HeadLabel string `json:"headLabel,omitempty"`
 }
 
 // ChangedFileDTO is one changed file in the Changes list.
@@ -1586,6 +1612,13 @@ func workspaceChangesResponse(res sessionsvc.WorkspaceChangesResult) WorkspaceCh
 		Truncated:        res.Truncated,
 		TargetFetch:      res.TargetFetch,
 		TargetFetchError: res.TargetFetchError,
+		Branch:           res.Branch,
+		BranchMissing:    res.BranchMissing,
+		DiffSubject:      res.DiffSubject,
+		IncludesWorktree: res.IncludesWorktree,
+		PendingPaths:     res.PendingPaths,
+		HeadState:        res.HeadState,
+		HeadLabel:        res.HeadLabel,
 	}
 }
 

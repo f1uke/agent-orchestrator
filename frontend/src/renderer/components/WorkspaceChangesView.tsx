@@ -1,8 +1,9 @@
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, GitBranch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { useWorkspaceFileDiff } from "../hooks/useWorkspaceFileDiff";
 import { apiErrorMessage } from "../lib/api-client";
+import { changesEmptyState, changesScopeNotice } from "../lib/changes-scope";
 import { activeIndexFromTops } from "../lib/active-section";
 import { orderedFileItems } from "../lib/file-tree";
 import { ACCENT, MONO, PALETTE as P, VIEWER as V, accentMix } from "../lib/comment-inbox";
@@ -139,6 +140,11 @@ export function WorkspaceChangesView({
 		el.scrollIntoView?.({ block: "start" });
 	}, [focus, files.length]);
 
+	// Named once: the note above the stack and the empty line below it are two
+	// halves of the same honesty, and deriving them twice invites them to drift.
+	const scopeNotice = query.data?.available ? changesScopeNotice(query.data) : null;
+	const emptyState = query.data?.available ? changesEmptyState(query.data) : null;
+
 	const additions = files.reduce((n, f) => n + (f.binary ? 0 : f.additions), 0);
 	const deletions = files.reduce((n, f) => n + (f.binary ? 0 : f.deletions), 0);
 	const allExpanded = files.length > 0 && files.every((f) => isExpanded(f.path));
@@ -247,10 +253,38 @@ export function WorkspaceChangesView({
 						There is nothing to diff for this session — see the Files tab for why.
 					</p>
 				) : null}
-				{query.data?.available && files.length === 0 ? (
-					<p style={{ fontSize: 12.5, color: P.muted2 }}>
-						No changes against {query.data.targetBranch || "the target branch"}.
+				{/* The same scope note the rail carries: this view reads the very same
+				    payload, so it must not be the surface that still implies the diff
+				    came from the worktree the reader is looking at. */}
+				{scopeNotice && files.length > 0 ? (
+					<p
+						style={{
+							display: "flex",
+							alignItems: "flex-start",
+							gap: 7,
+							maxWidth: 1040,
+							margin: "0 0 14px",
+							padding: "8px 11px",
+							border: `1px solid color-mix(in oklab, var(--amber) 26%, transparent)`,
+							borderRadius: 8,
+							background: "color-mix(in oklab, var(--amber) 8%, transparent)",
+							fontSize: 12,
+							lineHeight: 1.45,
+							color: P.muted2,
+						}}
+						role="status"
+					>
+						<GitBranch
+							aria-hidden="true"
+							style={{ width: 13, height: 13, flex: "none", marginTop: 2, color: "var(--amber)" }}
+						/>
+						<span>
+							<span style={{ fontWeight: 600, color: P.text }}>{scopeNotice.headline}</span> {scopeNotice.detail}
+						</span>
 					</p>
+				) : null}
+				{query.data?.available && files.length === 0 ? (
+					<p style={{ fontSize: 12.5, color: P.muted2 }}>{emptyState?.detail}</p>
 				) : null}
 
 				{files.map((file) => (

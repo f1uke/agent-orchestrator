@@ -7420,3 +7420,36 @@ ol.note-prose__list {
 .wiki-note__tail {
 	height: 48px;
 }
+
+/* What the Changes list actually measured, when that is not what the reader
+   assumes: the session's branch diffed while the worktree stands somewhere else
+   (a detached HEAD, another branch), or a branch ref that is not here at all.
+   Amber, the same weight as the stale-target marker beside it - the count on
+   screen is right, it just answers a slightly different question than usual. */
+.files-panel__scope {
+	display: flex;
+	flex: none;
+	align-items: flex-start;
+	gap: 7px;
+	margin: 0 11px 9px;
+	padding: 7px 9px;
+	border: 1px solid color-mix(in oklab, var(--amber) 26%, transparent);
+	border-radius: var(--radius-sm);
+	background: color-mix(in oklab, var(--amber) 8%, transparent);
+	color: var(--fg-muted);
+	font-size: 11.5px;
+	line-height: 1.45;
+}
+
+.files-panel__scope-icon {
+	width: 13px;
+	height: 13px;
+	flex: none;
+	margin-top: 2px;
+	color: var(--amber);
+}
+
+.files-panel__scope-head {
+	font-weight: 600;
+	color: var(--fg);
+}

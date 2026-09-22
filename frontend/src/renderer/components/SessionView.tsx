@@ -847,7 +847,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 									onToggleBrowserPopOut={setBrowserPoppedOut}
 									onViewChange={setInspectorView}
 									onOpenFile={setFileView}
-									onOpenChangedFile={({ path, status, binary }) => {
+									onOpenChangedFile={({ path, status, binary, liveOnDisk }) => {
 										setActiveChangedPath(path);
 										// 🗝 A DELETED or BINARY row has no working-tree buffer to
 										// open, which is exactly the trap ChangedFileTarget's own
@@ -855,7 +855,13 @@ export function SessionView({ sessionId }: SessionViewProps) {
 										// on the rows a reviewer most wants. Those keep going to the
 										// stacked diff; everything else opens in the editor, landing
 										// on the first hunk rather than on line 1.
-										if (status === "deleted" || binary) {
+										//
+										// liveOnDisk === false is the same trap wearing a friendlier
+										// face: the list is then the branch's commits while the
+										// worktree stands on another checkout, so the file on disk is
+										// a DIFFERENT version of the row that was clicked. Showing it
+										// would be a confident answer to a question nobody asked.
+										if (status === "deleted" || binary || liveOnDisk === false) {
 											setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
 											return;
 										}

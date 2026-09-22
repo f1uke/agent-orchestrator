@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { apiErrorMessage } from "../lib/api-client";
+import { changesEmptyState, changesScopeNotice } from "../lib/changes-scope";
 import { ancestorKeys, buildFileTree, collapsedExcept, matchesFileQuery, orderedFileItems } from "../lib/file-tree";
 import {
 	type FilesMode,
@@ -51,6 +52,17 @@ export type ChangedFileTarget = {
 	 */
 	status?: string;
 	binary?: boolean;
+	/**
+	 * Whether the WORKING TREE holds this row's content.
+	 *
+	 * False when the list is the branch's committed work and the worktree is
+	 * standing somewhere else (a detached HEAD, another branch). The file on disk
+	 * is then a different commit's version - or missing entirely - so opening it
+	 * in the editor would show content that does not match the counts on the row
+	 * it was opened from. Those rows go to the stacked diff, which reads the
+	 * branch, for the same reason a deleted row does.
+	 */
+	liveOnDisk?: boolean;
 };
 
 /** A row in Browse mode: any file in the worktree, changed or not. */
@@ -205,6 +217,10 @@ export function FilesPanel({
 	);
 
 	const files = useMemo(() => data?.files ?? [], [data]);
+	// What was measured, when that differs from what the reader assumes. Computed
+	// here because it decides both the notice above the list and the icon on the
+	// empty state: a check mark is only honest when the branch really does match.
+	const scopeNotice = data?.available ? changesScopeNotice(data) : null;
 	const visible = useMemo(() => files.filter((f) => matchesFileQuery(f.path, search)), [files, search]);
 	const tree = useMemo(() => buildFileTree(visible, (f) => f.path), [visible]);
 	// The flat list follows the tree's order too, so switching views re-groups the
@@ -490,11 +506,13 @@ export function FilesPanel({
 							fetchError={data.targetFetchError}
 							onReviewAll={files.length > 0 ? onReviewAll : undefined}
 						/>
+						{/* One voice: an empty list states the scope in its own detail line,
+						    so the strip would only repeat it back. */}
+						{files.length > 0 ? <ScopeNotice notice={scopeNotice} /> : null}
 						{files.length === 0 ? (
 							<EmptyState
-								icon={<CheckIcon />}
-								title={`No changes vs ${data.targetBranch || "target"}`}
-								detail="This branch matches its target branch. Nothing to review yet."
+								icon={scopeNotice ? <GitBranch aria-hidden="true" className="h-6 w-6" /> : <CheckIcon />}
+								{...changesEmptyState(data)}
 							/>
 						) : (
 							<>
@@ -508,7 +526,14 @@ export function FilesPanel({
 												nodes={tree}
 												collapsed={collapsedDirs}
 												onToggleDir={toggleDir}
-												onSelectFile={(f) => onOpenFile?.({ path: f.path, status: f.status, binary: f.binary })}
+												onSelectFile={(f) =>
+													onOpenFile?.({
+														path: f.path,
+														status: f.status,
+														binary: f.binary,
+														liveOnDisk: data.includesWorktree,
+													})
+												}
 												selectedKey={selectedPath}
 												revealedKey={revealedPath}
 												scrollTo={scrollTo}
@@ -534,6 +559,7 @@ export function FilesPanel({
 														selected={file.path === selectedPath}
 														revealed={file.path === revealedPath}
 														onOpen={onOpenFile}
+														liveOnDisk={data.includesWorktree}
 													/>
 												))}
 											</div>
@@ -696,11 +722,13 @@ function ChangedFileRow({
 	selected,
 	revealed,
 	onOpen,
+	liveOnDisk,
 }: {
 	file: ChangedFile;
 	selected: boolean;
 	revealed: boolean;
 	onOpen?: (target: ChangedFileTarget) => void;
+	liveOnDisk: boolean;
 }) {
 	const slash = file.path.lastIndexOf("/");
 	const dir = slash >= 0 ? file.path.slice(0, slash) : "";
@@ -713,7 +741,7 @@ function ChangedFileRow({
 			data-path={file.path}
 			aria-current={selected ? "true" : undefined}
 			className={cn("files-panel__row", selected && "is-selected", revealed && "is-revealed")}
-			onClick={() => onOpen?.({ path: file.path, status: file.status, binary: file.binary })}
+			onClick={() => onOpen?.({ path: file.path, status: file.status, binary: file.binary, liveOnDisk })}
 			title={file.path}
 		>
 			<span className="files-panel__lead">
@@ -857,6 +885,29 @@ function StaleMarker({ branch, state, error }: { branch?: string; state?: string
 				<TriangleAlert aria-hidden="true" className="h-3 w-3" />
 			</span>
 		</SimpleTooltip>
+	);
+}
+
+/**
+ * What the list actually measured, when that is not what the reader assumes.
+ *
+ * The panel used to be silent about it, which is how a session that had
+ * committed 38 files came to be described as matching its target branch: the
+ * diff was taken from the worktree's HEAD, and that worktree was parked on the
+ * base commit. A detached worktree is a normal thing for a session to do, so this
+ * is a note about what the numbers mean rather than a warning about a mistake -
+ * amber, the weight the panel already uses for "read this before you trust the
+ * count", and never shown when the branch and the worktree agree.
+ */
+function ScopeNotice({ notice }: { notice: ReturnType<typeof changesScopeNotice> }) {
+	if (!notice) return null;
+	return (
+		<div className="files-panel__scope" role="status">
+			<GitBranch aria-hidden="true" className="files-panel__scope-icon" />
+			<span>
+				<span className="files-panel__scope-head">{notice.headline}</span> {notice.detail}
+			</span>
+		</div>
 	);
 }
 

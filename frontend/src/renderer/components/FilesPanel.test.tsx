@@ -193,6 +193,104 @@ describe("FilesPanel", () => {
 		expect(await screen.findByText("No changes vs main")).toBeInTheDocument();
 	});
 
+	// The panel once reported a session with 38 committed files as matching its
+	// target branch, because the diff came from a worktree the worker had
+	// deliberately detached onto the base commit. The list now carries the
+	// branch's work, and the panel says where the worktree is standing.
+	it("lists the branch's files and names the detached worktree", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "develop",
+			targetSource: "session_pr_target",
+			truncated: false,
+			branch: "feature/cookies",
+			diffSubject: "branch",
+			includesWorktree: false,
+			headState: "detached",
+			headLabel: "a058308",
+			pendingPaths: 2,
+			files: [file({ path: "Sources/CookieStore.swift" })],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+
+		expect(await screen.findByRole("treeitem", { name: /CookieStore\.swift/ })).toBeInTheDocument();
+		const notice = screen.getByRole("status");
+		expect(notice).toHaveTextContent("Worktree detached at a058308");
+		// The uncommitted work it could not fold in is declared, not dropped.
+		expect(notice).toHaveTextContent("2 uncommitted paths");
+	});
+
+	// "No changes vs develop / this branch matches its target branch" was a
+	// positive claim, and it was false. An empty list from a worktree parked
+	// elsewhere has to say which question it answered.
+	it("does not claim a match when the empty answer came from a detached worktree", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "develop",
+			files: [],
+			truncated: false,
+			branch: "feature/cookies",
+			diffSubject: "branch",
+			includesWorktree: false,
+			headState: "detached",
+			headLabel: "a058308",
+			pendingPaths: 1,
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+
+		expect(await screen.findByText("No commits vs develop")).toBeInTheDocument();
+		expect(screen.queryByText(/matches its target branch/)).not.toBeInTheDocument();
+		// The empty state carries the scope itself, so the strip does not repeat it.
+		expect(screen.getByText(/The worktree is detached at a058308/)).toBeInTheDocument();
+		expect(screen.queryByRole("status")).not.toBeInTheDocument();
+	});
+
+	// A row carries whether the WORKING TREE holds its content, so its owner can
+	// route it. With the worktree parked elsewhere the file on disk is a different
+	// version of the row that was clicked, and the editor would show it without
+	// saying so.
+	it("reports that a row's content is not the one on disk when the worktree is elsewhere", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "develop",
+			truncated: false,
+			branch: "feature/cookies",
+			diffSubject: "branch",
+			includesWorktree: false,
+			headState: "detached",
+			headLabel: "a058308",
+			files: [file({ path: "Sources/CookieStore.swift" })],
+		});
+		const onOpenFile = vi.fn();
+		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("treeitem", { name: /CookieStore\.swift/ }));
+		expect(onOpenFile).toHaveBeenCalledWith({
+			path: "Sources/CookieStore.swift",
+			status: "modified",
+			binary: false,
+			liveOnDisk: false,
+		});
+	});
+
+	// A normal session must not wear a notice; a badge on every render is noise
+	// that trains the eye to skip the one that matters.
+	it("stays quiet while the worktree is on the session's branch", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			truncated: false,
+			branch: "feature/x",
+			diffSubject: "branch",
+			includesWorktree: true,
+			headState: "on_branch",
+			files: [file()],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+		expect(screen.queryByRole("status")).not.toBeInTheDocument();
+	});
+
 	// 🗝 The row reports its STATUS, so its owner can route it. A deleted file has
 	// no working-tree content and would 404 through the file endpoint, so it has
 	// to stay distinguishable here even though this panel does not decide where
@@ -202,13 +300,19 @@ describe("FilesPanel", () => {
 			available: true,
 			targetBranch: "main",
 			truncated: false,
+			includesWorktree: true,
 			files: [file({ path: "lib/gone.ts", status: "deleted", additions: 0, deletions: 38 })],
 		});
 		const onOpenFile = vi.fn();
 		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
 
 		await userEvent.click(await screen.findByRole("treeitem", { name: /gone\.ts/ }));
-		expect(onOpenFile).toHaveBeenCalledWith({ path: "lib/gone.ts", status: "deleted", binary: false });
+		expect(onOpenFile).toHaveBeenCalledWith({
+			path: "lib/gone.ts",
+			status: "deleted",
+			binary: false,
+			liveOnDisk: true,
+		});
 	});
 
 	it("reports a binary row too, which has no text buffer to open either", async () => {
@@ -216,13 +320,19 @@ describe("FilesPanel", () => {
 			available: true,
 			targetBranch: "main",
 			truncated: false,
+			includesWorktree: true,
 			files: [file({ path: "logo.png", status: "modified", binary: true })],
 		});
 		const onOpenFile = vi.fn();
 		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
 
 		await userEvent.click(await screen.findByRole("treeitem", { name: /logo\.png/ }));
-		expect(onOpenFile).toHaveBeenCalledWith({ path: "logo.png", status: "modified", binary: true });
+		expect(onOpenFile).toHaveBeenCalledWith({
+			path: "logo.png",
+			status: "modified",
+			binary: true,
+			liveOnDisk: true,
+		});
 	});
 
 	// The stacked all-files review lost its only entry point when a ROW started

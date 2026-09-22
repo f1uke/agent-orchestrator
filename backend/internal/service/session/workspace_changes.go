@@ -21,6 +21,24 @@ const (
 	ChangesNoTargetBranch = "no_target_branch" // nothing to compare against
 )
 
+// What the file list was measured FROM. A session owns a branch, so the branch
+// is normally the subject; HEAD is the fallback for a worktree whose branch we
+// cannot name or cannot find.
+const (
+	ChangesSubjectBranch = "branch"
+	ChangesSubjectHead   = "head"
+)
+
+// Where the worktree's HEAD stands relative to the session's branch. This is
+// reported on EVERY payload, because "the diff is empty" and "the worktree is
+// parked somewhere else" are different answers and the reader has to be able to
+// tell them apart.
+const (
+	HeadOnBranch      = "on_branch"
+	HeadDetached      = "detached"
+	HeadOnOtherBranch = "other_branch"
+)
+
 // Change statuses, mirroring git's name-status letters.
 const (
 	ChangeAdded    = "added"
@@ -144,8 +162,10 @@ type ChangedFile struct {
 }
 
 // WorkspaceChangesResult is the Changes-mode payload: the files differing
-// between the session's branch (including its working tree) and the resolved
-// target branch.
+// between the session's branch (including its working tree, when the worktree is
+// standing on that branch) and the resolved target branch. The scope fields at
+// the bottom say WHICH comparison this is, because "no changes" and "I measured
+// something else" must never read the same.
 type WorkspaceChangesResult struct {
 	Available bool
 	// Reason explains Available=false (one of the Changes* constants).
@@ -165,10 +185,172 @@ type WorkspaceChangesResult struct {
 	// exactly like a correct one.
 	TargetFetch      string
 	TargetFetchError string
+	// Branch is the session's OWN branch - what the board, the pull request and
+	// the human all mean by "this task's changes". Empty only when the session
+	// records no branch AND the worktree is not standing on one.
+	Branch string
+	// BranchMissing reports that Branch is named but has no ref in this worktree
+	// (never created, renamed, or deleted). The diff then falls back to HEAD, and
+	// saying so is the difference between "nothing changed" and "I could not find
+	// the thing you asked about".
+	BranchMissing bool
+	// DiffSubject is what Files was measured FROM: ChangesSubjectBranch (the
+	// branch's tip) or ChangesSubjectHead (the worktree's HEAD).
+	DiffSubject string
+	// IncludesWorktree reports whether uncommitted and untracked work is folded
+	// into Files. It is false exactly when the worktree is NOT standing on the
+	// subject: those edits are measured against a different baseline, so mixing
+	// them into the branch's diff would invent changes neither side made.
+	// PendingPaths then counts what was left out.
+	IncludesWorktree bool
+	// PendingPaths counts the worktree paths carrying uncommitted, staged or
+	// untracked work that Files does NOT include. Zero when IncludesWorktree.
+	PendingPaths int
+	// HeadState is where the worktree's HEAD stands relative to Branch:
+	// HeadOnBranch, HeadDetached or HeadOnOtherBranch. HeadLabel names it - the
+	// short sha for a detached HEAD, the branch name for another branch, empty
+	// when HEAD is on Branch.
+	HeadState string
+	HeadLabel string
 }
 
-// WorkspaceChanges lists the files differing between the session's branch and
-// its target branch, folding in uncommitted working-tree work.
+// changesScope is the answer to "what exactly are we comparing, and what is the
+// worktree doing while we do it". It exists because those two questions used to
+// be answered by the same ref: the diff was computed from the worktree's HEAD, so
+// a session that had legitimately checked out its base commit (to install a
+// baseline build and test an upgrade path) reported that its branch matched its
+// target - with 38 committed files sitting on the branch. A session OWNS A
+// BRANCH; that is the subject, and where HEAD happens to be parked is a separate
+// fact the reader is told rather than a silent input to the answer.
+type changesScope struct {
+	// Target is the resolved comparison branch, TargetSource how it was resolved,
+	// and TargetRef the ref that actually exists for it.
+	Target, TargetSource, TargetRef string
+	// MergeBase is merge-base(TargetRef, SubjectRev).
+	MergeBase string
+	// SubjectRev is the rev Files is measured from, and Subject says which kind
+	// of rev it is (ChangesSubject*).
+	SubjectRev, Subject string
+	// Branch/BranchMissing/HeadState/HeadLabel/IncludesWorktree are reported
+	// verbatim on the payload; see WorkspaceChangesResult for what each means.
+	Branch                          string
+	BranchMissing, IncludesWorktree bool
+	HeadState, HeadLabel            string
+	// Reason is non-empty when nothing can be diffed; the caller returns it as an
+	// Available=false payload rather than an error.
+	Reason string
+	// TargetFetch/TargetFetchError carry the freshness of the target's
+	// remote-tracking ref.
+	TargetFetch, TargetFetchError string
+}
+
+// resolveChangesScope decides what a session's changes are measured from, and
+// records where the worktree's HEAD is while they are.
+//
+// It is shared by the file LIST and the per-file diff on purpose: a row that the
+// list offers must open on the same comparison the list counted, or a file listed
+// as +38 opens on "no diff to show".
+func (s *Service) resolveChangesScope(
+	ctx context.Context, rec domain.SessionRecord, workspace string,
+) changesScope {
+	sc := changesScope{}
+	sc.Target, sc.TargetSource = s.resolveTargetBranch(ctx, rec, workspace)
+	if sc.Target == "" {
+		sc.Reason = ChangesNoTargetBranch
+		return sc
+	}
+	// Refresh the target's remote-tracking ref before reading it. This does not
+	// block: it returns immediately with the freshness of what is on disk, and
+	// the diff below is computed from whatever refs exist right now. A branch
+	// that moved on the forge lands on the next poll rather than stalling this
+	// render behind the network.
+	sc.TargetFetch, sc.TargetFetchError = s.refreshTarget(ctx, workspace, sc.Target)
+
+	ref, ok := resolveBranchRef(ctx, workspace, sc.Target)
+	if !ok {
+		// The branch is named but does not exist in this worktree (never fetched,
+		// or renamed upstream). Naming it beats a bare "nothing to compare".
+		sc.Reason = ChangesNoTargetBranch
+		return sc
+	}
+	sc.TargetRef = ref
+
+	headBranch, headSHA := readHead(ctx, workspace)
+	sc.Branch = strings.TrimSpace(rec.Metadata.Branch)
+	if sc.Branch == "" {
+		// A session that recorded no branch (an early row, or one spawned into an
+		// existing checkout) still owns whatever the worktree is standing on. This
+		// is read knowledge, not a guess - and it keeps HeadState quiet for every
+		// session that is simply working normally.
+		sc.Branch = headBranch
+	}
+	switch headBranch {
+	case "":
+		// Nothing is adopted from a detached HEAD, so Branch here is either the
+		// recorded one or empty; either way the worktree is parked on a commit.
+		sc.HeadState, sc.HeadLabel = HeadDetached, headSHA
+	case sc.Branch:
+		sc.HeadState = HeadOnBranch
+	default:
+		sc.HeadState, sc.HeadLabel = HeadOnOtherBranch, headBranch
+	}
+
+	// The subject: the session's branch when it has a ref, HEAD when it does not.
+	sc.Subject, sc.SubjectRev, sc.IncludesWorktree = ChangesSubjectHead, "HEAD", true
+	if sc.Branch != "" {
+		if branchRef, ok := resolveLocalBranchRef(ctx, workspace, sc.Branch); ok {
+			sc.Subject, sc.SubjectRev = ChangesSubjectBranch, branchRef
+			// Uncommitted work belongs to the diff only while the worktree is
+			// standing on the subject. Parked elsewhere, its edits are measured
+			// against another baseline; folding them in would report changes the
+			// branch does not carry and hide the ones it does.
+			sc.IncludesWorktree = sc.HeadState == HeadOnBranch
+		} else {
+			sc.BranchMissing = true
+		}
+	}
+
+	baseOut, err := gitOutput(ctx, workspace, "merge-base", sc.TargetRef, sc.SubjectRev)
+	if err != nil {
+		// No common ancestor (unrelated histories, or an unborn HEAD). Degrading
+		// to an empty state rather than erroring is the same contract DiffContext
+		// follows.
+		sc.Reason = ChangesNoTargetBranch
+		return sc
+	}
+	sc.MergeBase = strings.TrimSpace(string(baseOut))
+	return sc
+}
+
+// readHead reports the branch the worktree is on ("" when HEAD is detached) and
+// HEAD's short sha ("" on an unborn HEAD).
+func readHead(ctx context.Context, workspace string) (branch, shortSHA string) {
+	if out, err := gitOutput(ctx, workspace, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
+		branch = strings.TrimSpace(string(out))
+	}
+	if out, err := gitOutput(ctx, workspace, "rev-parse", "--short", "HEAD"); err == nil {
+		shortSHA = strings.TrimSpace(string(out))
+	}
+	return branch, shortSHA
+}
+
+// resolveLocalBranchRef verifies the session's OWN branch, which is strictly the
+// local ref. Unlike the target (see resolveBranchRef, which prefers
+// origin/<branch>), a session's branch is the local one by definition: its
+// newest commits may not be pushed yet, and origin's copy of the same name would
+// silently under-report them.
+func resolveLocalBranchRef(ctx context.Context, workspace, branch string) (string, bool) {
+	ref := "refs/heads/" + branch
+	if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+		return "", false
+	}
+	return ref, true
+}
+
+// WorkspaceChanges lists the files differing between the session's BRANCH and
+// its target branch, folding in uncommitted working-tree work while the worktree
+// is standing on that branch (see resolveChangesScope for what happens when it
+// is not, and why the payload says which of the two it did).
 //
 // Every degraded state (no worktree on disk, not a repo, no resolvable target
 // branch) comes back Available=false with a Reason rather than an error, so the
@@ -193,62 +375,49 @@ func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (Wo
 		return WorkspaceChangesResult{Reason: ChangesNotARepo}, nil //nolint:nilerr // intentional: degrade, don't error
 	}
 
-	branch, source := s.resolveTargetBranch(ctx, rec, workspace)
-	if branch == "" {
-		return WorkspaceChangesResult{Reason: ChangesNoTargetBranch}, nil
-	}
-	// Refresh the target's remote-tracking ref before reading it. This does not
-	// block: it returns immediately with the freshness of what is on disk, and
-	// the diff below is computed from whatever refs exist right now. A branch
-	// that moved on the forge lands on the next poll rather than stalling this
-	// render behind the network.
-	fetchStatus, fetchErr := s.refreshTarget(ctx, workspace, branch)
-
-	ref, ok := resolveBranchRef(ctx, workspace, branch)
-	if !ok {
-		// The branch is named but does not exist in this worktree (never fetched,
-		// or renamed upstream). Naming it beats a bare "nothing to compare".
-		return WorkspaceChangesResult{
-			Reason: ChangesNoTargetBranch, TargetBranch: branch, TargetSource: source,
-			TargetFetch: fetchStatus, TargetFetchError: fetchErr,
-		}, nil
-	}
-	baseOut, err := gitOutput(ctx, workspace, "merge-base", ref, "HEAD")
-	if err != nil {
-		// No common ancestor (unrelated histories, or an unborn HEAD). Degrading
-		// to an empty state rather than erroring is the same contract DiffContext
-		// follows; nilerr is suppressed on the `return` line because that is where
-		// it reports, not on the closing `}, nil`.
-		//nolint:nilerr // intentional: an unrelated history degrades, it is not an error
-		return WorkspaceChangesResult{
-			Reason: ChangesNoTargetBranch, TargetBranch: branch, TargetSource: source,
-			TargetFetch: fetchStatus, TargetFetchError: fetchErr,
-		}, nil
-	}
-	mergeBase := strings.TrimSpace(string(baseOut))
-
+	sc := s.resolveChangesScope(ctx, rec, workspace)
 	res := WorkspaceChangesResult{
-		Available: true, TargetBranch: branch, TargetSource: source, MergeBase: mergeBase,
-		TargetFetch: fetchStatus, TargetFetchError: fetchErr,
+		TargetBranch: sc.Target, TargetSource: sc.TargetSource, MergeBase: sc.MergeBase,
+		TargetFetch: sc.TargetFetch, TargetFetchError: sc.TargetFetchError,
+		Branch: sc.Branch, BranchMissing: sc.BranchMissing, DiffSubject: sc.Subject,
+		IncludesWorktree: sc.IncludesWorktree, HeadState: sc.HeadState, HeadLabel: sc.HeadLabel,
 	}
+	if sc.Reason != "" {
+		res.Reason = sc.Reason
+		return res, nil
+	}
+	res.Available = true
 
-	// Diffing mergeBase against the WORKING TREE (no second ref) is what makes
-	// committed and uncommitted work appear in one list — the reviewer wants
-	// "what has this session done", not "what has it committed".
-	nameOut, err := gitOutput(ctx, workspace, "diff", "--name-status", "-M", "-z", mergeBase)
+	// With the worktree standing on the subject, the diff runs against the
+	// WORKING TREE (no second rev) so committed and uncommitted work appear in one
+	// list — the reviewer wants "what has this session done", not "what has it
+	// committed". Parked elsewhere, the subject's tip is named explicitly and the
+	// worktree is reported separately instead (see countPendingPaths).
+	args := []string{"diff", "--name-status", "-M", "-z", sc.MergeBase}
+	numArgs := []string{"diff", "--numstat", "-M", "-z", sc.MergeBase}
+	if !sc.IncludesWorktree {
+		args = append(args, sc.SubjectRev)
+		numArgs = append(numArgs, sc.SubjectRev)
+	}
+	nameOut, err := gitOutput(ctx, workspace, args...)
 	if err != nil {
 		return WorkspaceChangesResult{Reason: ChangesNotARepo}, nil //nolint:nilerr // intentional: degrade, don't error
 	}
 	files := parseNameStatusZ(string(nameOut))
 
-	if numOut, err := gitOutput(ctx, workspace, "diff", "--numstat", "-M", "-z", mergeBase); err == nil {
+	if numOut, err := gitOutput(ctx, workspace, numArgs...); err == nil {
 		applyNumstatZ(files, string(numOut))
 	}
 
-	// git diff never reports untracked files, and a brand-new file a worker has
-	// not staged yet is exactly what a reviewer is looking for.
 	dirty := map[string]bool{}
-	if stOut, err := gitOutput(ctx, workspace, "status", "--porcelain=v1", "-z"); err == nil {
+	if !sc.IncludesWorktree {
+		// The list is the branch's committed work, so every file in it is
+		// committed by construction, and the worktree's own pending work is
+		// declared as a count rather than silently dropped.
+		res.PendingPaths = countPendingPaths(ctx, workspace)
+	} else if stOut, err := gitOutput(ctx, workspace, "status", "--porcelain=v1", "-z"); err == nil {
+		// git diff never reports untracked files, and a brand-new file a worker has
+		// not staged yet is exactly what a reviewer is looking for.
 		for _, u := range parsePorcelainZ(string(stOut), dirty) {
 			files = appendUntracked(ctx, workspace, files, u, dirty)
 		}
@@ -268,6 +437,31 @@ func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (Wo
 	}
 	res.Files = files
 	return res, nil
+}
+
+// countPendingPaths counts the worktree paths carrying uncommitted, staged or
+// untracked work. It is only asked when those paths are NOT in the file list: a
+// count is what lets the panel say "the branch's commits are listed; the worktree
+// also holds 3 paths of work measured against something else" instead of leaving
+// the reader to assume one way or the other.
+//
+// An untracked DIRECTORY counts as the single path git reports it as, the same
+// way the list would show it.
+func countPendingPaths(ctx context.Context, workspace string) int {
+	out, err := gitOutput(ctx, workspace, "status", "--porcelain=v1", "-z")
+	if err != nil {
+		return 0
+	}
+	dirty := map[string]bool{}
+	untracked := parsePorcelainZ(string(out), dirty)
+	n := len(dirty)
+	for _, u := range untracked {
+		// An untracked FILE is already counted in dirty; a collapsed directory is not.
+		if u.Dir {
+			n++
+		}
+	}
+	return n
 }
 
 // resolveTargetBranch answers "what is this session's branch measured against",

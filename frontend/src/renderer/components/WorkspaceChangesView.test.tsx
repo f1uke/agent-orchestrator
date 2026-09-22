@@ -92,6 +92,36 @@ describe("autoExpandedPaths", () => {
 });
 
 describe("WorkspaceChangesView", () => {
+	// This view reads the very same payload as the rail, so it must not be the
+	// surface that still implies the diff came from the worktree on screen.
+	it("names a detached worktree above the stack", async () => {
+		getMock.mockImplementation((url: string) => {
+			if (url.endsWith("/workspace/changes")) {
+				return Promise.resolve({
+					data: {
+						available: true,
+						targetBranch: "develop",
+						targetSource: "pr",
+						truncated: false,
+						branch: "feature/cookies",
+						diffSubject: "branch",
+						includesWorktree: false,
+						headState: "detached",
+						headLabel: "a058308",
+						pendingPaths: 2,
+						files: [file("Sources/CookieStore.swift")],
+					},
+					error: undefined,
+				});
+			}
+			return Promise.resolve({ data: diffBody, error: undefined });
+		});
+		render(<WorkspaceChangesView sessionId="s1" focus={null} onClose={() => {}} />, { wrapper });
+
+		await screen.findByRole("region", { name: "Sources/CookieStore.swift" });
+		expect(screen.getByRole("status")).toHaveTextContent("Worktree detached at a058308");
+	});
+
 	it("stacks a section for every changed file, not one file at a time", async () => {
 		serve([file("src/a.ts"), file("src/b.ts"), file("docs/c.md")]);
 		render(<WorkspaceChangesView sessionId="s1" focus={null} onClose={() => {}} />, { wrapper });

@@ -3825,8 +3825,15 @@ export interface components {
         };
         WorkspaceChangesResponse: {
             available: boolean;
+            branch?: string;
+            branchMissing?: boolean;
+            diffSubject?: string;
             files: components["schemas"]["ChangedFileDTO"][];
+            headLabel?: string;
+            headState?: string;
+            includesWorktree: boolean;
             mergeBase?: string;
+            pendingPaths?: number;
             reason?: string;
             targetBranch?: string;
             targetFetch?: string;
