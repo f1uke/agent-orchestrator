@@ -17,13 +17,14 @@ const device = (overrides: Partial<SimDevice> = {}): SimDevice =>
 		...overrides,
 	}) as SimDevice;
 
-function open(devices: SimDevice[], overrides: { chosen?: string | null } = {}) {
+function open(devices: SimDevice[], overrides: { chosen?: string | null; holderNames?: Map<string, string> } = {}) {
 	const onPower = vi.fn();
 	const onChoose = vi.fn();
 	render(
 		<SimDevicePicker
 			chosen={overrides.chosen ?? null}
 			devices={devices}
+			holderNames={overrides.holderNames}
 			loading={false}
 			onChoose={onChoose}
 			onPower={onPower}
@@ -32,6 +33,8 @@ function open(devices: SimDevice[], overrides: { chosen?: string | null } = {}) 
 	);
 	return { onChoose, onPower };
 }
+
+const held = (holder: string) => ({ state: "held", holder }) as SimDevice["lease"];
 
 const openPicker = () => userEvent.click(screen.getByRole("button", { name: /simulator to watch/i }));
 
@@ -284,6 +287,63 @@ describe("SimDevicePicker", () => {
 		await openPicker();
 
 		expect(screen.queryByTestId("sim-power-stock")).not.toBeInTheDocument();
+	});
+
+	// 🗝 Being taken has to be legible while somebody is SCANNING the list to pick
+	// a device, which is a moment nobody spends hovering. It used to be the tail of
+	// `iOS 26.3 · watching · leased by …` - the end of the line that truncates
+	// first - with the holder's name only in a tooltip.
+	it("tags a leased device rather than burying it at the end of a line", async () => {
+		open([device({ state: "Booted", lease: held("p-9") })]);
+		await openPicker();
+
+		const tag = within(screen.getByTestId("sim-device-UDID-A")).getByTestId("sim-lease-tag");
+		expect(tag).toHaveTextContent(/leased by @p-9/i);
+	});
+
+	// ⚠ The two leases mean opposite things to the hand about to click: one device
+	// is this session's to drive, the other will refuse it. A row that read the
+	// same either way would be worse than one that said nothing.
+	it("does not say this session's own device the way it says somebody else's", async () => {
+		open([
+			device({ udid: "UDID-A", state: "Booted", lease: held("p-1") }),
+			device({ udid: "UDID-B", name: "iPhone 17 Pro", state: "Booted", lease: held("p-9") }),
+		]);
+		await openPicker();
+
+		const mine = within(screen.getByTestId("sim-device-UDID-A")).getByTestId("sim-lease-tag");
+		const theirs = within(screen.getByTestId("sim-device-UDID-B")).getByTestId("sim-lease-tag");
+		expect(mine).toHaveTextContent(/^yours$/i);
+		expect(theirs).toHaveTextContent(/leased by @p-9/i);
+		expect(mine.className).not.toEqual(theirs.className);
+		// And a screen reader is told the same thing, which an aria-label on the
+		// row would otherwise swallow.
+		expect(screen.getByRole("button", { name: /watch iPhone 17 Pro, leased by @p-9/i })).toBeInTheDocument();
+	});
+
+	// The id is long enough to truncate the row it sits on and says nothing about
+	// what that session is doing. The board name is shorter and answers both.
+	it("names a holder by its board name where the board has one", async () => {
+		open([device({ state: "Booted", lease: held("nter-ios-app-77") })], {
+			holderNames: new Map([["nter-ios-app-77", "OA landing advisor"]]),
+		});
+		await openPicker();
+
+		expect(screen.getByTestId("sim-lease-tag")).toHaveTextContent(/leased by OA landing advisor/i);
+		// The raw id is never lost - taking the device away needs it, and so does
+		// anybody about to go looking for that session.
+		expect(screen.getByRole("button", { name: /watch iPhone 17 Pro Max/i })).toHaveAttribute(
+			"title",
+			"Leased by @nter-ios-app-77",
+		);
+	});
+
+	// A device nobody holds gets no tag at all: a row per device saying "free"
+	// would make the one that is taken harder to spot, not easier.
+	it("says nothing about a lease nobody holds", async () => {
+		open([device({ state: "Booted" })]);
+		await openPicker();
+		expect(screen.queryByTestId("sim-lease-tag")).not.toBeInTheDocument();
 	});
 
 	it("says so when the machine has no simulators at all", async () => {
