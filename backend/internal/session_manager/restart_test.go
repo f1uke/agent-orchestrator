@@ -76,7 +76,7 @@ func TestRestart_LeavesRestoreMarkersAndReviewerAlone(t *testing.T) {
 		SessionID: "mer-1", RepoName: domain.RootWorkspaceRepoName, Branch: "b", WorktreePath: "/ws/mer-1", State: "active",
 	}}
 	reviewerReaped := 0
-	m.SetReviewerReaper(func(context.Context, domain.SessionID) error { reviewerReaped++; return nil })
+	m.SetSessionPaneReaper(func(context.Context, domain.SessionID) error { reviewerReaped++; return nil })
 
 	if _, err := m.Restart(ctx, "mer-1"); err != nil {
 		t.Fatalf("Restart: %v", err)

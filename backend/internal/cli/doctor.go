@@ -20,6 +20,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/codex"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 )
 
 type doctorLevel string
@@ -144,7 +145,7 @@ func (c *commandContext) runDoctor(ctx context.Context) []doctorCheck {
 		)
 	}
 
-	checks = append(checks, checkStore(cfg.DataDir), checkHooksLog(cfg.DataDir, time.Now()))
+	checks = append(checks, checkStore(cfg.DataDir), checkHooksLog(cfg.DataDir, time.Now()), checkSessionEndings(cfg.DataDir, time.Now()))
 
 	st, err := c.inspectDaemon(ctx)
 	if err != nil {
@@ -380,6 +381,42 @@ func checkHooksLog(dataDir string, now time.Time) doctorCheck {
 	return doctorCheck{
 		Level: doctorWarn, Section: doctorSectionCore, Name: name,
 		Message: fmt.Sprintf("%d hook delivery failure(s) in the last 24h — activity tracking may be degraded; latest: %s (full log: %s)", recent, latest, path),
+	}
+}
+
+// checkSessionEndings surfaces a MASS ENDING: several sessions that stopped as
+// one event, when nobody ordered it.
+//
+// Three sessions across two projects once ended within 105 milliseconds of each
+// other, every one of them recorded `agent`/`other`, and the only reason that
+// was ever noticed is that a human sorted terminated_at by hand. Three sessions
+// ending is an ordinary afternoon; three sessions ending TOGETHER is a machine
+// doing something to them, and the difference is what this check exists to say
+// out loud.
+//
+// It reads the journal rather than asking the daemon, so it still answers after
+// a restart - and it excludes AO-ordered endings, because the shutdown sweep
+// ends every live session at once by design and an alarm that fires on every
+// shutdown is one nobody reads.
+func checkSessionEndings(dataDir string, now time.Time) doctorCheck {
+	const name = "session-endings"
+	path := filepath.Join(dataDir, endingslog.FileName)
+	clusters, err := endingslog.MassEndings(dataDir, now.Add(-24*time.Hour))
+	if err != nil {
+		return doctorCheck{Level: doctorWarn, Section: doctorSectionCore, Name: name, Message: err.Error()}
+	}
+	if len(clusters) == 0 {
+		return doctorCheck{
+			Level: doctorPass, Section: doctorSectionCore, Name: name,
+			Message: fmt.Sprintf("no mass session endings in the last 24h (%s)", path),
+		}
+	}
+	latest := clusters[len(clusters)-1]
+	return doctorCheck{
+		Level: doctorWarn, Section: doctorSectionCore, Name: name,
+		Message: fmt.Sprintf("%d session(s) ended together within %s at %s, and nobody ordered it: %s — %d such event(s) in the last 24h (full journal: %s)",
+			len(latest.Entries), latest.Span().Round(time.Millisecond), latest.At.Format(time.RFC3339),
+			strings.Join(latest.IDs(), ", "), len(clusters), path),
 	}
 }
 

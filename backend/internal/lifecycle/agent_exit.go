@@ -178,7 +178,8 @@ func (m *Manager) parkUndelivered(ctx context.Context, id domain.SessionID, at t
 // of an ending AO did not order, so it is recorded rather than replaced by the
 // name of an operation nobody ran.
 func (m *Manager) markAgentExited(ctx context.Context, id domain.SessionID, reason string, at time.Time) error {
-	return m.mutate(ctx, id, func(cur domain.SessionRecord, _ time.Time) (domain.SessionRecord, bool) {
+	var ended *ports.SessionEnding
+	err := m.mutate(ctx, id, func(cur domain.SessionRecord, _ time.Time) (domain.SessionRecord, bool) {
 		if cur.IsTerminated {
 			return cur, false
 		}
@@ -189,6 +190,17 @@ func (m *Manager) markAgentExited(ctx context.Context, id domain.SessionID, reas
 			next.FirstSignalAt = at
 		}
 		next.Termination = m.termination(cur, domain.TerminationSourceAgent, reason, at)
+		// The account of an ending NOBODY ORDERED, captured here and journalled
+		// once the write lands. This is the route the 2026-09-22 incident took,
+		// and the route that left three sessions recorded as `agent`/`other`
+		// with nothing else to go on.
+		e := m.endingFor(cur, next.Termination)
+		ended = &e
 		return next, true
 	})
+	if err != nil {
+		return err
+	}
+	m.afterTermination(ctx, ended)
+	return nil
 }

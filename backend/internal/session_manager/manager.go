@@ -290,20 +290,22 @@ type Manager struct {
 	// Nil (bare Manager/omitting wiring) means English (no directive) — the safe
 	// default that leaves every prompt byte-for-byte unchanged.
 	responseLanguage func() string
-	// reviewerReaper closes a worker's reviewer pane when the worker is torn
-	// down, so the reviewer (a child of the worker, keyed on the worker id) does
-	// not linger. Injected by the daemon after the review service is built to
-	// avoid an import cycle; nil in tests/wiring that omit it, in which case
-	// teardown simply skips reviewer reaping.
-	reviewerReaper func(context.Context, domain.SessionID) error
+	// sessionPaneReaper closes the AUXILIARY panes a session leaves behind when
+	// it is torn down: its reviewer pane and its iOS run pane. Both are bare
+	// runtime handles named after the session id - no database row, no worktree,
+	// no board card - so nothing that sweeps sessions can find them afterwards
+	// and a missed reap is permanent. Injected by the daemon after the review
+	// service is built to avoid an import cycle; nil in tests/wiring that omit
+	// it, in which case teardown simply skips the reap.
+	sessionPaneReaper func(context.Context, domain.SessionID) error
 	// smokeEvidencePurger hard-deletes a session's on-disk smoke-test evidence
 	// tree when the session is purged (the DB rows cascade separately). Injected
-	// by the daemon after the smoke service is built, same as reviewerReaper; nil
+	// by the daemon after the smoke service is built, same as sessionPaneReaper; nil
 	// in tests/wiring that omit it, in which case purge simply skips it.
 	smokeEvidencePurger func(context.Context, domain.SessionID) error
 	// simDeviceAssigner returns the udid of the simulator a session owns,
 	// reserving one if it has none. Injected by the daemon after the simulator
-	// services exist, same as reviewerReaper; nil in tests/wiring that omit it,
+	// services exist, same as sessionPaneReaper; nil in tests/wiring that omit it,
 	// in which case a session is spawned with no device of its own - exactly as
 	// it was before assignments existed.
 	simDeviceAssigner func(context.Context, domain.SessionID) (string, error)
@@ -398,29 +400,40 @@ func New(d Deps) *Manager {
 	return m
 }
 
-// SetReviewerReaper wires the hook that closes a worker's reviewer pane on
-// teardown. The daemon calls this after the review service is constructed (the
-// session manager is built first, so it cannot receive the hook via Deps without
-// an import cycle). A manager with no reaper set simply skips reviewer reaping.
-func (m *Manager) SetReviewerReaper(fn func(context.Context, domain.SessionID) error) {
-	m.reviewerReaper = fn
+// SetSessionPaneReaper wires the hook that closes the auxiliary panes a session
+// leaves behind - its reviewer pane and its iOS run pane. The daemon calls this
+// after the review service is constructed (the session manager is built first,
+// so it cannot receive the hook via Deps without an import cycle). A manager
+// with no reaper set simply skips the reap.
+func (m *Manager) SetSessionPaneReaper(fn func(context.Context, domain.SessionID) error) {
+	m.sessionPaneReaper = fn
 }
 
-// reapReviewer best-effort closes the worker's reviewer pane. Teardown of the
-// worker must never fail because its reviewer could not be reaped, so any error
-// is logged and swallowed. A nil reaper (unwired) is a no-op.
-func (m *Manager) reapReviewer(ctx context.Context, id domain.SessionID) {
-	if m.reviewerReaper == nil {
-		return
+// ReapSessionPanes best-effort closes the session's auxiliary panes and reports
+// what went wrong, for the lifecycle reducer - which reaches the routes to
+// termination that never come through Teardown (an agent ending itself, a
+// runtime the reaper finds missing). Exported for that wiring only; inside this
+// package use reapSessionPanes, which swallows the error.
+func (m *Manager) ReapSessionPanes(ctx context.Context, id domain.SessionID) error {
+	if m.sessionPaneReaper == nil {
+		return nil
 	}
-	if err := m.reviewerReaper(ctx, id); err != nil {
-		m.logger.Warn("reviewer pane teardown failed", "sessionID", id, "error", err)
+	return m.sessionPaneReaper(ctx, id)
+}
+
+// reapSessionPanes best-effort closes the panes the session leaves behind.
+// Teardown of the session must never fail because one of them could not be
+// reaped, so any error is logged and swallowed. A nil reaper (unwired) is a
+// no-op.
+func (m *Manager) reapSessionPanes(ctx context.Context, id domain.SessionID) {
+	if err := m.ReapSessionPanes(ctx, id); err != nil {
+		m.logger.Warn("session pane teardown failed", "sessionID", id, "error", err)
 	}
 }
 
 // SetSmokeEvidencePurger wires the hook that hard-deletes a session's smoke-test
 // evidence blobs on purge. Wired by the daemon after the smoke service exists,
-// mirroring SetReviewerReaper. A manager with no purger set skips it.
+// mirroring SetSessionPaneReaper. A manager with no purger set skips it.
 func (m *Manager) SetSmokeEvidencePurger(fn func(context.Context, domain.SessionID) error) {
 	m.smokeEvidencePurger = fn
 }
@@ -439,7 +452,7 @@ func (m *Manager) purgeSmokeEvidence(ctx context.Context, id domain.SessionID) {
 
 // SetSimDeviceAssigner wires the hook that reserves one local iOS Simulator per
 // session, whose udid is exported as AO_SIM_UDID / AO_SIM_DESTINATION. Wired by
-// the daemon after the simulator services exist, mirroring SetReviewerReaper. A
+// the daemon after the simulator services exist, mirroring SetSessionPaneReaper. A
 // manager with no assigner set spawns sessions with no device of their own.
 func (m *Manager) SetSimDeviceAssigner(fn func(context.Context, domain.SessionID) (string, error)) {
 	m.simDeviceAssigner = fn
@@ -1388,7 +1401,7 @@ func (m *Manager) teardown(ctx context.Context, id domain.SessionID, cause strin
 	// The worker is terminating: close its reviewer pane too. Done before the
 	// (possibly refused) workspace teardown so a preserved dirty worktree still
 	// reaps the reviewer.
-	m.reapReviewer(ctx, id)
+	m.reapSessionPanes(ctx, id)
 	// The tree refcount (workspaceHeldByLiveSession): a subordinate never removes
 	// dev's tree, dev keeps it while a subordinate is still alive on it, and
 	// NOBODY removes a tree another live session is standing in. Checked AFTER the
@@ -1562,7 +1575,7 @@ func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force b
 	}
 	// Close the worker's reviewer pane before the row (and its cascading review
 	// rows) are hard-deleted, so a delete never orphans the reviewer's tmux.
-	m.reapReviewer(ctx, id)
+	m.reapSessionPanes(ctx, id)
 	// Hard-delete the session's smoke-test evidence blobs; the DB rows cascade
 	// with the session row below.
 	m.purgeSmokeEvidence(ctx, id)
@@ -2978,7 +2991,7 @@ func (m *Manager) Cleanup(ctx context.Context, project domain.ProjectID) (Cleanu
 		// A terminal worker reclaimed here may never have gone through Kill (e.g.
 		// merged, or crash-terminated by reconcile), so this is the choke point that
 		// closes its reviewer pane.
-		m.reapReviewer(ctx, rec.ID)
+		m.reapSessionPanes(ctx, rec.ID)
 		result.Cleaned = append(result.Cleaned, rec.ID)
 	}
 	return result, nil

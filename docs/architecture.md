@@ -747,6 +747,57 @@ flowchart TD
 
 **Key principle:** Failed probes are NOT proof of death. A session is only terminated when the runtime and process are **both** clearly dead and recent activity doesn't contradict that.
 
+### What ended a session, and what it left behind
+
+A terminated row keeps two words about its ending: `termination_source` (who -
+`agent`, `ao`, `runtime_gone`) and `termination_reason` (the harness's own
+token, or the AO operation that ordered the teardown). That is deliberately all
+the ROW keeps, because it is read on every board refresh.
+
+Two words are not enough to investigate with. On 2026-09-22 three sessions
+across two projects ended within 105 milliseconds of each other, all three
+recording `agent` / `other` - Claude Code's catch-all - and the cause could not
+be established from anything AO had written down. So everything else AO knows at
+the moment of an ending goes to a journal off to the side:
+
+- **`<AO_DATA_DIR>/endings.jsonl`**, one JSON line per termination, written by
+  the lifecycle reducer at each of its three terminal writes (agent exit,
+  runtime gone, and every AO-ordered teardown, which all funnel through
+  `MarkTerminated`). It carries the session, project, kind, crew role and
+  harness, the source and reason, what the session was doing immediately before
+  it stopped, **how long it had been silent** (the field that separates an idle
+  timeout from a signal), the transcript's address, **whether the terminal pane
+  was still alive at that instant** (probed there, because it stops being true
+  if you look later), and **which other sessions ended alongside it**. It rolls
+  over at 1 MiB keeping one previous generation, like `message-delivery.jsonl`.
+- **A mass ending is one event, not N endings.** Three or more endings *nobody
+  ordered* inside five seconds raise a daemon `WARN` and are reported by
+  **`ao doctor` (`session-endings`)**, which recomputes the grouping from the
+  file so it still answers after a restart. Endings AO ordered are excluded: the
+  shutdown sweep ends every live session at once by design, and an alarm that
+  fires on every shutdown is one nobody reads.
+
+The hook process still forwards only the harness's bounded reason token, never
+the raw SessionEnd payload - that curation boundary is unchanged, and the
+payload's remaining fields (`cwd`, `transcript_path`, `session_id`,
+`permission_mode`) duplicate facts AO already holds.
+
+**The panes a session spawns go with it.** A session's reviewer pane and its iOS
+run pane (`iosrun-<session id>`) are bare runtime handles with no row, no
+worktree and no board card, so nothing that sweeps sessions can find them and a
+missed reap is permanent. Both are reaped from the lifecycle reducer after every
+terminal write, which is what reaches the two routes that never pass through
+`session_manager.Teardown`: an agent ending its own session, and the reaper
+finding a runtime that is no longer there.
+
+On boot each is swept once more for panes orphaned by a crash, or by a kill
+while the daemon was down - `ReapOrphanedReviewers` from the `reviews` table,
+and `ReapOrphanedRuns` from the run records under `<AO_DATA_DIR>/iosrun/`.
+Enumerating AO's own records rather than tmux is what scopes the sweep: a second
+daemon on its own `AO_DATA_DIR` can never reap the first one's panes. A pane
+whose session is still LIVE is always left alone - a build that survived a
+restart is one somebody is waiting for.
+
 ---
 
 ## Observation Loops

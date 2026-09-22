@@ -80,6 +80,23 @@ func WithTranscriptLocator(fn func(domain.SessionRecord) string) Option {
 	}
 }
 
+// WithEndingSink wires the journal that records WHY a session stopped.
+//
+// The session row keeps two words about an ending - who ended it and their one
+// reason token - and that is deliberately all it keeps, because the row is read
+// on every board refresh. Everything else AO knows at that instant (sub-second
+// timing, how long the session had been silent, whether its pane outlived it,
+// which other sessions went with it) goes to this sink instead, which writes it
+// off to the side. A Manager built without one records nothing extra and behaves
+// exactly as it did before.
+func WithEndingSink(sink ports.SessionEndingSink) Option {
+	return func(m *Manager) {
+		if sink != nil {
+			m.endings = sink
+		}
+	}
+}
+
 // WithAutoNudgeDefault wires the global default for auto-nudging a worker when
 // its PR has unresolved review comments (used when a session has no per-session
 // override). A nil fn leaves the safe "off" default in place.
@@ -124,11 +141,24 @@ type Manager struct {
 	// no-op for every solo session (which has no crew), so the common path is
 	// decided by the absence of data rather than by a branch.
 	crewReaper func(context.Context, domain.SessionID, string) error
+	// sessionPaneReaper closes the AUXILIARY panes a session leaves behind - its
+	// reviewer pane and its iOS run pane - which are bare runtime handles named
+	// after the session id rather than sessions of their own, so nothing that
+	// sweeps sessions can see them. The session manager reaps them in Teardown,
+	// but an agent that ends itself and a runtime the reaper finds missing never
+	// reach Teardown, and those are exactly the endings that left
+	// `iosrun-advisor-ios-app-13` building away with its owner long gone. Injected
+	// by the session manager (like SetCrewReaper) because lifecycle has no
+	// runtime. Nil until wired; best-effort when set.
+	sessionPaneReaper func(context.Context, domain.SessionID) error
+	// endings records the account of each termination to the side journal. Nil
+	// until wired; see WithEndingSink.
+	endings ports.SessionEndingSink
 }
 
 // SetRuntimeSuspender wires the hook the merge-suspend path uses to tear a
 // worker's tmux down when its PR merges — the runtime half of suspend-in-place,
-// injected by the session manager (like SetReviewerReaper on the manager side)
+// injected by the session manager (like SetSessionPaneReaper on the manager side)
 // because lifecycle has no runtime. A manager with no suspender set skips the
 // reap: the session still suspends (card stays in its lane) and the stray tmux is
 // reaped later (agent exit / daemon restart).
@@ -152,6 +182,26 @@ func (m *Manager) SetRuntimeSuspender(fn func(context.Context, domain.SessionID)
 // fan-out entirely.
 func (m *Manager) SetCrewReaper(fn func(context.Context, domain.SessionID, string) error) {
 	m.crewReaper = fn
+}
+
+// SetSessionPaneReaper wires the hook that closes a session's auxiliary panes -
+// its reviewer pane and its iOS run pane - injected by the session manager for
+// the same reason as the two hooks above: lifecycle has no runtime.
+//
+// It exists because those panes are reaped in Teardown, and TWO routes to
+// termination never go through Teardown: an agent ending its own session, and
+// the reaper finding a runtime that is no longer there. A run pane is a bare
+// tmux handle named `iosrun-<session id>` with no database row, so nothing that
+// sweeps sessions can find it afterwards either - it simply keeps building
+// until somebody notices it by hand. Wiring the reap to the reducer means every
+// route that writes a terminal row reaps, including the two that never could.
+//
+// Best-effort, and overlapping with Teardown's own call on purpose: Destroy is
+// idempotent, so a session torn down the ordinary way pays one no-op tmux call
+// and a session that ended itself stops leaking. A Manager with no reaper set
+// skips it.
+func (m *Manager) SetSessionPaneReaper(fn func(context.Context, domain.SessionID) error) {
+	m.sessionPaneReaper = fn
 }
 
 // anyMergedPR reports whether the session owns at least one merged PR. MarkSpawned
@@ -232,10 +282,63 @@ func (m *Manager) termination(before domain.SessionRecord, src domain.Terminatio
 	}
 }
 
+// endingFor builds the SIDE-JOURNAL account of an ending, from the same
+// pre-write record domain.Termination is built from.
+//
+// It carries more than the row does on purpose. The row answers "who ended it,
+// and what did they call it" and is read constantly; this answers "what ended
+// it", is read when somebody is investigating, and therefore costs the board
+// nothing. LastActivityAt is the field that does the work the row cannot: the
+// gap between it and the ending separates a session that went quiet hours ago
+// from one that stopped mid-turn.
+func (m *Manager) endingFor(before domain.SessionRecord, t domain.Termination) ports.SessionEnding {
+	return ports.SessionEnding{
+		At:              t.At,
+		SessionID:       before.ID,
+		ProjectID:       before.ProjectID,
+		Kind:            before.Kind,
+		CrewRole:        before.CrewRole,
+		Harness:         before.Harness,
+		Source:          t.Source,
+		Reason:          t.Reason,
+		LastState:       t.LastState,
+		LastActivityAt:  before.Activity.LastActivityAt,
+		TranscriptPath:  t.TranscriptPath,
+		AgentSessionID:  before.Metadata.AgentSessionID,
+		RuntimeHandleID: before.Metadata.RuntimeHandleID,
+		WorkspacePath:   before.Metadata.WorkspacePath,
+	}
+}
+
+// afterTermination fires everything that happens BECAUSE a session ended, once
+// the terminal row is written: the account goes to the journal, and the
+// auxiliary panes the session left behind are closed.
+//
+// It must run with m.mu RELEASED - it does file and tmux I/O - so every caller
+// captures the ending inside its mutate closure and calls this afterwards,
+// which is the pattern ApplyActivitySignal already uses for notification
+// intents. A nil ending means the write was a no-op (the row had already
+// ended), so there is nothing to report and nothing to reap.
+func (m *Manager) afterTermination(ctx context.Context, e *ports.SessionEnding) {
+	if e == nil {
+		return
+	}
+	if m.endings != nil {
+		m.endings.RecordEnding(ctx, *e)
+	}
+	if m.sessionPaneReaper != nil {
+		if err := m.sessionPaneReaper(ctx, e.SessionID); err != nil {
+			slog.Default().Warn("lifecycle: could not close the panes of an ended session",
+				"session", e.SessionID, "err", err)
+		}
+	}
+}
+
 // ApplyRuntimeObservation only writes when runtime liveness is unambiguous. A
 // failed probe or liveness disagreement is ignored; no transient lifecycle state is stored.
 func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.SessionID, f ports.RuntimeFacts) error {
-	return m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
+	var ended *ports.SessionEnding
+	err := m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
 		// A suspended session INTENTIONALLY has no runtime: the idle sweep tore its
 		// tmux down while keeping it on the board. A dead-runtime probe is expected,
 		// not proof of death — never let it flip a suspended session to terminated
@@ -249,8 +352,15 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 		// Nobody reported this ending: the runtime was simply not there. Recording
 		// it as inference keeps it from being read as an agent's own report.
 		next.Termination = m.termination(cur, domain.TerminationSourceRuntimeGone, domain.TerminationCauseRuntimeMissing, timeOr(f.ObservedAt, now))
+		e := m.endingFor(cur, next.Termination)
+		ended = &e
 		return next, true
 	})
+	if err != nil {
+		return err
+	}
+	m.afterTermination(ctx, ended)
+	return nil
 }
 
 // ApplyActivitySignal records an authoritative agent activity signal.
@@ -464,7 +574,8 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 // ending can be attributed to the operation behind it instead of appearing as an
 // anonymous "exited".
 func (m *Manager) MarkTerminated(ctx context.Context, id domain.SessionID, cause string) error {
-	return m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
+	var ended *ports.SessionEnding
+	err := m.mutate(ctx, id, func(cur domain.SessionRecord, now time.Time) (domain.SessionRecord, bool) {
 		if cur.IsTerminated {
 			return cur, false
 		}
@@ -472,8 +583,15 @@ func (m *Manager) MarkTerminated(ctx context.Context, id domain.SessionID, cause
 		next.IsTerminated = true
 		next.Activity = domain.Activity{State: domain.ActivityExited, LastActivityAt: now}
 		next.Termination = m.termination(cur, domain.TerminationSourceAO, cause, now)
+		e := m.endingFor(cur, next.Termination)
+		ended = &e
 		return next, true
 	})
+	if err != nil {
+		return err
+	}
+	m.afterTermination(ctx, ended)
+	return nil
 }
 
 // MarkSuspended flags a session as runtime-suspended. The runtime (tmux) is torn

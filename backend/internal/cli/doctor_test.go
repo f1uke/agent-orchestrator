@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 )
 
 func TestDoctorChecksGitVersion(t *testing.T) {
@@ -602,6 +604,94 @@ func writeHooksLogLines(t *testing.T, dataDir string, lines ...string) {
 	}
 	content := strings.Join(lines, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(dataDir, hooksLogName), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A MASS ENDING has to be obvious rather than reconstructed. Three sessions
+// ending 105ms apart on 2026-09-22 was only ever noticed because a human sorted
+// terminated_at by hand; `ao doctor` now says it.
+func TestDoctorSessionEndingsStates(t *testing.T) {
+	gitOnly := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("git version 2.43.0\n"), nil
+	}
+
+	t.Run("missing journal passes", func(t *testing.T) {
+		setConfigEnv(t)
+		c := doctorContext(t, map[string]string{"git": "/bin/git"}, gitOnly)
+		check := findDoctorCheck(t, c.runDoctor(context.Background()), "session-endings")
+		if check.Level != doctorPass || !strings.Contains(check.Message, "no mass session endings") {
+			t.Fatalf("session-endings = %+v, want PASS", check)
+		}
+	})
+
+	t.Run("the incident warns and names every session", func(t *testing.T) {
+		cfg := setConfigEnv(t)
+		base := time.Now().Add(-time.Hour).UTC()
+		writeEndings(t, cfg.dataDir,
+			endingLine(base, "nter-ios-app-78", "agent", "other"),
+			endingLine(base.Add(53*time.Millisecond), "advisor-ios-app-14", "agent", "other"),
+			endingLine(base.Add(105*time.Millisecond), "advisor-ios-app-13", "agent", "other"),
+		)
+		c := doctorContext(t, map[string]string{"git": "/bin/git"}, gitOnly)
+		check := findDoctorCheck(t, c.runDoctor(context.Background()), "session-endings")
+		if check.Level != doctorWarn {
+			t.Fatalf("session-endings = %+v, want WARN", check)
+		}
+		for _, want := range []string{"3 session(s) ended together", "nter-ios-app-78", "advisor-ios-app-14", "advisor-ios-app-13", "105ms"} {
+			if !strings.Contains(check.Message, want) {
+				t.Errorf("message missing %q: %s", want, check.Message)
+			}
+		}
+	})
+
+	t.Run("a daemon shutdown is not an incident", func(t *testing.T) {
+		cfg := setConfigEnv(t)
+		base := time.Now().Add(-time.Hour).UTC()
+		writeEndings(t, cfg.dataDir,
+			endingLine(base, "a-1", "ao", "daemon_shutdown"),
+			endingLine(base.Add(10*time.Millisecond), "a-2", "ao", "daemon_shutdown"),
+			endingLine(base.Add(20*time.Millisecond), "a-3", "ao", "daemon_shutdown"),
+			endingLine(base.Add(30*time.Millisecond), "a-4", "ao", "daemon_shutdown"),
+		)
+		c := doctorContext(t, map[string]string{"git": "/bin/git"}, gitOnly)
+		check := findDoctorCheck(t, c.runDoctor(context.Background()), "session-endings")
+		if check.Level != doctorPass {
+			t.Fatalf("session-endings = %+v, want PASS - AO ordered every one of these", check)
+		}
+	})
+
+	t.Run("older than a day passes", func(t *testing.T) {
+		cfg := setConfigEnv(t)
+		base := time.Now().Add(-72 * time.Hour).UTC()
+		writeEndings(t, cfg.dataDir,
+			endingLine(base, "a-1", "agent", "other"),
+			endingLine(base.Add(time.Millisecond), "a-2", "agent", "other"),
+			endingLine(base.Add(2*time.Millisecond), "a-3", "agent", "other"),
+		)
+		c := doctorContext(t, map[string]string{"git": "/bin/git"}, gitOnly)
+		check := findDoctorCheck(t, c.runDoctor(context.Background()), "session-endings")
+		if check.Level != doctorPass {
+			t.Fatalf("session-endings = %+v, want PASS - the 24h window has passed", check)
+		}
+	})
+}
+
+func endingLine(at time.Time, id, source, reason string) string {
+	line, err := json.Marshal(endingslog.Entry{At: at, SessionID: id, Source: source, Reason: reason})
+	if err != nil {
+		panic(err)
+	}
+	return string(line)
+}
+
+func writeEndings(t *testing.T, dataDir string, lines ...string) {
+	t.Helper()
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dataDir, endingslog.FileName), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
