@@ -21,8 +21,35 @@ type gatedRuntime struct {
 
 // newGatedRuntime wraps inner so SendMessage defers to the gate. gate may be nil,
 // in which case SendMessage is a plain pass-through (WaitForQuiet no-ops on nil).
-func newGatedRuntime(inner runtimeselect.Runtime, gate *inputgate.Gate) gatedRuntime {
-	return gatedRuntime{Runtime: inner, gate: gate}
+//
+// The wrapper must not hide what inner can do. Its method set is the union
+// interface it embeds, and AgentAlive is an OPTIONAL capability outside that
+// interface (conpty cannot implement it), so a bare gatedRuntime answers "no" to
+// every `runtime.(ports.AgentLivenessProber)` - and every consumer handed it
+// quietly fell back to pane existence. That made the session manager's
+// reap-safety check a no-op and let Resume adopt a pane whose agent had exited,
+// which is every pane an agent leaves behind (the keep-alive shell outlives it).
+// So when inner has the capability, the wrapper carries it through.
+func newGatedRuntime(inner runtimeselect.Runtime, gate *inputgate.Gate) runtimeselect.Runtime {
+	g := gatedRuntime{Runtime: inner, gate: gate}
+	if prober, ok := inner.(ports.AgentLivenessProber); ok {
+		return gatedProbingRuntime{gatedRuntime: g, prober: prober}
+	}
+	return g
+}
+
+// gatedProbingRuntime is gatedRuntime over a runtime that can tell a live agent
+// from a pane that merely exists.
+type gatedProbingRuntime struct {
+	gatedRuntime
+	prober ports.AgentLivenessProber
+}
+
+var _ ports.AgentLivenessProber = gatedProbingRuntime{}
+
+// AgentAlive forwards to the wrapped runtime's own probe.
+func (g gatedProbingRuntime) AgentAlive(ctx context.Context, handle ports.RuntimeHandle) (bool, error) {
+	return g.prober.AgentAlive(ctx, handle)
 }
 
 // SendMessage holds until the target pane has been quiet (no user keystrokes) for
@@ -34,11 +61,8 @@ func (g gatedRuntime) SendMessage(ctx context.Context, handle ports.RuntimeHandl
 }
 
 // agentLivenessProber returns rt's agent-liveness capability, or nil when the
-// runtime cannot report it (conpty). It takes the UNWRAPPED adapter on purpose:
-// gatedRuntime embeds the runtimeselect union interface, so its method set is
-// that interface's, and AgentAlive is not part of it. Asking the wrapper would
-// therefore find nothing and silently downgrade queued-message delivery from
-// "wait for the agent" to "wait a while and hope".
+// runtime cannot report it (conpty). Without it, queued-message delivery
+// downgrades from "wait for the agent" to "wait a while and hope".
 func agentLivenessProber(rt runtimeselect.Runtime) ports.AgentLivenessProber {
 	prober, ok := rt.(ports.AgentLivenessProber)
 	if !ok {

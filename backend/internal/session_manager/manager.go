@@ -1732,7 +1732,7 @@ func (m *Manager) restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	// genuinely dead runtime falls through to the relaunch path below. A probe error
 	// is not proof of death, so it also falls through rather than adopting.
 	if handleID := strings.TrimSpace(meta.RuntimeHandleID); handleID != "" {
-		if alive, err := m.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID}); err == nil && alive {
+		if m.agentAdoptable(ctx, ports.RuntimeHandle{ID: handleID}) {
 			if err := m.lcm.MarkSpawned(ctx, id, meta, domain.WokenByRestore); err != nil {
 				return domain.SessionRecord{}, fmt.Errorf("restore %s: adopt live runtime: %w", id, err)
 			}
@@ -2295,6 +2295,38 @@ func (m *Manager) SuspendRuntime(ctx context.Context, id domain.SessionID) error
 	return m.reapRuntimeIfAlive(ctx, id, runtimeHandle(rec.Metadata))
 }
 
+// agentAdoptable answers Resume's and Restore's adopt-instead-of-relaunch
+// question: is there a live AGENT under this handle to adopt?
+//
+// A pane that merely EXISTS is not that. The launch keeps a shell alive in the
+// pane after the agent exits, so every agent that ends itself - including every
+// worker PARKED for undelivered work, whose card exists precisely so it can be
+// opened and resumed - leaves a pane behind with nothing in it. Adopting that
+// flipped the row back to awake and relaunched nothing: the card read idle while
+// the pane held a bare prompt. So the pane must exist AND hold a live agent.
+// When it holds none, the relaunch below runs, and the runtime's Create reaps
+// the stale pane of the same name before starting the agent in a fresh one.
+//
+// Where liveness cannot be told apart - a runtime without the capability, or an
+// agent probe that fails - the pane's existence decides, as it did before: a
+// relaunch that collides with a live agent is refused by Create, so erring
+// toward adopt is the side that never kills a running session.
+func (m *Manager) agentAdoptable(ctx context.Context, handle ports.RuntimeHandle) bool {
+	alive, err := m.runtime.IsAlive(ctx, handle)
+	if err != nil || !alive {
+		return false
+	}
+	prober, ok := m.runtime.(ports.AgentLivenessProber)
+	if !ok {
+		return true
+	}
+	agent, err := prober.AgentAlive(ctx, handle)
+	if err != nil {
+		return true
+	}
+	return agent
+}
+
 // exitStatusFile is where an agent's pane records how the agent process ended:
 // the endings journal itself, so the pane's exit line and the daemon's ending
 // line for the same stop land in one file and are joined on read (see
@@ -2409,11 +2441,13 @@ func (m *Manager) Resume(ctx context.Context, id domain.SessionID, by domain.Wok
 	// starts qa and leaves dev exactly where it was. Solo: both calls are no-ops.
 	defer m.lockCrew(rec.CrewID)()
 	m.reconcileCrewPeers(ctx, rec, routeResume)
-	// The tmux was torn down at suspend, but defensively adopt a still-alive
-	// runtime (e.g. a suspend that raced this open) instead of colliding on
-	// `tmux new-session` — mirror Restore's adopt-if-alive guard.
+	// The tmux was torn down at suspend, but defensively adopt a still-running
+	// agent (e.g. a suspend that raced this open, or an orchestrator sibling on a
+	// shared handle) instead of colliding on `tmux new-session` - mirror
+	// Restore's adopt-if-alive guard. A PARKED worker's pane outlives its agent,
+	// so it is the agent that must be alive, not the pane (agentAdoptable).
 	if handleID := strings.TrimSpace(rec.Metadata.RuntimeHandleID); handleID != "" {
-		if alive, aliveErr := m.runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID}); aliveErr == nil && alive {
+		if m.agentAdoptable(ctx, ports.RuntimeHandle{ID: handleID}) {
 			if err := m.lcm.MarkSpawned(ctx, id, rec.Metadata, by); err != nil {
 				return domain.SessionRecord{}, fmt.Errorf("resume %s: adopt live runtime: %w", id, err)
 			}
