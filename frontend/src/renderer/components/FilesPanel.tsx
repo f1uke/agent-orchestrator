@@ -52,6 +52,17 @@ export type ChangedFileTarget = {
 	 */
 	status?: string;
 	binary?: boolean;
+	/**
+	 * Whether the WORKING TREE holds this row's content.
+	 *
+	 * False when the list is the branch's committed work and the worktree is
+	 * standing somewhere else (a detached HEAD, another branch). The file on disk
+	 * is then a different commit's version - or missing entirely - so opening it
+	 * in the editor would show content that does not match the counts on the row
+	 * it was opened from. Those rows go to the stacked diff, which reads the
+	 * branch, for the same reason a deleted row does.
+	 */
+	liveOnDisk?: boolean;
 };
 
 /** A row in Browse mode: any file in the worktree, changed or not. */
@@ -515,7 +526,14 @@ export function FilesPanel({
 												nodes={tree}
 												collapsed={collapsedDirs}
 												onToggleDir={toggleDir}
-												onSelectFile={(f) => onOpenFile?.({ path: f.path, status: f.status, binary: f.binary })}
+												onSelectFile={(f) =>
+													onOpenFile?.({
+														path: f.path,
+														status: f.status,
+														binary: f.binary,
+														liveOnDisk: data.includesWorktree,
+													})
+												}
 												selectedKey={selectedPath}
 												revealedKey={revealedPath}
 												scrollTo={scrollTo}
@@ -541,6 +559,7 @@ export function FilesPanel({
 														selected={file.path === selectedPath}
 														revealed={file.path === revealedPath}
 														onOpen={onOpenFile}
+														liveOnDisk={data.includesWorktree}
 													/>
 												))}
 											</div>
@@ -703,11 +722,13 @@ function ChangedFileRow({
 	selected,
 	revealed,
 	onOpen,
+	liveOnDisk,
 }: {
 	file: ChangedFile;
 	selected: boolean;
 	revealed: boolean;
 	onOpen?: (target: ChangedFileTarget) => void;
+	liveOnDisk: boolean;
 }) {
 	const slash = file.path.lastIndexOf("/");
 	const dir = slash >= 0 ? file.path.slice(0, slash) : "";
@@ -720,7 +741,7 @@ function ChangedFileRow({
 			data-path={file.path}
 			aria-current={selected ? "true" : undefined}
 			className={cn("files-panel__row", selected && "is-selected", revealed && "is-revealed")}
-			onClick={() => onOpen?.({ path: file.path, status: file.status, binary: file.binary })}
+			onClick={() => onOpen?.({ path: file.path, status: file.status, binary: file.binary, liveOnDisk })}
 			title={file.path}
 		>
 			<span className="files-panel__lead">

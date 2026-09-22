@@ -245,6 +245,34 @@ describe("FilesPanel", () => {
 		expect(screen.queryByRole("status")).not.toBeInTheDocument();
 	});
 
+	// A row carries whether the WORKING TREE holds its content, so its owner can
+	// route it. With the worktree parked elsewhere the file on disk is a different
+	// version of the row that was clicked, and the editor would show it without
+	// saying so.
+	it("reports that a row's content is not the one on disk when the worktree is elsewhere", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "develop",
+			truncated: false,
+			branch: "feature/cookies",
+			diffSubject: "branch",
+			includesWorktree: false,
+			headState: "detached",
+			headLabel: "a058308",
+			files: [file({ path: "Sources/CookieStore.swift" })],
+		});
+		const onOpenFile = vi.fn();
+		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
+
+		await userEvent.click(await screen.findByRole("treeitem", { name: /CookieStore\.swift/ }));
+		expect(onOpenFile).toHaveBeenCalledWith({
+			path: "Sources/CookieStore.swift",
+			status: "modified",
+			binary: false,
+			liveOnDisk: false,
+		});
+	});
+
 	// A normal session must not wear a notice; a badge on every render is noise
 	// that trains the eye to skip the one that matters.
 	it("stays quiet while the worktree is on the session's branch", async () => {
@@ -272,13 +300,19 @@ describe("FilesPanel", () => {
 			available: true,
 			targetBranch: "main",
 			truncated: false,
+			includesWorktree: true,
 			files: [file({ path: "lib/gone.ts", status: "deleted", additions: 0, deletions: 38 })],
 		});
 		const onOpenFile = vi.fn();
 		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
 
 		await userEvent.click(await screen.findByRole("treeitem", { name: /gone\.ts/ }));
-		expect(onOpenFile).toHaveBeenCalledWith({ path: "lib/gone.ts", status: "deleted", binary: false });
+		expect(onOpenFile).toHaveBeenCalledWith({
+			path: "lib/gone.ts",
+			status: "deleted",
+			binary: false,
+			liveOnDisk: true,
+		});
 	});
 
 	it("reports a binary row too, which has no text buffer to open either", async () => {
@@ -286,13 +320,19 @@ describe("FilesPanel", () => {
 			available: true,
 			targetBranch: "main",
 			truncated: false,
+			includesWorktree: true,
 			files: [file({ path: "logo.png", status: "modified", binary: true })],
 		});
 		const onOpenFile = vi.fn();
 		render(<FilesPanel sessionId="s1" onOpenFile={onOpenFile} />, { wrapper });
 
 		await userEvent.click(await screen.findByRole("treeitem", { name: /logo\.png/ }));
-		expect(onOpenFile).toHaveBeenCalledWith({ path: "logo.png", status: "modified", binary: true });
+		expect(onOpenFile).toHaveBeenCalledWith({
+			path: "logo.png",
+			status: "modified",
+			binary: true,
+			liveOnDisk: true,
+		});
 	});
 
 	// The stacked all-files review lost its only entry point when a ROW started
