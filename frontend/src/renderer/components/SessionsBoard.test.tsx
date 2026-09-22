@@ -30,6 +30,7 @@ vi.mock("../lib/api-client", () => ({
 	},
 }));
 
+import { useUiStore } from "../stores/ui-store";
 import { SessionsBoard } from "./SessionsBoard";
 
 function doneSession(id: string): WorkspaceSession {
@@ -78,6 +79,8 @@ beforeEach(() => {
 	deleteMock.mockReset();
 	postMock.mockReset();
 	workspaceQueryMock.mockReset().mockReturnValue({ data: [], isError: false });
+	localStorage.clear();
+	useUiStore.setState({ collapsedBoardLanes: new Set() });
 });
 
 describe("SessionsBoard", () => {
@@ -441,5 +444,83 @@ describe("SessionsBoard status conveyance", () => {
 			expect(el.style.borderLeft).toBe("");
 			expect(el.style.borderTop).not.toMatch(/lane-/);
 		}
+	});
+});
+
+describe("SessionsBoard card header", () => {
+	function cardOf(title: string): HTMLElement {
+		const card = screen.getByText(title).closest("div.group");
+		expect(card).not.toBeNull();
+		return card as HTMLElement;
+	}
+
+	// Widths are a paint question jsdom cannot answer; what it can pin is which
+	// line each item lives on, which is what the two old defects were about: the
+	// agent dropping to a line of its own, and the wide chip riding the status line.
+	it("keeps the agent on the status line and gives the undelivered chip a line of its own", () => {
+		workspaceQueryMock.mockReturnValue({
+			data: [
+				{
+					id: "proj-1",
+					sessions: [
+						{
+							...activeSession("sess-1", "needs_input"),
+							title: "cookie to keychain",
+							isSuspended: true,
+							sleepReason: "undelivered",
+						},
+					],
+				},
+			],
+			isError: false,
+		});
+		renderBoard();
+
+		const card = cardOf("cookie to keychain");
+		const statusLine = card.querySelector("[data-status]")!.parentElement as HTMLElement;
+		expect(within(statusLine).getByText("Claude")).toBeInTheDocument();
+		expect(within(statusLine).queryByText("Undelivered")).toBeNull();
+
+		const chipLine = card.querySelector<HTMLElement>("[data-card-chips]")!;
+		expect(within(chipLine).getByText("Undelivered")).toBeInTheDocument();
+		expect(within(chipLine).getByRole("button", { name: "Move to Done" })).toBeInTheDocument();
+	});
+
+	it("leaves the chip line empty when a card has no chips, so it takes no room", () => {
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-1", "working")] }],
+			isError: false,
+		});
+		renderBoard();
+
+		const chipLine = cardOf("active sess-1").querySelector<HTMLElement>("[data-card-chips]")!;
+		// `empty:hidden` only collapses a line with no children at all.
+		expect(chipLine.childNodes).toHaveLength(0);
+	});
+});
+
+describe("SessionsBoard lane collapse", () => {
+	it("folds a lane to its glyph, count and name, remembers it, and opens it again", async () => {
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", sessions: [activeSession("sess-1", "needs_input")] }],
+			isError: false,
+		});
+		const { unmount } = renderBoard();
+
+		await userEvent.click(screen.getByRole("button", { name: "Collapse Needs you" }));
+
+		const expand = screen.getByRole("button", { name: "Expand Needs you, 1 card" });
+		expect(expand).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByText("active sess-1")).toBeNull();
+		expect(JSON.parse(localStorage.getItem("ao.board.collapsedLanes")!)).toEqual(["action"]);
+
+		// Still folded on the next visit to the board.
+		unmount();
+		renderBoard();
+		await userEvent.click(screen.getByRole("button", { name: "Expand Needs you, 1 card" }));
+
+		expect(screen.getByText("active sess-1")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Collapse Needs you" })).toHaveAttribute("aria-expanded", "true");
+		expect(JSON.parse(localStorage.getItem("ao.board.collapsedLanes")!)).toEqual([]);
 	});
 });

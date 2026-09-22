@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -9,6 +9,7 @@ import {
 	CircleCheck,
 	CircleDashed,
 	Flame,
+	FoldHorizontal,
 	MoreHorizontal,
 	Play,
 	RotateCw,
@@ -71,6 +72,15 @@ type SessionsBoardProps = {
 // design handoff Board.dc.html); "done" is archived in the Done bar, not a lane.
 const COLUMNS: LaneConfig[] = LANE_ORDER.map((key) => LANES[key]);
 
+// 12rem is the narrowest lane whose card reads: its status line keeps the agent
+// label and still wraps "Nobody is working on this" onto two lines, and the
+// widest chip fits by wrapping its button. It is also what a 1280px window gives
+// each of five lanes, so the board only scrolls on windows narrower than that.
+const OPEN_LANE_WIDTH = "minmax(12rem, 1fr)";
+// Narrow enough that at the 960px minimum, folding any two lanes lets the other
+// three fit without scrolling.
+const COLLAPSED_LANE_WIDTH = "2.25rem";
+
 export function SessionsBoard({ projectId }: SessionsBoardProps) {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -83,6 +93,8 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 	const restartingProjectIds = useUiStore((state) => state.restartingProjectIds);
 	const setProjectRestarting = useUiStore((state) => state.setProjectRestarting);
 	const setOrchestratorReplacementError = useUiStore((state) => state.setOrchestratorReplacementError);
+	const collapsedLanes = useUiStore((state) => state.collapsedBoardLanes);
+	const toggleLaneCollapsed = useUiStore((state) => state.toggleBoardLaneCollapsed);
 	const isProjectRestarting = projectId ? restartingProjectIds.has(projectId) : false;
 	const health = workspace ? orchestratorHealth(workspace, isProjectRestarting) : { state: "ok" as const };
 
@@ -160,17 +172,40 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 				{workspaceQuery.isError ? (
 					<p className="py-10 text-center text-[12px] text-passive">Could not load sessions.</p>
 				) : (
-					<div className="grid h-full grid-cols-5 gap-2">
-						{COLUMNS.map((col) => (
-							<ZoneColumn
-								key={col.key}
-								col={col}
-								tasks={byZone.get(col.key) ?? []}
-								gates={gates}
-								onOpen={col.key === "todo" ? openTodo : openSession}
-								onStarted={handleTodoStarted}
-							/>
-						))}
+					// A lane is never narrower than its cards can be read at. Five lanes at
+					// the 960px minimum window used to get 130px each, which left a card's
+					// header 52px - narrower than the word "requested" - and no layout of
+					// that row could hold its status, its agent and its chips. Below the
+					// floor the board scrolls sideways (as agent-orchestrator's does), and
+					// the person takes the room back by folding lanes they are not watching.
+					<div
+						className="grid h-full gap-2 overflow-x-auto"
+						style={{
+							gridTemplateColumns: COLUMNS.map((col) =>
+								collapsedLanes.has(col.key) ? COLLAPSED_LANE_WIDTH : OPEN_LANE_WIDTH,
+							).join(" "),
+						}}
+					>
+						{COLUMNS.map((col) =>
+							collapsedLanes.has(col.key) ? (
+								<CollapsedZoneColumn
+									key={col.key}
+									col={col}
+									count={byZone.get(col.key)?.length ?? 0}
+									onExpand={() => toggleLaneCollapsed(col.key)}
+								/>
+							) : (
+								<ZoneColumn
+									key={col.key}
+									col={col}
+									tasks={byZone.get(col.key) ?? []}
+									gates={gates}
+									onOpen={col.key === "todo" ? openTodo : openSession}
+									onStarted={handleTodoStarted}
+									onCollapse={() => toggleLaneCollapsed(col.key)}
+								/>
+							),
+						)}
 					</div>
 				)}
 			</div>
@@ -473,38 +508,47 @@ function ZoneColumn({
 	gates,
 	onOpen,
 	onStarted,
+	onCollapse,
 }: {
 	col: LaneConfig;
 	tasks: Task[];
 	gates: Map<string, TaskGates>;
 	onOpen: (s: WorkspaceSession) => void;
 	onStarted: (sessionId: string) => void;
+	onCollapse: () => void;
 }) {
 	const isTodo = col.key === "todo";
-	const { dotVar, Icon } = col;
+	const { dotVar } = col;
 	return (
 		<section
 			// No painted edges: the lane's identity is carried by the header's shape
 			// glyph + label, and each card repeats its own status as a glyph in the
 			// card gutter. The column itself is a plain neutral surface, so nothing
 			// competes with the cards standing on it.
-			className="flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--kanban-col-border)] bg-[var(--kanban-column-bg)]"
+			data-lane={col.key}
+			className={LANE_SURFACE}
 		>
-			<div className="flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[13px]">
-				<Icon
-					data-lane-glyph={col.key}
-					className="h-[13px] w-[13px] shrink-0"
-					style={{ color: dotVar, ...(col.filled ? { fill: "currentColor" } : {}) }}
-					aria-hidden="true"
-				/>
+			<div className="group/lane flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[13px]">
+				<LaneGlyph col={col} />
 				<span className="truncate text-[11.5px] font-bold uppercase tracking-[0.09em]" style={{ color: dotVar }}>
 					{col.label}
 				</span>
-				<span className="ml-auto min-w-[22px] rounded-full border border-border-strong bg-interactive-hover px-[9px] py-px text-center font-mono text-[11px] font-bold leading-[1.5] text-muted-foreground">
-					{tasks.length}
-				</span>
+				<LaneCount className="ml-auto" count={tasks.length} />
+				<button
+					type="button"
+					aria-expanded={true}
+					aria-label={`Collapse ${col.label}`}
+					title={`Collapse ${col.label}`}
+					onClick={onCollapse}
+					className="-mr-1.5 grid size-5 shrink-0 place-items-center rounded text-passive opacity-0 transition-opacity hover:bg-interactive-hover hover:text-foreground focus-visible:opacity-100 group-hover/lane:opacity-100"
+				>
+					<FoldHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+				</button>
 			</div>
-			<div className="min-h-0 flex-1 overflow-y-auto px-[11px] pb-3">
+			{/* The scrollbar's gutter is reserved in every lane, scrolling or not, and
+			    stands in for the right padding: otherwise the one lane long enough to
+			    scroll draws its cards 10px narrower than its neighbours. */}
+			<div className="min-h-0 flex-1 overflow-y-auto pb-3 pl-[11px] pr-px [scrollbar-gutter:stable]">
 				{tasks.length === 0 ? (
 					<EmptyLane col={col} />
 				) : (
@@ -526,6 +570,61 @@ function ZoneColumn({
 				)}
 			</div>
 		</section>
+	);
+}
+
+// A lane folded out of the way: the same trough, holding only what says which
+// lane it is and how much is in it - the glyph, the count, the name read
+// sideways. The whole strip is the button that opens it again.
+function CollapsedZoneColumn({ col, count, onExpand }: { col: LaneConfig; count: number; onExpand: () => void }) {
+	return (
+		<section data-lane={col.key} data-collapsed="" className={LANE_SURFACE}>
+			<button
+				type="button"
+				aria-expanded={false}
+				aria-label={`Expand ${col.label}, ${count} ${count === 1 ? "card" : "cards"}`}
+				title={`Expand ${col.label}`}
+				onClick={onExpand}
+				className="flex h-full flex-col items-center gap-2.5 pb-3 pt-[15px] transition-colors hover:bg-interactive-hover"
+			>
+				<LaneGlyph col={col} />
+				<LaneCount count={count} />
+				<span
+					className="whitespace-nowrap text-[11.5px] font-bold uppercase tracking-[0.09em] [writing-mode:vertical-rl]"
+					style={{ color: col.dotVar }}
+				>
+					{col.label}
+				</span>
+			</button>
+		</section>
+	);
+}
+
+const LANE_SURFACE =
+	"flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--kanban-col-border)] bg-[var(--kanban-column-bg)]";
+
+function LaneGlyph({ col }: { col: LaneConfig }) {
+	const { Icon } = col;
+	return (
+		<Icon
+			data-lane-glyph={col.key}
+			className="h-[13px] w-[13px] shrink-0"
+			style={{ color: col.dotVar, ...(col.filled ? { fill: "currentColor" } : {}) }}
+			aria-hidden="true"
+		/>
+	);
+}
+
+function LaneCount({ count, className }: { count: number; className?: string }) {
+	return (
+		<span
+			className={cn(
+				"min-w-[22px] rounded-full border border-border-strong bg-interactive-hover px-[9px] py-px text-center font-mono text-[11px] font-bold leading-[1.5] text-muted-foreground",
+				className,
+			)}
+		>
+			{count}
+		</span>
 	);
 }
 
@@ -634,7 +733,7 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 					<button
 						aria-label="Session actions"
 						className={cn(
-							"rounded p-0.5 text-passive opacity-0 transition-opacity hover:text-foreground",
+							"peer -my-1 rounded p-0.5 text-passive opacity-0 transition-opacity hover:text-foreground",
 							"focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
 						)}
 						// Stop the click from reaching the card's open-session handler.
@@ -800,12 +899,11 @@ function TodoCard({
 					<CircleDashed className="h-[15px] w-[15px]" aria-hidden="true" />
 				</span>
 				<div className="min-w-0 flex-1">
-					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-[7px]">
-						<span data-status="Queued" className="text-[12px] font-semibold" style={{ color: col.dotVar }}>
+					{/* The live card's status line, without its chips or menu - see SessionCard. */}
+					<div className="flow-root pb-[7px] text-[12px] leading-[1.3] text-pretty">
+						<CardAgentLabel provider={session.provider} />
+						<span data-status="Queued" className="font-semibold" style={{ color: col.dotVar }}>
 							Queued
-						</span>
-						<span className="ml-auto font-mono text-[10.5px] tracking-[0.04em] text-passive">
-							{agentLabel(session.provider)}
 						</span>
 					</div>
 					{/* Margin, not padding — see the note on the live card's title. */}
@@ -953,50 +1051,53 @@ function SessionCard({
 					/>
 				</span>
 				<div className="min-w-0 flex-1">
-					{/* flex-wrap, and the status is the one item that never shrinks. At the
-					    app's 960px minimum a board column is ~157px wide; with everything on
-					    one shrinkable line the status got squeezed to 3px and clipped to
-					    "C." — destroying the exact fact the retired bar was meant to carry.
-					    Here the secondary cluster (agent, chips, menu) drops to its own line
-					    instead, and the status keeps every character. */}
-					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-[7px]">
-						<span
-							data-status={statusText}
-							className="text-[12px] font-semibold leading-[1.3]"
-							style={{ color: col.dotVar }}
-						>
+					{/* Two lines with fixed jobs, never a wrap decided by width. Both earlier
+					    layouts broke on a width: one shrinkable line squeezed the status to
+					    3px ("C."), and one wrapping line dropped a shrink-0 cluster to a line
+					    of its own - where "Claude" sat alone, or, carrying the 169px
+					    undelivered chip, ran off the card.
+					    Line 1 is the status, with the agent floated into its top-right
+					    corner: the status wraps its own words AROUND it, so only its first
+					    line gives up room and every later line has the full width. The agent
+					    is what yields (capped, then an ellipsis), so it always shares the
+					    status's first line and never stands alone.
+					    Line 2 holds the chips - the wide items - and exists only when one
+					    renders. A chip too wide even for that whole line wraps inside itself
+					    (lib/chip-with-action). */}
+					<div className="flow-root pb-[7px] text-[12px] leading-[1.3] text-pretty">
+						<CardAgentLabel
+							provider={session.provider}
+							menu={<SessionCardMenu session={session} onOpenSession={() => onOpen(session)} />}
+						/>
+						<span data-status={statusText} className="font-semibold" style={{ color: col.dotVar }}>
 							{statusText}
 						</span>
+					</div>
+					<div data-card-chips className="@container -mt-0.5 flex flex-wrap items-start gap-1.5 pb-[7px] empty:hidden">
 						{issueId && !jiraKey && (
 							<span
-								className="inline-flex max-w-[13rem] items-center truncate rounded-[4px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] px-1.5 py-0.5 font-mono text-[10px] text-accent"
+								className="max-w-full truncate rounded-[4px] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] px-1.5 py-0.5 font-mono text-[10px] text-accent"
 								title={`Intake issue: ${issueId}`}
 							>
 								{issueId}
 							</span>
 						)}
-						<div className="ml-auto flex shrink-0 items-center gap-1.5">
-							<QueuedMessagesChip session={session} />
-							{isMergeSuspended(session) ? (
-								<MergeSuspendChip session={session} />
-							) : isUndeliveredParked(session) ? (
-								// Parked holding work nobody has seen. Its own chip, for the same
-								// reason the merged one has one: "Paused - open to resume" is true
-								// but says nothing about why this card will not move to Done.
-								<UndeliveredWorkChip session={session} onOpenSession={() => onOpen(session)} />
-							) : (
-								// "Paused - open to resume" is a fact about a session, and on a
-								// crew card it would be read as a fact about the TASK - which is
-								// not paused at all while its other member is running. The crew
-								// strip already says which member is asleep, in the place where
-								// per-member facts live.
-								!pausedWhileCrewmateWorks && <IdleStatusChip session={session} />
-							)}
-							<span className="font-mono text-[10.5px] tracking-[0.04em] text-passive">
-								{agentLabel(session.provider)}
-							</span>
-							<SessionCardMenu session={session} onOpenSession={() => onOpen(session)} />
-						</div>
+						<QueuedMessagesChip session={session} />
+						{isMergeSuspended(session) ? (
+							<MergeSuspendChip session={session} />
+						) : isUndeliveredParked(session) ? (
+							// Parked holding work nobody has seen. Its own chip, for the same
+							// reason the merged one has one: "Paused - open to resume" is true
+							// but says nothing about why this card will not move to Done.
+							<UndeliveredWorkChip session={session} onOpenSession={() => onOpen(session)} />
+						) : (
+							// "Paused - open to resume" is a fact about a session, and on a
+							// crew card it would be read as a fact about the TASK - which is
+							// not paused at all while its other member is running. The crew
+							// strip already says which member is asleep, in the place where
+							// per-member facts live.
+							!pausedWhileCrewmateWorks && <IdleStatusChip session={session} />
+						)}
 					</div>
 					{/* MARGIN, not padding. Bottom padding on a `overflow-hidden` clamped
 					    box is inside the clip region, so the clamped third line bleeds
@@ -1124,6 +1225,33 @@ function sameLabel(a: string, b: string): boolean {
 			.replace(/^(feat|fix|chore|refactor|session)\//, "")
 			.replace(/[^a-z0-9]+/g, "");
 	return normalize(a) === normalize(b);
+}
+
+// The top-right corner of a card's status line: which agent, and the card's menu.
+// It floats, so the status wraps around it rather than being held to a column
+// beside it. Of everything on the line it is what yields: capped at 40% of the
+// line and truncated past that, which leaves the status's first word room beside
+// it at the narrowest lane - so it never ends up on a line of its own.
+//
+// The menu is a hover affordance, and it takes the agent's place rather than a
+// slot of its own: both sit in one grid cell, and the name steps aside while the
+// card is hovered, the menu is focused, or it is open. A permanent slot for an
+// invisible button cost the status a quarter of a narrow card's line.
+function CardAgentLabel({ provider, menu }: { provider: WorkspaceSession["provider"]; menu?: ReactNode }) {
+	return (
+		// One status line tall, so the name centres on the status's first line.
+		<div className="float-right ml-2 grid h-[1.3em] max-w-[40%] grid-cols-[minmax(0,auto)] items-center justify-items-end *:[grid-area:1/1]">
+			{menu}
+			<span
+				className={cn(
+					"max-w-full truncate font-mono text-[10.5px] tracking-[0.04em] text-passive",
+					menu && "group-hover:invisible peer-focus-visible:invisible peer-data-[state=open]:invisible",
+				)}
+			>
+				{agentLabel(provider)}
+			</span>
+		</div>
+	);
 }
 
 function agentLabel(provider: WorkspaceSession["provider"]): string {

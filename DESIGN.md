@@ -322,10 +322,27 @@ needed, empty signal bars = no signal, octagon-X = CI failed, warning triangle =
 changes requested). Shape is the primary channel, the visible status text is the
 accessible one, and the lane hue is a third, redundant reinforcement, so the board
 still reads with colour removed entirely. The glyph is `aria-hidden`; the text
-beside it carries the fact. Status text **wraps, never truncates** — at the app's
-960px minimum a column is ~157px wide and an ellipsis would turn "Changes
-requested" back into a single uninformative mark, which is the failure this whole
-design exists to avoid.
+beside it carries the fact. Status text **wraps, never truncates** - an ellipsis
+would turn "Changes requested" back into a single uninformative mark, which is the
+failure this whole design exists to avoid.
+
+**Card header (2026-09-23).** Two lines with fixed jobs. Line 1 is the status with
+the agent label **floated** into its top-right corner, so the status wraps around it
+and only its first line gives up room; the agent is the part that yields (capped at
+40% of the line, then an ellipsis), so it never lands on a line of its own. The card
+menu is hover-only and takes the agent label's place rather than a slot of its own.
+Line 2 holds the chips and exists only when one renders. A chip with its own button
+(`lib/chip-with-action`: Undelivered / Merged · Move to Done) drops the button under
+its label when its line is under 11rem, and its pill becomes an 11px-radius box.
+
+**Lane width and folding (2026-09-23, reference is silent on folding).** An open lane
+is `minmax(12rem, 1fr)`: five lanes fit a 1280px window with the default sidebar, and
+below that the board scrolls sideways, as agent-orchestrator's does below 640px. At
+the 960px minimum only about three lanes fit, so any lane folds (hover its header →
+fold button) to a 2.25rem strip showing its glyph, count and vertical label; the
+whole strip unfolds it. Folded lanes persist (`ao.board.collapsedLanes`). The lane
+body reserves its scrollbar gutter in place of right padding, so a scrolling lane's
+cards are as wide as its neighbours'.
 
 Motion: the card status glyph pulses (`--animate-status-pulse`) **only in WORKING** —
 per the Motion rule that pulse means a genuinely-live session — not in every lane.
