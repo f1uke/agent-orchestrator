@@ -36,7 +36,7 @@ func TestMassEndings_FindsTheIncident(t *testing.T) {
 }
 
 // The reader recomputes clusters from the FILE, so a daemon that restarted
-// mid-incident still reports it — the in-memory window would have been lost.
+// mid-incident still reports it - the in-memory window would have been lost.
 func TestMassEndings_SurvivesARestartAndSpansBothGenerations(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 9, 22, 6, 37, 17, 0, time.UTC)

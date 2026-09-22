@@ -414,7 +414,7 @@ func checkSessionEndings(dataDir string, now time.Time) doctorCheck {
 	latest := clusters[len(clusters)-1]
 	return doctorCheck{
 		Level: doctorWarn, Section: doctorSectionCore, Name: name,
-		Message: fmt.Sprintf("%d session(s) ended together within %s at %s, and nobody ordered it: %s — %d such event(s) in the last 24h (full journal: %s)",
+		Message: fmt.Sprintf("%d session(s) ended together within %s at %s, and nobody ordered it: %s - %d such event(s) in the last 24h (full journal: %s)",
 			len(latest.Entries), latest.Span().Round(time.Millisecond), latest.At.Format(time.RFC3339),
 			strings.Join(latest.IDs(), ", "), len(clusters), path),
 	}

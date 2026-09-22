@@ -256,6 +256,7 @@ func Run() error {
 	// probe it asks costs nothing measurable; what it buys is the one fact that
 	// stops being true if you look later - whether the pane outlived the agent.
 	// A journal that cannot be built is logged and skipped: AO must still run.
+	//
 	// Declared as the INTERFACE and assigned only on success: handing the
 	// reducer a typed nil pointer would give it a non-nil sink that panics on
 	// the first ending.
@@ -269,6 +270,7 @@ func Run() error {
 	} else {
 		endingsJournal = journal
 	}
+
 	// Bring up the Lifecycle Manager and the reaper first: it makes the session
 	// lifecycle write path live (reducer write -> store -> DB trigger ->
 	// change_log -> poller -> broadcaster) and gives startSession the shared LCM.

@@ -257,7 +257,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	// Tie the panes a session SPAWNS to the session itself: when it is torn down
 	// (kill/reclaim/delete), its reviewer pane and its iOS run pane go with it,
 	// instead of leaving keep-alive shells and a live xcodebuild behind. Wired
-	// here — after the review service exists — because the manager is built
+	// here - after the review service exists - because the manager is built
 	// first.
 	//
 	// Both are bare runtime handles named after the session id, with no row, no
