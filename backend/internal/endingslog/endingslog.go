@@ -25,6 +25,11 @@
 //
 // JSON Lines, under the data dir: greppable by eye, parseable by tools, and
 // append-only so an interrupted write can damage at most the final line.
+//
+// WHAT A LINE IS. Each daemon line records an agent STOPPING - whether AO then
+// terminated the session or, for a worker that stopped holding undelivered
+// work, parked it (see Entry.Outcome). A second writer, the agent's own pane,
+// appends how the process ended; Read joins the two (see exitrecord.go).
 package endingslog
 
 import (
@@ -94,6 +99,10 @@ type Entry struct {
 	// harness's own word for it, or the AO operation that ordered the teardown.
 	Source string `json:"source"`
 	Reason string `json:"reason,omitempty"`
+	// Outcome is what AO did with the row: "terminated", or "parked" for an
+	// agent that stopped with undelivered work and was suspended instead. A
+	// line written before this field existed is a termination.
+	Outcome string `json:"outcome,omitempty"`
 
 	// LastState is what the session was doing immediately before it stopped.
 	LastState string `json:"lastState,omitempty"`
@@ -123,6 +132,13 @@ type Entry struct {
 	// MassEnding marks a line that is part of MassEndingThreshold or more
 	// endings nobody ordered. This is the bit a reader greps for.
 	MassEnding bool `json:"massEnding,omitempty"`
+
+	// Exit is how the agent PROCESS ended, as the shell that launched it saw it.
+	// It is never written on this line by the daemon: the pane records it on a
+	// line of its own when the process goes, and Read joins it on (see
+	// exitrecord.go). Absent when the pane recorded nothing - it was destroyed
+	// with the agent, or the runtime does not observe exits.
+	Exit *AgentExit `json:"exit,omitempty"`
 }
 
 // PaneProbe answers whether a runtime handle still has a terminal pane. The
@@ -187,12 +203,17 @@ func New(dir string, opts ...Option) (*Recorder, error) {
 	if dir == "" {
 		return nil, errors.New("endingslog: data dir is required")
 	}
-	r := &Recorder{path: filepath.Join(dir, FileName), log: slog.Default(), now: time.Now}
+	r := &Recorder{path: JournalPath(dir), log: slog.Default(), now: time.Now}
 	for _, opt := range opts {
 		opt(r)
 	}
 	return r, nil
 }
+
+// JournalPath is where the journal lives under dir. It is also where a runtime
+// is told to append an agent's exit status (ports.RuntimeConfig.ExitStatusFile),
+// so both halves of an ending land in one file.
+func JournalPath(dir string) string { return filepath.Join(dir, FileName) }
 
 // Path is where the journal lives, so the daemon and `ao doctor` can tell a
 // human where to look.
@@ -217,9 +238,13 @@ func (r *Recorder) RecordEnding(ctx context.Context, e ports.SessionEnding) {
 		Harness:        string(e.Harness),
 		Source:         string(e.Source),
 		Reason:         e.Reason,
+		Outcome:        string(e.Outcome),
 		LastState:      string(e.LastState),
 		TranscriptPath: e.TranscriptPath,
 		AgentSessionID: e.AgentSessionID,
+	}
+	if entry.Outcome == "" {
+		entry.Outcome = string(ports.EndingTerminated)
 	}
 	if !e.LastActivityAt.IsZero() {
 		silent := int64(at.Sub(e.LastActivityAt).Round(time.Second).Seconds())

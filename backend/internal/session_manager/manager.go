@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/knowledgestore"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
@@ -703,12 +704,13 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
 	handle, err := m.runtime.Create(ctx, ports.RuntimeConfig{
-		SessionID:     id,
-		ProjectID:     cfg.ProjectID,
-		Branch:        runtimeNameBranch(ws.Branch, cfg.CrewRole),
-		WorkspacePath: ws.Path,
-		Argv:          argv,
-		Env:           m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env),
+		SessionID:      id,
+		ProjectID:      cfg.ProjectID,
+		Branch:         runtimeNameBranch(ws.Branch, cfg.CrewRole),
+		WorkspacePath:  ws.Path,
+		Argv:           argv,
+		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env),
+		ExitStatusFile: m.exitStatusFile(),
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -1796,12 +1798,13 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
 	handle, err := m.runtime.Create(ctx, ports.RuntimeConfig{
-		SessionID:     rec.ID,
-		ProjectID:     rec.ProjectID,
-		Branch:        runtimeNameBranch(ws.Branch, rec.CrewRole),
-		WorkspacePath: ws.Path,
-		Argv:          argv,
-		Env:           m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env),
+		SessionID:      rec.ID,
+		ProjectID:      rec.ProjectID,
+		Branch:         runtimeNameBranch(ws.Branch, rec.CrewRole),
+		WorkspacePath:  ws.Path,
+		Argv:           argv,
+		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env),
+		ExitStatusFile: m.exitStatusFile(),
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: runtime: %w", rec.ID, err)
@@ -2290,6 +2293,24 @@ func (m *Manager) SuspendRuntime(ctx context.Context, id domain.SessionID) error
 		return nil
 	}
 	return m.reapRuntimeIfAlive(ctx, id, runtimeHandle(rec.Metadata))
+}
+
+// exitStatusFile is where an agent's pane records how the agent process ended:
+// the endings journal itself, so the pane's exit line and the daemon's ending
+// line for the same stop land in one file and are joined on read (see
+// endingslog). Set on every agent launch - spawn and restore alike - so a
+// resumed session is covered too. Empty without a data dir, which asks for
+// nothing. Made absolute because the pane resolves it from the worktree, not
+// from wherever the daemon was started.
+func (m *Manager) exitStatusFile() string {
+	if m.dataDir == "" {
+		return ""
+	}
+	path, err := filepath.Abs(endingslog.JournalPath(m.dataDir))
+	if err != nil {
+		return ""
+	}
+	return path
 }
 
 // agentAlive reports whether a live AGENT process is attached to handle, seeing

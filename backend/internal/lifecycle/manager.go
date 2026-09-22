@@ -301,6 +301,7 @@ func (m *Manager) endingFor(before domain.SessionRecord, t domain.Termination) p
 		Harness:         before.Harness,
 		Source:          t.Source,
 		Reason:          t.Reason,
+		Outcome:         ports.EndingTerminated,
 		LastState:       t.LastState,
 		LastActivityAt:  before.Activity.LastActivityAt,
 		TranscriptPath:  t.TranscriptPath,
@@ -323,14 +324,19 @@ func (m *Manager) afterTermination(ctx context.Context, e *ports.SessionEnding) 
 	if e == nil {
 		return
 	}
-	if m.endings != nil {
-		m.endings.RecordEnding(ctx, *e)
-	}
+	m.recordEnding(ctx, *e)
 	if m.sessionPaneReaper != nil {
 		if err := m.sessionPaneReaper(ctx, e.SessionID); err != nil {
 			slog.Default().Warn("lifecycle: could not close the panes of an ended session",
 				"session", e.SessionID, "err", err)
 		}
+	}
+}
+
+// recordEnding hands one account to the journal. Callers must not hold m.mu.
+func (m *Manager) recordEnding(ctx context.Context, e ports.SessionEnding) {
+	if m.endings != nil {
+		m.endings.RecordEnding(ctx, e)
 	}
 }
 

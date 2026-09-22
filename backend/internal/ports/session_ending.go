@@ -44,6 +44,14 @@ type SessionEnding struct {
 	Source domain.TerminationSource
 	Reason string
 
+	// Outcome is what AO did with the session row once the agent stopped. An
+	// agent that ends itself with work nobody has received is PARKED - the row
+	// is suspended, keeps its worktree and can be resumed - rather than
+	// terminated, but its agent stopped all the same, and a record of why agents
+	// stop that left those out would miss exactly the sessions still holding
+	// unshipped work. The zero value means terminated.
+	Outcome EndingOutcome
+
 	// LastState is what the session was doing immediately before it stopped.
 	LastState domain.ActivityState
 	// LastActivityAt is when it last said anything. The gap between this and At
@@ -66,7 +74,20 @@ type SessionEnding struct {
 	WorkspacePath   string
 }
 
-// SessionEndingSink receives one SessionEnding per termination.
+// EndingOutcome is what became of the session row after its agent stopped.
+type EndingOutcome string
+
+const (
+	// EndingTerminated is an ending the row records as terminal.
+	EndingTerminated EndingOutcome = "terminated"
+	// EndingParked is an agent that stopped while the session did not: the row
+	// was suspended with its work intact (sleep_reason undelivered) and carries
+	// no termination account.
+	EndingParked EndingOutcome = "parked"
+)
+
+// SessionEndingSink receives one SessionEnding per termination, and one per
+// agent exit AO parks instead of terminating.
 //
 // It returns nothing. An ending is a fact that has already happened by the time
 // this is called, and no failure to record it may change what AO does about it -

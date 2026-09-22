@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
@@ -5255,5 +5256,34 @@ func TestCloseIdleSessions_ExactlyAtTTL_NotYetIdle(t *testing.T) {
 	}
 	if rt.destroyed != 0 {
 		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
+	}
+}
+
+// Every agent launch - a fresh spawn and a restore alike - asks the runtime to
+// record how the agent process ends, into the endings journal under the data
+// dir, so a resumed session's next stop is covered as well as its first.
+func TestLaunch_AsksTheRuntimeToRecordTheAgentsExit(t *testing.T) {
+	dataDir := t.TempDir()
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
+	rt := &fakeRuntime{}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, DataDir: dataDir})
+	want := filepath.Join(dataDir, endingslog.FileName)
+
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker}); err != nil {
+		t.Fatal(err)
+	}
+	if rt.lastCfg.ExitStatusFile != want {
+		t.Errorf("spawn ExitStatusFile = %q, want %q", rt.lastCfg.ExitStatusFile, want)
+	}
+
+	rt.lastCfg = ports.RuntimeConfig{}
+	seedTerminal(st, "mer-9", domain.SessionMetadata{WorkspacePath: "/ws/mer-9", Branch: "b", AgentSessionID: "agent-x"})
+	if _, err := m.Restore(ctx, "mer-9"); err != nil {
+		t.Fatal(err)
+	}
+	if rt.lastCfg.ExitStatusFile != want {
+		t.Errorf("restore ExitStatusFile = %q, want %q", rt.lastCfg.ExitStatusFile, want)
 	}
 }

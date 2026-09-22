@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -803,11 +804,54 @@ func buildLaunchCommand(cfg ports.RuntimeConfig) string {
 		parts[i] = shellQuote(a)
 	}
 	b.WriteString(strings.Join(parts, " "))
+	if rec := exitStatusRecorder(cfg.ExitStatusFile, cfg.SessionID); rec != "" {
+		b.WriteString("; ")
+		b.WriteString(rec)
+	}
 	// Keep the tmux session alive after the agent exits so the operator can
 	// inspect the terminal. The shell variable expansion picks up $SHELL from
 	// the process env if set, otherwise falls back to /bin/sh.
 	b.WriteString(`; exec "${SHELL:-/bin/sh}" -i`)
 	return b.String()
+}
+
+// exitStatusRecorder is the shell that records how the agent process ended
+// (ports.RuntimeConfig.ExitStatusFile), run between the agent and the keep-alive
+// shell. Empty when nothing asked for it.
+//
+// The pane's leader shell is the one party that SEES the agent's exit: the
+// agent's own SessionEnd hook runs inside the dying process and cannot tell a
+// signal from a decision, while `$?` here is 128+N when signal N killed it. So
+// the leader appends one line to the file before it becomes the keep-alive
+// shell. It runs only after the agent has gone and changes nothing about how
+// the agent is launched, resumed or restored.
+//
+// Every piece is chosen to work in any POSIX shell AND to fail silently:
+//
+//   - `$?` is captured first, before anything can overwrite it.
+//   - The timestamp is $EPOCHREALTIME (bash 5; zsh once zsh/datetime is
+//     loaded - hence the zmodload, which other shells reject harmlessly), else
+//     whole seconds from date(1). The daemon's line has milliseconds, and "how
+//     long after the hook did the process go" is worth sub-second precision.
+//   - printf is a builtin everywhere, so the line is one append of a few dozen
+//     bytes: it cannot interleave with the daemon's own appends.
+//   - stderr is discarded for the whole group, so a missing module, a missing
+//     file or a read-only disk never paints an error into the pane.
+//
+// The session id is JSON-encoded here rather than trusted to be JSON-safe, and
+// a relative path is refused outright: it would resolve against the pane's
+// working directory - the worktree - and put AO state on the agent's branch.
+func exitStatusRecorder(file string, sessionID domain.SessionID) string {
+	if file == "" || !filepath.IsAbs(file) {
+		return ""
+	}
+	id, err := json.Marshal(string(sessionID))
+	if err != nil {
+		return ""
+	}
+	const format = `{"sessionId":%s,"agentExit":{"code":%d,"epoch":"%s"}}\n`
+	return `__ao_rc=$?; { zmodload zsh/datetime; printf ` + shellQuote(format) + ` ` + shellQuote(string(id)) +
+		` "$__ao_rc" "${EPOCHREALTIME:-$(date +%s)}" >> ` + shellQuote(file) + `; } 2>/dev/null`
 }
 
 // -- error type --
