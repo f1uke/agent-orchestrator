@@ -31,7 +31,13 @@ const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
 async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 	if (usePreviewData) {
-		return mockWorkspaces;
+		// A spec can widen the demo board through this seam - the Done lane is
+		// measured at the size of a real machine's archive, hundreds of sessions,
+		// which the hand-written fixture is not. `dev:web` issues no request, so a
+		// fetch stub would never be reached.
+		const widen = (globalThis as { __aoMockWorkspaces?: (base: WorkspaceSummary[]) => WorkspaceSummary[] })
+			.__aoMockWorkspaces;
+		return widen ? widen(mockWorkspaces) : mockWorkspaces;
 	}
 	if (!hasTrustedApiBaseUrl()) {
 		return [];

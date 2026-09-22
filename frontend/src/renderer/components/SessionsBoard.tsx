@@ -1,6 +1,7 @@
-import { type KeyboardEvent, type ReactNode, useState } from "react";
+import { type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
 	AlertTriangle,
@@ -10,10 +11,14 @@ import {
 	CircleDashed,
 	Flame,
 	FoldHorizontal,
+	type LucideIcon,
 	MoreHorizontal,
 	Play,
 	RotateCw,
+	Search,
 	Trash2,
+	UnfoldHorizontal,
+	X,
 } from "lucide-react";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import {
@@ -53,32 +58,44 @@ import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/
 import { TokenUsageChip } from "./TokenUsageChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import { restartProjectOrchestrator } from "../lib/restart-orchestrator";
 import { approvalProgress, prBrowserUrl, prKindLabel, prRef, sessionPRDisplaySummaries } from "../lib/pr-display";
 import { ApprovalMeter } from "./ApprovalMeter";
-import { type DoneDisposition, doneDisposition, formatMovedAgo, sortDoneRecentFirst } from "../lib/done-chip";
-import { LANE_ORDER, LANES, type LaneConfig } from "../lib/lane-indicator";
+import {
+	type DoneDisposition,
+	doneDisposition,
+	doneAt,
+	doneSearchText,
+	matchesDoneQuery,
+	sortDoneRecentFirst,
+} from "../lib/done-lane";
+import { type BoardLaneKey, DONE_LANE, LANE_ORDER, LANES, type LaneConfig } from "../lib/lane-indicator";
 import { statusGlyph } from "../lib/status-glyph";
+import { formatTimeCompact } from "../lib/format-time";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
+import { measuredOrFallbackRect } from "../lib/virtual-rect";
 
 type SessionsBoardProps = {
 	/** When set, the board shows only this project's sessions. */
 	projectId?: string;
 };
 
-// The four kanban lanes, left→right by flow (work → review → merge). Each lane
+// The live kanban lanes, left→right by flow (work → review → merge). Each lane
 // owns one hue in the 4-color semantic system (see lib/lane-indicator +
-// design handoff Board.dc.html); "done" is archived in the Done bar, not a lane.
+// design handoff Board.dc.html). Done follows them as the board's last lane.
 const COLUMNS: LaneConfig[] = LANE_ORDER.map((key) => LANES[key]);
 
-// 12rem is the narrowest lane whose card reads: its status line keeps the agent
-// label and still wraps "Nobody is working on this" onto two lines, and the
-// widest chip fits by wrapping its button. It is also what a 1280px window gives
-// each of five lanes, so the board only scrolls on windows narrower than that.
-const OPEN_LANE_WIDTH = "minmax(12rem, 1fr)";
-// Narrow enough that at the 960px minimum, folding any two lanes lets the other
-// three fit without scrolling.
+// 11rem is the narrowest lane whose card still reads: its status line keeps the
+// agent label beside a wrapping status, and the widest chip fits by wrapping its
+// button. It is sized so the board fits the windows people use without scrolling
+// sideways: at 1280px the five live lanes open plus Done folded, and at the 960px
+// minimum three open lanes with the other three folded. Above the floor the lanes
+// share the room, so at 1280px each is ~186px.
+const OPEN_LANE_WIDTH = "minmax(11rem, 1fr)";
+// Narrow enough that at the 960px minimum, three open lanes fit beside three
+// folded ones.
 const COLLAPSED_LANE_WIDTH = "2.25rem";
 
 export function SessionsBoard({ projectId }: SessionsBoardProps) {
@@ -109,11 +126,27 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 		const zone = taskLane(task, gates.get(task.dev.id) ?? { review: "not run" }).zone;
 		(byZone.get(zone) ?? byZone.set(zone, []).get(zone)!).push(task);
 	}
-	// Most-recently-moved first, so the session just archived sits at the front.
-	const done = sortDoneRecentFirst((byZone.get("done") ?? []).map((task) => task.dev));
-	// Collapsed by default, like agent-orchestrator's done-bar: finished and
-	// killed sessions cost one quiet line under the board until expanded.
-	const [doneExpanded, setDoneExpanded] = useState(false);
+	// Finished work is one card per session, unsorted here: only the open Done
+	// lane orders and searches it, so a folded lane costs a count and nothing more.
+	const done = (byZone.get("done") ?? []).map((task) => task.dev);
+	const doneFolded = collapsedLanes.has(DONE_LANE.key);
+
+	// A lane opened by hand is brought into view. Below the width that fits every
+	// lane the board scrolls sideways, and opening Done - the last lane - at 1280px
+	// would otherwise unfold it past the right edge, where it looks like nothing
+	// happened. Only on an unfold the person made: a board that loads with a lane
+	// already open stays scrolled where it starts.
+	const boardRef = useRef<HTMLDivElement | null>(null);
+	const expandLane = (lane: BoardLaneKey) => {
+		toggleLaneCollapsed(lane);
+		// A click's update is committed before the next frame, so by then the lane
+		// is drawn open at its full width.
+		requestAnimationFrame(() =>
+			boardRef.current
+				?.querySelector(`[data-lane="${lane}"]`)
+				?.scrollIntoView?.({ behavior: "smooth", block: "nearest", inline: "nearest" }),
+		);
+	};
 
 	const openSession = (session: WorkspaceSession) =>
 		void navigate({
@@ -178,12 +211,16 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 					// that row could hold its status, its agent and its chips. Below the
 					// floor the board scrolls sideways (as agent-orchestrator's does), and
 					// the person takes the room back by folding lanes they are not watching.
+					//
+					// Done is the board's last lane - a sanctioned departure from the
+					// reference, which keeps finished work in a bar under the board.
 					<div
+						ref={boardRef}
 						className="grid h-full gap-2 overflow-x-auto"
 						style={{
-							gridTemplateColumns: COLUMNS.map((col) =>
-								collapsedLanes.has(col.key) ? COLLAPSED_LANE_WIDTH : OPEN_LANE_WIDTH,
-							).join(" "),
+							gridTemplateColumns: [...COLUMNS, DONE_LANE]
+								.map((col) => (collapsedLanes.has(col.key) ? COLLAPSED_LANE_WIDTH : OPEN_LANE_WIDTH))
+								.join(" "),
 						}}
 					>
 						{COLUMNS.map((col) =>
@@ -192,7 +229,7 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 									key={col.key}
 									col={col}
 									count={byZone.get(col.key)?.length ?? 0}
-									onExpand={() => toggleLaneCollapsed(col.key)}
+									onExpand={() => expandLane(col.key)}
 								/>
 							) : (
 								<ZoneColumn
@@ -206,56 +243,144 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 								/>
 							),
 						)}
+						{doneFolded ? (
+							<CollapsedZoneColumn col={DONE_LANE} count={done.length} onExpand={() => expandLane(DONE_LANE.key)} />
+						) : (
+							<DoneLane sessions={done} onOpen={openSession} onCollapse={() => toggleLaneCollapsed(DONE_LANE.key)} />
+						)}
 					</div>
 				)}
 			</div>
-
-			{done.length > 0 && (
-				<div className="shrink-0 border-t border-border px-[18px]">
-					{/* agent-orchestrator's done-bar (Dashboard.tsx + globals.css):
-					    a full-width chevron + label + count toggle row. min-h matches
-					    the sidebar footer so this border-t aligns with the sidebar's
-					    footer border: 7px pad ×2 + a 35.5px Settings button (p-2 = 8px
-					    ×2 around a 13px/1.5 = 19.5px line). Both bars are bottom-
-					    anchored, so a mismatch here shows up as two borders 1-2px
-					    apart across the bottom of the window. */}
-					<div className="flex min-h-[49.5px] w-full items-center gap-2 py-2">
-						<button
-							aria-expanded={doneExpanded}
-							className="group flex flex-1 items-center gap-2 text-muted-foreground transition-colors hover:text-foreground"
-							onClick={() => setDoneExpanded((v) => !v)}
-							type="button"
-						>
-							<svg
-								aria-hidden="true"
-								className={cn("h-3 w-3 shrink-0 transition-transform duration-150", doneExpanded && "rotate-90")}
-								fill="none"
-								stroke="currentColor"
-								strokeWidth="2"
-								viewBox="0 0 24 24"
-							>
-								<path d="m9 18 6-6-6-6" />
-							</svg>
-							<span className="font-mono text-[10.5px] font-medium uppercase tracking-[0.05em]">Done / Terminated</span>
-							<span className="ml-auto shrink-0 font-mono text-[10px] text-passive">{done.length}</span>
-						</button>
-						{done.length > 0 && <ClearAllButton sessions={done} />}
-					</div>
-					{doneExpanded && (
-						<div className="flex flex-wrap gap-2 pb-2.5 pt-1">
-							{done.map((s) => (
-								<DoneChip key={s.id} session={s} onOpen={() => openSession(s)} />
-							))}
-						</div>
-					)}
-				</div>
-			)}
 			<TodoDetailDialog
 				session={todoDetail}
 				onOpenChange={(open) => !open && setTodoDetail(null)}
 				onStarted={handleTodoStarted}
 			/>
 		</div>
+	);
+}
+
+// A done card's first guess at its own height, before it is measured: a
+// two-line title, the disposition line and the branch line. Cards are measured
+// once drawn, so this only has to be close enough that the scrollbar does not
+// jump on the first scroll.
+const DONE_CARD_ESTIMATE = 86;
+const DONE_CARD_GAP = 10;
+
+// The Done lane, open: every merged or terminated session, most recently ended
+// first, behind a search box. It can hold hundreds - a busy machine had 426 - so
+// the list is WINDOWED: only the cards in view (and a few either side) are in the
+// DOM, and the search filters an index built once per list, never per keystroke.
+// Folded, none of this mounts; the board draws the strip from a count alone.
+function DoneLane({
+	sessions,
+	onOpen,
+	onCollapse,
+}: {
+	sessions: WorkspaceSession[];
+	onOpen: (s: WorkspaceSession) => void;
+	onCollapse: () => void;
+}) {
+	const [query, setQuery] = useState("");
+	const searchable = useMemo(
+		() => sortDoneRecentFirst(sessions).map((session) => ({ session, text: doneSearchText(session) })),
+		[sessions],
+	);
+	const searching = query.trim() !== "";
+	const shown = useMemo(
+		() =>
+			(searching ? searchable.filter((entry) => matchesDoneQuery(entry.text, query)) : searchable).map(
+				(entry) => entry.session,
+			),
+		[searchable, searching, query],
+	);
+
+	const scrollRef = useRef<HTMLDivElement | null>(null);
+	const virtualizer = useVirtualizer({
+		count: shown.length,
+		getScrollElement: () => scrollRef.current,
+		estimateSize: () => DONE_CARD_ESTIMATE,
+		getItemKey: (index) => shown[index].id,
+		gap: DONE_CARD_GAP,
+		overscan: 6,
+		observeElementRect: measuredOrFallbackRect,
+	});
+	// A new query is a new list: start it at its top, not wherever the last one
+	// was scrolled to.
+	const search = (next: string) => {
+		setQuery(next);
+		if (scrollRef.current) scrollRef.current.scrollTop = 0;
+	};
+
+	return (
+		<section data-lane={DONE_LANE.key} className={LANE_SURFACE}>
+			<LaneHeader col={DONE_LANE} count={sessions.length} onCollapse={onCollapse} />
+			{sessions.length > 0 && (
+				<div className="shrink-0 px-[11px] pb-2">
+					<div className="relative">
+						<Search
+							className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-passive"
+							aria-hidden="true"
+						/>
+						<Input
+							type="search"
+							aria-label="Search finished sessions"
+							title="Matches the name, session id, branch, Jira key or PR number"
+							placeholder="Search"
+							value={query}
+							onChange={(event) => search(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Escape" && query !== "") {
+									event.preventDefault();
+									search("");
+								}
+							}}
+							className="h-7 bg-[var(--kanban-card-bg)] pl-7 pr-7 text-[12px] [&::-webkit-search-cancel-button]:appearance-none"
+						/>
+						{query !== "" && (
+							<button
+								type="button"
+								aria-label="Clear search"
+								title="Clear search"
+								onClick={() => search("")}
+								className="absolute right-1 top-1/2 grid size-5 -translate-y-1/2 cursor-pointer place-items-center rounded text-passive hover:bg-interactive-hover hover:text-foreground"
+							>
+								<X className="size-3" aria-hidden="true" />
+							</button>
+						)}
+					</div>
+					<div className="mt-1.5 flex items-center gap-2 px-0.5 font-mono text-[10px] text-passive">
+						<span aria-live="polite" className="min-w-0 flex-1 truncate">
+							{searching ? `${shown.length} of ${sessions.length}` : `${sessions.length} finished`}
+						</span>
+						{shown.length > 0 && <ClearAllButton sessions={shown} filtered={searching} />}
+					</div>
+				</div>
+			)}
+			{/* The same body as a live lane - see ZoneColumn - except that it is the
+			    virtualiser's scroll element. */}
+			<div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto pb-3 pl-[11px] pr-px [scrollbar-gutter:stable]">
+				{sessions.length === 0 ? (
+					<EmptyLane col={DONE_LANE} />
+				) : shown.length === 0 ? (
+					<EmptyLane col={DONE_LANE} text={`Nothing finished matches “${query.trim()}”`} />
+				) : (
+					<div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+						{virtualizer.getVirtualItems().map((item) => (
+							<div
+								key={item.key}
+								data-index={item.index}
+								ref={virtualizer.measureElement}
+								className="absolute left-0 top-0 w-full"
+								style={{ transform: `translateY(${item.start}px)` }}
+							>
+								<DoneCard session={shown[item.index]} onOpen={() => onOpen(shown[item.index])} />
+							</div>
+						))}
+					</div>
+				)}
+			</div>
+		</section>
 	);
 }
 
@@ -267,13 +392,17 @@ const DONE_DISPOSITION: Record<DoneDisposition, { label: string; className: stri
 	terminated: { label: "terminated", className: "text-passive" },
 };
 
-// A finished/terminated session's chip in the done-bar. Deleting is
-// permanent (unlike kill, which just stops a running worker), so it mirrors
-// TopbarKillButton's inline arm-confirm rather than firing on a single click.
-// Default force=false preserves an uncommitted worktree; a dirty-worktree
+// A finished/terminated session's card in the Done lane. It is deliberately not
+// a live card: no status gutter, no agent label, no crew strip, no PR footer and
+// nothing that pulses - its title sits in the muted ink and its one status is how
+// it ended, and when.
+//
+// Deleting is permanent (unlike kill, which just stops a running worker), so it
+// mirrors TopbarKillButton's inline arm-confirm rather than firing on a single
+// click. Default force=false preserves an uncommitted worktree; a dirty-worktree
 // refusal surfaces the daemon's error and offers "Delete anyway" (force=true)
 // instead of silently discarding work.
-function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () => void }) {
+function DoneCard({ session, onOpen }: { session: WorkspaceSession; onOpen: () => void }) {
 	const queryClient = useQueryClient();
 	const [confirming, setConfirming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -327,29 +456,84 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 	});
 
 	const disposition = DONE_DISPOSITION[doneDisposition(session)];
+	const jiraKey = jiraKeyFromIssueId(session.issueId);
+	const branch = session.branch || "";
+	const showBranch = branch !== "" && !sameLabel(branch, session.title) && !sameLabel(branch, session.id);
 	return (
-		<div className="flex items-center gap-1 rounded-[7px] border border-border bg-surface pl-2.5 pr-1 py-1.5 transition-colors hover:border-border-strong">
-			<div className="flex min-w-0 flex-col gap-0.5">
-				<button className="text-left text-[12px] text-muted-foreground" onClick={onOpen} type="button">
+		<div
+			data-done-card={session.id}
+			className="rounded-[10px] px-[13px] pb-2.5 pt-[9px]"
+			style={{ background: "var(--kanban-card-bg)", border: "1px solid var(--kanban-card-border)" }}
+		>
+			<div className="flex items-start gap-1">
+				<button
+					className="line-clamp-2 min-w-0 flex-1 cursor-pointer text-left text-[12.5px] font-medium leading-[1.4] tracking-[-0.01em] text-muted-foreground transition-colors hover:text-foreground"
+					onClick={onOpen}
+					title={session.title}
+					type="button"
+				>
 					{session.title}
 				</button>
-				{/* Second line: how it finished (done vs terminated) + when it moved here. */}
-				<span className="flex items-center gap-1 text-[10px] leading-none">
-					<span className={cn("inline-flex items-center gap-1 font-medium", disposition.className)}>
-						<span className="h-[5px] w-[5px] rounded-full bg-current" aria-hidden="true" />
-						{disposition.label}
-					</span>
-					<span className="text-passive" aria-hidden="true">
-						·
-					</span>
-					<span className="font-mono text-passive">{formatMovedAgo(session.updatedAt)}</span>
+				{!confirming && (
+					<div className="-mr-1.5 -mt-0.5 flex shrink-0 items-center">
+						<button
+							aria-label="Reopen session"
+							title="Reopen session"
+							className="cursor-pointer rounded p-1 text-passive hover:bg-interactive-hover hover:text-foreground"
+							disabled={reopen.isPending}
+							onClick={() => {
+								setReopenError(null);
+								reopen.mutate();
+							}}
+							type="button"
+						>
+							<RotateCw className="h-3 w-3" aria-hidden="true" />
+						</button>
+						<button
+							aria-label="Delete session"
+							title="Delete session"
+							className="cursor-pointer rounded p-1 text-passive hover:bg-interactive-hover hover:text-error"
+							onClick={() => {
+								setError(null);
+								setConfirming(true);
+							}}
+							type="button"
+						>
+							<Trash2 className="h-3 w-3" aria-hidden="true" />
+						</button>
+					</div>
+				)}
+			</div>
+			{/* How it finished (done vs terminated) + how long ago. */}
+			<div className="mt-1 flex items-center gap-1 text-[10px] leading-none">
+				<span className={cn("inline-flex items-center gap-1 font-medium", disposition.className)}>
+					<span className="h-[5px] w-[5px] rounded-full bg-current" aria-hidden="true" />
+					{disposition.label}
+				</span>
+				<span className="text-passive" aria-hidden="true">
+					·
+				</span>
+				{/* The dot already says it ended; the time alone keeps the line whole in
+				    a narrow lane, and the tooltip gives the exact moment. */}
+				<span className="truncate font-mono text-passive" title={`Ended ${new Date(doneAt(session)).toLocaleString()}`}>
+					{formatTimeCompact(doneAt(session))}
 				</span>
 			</div>
-			{confirming ? (
-				<>
+			{/* What the search box matches beyond the name, so a hit on a branch or a
+			    key shows why it matched. Plain text: a Jira badge would fetch the
+			    issue for every card scrolled past. */}
+			{(showBranch || jiraKey) && (
+				<div className="mt-1.5 flex min-w-0 items-center gap-1.5 font-mono text-[10.5px] text-passive">
+					{jiraKey && <span className="shrink-0 text-accent">{jiraKey}</span>}
+					{showBranch && <span className="truncate">{branch}</span>}
+				</div>
+			)}
+			{confirming && (
+				<div className="mt-2 flex items-center gap-2 text-[11px]">
+					<span className="min-w-0 flex-1 text-muted-foreground">Delete for good?</span>
 					<button
 						aria-label="Confirm delete"
-						className="text-[11px] text-error"
+						className="cursor-pointer text-error hover:underline"
 						disabled={del.isPending}
 						onClick={() => del.mutate(false)}
 						type="button"
@@ -358,7 +542,7 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 					</button>
 					<button
 						aria-label="Cancel delete"
-						className="text-[11px] text-passive"
+						className="cursor-pointer text-passive hover:text-foreground"
 						onClick={() => {
 							setConfirming(false);
 							setError(null);
@@ -367,67 +551,41 @@ function DoneChip({ session, onOpen }: { session: WorkspaceSession; onOpen: () =
 					>
 						Cancel
 					</button>
-				</>
-			) : (
-				<>
-					<button
-						aria-label="Reopen session"
-						title="Reopen session"
-						className="rounded p-1 text-passive hover:text-foreground"
-						disabled={reopen.isPending}
-						onClick={() => {
-							setReopenError(null);
-							reopen.mutate();
-						}}
-						type="button"
-					>
-						<RotateCw className="h-3 w-3" aria-hidden="true" />
-					</button>
-					<button
-						aria-label="Delete session"
-						title="Delete session"
-						className="rounded p-1 text-passive hover:text-error"
-						onClick={() => {
-							setError(null);
-							setConfirming(true);
-						}}
-						type="button"
-					>
-						<Trash2 className="h-3 w-3" aria-hidden="true" />
-					</button>
-				</>
+				</div>
 			)}
 			{error && (
-				<span className="flex items-center gap-1 text-[10px] text-error">
-					{error}
+				<div className="mt-2 text-[10.5px] leading-snug text-error">
+					{error}{" "}
 					{/* A dirty-worktree refusal (SESSION_WORKSPACE_DIRTY) is the expected
 					    reason; offer a force delete that discards uncommitted changes. */}
 					<button
 						aria-label="Delete anyway"
-						className="underline hover:text-error"
+						className="cursor-pointer underline hover:text-error"
 						disabled={del.isPending}
 						onClick={() => del.mutate(true)}
 						type="button"
 					>
 						Delete anyway
 					</button>
-				</span>
+				</div>
 			)}
 			{reopenError && (
-				<span className="text-[10px] text-error" role="alert">
+				<div className="mt-2 text-[10.5px] leading-snug text-error" role="alert">
 					Couldn’t reopen: {reopenError}
-				</span>
+				</div>
 			)}
 		</div>
 	);
 }
 
-// "Clear all" empties the whole done bucket. There is no bulk-delete endpoint,
-// so this fires one DELETE per session (force=false, same as a single chip) and
-// reports how many failed rather than partially retrying. Confirmed via a
-// Radix dialog (mirrors RestoreUnavailableDialog) since it is destructive and
-// scoped to N sessions rather than one.
-function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
+// "Clear all" empties the Done lane - or, while its search narrows the lane, only
+// the sessions the search shows, since those are the ones on screen when the
+// button is pressed. There is no bulk-delete endpoint, so this fires one DELETE
+// per session (force=false, same as a single card) and reports how many failed
+// rather than partially retrying. Confirmed via a Radix dialog (mirrors
+// RestoreUnavailableDialog) since it is destructive and scoped to N sessions
+// rather than one; the dialog names N.
+function ClearAllButton({ sessions, filtered }: { sessions: WorkspaceSession[]; filtered: boolean }) {
 	const queryClient = useQueryClient();
 	const [open, setOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -450,7 +608,7 @@ function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
 		onError: (e) => setError(e instanceof Error ? e.message : "Clear failed"),
 		// Refresh the workspace query whether or not every deletion succeeded, so
 		// sessions that WERE deleted (a partial-failure run still deletes some)
-		// drop out of the done-bar instead of lingering as stale rows until the
+		// drop out of the Done lane instead of lingering as stale rows until the
 		// next unrelated refetch.
 		onSettled: () => {
 			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
@@ -464,16 +622,14 @@ function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
 	return (
 		<>
 			<button
-				aria-label="Clear all"
-				className="shrink-0 font-mono text-[10px] text-passive hover:text-error"
-				onClick={(e) => {
-					e.stopPropagation();
+				className="shrink-0 cursor-pointer font-mono text-[10px] text-passive hover:text-error"
+				onClick={() => {
 					setError(null);
 					setOpen(true);
 				}}
 				type="button"
 			>
-				Clear all
+				{filtered ? "Clear shown" : "Clear all"}
 			</button>
 			<Dialog.Root open={open} onOpenChange={setOpen}>
 				<Dialog.Portal>
@@ -482,9 +638,12 @@ function ClearAllButton({ sessions }: { sessions: WorkspaceSession[] }) {
 						{...dismissFocus}
 						className="fixed left-1/2 top-1/2 z-50 w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-lg"
 					>
-						<Dialog.Title className="text-sm font-medium text-foreground">Clear all finished sessions</Dialog.Title>
+						<Dialog.Title className="text-sm font-medium text-foreground">
+							{filtered ? "Clear the finished sessions shown" : "Clear all finished sessions"}
+						</Dialog.Title>
 						<Dialog.Description className="mt-2 text-[13px] text-muted-foreground">
-							Permanently remove {sessions.length} finished session(s) from AO. Their git branches are kept.
+							Permanently remove {sessions.length} finished session(s) from AO
+							{filtered ? ", the ones matching the search" : ""}. Their git branches are kept.
 						</Dialog.Description>
 						{error && <div className="mt-3 text-[12px] text-error">{error}</div>}
 						<div className="mt-4 flex justify-end gap-2">
@@ -518,7 +677,6 @@ function ZoneColumn({
 	onCollapse: () => void;
 }) {
 	const isTodo = col.key === "todo";
-	const { dotVar } = col;
 	return (
 		<section
 			// No painted edges: the lane's identity is carried by the header's shape
@@ -528,23 +686,7 @@ function ZoneColumn({
 			data-lane={col.key}
 			className={LANE_SURFACE}
 		>
-			<div className="group/lane flex shrink-0 items-center gap-[9px] px-[15px] pb-[11px] pt-[13px]">
-				<LaneGlyph col={col} />
-				<span className="truncate text-[11.5px] font-bold uppercase tracking-[0.09em]" style={{ color: dotVar }}>
-					{col.label}
-				</span>
-				<LaneCount className="ml-auto" count={tasks.length} />
-				<button
-					type="button"
-					aria-expanded={true}
-					aria-label={`Collapse ${col.label}`}
-					title={`Collapse ${col.label}`}
-					onClick={onCollapse}
-					className="-mr-1.5 grid size-5 shrink-0 place-items-center rounded text-passive opacity-0 transition-opacity hover:bg-interactive-hover hover:text-foreground focus-visible:opacity-100 group-hover/lane:opacity-100"
-				>
-					<FoldHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-				</button>
-			</div>
+			<LaneHeader col={col} count={tasks.length} onCollapse={onCollapse} />
 			{/* The scrollbar's gutter is reserved in every lane, scrolling or not, and
 			    stands in for the right padding: otherwise the one lane long enough to
 			    scroll draws its cards 10px narrower than its neighbours. */}
@@ -573,22 +715,65 @@ function ZoneColumn({
 	);
 }
 
+// A lane's header, and the control that folds it: the WHOLE strip is one button
+// - glyph, name, count and the space between - so folding a lane never means
+// hunting for a 20px icon. It looks like one: the pointer, a hover wash over the
+// strip, and the lane glyph turning into the fold glyph while the strip is
+// hovered or focused. Nothing else may live inside it; a lane with its own
+// controls (Done's search) puts them under the header, where a click on them can
+// never fold the lane by accident.
+function LaneHeader({
+	col,
+	count,
+	onCollapse,
+}: {
+	col: LaneConfig<BoardLaneKey>;
+	count: number;
+	onCollapse: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			aria-expanded={true}
+			aria-label={`Collapse ${col.label}, ${cardCount(count)}`}
+			title={`Collapse ${col.label}`}
+			onClick={onCollapse}
+			className="group/lane flex w-full shrink-0 cursor-pointer items-center gap-[9px] px-[15px] pb-[11px] pt-[13px] text-left transition-colors hover:bg-interactive-hover focus-visible:bg-interactive-hover focus-visible:outline-none"
+		>
+			<SwapGlyph col={col} Swap={FoldHorizontal} />
+			<span className="truncate text-[11.5px] font-bold uppercase tracking-[0.09em]" style={{ color: col.dotVar }}>
+				{col.label}
+			</span>
+			<LaneCount className="ml-auto" count={count} />
+		</button>
+	);
+}
+
 // A lane folded out of the way: the same trough, holding only what says which
 // lane it is and how much is in it - the glyph, the count, the name read
-// sideways. The whole strip is the button that opens it again.
-function CollapsedZoneColumn({ col, count, onExpand }: { col: LaneConfig; count: number; onExpand: () => void }) {
+// sideways. The whole strip is the button that opens it again, and it answers a
+// hover the way an open lane's header does.
+function CollapsedZoneColumn({
+	col,
+	count,
+	onExpand,
+}: {
+	col: LaneConfig<BoardLaneKey>;
+	count: number;
+	onExpand: () => void;
+}) {
 	return (
 		<section data-lane={col.key} data-collapsed="" className={LANE_SURFACE}>
 			<button
 				type="button"
 				aria-expanded={false}
-				aria-label={`Expand ${col.label}, ${count} ${count === 1 ? "card" : "cards"}`}
+				aria-label={`Expand ${col.label}, ${cardCount(count)}`}
 				title={`Expand ${col.label}`}
 				onClick={onExpand}
-				className="flex h-full flex-col items-center gap-2.5 pb-3 pt-[15px] transition-colors hover:bg-interactive-hover"
+				className="group/lane flex h-full cursor-pointer flex-col items-center gap-2.5 pb-3 pt-[15px] transition-colors hover:bg-interactive-hover focus-visible:bg-interactive-hover focus-visible:outline-none"
 			>
-				<LaneGlyph col={col} />
-				<LaneCount count={count} />
+				<SwapGlyph col={col} Swap={UnfoldHorizontal} />
+				<LaneCount count={count} compact />
 				<span
 					className="whitespace-nowrap text-[11.5px] font-bold uppercase tracking-[0.09em] [writing-mode:vertical-rl]"
 					style={{ color: col.dotVar }}
@@ -600,26 +785,48 @@ function CollapsedZoneColumn({ col, count, onExpand }: { col: LaneConfig; count:
 	);
 }
 
+function cardCount(count: number): string {
+	return `${count} ${count === 1 ? "card" : "cards"}`;
+}
+
 const LANE_SURFACE =
 	"flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--kanban-col-border)] bg-[var(--kanban-column-bg)]";
 
-function LaneGlyph({ col }: { col: LaneConfig }) {
+function LaneGlyph({ col, className }: { col: LaneConfig<BoardLaneKey>; className?: string }) {
 	const { Icon } = col;
 	return (
 		<Icon
 			data-lane-glyph={col.key}
-			className="h-[13px] w-[13px] shrink-0"
+			className={cn("h-[13px] w-[13px] shrink-0", className)}
 			style={{ color: col.dotVar, ...(col.filled ? { fill: "currentColor" } : {}) }}
 			aria-hidden="true"
 		/>
 	);
 }
 
-function LaneCount({ count, className }: { count: number; className?: string }) {
+// The lane glyph in a fold control, standing in for the fold (or unfold) glyph
+// while the control is hovered or focused: the one cell says both which lane
+// this is and what pressing it does, without costing the name any room.
+function SwapGlyph({ col, Swap }: { col: LaneConfig<BoardLaneKey>; Swap: LucideIcon }) {
+	return (
+		<span className="grid shrink-0 place-items-center *:[grid-area:1/1]">
+			<LaneGlyph col={col} className="group-hover/lane:invisible group-focus-visible/lane:invisible" />
+			<Swap
+				className="invisible h-[14px] w-[14px] text-muted-foreground group-hover/lane:visible group-focus-visible/lane:visible"
+				aria-hidden="true"
+			/>
+		</span>
+	);
+}
+
+// `compact` is the folded strip's: 2.25rem across, which the badge's own padding
+// would overrun at three digits - and the Done lane reaches three digits.
+function LaneCount({ count, className, compact }: { count: number; className?: string; compact?: boolean }) {
 	return (
 		<span
 			className={cn(
-				"min-w-[22px] rounded-full border border-border-strong bg-interactive-hover px-[9px] py-px text-center font-mono text-[11px] font-bold leading-[1.5] text-muted-foreground",
+				"min-w-[22px] rounded-full border border-border-strong bg-interactive-hover py-px text-center font-mono font-bold leading-[1.5] text-muted-foreground",
+				compact ? "px-[4px] text-[10px]" : "px-[9px] text-[11px]",
 				className,
 			)}
 		>
@@ -633,7 +840,7 @@ function LaneCount({ count, className }: { count: number; className?: string }) 
 // passive, low-contrast text, faded further with opacity — so an empty lane
 // reads as "nothing here" filler and recedes, letting a single real card (solid
 // surface, bright lane-coloured dot, full-strength title) clearly dominate.
-function EmptyLane({ col }: { col: LaneConfig }) {
+function EmptyLane({ col, text }: { col: LaneConfig<BoardLaneKey>; text?: string }) {
 	const { Icon } = col;
 	return (
 		<div className="mt-2 flex flex-col items-center justify-center gap-2 rounded-[10px] border border-dashed border-border px-4 py-[34px] text-center text-[12px] text-passive opacity-60">
@@ -642,7 +849,7 @@ function EmptyLane({ col }: { col: LaneConfig }) {
 				style={col.filled ? { fill: "currentColor" } : undefined}
 				aria-hidden="true"
 			/>
-			<span>{col.emptyText}</span>
+			<span className="break-words [overflow-wrap:anywhere]">{text ?? col.emptyText}</span>
 		</div>
 	);
 }
@@ -652,7 +859,7 @@ function EmptyLane({ col }: { col: LaneConfig }) {
 // as the topbar Kill (ShellTopbar's TopbarKillButton), reached from the board so a
 // no-PR session (e.g. an investigation) can be finished without opening it. Kill keeps
 // the git branch and preserves an uncommitted worktree, so the session stays restorable
-// via the Done bar's Reopen (the sole reversal affordance — this menu has no reopen).
+// via the Done lane's Reopen (the sole reversal affordance — this menu has no reopen).
 // Terminating is destructive, so the item arms a one-step confirm inside the menu
 // before firing.
 //
@@ -675,7 +882,7 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 		onSuccess: () => {
 			void captureRendererEvent("ao.renderer.session_kill_succeeded", { project_id: session.workspaceId });
 			// The session flips to terminated on the next refresh, so its card leaves this
-			// column for the Done bar and this menu unmounts with it.
+			// column for the Done lane and this menu unmounts with it.
 			setOpen(false);
 			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 		},
@@ -750,7 +957,7 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 					{confirming ? (
 						<>
 							<div className="max-w-[15rem] px-2 py-1.5 text-[11px] leading-snug text-muted-foreground">
-								Stops the agent and reclaims its worktree. The branch and any open PR stay. Reopen from the Done bar to
+								Stops the agent and reclaims its worktree. The branch and any open PR stay. Reopen from the Done lane to
 								undo.
 							</div>
 							<DropdownMenuItem

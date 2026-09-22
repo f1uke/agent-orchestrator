@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { leaf, type SplitNode } from "../lib/split-layout";
-import { useUiStore } from "./ui-store";
+import { readFoldedBoardLanes, useUiStore } from "./ui-store";
 
 const STORAGE_KEY = "ao.projects.collapsed";
 const ORDER_STORAGE_KEY = "ao.projects.order";
@@ -83,5 +83,32 @@ describe("ui-store split layouts", () => {
 	it("removing an absent layout is a no-op", () => {
 		useUiStore.getState().setSplitLayout("proj-1", null);
 		expect(useUiStore.getState().splitLayouts).toEqual({});
+	});
+});
+
+describe("ui-store board lane folding", () => {
+	const LANES_KEY = "ao.board.collapsedLanes";
+
+	it("starts with only Done folded", () => {
+		expect([...readFoldedBoardLanes()]).toEqual(["done"]);
+	});
+
+	it("reads the array stored before Done was a lane as the lanes folded, Done still folded", () => {
+		localStorage.setItem(LANES_KEY, JSON.stringify(["todo", "merge"]));
+		expect(readFoldedBoardLanes()).toEqual(new Set(["done", "todo", "merge"]));
+	});
+
+	it("remembers a default-folded lane the human opened", () => {
+		useUiStore.setState({ collapsedBoardLanes: readFoldedBoardLanes() });
+		useUiStore.getState().toggleBoardLaneCollapsed("done");
+		useUiStore.getState().toggleBoardLaneCollapsed("working");
+
+		expect(JSON.parse(localStorage.getItem(LANES_KEY)!)).toEqual({ working: true, done: false });
+		expect(readFoldedBoardLanes()).toEqual(new Set(["working"]));
+	});
+
+	it("falls back to the defaults on a value it cannot read", () => {
+		localStorage.setItem(LANES_KEY, "{not json");
+		expect(readFoldedBoardLanes()).toEqual(new Set(["done"]));
 	});
 });

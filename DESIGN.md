@@ -284,8 +284,9 @@ glyphs documented below.)
 
 The kanban board (`SessionsBoard.tsx`) uses a **4-hue semantic lane system** so lanes
 and statuses are cleanly separable. Each lane owns one **base hue** (chrome) plus a
-**brighter variant** (dots/text/glyphs). `DONE` / terminated is **not** a lane — those
-sessions archive to the Done bar (passive gray, unchanged).
+**brighter variant** (dots/text/glyphs). **Done** (merged + terminated) is the board's
+sixth, last lane but takes **no hue**: its archive glyph and label use `--fg-muted`, so
+it never reads as a fifth state of work in flight (see _Done lane_ below).
 
 | Lane (attention zone)        | Base hue (token)                 | Bright variant (token)            |
 | ---------------------------- | -------------------------------- | --------------------------------- |
@@ -336,13 +337,32 @@ Line 2 holds the chips and exists only when one renders. A chip with its own but
 its label when its line is under 11rem, and its pill becomes an 11px-radius box.
 
 **Lane width and folding (2026-09-23, reference is silent on folding).** An open lane
-is `minmax(12rem, 1fr)`: five lanes fit a 1280px window with the default sidebar, and
-below that the board scrolls sideways, as agent-orchestrator's does below 640px. At
-the 960px minimum only about three lanes fit, so any lane folds (hover its header →
-fold button) to a 2.25rem strip showing its glyph, count and vertical label; the
-whole strip unfolds it. Folded lanes persist (`ao.board.collapsedLanes`). The lane
-body reserves its scrollbar gutter in place of right padding, so a scrolling lane's
-cards are as wide as its neighbours'.
+is `minmax(11rem, 1fr)`: the five live lanes plus folded Done fit a 1280px window with
+the default sidebar (~186px each), and below that the board scrolls sideways, as
+agent-orchestrator's does below 640px. At the 960px minimum three open lanes fit beside
+three folded ones. The floor was 12rem until Done became a lane; 11rem is the same
+derivation with one more (folded) column. Any lane folds to a 2.25rem strip showing its
+glyph, count (tighter padding there, so three digits fit) and vertical label.
+**The whole header strip is the fold control** - one button over glyph, name, count
+and the space between, with a pointer cursor, a hover wash and the lane glyph swapping
+to the fold glyph on hover/focus; there is no separate small fold icon. The folded
+strip is the mirror: the whole strip unfolds, and an unfold scrolls that lane into
+view. Headers hold nothing else interactive - a lane's own controls sit under the
+header. Fold state persists in `ao.board.collapsedLanes` as `{lane: folded}`, so a
+default-folded lane (Done) remembers being opened; the older array form still reads.
+The lane body reserves its scrollbar gutter in place of right padding, so a scrolling
+lane's cards are as wide as its neighbours'. At ~186px "Ready to merge" still
+truncates in its header (it did at 194px too); it reads whole from 1440px.
+
+**Done lane (approved deviation, 2026-09-23).** The reference keeps finished work in a
+collapsible bar under the board; by explicit human request it is instead the board's
+last lane, **folded by default**. Open, it has a search box under its header (name,
+session id, branch, Jira key, PR/MR number; every term must match), a `N finished` /
+`N of M` line with **Clear all** (or **Clear shown**, scoped to the matches), and its
+cards newest-ended first by `termination.at` (falling back to `updatedAt`). The list
+is windowed (`@tanstack/react-virtual`), measured at ~370 cards: ~14 in the DOM, not 373. A done card is not a live card - no status gutter, agent label, crew strip, PR
+footer or pulse: muted title, a `done`/`terminated` dot with how long ago, then the
+Jira key and branch as plain text, plus Reopen and Delete (with its inline confirm).
 
 Motion: the card status glyph pulses (`--animate-status-pulse`) **only in WORKING** —
 per the Motion rule that pulse means a genuinely-live session — not in every lane.
@@ -466,3 +486,4 @@ mirrors emdash exactly. Launching from a project row pre-fills the Project field
 | 2026-06-09 | Topbar right = PR/CI pill + view toggles + ⋯ menu (worker)                      | Surfaces the actionable PR/CI state from the daemon; emdash/PostHog Code precedent.                                                                                                                                           |
 | 2026-06-09 | Spawn modal mirrors emdash's Create Task                                        | Consistency with the reference; mapped to `ao spawn` params.                                                                                                                                                                  |
 | 2026-07-10 | **4-hue board lane colour system** + sidebar status glyphs (approved deviation) | User-approved layer on the AO clone (Claude Design handoff `Board.dc.html`); separates lanes (NEEDS YOU → coral, IN REVIEW → blue) so statuses don't collide. Sanctioned — not drift. See _Color → Board lane colour system_. |
+| 2026-09-23 | **Done / Terminated is a board lane** (approved deviation)                      | Human request: the reference keeps it in a bar under the board; hundreds of finished sessions need a lane with search. See _Done lane_.                                                                                       |

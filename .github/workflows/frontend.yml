@@ -162,9 +162,9 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Measure the status glyphs, the card header, the sidebar qa pip, the editor, the Files rail, the terminal's links and the pinch dots in a real browser
+      - name: Measure the status glyphs, the card header, the Done lane, the sidebar qa pip, the editor, the Files rail, the terminal's links and the pinch dots in a real browser
         run: >-
-          npx playwright test e2e/status-glyph.spec.ts e2e/card-header.spec.ts e2e/sidebar-qa-pip.spec.ts
+          npx playwright test e2e/status-glyph.spec.ts e2e/card-header.spec.ts e2e/done-lane.spec.ts e2e/sidebar-qa-pip.spec.ts
           e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
           e2e/editor-completion.spec.ts e2e/editor-lsp-surface.spec.ts e2e/files-perf.spec.ts
           e2e/files-state.spec.ts e2e/search-perf.spec.ts e2e/terminal-links.spec.ts
