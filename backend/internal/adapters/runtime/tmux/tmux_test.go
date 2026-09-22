@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -364,7 +365,7 @@ func TestCreateNeverPutsTheLaunchCommandOnACommandLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch script: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
+	if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0o600 {
 		t.Fatalf("launch script mode = %o, want 600 (it carries the prompt)", got)
 	}
 	if !strings.HasPrefix(scriptPath, dataDir) {

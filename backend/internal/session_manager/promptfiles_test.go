@@ -3,6 +3,7 @@ package sessionmanager
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -41,7 +42,7 @@ func assertPrivatePromptFile(t *testing.T, dataDir string, id domain.SessionID, 
 	if err != nil {
 		t.Fatalf("system prompt file: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
+	if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0o600 {
 		t.Fatalf("system prompt file mode = %o, want 600", got)
 	}
 	if data, _ := os.ReadFile(path); string(data) != systemPrompt { //nolint:gosec // test-owned temp dir
@@ -96,6 +97,9 @@ func TestSystemPromptIsHandedToTheAgentByFile(t *testing.T) {
 // End to end through the real Claude Code adapter: what reaches the runtime -
 // the argv tmux will run - names the file and carries none of the text.
 func TestSpawnedClaudeArgvCarriesNoSystemPrompt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub claude binary is a POSIX shell script")
+	}
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { //nolint:gosec // G306: a stub binary must be executable
 		t.Fatal(err)

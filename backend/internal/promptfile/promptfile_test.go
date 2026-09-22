@@ -3,6 +3,7 @@ package promptfile
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -20,6 +21,9 @@ func TestWriteIsPrivateAndUnderTheSessionDir(t *testing.T) {
 	data, err := os.ReadFile(path)
 	if err != nil || string(data) != "stand by" {
 		t.Fatalf("content = %q, %v", data, err)
+	}
+	if runtime.GOOS == "windows" {
+		return // no POSIX permission bits to check
 	}
 	for p, want := range map[string]os.FileMode{path: 0o600, filepath.Dir(path): 0o700} {
 		info, err := os.Stat(p)
@@ -48,7 +52,7 @@ func TestWriteReplacesAndTightensAnOldDirectory(t *testing.T) {
 	if data, _ := os.ReadFile(path); string(data) != "new" {
 		t.Fatalf("content = %q, want new", data)
 	}
-	if info, _ := os.Stat(dir); info.Mode().Perm() != 0o700 {
+	if info, _ := os.Stat(dir); runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 		t.Fatalf("dir mode = %o, want 700", info.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(dir)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -131,7 +132,7 @@ func TestLauncherSpawnHandsReviewerSystemPromptByFile(t *testing.T) {
 	if err != nil || string(data) != inv.SystemPrompt {
 		t.Fatalf("reviewer prompt file does not hold the reviewer role (%v)", err)
 	}
-	if info, _ := os.Stat(inv.SystemPromptFile); info.Mode().Perm() != 0o600 {
+	if info, _ := os.Stat(inv.SystemPromptFile); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("reviewer prompt file mode = %o, want 600", info.Mode().Perm())
 	}
 }
