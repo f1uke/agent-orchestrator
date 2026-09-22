@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Loader2, Power } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, Lock, Power } from "lucide-react";
 import type { SimDevice } from "../hooks/useSimDevices";
-import { crewHolderLabel, type Task } from "../lib/crew";
+import { crewHolderLabel, type SessionNames, type Task } from "../lib/crew";
 import type { SimPowerRequest } from "../hooks/useSimPower";
 import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 /**
@@ -50,6 +51,7 @@ type PowerInfo = NonNullable<SimDevice["power"]>;
 export function SimDevicePicker({
 	chosen,
 	devices,
+	holderNames,
 	loading,
 	onChoose,
 	onPower,
@@ -58,6 +60,12 @@ export function SimDevicePicker({
 }: {
 	chosen: string | null;
 	devices: SimDevice[];
+	/**
+	 * Board names for every session on this machine, so a device held by work
+	 * outside this task is named rather than left as an id. Undefined names every
+	 * non-crewmate holder by `@id`, which is what it always did.
+	 */
+	holderNames?: SessionNames;
 	loading: boolean;
 	onChoose: (udid: string) => void;
 	onPower: (request: SimPowerRequest) => void;
@@ -130,6 +138,7 @@ export function SimDevicePicker({
 								bootedCount={booted.length}
 								confirming={confirming === device.udid}
 								device={device}
+								holderNames={holderNames}
 								key={device.udid}
 								onChoose={() => {
 									onChoose(device.udid);
@@ -150,6 +159,7 @@ export function SimDevicePicker({
 								bootedCount={booted.length}
 								confirming={confirming === device.udid}
 								device={device}
+								holderNames={holderNames}
 								key={device.udid}
 								onChoose={() => {}}
 								onConfirm={setConfirming}
@@ -203,6 +213,7 @@ function DeviceRow({
 	bootedCount,
 	confirming,
 	device,
+	holderNames,
 	onChoose,
 	onConfirm,
 	onPower,
@@ -213,6 +224,7 @@ function DeviceRow({
 	bootedCount: number;
 	confirming: boolean;
 	device: SimDevice;
+	holderNames?: SessionNames;
 	task?: Task;
 	onChoose: () => void;
 	onConfirm: (udid: string | null) => void;
@@ -225,6 +237,14 @@ function DeviceRow({
 	const running = power?.state === "running";
 	const holder = device.lease?.state === "held" ? (device.lease.holder ?? "") : "";
 	const heldByOther = Boolean(holder) && holder !== sessionId;
+	const heldByMe = Boolean(holder) && holder === sessionId;
+	// The holder in the words a person recognises: this task's other member by
+	// its ROLE, anybody else by their BOARD NAME, and an `@id` only for a session
+	// nothing can name. The raw id stays on the tooltip either way.
+	const holderLabel = heldByOther ? crewHolderLabel(task, holder, holderNames) : "";
+	// What a screen reader hears, because the button carries an aria-label and an
+	// aria-label REPLACES the text inside it - the tag below would be silent.
+	const spokenLease = heldByOther ? `, leased by ${holderLabel}` : heldByMe ? ", leased by this session" : "";
 
 	// Boot the first device with one press; ask before adding to a machine that
 	// is already carrying one.
@@ -246,11 +266,11 @@ function DeviceRow({
 					// A booted device is chosen by pressing it; a shut-down one has
 					// nothing to look at yet, so its whole row leads to its Boot button
 					// rather than pretending to be selectable.
-					aria-label={booted ? `Watch ${device.name}` : `${device.name}, shut down`}
+					aria-label={booted ? `Watch ${device.name}${spokenLease}` : `${device.name}, shut down${spokenLease}`}
 					className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
 					disabled={!booted}
 					onClick={onChoose}
-					title={heldByOther ? `Leased by @${holder}` : undefined}
+					title={holder ? `Leased by @${holder}` : undefined}
 					type="button"
 				>
 					<span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", booted ? "bg-success" : "bg-passive")} />
@@ -259,11 +279,6 @@ function DeviceRow({
 						<span className="block truncate text-[11px] text-muted-foreground">
 							{device.runtime}
 							{watching ? " · watching" : ""}
-							{/* The holder in the ROLE's words where it is this task's other
-							    member (`leased by qa`), and by `@id` for anything else. Same
-							    vocabulary as the member switcher in the topbar; the raw id
-							    stays on the row's tooltip either way. */}
-							{heldByOther ? ` · leased by ${crewHolderLabel(task, holder)}` : ""}
 						</span>
 					</span>
 				</button>
@@ -284,11 +299,16 @@ function DeviceRow({
 				)}
 			</div>
 
+			{/* Below the row rather than inside it, so the holder's name has the whole
+			    320px instead of what is left beside the power button - the same shape
+			    the confirmation and the failure below it already take. */}
+			{holder ? <LeaseTag holder={holderLabel} mine={heldByMe} /> : null}
+
 			{confirming && !running ? (
 				<Confirm
 					booted={booted}
 					bootedCount={bootedCount}
-					holder={heldByOther ? crewHolderLabel(task, holder) : ""}
+					holder={holderLabel}
 					name={device.name}
 					onCancel={() => onConfirm(null)}
 					onConfirm={act}
@@ -300,6 +320,36 @@ function DeviceRow({
 				<Stock reason={power.profileReason ?? "It came up stock and said nothing."} />
 			) : null}
 		</div>
+	);
+}
+
+/**
+ * That a device is SPOKEN FOR, before anything on the row is read.
+ *
+ * 🗝 Why this is a tag and not more words on the meta line. It used to be the
+ * tail of `iOS 26.3 · watching · leased by …`, which put the one fact that
+ * decides whether a row is worth pressing last in the line that truncates first
+ * - so the holder's name was routinely cut off, and a tooltip only pays out to
+ * somebody who already suspected there was something to hover. Scanning a list
+ * to pick a device is precisely the moment nobody is hovering.
+ *
+ * ⚠ The two states must not look alike. A device this session holds is one it
+ * can drive; a device another session holds will REFUSE it. They get different
+ * colours, different words and different lengths, because "leased by me" and
+ * "leased by someone else" mean opposite things to the hand about to click:
+ * accent is this app's mark for the live thing that is yours, warning is its
+ * mark for something that will stop you.
+ *
+ * The tag sits on its own line rather than beside the name so that a long device
+ * name and a long holder name cannot compete for the same 320px: each truncates
+ * within its own line, and the word `Leased` is the part that never does.
+ */
+function LeaseTag({ holder, mine }: { holder: string; mine: boolean }) {
+	return (
+		<Badge className="mt-1.5 max-w-full" data-testid="sim-lease-tag" variant={mine ? "accent" : "warning"}>
+			<Lock aria-hidden className="size-2.5 shrink-0" />
+			<span className="min-w-0 truncate">{mine ? "Yours" : `Leased by ${holder}`}</span>
+		</Badge>
 	);
 }
 

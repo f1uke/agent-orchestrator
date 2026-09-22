@@ -7,6 +7,7 @@ import {
 	type IosProject,
 	type IosRun,
 } from "../hooks/useIosProject";
+import { useSessionNames } from "../hooks/useSessionNames";
 import { useSimDevices } from "../hooks/useSimDevices";
 import { useSimPower } from "../hooks/useSimPower";
 import type { Task } from "../lib/crew";
@@ -71,6 +72,10 @@ export function IosRunBar({
 	// polling simctl every five seconds for a control it does not have.
 	const hasProject = Boolean(project?.name);
 	const devices = useSimDevices(hasProject);
+	// A simulator is a machine-wide resource, so the session holding one is
+	// often working on something else entirely. This is what lets the picker
+	// name it by its board name rather than by its id.
+	const holderNames = useSessionNames();
 	const power = useSimPower(sessionId, setProblem);
 	const start = useStartIosRun(sessionId, setProblem);
 	// Opening either picker re-reads the project. The human's workflow is
@@ -199,6 +204,7 @@ export function IosRunBar({
 			<SimDevicePicker
 				chosen={chosenUdid}
 				devices={allDevices}
+				holderNames={holderNames}
 				loading={devices.isLoading}
 				onChoose={setUdid}
 				onPower={power.mutate}

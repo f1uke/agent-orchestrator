@@ -1175,6 +1175,11 @@ export function mockJiraProjects(query: string): components["schemas"]["JiraProj
  * and the Device tab's role-named holder line visible without a Mac, an Xcode
  * and two running agents.
  */
+// The three lease states the picker has to tell apart, side by side, because
+// "taken by me" and "taken by somebody else" mean opposite things to the hand
+// about to press a row and the harness is where that is looked at. The holder of
+// MOCK-UDID-B is a session on OTHER work, with a name long enough to prove the
+// row survives one.
 export function mockSimDevices(): components["schemas"]["ListSimDevicesResponse"] {
 	return {
 		defaultUdid: null,
@@ -1188,17 +1193,37 @@ export function mockSimDevices(): components["schemas"]["ListSimDevicesResponse"
 				state: "Booted",
 				available: true,
 				default: false,
-				lease: { state: "held", holder: "demo-ready" },
+				lease: { state: "held", holder: "demo-working" },
 			},
 			{
 				udid: "MOCK-UDID-B",
-				name: "iPhone 15",
+				name: "iPhone 17 Pro Max",
 				runtime: "iOS 26.3",
 				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
 				state: "Booted",
 				available: true,
 				default: false,
-				lease: { state: "held", holder: "demo-ready-qa" },
+				lease: { state: "held", holder: "demo-ready" },
+			},
+			{
+				udid: "MOCK-UDID-C",
+				name: "iPad Pro 13-inch (M4)",
+				runtime: "iOS 26.3",
+				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+				state: "Shutdown",
+				available: true,
+				default: false,
+				lease: { state: "unknown", reason: "no AO session holds this device" },
+			},
+			{
+				udid: "MOCK-UDID-D",
+				name: "iPhone SE (3rd generation)",
+				runtime: "iOS 18.2",
+				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+				state: "Shutdown",
+				available: true,
+				default: false,
+				lease: { state: "unknown", reason: "no AO session holds this device" },
 			},
 		],
 	};

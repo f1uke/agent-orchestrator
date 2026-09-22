@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	canAttachRole,
 	crewChipState,
+	crewHolderLabel,
 	crewJoinLine,
 	neverStarted,
 	qaPresence,
@@ -649,5 +650,35 @@ describe("crewJoinLine", () => {
 		expect(crewJoinLine({ dev, members: [dev], isCrew: false })).toBeUndefined();
 		const pair = crew();
 		expect(crewJoinLine({ dev: pair.dev, qa: pair.qa, members: pair.sessions, isCrew: true })).toBeUndefined();
+	});
+});
+
+describe("crewHolderLabel — naming the session that holds a device", () => {
+	// Both members of a crew carry the SAME board name, so a title would name
+	// them both the same. The role is the half that says which of them it is.
+	it("names this task's own member by its role, even where a board name exists", () => {
+		const { dev, qa, sessions } = crew({ title: "sim picker lease" }, { title: "sim picker lease" });
+		const task = { dev, qa, members: sessions, isCrew: true };
+		const names = new Map([["demo-2", "sim picker lease"]]);
+		expect(crewHolderLabel(task, "demo-2", names)).toBe("qa");
+	});
+
+	// The holder is usually not on this task at all - a simulator is a
+	// machine-wide resource - and there the board name is what a person
+	// recognises. `@nter-ios-app-77` is long enough to truncate the row it sits
+	// on and says nothing about what that session is doing.
+	it("names any other session by its board name", () => {
+		const dev = session("demo-1");
+		const task = { dev, members: [dev], isCrew: false };
+		const names = new Map([["nter-ios-app-77", "OA landing advisor"]]);
+		expect(crewHolderLabel(task, "nter-ios-app-77", names)).toBe("OA landing advisor");
+	});
+
+	// The id is the last resort, and it keeps its `@` - which is the part that
+	// says "this is an id, not a name".
+	it("falls back to the id when nothing can name the holder", () => {
+		expect(crewHolderLabel(undefined, "p-9")).toBe("@p-9");
+		expect(crewHolderLabel(undefined, "p-9", new Map())).toBe("@p-9");
+		expect(crewHolderLabel(undefined, undefined)).toBe("@another session");
 	});
 });

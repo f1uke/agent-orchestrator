@@ -3,8 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { House, Keyboard, Layers, MoreHorizontal, MousePointer2 } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
+import { useSessionNames } from "../hooks/useSessionNames";
 import { useSessionTask } from "../hooks/useSessionTask";
-import { crewHolderLabel, type Task } from "../lib/crew";
+import { crewHolderLabel, type SessionNames, type Task } from "../lib/crew";
 import { useSimKeyboard } from "../hooks/useSimKeyboard";
 import { useSimPower, type SimPowerRequest } from "../hooks/useSimPower";
 import { usePageVisible, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
@@ -196,8 +197,11 @@ export function SimulatorPanel({
 
 	const devices = useSimDevices(watching);
 	// The task this pane belongs to, so a lease held by the crewmate can be named
-	// by its role rather than by a raw session id.
+	// by its role rather than by a raw session id. Every OTHER session on this
+	// machine is named by its board name from the same listing - a simulator is a
+	// machine-wide resource, so its holder is usually on other work entirely.
 	const task = useSessionTask(sessionId);
+	const holderNames = useSessionNames();
 	const [chosen, setChosen] = useState<string | null>(() => recall(sessionId)?.udid ?? null);
 	// 🗝 What the human ASKED for, which is not the same as what they may do.
 	// Driving itself is derived below, from this and the lease together.
@@ -368,7 +372,7 @@ export function SimulatorPanel({
 		if (canDrive) return "";
 		if (!chosen) return "No simulator is chosen yet, so there is nothing to touch. Pick one first.";
 		if (heldByOther) {
-			return `${crewHolderLabel(task, lease?.holder)} is holding this device, so nothing here may touch it. Take it over to drive it.`;
+			return `${crewHolderLabel(task, lease?.holder, holderNames)} is holding this device, so nothing here may touch it. Take it over to drive it.`;
 		}
 		if (!heldByThisSession) {
 			return "This session is not holding this device, so nothing here may touch it. Claim it to drive it.";
@@ -769,6 +773,7 @@ export function SimulatorPanel({
 				<DevicePill
 					chosen={chosen}
 					devices={all}
+					holderNames={holderNames}
 					loading={devices.isPending && watching}
 					onChoose={setChosen}
 					onPower={onPower}
@@ -893,7 +898,7 @@ export function SimulatorPanel({
 							device={device}
 							heldByOther={Boolean(heldByOther)}
 							heldByThisSession={heldByThisSession}
-							holder={crewHolderLabel(task, lease?.holder)}
+							holder={crewHolderLabel(task, lease?.holder, holderNames)}
 							onRefresh={refreshDevices}
 							onRelease={() => device && release.mutate(device.udid)}
 							sessionId={sessionId}
@@ -928,7 +933,7 @@ export function SimulatorPanel({
 							label={
 								<span className="block max-w-[220px]">
 									{heldByOther
-										? `Take the device from ${crewHolderLabel(task, device.lease?.holder)} (@${device.lease?.holder}). Refused while their agent is mid-gesture, so a touch in flight is never cut in half.`
+										? `Take the device from ${crewHolderLabel(task, device.lease?.holder, holderNames)} (@${device.lease?.holder}). Refused while their agent is mid-gesture, so a touch in flight is never cut in half.`
 										: "Take the same lease `ao sim tap` takes. Watching never needs one; touching the device always does."}
 								</span>
 							}
@@ -937,7 +942,9 @@ export function SimulatorPanel({
 								// Named after the holder, so taking a device from another
 								// session reads as a decision rather than a slip.
 								aria-label={
-									heldByOther ? `Take over from ${crewHolderLabel(task, device.lease?.holder)}` : "Claim to drive"
+									heldByOther
+										? `Take over from ${crewHolderLabel(task, device.lease?.holder, holderNames)}`
+										: "Claim to drive"
 								}
 								className="flex h-9 items-center rounded-full border border-border bg-raised px-3 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay disabled:opacity-40 disabled:hover:bg-raised"
 								disabled={claim.isPending}
@@ -1098,6 +1105,7 @@ function PillButton({
 function DevicePill({
 	chosen,
 	devices,
+	holderNames,
 	loading,
 	onChoose,
 	onPower,
@@ -1108,6 +1116,8 @@ function DevicePill({
 }: {
 	chosen: string | null;
 	devices: SimDevice[];
+	/** Board names for every session, so a holder outside this task is named too. */
+	holderNames?: SessionNames;
 	loading: boolean;
 	onChoose: (udid: string) => void;
 	onPower: (request: SimPowerRequest) => void;
@@ -1122,6 +1132,7 @@ function DevicePill({
 			<SimDevicePicker
 				chosen={chosen}
 				devices={devices}
+				holderNames={holderNames}
 				loading={loading}
 				onChoose={onChoose}
 				onPower={onPower}

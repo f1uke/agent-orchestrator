@@ -335,6 +335,9 @@ const RUNTIME_TOUCH_CAUSE: Record<NonNullable<WorkspaceSession["runtimeTouch"]>,
 	preview: "dev opened a preview",
 };
 
+/** Session id to the name the BOARD gives it. See {@link crewHolderLabel}. */
+export type SessionNames = ReadonlyMap<string, string>;
+
 /**
  * What to CALL the session holding one of this task's exclusive resources - a
  * simulator lease, today.
@@ -342,16 +345,25 @@ const RUNTIME_TOUCH_CAUSE: Record<NonNullable<WorkspaceSession["runtimeTouch"]>,
  * Two agents on one task can hold two simulators at once, and "who has which"
  * is asked at the device more than anywhere else, so the answer has to be in the
  * vocabulary of the member switcher one strip above it. A holder that is a
- * member of THIS task is named by its role (`dev`, `qa`); anything else keeps
- * its `@id`, because a bare role would be a lie about which task it belongs to.
- * The id is never lost - callers put it in the tooltip.
+ * member of THIS task is named by its role (`dev`, `qa`); anything else is named
+ * by its BOARD NAME, the same words the card carries; and only a holder nothing
+ * can name keeps its `@id`. The id is never lost - callers put it in the tooltip.
+ *
+ * The order is the point. Role comes FIRST even though a name exists, because
+ * both members of a crew share one board name and the title would name them both
+ * the same - it is the role that says which of them. Every other holder is a
+ * different piece of work, and there its board name is the recognisable half:
+ * `@nter-ios-app-77` is long enough to truncate the row it sits on and says
+ * nothing about what that session is doing, where "OA landing advisor" says it.
  *
  * A solo session has no role at all, so every one-agent task reads exactly as it
  * reads today.
  */
-export function crewHolderLabel(task: Task | undefined, holder: string | undefined): string {
+export function crewHolderLabel(task: Task | undefined, holder: string | undefined, names?: SessionNames): string {
 	const role = task?.members.find((member) => member.id === holder)?.crew?.role;
-	return role ?? `@${holder ?? "another session"}`;
+	if (role) return role;
+	const named = holder ? names?.get(holder) : undefined;
+	return named || `@${holder ?? "another session"}`;
 }
 
 /**
