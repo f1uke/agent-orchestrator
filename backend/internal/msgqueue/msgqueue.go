@@ -23,7 +23,7 @@
 //     permission prompt open in the pane (activity_state waiting_input) owns the
 //     keyboard, so anything typed is eaten by the dialog and the trailing Enter can
 //     answer it. And resuming a session recreates the pane as
-//     `<shell> -c '<exports>; <agent argv>; exec <shell> -i'`, so for a moment
+//     `<shell> <script>` running `<exports>; <agent argv>; exec <shell> -i`, so for a moment
 //     the foreground process is a SHELL. Text typed then is eaten by the shell
 //     as a command line and the human is told it was delivered. The gate is
 //     therefore the agent-liveness probe (ports.AgentLivenessProber: the pane

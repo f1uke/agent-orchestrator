@@ -56,8 +56,11 @@ type ReviewInvocation struct {
 	// carries the standing reviewer role, Prompt the per-pass task. A prompt-driven
 	// adapter (claude-code) feeds them to the agent; a one-shot CLI reviewer may
 	// ignore them.
-	Prompt       string
-	SystemPrompt string
+	// SystemPromptFile is a private file holding SystemPrompt, to hand the agent
+	// in place of the text (see LaunchConfig.SystemPromptFile).
+	Prompt           string
+	SystemPrompt     string
+	SystemPromptFile string
 }
 
 // ReviewTask is one PR/run in a multi-PR review trigger queue.

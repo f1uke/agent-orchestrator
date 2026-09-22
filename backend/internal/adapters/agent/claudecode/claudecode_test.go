@@ -68,15 +68,16 @@ func TestGetLaunchCommandMapsPermissionModes(t *testing.T) {
 	}
 }
 
-func TestGetLaunchCommandAppendsSystemPromptFromFile(t *testing.T) {
-	dir := t.TempDir()
-	promptFile := filepath.Join(dir, "system.md")
-	if err := os.WriteFile(promptFile, []byte("You are an orchestrator.\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+// The standing instructions reach Claude as a PATH, never as text: argv is
+// what `pkill -f <word>` matches, and on 2026-09-22 `pkill -f 'xcodebuild test'`
+// killed every iOS agent because their system prompt mentions it. The text is
+// supplied too, as every caller does, and must still stay off the command line.
+func TestGetLaunchCommandPassesSystemPromptByFile(t *testing.T) {
+	promptFile := writePromptFile(t, "You are an orchestrator.\n")
 
 	p := &Plugin{resolvedBinary: "claude"}
 	cmd, err := p.GetLaunchCommand(context.Background(), ports.LaunchConfig{
+		SystemPrompt:     "You are an orchestrator.",
 		SystemPromptFile: promptFile,
 		Prompt:           "do the thing",
 	})
@@ -86,12 +87,21 @@ func TestGetLaunchCommandAppendsSystemPromptFromFile(t *testing.T) {
 
 	want := []string{
 		"claude",
-		"--append-system-prompt", "You are an orchestrator.",
+		"--append-system-prompt-file", promptFile,
 		"--", "do the thing",
 	}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("unexpected command\nwant: %#v\n got: %#v", want, cmd)
 	}
+}
+
+func writePromptFile(t *testing.T, text string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "system-prompt.md")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestGetLaunchCommandInlineSystemPrompt(t *testing.T) {
@@ -427,6 +437,39 @@ func TestGetRestoreCommandReappendsSystemPrompt(t *testing.T) {
 	want := []string{"claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", "You are an orchestrator.", "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
+	}
+}
+
+func TestGetRestoreCommandPassesSystemPromptByFile(t *testing.T) {
+	promptFile := writePromptFile(t, "You are an orchestrator.")
+	cmd, ok, err := (&Plugin{resolvedBinary: "claude"}).GetRestoreCommand(context.Background(), ports.RestoreConfig{
+		Permissions:      ports.PermissionModeBypassPermissions,
+		SystemPrompt:     "You are an orchestrator.",
+		SystemPromptFile: promptFile,
+		Session: ports.SessionRef{
+			ID:       "sess-r",
+			Metadata: map[string]string{ports.MetadataKeyAgentSessionID: "claude-native-1"},
+		},
+	})
+	if err != nil || !ok {
+		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
+	}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--append-system-prompt-file", promptFile, "--resume", "claude-native-1"}
+	if !reflect.DeepEqual(cmd, want) {
+		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
+	}
+}
+
+func TestGetRestoreCommandMissingSystemPromptFileErrors(t *testing.T) {
+	_, _, err := (&Plugin{resolvedBinary: "claude"}).GetRestoreCommand(context.Background(), ports.RestoreConfig{
+		SystemPromptFile: filepath.Join(t.TempDir(), "does-not-exist.md"),
+		Session: ports.SessionRef{
+			ID:       "sess-r",
+			Metadata: map[string]string{ports.MetadataKeyAgentSessionID: "claude-native-1"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error for missing system prompt file")
 	}
 }
 

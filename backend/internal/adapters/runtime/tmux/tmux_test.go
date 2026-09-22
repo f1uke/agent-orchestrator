@@ -52,9 +52,24 @@ func (f *fakeRunner) Run(_ context.Context, env []string, name string, args ...s
 
 // -- helpers --
 
+// testDataDir holds the launch scripts every Create writes: the fake runner never
+// runs them, so they would not delete themselves, and TestMain removes the lot.
+var testDataDir string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "tmux-runtime-test-")
+	if err != nil {
+		panic(err)
+	}
+	testDataDir = dir
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 func newTestRuntime(chunkSize int) (*Runtime, *fakeRunner) {
 	fr := &fakeRunner{}
-	r := New(Options{Binary: "tmux-test", Timeout: time.Second, Shell: "/bin/sh", ChunkSize: chunkSize})
+	r := New(Options{Binary: "tmux-test", Timeout: time.Second, Shell: "/bin/sh", ChunkSize: chunkSize, DataDir: testDataDir})
 	r.runner = fr
 	r.sleep = func(time.Duration) {} // don't burn real time on the send delays
 	return r, fr
@@ -81,9 +96,9 @@ func TestNewPicksUpShellFromEnv(t *testing.T) {
 // -- command builder tests --
 
 func TestCommandBuilders(t *testing.T) {
-	if got, want := newSessionArgs("sess-1", "/tmp/ws", "/bin/sh", `echo hi; exec "${SHELL:-/bin/sh}" -i`),
-		[]string{"new-session", "-d", "-s", "sess-1", "-x", "220", "-y", "50", "-c", "/tmp/ws", "/bin/sh", "-c", `echo hi; exec "${SHELL:-/bin/sh}" -i`}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("newSessionArgs = %#v, want %#v", got, want)
+	if got, want := newSessionScriptArgs("sess-1", "/tmp/ws", "/bin/sh", "/data/launch.sh"),
+		[]string{"new-session", "-d", "-s", "sess-1", "-x", "220", "-y", "50", "-c", "/tmp/ws", "/bin/sh", "/data/launch.sh"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("newSessionScriptArgs = %#v, want %#v", got, want)
 	}
 	// set-option uses pane-targeting (no = prefix).
 	if got, want := setStatusOffArgs("sess-1"), []string{"set-option", "-t", "sess-1", "status", "off"}; !reflect.DeepEqual(got, want) {
@@ -317,25 +332,63 @@ func TestCreateWritesScriptForOversizedLaunchCommand(t *testing.T) {
 	}
 }
 
-// TestCreateUsesInlineCommandForNormalLaunch guards that an ordinary (small)
-// launch still uses `sh -c <cmd>` — the script-file path is a targeted fallback
-// for oversized commands only, so normal sessions are unchanged.
-func TestCreateUsesInlineCommandForNormalLaunch(t *testing.T) {
+// TestCreateNeverPutsTheLaunchCommandOnACommandLine guards that even a small
+// launch goes through a script: an inline `<shell> -c <cmd>` puts the prompt on
+// the pane shell's command line and, when this new-session starts the server,
+// on the tmux server's for its whole life - where `pkill -f <word>` finds it.
+func TestCreateNeverPutsTheLaunchCommandOnACommandLine(t *testing.T) {
 	r, fr := newTestRuntime(0)
 	fr.outputs = [][]byte{nil, nil, nil, nil}
+	dataDir := t.TempDir()
 
 	_, err := r.Create(context.Background(), ports.RuntimeConfig{
 		SessionID:     "sess-1",
 		WorkspacePath: "/tmp/ws",
-		Argv:          []string{"echo", "hi"},
-		Env:           map[string]string{"AO_DATA_DIR": t.TempDir()},
+		Argv:          []string{"claude", "--", "run xcodebuild test"},
+		Env:           map[string]string{"AO_DATA_DIR": dataDir},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	nsArgs := fr.calls[0].args
-	if n := len(nsArgs); nsArgs[n-2] != "-c" {
-		t.Fatalf("expected inline `-c` launch for a small command, got: %v", nsArgs)
+	for _, arg := range nsArgs {
+		if strings.Contains(arg, "xcodebuild") {
+			t.Fatalf("new-session args carry the launch command inline: %q", nsArgs)
+		}
+	}
+	if got := nsArgs[len(nsArgs)-2]; got != "/bin/sh" {
+		t.Fatalf("new-session runs %q, want the shell given only a script path: %q", got, nsArgs)
+	}
+	scriptPath := nsArgs[len(nsArgs)-1]
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatalf("launch script: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("launch script mode = %o, want 600 (it carries the prompt)", got)
+	}
+	if !strings.HasPrefix(scriptPath, dataDir) {
+		t.Fatalf("script path %q not under data dir %q", scriptPath, dataDir)
+	}
+}
+
+// A pane launched with no session env (reviewer, wiki, run panes) writes its
+// script under the runtime's own data dir, never outside ~/.ao.
+func TestCreateWritesScriptUnderRuntimeDataDirWithoutSessionEnv(t *testing.T) {
+	r, fr := newTestRuntime(0)
+	fr.outputs = [][]byte{nil, nil, nil, nil}
+	r.dataDir = t.TempDir()
+
+	if _, err := r.Create(context.Background(), ports.RuntimeConfig{
+		SessionID:     "review-sess-1",
+		WorkspacePath: "/tmp/ws",
+		Argv:          []string{"echo", "hi"},
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	nsArgs := fr.calls[0].args
+	if scriptPath := nsArgs[len(nsArgs)-1]; !strings.HasPrefix(scriptPath, r.dataDir) {
+		t.Fatalf("script path %q not under the runtime data dir %q", scriptPath, r.dataDir)
 	}
 }
 
@@ -373,9 +426,7 @@ func TestCreateLaunchCommandContainsKeepAliveShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	// The launch command is the last argument to new-session (after shellPath -c).
-	args := fr.calls[0].args
-	launchCmd := args[len(args)-1]
+	launchCmd := launchScriptOf(t, fr.calls[0].args)
 	if !strings.Contains(launchCmd, `exec "${SHELL:-/bin/sh}" -i`) {
 		t.Fatalf("launch command missing keep-alive shell: %q", launchCmd)
 	}
@@ -410,8 +461,7 @@ func TestCreateLaunchCommandExportsEnvVars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	args := fr.calls[0].args
-	launchCmd := args[len(args)-1]
+	launchCmd := launchScriptOf(t, fr.calls[0].args)
 	for _, want := range []string{
 		"export AO_SESSION_ID='sess-1';",
 		"export ODD='can'\\''t';",
@@ -808,4 +858,15 @@ func TestTrimTrailingBlankLines(t *testing.T) {
 	if got := trimTrailingBlankLines(""); got != "" {
 		t.Fatalf("trimTrailingBlankLines empty = %q", got)
 	}
+}
+
+// launchScriptOf returns the launch command new-session was handed, read from
+// the script file that is its last argument.
+func launchScriptOf(t *testing.T, nsArgs []string) string {
+	t.Helper()
+	data, err := os.ReadFile(nsArgs[len(nsArgs)-1])
+	if err != nil {
+		t.Fatalf("read launch script: %v", err)
+	}
+	return string(data)
 }

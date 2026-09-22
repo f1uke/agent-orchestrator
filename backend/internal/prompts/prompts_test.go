@@ -1077,3 +1077,17 @@ func TestCoordinationFloor_QAHandbackTakesTheDetailCutFromTheNotes(t *testing.T)
 		}
 	}
 }
+
+// Every agent that runs commands carries the kill-by-PID rule in its FLOOR, so
+// an edited or cleared base cannot drop it: on 2026-09-22 one worker's
+// `pkill -f 'xcodebuild test'` killed every iOS agent on the machine.
+func TestWorkerFloorForbidsPatternKills(t *testing.T) {
+	for _, k := range []Kind{KindWorker, KindQA} {
+		floor := CoordinationFloor(k)
+		for _, want := range []string{"## Stopping processes (AO)", "`$!`", "Never kill by pattern", "`pkill -f`", "`killall`"} {
+			if !strings.Contains(floor, want) {
+				t.Errorf("%s floor is missing %q", k, want)
+			}
+		}
+	}
+}

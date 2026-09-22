@@ -82,6 +82,8 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 		WorkspacePath: inv.WorkspacePath,
 		Prompt:        inv.Prompt,
 		SystemPrompt:  inv.SystemPrompt,
+		// By path, so the reviewer role stays off the pane's command line.
+		SystemPromptFile: inv.SystemPromptFile,
 		// Launch off bypassPermissions so the allow/deny lists are enforced.
 		// Set an explicit non-bypass mode instead of deferring to the user's
 		// Claude defaultMode, which may itself be bypassPermissions.

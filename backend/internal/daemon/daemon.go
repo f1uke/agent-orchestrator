@@ -133,7 +133,7 @@ func Run() error {
 	if err != nil {
 		log.Error("message delivery journal unavailable; deliveries will not be recorded", "err", err)
 	}
-	runtimeAdapter := runtimeselect.New(log, runtimeselect.Options{Journal: journalOrNil(deliveryJournal)})
+	runtimeAdapter := runtimeselect.New(log, runtimeselect.Options{Journal: journalOrNil(deliveryJournal), DataDir: cfg.DataDir})
 	// The input gate couples message injection with live user typing. The terminal
 	// mux records every client keystroke into it (WithInputRecorder); the gated
 	// runtime consults it before SendMessage so an inbound message never merges
@@ -516,6 +516,16 @@ func Run() error {
 		log.Error("reap orphaned iOS run panes on boot failed", "err", reapErr)
 	} else if reaped > 0 {
 		log.Info("reaped orphaned iOS run panes on boot", "reaped", reaped)
+	}
+
+	// And the session's private prompt files (its system prompt, handed to the
+	// agent by path so it never rides on a command line): an ending removes
+	// them, so only a session that ended while the daemon was down leaves any.
+	// Best-effort; never blocks boot.
+	if reaped, reapErr := sessMgr.ReapOrphanedPromptFiles(ctx); reapErr != nil {
+		log.Error("reap orphaned prompt files on boot failed", "err", reapErr)
+	} else if reaped > 0 {
+		log.Info("reaped orphaned prompt files on boot", "reaped", reaped)
 	}
 
 	// ponytail: 5s tolerates a brief frontend restart; tune if dev hot-reload trips it.

@@ -8,9 +8,11 @@
 // relies on prompts not beginning with a literal "-".
 //
 // System prompts are appended to Pi's default coding-assistant prompt via
-// `--append-system-prompt <text>`. Pi's flag takes inline text only (no file
-// variant), so a system-prompt file is read from disk and its contents are
-// inlined into the flag; a read failure aborts the launch.
+// `--append-system-prompt <value>`, which Pi reads as a FILE when the value
+// names one that exists, else as text. AO passes its system-prompt file's
+// absolute path, so the text stays off the command line (see
+// ports.LaunchConfig.SystemPromptFile); a missing file aborts the launch rather
+// than letting Pi append the path itself as the instructions.
 //
 // Permissions: Pi has no permission/approval CLI flags ("No permission popups" --
 // confirmation flows are built via TypeScript extensions), so AO emits no
@@ -33,7 +35,9 @@ package pi
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -76,7 +80,7 @@ func (p *Plugin) Manifest() adapters.Manifest {
 
 // GetLaunchCommand builds the argv to start a new interactive Pi session:
 //
-//	pi [--append-system-prompt <system prompt>] [<prompt>]
+//	pi [--append-system-prompt <system prompt file>] [<prompt>]
 //
 // The prompt is delivered in-command as a trailing positional message. Pi does
 // not honor a `--` options terminator, so the prompt must not begin with "-".
@@ -88,14 +92,8 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 	}
 
 	cmd = []string{binary}
-	if cfg.SystemPromptFile != "" {
-		data, err := os.ReadFile(cfg.SystemPromptFile) //nolint:gosec // path is AO-owned launch config
-		if err != nil {
-			return nil, err
-		}
-		cmd = append(cmd, "--append-system-prompt", string(data))
-	} else if cfg.SystemPrompt != "" {
-		cmd = append(cmd, "--append-system-prompt", cfg.SystemPrompt)
+	if err := appendSystemPromptFlag(&cmd, cfg.SystemPromptFile, cfg.SystemPrompt); err != nil {
+		return nil, err
 	}
 	if cfg.Prompt != "" {
 		cmd = append(cmd, cfg.Prompt)
@@ -120,9 +118,10 @@ func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig)
 	if err != nil {
 		return nil, false, err
 	}
-	cmd = []string{binary}
-	if cfg.SystemPrompt != "" {
-		cmd = append(cmd, "--append-system-prompt", cfg.SystemPrompt)
+	cmd = make([]string, 0, 5)
+	cmd = append(cmd, binary)
+	if err := appendSystemPromptFlag(&cmd, cfg.SystemPromptFile, cfg.SystemPrompt); err != nil {
+		return nil, false, err
 	}
 	cmd = append(cmd, "--session", agentSessionID)
 	return cmd, true, nil
@@ -161,4 +160,28 @@ func (p *Plugin) piBinary(ctx context.Context) (string, error) {
 	}
 	p.resolvedBinary = binary
 	return binary, nil
+}
+
+// appendSystemPromptFlag appends `--append-system-prompt`, by file whenever one
+// is supplied. Pi reads an existing path as the file and anything else as
+// literal text, so the path is made absolute (Pi resolves a relative one
+// against its own cwd) and checked here: a missing file would otherwise be
+// appended as its own name. The inline text is only the fallback for a caller
+// with no file to give.
+func appendSystemPromptFlag(cmd *[]string, file, text string) error {
+	if file != "" {
+		abs, err := filepath.Abs(file)
+		if err != nil {
+			return fmt.Errorf("pi: system prompt file: %w", err)
+		}
+		if _, err := os.Stat(abs); err != nil {
+			return fmt.Errorf("pi: system prompt file: %w", err)
+		}
+		*cmd = append(*cmd, "--append-system-prompt", abs)
+		return nil
+	}
+	if text != "" {
+		*cmd = append(*cmd, "--append-system-prompt", text)
+	}
+	return nil
 }

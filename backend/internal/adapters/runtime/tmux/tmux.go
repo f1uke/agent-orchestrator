@@ -58,6 +58,10 @@ type Options struct {
 	ChunkSize  int           // default 8*1024; always clamped to sendKeysLiteralBudget
 	ChunkDelay time.Duration // pause between send-keys chunks; default 15ms
 	EnterDelay time.Duration // pause before the submitting Enter; default 300ms
+	// DataDir is where launch scripts are written when the session's env
+	// carries no AO_DATA_DIR (reviewer, wiki and run panes). Empty falls back
+	// to the OS temp dir.
+	DataDir string
 }
 
 // Runtime runs agent sessions inside tmux sessions, driving them via the tmux
@@ -69,6 +73,7 @@ type Runtime struct {
 	chunkSize  int
 	chunkDelay time.Duration
 	enterDelay time.Duration
+	dataDir    string
 	runner     runner
 	sleep      func(time.Duration) // seam for tests; defaults to time.Sleep
 	// hasLiveChild reports whether pid has at least one live child process. It is
@@ -182,6 +187,7 @@ func New(opts Options) *Runtime {
 		chunkSize:    chunkSize,
 		chunkDelay:   chunkDelay,
 		enterDelay:   enterDelay,
+		dataDir:      opts.DataDir,
 		runner:       execRunner{},
 		sleep:        time.Sleep,
 		hasLiveChild: defaultHasLiveChild,
@@ -210,10 +216,10 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (_ ports.
 	if err != nil {
 		return ports.RuntimeHandle{}, err
 	}
-	// A launch command too long for tmux's inline limit is delivered via a
-	// self-deleting script file (see launchInvocation). On success the shell
-	// removes it; if new-session ultimately fails, the shell never runs it, so
-	// remove it here rather than leak it. Inline launches leave scriptPath "".
+	// The launch command is delivered via a self-deleting script file (see
+	// launchInvocation). On success the shell removes it; if new-session
+	// ultimately fails, the shell never runs it, so remove it here rather than
+	// leak it.
 	defer func() {
 		if err != nil && scriptPath != "" {
 			_ = os.Remove(scriptPath)
@@ -310,7 +316,7 @@ func (r *Runtime) IsAlive(ctx context.Context, handle ports.RuntimeHandle) (bool
 
 // AgentAlive reports whether the agent process is still running in the session's
 // pane, seeing past the keep-alive shell that IsAlive cannot. The pane is
-// launched as `<shell> -c '<exports>; <agent argv>; exec <shell> -i'`: while the
+// launched as `<shell> <script>` running `<exports>; <agent argv>; exec <shell> -i`: while the
 // agent runs it is a child of the pane's leader process; once it exits the leader
 // execs into a bare interactive shell with no children. So "the pane leader has a
 // live child" is a runtime-agnostic proxy for "the agent is alive" — a leaked
@@ -708,39 +714,37 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-// maxInlineLaunchLen is the largest launch command tmux accepts inline via
-// `new-session … <shell> -c <cmd>`. tmux caps a command argument near 16 KiB and
-// fails with "command too long" beyond it, so a bigger command (a large prompt
-// and/or system prompt) is delivered via a script FILE instead — the prompt then
-// reaches the agent as a normal argv element, bounded only by ARG_MAX (~1 MiB).
-// The margin below 16384 leaves room for the other new-session args.
-const maxInlineLaunchLen = 15000
-
-// launchInvocation returns the `tmux new-session` args for cfg's launch command.
-// A command within tmux's inline limit uses `<shell> -c <cmd>` (unchanged
-// behavior). An oversized command is written to a self-deleting script under the
-// session data dir and launched as `<shell> <script>`. The returned scriptPath is
-// non-empty only in that case, so Create can remove it if new-session fails (on
-// success the script removes itself — see writeLaunchScript).
+// launchInvocation returns the `tmux new-session` args for cfg's launch command,
+// which is ALWAYS delivered as a self-deleting script file run as
+// `<shell> <script>`, never inline as `<shell> -c <cmd>`. The returned
+// scriptPath lets Create remove the script if new-session fails (on success the
+// script removes itself - see writeLaunchScript).
+//
+// Two reasons, and the second is the one that matters. tmux caps an inline
+// command near 16 KiB ("command too long"), which a large prompt exceeds. And an
+// inline command sits on two command lines that outlive the launch: the pane
+// shell's, for the agent's whole life, and the tmux SERVER's, when this
+// new-session is the one that starts it - the server keeps that argv until it
+// exits. A command line is what `pkill -f <word>` matches, so the prompt text
+// in it made the pane shell, or the tmux server and with it EVERY session,
+// killable by anyone who pattern-kills a word the prompt contains. A script
+// leaves only its path on either.
 func (r *Runtime) launchInvocation(id, cwd, launchCmd string, env map[string]string) (args []string, scriptPath string, err error) {
-	if len(launchCmd) <= maxInlineLaunchLen {
-		return newSessionArgs(id, cwd, r.shell, launchCmd), "", nil
-	}
-	scriptPath, err = writeLaunchScript(id, launchCmd, env)
+	scriptPath, err = writeLaunchScript(r.launchScriptBaseDir(env), id, launchCmd)
 	if err != nil {
 		return nil, "", err
 	}
 	return newSessionScriptArgs(id, cwd, r.shell, scriptPath), scriptPath, nil
 }
 
-// writeLaunchScript writes launchCmd to a self-deleting shell script so an
-// oversized launch command bypasses tmux's inline command-length limit. The
-// script removes itself as its first action; the shell keeps the file open by
-// fd, so the unlink is safe and nothing is left behind after launch. It lives
-// under AO_DATA_DIR (all app state stays under ~/.ao) — never the worktree, where
-// it could be committed onto the branch.
-func writeLaunchScript(id, launchCmd string, env map[string]string) (string, error) {
-	dir := filepath.Join(launchScriptBaseDir(env), "runtime", "launch")
+// writeLaunchScript writes launchCmd to a self-deleting shell script under
+// baseDir. The script removes itself as its first action; the shell keeps the
+// file open by fd, so the unlink is safe and nothing is left behind after
+// launch. It lives under AO_DATA_DIR (all app state stays under ~/.ao) - never
+// the worktree, where it could be committed onto the branch - and is created
+// 0600, since it carries the agent's prompt.
+func writeLaunchScript(baseDir, id, launchCmd string) (string, error) {
+	dir := filepath.Join(baseDir, "runtime", "launch")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("tmux runtime: prepare launch dir: %w", err)
 	}
@@ -762,10 +766,15 @@ func writeLaunchScript(id, launchCmd string, env map[string]string) (string, err
 }
 
 // launchScriptBaseDir returns the base dir for launch scripts: the session's
-// AO_DATA_DIR when set (keeping app state under ~/.ao), else a temp dir.
-func launchScriptBaseDir(env map[string]string) string {
+// AO_DATA_DIR when set, else the runtime's own data dir (panes launched without
+// a session env), keeping app state under ~/.ao; the OS temp dir only when
+// neither is configured.
+func (r *Runtime) launchScriptBaseDir(env map[string]string) string {
 	if d := strings.TrimSpace(env["AO_DATA_DIR"]); d != "" {
 		return d
+	}
+	if r.dataDir != "" {
+		return r.dataDir
 	}
 	return os.TempDir()
 }

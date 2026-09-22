@@ -65,7 +65,9 @@ func TestGetLaunchCommandBuildsCrossPlatformArgv(t *testing.T) {
 	}
 	want = append(want,
 		"-c", `projects={`+codexTOMLConfigString(workspace)+`={trust_level="trusted"}}`,
-		"-c", "model_instructions_file="+filepath.Join("tmp", "prompt with spaces.md"),
+		// developer_instructions appends to Codex's base instructions; the file
+		// key would REPLACE them, so the text is used even when a file exists.
+		"-c", "developer_instructions='ignored'",
 		"--", "-fix this",
 	)
 	if !reflect.DeepEqual(cmd, want) {
