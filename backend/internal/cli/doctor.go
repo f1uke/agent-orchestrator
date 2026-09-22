@@ -395,9 +395,9 @@ func checkHooksLog(dataDir string, now time.Time) doctorCheck {
 // out loud.
 //
 // It reads the journal rather than asking the daemon, so it still answers after
-// a restart - and it excludes AO-ordered endings, because the shutdown sweep
-// ends every live session at once by design and an alarm that fires on every
-// shutdown is one nobody reads.
+// a restart - and it excludes AO-ordered endings, because a crew teardown and an
+// auto-reclaim sweep end several sessions at once by design and an alarm that
+// fires on those is one nobody reads.
 func checkSessionEndings(dataDir string, now time.Time) doctorCheck {
 	const name = "session-endings"
 	path := filepath.Join(dataDir, endingslog.FileName)

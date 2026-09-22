@@ -773,9 +773,10 @@ the moment of an ending goes to a journal off to the side:
 - **A mass ending is one event, not N endings.** Three or more endings _nobody
   ordered_ inside five seconds raise a daemon `WARN` and are reported by
   **`ao doctor` (`session-endings`)**, which recomputes the grouping from the
-  file so it still answers after a restart. Endings AO ordered are excluded: the
-  shutdown sweep ends every live session at once by design, and an alarm that
-  fires on every shutdown is one nobody reads.
+  file so it still answers after a restart. Endings AO ordered are excluded: a
+  crew teardown ends dev and its members together and an auto-reclaim sweep
+  walks a batch, so an alarm that counted those would fire on an ordinary
+  afternoon.
 
 The hook process still forwards only the harness's bounded reason token, never
 the raw SessionEnd payload - that curation boundary is unchanged, and the

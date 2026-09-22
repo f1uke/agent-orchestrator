@@ -106,9 +106,9 @@ func readFile(path string) ([]Entry, error) {
 // MassEndingThreshold or more, oldest first.
 //
 // AO-ordered endings are excluded for the same reason the live alarm excludes
-// them: the shutdown sweep ends every live session at once and a crew teardown
-// ends dev and qa together, so counting those would report a mass ending on
-// every ordinary shutdown.
+// them: a crew teardown ends dev and its members together and an auto-reclaim
+// sweep walks a batch, so counting those would report a mass ending on an
+// ordinary afternoon.
 //
 // Grouping is chained - each ending joins the group when it is inside
 // MassEndingWindow of the one before it - which is what the writer's sliding

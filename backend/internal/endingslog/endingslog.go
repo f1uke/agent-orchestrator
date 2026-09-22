@@ -63,13 +63,15 @@ const MassEndingWindow = 5 * time.Second
 // MassEndingThreshold is how many UNORDERED endings inside the window make a
 // mass ending.
 //
-// Unordered is the whole of it: AO ends many sessions at once on purpose - the
-// shutdown sweep terminates every live session, a crew teardown takes dev and
-// qa together - so counting those would cry wolf on every ordinary shutdown and
-// teach the reader to ignore it. Only endings AO did not order count, and three
-// of those inside five seconds is the shape of the incident. Two is left below
-// the bar because two agents finishing seconds apart is ordinary; the peers are
-// still recorded on the line either way, so a pair remains findable by grep.
+// Unordered is the whole of it: AO ends several sessions at once on perfectly
+// ordinary routes - a crew teardown takes dev and its members together, an
+// auto-reclaim sweep walks a batch, somebody closes three cards in a row - so
+// counting those would cry wolf on an ordinary afternoon and teach the reader
+// to ignore the one time it matters. Only endings AO did not order count, and
+// three of those inside five seconds is the shape of the incident. Two is left
+// below the bar because two agents finishing seconds apart is ordinary; the
+// peers are still recorded on the line either way, so a pair remains findable
+// by grep.
 const MassEndingThreshold = 3
 
 // Entry is one recorded session ending, as it appears on disk.
@@ -228,9 +230,9 @@ func (r *Recorder) RecordEnding(ctx context.Context, e ports.SessionEnding) {
 	}
 	entry.PaneAlive = r.probePane(ctx, e.RuntimeHandleID)
 
-	// AO-ordered endings are excluded from the alarm, not from the journal: the
-	// shutdown sweep and a crew teardown end several sessions at once by design,
-	// and an alarm that fires on those is one nobody reads.
+	// AO-ordered endings are excluded from the alarm, not from the journal: a
+	// crew teardown and an auto-reclaim sweep end several sessions at once by
+	// design, and an alarm that fires on those is one nobody reads.
 	ordered := e.Source == domain.TerminationSourceAO
 	together, mass := r.cluster(entry.At, entry.SessionID, ordered)
 	entry.Together, entry.MassEnding = together, mass
