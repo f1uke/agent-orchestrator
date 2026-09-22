@@ -19,6 +19,12 @@ type UiState = {
 	/** Projects whose sidebar section is collapsed (heading only). Absent = expanded. */
 	collapsedProjectIds: ReadonlySet<string>;
 	/**
+	 * Board lanes folded to a narrow strip (icon, count, vertical label). Absent =
+	 * open. One set for every project: it answers "how much room does this window
+	 * give the board", which is not a fact about any one project.
+	 */
+	collapsedBoardLanes: ReadonlySet<string>;
+	/**
 	 * User's custom sidebar project order (project ids). Empty = daemon default.
 	 * Projects absent from this list sort after the listed ones (see
 	 * `orderWorkspaces`). Set by drag-and-drop reorder in the sidebar.
@@ -58,6 +64,7 @@ type UiState = {
 	toggleSidebar: () => void;
 	toggleInspector: () => void;
 	toggleProjectCollapsed: (projectId: string) => void;
+	toggleBoardLaneCollapsed: (lane: string) => void;
 	setProjectOrder: (orderedProjectIds: readonly string[]) => void;
 	/** Replace (or with null, remove) a project's split layout; persists the map. */
 	setSplitLayout: (projectId: string, root: SplitNode | null) => void;
@@ -73,6 +80,7 @@ const sidebarStorageKey = "ao.sidebar.open";
 const inspectorStorageKey = "ao.inspector.open";
 const themeStorageKey = "ao.theme";
 const collapsedProjectsStorageKey = "ao.projects.collapsed";
+const collapsedBoardLanesStorageKey = "ao.board.collapsedLanes";
 const projectOrderStorageKey = "ao.projects.order";
 const splitLayoutsStorageKey = "ao.split.layouts";
 
@@ -89,8 +97,8 @@ function initialInspectorOpen() {
 	return getLocalStorage()?.getItem(inspectorStorageKey) !== "false";
 }
 
-function initialCollapsedProjectIds(): Set<string> {
-	const raw = getLocalStorage()?.getItem(collapsedProjectsStorageKey);
+function readStoredIdSet(storageKey: string): Set<string> {
+	const raw = getLocalStorage()?.getItem(storageKey);
 	if (!raw) return new Set();
 	try {
 		const parsed = JSON.parse(raw);
@@ -133,7 +141,8 @@ export const useUiStore = create<UiState>((set) => ({
 	isInspectorOpen: initialInspectorOpen(),
 	theme: initialTheme(),
 	restartingProjectIds: new Set<string>(),
-	collapsedProjectIds: initialCollapsedProjectIds(),
+	collapsedProjectIds: readStoredIdSet(collapsedProjectsStorageKey),
+	collapsedBoardLanes: readStoredIdSet(collapsedBoardLanesStorageKey),
 	projectOrder: initialProjectOrder(),
 	splitLayouts: parseSplitLayouts(getLocalStorage()?.getItem(splitLayoutsStorageKey) ?? null),
 	orchestratorReplacementErrors: {},
@@ -172,6 +181,17 @@ export const useUiStore = create<UiState>((set) => ({
 			}
 			getLocalStorage()?.setItem(collapsedProjectsStorageKey, JSON.stringify([...collapsedProjectIds]));
 			return { collapsedProjectIds };
+		}),
+	toggleBoardLaneCollapsed: (lane) =>
+		set((state) => {
+			const collapsedBoardLanes = new Set(state.collapsedBoardLanes);
+			if (collapsedBoardLanes.has(lane)) {
+				collapsedBoardLanes.delete(lane);
+			} else {
+				collapsedBoardLanes.add(lane);
+			}
+			getLocalStorage()?.setItem(collapsedBoardLanesStorageKey, JSON.stringify([...collapsedBoardLanes]));
+			return { collapsedBoardLanes };
 		}),
 	setProjectOrder: (orderedProjectIds) => {
 		const projectOrder = [...orderedProjectIds];

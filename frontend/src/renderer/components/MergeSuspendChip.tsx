@@ -5,6 +5,7 @@ import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/kill-session";
 import { captureRendererEvent } from "../lib/telemetry";
 import { cn } from "../lib/utils";
+import { CHIP_ACTION_BUTTON, CHIP_WITH_ACTION } from "../lib/chip-with-action";
 import { mergedSuspendPRNumber, type WorkspaceSession } from "../types/workspace";
 import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
 
@@ -71,15 +72,17 @@ export function MergeSuspendChip({ session, compact = false }: { session: Worksp
 			<span
 				aria-label={`${label} — open to continue, or move to Done`}
 				className={cn(
-					"inline-flex shrink-0 items-center gap-1 rounded-full border py-0.5 pl-1.5 pr-0.5 text-[10px] font-medium",
+					CHIP_WITH_ACTION,
 					errorText
 						? "border-[color-mix(in_srgb,var(--red)_55%,transparent)]"
 						: "border-[color-mix(in_srgb,var(--fg-passive)_30%,transparent)]",
 				)}
 				title={errorText ?? `${label} — open the card to continue, or Move to Done to archive`}
 			>
-				<GitMerge className="h-3 w-3" style={{ color: "var(--lane-merge-bright)" }} strokeWidth={2} />
-				<span className="text-passive">{label}</span>
+				<span className="inline-flex items-center gap-1">
+					<GitMerge className="h-3 w-3" style={{ color: "var(--lane-merge-bright)" }} strokeWidth={2} />
+					<span className="text-passive">{label}</span>
+				</span>
 				<button
 					type="button"
 					disabled={done.isPending}
@@ -87,7 +90,7 @@ export function MergeSuspendChip({ session, compact = false }: { session: Worksp
 						e.stopPropagation();
 						done.mutate();
 					}}
-					className="rounded-full px-1.5 py-px text-passive transition-colors hover:bg-[color-mix(in_srgb,var(--fg-passive)_16%,transparent)] disabled:opacity-50"
+					className={CHIP_ACTION_BUTTON}
 				>
 					{done.isPending ? "Moving…" : "Move to Done"}
 				</button>
