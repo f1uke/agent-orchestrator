@@ -2108,6 +2108,33 @@ func TestSessionsAPI_WorkspaceChanges(t *testing.T) {
 	}
 }
 
+// A detached worktree must reach the renderer as FACTS, not as an empty list.
+// The panel cannot tell "nothing changed" from "the diff came from somewhere
+// else" unless the scope rides on the wire.
+func TestSessionsAPI_WorkspaceChangesCarriesTheScope(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceChanges = sessionsvc.WorkspaceChangesResult{
+		Available: true, TargetBranch: "develop", TargetSource: sessionsvc.TargetFromPR, MergeBase: "a058308",
+		Branch: "feature/cookies", DiffSubject: sessionsvc.ChangesSubjectBranch,
+		IncludesWorktree: false, PendingPaths: 2,
+		HeadState: sessionsvc.HeadDetached, HeadLabel: "a058308",
+		Files: []sessionsvc.ChangedFile{{Path: "a.go", Status: sessionsvc.ChangeModified, Committed: true}},
+	}
+	srv := newSessionTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/changes", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	for _, want := range []string{
+		`"branch":"feature/cookies"`, `"diffSubject":"branch"`, `"includesWorktree":false`,
+		`"pendingPaths":2`, `"headState":"detached"`, `"headLabel":"a058308"`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body missing %s:\n%s", want, body)
+		}
+	}
+}
+
 // TestSessionsAPI_WorkspaceChangesUnavailable pins the contract that a degraded
 // session (worktree cleaned up, no target branch) is a 200 with a reason the UI
 // renders as its own empty state — never an error status.

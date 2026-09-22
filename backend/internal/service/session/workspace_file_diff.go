@@ -17,9 +17,11 @@ import (
 type DiffBase string
 
 const (
-	// DiffBaseTarget is merge-base(target, HEAD) .. WORKING TREE — everything
+	// DiffBaseTarget is merge-base(target, branch) .. WORKING TREE — everything
 	// this branch did, committed or not. This is the level the Changes rail
-	// lists, and the level the editor's branch gutter lane marks.
+	// lists, and the level the editor's branch gutter lane marks. When the
+	// worktree is not standing on the session's branch it is
+	// merge-base(target, branch) .. branch tip, exactly as the rail's list is.
 	DiffBaseTarget DiffBase = "target"
 	// DiffBaseHead is HEAD .. WORKING TREE — what Discard Change can undo, and
 	// the level the editor's uncommitted gutter lane marks.
@@ -73,7 +75,7 @@ type FileDiffQuery struct {
 // pr.BaseSHA..pr.HeadSHA. A worker mid-task has no PR yet — which is precisely
 // when the Files panel is most useful. Rather than widen DiffContext (whose
 // contract is review-comment anchoring: mandatory line, hunk windowing), this
-// shares only resolveTargetBranch with WorkspaceChanges and returns the same
+// shares resolveChangesScope with WorkspaceChanges and returns the same
 // DiffContextResult shape so DiffRows/FileDiffView consume it unchanged.
 //
 // It also covers the case a naive implementation gets wrong: a DELETED file has
@@ -111,51 +113,49 @@ func (s *Service) WorkspaceFileDiff(
 	// commit; making it depend on a remote ref would tie an offline action to
 	// the network, and would answer nothing at all for a session whose target
 	// cannot be resolved.
-	baseRev := "HEAD"
+	baseRev, headRev := "HEAD", ""
 	if base == DiffBaseTarget {
-		baseRev, ok = s.mergeBaseWithTarget(ctx, rec, workspace)
-		if !ok {
+		// The SAME scope the list resolved, not a second answer to the same
+		// question: a row the list offered must open on the comparison the list
+		// counted. Sharing it is what keeps a file listed as +38 from opening on
+		// "no diff to show" because the worktree is parked on the base commit.
+		//
+		// The non-blocking target refresh rides along for the same reason - opening
+		// a row must not show hunks measured against a staler target than the list
+		// that offered it. Throttling is shared, so this is normally free.
+		sc := s.resolveChangesScope(ctx, rec, workspace)
+		if sc.Reason != "" {
 			return DiffContextResult{Mode: "file", Path: safePath}, nil
 		}
+		baseRev = sc.MergeBase
+		if !sc.IncludesWorktree {
+			// The worktree stands on another baseline, so the branch's committed
+			// tip is the right-hand side rather than the files on disk.
+			headRev = sc.SubjectRev
+		}
 	}
-	return diffFileAgainst(ctx, workspace, abs, safePath, baseRev, q.FullContext), nil
+	return diffFileAgainst(ctx, workspace, abs, safePath, baseRev, headRev, q.FullContext), nil
 }
 
-// mergeBaseWithTarget resolves the session's target branch, refreshes it, and
-// returns merge-base(target, HEAD). Every failure degrades to ok=false, which
-// the caller renders as "nothing to show" rather than an error.
-func (s *Service) mergeBaseWithTarget(ctx context.Context, rec domain.SessionRecord, workspace string) (string, bool) {
-	branch, _ := s.resolveTargetBranch(ctx, rec, workspace)
-	if branch == "" {
-		return "", false
+// diffFileAgainst renders one file's diff between baseRev and headRev. An EMPTY
+// headRev means the WORKING TREE, so a file the worker has edited but not
+// committed shows its real current state — the same union WorkspaceChanges lists
+// while the worktree is on the session's branch. A named headRev is that branch's
+// tip, used when the worktree is standing somewhere else entirely.
+func diffFileAgainst(
+	ctx context.Context, workspace, abs, safePath, baseRev, headRev string, fullContext bool,
+) DiffContextResult {
+	revs := []string{baseRev}
+	if headRev != "" {
+		revs = append(revs, headRev)
 	}
-	// Same non-blocking refresh the list does, and for the same reason: opening a
-	// row must not show hunks measured against a different (staler) target than
-	// the list that offered it. Throttling is shared, so this is normally free.
-	s.refreshTarget(ctx, workspace, branch)
-
-	ref, ok := resolveBranchRef(ctx, workspace, branch)
-	if !ok {
-		return "", false
-	}
-	out, err := gitOutput(ctx, workspace, "merge-base", ref, "HEAD")
-	if err != nil {
-		return "", false
-	}
-	return strings.TrimSpace(string(out)), true
-}
-
-// diffFileAgainst renders one file's diff against baseRev. No second ref: the
-// diff runs against the WORKING TREE, so a file the worker has edited but not
-// committed shows its real current state — the same union WorkspaceChanges
-// lists.
-func diffFileAgainst(ctx context.Context, workspace, abs, safePath, baseRev string, fullContext bool) DiffContextResult {
-	args := []string{"diff", "-M", baseRev, "--", safePath}
+	args := append([]string{"diff", "-M"}, revs...)
 	if fullContext {
 		// -U with the viewer's own line cap: any wider is wasted, and anything
 		// this drops is dropped again by the maxFileLines truncation below.
-		args = []string{"diff", "-M", fmt.Sprintf("-U%d", maxFileLines), baseRev, "--", safePath}
+		args = append([]string{"diff", "-M", fmt.Sprintf("-U%d", maxFileLines)}, revs...)
 	}
+	args = append(args, "--", safePath)
 	out, err := gitOutput(ctx, workspace, args...)
 	if err != nil {
 		return DiffContextResult{Mode: "file", Path: safePath}

@@ -1685,13 +1685,13 @@ function mockAgentSmokeChecks(sessionId: string, worker?: string): components["s
  */
 export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesResponse {
 	if (sessionId === "demo-no-target") {
-		return { available: false, reason: "no_target_branch", files: [], truncated: false };
+		return { available: false, reason: "no_target_branch", files: [], truncated: false, includesWorktree: false };
 	}
 	// The board's merged sessions are `demo-merged-recent` / `demo-merged-earlier`
 	// — matching the bare id meant this branch was unreachable, so the "worktree
 	// is gone" state has never actually been visible in `ao preview`.
 	if (sessionId.startsWith("demo-merged")) {
-		return { available: false, reason: "no_workspace", files: [], truncated: false };
+		return { available: false, reason: "no_workspace", files: [], truncated: false, includesWorktree: false };
 	}
 	if (sessionId === "demo-clean") {
 		return {
@@ -1700,6 +1700,50 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 			targetSource: "pr",
 			files: [],
 			truncated: false,
+			branch: "feature/clean",
+			diffSubject: "branch",
+			includesWorktree: true,
+			headState: "on_branch",
+		};
+	}
+	// The QA member of a crew, standing on the base build to prove an upgrade path
+	// - the real shape of the defect this scope reporting exists for. Its branch
+	// carries committed work while its worktree is detached, so the panel has to
+	// list the branch AND say where the worktree is. Keyed to a session the demo
+	// board really has, so `VITE_NO_ELECTRON=1` can actually reach it.
+	if (sessionId === "demo-working-qa") {
+		return {
+			available: true,
+			targetBranch: "develop",
+			targetSource: "session_pr_target",
+			mergeBase: "a058308",
+			truncated: false,
+			branch: "feature/encrypted-cookie-storage",
+			diffSubject: "branch",
+			includesWorktree: false,
+			headState: "detached",
+			headLabel: "a058308",
+			pendingPaths: 2,
+			files: [
+				{
+					path: "Sources/Session/CookieStore.swift",
+					status: "modified",
+					additions: 64,
+					deletions: 12,
+					binary: false,
+					committed: true,
+					kind: "file",
+				},
+				{
+					path: "Sources/Session/KeychainCookieStore.swift",
+					status: "added",
+					additions: 118,
+					deletions: 0,
+					binary: false,
+					committed: true,
+					kind: "file",
+				},
+			],
 		};
 	}
 	return {
@@ -1708,6 +1752,10 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 		targetSource: "pr",
 		mergeBase: "abc1234",
 		truncated: false,
+		branch: "feature/files-panel",
+		diffSubject: "branch",
+		includesWorktree: true,
+		headState: "on_branch",
 		files: [
 			{
 				path: "frontend/src/renderer/components/DiffRows.tsx",

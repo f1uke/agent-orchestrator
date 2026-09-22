@@ -10791,12 +10791,26 @@ components:
       properties:
         available:
           type: boolean
+        branch:
+          type: string
+        branchMissing:
+          type: boolean
+        diffSubject:
+          type: string
         files:
           items:
             $ref: '#/components/schemas/ChangedFileDTO'
           type: array
+        headLabel:
+          type: string
+        headState:
+          type: string
+        includesWorktree:
+          type: boolean
         mergeBase:
           type: string
+        pendingPaths:
+          type: integer
         reason:
           type: string
         targetBranch:
@@ -10813,6 +10827,7 @@ components:
       - available
       - files
       - truncated
+      - includesWorktree
       type: object
     WorkspaceFileResponse:
       properties:
