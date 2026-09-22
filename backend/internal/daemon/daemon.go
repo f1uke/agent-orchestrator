@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
@@ -250,10 +251,30 @@ func Run() error {
 	// every loop registers into the same registry.
 	loopReg := looptelemetry.New(func() time.Time { return time.Now().UTC() })
 
+	// The account of WHY sessions stop, kept off the session row and beside the
+	// other journals under the data dir. A termination is rare, so the pane
+	// probe it asks costs nothing measurable; what it buys is the one fact that
+	// stops being true if you look later - whether the pane outlived the agent.
+	// A journal that cannot be built is logged and skipped: AO must still run.
+	//
+	// Declared as the INTERFACE and assigned only on success: handing the
+	// reducer a typed nil pointer would give it a non-nil sink that panics on
+	// the first ending.
+	var endingsJournal ports.SessionEndingSink
+	if journal, err := endingslog.New(cfg.DataDir,
+		endingslog.WithLogger(log),
+		endingslog.WithPaneProbe(func(ctx context.Context, handleID string) (bool, error) {
+			return gatedRuntime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID})
+		})); err != nil {
+		log.Warn("session endings journal unavailable; endings will record only what the row keeps", "err", err)
+	} else {
+		endingsJournal = journal
+	}
+
 	// Bring up the Lifecycle Manager and the reaper first: it makes the session
 	// lifecycle write path live (reducer write -> store -> DB trigger ->
 	// change_log -> poller -> broadcaster) and gives startSession the shared LCM.
-	lcStack := startLifecycle(ctx, store, gatedRuntime, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, func() bool { return autoNudge.Get().Enabled }, loopReg, log)
+	lcStack := startLifecycle(ctx, store, gatedRuntime, messenger, notificationWriter, telemetrySink, func() map[string]string { return promptOverrides.Get().Templates }, func() bool { return autoNudge.Get().Enabled }, loopReg, endingsJournal, log)
 	lcStack.scmDone = startSCMObserver(ctx, store, lcStack.LCM, loopReg, log)
 
 	// The spawn-confirm gate is a global setting the orchestrator prompt reads at
@@ -397,6 +418,12 @@ func Run() error {
 	}
 	wikiSvc := wikisvc.New(wikisvc.Deps{Settings: wikiSettings, Agents: wikiAgents, Runtime: gatedRuntime})
 
+	// Built here rather than inline so the boot sweep below can reach it: a run
+	// pane is the one per-session pane with no database row to enumerate, so
+	// recovering the orphans needs the service that knows where their records
+	// live.
+	iosRunSvc := newIOSRunService(cfg.DataDir, store, runtimeAdapter)
+
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
 		Agents:             agentSvc,
@@ -406,7 +433,7 @@ func Run() error {
 		Smoke:              smokeSvc,
 		CrewRuns:           crewRunSvc,
 		Sim:                newSimService(store, simScreen, sessMgr),
-		IOSRun:             newIOSRunService(cfg.DataDir, store, runtimeAdapter),
+		IOSRun:             iosRunSvc,
 		SimScreen:          simScreen,
 		SimVideo:           simVideo,
 		SimDrags:           simDrags,
@@ -479,6 +506,18 @@ func Run() error {
 		} else if failed > 0 {
 			log.Info("reconciled orphaned review runs on boot", "failed", failed)
 		}
+	}
+
+	// The same sweep for the OTHER pane a session spawns: the run bar's build
+	// pane. It has no row of its own either, and until an ending started reaping
+	// it nothing ever did - `iosrun-advisor-ios-app-13` was still building days
+	// after its session had ended. This is the recovery half: panes orphaned by
+	// a crash, or by a kill while the daemon was down. Best-effort; never blocks
+	// boot.
+	if reaped, reapErr := iosRunSvc.ReapOrphanedRuns(ctx); reapErr != nil {
+		log.Error("reap orphaned iOS run panes on boot failed", "err", reapErr)
+	} else if reaped > 0 {
+		log.Info("reaped orphaned iOS run panes on boot", "reaped", reaped)
 	}
 
 	// ponytail: 5s tolerates a brief frontend restart; tune if dev hot-reload trips it.

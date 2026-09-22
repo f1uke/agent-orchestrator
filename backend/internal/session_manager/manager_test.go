@@ -1238,7 +1238,7 @@ func TestKill_ReapsReviewerPane(t *testing.T) {
 	m, st, _, _ := newManager()
 	st.sessions["mer-1"] = mkLive("mer-1")
 	var reaped []domain.SessionID
-	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
+	m.SetSessionPaneReaper(func(_ context.Context, id domain.SessionID) error {
 		reaped = append(reaped, id)
 		return nil
 	})
@@ -1262,7 +1262,7 @@ func TestKill_ReapsReviewerPaneEvenWhenWorkspacePreserved(t *testing.T) {
 	other.Metadata.WorkspacePath = st.sessions["mer-1"].Metadata.WorkspacePath
 	st.sessions["mer-2"] = other
 	var reaped []domain.SessionID
-	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
+	m.SetSessionPaneReaper(func(_ context.Context, id domain.SessionID) error {
 		reaped = append(reaped, id)
 		return nil
 	})
@@ -1285,7 +1285,7 @@ func TestKill_RefusedKillLeavesTheReviewerPaneAlone(t *testing.T) {
 	st.sessions["mer-1"] = mkLive("mer-1")
 	dirtyWorkspace(ws)
 	var reaped []domain.SessionID
-	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
+	m.SetSessionPaneReaper(func(_ context.Context, id domain.SessionID) error {
 		reaped = append(reaped, id)
 		return nil
 	})
@@ -1301,7 +1301,7 @@ func TestKill_RefusedKillLeavesTheReviewerPaneAlone(t *testing.T) {
 func TestKill_ReviewerReaperErrorDoesNotFailKill(t *testing.T) {
 	m, st, _, _ := newManager()
 	st.sessions["mer-1"] = mkLive("mer-1")
-	m.SetReviewerReaper(func(_ context.Context, _ domain.SessionID) error {
+	m.SetSessionPaneReaper(func(_ context.Context, _ domain.SessionID) error {
 		return errors.New("tmux is unhappy")
 	})
 	if _, err := killFreed(m, "mer-1"); err != nil {
@@ -1316,7 +1316,7 @@ func TestCleanup_ReapsReviewerPane(t *testing.T) {
 	m, st, _, _ := newManager()
 	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", RuntimeHandleID: "h1"})
 	var reaped []domain.SessionID
-	m.SetReviewerReaper(func(_ context.Context, id domain.SessionID) error {
+	m.SetSessionPaneReaper(func(_ context.Context, id domain.SessionID) error {
 		reaped = append(reaped, id)
 		return nil
 	})

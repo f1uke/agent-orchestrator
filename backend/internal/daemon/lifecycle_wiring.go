@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
+	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
@@ -56,9 +58,9 @@ type lifecycleStack struct {
 // templates is the prompt-overrides store's Templates getter; it lets an
 // operator's edited nudge text take effect on the next observation without a
 // daemon restart.
-func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, templates func() map[string]string, autoNudgeDefault func() bool, reg *looptelemetry.Registry, logger *slog.Logger) *lifecycleStack {
+func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, templates func() map[string]string, autoNudgeDefault func() bool, reg *looptelemetry.Registry, endings ports.SessionEndingSink, logger *slog.Logger) *lifecycleStack {
 	renderer := messagetemplates.NewRenderer(templates)
-	lcm := lifecycle.New(store, messenger, lifecycle.WithNotificationSink(notifier), lifecycle.WithTelemetry(telemetry), lifecycle.WithMessageRenderer(renderer), lifecycle.WithAutoNudgeDefault(autoNudgeDefault), lifecycle.WithTranscriptLocator(locateTranscript))
+	lcm := lifecycle.New(store, messenger, lifecycle.WithNotificationSink(notifier), lifecycle.WithTelemetry(telemetry), lifecycle.WithMessageRenderer(renderer), lifecycle.WithAutoNudgeDefault(autoNudgeDefault), lifecycle.WithTranscriptLocator(locateTranscript), lifecycle.WithEndingSink(endings))
 	reaperRec := reg.Register(looptelemetry.Spec{
 		Name:        "reaper",
 		Display:     "Runtime liveness",
@@ -67,6 +69,26 @@ func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runt
 	})
 	rp := reaper.New(lcm, store, runtime, reaper.Config{Logger: logger, OnTick: reaperRec.Tick})
 	return &lifecycleStack{LCM: lcm, reaperDone: rp.Start(ctx)}
+}
+
+// newSessionPaneReaper composes the reap of every pane a session SPAWNS, so
+// they share one lifetime and one failure mode.
+//
+// Both are bare runtime handles named after the session id - no database row,
+// no worktree, no board card - which is what makes a missed reap permanent:
+// nothing that sweeps sessions can find them afterwards. `ao sim run`'s pane
+// (#308) had no reaper at all, so `iosrun-advisor-ios-app-13` was still
+// building days after the session that started it had ended.
+//
+// errors.Join rather than an early return: one pane that will not die must not
+// leave the other one running, and the caller logs whatever comes back.
+func newSessionPaneReaper(reapReviewer func(context.Context, domain.SessionID) error, runtime ports.Runtime) func(context.Context, domain.SessionID) error {
+	return func(ctx context.Context, id domain.SessionID) error {
+		return errors.Join(
+			reapReviewer(ctx, id),
+			runtime.Destroy(ctx, ports.RuntimeHandle{ID: iosrunsvc.HandleID(id)}),
+		)
+	}
 }
 
 // Stop waits for the reaper goroutine to exit. The caller must cancel the ctx
@@ -232,11 +254,24 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		ResponseLanguage: func() string { return responseLang.Language() },
 	})
 	reviewSvc := reviewsvc.New(reviewEngine, store, reviewsvc.WithLifecycleReducer(lcm))
-	// Tie the reviewer pane's lifetime to its worker: when the session manager
-	// tears a worker down (kill/reclaim/delete), it closes the worker's reviewer
-	// pane too, instead of leaving a keep-alive shell behind. Wired here — after
-	// the review service exists — because the manager is built first.
-	mgr.SetReviewerReaper(reviewSvc.TeardownReviewer)
+	// Tie the panes a session SPAWNS to the session itself: when it is torn down
+	// (kill/reclaim/delete), its reviewer pane and its iOS run pane go with it,
+	// instead of leaving keep-alive shells and a live xcodebuild behind. Wired
+	// here - after the review service exists - because the manager is built
+	// first.
+	//
+	// Both are bare runtime handles named after the session id, with no row, no
+	// worktree and no card, which is what makes a missed reap permanent: nothing
+	// that sweeps sessions can see them, so `iosrun-advisor-ios-app-13` was still
+	// running days after the session that started it had ended. They are reaped
+	// together because they have exactly the same lifetime and exactly the same
+	// failure mode.
+	mgr.SetSessionPaneReaper(newSessionPaneReaper(reviewSvc.TeardownReviewer, runtime))
+	// And reach the two routes to termination that never come through Teardown:
+	// an agent ending its own session, and the reaper finding a runtime that is
+	// no longer there. Those are the endings that leaked a run pane, because the
+	// reducer writes the terminal row directly and nothing else ran.
+	lcm.SetSessionPaneReaper(mgr.ReapSessionPanes)
 	// The smoke service backs the Tests tab: per-session checklists + evidence
 	// blobs under <dataDir>/evidence, and report-back over the same Send path
 	// `ao send` uses (sessionSvc). Built after sessionSvc so it can deliver
