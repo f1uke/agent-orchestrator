@@ -645,6 +645,35 @@ func TestDoctorSessionEndingsStates(t *testing.T) {
 		}
 	})
 
+	// The 15:06:43 event as the journal now records it: one of the five was
+	// PARKED, and each pane said how its agent died. The doctor line has to
+	// carry both, because "SIGTERM x5" is the answer to what did it.
+	t.Run("names parked stops and how each process died", func(t *testing.T) {
+		cfg := setConfigEnv(t)
+		base := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
+		parked, _ := json.Marshal(endingslog.Entry{At: base, SessionID: "nter-ios-app-79", Source: "agent", Reason: "other", Outcome: "parked"})
+		exit := func(id string, at time.Time, code int) string {
+			return fmt.Sprintf(`{"sessionId":%q,"agentExit":{"code":%d,"epoch":"%d.%09d"}}`, id, code, at.Unix(), at.Nanosecond())
+		}
+		writeEndings(t, cfg.dataDir,
+			string(parked),
+			endingLine(base.Add(20*time.Millisecond), "nter-ios-app-77", "agent", "other"),
+			exit("nter-ios-app-79", base.Add(500*time.Millisecond), 143),
+			exit("nter-ios-app-77", base.Add(510*time.Millisecond), 143),
+			exit("advisor-ios-app-15", base.Add(30*time.Millisecond), 137),
+		)
+		c := doctorContext(t, map[string]string{"git": "/bin/git"}, gitOnly)
+		check := findDoctorCheck(t, c.runDoctor(context.Background()), "session-endings")
+		if check.Level != doctorWarn {
+			t.Fatalf("session-endings = %+v, want WARN", check)
+		}
+		for _, want := range []string{"3 session(s) ended together", "nter-ios-app-79 (parked, SIGTERM)", "nter-ios-app-77 (SIGTERM)", "advisor-ios-app-15 (unreported, SIGKILL)"} {
+			if !strings.Contains(check.Message, want) {
+				t.Errorf("message missing %q: %s", want, check.Message)
+			}
+		}
+	})
+
 	t.Run("a daemon shutdown is not an incident", func(t *testing.T) {
 		cfg := setConfigEnv(t)
 		base := time.Now().Add(-time.Hour).UTC()

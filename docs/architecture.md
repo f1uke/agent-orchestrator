@@ -770,13 +770,40 @@ the moment of an ending goes to a journal off to the side:
   was still alive at that instant** (probed there, because it stops being true
   if you look later), and **which other sessions ended alongside it**. It rolls
   over at 1 MiB keeping one previous generation, like `message-delivery.jsonl`.
+- **An agent that stops is recorded even when the session does not end.** A
+  solo or dev worker whose agent ends itself before any PR was opened is
+  PARKED (suspended, `sleep_reason = undelivered`, worktree kept) rather than
+  terminated, and its row records no termination - the session is not over.
+  But its agent did stop, so the journal gets a line for it with
+  `"outcome": "parked"`; every terminal write says `"outcome": "terminated"`.
+  The journal is the record of agents stopping; `outcome` says what AO then
+  did with the row. Parked stops count toward a mass ending: on 2026-09-22
+  each event hid one parked session, and those were exactly the ones still
+  holding unshipped work.
+- **How the agent PROCESS ended.** The SessionEnd hook runs inside the dying
+  process and cannot tell a signal from a decision. The pane's leader shell
+  can: `ports.RuntimeConfig.ExitStatusFile` makes the tmux launch run a POSIX
+  snippet between the agent and the keep-alive shell that appends
+  `{"sessionId", "agentExit": {"code", "epoch"}}` to the same `endings.jsonl`.
+  `code` is `$?`, which is 128+N when signal N killed the agent. Measured on
+  Claude Code 2.1.280: SIGTERM gives `reason: other` + 143, SIGHUP `other` +
+  129, SIGINT `other` + 0, SIGKILL no SessionEnd at all + 137, and `/exit`
+  gives `prompt_input_exit` + 0. The daemon and the pane each append their
+  line the moment they know - neither waits for the other, so a daemon killed
+  by the same event loses nothing - and `endingslog.Read` joins each exit
+  line onto the nearest ending of the same session (exit within -5 s / +60 s
+  of it). An exit with no ending, such as a SIGKILL, becomes an entry of its
+  own with an empty `source`. Only agent launches (spawn and restore) opt in;
+  reviewer, wiki and iOS-run panes do not.
 - **A mass ending is one event, not N endings.** Three or more endings _nobody
   ordered_ inside five seconds raise a daemon `WARN` and are reported by
   **`ao doctor` (`session-endings`)**, which recomputes the grouping from the
-  file so it still answers after a restart. Endings AO ordered are excluded: a
-  crew teardown ends dev and its members together and an auto-reclaim sweep
-  walks a batch, so an alarm that counted those would fire on an ordinary
-  afternoon.
+  file so it still answers after a restart, and names each session with its
+  outcome and exit (`nter-ios-app-79 (parked, SIGTERM)`). Endings AO ordered
+  are excluded: a crew teardown ends dev and its members together and an
+  auto-reclaim sweep walks a batch, so an alarm that counted those would fire
+  on an ordinary afternoon. Exits that no hook reported are counted from the
+  file only, since they never reached the daemon.
 
 The hook process still forwards only the harness's bounded reason token, never
 the raw SessionEnd payload - that curation boundary is unchanged, and the

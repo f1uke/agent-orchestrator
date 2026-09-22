@@ -132,6 +132,23 @@ type RuntimeConfig struct {
 	WorkspacePath string
 	Argv          []string
 	Env           map[string]string
+
+	// ExitStatusFile, when set, asks the runtime to record how the agent process
+	// ended: once Argv exits, the runtime appends ONE JSON line to this file,
+	//
+	//	{"sessionId":"<id>","agentExit":{"code":<status>,"epoch":"<unix seconds>"}}
+	//
+	// where code is the exit status the launching shell saw (128+N when signal N
+	// killed it) and epoch is when that shell saw it, to whatever sub-second
+	// precision the shell offers. The line is written by whatever outlives the
+	// agent inside the runtime, never by the daemon, so it is recorded even when
+	// nothing reported the ending and even when the daemon is down.
+	//
+	// It is opt-in and best-effort: it must not change how Argv runs, and a
+	// runtime that cannot observe the exit simply writes nothing. Only an agent
+	// session's own launch sets it; auxiliary panes (reviewer, wiki, iOS runs)
+	// leave it empty, since their exits are not a session ending.
+	ExitStatusFile string
 }
 
 // RuntimeHandle identifies a live runtime instance. Its ID is opaque outside

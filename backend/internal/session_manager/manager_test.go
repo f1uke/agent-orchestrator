@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
@@ -1541,6 +1542,7 @@ func TestRestore_AdoptsLiveRuntimeWithoutRelaunch(t *testing.T) {
 	m, st, rt, ws := newManager()
 	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x", RuntimeHandleID: "live-1"})
 	rt.aliveByHandle = map[string]bool{"live-1": true}
+	rt.agentAliveByHandle = map[string]bool{"live-1": true}
 
 	s, err := m.Restore(ctx, "mer-1")
 	if err != nil {
@@ -4224,6 +4226,90 @@ func TestResume_RecreatesRuntimeClearsSuspended(t *testing.T) {
 	}
 }
 
+// A PARKED worker's agent ended itself, and the launch keeps a shell alive in
+// its pane afterwards - so the pane is still there when the card is opened, with
+// nothing in it. Adopting that woke the row and relaunched nothing. The agent is
+// what must be alive to adopt; a pane without one is relaunched into.
+func TestResume_AParkedPaneWithNoAgentIsRelaunchedNotAdopted(t *testing.T) {
+	now := time.Date(2026, 9, 22, 16, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
+		IsSuspended: true, SleepReason: domain.SleepReasonUndelivered,
+		Metadata:  domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX", Prompt: "do the thing"},
+		Activity:  domain.Activity{State: domain.ActivityParked, LastActivityAt: now.Add(-time.Hour)},
+		CreatedAt: now.Add(-2 * time.Hour),
+	}
+	rt.aliveByHandle = map[string]bool{"hX": true}
+	rt.agentAliveByHandle = map[string]bool{"hX": false}
+
+	rec, err := m.Resume(ctx, "s1", domain.WokenByView)
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if rt.created != 1 {
+		t.Fatalf("a pane with no agent in it was adopted: runtime created = %d, want 1 relaunch", rt.created)
+	}
+	if rec.IsSuspended {
+		t.Fatal("Resume must clear the suspended flag")
+	}
+}
+
+// The other side of the same guard: an agent that IS still running under the
+// handle - an orchestrator sibling on a shared handle, a suspend that raced the
+// open - is adopted, never relaunched on top of.
+func TestResume_AdoptsARunningAgent(t *testing.T) {
+	now := time.Date(2026, 9, 22, 16, 0, 0, 0, time.UTC)
+	m, st, rt, _, _ := newIdleManager(time.Hour, now)
+	st.sessions["s1"] = domain.SessionRecord{
+		ID: "s1", ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessClaudeCode,
+		IsSuspended: true,
+		Metadata:    domain.SessionMetadata{Branch: "ao/s1/root", WorkspacePath: "/ws/s1", RuntimeHandleID: "hX"},
+		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: now.Add(-time.Hour)},
+		CreatedAt:   now.Add(-2 * time.Hour),
+	}
+	rt.aliveByHandle = map[string]bool{"hX": true}
+	rt.agentAliveByHandle = map[string]bool{"hX": true}
+
+	if _, err := m.Resume(ctx, "s1", domain.WokenByView); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if rt.created != 0 {
+		t.Fatalf("a running agent was relaunched on top of: created = %d, want 0", rt.created)
+	}
+}
+
+// Restore has the same guard for the same reason: an agent that ended itself is
+// terminated with its pane still standing.
+func TestRestore_APaneWithNoAgentIsRelaunchedNotAdopted(t *testing.T) {
+	m, st, rt, _ := newManager()
+	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x", RuntimeHandleID: "live-1"})
+	rt.aliveByHandle = map[string]bool{"live-1": true}
+
+	if _, err := m.Restore(ctx, "mer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if rt.created != 1 {
+		t.Fatalf("a pane with no agent in it was adopted: created = %d, want 1 relaunch", rt.created)
+	}
+}
+
+// When the agent probe cannot answer, the pane's existence decides as before:
+// erring toward adopt never relaunches on top of a live agent.
+func TestRestore_AnUnanswerableAgentProbeStillAdopts(t *testing.T) {
+	m, st, rt, _ := newManager()
+	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x", RuntimeHandleID: "live-1"})
+	rt.aliveByHandle = map[string]bool{"live-1": true}
+	rt.agentAliveErr = errors.New("pgrep unavailable")
+
+	if _, err := m.Restore(ctx, "mer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if rt.created != 0 {
+		t.Fatalf("created = %d, want the pane adopted when its agent cannot be probed", rt.created)
+	}
+}
+
 // TestResume_NotSuspendedIsNoOp: resuming a live session is idempotent.
 func TestResume_NotSuspendedIsNoOp(t *testing.T) {
 	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
@@ -5255,5 +5341,34 @@ func TestCloseIdleSessions_ExactlyAtTTL_NotYetIdle(t *testing.T) {
 	}
 	if rt.destroyed != 0 {
 		t.Fatalf("Destroy calls = %d, want 0", rt.destroyed)
+	}
+}
+
+// Every agent launch - a fresh spawn and a restore alike - asks the runtime to
+// record how the agent process ends, into the endings journal under the data
+// dir, so a resumed session's next stop is covered as well as its first.
+func TestLaunch_AsksTheRuntimeToRecordTheAgentsExit(t *testing.T) {
+	dataDir := t.TempDir()
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
+	rt := &fakeRuntime{}
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: rt, Agents: fakeAgents{}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, DataDir: dataDir})
+	want := filepath.Join(dataDir, endingslog.FileName)
+
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker}); err != nil {
+		t.Fatal(err)
+	}
+	if rt.lastCfg.ExitStatusFile != want {
+		t.Errorf("spawn ExitStatusFile = %q, want %q", rt.lastCfg.ExitStatusFile, want)
+	}
+
+	rt.lastCfg = ports.RuntimeConfig{}
+	seedTerminal(st, "mer-9", domain.SessionMetadata{WorkspacePath: "/ws/mer-9", Branch: "b", AgentSessionID: "agent-x"})
+	if _, err := m.Restore(ctx, "mer-9"); err != nil {
+		t.Fatal(err)
+	}
+	if rt.lastCfg.ExitStatusFile != want {
+		t.Errorf("restore ExitStatusFile = %q, want %q", rt.lastCfg.ExitStatusFile, want)
 	}
 }

@@ -80,12 +80,12 @@ func TestGatedRuntime_DefersWhileUserTyping(t *testing.T) {
 	}
 }
 
-// The queued-message readiness signal is the runtime's agent-liveness probe.
-// Losing it is INVISIBLE at runtime — messages still arrive, just later and on a
-// timer instead of on a signal — so pin both halves: the selected runtime does
-// carry the capability here, and the input-gated wrapper does NOT, which is why
-// the prober has to be taken from the adapter itself.
-func TestAgentLivenessProberComesFromTheUnwrappedRuntime(t *testing.T) {
+// Agent liveness is how every consumer tells a live agent from the shell a pane
+// keeps after its agent exits. Losing it is INVISIBLE at runtime - the queue
+// waits on a timer instead of a signal, the session manager's reap-safety check
+// says "dead" for everything, Resume adopts a pane with no agent in it - so pin
+// that the input gate carries the capability through rather than hiding it.
+func TestGatedRuntimeKeepsAgentLiveness(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("conpty cannot report agent liveness; the queue falls back to a bounded wait there")
 	}
@@ -93,7 +93,33 @@ func TestAgentLivenessProberComesFromTheUnwrappedRuntime(t *testing.T) {
 	if agentLivenessProber(adapter) == nil {
 		t.Fatal("the selected runtime must expose AgentAlive, or queued messages lose their readiness signal")
 	}
-	if _, ok := any(newGatedRuntime(adapter, nil)).(ports.AgentLivenessProber); ok {
-		t.Fatal("gatedRuntime now satisfies AgentLivenessProber; the comment on agentLivenessProber is stale")
+	if _, ok := newGatedRuntime(adapter, nil).(ports.AgentLivenessProber); !ok {
+		t.Fatal("the input gate hides AgentAlive; the session manager would read every pane as agentless")
+	}
+}
+
+// probeOnlyInner is an inner runtime that can report agent liveness.
+type probeOnlyInner struct {
+	runtimeselect.Runtime
+	alive bool
+}
+
+func (p probeOnlyInner) AgentAlive(context.Context, ports.RuntimeHandle) (bool, error) {
+	return p.alive, nil
+}
+
+// The wrapper forwards the inner runtime's answer, and a runtime without the
+// capability (conpty) stays without it, so its consumers keep their fallback.
+func TestGatedRuntimeForwardsAgentLivenessOnlyWhenInnerHasIt(t *testing.T) {
+	g := newGatedRuntime(probeOnlyInner{alive: true}, nil)
+	prober, ok := g.(ports.AgentLivenessProber)
+	if !ok {
+		t.Fatal("capability lost through the gate")
+	}
+	if alive, err := prober.AgentAlive(context.Background(), ports.RuntimeHandle{ID: "h"}); err != nil || !alive {
+		t.Fatalf("AgentAlive = %v, %v; want the inner runtime's true", alive, err)
+	}
+	if _, ok := newGatedRuntime(&fakeInnerRuntime{}, nil).(ports.AgentLivenessProber); ok {
+		t.Fatal("a runtime without the capability gained one through the gate")
 	}
 }

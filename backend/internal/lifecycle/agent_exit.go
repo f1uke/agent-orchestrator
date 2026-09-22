@@ -43,7 +43,7 @@ func (m *Manager) applyAgentExit(ctx context.Context, rec domain.SessionRecord, 
 		return err
 	}
 	if undelivered {
-		if err := m.parkUndelivered(ctx, rec.ID, at); err != nil {
+		if err := m.parkUndelivered(ctx, rec.ID, reason, at); err != nil {
 			return err
 		}
 		m.emitLeftWaitingInput(ctx, rec, domain.ActivityParked, now)
@@ -150,12 +150,24 @@ func (m *Manager) exitLeavesWorkUndelivered(ctx context.Context, rec domain.Sess
 // the tree its work is still sitting in, which is the affordance a keep-warm
 // merged worker already has.
 //
-// No termination account is recorded, because the session has not ended.
-func (m *Manager) parkUndelivered(ctx context.Context, id domain.SessionID, at time.Time) error {
-	return m.mutate(ctx, id, func(cur domain.SessionRecord, _ time.Time) (domain.SessionRecord, bool) {
+// No termination account is recorded ON THE ROW, because the session has not
+// ended. The endings journal still gets a line, marked parked: the journal is
+// the record of an agent STOPPING, and this agent did stop - by the same routes,
+// for the same unknown reasons, as the ones that are terminated. Leaving it out
+// hid one session in each of the 2026-09-22 mass endings, and the hidden ones
+// were exactly those still holding unshipped work. Its panes are NOT reaped:
+// the session is alive on the board, and resuming it expects them intact.
+func (m *Manager) parkUndelivered(ctx context.Context, id domain.SessionID, reason string, at time.Time) error {
+	var parked *ports.SessionEnding
+	err := m.mutate(ctx, id, func(cur domain.SessionRecord, _ time.Time) (domain.SessionRecord, bool) {
 		if cur.IsTerminated || cur.IsSuspended {
 			return cur, false
 		}
+		// The same account a terminal write would give, built from the same
+		// pre-write record, differing only in what AO did about it.
+		e := m.endingFor(cur, m.termination(cur, domain.TerminationSourceAgent, reason, at))
+		e.Outcome = ports.EndingParked
+		parked = &e
 		next := cur
 		next.Activity = domain.Activity{State: domain.ActivityParked, LastActivityAt: at}
 		// The deriver reads parked only for a session that has proved its hook
@@ -169,6 +181,13 @@ func (m *Manager) parkUndelivered(ctx context.Context, id domain.SessionID, at t
 		next.WokenBy = ""
 		return next, true
 	})
+	if err != nil {
+		return err
+	}
+	if parked != nil {
+		m.recordEnding(ctx, *parked)
+	}
+	return nil
 }
 
 // markAgentExited writes the terminal row for an ending the agent reported.

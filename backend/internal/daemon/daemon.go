@@ -169,10 +169,8 @@ func Run() error {
 	// trailing Enter. It delivers through the SAME gated runtime, so a held message
 	// lands on an empty input line like any other. Built before the messenger,
 	// which hands it anything addressed to a session that is not listening.
-	// The readiness signal is the runtime's own agent-liveness probe, taken from
-	// the UNWRAPPED adapter: gatedRuntime's method set is the union interface it
-	// embeds, which does not carry AgentAlive (conpty cannot implement it), so
-	// asking the wrapper for the capability would silently find nothing.
+	// The readiness signal is the runtime's own agent-liveness probe, nil for a
+	// runtime that cannot report it (conpty).
 	messageQueue := msgqueue.New(store, gatedRuntime, agentLivenessProber(runtimeAdapter), log)
 	// The agent messenger sends validated user input to the session's live
 	// runtime pane, or queues it when the session cannot receive it. Built before the
