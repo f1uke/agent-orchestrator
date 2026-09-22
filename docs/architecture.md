@@ -770,8 +770,8 @@ the moment of an ending goes to a journal off to the side:
   was still alive at that instant** (probed there, because it stops being true
   if you look later), and **which other sessions ended alongside it**. It rolls
   over at 1 MiB keeping one previous generation, like `message-delivery.jsonl`.
-- **A mass ending is one event, not N endings.** Three or more endings *nobody
-  ordered* inside five seconds raise a daemon `WARN` and are reported by
+- **A mass ending is one event, not N endings.** Three or more endings _nobody
+  ordered_ inside five seconds raise a daemon `WARN` and are reported by
   **`ao doctor` (`session-endings`)**, which recomputes the grouping from the
   file so it still answers after a restart. Endings AO ordered are excluded: the
   shutdown sweep ends every live session at once by design, and an alarm that
