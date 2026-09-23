@@ -1,4 +1,4 @@
-import { Check, Circle, CircleDot, CircleDashed, Contrast, type LucideIcon } from "lucide-react";
+import { Archive, Check, Circle, CircleDot, CircleDashed, Contrast, type LucideIcon } from "lucide-react";
 import type { AttentionZone } from "../types/workspace";
 
 // The four board lanes, each owning one hue in a 4-color semantic system
@@ -13,8 +13,15 @@ import type { AttentionZone } from "../types/workspace";
 // while each card draws its own.
 export type LaneKey = "todo" | "working" | "action" | "pending" | "merge";
 
-export type LaneConfig = {
-	key: LaneKey;
+/**
+ * Every lane the board draws: the five live lanes plus Done, where merged and
+ * terminated sessions go. Done is a board lane only - the sidebar drops finished
+ * sessions, so {@link LaneKey} and {@link LANE_ORDER} stay the live five.
+ */
+export type BoardLaneKey = LaneKey | "done";
+
+export type LaneConfig<K extends BoardLaneKey = LaneKey> = {
+	key: K;
 	/** Board column header label. */
 	label: string;
 	/** The lane's hue: column header label + glyph, and every card's status glyph. */
@@ -70,13 +77,26 @@ export const LANES: Record<LaneKey, LaneConfig> = {
 	},
 };
 
+// Finished work: merged and terminated sessions, newest ending first. It takes
+// no hue of its own - the four-hue system is for work in flight, and an archive
+// wearing one would read as a fifth state of work. Muted rather than passive, so
+// its header still clears the contrast floor beside the coloured ones.
+export const DONE_LANE: LaneConfig<"done"> = {
+	key: "done",
+	label: "Done",
+	dotVar: "var(--fg-muted)",
+	Icon: Archive,
+	filled: false,
+	emptyText: "Nothing finished yet",
+};
+
 // Left→right board order and, identically, the sidebar's sort order (the design
 // sorts sidebar sessions by state in the same flow as the lanes).
 export const LANE_ORDER: LaneKey[] = ["todo", "working", "action", "pending", "merge"];
 
-// Maps a derived attention zone to its lane. "done" is not a lane (terminated /
-// merged sessions live in the board's Done bar and leave the sidebar), so it
-// falls back to the review lane for any defensive caller.
+// Maps a derived attention zone to its live lane. "done" has no live lane
+// (terminated / merged sessions sit in the board's Done lane and leave the
+// sidebar), so it falls back to the review lane for any defensive caller.
 export function laneForZone(zone: AttentionZone): LaneConfig {
 	return zone === "done" ? LANES.pending : LANES[zone];
 }

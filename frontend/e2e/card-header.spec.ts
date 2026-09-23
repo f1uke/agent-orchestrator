@@ -10,8 +10,9 @@ import { expect, test, type Page } from "@playwright/test";
 // lay out, so they are measured here in real Chromium on the demo board (which
 // carries an undelivered card and a stalled crew holding one).
 
-// 960 is the app's minimum window; 1280 is the narrowest that still fits five
-// open lanes; 1440 wraps the undelivered chip's button; 1800 keeps it on one line.
+// 960 is the app's minimum window; 1280 is the narrowest that still fits the five
+// live lanes open beside the folded Done lane; 1440 wraps the undelivered chip's
+// button; 1800 keeps it on one line.
 const WIDTHS = [960, 1280, 1440, 1800];
 
 type HeaderReport = {
@@ -104,15 +105,18 @@ test("the undelivered chip keeps its button on its line when there is room, and 
 	expect(await chipHeight()).toBeGreaterThan(36);
 });
 
-test("five lanes fit from 1280px; at 960px the board scrolls until two lanes are folded", async ({ page }) => {
+test("five lanes and folded Done fit from 1280px; at 960px the board scrolls until two lanes are folded", async ({
+	page,
+}) => {
 	await openBoard(page, 1280);
+	await expect(page.getByRole("button", { name: /^Expand Done, \d+ cards?$/ })).toBeVisible();
 	expect(await boardOverflow(page)).toBe(0);
 
 	await openBoard(page, 960);
 	expect(await boardOverflow(page)).toBeGreaterThan(0);
 
-	await page.getByRole("button", { name: "Collapse Todo" }).click();
-	await page.getByRole("button", { name: "Collapse Ready to merge" }).click();
+	await page.getByRole("button", { name: /^Collapse Todo, / }).click();
+	await page.getByRole("button", { name: /^Collapse Ready to merge, / }).click();
 	expect(await boardOverflow(page)).toBe(0);
 
 	// Folding is remembered across a reload, and the strip opens the lane again.
@@ -120,5 +124,24 @@ test("five lanes fit from 1280px; at 960px the board scrolls until two lanes are
 	const todo = page.getByRole("button", { name: /^Expand Todo, \d+ cards?$/ });
 	await expect(todo).toBeVisible();
 	await todo.click();
-	await expect(page.getByRole("button", { name: "Collapse Todo" })).toHaveAttribute("aria-expanded", "true");
+	await expect(page.getByRole("button", { name: /^Collapse Todo, / })).toHaveAttribute("aria-expanded", "true");
 });
+
+// A lane name clips below ~210px: at 1280px a lane is ~186px and "Ready to merge"
+// clips, as it did at 194px before the Done lane. From 1440px the five live lanes
+// read whole beside folded Done, and from 1800px all six do with Done open.
+for (const [width, openDone] of [
+	[1440, false],
+	[1800, true],
+] as const) {
+	test(`every open lane's name reads whole at ${width}px${openDone ? " with Done open" : ""}`, async ({ page }) => {
+		await openBoard(page, width);
+		if (openDone) await page.getByRole("button", { name: /^Expand Done, / }).click();
+		const labels = page.locator("[data-lane]:not([data-collapsed]) button[aria-expanded='true'] > span.truncate");
+		await expect(labels).toHaveCount(openDone ? 6 : 5);
+		const clipped = await labels.evaluateAll((els) =>
+			els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent),
+		);
+		expect(clipped).toEqual([]);
+	});
+}

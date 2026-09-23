@@ -1,9 +1,10 @@
-import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { File, FileCode2, FileCog, FileImage, FileJson2, FileText, FileType2, Folder, FolderOpen } from "lucide-react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { type FileKind, fileKindFor } from "../lib/file-kind";
 import { type FileTreeNode, flattenFileTree } from "../lib/file-tree";
 import { cn } from "../lib/utils";
+import { measuredOrFallbackRect } from "../lib/virtual-rect";
 
 /** One icon per coarse file bucket — see `fileKindFor` for why not per language. */
 const KIND_ICON: Record<FileKind, typeof File> = {
@@ -30,17 +31,6 @@ const ROW_HEIGHT = 30;
  * expose blank rows, small enough that the DOM stays a viewport's worth.
  */
 const OVERSCAN = 10;
-
-/**
- * The viewport a tree assumes when its scroller measures zero-height.
- *
- * jsdom has no layout, so `getBoundingClientRect()` there is all zeros and a
- * virtualiser told the truth would render nothing at all — every existing tree
- * test would go blank. It is also the right answer in the browser for the moment
- * before layout has run: rows appear immediately and the ResizeObserver corrects
- * the count on the next frame.
- */
-const FALLBACK_VIEWPORT = { width: 320, height: 900 };
 
 const INDENT_BASE = 8;
 /** Indent per level, and the half-step levels past `TAPER_AFTER` fall back to. */
@@ -279,18 +269,6 @@ export function FileTree<T>({
 function rowKey<T>(node: FileTreeNode<T>, getFileKey?: (item: T) => string): string {
 	return node.kind === "file" && getFileKey ? getFileKey(node.item) : node.key;
 }
-
-/**
- * The scroller's size, falling back to a nominal viewport when it measures zero.
- *
- * `observeElementRect` is the library's own implementation; all this adds is the
- * floor. See FALLBACK_VIEWPORT for why a zero-height scroller must not mean an
- * empty tree.
- */
-const measuredOrFallbackRect: typeof observeElementRect = (instance, cb) =>
-	observeElementRect(instance, (rect) =>
-		cb(rect.height > 0 ? rect : { width: rect.width || FALLBACK_VIEWPORT.width, height: FALLBACK_VIEWPORT.height }),
-	);
 
 /**
  * The hairlines that trace each open ancestor down the rows beneath it, as

@@ -1,4 +1,4 @@
-import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	ChevronDown,
 	ChevronRight,
@@ -21,6 +21,7 @@ import {
 	trimPreviewIndent,
 } from "../lib/editor/search-results";
 import { cn } from "../lib/utils";
+import { measuredOrFallbackRect } from "../lib/virtual-rect";
 
 /** Same coarse buckets the tree uses, so a file looks the same in both lists. */
 const KIND_ICON: Record<FileKind, typeof File> = {
@@ -51,9 +52,6 @@ const MATCH_ROW_HEIGHT = 21;
 
 /** As in FileTree: enough that a flick shows no gap, few enough to stay a window. */
 const OVERSCAN = 12;
-
-/** As in FileTree: jsdom has no layout, and a zero-height scroller must not mean an empty list. */
-const FALLBACK_VIEWPORT = { width: 320, height: 900 };
 
 /** Where a clicked match should open. */
 export type SearchHit = { path: string; line: number; column: number };
@@ -224,13 +222,3 @@ function MatchRow({
 		</button>
 	);
 }
-
-/**
- * The scroller's size, falling back to a nominal viewport when it measures zero
- * — the same treatment FileTree gives it, and for the same reason: jsdom has no
- * layout, so a virtualiser told the truth there renders nothing at all.
- */
-const measuredOrFallbackRect: typeof observeElementRect = (instance, cb) =>
-	observeElementRect(instance, (rect) =>
-		cb(rect.height > 0 ? rect : { width: rect.width || FALLBACK_VIEWPORT.width, height: FALLBACK_VIEWPORT.height }),
-	);

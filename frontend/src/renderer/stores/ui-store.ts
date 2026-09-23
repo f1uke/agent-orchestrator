@@ -19,9 +19,11 @@ type UiState = {
 	/** Projects whose sidebar section is collapsed (heading only). Absent = expanded. */
 	collapsedProjectIds: ReadonlySet<string>;
 	/**
-	 * Board lanes folded to a narrow strip (icon, count, vertical label). Absent =
-	 * open. One set for every project: it answers "how much room does this window
-	 * give the board", which is not a fact about any one project.
+	 * Board lanes folded to a narrow strip (icon, count, vertical label). A lane
+	 * the human has never touched takes its default: open, except the lanes in
+	 * `defaultFoldedBoardLanes`. One set for every project: it answers "how much
+	 * room does this window give the board", which is not a fact about any one
+	 * project.
 	 */
 	collapsedBoardLanes: ReadonlySet<string>;
 	/**
@@ -108,6 +110,50 @@ function readStoredIdSet(storageKey: string): Set<string> {
 	}
 }
 
+/**
+ * Lanes that start folded until the human opens them. Done holds every session
+ * that ever finished - hundreds - and is the one lane nobody needs open to
+ * follow work in flight.
+ */
+const defaultFoldedBoardLanes: readonly string[] = ["done"];
+
+/**
+ * The folded lanes, from what the human has set. Stored as `{lane: folded}` so
+ * that OPENING a default-folded lane is remembered too - a set of folded lanes
+ * cannot say "the human opened Done", only "Done is not folded", which a lane
+ * that has never been touched says as well. The array this key held before
+ * Done was a lane is read as the lanes folded, with every default applying.
+ */
+export function readFoldedBoardLanes(): Set<string> {
+	const folded = new Set(defaultFoldedBoardLanes);
+	const raw = getLocalStorage()?.getItem(collapsedBoardLanesStorageKey);
+	if (!raw) return folded;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return folded;
+	}
+	if (Array.isArray(parsed)) {
+		for (const lane of parsed) if (typeof lane === "string") folded.add(lane);
+		return folded;
+	}
+	if (parsed && typeof parsed === "object") {
+		for (const [lane, isFolded] of Object.entries(parsed)) {
+			if (isFolded === true) folded.add(lane);
+			if (isFolded === false) folded.delete(lane);
+		}
+	}
+	return folded;
+}
+
+function writeFoldedBoardLanes(folded: ReadonlySet<string>) {
+	const record: Record<string, boolean> = {};
+	for (const lane of folded) record[lane] = true;
+	for (const lane of defaultFoldedBoardLanes) if (!folded.has(lane)) record[lane] = false;
+	getLocalStorage()?.setItem(collapsedBoardLanesStorageKey, JSON.stringify(record));
+}
+
 function initialProjectOrder(): string[] {
 	const raw = getLocalStorage()?.getItem(projectOrderStorageKey);
 	if (!raw) return [];
@@ -142,7 +188,7 @@ export const useUiStore = create<UiState>((set) => ({
 	theme: initialTheme(),
 	restartingProjectIds: new Set<string>(),
 	collapsedProjectIds: readStoredIdSet(collapsedProjectsStorageKey),
-	collapsedBoardLanes: readStoredIdSet(collapsedBoardLanesStorageKey),
+	collapsedBoardLanes: readFoldedBoardLanes(),
 	projectOrder: initialProjectOrder(),
 	splitLayouts: parseSplitLayouts(getLocalStorage()?.getItem(splitLayoutsStorageKey) ?? null),
 	orchestratorReplacementErrors: {},
@@ -190,7 +236,7 @@ export const useUiStore = create<UiState>((set) => ({
 			} else {
 				collapsedBoardLanes.add(lane);
 			}
-			getLocalStorage()?.setItem(collapsedBoardLanesStorageKey, JSON.stringify([...collapsedBoardLanes]));
+			writeFoldedBoardLanes(collapsedBoardLanes);
 			return { collapsedBoardLanes };
 		}),
 	setProjectOrder: (orderedProjectIds) => {
