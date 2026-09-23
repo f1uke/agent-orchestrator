@@ -2,23 +2,10 @@ package tmux
 
 import "fmt"
 
-// newSessionArgs builds args for `tmux new-session -d -s <id> -x 220 -y 50
-// -c <cwd> <shell> -c <launchCmd>`. The shell -c form runs the launch command
-// inside the configured shell so exported env vars and quoting work correctly.
-func newSessionArgs(id, cwd, shellPath, launchCmd string) []string {
-	return []string{
-		"new-session", "-d",
-		"-s", id,
-		"-x", "220",
-		"-y", "50",
-		"-c", cwd,
-		shellPath, "-c", launchCmd,
-	}
-}
-
-// newSessionScriptArgs is newSessionArgs for a launch delivered as a SCRIPT FILE
-// (`<shell> <scriptPath>`) instead of an inline `<shell> -c <cmd>`. Used when the
-// launch command exceeds tmux's inline command-length limit (see launchInvocation).
+// newSessionScriptArgs builds args for `tmux new-session -d -s <id> -x 220
+// -y 50 -c <cwd> <shell> <scriptPath>`: the launch command is delivered as a
+// SCRIPT FILE the shell runs, never inline as `<shell> -c <cmd>`, so no prompt
+// text reaches a command line (see launchInvocation).
 func newSessionScriptArgs(id, cwd, shellPath, scriptPath string) []string {
 	return []string{
 		"new-session", "-d",

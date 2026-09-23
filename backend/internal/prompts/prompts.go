@@ -249,6 +249,12 @@ Post your review as comments on the pull request or merge request, stating clear
 // cleared/edited worker base: branch-namespace PR attribution and orchestrator
 // escalation. The concrete `ao send --session <id>` command with the live id is
 // injected separately (only when an orchestrator is active).
+//
+// It also carries the one process rule every agent needs, because any agent
+// can reach for it: kill by PID, never by pattern. On 2026-09-22 a worker
+// clearing a stuck build ran `pkill -f 'xcodebuild test'`, and that matched -
+// and killed - every other iOS agent on the machine, whose instructions held
+// those words.
 const workerFloor = "\n\n" + `## Required coordination (AO)
 
 Non-negotiable: keep every branch you create within your session's branch namespace so AO can attribute your pull requests, and message the orchestrator with ` + "`ao send`" + ` if you hit a blocker you cannot resolve.
@@ -257,7 +263,11 @@ Non-negotiable: keep every branch you create within your session's branch namesp
 
 This session already runs in an AO-managed git worktree on its assigned branch. That is the isolation boundary for this task. You may still delegate work to child agents, but same-task child agents must work in the current AO worktree so every edit remains on this branch. Do not launch an Agent with ` + "`isolation: \"worktree\"`" + `, do not call ` + "`EnterWorktree`" + `, and do not create another worktree with git. Those actions move child work outside the AO branch and may leave valid changes behind in an untracked checkout.
 
-Because implementation children share this worktree, run only one file-writing or implementation child at a time. The parent worker owns git state and commits: children must not commit, stash, reset, switch or create branches, or run destructive repository-wide commands. Give each child explicit file ownership and wait for it to finish before starting another writer. Read-only children may run concurrently.`
+Because implementation children share this worktree, run only one file-writing or implementation child at a time. The parent worker owns git state and commits: children must not commit, stash, reset, switch or create branches, or run destructive repository-wide commands. Give each child explicit file ownership and wait for it to finish before starting another writer. Read-only children may run concurrently.
+
+## Stopping processes (AO)
+
+Kill only a process you started, by the PID you captured when you started it (` + "`$!`" + `). Never kill by pattern: no ` + "`pkill -f`" + `, ` + "`killall`" + ` or ` + "`pgrep ... | xargs kill`" + ` on a word. A pattern matches every process on this machine whose command line holds that word, other agents included, and one such kill has already ended every live session at once.`
 
 // qaHandbackFloor is qa's obligation to HAND BACK, and it exists because the
 // first full crew run stalled for want of it.

@@ -132,9 +132,10 @@ func TestGetLaunchCommandAppendsSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestGetLaunchCommandInlinesSystemPromptFileContents(t *testing.T) {
-	dir := t.TempDir()
-	file := filepath.Join(dir, "system.md")
+// Pi reads an existing path given to --append-system-prompt as the file, so
+// the path is handed over and the text stays off the command line.
+func TestGetLaunchCommandPassesSystemPromptFilePath(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "system.md")
 	if err := os.WriteFile(file, []byte("file contents win"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -148,9 +149,21 @@ func TestGetLaunchCommandInlinesSystemPromptFileContents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []string{"pi", "--append-system-prompt", "file contents win"}
+	want := []string{"pi", "--append-system-prompt", file}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("cmd = %#v, want %#v", cmd, want)
+	}
+
+	restore, ok, err := p.GetRestoreCommand(context.Background(), ports.RestoreConfig{
+		SystemPromptFile: file,
+		SystemPrompt:     "inline ignored",
+		Session:          ports.SessionRef{Metadata: map[string]string{ports.MetadataKeyAgentSessionID: "abc"}},
+	})
+	if err != nil || !ok {
+		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
+	}
+	if want := []string{"pi", "--append-system-prompt", file, "--session", "abc"}; !reflect.DeepEqual(restore, want) {
+		t.Fatalf("restore = %#v, want %#v", restore, want)
 	}
 }
 

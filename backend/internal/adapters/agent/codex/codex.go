@@ -97,10 +97,12 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 		cmd = append(cmd, "--model", model)
 	}
 
-	if cfg.SystemPromptFile != "" {
-		cmd = append(cmd, "-c", "model_instructions_file="+cfg.SystemPromptFile)
-	} else if cfg.SystemPrompt != "" {
-		cmd = append(cmd, "-c", "developer_instructions="+codexTOMLConfigString(cfg.SystemPrompt))
+	systemPrompt, err := codexDeveloperInstructions(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if systemPrompt != "" {
+		cmd = append(cmd, "-c", "developer_instructions="+codexTOMLConfigString(systemPrompt))
 	}
 
 	if cfg.Prompt != "" {
@@ -361,4 +363,24 @@ func appendApprovalFlags(cmd *[]string, permissions ports.PermissionMode) {
 var fileExists = func(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+// codexDeveloperInstructions returns the standing instructions to hand Codex as
+// `developer_instructions`, which layer ON TOP of Codex's own base
+// instructions. That key takes text only, so these instructions ride on
+// Codex's command line: unlike Claude Code, Codex has no file form that
+// appends. Its one file key, `model_instructions_file`, REPLACES the base
+// instructions - Codex's tool and editing guidance - so it is deliberately not
+// used even when AO supplies a file; the file's contents are inlined instead.
+// A profile file would carry the key without argv, but Codex reads profiles
+// only from CODEX_HOME, outside AO's data dir.
+func codexDeveloperInstructions(cfg ports.LaunchConfig) (string, error) {
+	if cfg.SystemPrompt != "" || cfg.SystemPromptFile == "" {
+		return cfg.SystemPrompt, nil
+	}
+	data, err := os.ReadFile(cfg.SystemPromptFile) //nolint:gosec // path is AO-owned launch config
+	if err != nil {
+		return "", fmt.Errorf("codex: read system prompt file: %w", err)
+	}
+	return strings.TrimRight(string(data), "\n"), nil
 }

@@ -71,6 +71,9 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 	}
 	appendApprovalFlags(&cmd, cfg.Permissions)
 
+	// Text only: Cline has no file form for -s, so the instructions ride on its
+	// command line (a known exposure; see ports.LaunchConfig.SystemPromptFile
+	// and the registry's systemPromptOnArgv).
 	if cfg.SystemPrompt != "" {
 		cmd = append(cmd, "-s", cfg.SystemPrompt)
 	}

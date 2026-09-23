@@ -136,7 +136,7 @@ func (p *Plugin) GetConfigSpec(ctx context.Context) (ports.ConfigSpec, error) {
 //
 //	claude [--session-id <uuid>] \
 //	       [--permission-mode <mode>] \
-//	       [--append-system-prompt <system prompt>] \
+//	       [--append-system-prompt-file <path>] \
 //	       [-- <prompt>]
 //
 // --session-id pins Claude's native session UUID to a value derived from the
@@ -180,15 +180,11 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 		cmd = append(cmd, "--model", model)
 	}
 
-	systemPrompt, err := resolveSystemPrompt(cfg)
-	if err != nil {
+	// Append rather than replace: Claude Code's default system prompt carries
+	// its tool-use and coding instructions, which we want to keep. The
+	// orchestrator prompt layers on top.
+	if err := appendSystemPromptFlags(&cmd, cfg.SystemPromptFile, cfg.SystemPrompt); err != nil {
 		return nil, err
-	}
-	if systemPrompt != "" {
-		// Append rather than replace: Claude Code's default system prompt
-		// carries its tool-use and coding instructions, which we want to
-		// keep. The orchestrator prompt layers on top.
-		cmd = append(cmd, "--append-system-prompt", systemPrompt)
 	}
 
 	if cfg.Prompt != "" {
@@ -223,14 +219,15 @@ func (p *Plugin) PreLaunch(ctx context.Context, cfg ports.LaunchConfig) error {
 }
 
 // GetRestoreCommand rebuilds the argv that continues an existing Claude Code
-// session: `claude [--permission-mode <mode>] --resume <agentSessionId>`. It
-// prefers the hook-captured native session id from
-// cfg.Session.Metadata["agentSessionId"]; for sessions created before hooks
+// session: `claude [--permission-mode <mode>] [--append-system-prompt-file <path>]
+// --resume <agentSessionId>`. It prefers the hook-captured native session id
+// from cfg.Session.Metadata["agentSessionId"]; for sessions created before hooks
 // captured it, it falls back to the deterministic UUID AO pins via
 // --session-id at launch. ok is false only when neither is available, so the
 // caller fresh-spawns. The command re-applies the permission mode (resume
-// otherwise reverts to the configured default) but not the prompt/system
-// prompt, which the session already carries.
+// otherwise reverts to the configured default) and the system prompt (resume
+// rebuilds it from flags), but not the initial prompt, which the transcript
+// already carries.
 func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig) (cmd []string, ok bool, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
@@ -269,11 +266,11 @@ func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig)
 	cmd = make([]string, 0, 7)
 	cmd = append(cmd, binary)
 	appendPermissionFlags(&cmd, cfg.Permissions)
-	if cfg.SystemPrompt != "" {
-		// --resume rebuilds the system prompt from the current flags (it is
-		// not stored in the transcript), so standing instructions must be
-		// re-appended or a restored orchestrator loses its role.
-		cmd = append(cmd, "--append-system-prompt", cfg.SystemPrompt)
+	// --resume rebuilds the system prompt from the current flags (it is not
+	// stored in the transcript), so standing instructions must be re-appended
+	// or a restored orchestrator loses its role.
+	if err := appendSystemPromptFlags(&cmd, cfg.SystemPromptFile, cfg.SystemPrompt); err != nil {
+		return nil, false, err
 	}
 	cmd = append(cmd, "--resume", sessionID)
 	return cmd, true, nil
@@ -469,17 +466,25 @@ func claudeProjectDirName(cwd string) string {
 	return string(b)
 }
 
-// resolveSystemPrompt returns the system prompt text to append, preferring
-// SystemPromptFile (read from disk) over an inline SystemPrompt.
-func resolveSystemPrompt(cfg ports.LaunchConfig) (string, error) {
-	if cfg.SystemPromptFile != "" {
-		data, err := os.ReadFile(cfg.SystemPromptFile)
-		if err != nil {
-			return "", fmt.Errorf("claude-code: read system prompt file: %w", err)
+// appendSystemPromptFlags appends the standing instructions, by FILE whenever
+// the caller supplied one: `--append-system-prompt-file <path>` keeps the text
+// off the command line, where every process can read it and `pkill -f <word>`
+// matches it (see ports.LaunchConfig.SystemPromptFile). The inline
+// `--append-system-prompt <text>` is only the fallback for a caller with no
+// file to give. A named file that is not there fails the launch here, with the
+// path, instead of in a pane nobody is watching.
+func appendSystemPromptFlags(cmd *[]string, file, text string) error {
+	if file != "" {
+		if _, err := os.Stat(file); err != nil {
+			return fmt.Errorf("claude-code: system prompt file: %w", err)
 		}
-		return strings.TrimRight(string(data), "\n"), nil
+		*cmd = append(*cmd, "--append-system-prompt-file", file)
+		return nil
 	}
-	return cfg.SystemPrompt, nil
+	if text != "" {
+		*cmd = append(*cmd, "--append-system-prompt", text)
+	}
+	return nil
 }
 
 // appendPermissionFlags maps AO's permission modes onto Claude Code's

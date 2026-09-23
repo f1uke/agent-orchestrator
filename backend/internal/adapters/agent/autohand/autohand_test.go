@@ -44,7 +44,7 @@ func TestGetLaunchCommandBuildsArgv(t *testing.T) {
 		"autohand",
 		"--path", "/work/space",
 		"--unrestricted",
-		"--sys-prompt", filepath.Join("tmp", "prompt with spaces.md"),
+		"--append-system-prompt-file", filepath.Join("tmp", "prompt with spaces.md"),
 		"--", "-fix this",
 	}
 	if !reflect.DeepEqual(cmd, want) {
@@ -61,7 +61,7 @@ func TestGetLaunchCommandInlineSystemPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"autohand", "--sys-prompt", "be terse"}
+	want := []string{"autohand", "--append-system-prompt", "be terse"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("unexpected command\nwant: %#v\n got: %#v", want, cmd)
 	}

@@ -127,6 +127,10 @@ type sessionLifecycle interface {
 	// interface for the same reason NoteRuntimeTouch is: the manager is built
 	// before the simulator services, so the daemon is where the two halves meet.
 	SetSimDeviceAssigner(fn func(context.Context, domain.SessionID) (string, error))
+	// ReapOrphanedPromptFiles removes the private prompt files of sessions that
+	// ended while the daemon was down; the boot half of the reap every ending
+	// runs through ReapSessionPanes.
+	ReapOrphanedPromptFiles(ctx context.Context) (int, error)
 }
 
 // startSession builds the controller-facing session service: a session manager
@@ -238,7 +242,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		Sessions: store,
 		PRs:      store,
 		Projects: store,
-		Launcher: reviewcore.NewLauncher(reviewers, runtime),
+		Launcher: reviewcore.NewLauncher(reviewers, runtime, cfg.DataDir),
 		// The ephemeral reviewer is a READER of the worker's checkout, and both crew
 		// members now write that checkout while it reads. It cannot refuse to start
 		// (it would refuse forever), so it brackets its run with the same write-

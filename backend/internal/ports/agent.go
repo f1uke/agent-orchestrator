@@ -183,8 +183,15 @@ type LaunchConfig struct {
 	// relies on: bypassPermissions ignores both lists, so a restricted launch
 	// must leave Permissions off bypass. Empty means no restriction, so worker
 	// sessions are unaffected.
-	AllowedTools     []string
-	DisallowedTools  []string
+	AllowedTools    []string
+	DisallowedTools []string
+	// SystemPrompt is the session's standing instructions and SystemPromptFile
+	// a private file holding the same text. An adapter whose CLI can read its
+	// instructions from a file MUST pass the file and leave the text off the
+	// command line: argv is readable by every process on the machine and is what
+	// `pkill -f <word>` matches, so instructions on argv make every agent that
+	// carries a word killable by anyone who pattern-kills it (see promptfile).
+	// The text is still supplied for CLIs that only take it inline.
 	SystemPrompt     string
 	SystemPromptFile string
 	WorkspacePath    string
@@ -209,7 +216,10 @@ type RestoreConfig struct {
 	// orchestrator role). Agent CLIs rebuild their system prompt from flags on
 	// resume — it is not part of the transcript — so adapters whose CLI has a
 	// system-prompt flag should re-apply this in their resume command.
-	SystemPrompt string
+	// SystemPromptFile holds the same text, and the file rule on
+	// LaunchConfig.SystemPromptFile applies here too.
+	SystemPrompt     string
+	SystemPromptFile string
 }
 
 // SessionRef identifies an AO session whose agent-owned metadata may be read.

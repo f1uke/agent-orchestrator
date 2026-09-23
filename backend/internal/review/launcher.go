@@ -8,6 +8,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptfile"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 )
 
@@ -76,15 +77,21 @@ type reviewerRuntime interface {
 type agentLauncher struct {
 	reviewers ports.ReviewerResolver
 	runtime   reviewerRuntime
+	// dataDir is where the reviewer's private system-prompt file is kept
+	// (promptfile), beside the worker's own so the worker's ending removes
+	// both. Empty (tests that do not wire it) hands the reviewer the text.
+	dataDir string
 }
 
 type preLaunchReviewer interface {
 	PreLaunch(ctx context.Context, inv ports.ReviewInvocation) error
 }
 
-// NewLauncher builds the production reviewer launcher.
-func NewLauncher(reviewers ports.ReviewerResolver, runtime reviewerRuntime) Launcher {
-	return &agentLauncher{reviewers: reviewers, runtime: runtime}
+// NewLauncher builds the production reviewer launcher. dataDir is the daemon's
+// data dir, where the reviewer's system prompt is written so it reaches the
+// agent by path rather than on its command line.
+func NewLauncher(reviewers ports.ReviewerResolver, runtime reviewerRuntime, dataDir string) Launcher {
+	return &agentLauncher{reviewers: reviewers, runtime: runtime, dataDir: dataDir}
 }
 
 // reviewerHandleID is the stable runtime handle for a worker's reviewer pane, so
@@ -129,6 +136,13 @@ func (l *agentLauncher) Spawn(ctx context.Context, spec LaunchSpec) (string, err
 	}
 	handleID := reviewerHandleID(spec.WorkerID)
 	inv := l.invocation(spec)
+	if l.dataDir != "" {
+		path, err := promptfile.Write(l.dataDir, spec.WorkerID, promptfile.ReviewerSystemPrompt, inv.SystemPrompt)
+		if err != nil {
+			return "", fmt.Errorf("reviewer system prompt: %w", err)
+		}
+		inv.SystemPromptFile = path
+	}
 	if pl, ok := reviewer.(preLaunchReviewer); ok {
 		if err := pl.PreLaunch(ctx, inv); err != nil {
 			return "", fmt.Errorf("reviewer pre-launch: %w", err)

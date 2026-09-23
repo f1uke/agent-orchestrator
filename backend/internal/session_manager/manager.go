@@ -20,6 +20,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/knowledgestore"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptfile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
@@ -410,16 +411,22 @@ func (m *Manager) SetSessionPaneReaper(fn func(context.Context, domain.SessionID
 	m.sessionPaneReaper = fn
 }
 
-// ReapSessionPanes best-effort closes the session's auxiliary panes and reports
-// what went wrong, for the lifecycle reducer - which reaches the routes to
-// termination that never come through Teardown (an agent ending itself, a
-// runtime the reaper finds missing). Exported for that wiring only; inside this
-// package use reapSessionPanes, which swallows the error.
+// ReapSessionPanes best-effort closes the session's auxiliary panes, removes
+// its private prompt files, and reports what went wrong, for the lifecycle
+// reducer - which reaches the routes to termination that never come through
+// Teardown (an agent ending itself, a runtime the reaper finds missing).
+// Exported for that wiring only; inside this package use reapSessionPanes,
+// which swallows the error.
+//
+// The prompt files ride here because they have the panes' lifetime: they are
+// read when an agent in one of them starts, and a relaunch writes them afresh,
+// so an ended session has no further use for them.
 func (m *Manager) ReapSessionPanes(ctx context.Context, id domain.SessionID) error {
-	if m.sessionPaneReaper == nil {
-		return nil
+	var paneErr error
+	if m.sessionPaneReaper != nil {
+		paneErr = m.sessionPaneReaper(ctx, id)
 	}
-	return m.sessionPaneReaper(ctx, id)
+	return errors.Join(paneErr, promptfile.Remove(m.dataDir, id))
 }
 
 // reapSessionPanes best-effort closes the panes the session leaves behind.
@@ -679,15 +686,22 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
+	systemPromptFile, err := m.writeSystemPromptFile(id, systemPrompt)
+	if err != nil {
+		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
+		disposeSeed()
+		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
+	}
 	argv, err := agent.GetLaunchCommand(ctx, ports.LaunchConfig{
-		SessionID:     string(id),
-		WorkspacePath: ws.Path,
-		Kind:          cfg.Kind,
-		Prompt:        prompt,
-		SystemPrompt:  systemPrompt,
-		IssueID:       string(cfg.IssueID),
-		Config:        agentConfig,
-		Permissions:   agentConfig.Permissions,
+		SessionID:        string(id),
+		WorkspacePath:    ws.Path,
+		Kind:             cfg.Kind,
+		Prompt:           prompt,
+		SystemPrompt:     systemPrompt,
+		SystemPromptFile: systemPromptFile,
+		IssueID:          string(cfg.IssueID),
+		Config:           agentConfig,
+		Permissions:      agentConfig.Permissions,
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -1793,7 +1807,11 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if err := m.prepareWorkspace(ctx, agent, rec.ID, ws.Path, systemPrompt, agentConfig); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
-	argv, err := restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, agentConfig, rec.Kind)
+	systemPromptFile, err := m.writeSystemPromptFile(rec.ID, systemPrompt)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
+	}
+	argv, err := restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, systemPromptFile, agentConfig, rec.Kind)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
@@ -3825,13 +3843,13 @@ func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id do
 // a worker with no prompt and no native session id has nothing to restore from.
 // Orchestrators are promptless by design, so when they cannot resume they
 // relaunch fresh with the system prompt only rather than erroring.
-func restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt string, agentConfig ports.AgentConfig, kind domain.SessionKind) ([]string, error) {
+func restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt, systemPromptFile string, agentConfig ports.AgentConfig, kind domain.SessionKind) ([]string, error) {
 	ref := ports.SessionRef{
 		ID:            string(id),
 		WorkspacePath: workspacePath,
 		Metadata:      map[string]string{ports.MetadataKeyAgentSessionID: meta.AgentSessionID},
 	}
-	cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, Config: agentConfig, Permissions: agentConfig.Permissions})
+	cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, Config: agentConfig, Permissions: agentConfig.Permissions})
 	if err != nil {
 		return nil, fmt.Errorf("restore command: %w", err)
 	}
@@ -3846,13 +3864,14 @@ func restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, wo
 	}
 	// Fall through to GetLaunchCommand (replays meta.Prompt; empty for an orchestrator).
 	argv, err := agent.GetLaunchCommand(ctx, ports.LaunchConfig{
-		SessionID:     string(id),
-		WorkspacePath: workspacePath,
-		Kind:          kind,
-		Prompt:        meta.Prompt,
-		SystemPrompt:  systemPrompt,
-		Config:        agentConfig,
-		Permissions:   agentConfig.Permissions,
+		SessionID:        string(id),
+		WorkspacePath:    workspacePath,
+		Kind:             kind,
+		Prompt:           meta.Prompt,
+		SystemPrompt:     systemPrompt,
+		SystemPromptFile: systemPromptFile,
+		Config:           agentConfig,
+		Permissions:      agentConfig.Permissions,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("launch command: %w", err)

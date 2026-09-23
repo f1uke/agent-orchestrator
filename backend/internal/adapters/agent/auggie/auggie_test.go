@@ -122,7 +122,7 @@ func TestGetLaunchCommandPrefersSystemPromptFileFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []string{"auggie", "--print", "--instruction-file", "/tmp/system.md"}
+	want := []string{"auggie", "--print", "--rules", "/tmp/system.md"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("cmd = %#v, want %#v", cmd, want)
 	}

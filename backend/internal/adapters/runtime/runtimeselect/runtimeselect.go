@@ -49,6 +49,9 @@ type Options struct {
 	// one layer that always knows the answer and cannot be bypassed by a caller
 	// that forgets to ask.
 	Journal msgdelivery.Journal
+	// DataDir is the daemon's data dir, where the tmux runtime writes the launch
+	// scripts of panes whose env names no AO_DATA_DIR of its own.
+	DataDir string
 }
 
 // New returns the per-platform runtime: tmux on Darwin/Linux, conpty on Windows.
@@ -56,5 +59,5 @@ func New(log *slog.Logger, opts Options) Runtime {
 	if runtime.GOOS == "windows" {
 		return conpty.New(conpty.Options{Journal: opts.Journal})
 	}
-	return claudepeer.New(tmux.New(tmux.Options{}), claudepeer.Options{Logger: log, Journal: opts.Journal})
+	return claudepeer.New(tmux.New(tmux.Options{DataDir: opts.DataDir}), claudepeer.Options{Logger: log, Journal: opts.Journal})
 }

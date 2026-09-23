@@ -80,11 +80,12 @@ func (p *Plugin) Manifest() adapters.Manifest {
 
 // GetLaunchCommand builds the argv to start a new headless Auggie session:
 //
-//	auggie --print [--instruction-file <f> | --instruction <s>] [-- <prompt>]
+//	auggie --print [--rules <f> | --instruction <s>] [-- <prompt>]
 //
 // The prompt is passed after `--` so a prompt beginning with "-" is not mistaken
-// for a flag. A system prompt is injected via --instruction-file / --instruction,
-// mirroring the system-prompt handling of the other adapters.
+// for a flag. A system-prompt file is appended to Auggie's guidelines with
+// `--rules <f>`, which keeps the text off the command line; `--instruction-file`
+// would be wrong, as it names the initial TASK, not standing instructions.
 func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (cmd []string, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -96,7 +97,7 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 
 	cmd = []string{binary, "--print"}
 	if cfg.SystemPromptFile != "" {
-		cmd = append(cmd, "--instruction-file", cfg.SystemPromptFile)
+		cmd = append(cmd, "--rules", cfg.SystemPromptFile)
 	} else if cfg.SystemPrompt != "" {
 		cmd = append(cmd, "--instruction", cfg.SystemPrompt)
 	}

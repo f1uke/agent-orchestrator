@@ -54,10 +54,10 @@ func (p *Plugin) Manifest() adapters.Manifest {
 
 // GetLaunchCommand builds the argv to start a new Autohand command-mode session,
 // scoping the run to the workspace, applying the approval-mode flags and optional
-// system-prompt override, and passing the initial prompt as a positional argument
+// appended system prompt, and passing the initial prompt as a positional argument
 // after `--` so a prompt beginning with "-" is not read as a flag.
 //
-//	autohand [--path <workspace>] [<approval flags>] [--sys-prompt <value>] [-- <prompt>]
+//	autohand [--path <workspace>] [<approval flags>] [--append-system-prompt-file <path>] [-- <prompt>]
 func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (cmd []string, err error) {
 	binary, err := p.autohandBinary(ctx)
 	if err != nil {
@@ -68,12 +68,13 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 	appendWorkspaceFlag(&cmd, cfg.WorkspacePath)
 	appendApprovalFlags(&cmd, cfg.Permissions)
 
-	// Autohand's --sys-prompt accepts either an inline string or a file path,
-	// auto-detected by the CLI; prefer the file form when AO provides one.
+	// Append, never replace: Autohand's --sys-prompt REPLACES its whole system
+	// prompt, tool guidance included. The file form keeps the text off the
+	// command line (see ports.LaunchConfig.SystemPromptFile).
 	if cfg.SystemPromptFile != "" {
-		cmd = append(cmd, "--sys-prompt", cfg.SystemPromptFile)
+		cmd = append(cmd, "--append-system-prompt-file", cfg.SystemPromptFile)
 	} else if cfg.SystemPrompt != "" {
-		cmd = append(cmd, "--sys-prompt", cfg.SystemPrompt)
+		cmd = append(cmd, "--append-system-prompt", cfg.SystemPrompt)
 	}
 
 	if cfg.Prompt != "" {

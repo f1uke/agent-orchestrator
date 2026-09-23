@@ -2,11 +2,15 @@ package review
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/promptfile"
 )
 
 type fakeReviewer struct {
@@ -85,7 +89,7 @@ func launchSpec() LaunchSpec {
 func TestLauncherSpawnReturnsStableHandle(t *testing.T) {
 	reviewer := &fakeReviewer{}
 	rt := &fakeRuntime{}
-	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt)
+	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt, "")
 
 	handle, err := l.Spawn(context.Background(), launchSpec())
 	if err != nil {
@@ -106,10 +110,37 @@ func TestLauncherSpawnReturnsStableHandle(t *testing.T) {
 	}
 }
 
+// The reviewer's standing role reaches it as a private file kept beside the
+// worker's own prompt files - so the worker's ending removes it too - never as
+// text on the pane's command line.
+func TestLauncherSpawnHandsReviewerSystemPromptByFile(t *testing.T) {
+	reviewer := &fakeReviewer{}
+	dataDir := t.TempDir()
+	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, &fakeRuntime{}, dataDir)
+
+	if _, err := l.Spawn(context.Background(), launchSpec()); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	inv := reviewer.gotInv
+	if inv.SystemPrompt == "" {
+		t.Fatal("reviewer got no system prompt; nothing to check")
+	}
+	if want := filepath.Join(promptfile.Dir(dataDir, "mer-1"), promptfile.ReviewerSystemPrompt); inv.SystemPromptFile != want {
+		t.Fatalf("SystemPromptFile = %q, want %q", inv.SystemPromptFile, want)
+	}
+	data, err := os.ReadFile(inv.SystemPromptFile)
+	if err != nil || string(data) != inv.SystemPrompt {
+		t.Fatalf("reviewer prompt file does not hold the reviewer role (%v)", err)
+	}
+	if info, _ := os.Stat(inv.SystemPromptFile); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("reviewer prompt file mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
 func TestLauncherSpawnRunsReviewerPreLaunch(t *testing.T) {
 	reviewer := &fakePreLaunchReviewer{}
 	rt := &fakeRuntime{}
-	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt)
+	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt, "")
 
 	if _, err := l.Spawn(context.Background(), launchSpec()); err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -128,7 +159,7 @@ func TestLauncherSpawnRunsReviewerPreLaunch(t *testing.T) {
 func TestLauncherNotifySendsMessageToHandle(t *testing.T) {
 	reviewer := &fakeReviewer{}
 	rt := &fakeRuntime{}
-	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt)
+	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt, "")
 
 	if err := l.Notify(context.Background(), "review-mer-1", launchSpec()); err != nil {
 		t.Fatalf("Notify: %v", err)
@@ -139,7 +170,7 @@ func TestLauncherNotifySendsMessageToHandle(t *testing.T) {
 }
 
 func TestLauncherAlive(t *testing.T) {
-	l := NewLauncher(fakeReviewerResolver{ok: true}, &fakeRuntime{agentAlive: true})
+	l := NewLauncher(fakeReviewerResolver{ok: true}, &fakeRuntime{agentAlive: true}, "")
 	if ok, _ := l.Alive(context.Background(), "review-mer-1"); !ok {
 		t.Fatal("want alive true")
 	}
@@ -153,7 +184,7 @@ func TestLauncherAlive(t *testing.T) {
 // the engine recreates instead of typing the prompt into a bare shell.
 func TestLauncherAliveUsesAgentLiveness(t *testing.T) {
 	rt := &fakeRuntime{alive: true, agentAlive: false}
-	l := NewLauncher(fakeReviewerResolver{ok: true}, rt)
+	l := NewLauncher(fakeReviewerResolver{ok: true}, rt, "")
 	if ok, _ := l.Alive(context.Background(), "review-mer-1"); ok {
 		t.Fatal("Alive = true, want false when the agent has exited (bare keep-alive shell)")
 	}
@@ -164,7 +195,7 @@ func TestLauncherAliveUsesAgentLiveness(t *testing.T) {
 // "duplicate session".
 func TestLauncherSpawnDestroysStalePaneBeforeCreate(t *testing.T) {
 	rt := &fakeRuntime{}
-	l := NewLauncher(fakeReviewerResolver{reviewer: &fakeReviewer{}, ok: true}, rt)
+	l := NewLauncher(fakeReviewerResolver{reviewer: &fakeReviewer{}, ok: true}, rt, "")
 	if _, err := l.Spawn(context.Background(), launchSpec()); err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -182,7 +213,7 @@ func TestLauncherSpawnDestroysStalePaneBeforeCreate(t *testing.T) {
 func TestLauncherSpawnUsesFreshAgentSessionID(t *testing.T) {
 	reviewer := &fakeReviewer{}
 	rt := &fakeRuntime{}
-	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt)
+	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt, "")
 	spec := launchSpec()
 	spec.AgentSessionID = "review-mer-1-run-1"
 	if _, err := l.Spawn(context.Background(), spec); err != nil {
@@ -202,7 +233,7 @@ func TestLauncherSpawnUsesFreshAgentSessionID(t *testing.T) {
 // lingering as a keep-alive shell. It needs no reviewer adapter (pure runtime op).
 func TestLauncherTeardownDestroysReviewerPane(t *testing.T) {
 	rt := &fakeRuntime{}
-	l := NewLauncher(fakeReviewerResolver{ok: false}, rt)
+	l := NewLauncher(fakeReviewerResolver{ok: false}, rt, "")
 	if err := l.Teardown(context.Background(), "mer-1"); err != nil {
 		t.Fatalf("Teardown: %v", err)
 	}
@@ -212,7 +243,7 @@ func TestLauncherTeardownDestroysReviewerPane(t *testing.T) {
 }
 
 func TestLauncherSpawnNoAdapter(t *testing.T) {
-	l := NewLauncher(fakeReviewerResolver{ok: false}, &fakeRuntime{})
+	l := NewLauncher(fakeReviewerResolver{ok: false}, &fakeRuntime{}, "")
 	if _, err := l.Spawn(context.Background(), launchSpec()); err == nil || !strings.Contains(err.Error(), "no reviewer adapter") {
 		t.Fatalf("err = %v, want no-adapter", err)
 	}

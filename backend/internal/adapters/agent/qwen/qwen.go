@@ -66,6 +66,9 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 	cmd = []string{binary}
 	appendApprovalFlags(&cmd, cfg.Permissions)
 
+	// Text only: Qwen's --append-system-prompt has no file form (QWEN_SYSTEM_MD
+	// replaces the whole prompt), so the instructions ride on its command line
+	// (a known exposure; see the registry's systemPromptOnArgv).
 	if cfg.SystemPrompt != "" {
 		cmd = append(cmd, "--append-system-prompt", cfg.SystemPrompt)
 	}
