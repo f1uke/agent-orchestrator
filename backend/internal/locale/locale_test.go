@@ -3,6 +3,7 @@ package locale
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,9 @@ func TestEnsureProcess(t *testing.T) {
 // TestShellGuard runs the guard in a real POSIX shell with a scrubbed
 // environment, the way a pane's launch script runs it.
 func TestShellGuard(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("panes are tmux, which is macOS/Linux only")
+	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh")
