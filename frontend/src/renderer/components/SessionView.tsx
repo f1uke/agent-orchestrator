@@ -861,7 +861,12 @@ export function SessionView({ sessionId }: SessionViewProps) {
 										// worktree stands on another checkout, so the file on disk is
 										// a DIFFERENT version of the row that was clicked. Showing it
 										// would be a confident answer to a question nobody asked.
+										//
+										// The open file is closed first: the center shows it IN
+										// PREFERENCE to the stacked diff, so leaving it up made the
+										// click on such a row do nothing visible at all.
 										if (status === "deleted" || binary || liveOnDisk === false) {
+											setWorkspaceFile(null);
 											setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
 											return;
 										}

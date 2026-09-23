@@ -238,6 +238,114 @@ describe("WorkspaceFileView", () => {
 	});
 });
 
+// ── the mode across files ───────────────────────────────────────────────────
+
+/**
+ * Browse / Changes is the reader's choice of how to look at files, so it has to
+ * outlive the file it was made on. Reviewing a branch is clicking from changed
+ * file to changed file in Changes; a pane that snapped back to Browse on every
+ * click made the reader re-pick the mode each time.
+ */
+describe("WorkspaceFileView mode across files", () => {
+	/** A branch diff that changed the file's second line. */
+	const changedDiff = (path: string) => ({
+		available: true,
+		truncated: false,
+		mode: "file",
+		path,
+		lines: [
+			{ kind: "context", text: "package app", oldLine: 1, newLine: 1 },
+			{ kind: "del", text: "func Old() {", oldLine: 2, newLine: 0 },
+			{ kind: "add", text: "func Run() {", oldLine: 0, newLine: 2 },
+			{ kind: "context", text: "}", oldLine: 3, newLine: 3 },
+		],
+	});
+	/** What the route answers for a file the branch did not touch. */
+	const unchanged = (path: string) => ({ available: false, mode: "file", path });
+
+	function serveDiffs(diffs: Record<string, Record<string, unknown>>) {
+		getMock.mockImplementation(
+			async (route: string, init?: { params?: { query?: { base?: string; path?: string } } }) => {
+				const query = init?.params?.query;
+				if (route.includes("/workspace/file-diff")) {
+					return { data: query?.base === "head" ? null : (diffs[query?.path ?? ""] ?? null) };
+				}
+				if (route.includes("/workspace/file")) return { data: body };
+				return { data: null };
+			},
+		);
+	}
+
+	function renderSwitchable(path: string) {
+		const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+		const view = (p: string) => (
+			<QueryClientProvider client={client}>
+				<WorkspaceFileView sessionId="proj-1" path={p} onClose={vi.fn()} />
+			</QueryClientProvider>
+		);
+		const { rerender } = render(view(path));
+		return (next: string) => rerender(view(next));
+	}
+
+	const tab = (name: "Browse" | "Changes") => screen.getByRole("tab", { name });
+
+	it("keeps Changes when another changed file is opened", async () => {
+		serveDiffs({ "pkg/a.go": changedDiff("pkg/a.go"), "pkg/b.go": changedDiff("pkg/b.go") });
+		const open = renderSwitchable("pkg/a.go");
+		await waitFor(() => expect(tab("Changes")).toBeEnabled());
+		await userEvent.click(tab("Changes"));
+		await waitFor(() => expect(editorProps.current?.mode).toBe("diff"));
+
+		open("pkg/b.go");
+
+		await waitFor(() => expect(editorProps.current?.path).toBe("pkg/b.go"));
+		expect(editorProps.current?.mode).toBe("diff");
+		expect(tab("Changes")).toHaveAttribute("aria-selected", "true");
+	});
+
+	it("shows a file with no changes in Browse, and still opens the next changed file in Changes", async () => {
+		serveDiffs({
+			"pkg/a.go": changedDiff("pkg/a.go"),
+			"pkg/same.go": unchanged("pkg/same.go"),
+			"pkg/c.go": changedDiff("pkg/c.go"),
+		});
+		const open = renderSwitchable("pkg/a.go");
+		await waitFor(() => expect(tab("Changes")).toBeEnabled());
+		await userEvent.click(tab("Changes"));
+		await waitFor(() => expect(editorProps.current?.mode).toBe("diff"));
+
+		open("pkg/same.go");
+
+		// Nothing to compare, so the pane says so rather than drawing an empty diff.
+		await waitFor(() => expect(tab("Changes")).toBeDisabled());
+		expect(tab("Changes")).toHaveAttribute("title", "This file has no changes against the target branch.");
+		expect(tab("Browse")).toHaveAttribute("aria-selected", "true");
+		expect(editorProps.current?.path).toBe("pkg/same.go");
+		expect(editorProps.current?.mode).toBe("code");
+
+		open("pkg/c.go");
+
+		await waitFor(() => expect(editorProps.current?.path).toBe("pkg/c.go"));
+		expect(editorProps.current?.mode).toBe("diff");
+		expect(tab("Changes")).toHaveAttribute("aria-selected", "true");
+	});
+
+	it("keeps Browse when Browse was picked", async () => {
+		serveDiffs({ "pkg/a.go": changedDiff("pkg/a.go"), "pkg/b.go": changedDiff("pkg/b.go") });
+		const open = renderSwitchable("pkg/a.go");
+		await waitFor(() => expect(tab("Changes")).toBeEnabled());
+		await userEvent.click(tab("Changes"));
+		await userEvent.click(tab("Browse"));
+
+		open("pkg/b.go");
+
+		await waitFor(() => expect(editorProps.current?.path).toBe("pkg/b.go"));
+		await waitFor(() => expect(tab("Changes")).toBeEnabled());
+		expect(editorProps.current?.mode).toBe("code");
+		expect(tab("Browse")).toHaveAttribute("aria-selected", "true");
+	});
+});
+
 // ── editing and save ─────────────────────────────────────────────────────────
 
 /**

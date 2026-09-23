@@ -7,8 +7,15 @@ test("titlebar back/forward arrows traverse history", async ({ page }) => {
 	await expect(page.getByText("Projects")).toBeVisible();
 
 	// Navigate: home → session view (in-app push).
-	await page.getByRole("button", { name: "Open refactor-mux" }).click();
-	await expect(page).toHaveURL(/sessions\/refactor-mux/);
+	// Clicked where a person clicks - on the row's title. The row's button is a
+	// full-bleed layer UNDER the title, so clicking the button itself is refused
+	// as intercepted even though the same point opens the session for a person.
+	await page
+		.getByRole("button", { name: /^Open Resolve reviewer feedback on terminal polish/ })
+		.locator("xpath=ancestor::li[1]")
+		.getByText("Resolve reviewer feedback on terminal polish")
+		.click();
+	await expect(page).toHaveURL(/sessions\/demo-needs-input/);
 
 	const back = page.getByRole("button", { name: "Go back" });
 	const forward = page.getByRole("button", { name: "Go forward" });
@@ -17,9 +24,9 @@ test("titlebar back/forward arrows traverse history", async ({ page }) => {
 	await expect(back).toBeEnabled();
 
 	await back.click();
-	await expect(page).not.toHaveURL(/sessions\/refactor-mux/);
+	await expect(page).not.toHaveURL(/sessions\/demo-needs-input/);
 
 	await expect(forward).toBeEnabled();
 	await forward.click();
-	await expect(page).toHaveURL(/sessions\/refactor-mux/);
+	await expect(page).toHaveURL(/sessions\/demo-needs-input/);
 });
