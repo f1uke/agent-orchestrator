@@ -392,13 +392,18 @@ export function WorkspaceFileView({
 	}, [file?.contentHash, dirty, baseHash]);
 
 	// A new file in the pane starts from scratch: nothing about the last one's
-	// save state, drift or mode should survive.
+	// save state or drift should survive.
+	//
+	// 🗝 The MODE does survive. It is the reader's choice of how to look at files,
+	// not a fact about the last one: someone reviewing in Changes clicks from file
+	// to file expecting the next diff, and being dropped back into Browse on
+	// every click made them re-pick it each time. A file with nothing to compare
+	// is shown in Browse without forgetting the choice - see `shownMode`.
 	useEffect(() => {
 		setDirty(false);
 		setDrift(null);
 		setFailure(null);
 		setSavedFlash(false);
-		setMode("browse");
 		setBaseHash(undefined);
 		// 🗝 Cleared per file, not per server. The previous file's squiggles are
 		// gone from the editor the moment its model is; a header that kept
@@ -451,7 +456,6 @@ export function WorkspaceFileView({
 					setDirty(false);
 					setDrift(null);
 					setSavedFlash(true);
-					setMode("browse");
 				},
 				onError: (error) => {
 					if (error.failure.kind === "conflict") {
@@ -494,21 +498,37 @@ export function WorkspaceFileView({
 	// asked for, and a Changes row's "first hunk" is only a default.
 	const landOn = line ?? (focus === "first-hunk" ? (firstHunkLine(branchDiff.data) ?? undefined) : undefined);
 
+	// `mode` is what the reader picked and it outlives the file; `shownMode` is
+	// what THIS file can honour. A file with no diff to show falls back to Browse
+	// for as long as it is open, and the next file that has one opens in Changes
+	// again.
+	//
+	// While a file's branch diff is still in flight the pick is held, not
+	// dropped: the editor waits for the diff rather than mounting in Browse and
+	// rebuilding itself as a diff a moment later.
+	const waitingForChanges = mode === "changes" && inWorkspace && branchDiff.isPending;
+	const changesUnavailable = waitingForChanges
+		? null
+		: !inWorkspace || branchDiff.isPending
+			? "Changes mode needs this file's diff against the target branch."
+			: branchDiff.error
+				? "This file's diff against the target branch could not be loaded."
+				: branchDiff.data?.available === false
+					? "This file has no changes against the target branch."
+					: targetOriginal === null
+						? "This file's diff is too large to show side by side."
+						: null;
+	const shownMode: Mode = mode === "changes" && changesUnavailable === null ? "changes" : "browse";
+
 	// Changes mode compares against the target branch; the resolve view compares
 	// against the bytes now on disk. Both are the same diff editor over the same
 	// one buffer.
 	const diffOriginal = drift?.reviewing
 		? { text: savedText, label: "On disk" }
-		: mode === "changes" && targetOriginal !== null
-			? { text: targetOriginal, label: branchDiff.data?.path ? "target branch" : "target branch" }
+		: shownMode === "changes" && targetOriginal !== null
+			? { text: targetOriginal, label: "target branch" }
 			: null;
 	const editorMode = diffOriginal ? "diff" : "code";
-	const changesUnavailable =
-		!inWorkspace || branchDiff.isPending
-			? "Changes mode needs this file's diff against the target branch."
-			: targetOriginal === null
-				? "This file's diff is too large to show side by side."
-				: null;
 
 	return (
 		<div
@@ -619,7 +639,7 @@ export function WorkspaceFileView({
 
 				{file?.available && (
 					<ModeToggle
-						mode={mode}
+						mode={shownMode}
 						onMode={setMode}
 						disabledReason={changesUnavailable}
 						busy={drift?.reviewing}
@@ -745,7 +765,7 @@ export function WorkspaceFileView({
 			{/* `isPending`, not `isLoading`: between react-query retries a query has no
 			    data, no error, and `isLoading` false, so a viewer keyed on isLoading
 			    renders every branch falsy and shows a BLANK pane. */}
-			{q.isPending && !q.error && (
+			{(q.isPending || (waitingForChanges && file?.available)) && !q.error && (
 				<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>Loading file…</p>
 			)}
 			{q.error && (
@@ -773,7 +793,7 @@ export function WorkspaceFileView({
 					)}
 				</div>
 			)}
-			{file && file.available && lines.length > 0 && (
+			{file && file.available && lines.length > 0 && !waitingForChanges && (
 				<Suspense fallback={<p style={{ padding: "20px 24px", fontSize: 12.5, color: P.muted2 }}>Opening editor…</p>}>
 					<MonacoFileEditor
 						sessionId={sessionId}

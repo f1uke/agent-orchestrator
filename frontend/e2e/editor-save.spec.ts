@@ -280,8 +280,8 @@ test("resolving a conflict throws nothing into the renderer", async ({ page }) =
  *
  * qa found the first occurrence (entering diff mode). This is the second, in
  * the path that only opens when a file's branch diff is ALREADY CACHED: a file
- * opened for the first time has none, so the pane drops out of diff mode before
- * the switch and the hazard is closed by accident rather than by design.
+ * opened for the first time has none, so the editor is not on screen while it
+ * loads and there is no live diff editor to hold the old model.
  *
  * The warm-up below is therefore load-bearing, not ceremony. Without it this
  * test passes against the broken code.
@@ -295,26 +295,44 @@ test("switching to an already-visited file while in diff mode throws nothing", a
 	await pane.getByRole("tab", { name: "Changes" }).click();
 	await waitForDiffToCompute(page);
 
+	// The mode is the reader's and outlives the file, so the second file opens
+	// straight into Changes with no second click.
 	await reopenFile(page, ORDINARY);
-	await pane.getByRole("tab", { name: "Changes" }).click();
+	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
 	await waitForDiffToCompute(page);
 	// Anything thrown up to here belongs to the two cases above, not this one.
 	errors.length = 0;
 
-	// Back to the first file. Its diff is cached, so for the render between the
-	// new path arriving and the mode reset landing the pane is STILL in diff
-	// mode — and that transient window is where a live diff editor is left
-	// holding the model the path change is about to drop.
-	//
-	// 🗝 So this case cannot wait for a diff the way the two above do: by the
-	// time anything is observable the pane is deliberately back in Browse. It
-	// waits for the settled end state instead — the mode reset landed AND the
-	// new file's branch lane is drawn, which needs its diff query to have
-	// resolved and its decorations applied. Everything the switch set in motion
-	// has finished by then.
+	// Back to the first file. Its diff is cached, so the pane goes from one diff
+	// straight to the next with no Browse render in between - and a live diff
+	// editor still holding the model the path change is about to drop is exactly
+	// where Monaco throws.
 	await reopenFile(page, CONFLICTING);
-	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "code");
-	await expect(page.locator(".ao-branch-bar").first()).toBeVisible();
+	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
+	await waitForDiffToCompute(page);
+	await expect(page.getByTestId("terminal").getByRole("tab", { name: "Changes" })).toHaveAttribute(
+		"aria-selected",
+		"true",
+	);
 
 	expect(errors, `switching to a cached file: ${errors.join(" | ")}`).toEqual([]);
+});
+
+// The same switch into a file whose diff has NOT been fetched yet: the pane
+// holds the reader's Changes pick while the diff loads, instead of mounting
+// Browse and rebuilding itself as a diff a moment later.
+test("opening a new file while in Changes lands in Changes and throws nothing", async ({ page }) => {
+	const errors = collectPageErrors(page);
+	await openFile(page, ORDINARY);
+	const pane = page.getByTestId("terminal");
+	await pane.getByRole("tab", { name: "Changes" }).click();
+	await waitForDiffToCompute(page);
+	errors.length = 0;
+
+	await reopenFile(page, CONFLICTING);
+	await expect(page.getByTestId("monaco-file-editor")).toHaveAttribute("data-mode", "diff");
+	await waitForDiffToCompute(page);
+	await expect(pane.getByRole("tab", { name: "Changes" })).toHaveAttribute("aria-selected", "true");
+
+	expect(errors, `switching to an uncached file: ${errors.join(" | ")}`).toEqual([]);
 });
