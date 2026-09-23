@@ -21,6 +21,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/ptyexec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/locale"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -784,7 +785,8 @@ func (r *Runtime) launchScriptBaseDir(env map[string]string) string {
 // so the tmux session survives the agent exiting.
 //
 // PATH from cfg.Env is exported last, after all other keys, so an explicit
-// override takes effect.
+// override takes effect. A UTF-8 LC_CTYPE follows, only when nothing has set a
+// locale by then.
 func buildLaunchCommand(cfg ports.RuntimeConfig) string {
 	path := cfg.Env["PATH"]
 	if path == "" {
@@ -807,6 +809,13 @@ func buildLaunchCommand(cfg ports.RuntimeConfig) string {
 		b.WriteString(shellQuote(path))
 		b.WriteString("; ")
 	}
+	// Give the pane a UTF-8 character locale when it has none (see package
+	// locale). A pane inherits the tmux SERVER's environment, not the daemon's,
+	// so a server launchd started without a locale would otherwise pass that on
+	// to every agent here. Placed after cfg.Env's exports so a locale the
+	// project configures counts as the user's.
+	b.WriteString(locale.ShellGuard())
+	b.WriteString("; ")
 	// Quote each argv word so spaces inside a word are preserved.
 	parts := make([]string, len(cfg.Argv))
 	for i, a := range cfg.Argv {

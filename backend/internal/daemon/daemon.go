@@ -25,6 +25,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
+	"github.com/aoagents/agent-orchestrator/backend/internal/locale"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgqueue"
@@ -63,6 +64,15 @@ func Run() error {
 	}
 
 	log := newLogger()
+
+	// Before anything is spawned: a daemon started from Finder has no locale, and
+	// every child - git, simctl, the tmux server and the panes behind it -
+	// inherits that. See package locale for why pbcopy in a Claude pane needs it.
+	if set, err := locale.EnsureProcess(); err != nil {
+		log.Warn("set UTF-8 character locale", "err", err)
+	} else if set {
+		log.Info("no locale in environment; set LC_CTYPE for child processes", "LC_CTYPE", locale.CType)
+	}
 
 	// Fail fast only if a daemon is genuinely still serving the recorded port.
 	// CheckStale confirms the run-file's PID is alive, but that alone is not
