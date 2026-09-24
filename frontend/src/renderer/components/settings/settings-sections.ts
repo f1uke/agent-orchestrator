@@ -87,7 +87,7 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		Icon: Laptop,
 		hint: "the app itself, not the agents",
 		keywords:
-			"updates automatic channel stable nightly version check install restart wiki vault obsidian notes knowledge base folder path notifications test banner companion desktop pet overlay procs library creature species migration import legacy",
+			"updates automatic channel stable nightly version check install restart wiki vault obsidian notes knowledge base folder path tasks links jira gitlab merge request mr repo alias default repo notifications test banner companion desktop pet overlay procs library creature species migration import legacy",
 	},
 ];
 

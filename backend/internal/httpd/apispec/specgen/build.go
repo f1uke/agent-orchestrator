@@ -348,6 +348,8 @@ var schemaNames = map[string]string{
 	"ControllersSetResponseLanguageSettingsRequest":  "SetResponseLanguageSettingsRequest",
 	"ControllersWikiSettingsResponse":                "WikiSettingsResponse",
 	"ControllersSetWikiSettingsRequest":              "SetWikiSettingsRequest",
+	"ControllersRefLinksSettingsResponse":            "RefLinksSettingsResponse",
+	"ControllersSetRefLinksSettingsRequest":          "SetRefLinksSettingsRequest",
 	"ControllersWikiStatusResponse":                  "WikiStatusResponse",
 	"ControllersStartWikiAgentRequest":               "StartWikiAgentRequest",
 	"ControllersWikiFilesResponse":                   "WikiFilesResponse",
@@ -2016,6 +2018,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetWikiSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.WikiSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/ref-links", id: "getRefLinksSettings", tag: "settings",
+			summary: "Fetch where Jira keys and GitLab merge-request references in text link to",
+			resps: []respUnit{
+				{http.StatusOK, controllers.RefLinksSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/ref-links", id: "setRefLinksSettings", tag: "settings",
+			summary: "Replace the reference-link settings (empty fields leave that kind of reference unlinked)",
+			reqBody: controllers.SetRefLinksSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.RefLinksSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

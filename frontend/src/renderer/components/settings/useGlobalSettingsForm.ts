@@ -6,6 +6,8 @@ import type { UpdateChannel, UpdateSettings } from "../../../main/update-setting
 import type { components } from "../../../api/schema";
 import { updateSettingsQueryKey } from "./SystemActions";
 import { wikiStatusQueryKey } from "../../hooks/useWiki";
+import { refLinkSettingsQueryKey, type RefLinkSettingsResponse } from "../../hooks/useRefLinkSettings";
+import { formatAliasLines, parseAliasLines } from "../../lib/ref-links";
 
 export type PromptKind = "orchestrator" | "worker" | "qa" | "reviewer";
 export type PromptItem = { kind: PromptKind; default: string; override: string | null };
@@ -39,6 +41,12 @@ export type GlobalDraft = {
 	autoNudge: boolean;
 	responseLanguage: string;
 	wikiVaultPath: string;
+	// Where Jira keys / GitLab `!N` in text link to. The alias map is edited as
+	// `alias = group/project` lines and parsed back on save.
+	refJiraBaseUrl: string;
+	refGitlabBaseUrl: string;
+	refGitlabDefaultRepo: string;
+	refGitlabAliases: string;
 	reclaimEnabled: boolean;
 	reclaimGrace: number;
 	reclaimArtifacts: boolean;
@@ -53,6 +61,10 @@ export type GlobalScalarField =
 	| "autoNudge"
 	| "responseLanguage"
 	| "wikiVaultPath"
+	| "refJiraBaseUrl"
+	| "refGitlabBaseUrl"
+	| "refGitlabDefaultRepo"
+	| "refGitlabAliases"
 	| "reclaimEnabled"
 	| "reclaimGrace"
 	| "reclaimArtifacts"
@@ -68,6 +80,10 @@ const EMPTY_DRAFT: GlobalDraft = {
 	autoNudge: false,
 	responseLanguage: "English",
 	wikiVaultPath: "",
+	refJiraBaseUrl: "",
+	refGitlabBaseUrl: "",
+	refGitlabDefaultRepo: "",
+	refGitlabAliases: "",
 	reclaimEnabled: true,
 	reclaimGrace: 24 * 60,
 	reclaimArtifacts: true,
@@ -140,6 +156,16 @@ export function useGlobalSettingsForm() {
 			const { data, error } = await apiClient.GET("/api/v1/settings/wiki", {});
 			if (error) throw new Error(apiErrorMessage(error));
 			return data as components["schemas"]["WikiSettingsResponse"];
+		},
+	});
+	const refLinksQuery = useQuery({
+		// Its own key, not the Tasks tab's: this copy is a form's baseline, and it
+		// is seeded once. The tab's copy is invalidated on save.
+		queryKey: [...refLinkSettingsQueryKey, "form"],
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/ref-links", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as RefLinkSettingsResponse;
 		},
 	});
 	const reclaimQuery = useQuery({
@@ -222,6 +248,20 @@ export function useGlobalSettingsForm() {
 	}, [wikiQuery.data]);
 
 	useEffect(() => {
+		if (!refLinksQuery.data || seeded.current.has("refLinks")) return;
+		seeded.current.add("refLinks");
+		const d = refLinksQuery.data;
+		const v = {
+			refJiraBaseUrl: d.jiraBaseUrl,
+			refGitlabBaseUrl: d.gitlabBaseUrl,
+			refGitlabDefaultRepo: d.gitlabDefaultRepo,
+			refGitlabAliases: formatAliasLines(d.gitlabRepoAliases ?? {}),
+		};
+		setDraft((prev) => ({ ...prev, ...v }));
+		setBaseline((prev) => ({ ...prev, ...v }));
+	}, [refLinksQuery.data]);
+
+	useEffect(() => {
 		if (!reclaimQuery.data || seeded.current.has("reclaim")) return;
 		seeded.current.add("reclaim");
 		const { enabled, graceMinutes } = reclaimQuery.data;
@@ -275,6 +315,7 @@ export function useGlobalSettingsForm() {
 		draft.autoNudge !== baseline.autoNudge ||
 		draft.responseLanguage !== baseline.responseLanguage ||
 		draft.wikiVaultPath !== baseline.wikiVaultPath ||
+		refLinksDirty(draft, baseline) ||
 		draft.reclaimEnabled !== baseline.reclaimEnabled ||
 		draft.reclaimGrace !== baseline.reclaimGrace ||
 		draft.reclaimArtifacts !== baseline.reclaimArtifacts ||
@@ -300,6 +341,9 @@ export function useGlobalSettingsForm() {
 	const mutation = useMutation({
 		mutationFn: async () => {
 			const ops: Promise<void>[] = [];
+			// What the daemon stored, where it normalizes (a trailing `/` trimmed,
+			// say), so the form shows the value that is actually in effect.
+			const saved: { refLinks?: RefLinkSettingsResponse } = {};
 			const putPrompt = async (kind: string, base: string) => {
 				const { error } = await apiClient.PUT("/api/v1/settings/prompts/{kind}", {
 					params: { path: { kind: kind as PromptKind } },
@@ -382,6 +426,25 @@ export function useGlobalSettingsForm() {
 					})(),
 				);
 			}
+			if (refLinksDirty(draft, baseline)) {
+				// Parsed before anything is sent, so a malformed alias line
+				// refuses the save with the line named.
+				const aliases = parseAliasLines(draft.refGitlabAliases);
+				ops.push(
+					(async () => {
+						const { data, error } = await apiClient.PUT("/api/v1/settings/ref-links", {
+							body: {
+								jiraBaseUrl: draft.refJiraBaseUrl,
+								gitlabBaseUrl: draft.refGitlabBaseUrl,
+								gitlabDefaultRepo: draft.refGitlabDefaultRepo,
+								gitlabRepoAliases: aliases,
+							},
+						});
+						if (error) throw new Error(apiErrorMessage(error));
+						saved.refLinks = data as RefLinkSettingsResponse;
+					})(),
+				);
+			}
 			if (
 				draft.reclaimEnabled !== baseline.reclaimEnabled ||
 				draft.reclaimGrace !== baseline.reclaimGrace ||
@@ -424,10 +487,23 @@ export function useGlobalSettingsForm() {
 				ops.push(aoBridge.updateSettings.set(next));
 			}
 			await Promise.all(ops);
+			return saved;
 		},
-		onSuccess: () => {
+		onSuccess: (saved) => {
 			setSavedAt(Date.now());
-			setBaseline(draft);
+			const next = saved.refLinks
+				? {
+						...draft,
+						refJiraBaseUrl: saved.refLinks.jiraBaseUrl,
+						refGitlabBaseUrl: saved.refLinks.gitlabBaseUrl,
+						refGitlabDefaultRepo: saved.refLinks.gitlabDefaultRepo,
+						refGitlabAliases: formatAliasLines(saved.refLinks.gitlabRepoAliases ?? {}),
+					}
+				: draft;
+			setDraft(next);
+			setBaseline(next);
+			// The Tasks tab's copy (and the form's own, by prefix).
+			void queryClient.invalidateQueries({ queryKey: refLinkSettingsQueryKey });
 			void queryClient.invalidateQueries({ queryKey: systemPromptsQueryKey });
 			void queryClient.invalidateQueries({ queryKey: messageTemplatesQueryKey });
 			void queryClient.invalidateQueries({ queryKey: spawnConfirmQueryKey });
@@ -468,4 +544,13 @@ export function useGlobalSettingsForm() {
 		save: () => mutation.mutate(),
 		discard,
 	};
+}
+
+function refLinksDirty(draft: GlobalDraft, baseline: GlobalDraft): boolean {
+	return (
+		draft.refJiraBaseUrl !== baseline.refJiraBaseUrl ||
+		draft.refGitlabBaseUrl !== baseline.refGitlabBaseUrl ||
+		draft.refGitlabDefaultRepo !== baseline.refGitlabDefaultRepo ||
+		draft.refGitlabAliases !== baseline.refGitlabAliases
+	);
 }

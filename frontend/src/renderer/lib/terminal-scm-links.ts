@@ -48,11 +48,11 @@ export type ExternalRefMatch = {
 // GitLab merge requests live under an arbitrarily nested group/project path
 // followed by this host-agnostic marker; everything before it is the project
 // base. Mirrors pr-display.ts's `gitlabMRPathMarker`.
-const GITLAB_MR_MARKER = "/-/merge_requests/";
+export const GITLAB_MR_MARKER = "/-/merge_requests/";
 
 // A Jira issue browse URL is `<base>/browse/<KEY>`; everything before this marker
 // is the base (origin, or origin + path prefix on a self-hosted instance).
-const JIRA_BROWSE_MARKER = "/browse/";
+export const JIRA_BROWSE_MARKER = "/browse/";
 
 /**
  * The GitHub repo base (`https://<host>/<owner>/<repo>`) for a GitHub PR/issue
@@ -150,7 +150,7 @@ const GITLAB_REF_RE = /(^|[^\w#!/])!(\d+)(?![\w-])/g;
 // continuing word char or `-`, so `PROJ-2272-order-eligible-ui` (a branch name)
 // is rejected while a standalone `PROJ-2272` in log output survives. Group 2 is
 // the full key. Same shape as the backend's key validator (`^[A-Z][A-Z0-9]+-\d+$`).
-const JIRA_KEY_RE = /(^|[^\w/-])([A-Z][A-Z0-9]+-\d+)(?![\w-])/g;
+export const JIRA_KEY_RE = /(^|[^\w/-])([A-Z][A-Z0-9]+-\d+)(?![\w-])/g;
 
 function collectRefs(line: string, source: RegExp, toUrl: (num: string) => string, out: ExternalRefMatch[]): void {
 	// Fresh RegExp per call keeps lastIndex state local/reentrant.

@@ -1987,6 +1987,30 @@ type SetWikiSettingsRequest struct {
 	VaultPath string `json:"vaultPath"`
 }
 
+// RefLinksSettingsResponse is the body of GET/PUT /api/v1/settings/ref-links:
+// where a work-item reference written in plain text (a Jira key, a GitLab `!N`)
+// opens. Every field is empty by default, and an empty field leaves that kind
+// of reference unlinked.
+type RefLinksSettingsResponse struct {
+	// JiraBaseURL: a key ABC-123 opens `<jiraBaseUrl>/browse/ABC-123`.
+	JiraBaseURL string `json:"jiraBaseUrl"`
+	// GitLabBaseURL: the host every merge-request reference opens on.
+	GitLabBaseURL string `json:"gitlabBaseUrl"`
+	// GitLabDefaultRepo: the project path (group/project) a bare `!N` means.
+	GitLabDefaultRepo string `json:"gitlabDefaultRepo"`
+	// GitLabRepoAliases: short name -> project path, for `XYZ !187` / `XYZ!187`.
+	GitLabRepoAliases map[string]string `json:"gitlabRepoAliases"`
+}
+
+// SetRefLinksSettingsRequest is the body of PUT /api/v1/settings/ref-links. It
+// replaces every field; send an empty string (or an empty map) to clear one.
+type SetRefLinksSettingsRequest struct {
+	JiraBaseURL       string            `json:"jiraBaseUrl"`
+	GitLabBaseURL     string            `json:"gitlabBaseUrl"`
+	GitLabDefaultRepo string            `json:"gitlabDefaultRepo"`
+	GitLabRepoAliases map[string]string `json:"gitlabRepoAliases"`
+}
+
 // WikiStatusResponse is the whole state of the Wiki page in one read: whether a
 // vault is configured, and whether an agent is live inside it.
 //

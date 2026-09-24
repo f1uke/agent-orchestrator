@@ -35,6 +35,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimlog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/reflinks"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
@@ -253,6 +254,18 @@ func Run() error {
 		return fmt.Errorf("wiki settings: %w", err)
 	}
 
+	// Where a work-item reference in plain text (a Jira key, a GitLab `!N`)
+	// opens. Global and empty by default: an unset field leaves that kind of
+	// reference unlinked. A missing/corrupt file degrades to empty.
+	refLinkSettings, err := reflinks.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("ref-link settings: %w", err)
+	}
+
 	// loopReg tracks each fixed-interval background loop's last-run time so the
 	// API can surface a live countdown to each loop's next run. In-memory only:
 	// rebuilt on boot, forgotten on shutdown. Created before any loop starts so
@@ -459,6 +472,7 @@ func Run() error {
 		AutoNudge:          autoNudge,
 		ResponseLanguage:   responseLangSettings,
 		WikiSettings:       wikiSettings,
+		RefLinks:           refLinkSettings,
 		Wiki:               wikiSvc,
 		EvidenceRetention:  evidenceRetentionSettings,
 		EvidenceSweeper:    evidenceSweep,

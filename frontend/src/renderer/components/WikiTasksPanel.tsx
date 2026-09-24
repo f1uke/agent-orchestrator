@@ -4,6 +4,7 @@ import type { WikiTaskRow, WikiTasks, WikiTasksSettings } from "../hooks/useWiki
 import { WikiTaskWriteError } from "../hooks/useWiki";
 import { mergeHeldRows, partitionTasks, taskKey, type OwnerFilter } from "../lib/wiki-tasks";
 import { fromTagAddsSomething, sourceLabel, splitFromTags, splitWikilinks } from "../lib/wiki-task-text";
+import { splitRefLinks, type RefLinkSettings } from "../lib/ref-links";
 import {
 	loadCollapsedGroups,
 	loadOwnerFilter,
@@ -90,6 +91,7 @@ export function WikiTasksPanel({
 	settingsError,
 	onOpenSource,
 	onOpenWikilink,
+	refLinks,
 }: {
 	tasks: WikiTasks | undefined;
 	settings: WikiTasksSettings | undefined;
@@ -112,6 +114,11 @@ export function WikiTasksPanel({
 	onOpenSource: (path: string, line: number, raw: string) => void;
 	/** Open the note a `[[wikilink]]` in a row names, as the Notes tab does. */
 	onOpenWikilink: (target: string) => void;
+	/**
+	 * Where Jira keys and GitLab `!N` references in a row open. Undefined (not
+	 * loaded, or unset) links nothing and the row reads exactly as written.
+	 */
+	refLinks?: RefLinkSettings;
 }) {
 	const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>(loadOwnerFilter);
 	const [showHidden, setShowHidden] = useState<boolean>(loadShowHidden);
@@ -426,6 +433,7 @@ export function WikiTasksPanel({
 										onDismiss={() => settleTick(taskKey(row))}
 										onOpenSource={() => onOpenSource(row.path, row.line, row.raw)}
 										onOpenWikilink={onOpenWikilink}
+										refLinks={refLinks}
 									/>
 								))}
 						</div>
@@ -452,6 +460,7 @@ function TaskRow({
 	onDismiss,
 	onOpenSource,
 	onOpenWikilink,
+	refLinks,
 }: {
 	row: WikiTaskRow;
 	pending: Pending | undefined;
@@ -464,6 +473,7 @@ function TaskRow({
 	onDismiss: () => void;
 	onOpenSource: () => void;
 	onOpenWikilink: (target: string) => void;
+	refLinks: RefLinkSettings | undefined;
 }) {
 	// A settled write clears itself after a beat, so the row does not sit
 	// struck through until the next poll. A refusal does NOT: it stays until
@@ -535,11 +545,34 @@ function TaskRow({
 				 * brackets. Only `[[…]]` becomes a link, and it borrows the Notes
 				 * tab's own class rather than growing a second treatment for the
 				 * same thing.
+				 *
+				 * A Jira key or a GitLab `!N` in the plain runs becomes an
+				 * external link when the reference-link settings say where it
+				 * goes, and stays plain text when they do not. The link opens in
+				 * the OS browser (main's window-open handler), and it sits beside
+				 * the checkbox, not in it, so following one never ticks the row.
 				 */}
 				<span className="wiki-tasks__text">
 					{splitWikilinks(text).map((part, index) =>
 						part.kind === "text" ? (
-							<span key={index}>{part.value}</span>
+							<span key={index}>
+								{splitRefLinks(part.value, refLinks).map((piece, at) =>
+									piece.kind === "text" ? (
+										piece.value
+									) : (
+										<a
+											key={at}
+											className="wiki-tasks__ref"
+											href={piece.url}
+											target="_blank"
+											rel="noopener noreferrer"
+											title={piece.url}
+										>
+											{piece.value}
+										</a>
+									),
+								)}
+							</span>
 						) : (
 							<button
 								key={index}

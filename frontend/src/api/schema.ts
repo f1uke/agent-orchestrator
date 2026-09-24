@@ -1765,6 +1765,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/ref-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch where Jira keys and GitLab merge-request references in text link to */
+        get: operations["getRefLinksSettings"];
+        /** Replace the reference-link settings (empty fields leave that kind of reference unlinked) */
+        put: operations["setRefLinksSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/response-language": {
         parameters: {
             query?: never;
@@ -3034,6 +3052,14 @@ export interface components {
             /** @description pass | fail | skip, or omitted for an evidence-only run (allowed only when the case already carries agent evidence). */
             verdict?: string;
         };
+        RefLinksSettingsResponse: {
+            gitlabBaseUrl: string;
+            gitlabDefaultRepo: string;
+            gitlabRepoAliases: {
+                [key: string]: string;
+            } | null;
+            jiraBaseUrl: string;
+        };
         ReleaseSimHoldResponse: {
             /** @description True when the caller's gesture hold was dropped. */
             released: boolean;
@@ -3368,6 +3394,14 @@ export interface components {
             artifactsEnabled: boolean;
             enabled: boolean;
             graceMinutes: number;
+        };
+        SetRefLinksSettingsRequest: {
+            gitlabBaseUrl: string;
+            gitlabDefaultRepo: string;
+            gitlabRepoAliases: {
+                [key: string]: string;
+            } | null;
+            jiraBaseUrl: string;
         };
         SetResponseLanguageSettingsRequest: {
             language: string;
@@ -10834,6 +10868,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReclaimSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getRefLinksSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefLinksSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setRefLinksSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRefLinksSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefLinksSettingsResponse"];
                 };
             };
             /** @description Bad Request */
