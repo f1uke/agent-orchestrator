@@ -24,8 +24,8 @@ import (
 func reviewTexts(spec LaunchSpec) (prompt, systemPrompt string) {
 	// Assemble the reviewer system prompt in one place: the effective global base
 	// (override resolved by the Engine, else the built-in default), the project's
-	// per-project addition, then AO's protected review-only floor and the
-	// always-last confidentiality guard.
+	// per-project addition, then AO's protected review-only floor, the
+	// confidentiality guard, and the always-last response-language directive.
 	base := spec.ReviewerBase
 	if strings.TrimSpace(base) == "" {
 		base = prompts.DefaultBase(prompts.KindReviewer)
@@ -35,14 +35,14 @@ func reviewTexts(spec LaunchSpec) (prompt, systemPrompt string) {
 	// address the private knowledge store in a reviewer base and get the concrete
 	// project id. A base with no template actions renders unchanged.
 	base = prompts.RenderBase(base, string(spec.ProjectID))
-	// The response-language directive is injected LAST (just before the
+	// The response-language directive is the very LAST section (after the
 	// confidentiality guard) so it wins over the English base + review task above
 	// it. Empty/English renders nothing, so the default reviewer path is unchanged.
 	systemPrompt = base +
 		prompts.Section(spec.ReviewerAddition) +
 		prompts.CoordinationFloor(prompts.KindReviewer) +
-		prompts.ResponseLanguageDirective(spec.ResponseLanguage) +
-		prompts.ConfidentialityGuard
+		prompts.ConfidentialityGuard +
+		prompts.ResponseLanguageDirective(spec.ResponseLanguage)
 
 	var b strings.Builder
 	if reviewIsPreMR(spec) {

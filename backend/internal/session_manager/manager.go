@@ -3365,13 +3365,13 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 	if workspacePrompt != "" {
 		base += "\n\n" + workspacePrompt
 	}
-	// The human-facing response-language directive is injected LAST (just before the
-	// confidentiality guard) so this short, recent directive reliably wins over the
-	// voluminous English base + brief above it. The resolved value is the project's
+	// The human-facing response-language directive is the very LAST section (after
+	// the confidentiality guard, nothing follows it) so this short, recent directive
+	// reliably wins over the voluminous English base + brief above it. The resolved value is the project's
 	// override when set, otherwise the global default; English/empty renders nothing
 	// so the default path is byte-for-byte unchanged.
 	lang := prompts.ResolveResponseLanguage(cfg.ResponseLanguage, m.globalResponseLanguage())
-	return base + m.aoSkillPointer(cfg.HasWebUI) + prompts.ResponseLanguageDirective(lang) + prompts.ConfidentialityGuard, nil
+	return base + m.aoSkillPointer(cfg.HasWebUI) + prompts.ConfidentialityGuard + prompts.ResponseLanguageDirective(lang), nil
 }
 
 // globalResponseLanguage returns the global default human-facing response
