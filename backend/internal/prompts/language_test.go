@@ -162,3 +162,57 @@ func TestResponseLanguageDirective_CoversTheResultNoteNotItsLabels(t *testing.T)
 		}
 	}
 }
+
+// TestResponseLanguageDirective_NamesTheSlipPoints. A long Thai worker session
+// drifted to English with the directive present, worst in a few specific places:
+// narration between tool calls, tool descriptions, AskUserQuestion options, the
+// reply after a task notification / Monitor event, and the first reply after a
+// compaction. The directive names each one so the agent cannot read them as
+// outside "human-facing output".
+func TestResponseLanguageDirective_NamesTheSlipPoints(t *testing.T) {
+	got := ResponseLanguageDirective("Thai")
+	for _, want := range []string{
+		"places where agents most often slip back into English",
+		"narration you write between tool calls",
+		"`description` you give a Bash or other tool call",
+		"AskUserQuestion questions, option labels, and option descriptions",
+		"after a task notification, a background task finishing, or a Monitor event",
+		"first reply after a context compaction",
+		"your reply is still in Thai",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("directive does not name the slip point %q:\n%s", want, got)
+		}
+	}
+	// The slip list is part of the human-facing half, ahead of the English carve-out.
+	if strings.Index(got, "AskUserQuestion") > strings.Index(got, "in English:") {
+		t.Fatalf("the slip list must come before the English carve-out:\n%s", got)
+	}
+}
+
+// TestResponseLanguageDirective_EndsWithSelfCheck. The directive is the last
+// section of every assembled prompt, and its last sentence is a check the agent
+// runs before sending prose, so the final thing it reads is the language rule.
+func TestResponseLanguageDirective_EndsWithSelfCheck(t *testing.T) {
+	got := ResponseLanguageDirective("Thai")
+	want := "Before you send any prose to the human, check its language: if it is not in Thai, rewrite it in Thai first."
+	if !strings.HasSuffix(got, "\n\n"+want) {
+		t.Fatalf("directive must end with the self-check %q:\n%s", want, got)
+	}
+	// The repository carve-out is kept as a whole paragraph, just before the check.
+	carveOut := "Only the prose you address to a person changes language; the repository and its artifacts stay in English."
+	if !strings.Contains(got, carveOut+"\n\n"+want) {
+		t.Fatalf("the English carve-out paragraph must stay intact and precede the self-check:\n%s", got)
+	}
+}
+
+// TestResponseLanguageDirective_Calm. Clarity beats volume: the new wording adds
+// no shouting on top of the existing directive.
+func TestResponseLanguageDirective_Calm(t *testing.T) {
+	got := ResponseLanguageDirective("Thai")
+	for _, loud := range []string{"MUST", "NEVER", "ALWAYS", "IMPORTANT", "!"} {
+		if strings.Contains(got, loud) {
+			t.Fatalf("directive should stay calm, found %q:\n%s", loud, got)
+		}
+	}
+}

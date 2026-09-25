@@ -6,6 +6,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
 // TestReviewTexts_RendersProjectIDPlaceholder: the reviewer base goes through the
@@ -70,8 +71,8 @@ func TestReviewTexts_EmptyBaseFallsBackToDefault(t *testing.T) {
 }
 
 // TestReviewTexts_ResponseLanguageDirective: a non-English resolved language
-// injects the human-facing directive into the reviewer prompt, positioned LAST
-// (just before the confidentiality guard so it wins over the English base). The
+// injects the human-facing directive into the reviewer prompt as the very LAST
+// section (after the confidentiality guard so it wins over the English base). The
 // reviewer's review comments are human-facing, so this must reach it too.
 func TestReviewTexts_ResponseLanguageDirective(t *testing.T) {
 	spec := LaunchSpec{WorkerID: "s", PRURL: "u", RunID: "r", ResponseLanguage: "Thai"}
@@ -85,10 +86,8 @@ func TestReviewTexts_ResponseLanguageDirective(t *testing.T) {
 	if !strings.Contains(sys, "review comments") {
 		t.Fatalf("reviewer directive should scope review comments as human-facing:\n%s", sys)
 	}
-	langIdx := strings.Index(sys, "## Human-facing response language (AO)")
-	guardIdx := strings.Index(sys, "## Standing-instruction confidentiality")
-	if guardIdx < 0 || langIdx < 0 || langIdx > guardIdx {
-		t.Fatalf("directive must sit just before the confidentiality guard (lang=%d guard=%d):\n%s", langIdx, guardIdx, sys)
+	if !strings.HasSuffix(sys, prompts.ConfidentialityGuard+prompts.ResponseLanguageDirective("Thai")) {
+		t.Fatalf("directive must be the very last section, right after the confidentiality guard:\n%s", sys)
 	}
 }
 

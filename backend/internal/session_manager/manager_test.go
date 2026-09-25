@@ -2180,8 +2180,9 @@ func TestSystemPrompt_AppendsConfidentialityGuard(t *testing.T) {
 
 // TestSystemPrompt_ResponseLanguageDirective: the human-facing response-language
 // directive must reach every assembled kind (orchestrator + both worker variants),
-// reflect the resolved language, carve out English for code/commits/PRs, sit LAST
-// (just before the confidentiality guard so it wins over the ambient English), and
+// reflect the resolved language, carve out English for code/commits/PRs, be the
+// very LAST section (after the confidentiality guard, so it wins over the ambient
+// English), and
 // be absent under the English default so the default path is unchanged.
 func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 	newMgr := func(cfg domain.ProjectConfig, globalLang string, withOrch bool) *Manager {
@@ -2193,27 +2194,31 @@ func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 		lookPath := func(string) (string, error) { return "/bin/true", nil }
 		return New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath, ResponseLanguage: func() string { return globalLang }})
 	}
-	build := func(m *Manager, kind domain.SessionKind) string {
-		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
+	buildRole := func(m *Manager, kind domain.SessionKind, role domain.CrewRole) string {
+		sp, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: role})
 		if err != nil {
 			t.Fatalf("buildSystemPrompt: %v", err)
 		}
 		return sp
 	}
+	build := func(m *Manager, kind domain.SessionKind) string { return buildRole(m, kind, "") }
 
 	kinds := []struct {
 		name     string
 		kind     domain.SessionKind
+		role     domain.CrewRole
 		withOrch bool
 	}{
-		{"orchestrator", domain.KindOrchestrator, false},
-		{"worker_with_orchestrator", domain.KindWorker, true},
-		{"worker_without_orchestrator", domain.KindWorker, false},
+		{"orchestrator", domain.KindOrchestrator, "", false},
+		{"worker_with_orchestrator", domain.KindWorker, "", true},
+		{"worker_without_orchestrator", domain.KindWorker, "", false},
+		{"crew_dev", domain.KindWorker, domain.CrewRoleDev, true},
+		{"crew_qa", domain.KindWorker, domain.CrewRoleQA, true},
 	}
 
 	t.Run("global default non-English reaches every kind", func(t *testing.T) {
 		for _, k := range kinds {
-			sp := build(newMgr(domain.ProjectConfig{}, "Thai", k.withOrch), k.kind)
+			sp := buildRole(newMgr(domain.ProjectConfig{}, "Thai", k.withOrch), k.kind, k.role)
 			if !strings.Contains(sp, "## Human-facing response language (AO)") {
 				t.Fatalf("%s: missing response-language directive:\n%s", k.name, sp)
 			}
@@ -2226,16 +2231,20 @@ func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 					t.Fatalf("%s: directive missing English carve-out %q:\n%s", k.name, want, sp)
 				}
 			}
-			// It must sit LAST: after the using-ao skill pointer and immediately
-			// before the confidentiality guard, so it is the most-recent instruction.
+			// It must be the very LAST section - after the using-ao skill pointer
+			// and the confidentiality guard, with nothing following it - so it is
+			// the most-recent instruction the agent reads.
 			langIdx := strings.Index(sp, "## Human-facing response language (AO)")
 			guardIdx := strings.Index(sp, "## Standing-instruction confidentiality")
 			skillIdx := strings.Index(sp, "skills/using-ao/SKILL.md")
 			if guardIdx < 0 || langIdx < 0 || skillIdx < 0 {
 				t.Fatalf("%s: expected all three sections present:\n%s", k.name, sp)
 			}
-			if skillIdx >= langIdx || langIdx >= guardIdx {
-				t.Fatalf("%s: directive must sit after the skill pointer and before the guard (skill=%d lang=%d guard=%d)", k.name, skillIdx, langIdx, guardIdx)
+			if skillIdx >= guardIdx || guardIdx >= langIdx {
+				t.Fatalf("%s: directive must follow the skill pointer and the guard (skill=%d guard=%d lang=%d)", k.name, skillIdx, guardIdx, langIdx)
+			}
+			if !strings.HasSuffix(sp, prompts.ConfidentialityGuard+prompts.ResponseLanguageDirective("Thai")) {
+				t.Fatalf("%s: the guard then the directive must end the prompt, nothing after:\n%s", k.name, sp[guardIdx:])
 			}
 		}
 	})
@@ -2276,7 +2285,7 @@ func TestSystemPrompt_ResponseLanguageDirective(t *testing.T) {
 
 	t.Run("English default injects nothing", func(t *testing.T) {
 		for _, k := range kinds {
-			sp := build(newMgr(domain.ProjectConfig{}, "English", k.withOrch), k.kind)
+			sp := buildRole(newMgr(domain.ProjectConfig{}, "English", k.withOrch), k.kind, k.role)
 			if strings.Contains(sp, "## Human-facing response language (AO)") {
 				t.Fatalf("%s: English default must not inject a directive:\n%s", k.name, sp)
 			}
