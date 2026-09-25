@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { BookText } from "lucide-react";
 import { useDaemonStatus } from "../hooks/useDaemonStatus";
+import { useRefLinkSettings } from "../hooks/useRefLinkSettings";
 import {
 	useCompleteWikiTask,
 	useDeleteWikiTask,
@@ -69,6 +70,7 @@ export function WikiPage() {
 	// it is a tab you stop glancing at.
 	const tasksQuery = useWikiTasks(configured);
 	const tasksSettingsQuery = useWikiTasksSettings(configured);
+	const refLinkSettings = useRefLinkSettings();
 	const saveTasksSettings = useSaveWikiTasksSettings();
 	const completeTask = useCompleteWikiTask();
 	const deleteTask = useDeleteWikiTask();
@@ -290,6 +292,7 @@ export function WikiPage() {
 							settingsError={saveTasksSettings.error ? saveTasksSettings.error.message : null}
 							onOpenSource={openSource}
 							onOpenWikilink={resolveWikilink}
+							refLinks={refLinkSettings.data}
 						/>
 					}
 				/>

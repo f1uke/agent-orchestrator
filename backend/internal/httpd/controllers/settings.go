@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/reflinks"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
@@ -57,6 +58,13 @@ type ResponseLanguageService interface {
 type WikiSettingsService interface {
 	Get() wikisettings.Settings
 	Set(wikisettings.Settings) error
+}
+
+// RefLinksService is the reference-links settings store surface the controller
+// needs. *reflinks.Store satisfies this directly.
+type RefLinksService interface {
+	Get() reflinks.Settings
+	Set(reflinks.Settings) error
 }
 
 // EvidenceRetentionService is the evidence-retention settings store surface the
@@ -100,6 +108,7 @@ type SettingsController struct {
 	AutoNudge         AutoNudgeService
 	ResponseLanguage  ResponseLanguageService
 	Wiki              WikiSettingsService
+	RefLinks          RefLinksService
 	EvidenceRetention EvidenceRetentionService
 	EvidenceSweeper   EvidenceSweeper
 	SystemPrompts     SystemPromptsService
@@ -120,6 +129,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/wiki", c.setWiki)
 	r.Get("/settings/wiki/tasks", c.getWikiTasks)
 	r.Put("/settings/wiki/tasks", c.setWikiTasks)
+	r.Get("/settings/ref-links", c.getRefLinks)
+	r.Put("/settings/ref-links", c.setRefLinks)
 	r.Get("/settings/evidence-retention", c.getEvidenceRetention)
 	r.Put("/settings/evidence-retention", c.setEvidenceRetention)
 	r.Post("/settings/evidence-retention/sweep", c.sweepEvidenceRetention)
@@ -364,6 +375,52 @@ func wikiTasksSettingsResponse(t wikisettings.TaskSettings) WikiTasksSettingsRes
 		Cutoff:         t.Cutoff,
 		OwnerAliases:   nonNil(t.OwnerAliases),
 		RequireCreated: t.RequireCreated,
+	}
+}
+
+func (c *SettingsController) getRefLinks(w http.ResponseWriter, r *http.Request) {
+	if c.RefLinks == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/ref-links")
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, refLinksSettingsResponse(c.RefLinks.Get()))
+}
+
+// setRefLinks replaces every reference-link field at once. Empty fields are
+// legitimate: they are how a kind of reference is left unlinked.
+func (c *SettingsController) setRefLinks(w http.ResponseWriter, r *http.Request) {
+	if c.RefLinks == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/ref-links")
+		return
+	}
+	var in SetRefLinksSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	next := reflinks.Settings{
+		JiraBaseURL:       in.JiraBaseURL,
+		GitLabBaseURL:     in.GitLabBaseURL,
+		GitLabDefaultRepo: in.GitLabDefaultRepo,
+		GitLabRepoAliases: in.GitLabRepoAliases,
+	}
+	if err := c.RefLinks.Set(next); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, refLinksSettingsResponse(c.RefLinks.Get()))
+}
+
+func refLinksSettingsResponse(s reflinks.Settings) RefLinksSettingsResponse {
+	aliases := s.GitLabRepoAliases
+	if aliases == nil {
+		aliases = map[string]string{}
+	}
+	return RefLinksSettingsResponse{
+		JiraBaseURL:       s.JiraBaseURL,
+		GitLabBaseURL:     s.GitLabBaseURL,
+		GitLabDefaultRepo: s.GitLabDefaultRepo,
+		GitLabRepoAliases: aliases,
 	}
 }
 

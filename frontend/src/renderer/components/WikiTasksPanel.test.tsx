@@ -482,6 +482,48 @@ describe("a [[wikilink]] in a row", () => {
 	});
 });
 
+describe("work-item references in a row", () => {
+	const refLinks = {
+		jiraBaseUrl: "https://jira.example.com",
+		gitlabBaseUrl: "https://gitlab.example.com",
+		gitlabDefaultRepo: "group/app",
+		gitlabRepoAliases: { XYZ: "group/xyz" },
+	};
+	const text = "ABC-12: land XYZ `!187`, then `!1234`; QQQ !5 waits";
+
+	it("links a Jira key, an aliased MR and a bare MR, and leaves an unknown alias plain", () => {
+		render(panel({ tasks: tasks({ tasks: [row({ text })] }), refLinks }));
+
+		const jira = screen.getByRole("link", { name: "ABC-12" });
+		expect(jira.getAttribute("href")).toBe("https://jira.example.com/browse/ABC-12");
+		expect(jira.getAttribute("target")).toBe("_blank");
+		expect(screen.getByRole("link", { name: "!187" }).getAttribute("href")).toBe(
+			"https://gitlab.example.com/group/xyz/-/merge_requests/187",
+		);
+		expect(screen.getByRole("link", { name: "!1234" }).getAttribute("href")).toBe(
+			"https://gitlab.example.com/group/app/-/merge_requests/1234",
+		);
+		expect(screen.queryByRole("link", { name: /!5/ })).toBeNull();
+		expect(screen.getAllByRole("link")).toHaveLength(3);
+	});
+
+	it("does not tick the row when a link is followed", async () => {
+		const user = userEvent.setup();
+		const onComplete = vi.fn().mockResolvedValue({ moved: false });
+		render(panel({ tasks: tasks({ tasks: [row({ text })] }), refLinks, onComplete }));
+
+		await user.click(screen.getByRole("link", { name: "ABC-12" }));
+		expect(onComplete).not.toHaveBeenCalled();
+		expect(screen.getByRole("button", { name: /^Tick off:/ })).toBeTruthy();
+	});
+
+	it("draws the row exactly as written when nothing is configured", () => {
+		render(panel({ tasks: tasks({ tasks: [row({ text })] }) }));
+		expect(screen.queryAllByRole("link")).toHaveLength(0);
+		expect(screen.getByText(text)).toBeTruthy();
+	});
+});
+
 /**
  * The `created:`-only rule, from the tab's side: what it hides, what it still
  * says out loud, and the escape hatch that proves nothing was lost.

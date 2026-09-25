@@ -83,6 +83,7 @@ type APIDeps struct {
 	// setting, plus the one agent pane that runs inside it. It is deliberately
 	// not a session, so it has no lifecycle wiring of its own.
 	WikiSettings      controllers.WikiSettingsService
+	RefLinks          controllers.RefLinksService
 	Wiki              controllers.WikiService
 	EvidenceRetention controllers.EvidenceRetentionService
 	EvidenceSweeper   controllers.EvidenceSweeper
@@ -154,7 +155,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
-		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:          &controllers.WikiController{Svc: deps.Wiki},
 		daemon:        &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},

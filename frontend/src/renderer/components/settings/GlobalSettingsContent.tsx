@@ -6,6 +6,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
 import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
 import { SettingEditorControl } from "./SettingEditorControl";
 import { CompanionControls } from "./CompanionControls";
@@ -482,6 +483,89 @@ function ThisMacSection({ form }: { form: GlobalForm }) {
 					/>
 				</SettingRow>
 
+				{/* Where a work-item reference written in plain text opens - today, a
+				    Wiki Tasks row. Every field is optional and an empty one leaves that
+				    kind of reference as plain text: the app never guesses a URL. */}
+				<SettingRow
+					name="Jira address"
+					summary="Makes a Jira issue key such as ABC-123 in a task clickable, opening the issue in your browser."
+					detail="The site's base URL; the key opens at <address>/browse/<KEY>. Leave it empty to keep keys as plain text."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.refJiraBaseUrl || "Off"}
+					modified={isFieldDirty("refJiraBaseUrl")}
+					controlId="refJiraBaseUrl"
+				>
+					<Input
+						id="refJiraBaseUrl"
+						className="h-8 max-w-[340px] font-mono text-[12.5px]"
+						placeholder="https://jira.example.com"
+						spellCheck={false}
+						value={draft.refJiraBaseUrl}
+						onChange={(e) => setField("refJiraBaseUrl", e.target.value)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="GitLab address"
+					summary="Makes a merge request reference such as !123 in a task clickable, opening it in your browser."
+					detail="The GitLab host's base URL. Every merge request link needs it, together with a default repo or a repo alias. Leave it empty to keep them all as plain text."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.refGitlabBaseUrl || "Off"}
+					modified={isFieldDirty("refGitlabBaseUrl")}
+					controlId="refGitlabBaseUrl"
+				>
+					<Input
+						id="refGitlabBaseUrl"
+						className="h-8 max-w-[340px] font-mono text-[12.5px]"
+						placeholder="https://gitlab.example.com"
+						spellCheck={false}
+						value={draft.refGitlabBaseUrl}
+						onChange={(e) => setField("refGitlabBaseUrl", e.target.value)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Default GitLab repo"
+					summary="The project a bare !123 means, when no repo alias is written before it."
+					detail="A GitLab project path, group/project. Leave it empty to keep bare references as plain text."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.refGitlabDefaultRepo || "None"}
+					modified={isFieldDirty("refGitlabDefaultRepo")}
+					controlId="refGitlabDefaultRepo"
+				>
+					<Input
+						id="refGitlabDefaultRepo"
+						className="h-8 max-w-[340px] font-mono text-[12.5px]"
+						placeholder="group/project"
+						spellCheck={false}
+						value={draft.refGitlabDefaultRepo}
+						onChange={(e) => setField("refGitlabDefaultRepo", e.target.value)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Repo aliases"
+					summary="Short names written before a reference, so XYZ !187 (or XYZ!187) opens in the repo XYZ stands for."
+					detail="One per line, as alias = group/project. Names match regardless of case. An uppercase name that is not listed here leaves its reference as plain text rather than sending it to the default repo."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={aliasCount(draft.refGitlabAliases)}
+					modified={isFieldDirty("refGitlabAliases")}
+					controlId="refGitlabAliases"
+				>
+					<Textarea
+						id="refGitlabAliases"
+						className="min-h-20 max-w-[340px] resize-y font-mono text-[12.5px] leading-relaxed"
+						placeholder="XYZ = group/project"
+						spellCheck={false}
+						value={draft.refGitlabAliases}
+						onChange={(e) => setField("refGitlabAliases", e.target.value)}
+					/>
+				</SettingRow>
+
 				<SettingRow
 					name="Notifications"
 					summary="Sends a native banner down the exact path a real notification takes, so you can confirm macOS is letting them through."
@@ -528,6 +612,11 @@ function ThisMacSection({ form }: { form: GlobalForm }) {
 			</SettingRows>
 		</>
 	);
+}
+
+function aliasCount(lines: string): string {
+	const n = lines.split("\n").filter((line) => line.trim() !== "").length;
+	return n === 0 ? "None" : `${n} alias${n === 1 ? "" : "es"}`;
 }
 
 function LanguageSelect({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {

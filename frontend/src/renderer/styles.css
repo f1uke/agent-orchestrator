@@ -6886,6 +6886,26 @@ ol.note-prose__list {
 	overflow-wrap: anywhere;
 }
 
+/* A Jira key or GitLab `!N` the reference-link settings resolve: the Notes tab's
+   external-link look (accent, underline on hover), plus the app's blue keyboard
+   ring, which the row's wikilinks share. */
+.wiki-tasks__ref {
+	color: var(--accent);
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.wiki-tasks__ref:hover {
+	text-decoration: underline;
+}
+
+.wiki-tasks__text .wiki-tasks__ref:focus-visible,
+.wiki-tasks__text .note-prose__wikilink:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+	border-radius: 3px;
+}
+
 /* …and the caption that pays for it. One line, quiet at rest, and the first
    thing given up when the rail is narrow. */
 .wiki-tasks__meta {
