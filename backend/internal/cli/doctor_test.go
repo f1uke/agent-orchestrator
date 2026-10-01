@@ -643,6 +643,9 @@ func TestDoctorSessionEndingsStates(t *testing.T) {
 				t.Errorf("message missing %q: %s", want, check.Message)
 			}
 		}
+		if strings.Contains(check.Message, "runtime died") {
+			t.Errorf("blamed the runtime with no pane probe to say so: %s", check.Message)
+		}
 	})
 
 	// The 15:06:43 event as the journal now records it: one of the five was
@@ -668,6 +671,31 @@ func TestDoctorSessionEndingsStates(t *testing.T) {
 			t.Fatalf("session-endings = %+v, want WARN", check)
 		}
 		for _, want := range []string{"3 session(s) ended together", "nter-ios-app-79 (parked, SIGTERM)", "nter-ios-app-77 (SIGTERM)", "advisor-ios-app-15 (unreported, SIGKILL)"} {
+			if !strings.Contains(check.Message, want) {
+				t.Errorf("message missing %q: %s", want, check.Message)
+			}
+		}
+	})
+
+	// 2026-10-01: a `tmux kill-server` in one pane. Every agent reported its own
+	// ending ("other"), which reads like agents quitting - only the pane probe
+	// says the runtime went first. doctor has to say so, and how to recover.
+	t.Run("panes gone with their agents names the runtime and the restore", func(t *testing.T) {
+		cfg := setConfigEnv(t)
+		base := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
+		gone := false
+		var lines []string
+		for i, id := range []string{"agent-orchestrator-105", "nter-ios-app-77", "nter-ios-app-86"} {
+			line, _ := json.Marshal(endingslog.Entry{At: base.Add(time.Duration(i) * 20 * time.Millisecond), SessionID: id, Source: "agent", Reason: "other", PaneAlive: &gone})
+			lines = append(lines, string(line))
+		}
+		writeEndings(t, cfg.dataDir, lines...)
+		c := doctorContext(t, map[string]string{"git": "/bin/git"}, gitOnly)
+		check := findDoctorCheck(t, c.runDoctor(context.Background()), "session-endings")
+		if check.Level != doctorWarn {
+			t.Fatalf("session-endings = %+v, want WARN", check)
+		}
+		for _, want := range []string{"tmux runtime died under them", "ao session restore agent-orchestrator-105", "ao session restore nter-ios-app-86"} {
 			if !strings.Contains(check.Message, want) {
 				t.Errorf("message missing %q: %s", want, check.Message)
 			}

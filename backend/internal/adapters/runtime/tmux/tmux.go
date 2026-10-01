@@ -61,8 +61,19 @@ type Options struct {
 	EnterDelay time.Duration // pause before the submitting Enter; default 300ms
 	// DataDir is where launch scripts are written when the session's env
 	// carries no AO_DATA_DIR (reviewer, wiki and run panes). Empty falls back
-	// to the OS temp dir.
+	// to the OS temp dir. It also roots the per-session tmux sockets (see
+	// SocketDir), unless SocketDir overrides that.
 	DataDir string
+	// SocketDir overrides where the per-session tmux sockets live. Empty means
+	// SocketDir(DataDir).
+	SocketDir string
+	// LegacySocket is the shared tmux server AO ran every session on before each
+	// got its own (LegacyDefaultSocket). When set, a session with no socket of its
+	// own is looked for there, but adopted only if its pane was launched from
+	// THIS instance's launch-script dir - so a sandbox never reaches the real
+	// instance's sessions. Empty disables the fallback. It exists for the
+	// sessions alive across the upgrade and can go once none can be.
+	LegacySocket string
 }
 
 // Runtime runs agent sessions inside tmux sessions, driving them via the tmux
@@ -75,8 +86,15 @@ type Runtime struct {
 	chunkDelay time.Duration
 	enterDelay time.Duration
 	dataDir    string
-	runner     runner
-	sleep      func(time.Duration) // seam for tests; defaults to time.Sleep
+	// socketDir holds one tmux socket per session (see socket.go).
+	socketDir string
+	// legacySocket is Options.LegacySocket; legacyOwned caches, per session id,
+	// whether the session lives on it (a bool). Only definitive answers are
+	// cached; Create retires a legacy session before the id gets its own socket.
+	legacySocket string
+	legacyOwned  sync.Map
+	runner       runner
+	sleep        func(time.Duration) // seam for tests; defaults to time.Sleep
 	// hasLiveChild reports whether pid has at least one live child process. It is
 	// the seam AgentAlive uses to see past the keep-alive shell; tests fake it.
 	hasLiveChild func(ctx context.Context, pid int) (bool, error)
@@ -114,6 +132,16 @@ type execRunner struct{}
 // buildLaunchCommand, not inherited here, so stripping these is safe.
 var daemonOnlyEnvKeys = []string{"AO_SESSION_IDLE_CLOSE", "AO_OWNER"}
 
+// tmuxClientEnvKeys are what tmux itself sets inside a pane. Every command the
+// runtime runs names its server with -S, so they could not redirect it anyway;
+// they are dropped so a daemon started from inside a pane does not seed a new
+// server's global environment - which every pane of it inherits - with another
+// server's identity, and so `attach-session` does not refuse as "nested".
+var tmuxClientEnvKeys = []string{"TMUX", "TMUX_PANE"}
+
+// execEnvDropKeys is everything the tmux client's environment drops.
+var execEnvDropKeys = append(append([]string(nil), daemonOnlyEnvKeys...), tmuxClientEnvKeys...)
+
 // stripEnvKeys returns env (a KEY=VALUE slice) without any entry whose key is in
 // keys. The input slice is not mutated.
 func stripEnvKeys(env, keys []string) []string {
@@ -142,7 +170,7 @@ func (execRunner) Run(ctx context.Context, env []string, name string, args ...st
 	cmd := exec.CommandContext(ctx, name, args...)
 	// stripEnvKeys returns a fresh slice, so appending env into it is safe (no
 	// aliasing of the caller's os.Environ()).
-	cmd.Env = append(stripEnvKeys(os.Environ(), daemonOnlyEnvKeys), env...)
+	cmd.Env = append(stripEnvKeys(os.Environ(), execEnvDropKeys), env...)
 	return cmd.CombinedOutput()
 }
 
@@ -181,6 +209,10 @@ func New(opts Options) *Runtime {
 	if enterDelay <= 0 {
 		enterDelay = defaultEnterDelay
 	}
+	socketDir := opts.SocketDir
+	if socketDir == "" {
+		socketDir = SocketDir(opts.DataDir)
+	}
 	return &Runtime{
 		binary:       binary,
 		shell:        shellPath,
@@ -189,6 +221,8 @@ func New(opts Options) *Runtime {
 		chunkDelay:   chunkDelay,
 		enterDelay:   enterDelay,
 		dataDir:      opts.DataDir,
+		socketDir:    socketDir,
+		legacySocket: opts.LegacySocket,
 		runner:       execRunner{},
 		sleep:        time.Sleep,
 		hasLiveChild: defaultHasLiveChild,
@@ -226,7 +260,17 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (_ ports.
 			_ = os.Remove(scriptPath)
 		}
 	}()
-	if out, err := r.run(ctx, args...); err != nil {
+	// A new session always gets a server of its own. A same-named session this
+	// instance left on the shared pre-upgrade server is retired first, by the
+	// same rule as a stale duplicate below.
+	if err := r.retireLegacy(ctx, id); err != nil {
+		return ports.RuntimeHandle{}, err
+	}
+	sock := r.ownSocket(id)
+	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+		return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: prepare socket dir: %w", err)
+	}
+	if out, err := r.run(ctx, sock, args...); err != nil {
 		// A pre-existing session with this deterministic name blocks new-session
 		// with "duplicate session". If it is a STALE orphan (its agent has exited —
 		// e.g. left by a terminated/restarted session, the re-import→open case),
@@ -243,21 +287,21 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (_ ports.
 		if dErr := r.Destroy(ctx, stale); dErr != nil {
 			return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: create session %s: reap stale: %w", id, dErr)
 		}
-		if _, err := r.run(ctx, args...); err != nil {
+		if _, err := r.run(ctx, sock, args...); err != nil {
 			return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: create session %s (after reaping stale): %w", id, err)
 		}
 	}
 
 	// Hide the status bar in the embedded terminal: it clutters the view and
 	// was not designed for the in-browser display context.
-	if _, err := r.run(ctx, setStatusOffArgs(id)...); err != nil {
+	if _, err := r.run(ctx, sock, setStatusOffArgs(id)...); err != nil {
 		_ = r.Destroy(context.Background(), ports.RuntimeHandle{ID: id})
 		return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: set status %s: %w", id, err)
 	}
 
 	// Enable mouse mode so the embedded terminal's SGR wheel reports scroll the
 	// pane (see setMouseOnArgs). Without it, wheel scrolling silently no-ops.
-	if _, err := r.run(ctx, setMouseOnArgs(id)...); err != nil {
+	if _, err := r.run(ctx, sock, setMouseOnArgs(id)...); err != nil {
 		_ = r.Destroy(context.Background(), ports.RuntimeHandle{ID: id})
 		return ports.RuntimeHandle{}, fmt.Errorf("tmux runtime: set mouse %s: %w", id, err)
 	}
@@ -282,7 +326,16 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 	if err != nil {
 		return err
 	}
-	out, err := r.run(ctx, killSessionArgs(id)...)
+	sock, err := r.socketFor(ctx, id)
+	if err != nil {
+		return fmt.Errorf("tmux runtime: destroy session %s: %w", id, err)
+	}
+	return r.destroyOn(ctx, sock, id)
+}
+
+// destroyOn kills session id on the server at sock; already gone is success.
+func (r *Runtime) destroyOn(ctx context.Context, sock, id string) error {
+	out, err := r.run(ctx, sock, killSessionArgs(id)...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && killSessionMissingOutput(string(out)) {
@@ -304,7 +357,11 @@ func (r *Runtime) IsAlive(ctx context.Context, handle ports.RuntimeHandle) (bool
 	if err != nil {
 		return false, err
 	}
-	out, err := r.run(ctx, hasSessionArgs(id)...)
+	sock, err := r.socketFor(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("tmux runtime: probe session %s: %w", id, err)
+	}
+	out, err := r.run(ctx, sock, hasSessionArgs(id)...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && sessionMissingOutput(string(out)) {
@@ -329,7 +386,16 @@ func (r *Runtime) AgentAlive(ctx context.Context, handle ports.RuntimeHandle) (b
 	if err != nil {
 		return false, err
 	}
-	out, err := r.run(ctx, listPanePIDArgs(id)...)
+	sock, err := r.socketFor(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("tmux runtime: agent-alive probe %s: %w", id, err)
+	}
+	return r.agentAliveOn(ctx, sock, id)
+}
+
+// agentAliveOn is AgentAlive against the server at sock.
+func (r *Runtime) agentAliveOn(ctx context.Context, sock, id string) (bool, error) {
+	out, err := r.run(ctx, sock, listPanePIDArgs(id)...)
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && sessionMissingOutput(string(out)) {
@@ -418,13 +484,18 @@ func (r *Runtime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, m
 		size = budget
 	}
 
+	sock, err := r.socketFor(ctx, id)
+	if err != nil {
+		return fmt.Errorf("tmux runtime: send message %s: %w", id, err)
+	}
+
 	lock := r.sendLock(id)
 	lock.Lock()
 	defer lock.Unlock()
 
 	parts := chunks(message, size)
 	for i, chunk := range parts {
-		if _, err := r.run(ctx, sendKeysLiteralArgs(id, chunk)...); err != nil {
+		if _, err := r.run(ctx, sock, sendKeysLiteralArgs(id, chunk)...); err != nil {
 			return fmt.Errorf("tmux runtime: send message %s: %w", id, err)
 		}
 		if i < len(parts)-1 {
@@ -433,7 +504,7 @@ func (r *Runtime) SendMessage(ctx context.Context, handle ports.RuntimeHandle, m
 	}
 	// Let the pane ingest the whole message before the submit key arrives.
 	r.sleep(r.enterDelay)
-	if _, err := r.run(ctx, sendEnterArgs(id)...); err != nil {
+	if _, err := r.run(ctx, sock, sendEnterArgs(id)...); err != nil {
 		return fmt.Errorf("tmux runtime: send enter %s: %w", id, err)
 	}
 	return nil
@@ -449,7 +520,11 @@ func (r *Runtime) GetOutput(ctx context.Context, handle ports.RuntimeHandle, lin
 	if lines <= 0 {
 		return "", errors.New("tmux runtime: lines must be positive")
 	}
-	out, err := r.run(ctx, capturePaneArgs(id, lines)...)
+	sock, err := r.socketFor(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("tmux runtime: capture output %s: %w", id, err)
+	}
+	out, err := r.run(ctx, sock, capturePaneArgs(id, lines)...)
 	if err != nil {
 		return "", fmt.Errorf("tmux runtime: capture output %s: %w", id, err)
 	}
@@ -460,25 +535,32 @@ func (r *Runtime) GetOutput(ctx context.Context, handle ports.RuntimeHandle, lin
 // local PTY, sized rows x cols from birth when known. ctx cancellation closes
 // the PTY.
 func (r *Runtime) Attach(ctx context.Context, handle ports.RuntimeHandle, rows, cols uint16) (ports.Stream, error) {
-	argv, err := r.attachCommand(handle)
+	argv, err := r.attachCommand(ctx, handle)
 	if err != nil {
 		return nil, err
 	}
 	return ptyexec.Spawn(ctx, argv, attachEnv(os.Environ()), rows, cols)
 }
 
-// attachCommand returns the argv to attach a terminal to the session.
-// tmux needs no per-session env block.
-func (r *Runtime) attachCommand(handle ports.RuntimeHandle) ([]string, error) {
+// attachCommand returns the argv to attach a terminal to the session, on the
+// server that hosts it. tmux needs no per-session env block.
+func (r *Runtime) attachCommand(ctx context.Context, handle ports.RuntimeHandle) ([]string, error) {
 	id, err := handleID(handle)
 	if err != nil {
 		return nil, err
 	}
-	return []string{r.binary, "attach-session", "-t", id}, nil
+	sock, err := r.socketFor(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("tmux runtime: attach %s: %w", id, err)
+	}
+	return []string{r.binary, "-S", sock, "attach-session", "-t", id}, nil
 }
 
+// attachEnv is the attach client's environment: TERM pinned, and tmux's own
+// pane variables dropped (see tmuxClientEnvKeys) - a client that sees $TMUX
+// refuses to attach as "nested".
 func attachEnv(base []string) []string {
-	env := append([]string(nil), base...)
+	env := stripEnvKeys(base, tmuxClientEnvKeys)
 	for i, kv := range env {
 		if strings.HasPrefix(kv, "TERM=") {
 			env[i] = "TERM=xterm-256color"
@@ -488,11 +570,13 @@ func attachEnv(base []string) []string {
 	return append(env, "TERM=xterm-256color")
 }
 
-// run wraps runner.Run with a per-call timeout context.
-func (r *Runtime) run(ctx context.Context, args ...string) ([]byte, error) {
+// run runs one tmux command against the server at sock, with a per-call
+// timeout. Every command names its server: nothing the runtime does may fall
+// through to whatever server tmux would pick by default.
+func (r *Runtime) run(ctx context.Context, sock string, args ...string) ([]byte, error) {
 	cmdCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
-	out, err := r.runner.Run(cmdCtx, nil, r.binary, args...)
+	out, err := r.runner.Run(cmdCtx, nil, r.binary, append([]string{"-S", sock}, args...)...)
 	if cmdCtx.Err() != nil {
 		return out, cmdCtx.Err()
 	}

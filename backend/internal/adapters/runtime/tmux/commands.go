@@ -109,3 +109,11 @@ func listPanePIDArgs(id string) []string {
 func capturePaneArgs(id string, lines int) []string {
 	return []string{"capture-pane", "-t", id, "-p", "-S", fmt.Sprintf("-%d", lines)}
 }
+
+// listAllPaneStartsArgs builds args for `tmux list-panes -a -F
+// '#{session_name}<TAB>#{pane_start_command}'`: every pane on the server with the
+// session it belongs to and the command it was started with, which is how the
+// runtime recognises the sessions it launched (see legacyOwns).
+func listAllPaneStartsArgs() []string {
+	return []string{"list-panes", "-a", "-F", "#{session_name}\t#{pane_start_command}"}
+}

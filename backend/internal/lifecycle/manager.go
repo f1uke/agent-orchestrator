@@ -151,6 +151,12 @@ type Manager struct {
 	// by the session manager (like SetCrewReaper) because lifecycle has no
 	// runtime. Nil until wired; best-effort when set.
 	sessionPaneReaper func(context.Context, domain.SessionID) error
+	// runtimeProbe reports whether a runtime handle's pane still exists, so an
+	// agent's own ending can tell "the agent quit" from "its runtime died under
+	// it" (see applyAgentExit). Injected by the daemon (SetRuntimeProbe) because
+	// lifecycle has no runtime. Nil until wired; nil reads every pane as present,
+	// which is the behaviour from before the question was asked.
+	runtimeProbe func(ctx context.Context, handleID string) (bool, error)
 	// endings records the account of each termination to the side journal. Nil
 	// until wired; see WithEndingSink.
 	endings ports.SessionEndingSink
@@ -182,6 +188,12 @@ func (m *Manager) SetRuntimeSuspender(fn func(context.Context, domain.SessionID)
 // fan-out entirely.
 func (m *Manager) SetCrewReaper(fn func(context.Context, domain.SessionID, string) error) {
 	m.crewReaper = fn
+}
+
+// SetRuntimeProbe wires the pane-liveness question applyAgentExit asks (see
+// runtimeVanished), injected by the daemon because lifecycle has no runtime.
+func (m *Manager) SetRuntimeProbe(fn func(ctx context.Context, handleID string) (bool, error)) {
+	m.runtimeProbe = fn
 }
 
 // SetSessionPaneReaper wires the hook that closes a session's auxiliary panes -

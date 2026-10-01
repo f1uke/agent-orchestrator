@@ -47,6 +47,23 @@ func (c Cluster) IDs() []string {
 	return ids
 }
 
+// RuntimeLost reports whether the group's panes all went with their agents: every
+// ending carries a pane probe, and every probe found the pane gone. An agent
+// that quits leaves its pane behind (the launch keeps a shell alive after it),
+// so this is the signature of the runtime dying under the agents - a tmux server
+// killed, or tmux killed outright - rather than of agents deciding to stop.
+func (c Cluster) RuntimeLost() bool {
+	if len(c.Entries) == 0 {
+		return false
+	}
+	for _, e := range c.Entries {
+		if e.PaneAlive == nil || *e.PaneAlive {
+			return false
+		}
+	}
+	return true
+}
+
 // Describe names a session in a group with what is known about how it stopped,
 // e.g. "nter-ios-app-79 (parked, SIGTERM)": whether AO parked it rather than
 // terminating it, whether nothing ever reported it, and how its process ended.

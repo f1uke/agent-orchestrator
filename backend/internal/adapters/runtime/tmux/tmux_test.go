@@ -30,11 +30,24 @@ type fakeRunner struct {
 type runnerCall struct {
 	env  []string
 	name string
-	args []string
+	// socket is the -S the runtime named the server with; args is the tmux
+	// command after it.
+	socket string
+	args   []string
+}
+
+// splitSocket separates the leading `-S <socket>` every runtime command carries
+// from the tmux command itself.
+func splitSocket(args []string) (string, []string) {
+	if len(args) >= 2 && args[0] == "-S" {
+		return args[1], args[2:]
+	}
+	return "", args
 }
 
 func (f *fakeRunner) Run(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
-	f.calls = append(f.calls, runnerCall{env: append([]string(nil), env...), name: name, args: append([]string(nil), args...)})
+	sock, cmd := splitSocket(args)
+	f.calls = append(f.calls, runnerCall{env: append([]string(nil), env...), name: name, socket: sock, args: append([]string(nil), cmd...)})
 	var out []byte
 	if len(f.outputs) > 0 {
 		out = f.outputs[0]
@@ -510,7 +523,8 @@ type fakeRunnerSelectiveErr struct {
 
 func (f *fakeRunnerSelectiveErr) Run(_ context.Context, env []string, name string, args ...string) ([]byte, error) {
 	idx := len(f.calls)
-	f.calls = append(f.calls, runnerCall{env: append([]string(nil), env...), name: name, args: append([]string(nil), args...)})
+	sock, cmd := splitSocket(args)
+	f.calls = append(f.calls, runnerCall{env: append([]string(nil), env...), name: name, socket: sock, args: append([]string(nil), cmd...)})
 	var out []byte
 	if len(f.outputs) > 0 {
 		out = f.outputs[0]
@@ -777,12 +791,12 @@ func TestGetOutputArgs(t *testing.T) {
 // -- AttachCommand tests --
 
 func TestAttachCommandReturnsExpectedArgv(t *testing.T) {
-	r := New(Options{Binary: "/usr/bin/tmux", Timeout: time.Second})
-	argv, err := r.attachCommand(ports.RuntimeHandle{ID: "sess-1"})
+	r := New(Options{Binary: "/usr/bin/tmux", Timeout: time.Second, DataDir: "/data"})
+	argv, err := r.attachCommand(context.Background(), ports.RuntimeHandle{ID: "sess-1"})
 	if err != nil {
 		t.Fatalf("AttachCommand: %v", err)
 	}
-	want := []string{"/usr/bin/tmux", "attach-session", "-t", "sess-1"}
+	want := []string{"/usr/bin/tmux", "-S", "/data/tmux/sess-1", "attach-session", "-t", "sess-1"}
 	if !reflect.DeepEqual(argv, want) {
 		t.Fatalf("argv = %#v, want %#v", argv, want)
 	}
@@ -790,7 +804,7 @@ func TestAttachCommandReturnsExpectedArgv(t *testing.T) {
 
 func TestAttachCommandRejectsInvalidHandle(t *testing.T) {
 	r := New(Options{})
-	_, err := r.attachCommand(ports.RuntimeHandle{ID: ""})
+	_, err := r.attachCommand(context.Background(), ports.RuntimeHandle{ID: ""})
 	if err == nil {
 		t.Fatal("AttachCommand empty handle: got nil, want error")
 	}

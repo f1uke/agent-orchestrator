@@ -56,7 +56,18 @@ func (m *Manager) applyAgentExit(ctx context.Context, rec domain.SessionRecord, 
 	// reason it is there: a member that will not die must not stop dev from
 	// recording that it ended, and the surviving member still holds the worktree,
 	// so the refcount refuses the destroy and the reclaim log says so.
-	if m.crewReaper != nil {
+	//
+	// Unless dev's pane went with it. An agent that quits leaves its pane behind
+	// (the launch keeps a shell alive after it), so a SessionEnd whose pane is
+	// already gone is an agent that was killed WITH its runtime - its tmux server
+	// died, or something killed the session - not one that decided the task was
+	// over. On 2026-10-01 a `tmux kill-server` ended every session at once and
+	// this fan-out then tore down a qa on top, as "dev_exited". dev still records
+	// its ending below; its crew is left for a restore to pick up.
+	if m.crewReaper != nil && m.runtimeVanished(ctx, rec) {
+		slog.Default().Warn("lifecycle: dev's pane vanished with its agent - its runtime died under it, so its crew is left running",
+			"session", rec.ID, "handle", rec.Metadata.RuntimeHandleID)
+	} else if m.crewReaper != nil {
 		if err := m.crewReaper(ctx, rec.ID, domain.TerminationCauseDevExited); err != nil {
 			slog.Default().Warn("lifecycle: crew teardown on agent exit failed; the member keeps its worktree",
 				"session", rec.ID, "err", err)
@@ -67,6 +78,18 @@ func (m *Manager) applyAgentExit(ctx context.Context, rec domain.SessionRecord, 
 	}
 	m.emitLeftWaitingInput(ctx, rec, domain.ActivityExited, now)
 	return nil
+}
+
+// runtimeVanished reports whether rec's pane is DEFINITIVELY gone. Unknown is
+// not gone: no probe wired, no handle, or a failed probe all answer false, which
+// keeps the ending on the path it took before this question existed.
+func (m *Manager) runtimeVanished(ctx context.Context, rec domain.SessionRecord) bool {
+	handle := rec.Metadata.RuntimeHandleID
+	if m.runtimeProbe == nil || handle == "" {
+		return false
+	}
+	alive, err := m.runtimeProbe(ctx, handle)
+	return err == nil && !alive
 }
 
 // emitLeftWaitingInput keeps the turn telemetry honest across an ending. A

@@ -2,7 +2,9 @@ package tmux
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +20,7 @@ func TestRuntimeIntegration(t *testing.T) {
 
 	ctx := context.Background()
 	id := strings.ReplaceAll(t.Name(), "/", "_")
-	r := New(Options{Timeout: 5 * time.Second})
+	r := New(Options{Timeout: 5 * time.Second, SocketDir: privateSocketDir(t)})
 
 	// Ensure clean slate: ignore errors (session may not exist).
 	_ = r.Destroy(ctx, ports.RuntimeHandle{ID: id})
@@ -90,7 +92,7 @@ func TestRuntimeIntegrationExactSessionParsing(t *testing.T) {
 	longID := base + "_long"
 	prefixID := base
 
-	r := New(Options{Timeout: 5 * time.Second})
+	r := New(Options{Timeout: 5 * time.Second, SocketDir: privateSocketDir(t)})
 	_ = r.Destroy(ctx, ports.RuntimeHandle{ID: longID})
 	_ = r.Destroy(ctx, ports.RuntimeHandle{ID: prefixID})
 
@@ -140,4 +142,62 @@ func waitForOutput(t *testing.T, r *Runtime, h ports.RuntimeHandle, want string,
 		time.Sleep(100 * time.Millisecond)
 	}
 	return out
+}
+
+// TestKillServerInsideAPaneEndsOnlyThatSession replays the 2026-10-01 incident
+// against real tmux: an agent tearing down a sandbox ran
+// `TMUX_TMPDIR=<sandbox> tmux kill-server` from its own pane. `$TMUX` in the
+// pane wins over TMUX_TMPDIR, so the command addressed the server hosting the
+// pane - which, while AO shared one server, held every session there was. With
+// a server per session it can end only the session that ran it.
+func TestKillServerInsideAPaneEndsOnlyThatSession(t *testing.T) {
+	sockDir := privateSocketDir(t)
+	ctx := context.Background()
+	r := New(Options{Timeout: 5 * time.Second, Shell: "/bin/sh", SocketDir: sockDir})
+
+	bystander, err := r.Create(ctx, ports.RuntimeConfig{
+		SessionID: "bystander", WorkspacePath: t.TempDir(), Argv: []string{"sleep", "600"},
+	})
+	if err != nil {
+		t.Fatalf("Create bystander: %v", err)
+	}
+	// The culprit waits for a go signal, so Create sees it alive first.
+	trigger := filepath.Join(t.TempDir(), "go")
+	culprit, err := r.Create(ctx, ports.RuntimeConfig{
+		SessionID: "culprit", WorkspacePath: t.TempDir(),
+		Argv: []string{"sh", "-c", `while [ ! -e "$1" ]; do sleep 0.05; done; ` +
+			`test -n "$TMUX" || { echo "TMUX unset in pane" >&2; exit 1; }; ` +
+			`TMUX_TMPDIR=` + t.TempDir() + ` tmux kill-server`, "sh", trigger},
+	})
+	if err != nil {
+		t.Fatalf("Create culprit: %v", err)
+	}
+	if err := os.WriteFile(trigger, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		// A probe that lands while the server is going down errors ("server
+		// exited unexpectedly"); only a definitive "gone" ends the wait.
+		if alive, err := r.IsAlive(ctx, culprit); err == nil && !alive {
+			break
+		}
+		if time.Now().After(deadline) {
+			out, _ := r.GetOutput(ctx, culprit, 20)
+			t.Fatalf("the culprit's kill-server never ended its own session. Pane:\n%s", out)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	alive, err := r.IsAlive(ctx, bystander)
+	if err != nil {
+		t.Fatalf("IsAlive bystander: %v", err)
+	}
+	if !alive {
+		t.Fatal("a kill-server inside one session's pane took down another session")
+	}
+	agent, err := r.AgentAlive(ctx, bystander)
+	if err != nil || !agent {
+		t.Fatalf("bystander's agent alive = %v, %v; want its agent untouched", agent, err)
+	}
 }

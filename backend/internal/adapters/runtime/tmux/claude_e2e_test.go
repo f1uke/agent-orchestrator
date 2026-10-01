@@ -34,9 +34,11 @@ func TestSendMessageAutoSubmitsAgainstRealClaude(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	sockDir := privateSocketDir(t)
 	const sess = "ao-tmux-claude-e2e"
+	// The session is started by hand on the socket the runtime will look for.
 	tmuxRun := func(args ...string) ([]byte, error) {
-		return exec.Command(tmuxBin, args...).CombinedOutput()
+		return tmuxCommand(tmuxBin, SocketPathIn(sockDir, sess), args...).CombinedOutput()
 	}
 	_, _ = tmuxRun("kill-session", "-t", "="+sess)
 	if out, err := tmuxRun("new-session", "-d", "-s", sess, "-x", "200", "-y", "50", "-c", dir, "claude"); err != nil {
@@ -51,7 +53,7 @@ func TestSendMessageAutoSubmitsAgainstRealClaude(t *testing.T) {
 
 	// Deliver a multi-line message via the REAL production path (real delays).
 	msg := "multi-line probe:\nalpha line\nbeta line\ngamma line\nplease acknowledge"
-	r := New(Options{}) // production defaults: 15ms chunk delay, 300ms enter delay
+	r := New(Options{SocketDir: sockDir}) // production defaults: 15ms chunk delay, 300ms enter delay
 	if err := r.SendMessage(context.Background(), ports.RuntimeHandle{ID: sess}, msg); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}

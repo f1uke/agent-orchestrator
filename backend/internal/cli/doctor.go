@@ -412,12 +412,18 @@ func checkSessionEndings(dataDir string, now time.Time) doctorCheck {
 		}
 	}
 	latest := clusters[len(clusters)-1]
-	return doctorCheck{
-		Level: doctorWarn, Section: doctorSectionCore, Name: name,
-		Message: fmt.Sprintf("%d session(s) ended together within %s at %s, and nobody ordered it: %s - %d such event(s) in the last 24h (full journal: %s)",
-			len(latest.Entries), latest.Span().Round(time.Millisecond), latest.At.Format(time.RFC3339),
-			strings.Join(latest.Describe(), ", "), len(clusters), path),
+	msg := fmt.Sprintf("%d session(s) ended together within %s at %s, and nobody ordered it: %s - %d such event(s) in the last 24h (full journal: %s)",
+		len(latest.Entries), latest.Span().Round(time.Millisecond), latest.At.Format(time.RFC3339),
+		strings.Join(latest.Describe(), ", "), len(clusters), path)
+	if latest.RuntimeLost() {
+		restores := make([]string, 0, len(latest.Entries))
+		for _, id := range latest.IDs() {
+			restores = append(restores, "ao session restore "+id)
+		}
+		msg += ". Every pane went with its agent, so the tmux runtime died under them (a tmux server killed, or tmux itself) rather than the agents choosing to stop; bring them back with: " +
+			strings.Join(restores, "; ")
 	}
+	return doctorCheck{Level: doctorWarn, Section: doctorSectionCore, Name: name, Message: msg}
 }
 
 func (c *commandContext) checkHarness(ctx context.Context, harness harnessProbe) doctorCheck {

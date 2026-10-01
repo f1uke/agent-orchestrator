@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
+	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 )
 
 // maxDisplayNameLen caps the sidebar label set by `--name`. Mirrored by the
@@ -288,17 +289,38 @@ func validTaskSize(s string) bool {
 
 // spawnAttachHint returns a copy-pasteable attach hint for the selected runtime.
 // On Darwin/Linux it is a tmux attach-session using the sanitised session name
-// (branch-mirroring, falling back to the id); on Windows ConPTY has no
-// user-facing attach CLI, so it points at the AO dashboard.
+// (branch-mirroring, falling back to the id) on that session's own tmux server -
+// a bare `tmux attach` would look on the default server, where AO sessions no
+// longer live (see tmux.SocketPath); on Windows ConPTY has no user-facing attach
+// CLI, so it points at the AO dashboard.
 func spawnAttachHint(projectID, branch, id string) string {
 	if runtime.GOOS == "windows" {
 		return "Attach from the AO dashboard (ConPTY sessions have no CLI attach command)"
 	}
+	cfg, err := config.Load()
+	if err != nil {
+		return "Attach from the AO dashboard"
+	}
+	return tmuxAttachHint(cfg.DataDir, projectID, branch, id)
+}
+
+// tmuxAttachHint is the tmux attach command for a session of the AO instance
+// whose data dir is dataDir.
+func tmuxAttachHint(dataDir, projectID, branch, id string) string {
 	name, err := tmux.SessionNameFor(projectID, branch, id)
 	if err != nil {
 		name = id
 	}
-	return fmt.Sprintf("tmux attach -t %s", name)
+	return fmt.Sprintf("tmux -S %s attach -t %s", shellQuoteArg(tmux.SocketPath(dataDir, name)), name)
+}
+
+// shellQuoteArg quotes s for a POSIX shell only when it needs it, so the common
+// hint stays as plain as a person would type it.
+func shellQuoteArg(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+=:@") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func (c *commandContext) fetchAgentInventory(ctx context.Context, refresh bool) (agentInventory, error) {

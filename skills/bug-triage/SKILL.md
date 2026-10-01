@@ -101,7 +101,8 @@ tail -n 100 ~/.ao/daemon.log                        # daemon log
 # Sessions & runtime
 /tmp/ao session ls                                  # all sessions and their state
 /tmp/ao session get <id>                            # one session: spawn config, runtime, lifecycle
-tmux ls                                             # tmux runtime sessions backing terminals (macOS/Linux)
+ls ~/.ao/data/tmux                                  # one tmux server (socket) per AO session (macOS/Linux)
+tmux -S ~/.ao/data/tmux/<name> ls                   # inspect ONE session's server; never a bare `tmux ...` from inside an AO pane
 
 # Durable state (SQLite at ~/.ao/data)
 sqlite3 ~/.ao/data/ao.db '.tables'                  # inspect schema/rows if state looks wrong
@@ -363,7 +364,7 @@ any priority/confidence stated in the body), root cause summary.
 | **CLI** (`ao start/stop/spawn`) | Version, install method, OS, which binary | `backend/internal/cli/`, `backend/cmd/ao/main.go`                          |
 | **Daemon / HTTP API**           | `ao status`, port, daemon.log             | `backend/internal/daemon/daemon.go`, `backend/internal/httpd/controllers/` |
 | **Sessions / Lifecycle**        | Session ID, spawn config, runtime, state  | `backend/internal/session_manager/manager.go`                              |
-| **Runtime (tmux / ConPTY)**     | tmux version, `tmux ls` (macOS/Linux)     | `backend/internal/adapters/runtime/`                                       |
+| **Runtime (tmux / ConPTY)**     | tmux version, `ls ~/.ao/data/tmux`        | `backend/internal/adapters/runtime/`                                       |
 | **Terminal mux**                | Runtime type, shell, attach behavior      | `backend/internal/terminal/`                                               |
 | **Agent harness**               | Harness name + version                    | `backend/internal/adapters/agent/<harness>/`                               |
 | **Storage**                     | DB state, migrations                      | `backend/internal/storage/sqlite/`, `~/.ao/data/ao.db`                     |

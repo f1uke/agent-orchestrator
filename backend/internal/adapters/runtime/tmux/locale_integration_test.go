@@ -3,7 +3,6 @@ package tmux
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,31 +18,19 @@ import (
 // environment from that server, not from the client that asked for it, so the
 // launch script is the only place that can give the agent a locale.
 //
-// It runs on its own tmux server (a private TMUX_TMPDIR, TMUX unset so the
-// client does not follow a surrounding session's socket), never the user's.
+// Each session gets its own tmux server, started by the runtime from this
+// process's (locale-less) environment, on a private socket dir - never the
+// user's server.
 func TestPaneGetsUTF8LocaleFromLocalelessServer(t *testing.T) {
-	if _, err := exec.LookPath("tmux"); err != nil {
-		t.Skip("tmux unavailable")
-	}
-	// A short socket dir: tmux socket paths are capped near 104 bytes.
-	sockDir, err := os.MkdirTemp("", "aoloc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
-	for _, k := range []string{"TMUX", "LC_ALL", "LC_CTYPE", "LANG"} {
+	sockDir := privateSocketDir(t)
+	for _, k := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
 		t.Setenv(k, "") // registers the restore
 		if err := os.Unsetenv(k); err != nil {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("TMUX_TMPDIR", sockDir)
 
-	r := New(Options{Timeout: 5 * time.Second, Shell: "/bin/sh"})
-	t.Cleanup(func() {
-		// Socket-targeted: kills only the private server this test started.
-		_, _ = r.runner.Run(context.Background(), nil, r.binary, "kill-server")
-	})
+	r := New(Options{Timeout: 5 * time.Second, Shell: "/bin/sh", SocketDir: sockDir})
 
 	for _, tc := range []struct {
 		name string
