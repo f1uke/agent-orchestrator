@@ -2594,13 +2594,7 @@ func (m *Manager) RestoreAll(ctx context.Context) error {
 			ws = workspaceInfoFromRepoInfo(root)
 		} else {
 			var restoreErr error
-			ws, restoreErr = m.workspace.Restore(ctx, ports.WorkspaceConfig{
-				ProjectID:     rec.ProjectID,
-				SessionID:     rec.ID,
-				Kind:          rec.Kind,
-				SessionPrefix: sessionPrefix(project),
-				Branch:        rec.Metadata.Branch,
-			})
+			ws, restoreErr = m.workspace.Restore(ctx, sessionWorkspaceRestoreConfig(project, rec))
 			if restoreErr != nil {
 				m.logger.Error("restore-all: workspace restore failed", "sessionID", rec.ID, "error", restoreErr)
 				continue
@@ -2702,15 +2696,28 @@ func (m *Manager) markSessionWorktreesActive(ctx context.Context, rows []domain.
 	return nil
 }
 
+// sessionWorkspaceRestoreConfig is the workspace.Restore spec for a
+// single-repo session. Path is the worktree the session actually owns, as
+// recorded at spawn: without it the adapter re-derives the directory from the
+// CURRENT branch name, so a session whose branch was renamed after spawn misses
+// its own worktree, and git refuses to check the branch out a second time
+// ("already checked out" at the session's own path). Even when the worktree is
+// gone, recreating it at the recorded path keeps the agent's cwd - and with it
+// the agent's conversation, which Claude Code keys by cwd - unchanged.
+func sessionWorkspaceRestoreConfig(project domain.ProjectRecord, rec domain.SessionRecord) ports.WorkspaceConfig {
+	return ports.WorkspaceConfig{
+		ProjectID:     rec.ProjectID,
+		SessionID:     rec.ID,
+		Kind:          rec.Kind,
+		SessionPrefix: sessionPrefix(project),
+		Branch:        rec.Metadata.Branch,
+		Path:          rec.Metadata.WorkspacePath,
+	}
+}
+
 func (m *Manager) restoreSessionWorkspace(ctx context.Context, project domain.ProjectRecord, rec domain.SessionRecord) (ports.WorkspaceInfo, error) {
 	if project.Kind.WithDefault() != domain.ProjectKindWorkspace {
-		ws, err := m.workspace.Restore(ctx, ports.WorkspaceConfig{
-			ProjectID:     rec.ProjectID,
-			SessionID:     rec.ID,
-			Kind:          rec.Kind,
-			SessionPrefix: sessionPrefix(project),
-			Branch:        rec.Metadata.Branch,
-		})
+		ws, err := m.workspace.Restore(ctx, sessionWorkspaceRestoreConfig(project, rec))
 		if err != nil {
 			return ws, err
 		}
