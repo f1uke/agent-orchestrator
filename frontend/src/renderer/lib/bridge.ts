@@ -1,4 +1,5 @@
 import type { AoBridge } from "../../preload";
+import { DEFAULT_EDITOR_SETTINGS } from "../../shared/editor-settings";
 
 export const aoBridge: AoBridge =
 	window.ao ??
@@ -114,6 +115,21 @@ export const aoBridge: AoBridge =
 		updateSettings: {
 			get: async () => ({ enabled: false, channel: "latest", nightlyAck: false }),
 			set: async () => undefined,
+		},
+		// The defaults, unsaveable: there is no ~/.ao to write to from a browser tab.
+		editorSettings: {
+			get: async () => ({ ...DEFAULT_EDITOR_SETTINGS }),
+			set: async (settings) => settings,
+		},
+		// No main process, so no tool can be run and no config file read: format
+		// document falls back to re-indenting, and says why.
+		format: {
+			indentStyle: async () => null,
+			run: async () => ({
+				ok: false,
+				reason: "unavailable",
+				message: "Formatters run in the desktop app - this browser preview cannot start one.",
+			}),
 		},
 		// asked: true in the browser-preview stub, so the first-run offer never
 		// appears outside Electron — there is no desktop to put a Proc on there.

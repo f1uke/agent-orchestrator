@@ -73,6 +73,15 @@ import {
 	type InlineCompletionService,
 } from "./main/inline-completion/service";
 import {
+	coerceEditorSettings,
+	DEFAULT_EDITOR_SETTINGS,
+	type EditorSettings,
+	readEditorSettings,
+	writeEditorSettings,
+} from "./main/editor-settings";
+import { type FormatRequest, type FormatResult, runFormatter } from "./main/format/formatters";
+import { type IndentStyle, resolveIndentStyle } from "./main/format/project-config";
+import {
 	clampWindowState,
 	readWindowStateSync,
 	writeWindowState,
@@ -1471,6 +1480,46 @@ ipcMain.handle("updateSettings:set", async (_event, settings: UpdateSettings) =>
 	const runFile = runFilePath();
 	if (!runFile) return;
 	await writeUpdateSettings(path.dirname(runFile), settings);
+});
+
+// The code editor's indentation and formatting preferences.
+ipcMain.handle("editorSettings:get", async (): Promise<EditorSettings> => {
+	const runFile = runFilePath();
+	if (!runFile) return { ...DEFAULT_EDITOR_SETTINGS };
+	return readEditorSettings(path.dirname(runFile));
+});
+ipcMain.handle("editorSettings:set", async (_event, settings: EditorSettings): Promise<EditorSettings> => {
+	const runFile = runFilePath();
+	if (!runFile) return coerceEditorSettings(settings);
+	return writeEditorSettings(path.dirname(runFile), settings);
+});
+
+// Formatting runs here because the renderer cannot spawn a process. Both read
+// the project's own files (.editorconfig, .swift-format, Prettier's config),
+// so a path that is not absolute is refused rather than resolved against
+// wherever this process happens to be.
+ipcMain.handle(
+	"format:indentStyle",
+	async (
+		_event,
+		input: { filePath: string; languageId: string; workspaceRoot?: string },
+	): Promise<IndentStyle | null> => {
+		if (typeof input?.filePath !== "string" || !path.isAbsolute(input.filePath)) return null;
+		return resolveIndentStyle({
+			filePath: input.filePath,
+			languageId: String(input.languageId),
+			workspaceRoot: input.workspaceRoot,
+		});
+	},
+);
+ipcMain.handle("format:run", async (_event, request: FormatRequest): Promise<FormatResult> => {
+	if (typeof request?.filePath !== "string" || !path.isAbsolute(request.filePath) || typeof request.text !== "string") {
+		return { ok: false, reason: "unavailable", message: "Formatting needs the file's absolute path." };
+	}
+	// The login shell's PATH: gofmt lives in Homebrew's or Go's own bin, which
+	// Electron's inherited PATH does not reach - the same trap as gopls.
+	await ensureShellEnv();
+	return runFormatter(request, { env: daemonEnv() });
 });
 
 // The desktop companion. `enabled` drives the overlay window directly, so the

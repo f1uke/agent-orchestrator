@@ -5,6 +5,14 @@ import type { Hunk } from "../lib/editor/change-lanes";
 import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/gutter-lanes";
 import { revertEdit } from "../lib/editor/revert";
 import { ensureInlineCompletionProvider, noteFileOpened } from "../lib/inline-completion/provider";
+import {
+	attachEditorFormatting,
+	type EditorFormatting,
+	type FormatReport,
+} from "../lib/editor/formatting/editor-formatting";
+import type { LspTextEdit } from "../lib/editor/formatting/format-document";
+import { formatBridge } from "../lib/editor/formatting/format-bridge";
+import { useEditorSettings } from "../hooks/useEditorSettings";
 import { registerCompletion } from "../lib/lsp/completion-provider";
 import { registerLspNavigation } from "../lib/lsp/definition";
 import { registerDiagnostics } from "../lib/lsp/diagnostics";
@@ -39,6 +47,13 @@ const MESSAGE_CONTRIBUTION = "editor.contrib.messageController";
 type MessageContribution = monaco.editor.IEditorContribution & {
 	showMessage(message: string, position: monaco.IPosition): void;
 };
+
+/**
+ * Models whose project indentation has been applied. A model outlives its
+ * editor and every refetch re-runs the content effect, so this keeps the
+ * config files from being read again on every poll.
+ */
+const configuredModels = new WeakSet<monaco.editor.ITextModel>();
 
 /** Longest selection ⌘⇧F will carry into the search box as its seed. */
 const MAX_SEED_LENGTH = 200;
@@ -211,10 +226,15 @@ export type EditorHandle = {
 	/** The buffer's current text, or null before a model exists. */
 	getValue(): string | null;
 	focus(): void;
+	/** Format Document - as ⌃⇧I does it, or quietly before a save. One undo step. */
+	formatDocument(reason: "command" | "save"): Promise<FormatReport>;
 };
 
 /** What the chrome above the editor is told about its language server. */
 export type ServerStatus = Pick<LanguageServerHandle, "state" | "detail" | "need">;
+
+/** The server's own name, for a message that says who formatted (or refused). */
+const FORMATTER_NAMES: Record<string, string> = { go: "gopls", swift: "sourcekit-lsp" };
 
 export type MonacoFileEditorProps = {
 	sessionId: string;
@@ -384,6 +404,20 @@ export default function MonacoFileEditor({
 	const semanticRefreshRef = useRef<(() => void) | null>(null);
 	const onDiagnosticsRef = useRef(onDiagnostics);
 	onDiagnosticsRef.current = onDiagnostics;
+	// Read through a ref by the formatting wiring, which lives as long as the
+	// editor: a shortcut re-bound in Settings applies to the next key press.
+	const editorSettings = useEditorSettings();
+	const editorSettingsRef = useRef(editorSettings);
+	editorSettingsRef.current = editorSettings;
+	const readOnlyRef = useRef(readOnly);
+	readOnlyRef.current = readOnly;
+	const pathRef = useRef(path);
+	pathRef.current = path;
+	const workspaceRootRef = useRef(workspaceRoot);
+	workspaceRootRef.current = workspaceRoot;
+	const lspLanguageRef = useRef(lspLanguage);
+	lspLanguageRef.current = lspLanguage;
+	const formattingRef = useRef<EditorFormatting | null>(null);
 	// One reader per session, stable across a re-registration: the peek widgets
 	// need file TEXT, and the daemon's read route is the only path to it.
 	const readFile = useMemo(() => peekFileReader(sessionId), [sessionId]);
@@ -813,6 +847,82 @@ export default function MonacoFileEditor({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [modelGeneration, text]);
 
+	// Formatting: indentation as you type, ⌃I re-indent, ⌃⇧I format document.
+	// Everything it needs is read through refs at the moment it is needed, so
+	// it is attached once per editor instance and never rebuilt underneath a
+	// keystroke. See `editor-formatting.ts`.
+	useEffect(() => {
+		if (editorGeneration === 0) return;
+		const codeEditor = codeEditorRef.current;
+		if (!codeEditor) return;
+		const formatting = attachEditorFormatting({
+			editor: codeEditor,
+			getPath: () => pathRef.current,
+			getAbsolutePath: () => absolutePathRef.current,
+			getWorkspaceRoot: () => workspaceRootRef.current,
+			getSettings: () => editorSettingsRef.current,
+			isReadOnly: () => readOnlyRef.current,
+			// The attached server, only while it can format THIS buffer: ready (or
+			// indexing - formatting needs no index), advertising the feature, and
+			// holding the document.
+			getLsp: () => {
+				const { client, state } = serverRef.current;
+				const sync = syncRef.current;
+				if (!client || !sync || (state !== "ready" && state !== "indexing") || !client.features().formatting)
+					return null;
+				return {
+					name: FORMATTER_NAMES[lspLanguageRef.current ?? ""] ?? "the language server",
+					serverText: () => sync.serverText(),
+					request: (options) =>
+						client.request<LspTextEdit[] | null>("textDocument/formatting", {
+							textDocument: { uri: sync.uri },
+							options,
+						}),
+				};
+			},
+			runTool: (request) => formatBridge().run(request),
+			showMessage: (message) => {
+				const position = codeEditor.getPosition();
+				if (!position) return;
+				codeEditor.getContribution<MessageContribution>(MESSAGE_CONTRIBUTION)?.showMessage(message, position);
+			},
+		});
+		formattingRef.current = formatting;
+		return () => {
+			if (formattingRef.current === formatting) formattingRef.current = null;
+			formatting.dispose();
+		};
+	}, [editorGeneration]);
+
+	// Monaco's own auto-indent follows the "indent while typing" setting.
+	useEffect(() => {
+		formattingRef.current?.refresh();
+	}, [editorSettings.indentOnType, modelGeneration]);
+
+	// The project's indentation - `.editorconfig`, `.swift-format`, Prettier's
+	// config - over what Monaco guessed from the file's content, once per model.
+	// Typing, ⌃I and Tab then all agree with the formatter. Go is tabs whether or
+	// not anything says so: gofmt would put them back.
+	useEffect(() => {
+		if (modelGeneration === 0) return;
+		const model = monaco.editor.getModel(uri);
+		if (!model || configuredModels.has(model)) return;
+		configuredModels.add(model);
+		if (language === "go") model.updateOptions({ insertSpaces: false });
+		if (!absolutePath) return;
+		void formatBridge()
+			.indentStyle({ filePath: absolutePath, languageId: language, workspaceRoot })
+			.then((style) => {
+				if (!style || model.isDisposed()) return;
+				model.updateOptions({
+					...(style.insertSpaces !== undefined ? { insertSpaces: style.insertSpaces } : {}),
+					...(style.indentSize ? { indentSize: style.indentSize } : {}),
+					...(style.tabSize ? { tabSize: style.tabSize } : {}),
+				});
+			})
+			.catch((err: unknown) => console.warn("[editor] could not read the project's indentation settings", err));
+	}, [modelGeneration, uri, language, absolutePath, workspaceRoot]);
+
 	// Where the caret is, reported as it moves — the owner needs it so that going
 	// BACK returns to the line the reader jumped from rather than to line 1. It
 	// fires on every arrow key, so the listener is read from a ref and the
@@ -861,6 +971,7 @@ export default function MonacoFileEditor({
 		onHandle?.({
 			getValue: () => codeEditorRef.current?.getModel()?.getValue() ?? null,
 			focus: () => codeEditorRef.current?.focus(),
+			formatDocument: (reason) => formattingRef.current?.formatDocument(reason) ?? Promise.resolve({ applied: false }),
 		});
 		return () => onHandle?.(null);
 	}, [editorGeneration, onHandle]);

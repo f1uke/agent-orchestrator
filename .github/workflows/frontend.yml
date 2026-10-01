@@ -138,6 +138,15 @@ jobs:
   # positioned, because "can a person see this against that" is a question about
   # paint. The gallery puts both grounds side by side in both themes.
   #
+  # e2e/editor-formatting.spec.ts is the twelfth: indentation as you type, ⌃I
+  # re-indent and ⌃⇧I format document. Every one of them is a claim about what
+  # Monaco's model holds after a REAL key press, and about where its undo step
+  # closes - Return's indentation has to ride inside the keystroke's own step,
+  # which only holds because Monaco fires `onDidType` before closing it. A unit
+  # test can check the indent engine's arithmetic; only a browser can check that
+  # ⌘Z after Return leaves no stray whitespace behind, or that a formatter's
+  # refusal reaches the caret and leaves the buffer byte-for-byte alone.
+  #
   # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
   # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
   # replaced with `ao-demo`, so those six specs have been dead since — never
@@ -166,6 +175,6 @@ jobs:
         run: >-
           npx playwright test e2e/status-glyph.spec.ts e2e/card-header.spec.ts e2e/done-lane.spec.ts e2e/sidebar-qa-pip.spec.ts
           e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
-          e2e/editor-completion.spec.ts e2e/editor-inline-completion.spec.ts e2e/editor-next-edit.spec.ts e2e/editor-lsp-surface.spec.ts e2e/files-perf.spec.ts
+          e2e/editor-completion.spec.ts e2e/editor-inline-completion.spec.ts e2e/editor-next-edit.spec.ts e2e/editor-lsp-surface.spec.ts e2e/editor-formatting.spec.ts e2e/files-perf.spec.ts
           e2e/files-state.spec.ts e2e/search-perf.spec.ts e2e/terminal-links.spec.ts
           e2e/pinch-dots.spec.ts

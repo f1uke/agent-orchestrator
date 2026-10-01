@@ -76,14 +76,18 @@ describe("keying", () => {
 
 describe("idle lifecycle", () => {
 	test("the last detach stops the server only after the grace period", async () => {
-		const r = make({ idleGraceMs: 250 });
+		// 🗝 The grace has to dwarf one `health()` call: it measures RSS with `ps`
+		// BEFORE it reads the state, and on a machine running the whole suite in
+		// parallel that took longer than the 250 ms this used to allow - so the
+		// server was legitimately gone by the time "still ready?" was read.
+		const r = make({ idleGraceMs: 2000 });
 		const a = await r.attach({ root: HERE, languageId: "go" });
 		r.detach(a.handleId);
 		// The grace is load-bearing: closing one Go file and opening another must
 		// not pay gopls's multi-second cold start again.
 		expect((await r.health())[0].state).toBe("ready");
-		await vi.waitFor(async () => expect((await r.health()).length).toBe(0), { timeout: 3000 });
-	});
+		await vi.waitFor(async () => expect((await r.health()).length).toBe(0), { timeout: 8000 });
+	}, 15_000);
 
 	test("re-attaching inside the grace period keeps the same server alive", async () => {
 		const r = make({ idleGraceMs: 400 });

@@ -188,15 +188,17 @@ describe("startLspProcess", () => {
 		// and the boolean for references, deliberately.
 		const { proc } = start(fakeSpec());
 		await proc.initialized;
-		expect(proc.features).toEqual({ hover: true, references: true });
+		expect(proc.features).toEqual({ hover: true, references: true, formatting: true });
 	});
 
 	test("a server that advertises neither reports false, so the reason can be stated", async () => {
 		// False and "not attached yet" produce the same empty widget, and only the
 		// initialize reply can tell them apart.
-		const { proc } = start(fakeSpec({ FAKE_LSP_NO_HOVER: "1", FAKE_LSP_NO_REFERENCES: "1" }));
+		const { proc } = start(
+			fakeSpec({ FAKE_LSP_NO_HOVER: "1", FAKE_LSP_NO_REFERENCES: "1", FAKE_LSP_NO_FORMATTING: "1" }),
+		);
 		await proc.initialized;
-		expect(proc.features).toEqual({ hover: false, references: false });
+		expect(proc.features).toEqual({ hover: false, references: false, formatting: false });
 	});
 
 	test("answers workspace/configuration itself so the server does not stall", async () => {

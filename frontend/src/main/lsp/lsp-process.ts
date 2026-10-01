@@ -70,7 +70,7 @@ export type CompletionCapability = { triggerCharacters?: string[]; resolveProvid
  * of these are `boolean | { workDoneProgress }` on the wire, so presence is the
  * signal and the object form is not a promise of anything extra.
  */
-export type ServerFeatures = { hover: boolean; references: boolean };
+export type ServerFeatures = { hover: boolean; references: boolean; formatting: boolean };
 
 export type LspProcess = {
 	readonly pid: number | null;
@@ -231,6 +231,9 @@ function clientCapabilities() {
 				completionItemKind: { valueSet: Array.from({ length: 25 }, (_, i) => i + 1) },
 			},
 			documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+			// Format Document. Declared because a server may withhold a feature
+			// the client never asked for.
+			formatting: { dynamicRegistration: false },
 			publishDiagnostics: {},
 			/**
 			 * Declared even though sourcekit-lsp advertises its provider regardless:
@@ -272,7 +275,7 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 	let stopping: Promise<void> | null = null;
 	let semanticTokensLegend: SemanticTokensLegend | null = null;
 	let completionCapability: CompletionCapability | null = null;
-	let features: ServerFeatures = { hover: false, references: false };
+	let features: ServerFeatures = { hover: false, references: false, formatting: false };
 
 	const setState = (next: LspState, why?: string) => {
 		state = next;
@@ -451,6 +454,7 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 					completionProvider?: CompletionCapability;
 					hoverProvider?: boolean | Record<string, unknown>;
 					referencesProvider?: boolean | Record<string, unknown>;
+					documentFormattingProvider?: boolean | Record<string, unknown>;
 				};
 			} | null;
 			const info = reply?.serverInfo;
@@ -480,6 +484,9 @@ export function startLspProcess(options: LspProcessOptions): LspProcess {
 			features = {
 				hover: advertises(reply?.capabilities?.hoverProvider),
 				references: advertises(reply?.capabilities?.referencesProvider),
+				// Measured: gopls v0.21 answers `true`, sourcekit-lsp (Swift 6.2)
+				// the object form - and neither offers onTypeFormatting.
+				formatting: advertises(reply?.capabilities?.documentFormattingProvider),
 			};
 			const legend = reply?.capabilities?.semanticTokensProvider?.legend;
 			semanticTokensLegend =

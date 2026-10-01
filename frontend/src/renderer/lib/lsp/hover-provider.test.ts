@@ -32,7 +32,7 @@ const { runInLane, resetLanes } = await import("./request-lane");
 
 type Deferred = { resolve: (v: unknown) => void; reject: (e: unknown) => void; method: string; params: unknown };
 
-function harness(state = "ready", features = { hover: true, references: true }) {
+function harness(state = "ready", features = { hover: true, references: true, formatting: false }) {
 	const inFlight: Deferred[] = [];
 	const sent: { method: string; params: unknown }[] = [];
 	const client = {
@@ -279,7 +279,7 @@ describe("refusing", () => {
 	// Distinct from "not yet attached", and a reader has to be able to tell them
 	// apart — but once per session, not once per rest.
 	test("a server that offers no hover says so, exactly once", async () => {
-		const h = harness("ready", { hover: false, references: true });
+		const h = harness("ready", { hover: false, references: true, formatting: false });
 		register(h.document);
 		await ask();
 		await ask();

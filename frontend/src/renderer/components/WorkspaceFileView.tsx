@@ -12,6 +12,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, FolderOpen, GitCompare } from "lucide-react";
 import { useSaveWorkspaceFile } from "../hooks/useSaveWorkspaceFile";
+import { useEditorSettings } from "../hooks/useEditorSettings";
 import { type WorkspaceFile, useWorkspaceFile, workspaceFileQueryKey } from "../hooks/useWorkspaceFile";
 import { useWorkspaceFileDiff } from "../hooks/useWorkspaceFileDiff";
 import { apiErrorMessage } from "../lib/api-client";
@@ -258,6 +259,9 @@ export function WorkspaceFileView({
 	const [drift, setDrift] = useState<Drift | null>(null);
 	const [failure, setFailure] = useState<SaveFailure | null>(null);
 	const [savedFlash, setSavedFlash] = useState(false);
+	/** Format-on-save is running; the save waits for it, and a second ⌘S waits too. */
+	const [formattingForSave, setFormattingForSave] = useState(false);
+	const formatOnSave = useEditorSettings().formatOnSave;
 	/** The hash the next save is preconditioned on. Moves on every successful save. */
 	const [baseHash, setBaseHash] = useState<string | undefined>(undefined);
 	const handleRef = useRef<EditorHandle | null>(null);
@@ -466,8 +470,7 @@ export function WorkspaceFileView({
 		return () => window.clearTimeout(timer);
 	}, [savedFlash]);
 
-	const doSave = useCallback(() => {
-		if (!editability.editable || save.isPending) return;
+	const commitSave = useCallback(() => {
 		const text = handleRef.current?.getValue();
 		// Guarded twice on purpose. `buildSaveRequest` refuses a non-string too,
 		// but a save that cannot succeed should not even become a request: the
@@ -518,7 +521,27 @@ export function WorkspaceFileView({
 				},
 			},
 		);
-	}, [editability.editable, save, path, sessionId, file?.trailingNewline, baseHash, drift, q, queryClient]);
+	}, [save, path, sessionId, file?.trailingNewline, baseHash, drift, q, queryClient]);
+
+	const doSave = useCallback(() => {
+		if (!editability.editable || save.isPending || formattingForSave) return;
+		const handle = handleRef.current;
+		if (!formatOnSave || !handle) {
+			commitSave();
+			return;
+		}
+		// Format first, then save whatever the buffer holds - formatted or not.
+		// A formatter that is missing or refuses is said at the caret, and never
+		// stands between the reader and their work being on disk.
+		setFormattingForSave(true);
+		void handle
+			.formatDocument("save")
+			.catch(() => undefined)
+			.finally(() => {
+				setFormattingForSave(false);
+				commitSave();
+			});
+	}, [editability.editable, save.isPending, formattingForSave, formatOnSave, commitSave]);
 
 	// The pane's own ⌘S, so the shortcut works with focus in the chrome as well
 	// as inside the editor.
@@ -745,7 +768,7 @@ export function WorkspaceFileView({
 						type="button"
 						data-testid="save-file"
 						onClick={doSave}
-						disabled={!dirty || save.isPending}
+						disabled={!dirty || save.isPending || formattingForSave}
 						title={dirty ? "Save (⌘S)" : "No unsaved changes"}
 						style={{
 							flex: "none",
@@ -756,10 +779,10 @@ export function WorkspaceFileView({
 							border: `1px solid ${dirty ? accentMix(45) : P.borderPill}`,
 							background: dirty ? accentMix(16) : "transparent",
 							color: dirty ? ACCENT : P.muted2,
-							cursor: dirty && !save.isPending ? "pointer" : "default",
+							cursor: dirty && !save.isPending && !formattingForSave ? "pointer" : "default",
 						}}
 					>
-						{save.isPending ? "Saving…" : savedFlash ? "Saved" : "Save"}
+						{formattingForSave ? "Formatting…" : save.isPending ? "Saving…" : savedFlash ? "Saved" : "Save"}
 					</button>
 				)}
 			</div>

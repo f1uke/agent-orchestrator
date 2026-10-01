@@ -164,6 +164,19 @@ if (typeof window !== "undefined") {
 			get: async () => ({ enabled: false, asked: true }),
 			set: async () => undefined,
 		},
+		editorSettings: {
+			get: async () => ({
+				indentOnType: true,
+				formatOnSave: false,
+				reindentShortcut: "Ctrl+KeyI",
+				formatShortcut: "Ctrl+Shift+KeyI",
+			}),
+			set: async (settings) => settings,
+		},
+		format: {
+			indentStyle: async () => null,
+			run: async () => ({ ok: false, reason: "unavailable", message: "no formatter in tests" }),
+		},
 		companion: {
 			onOpenPetLibrary: () => () => undefined,
 			looksChanged: () => undefined,

@@ -1,5 +1,6 @@
 import { setApiBaseUrl } from "../src/renderer/lib/api-client";
 import { fixtureWithLabel, SWIFT_FIXTURE } from "./editor-fixture";
+import { MESSY_GO, MESSY_SWIFT } from "./editor-formatting-fixtures";
 
 /**
  * Answers the one endpoint the workspace file viewer calls, so the harness page
@@ -56,12 +57,18 @@ final class OfferStore {
 }
 `;
 
+function sourceFor(path: string): string {
+	if (path.endsWith(".go")) return MESSY_GO;
+	if (path.endsWith("Messy.swift")) return MESSY_SWIFT;
+	return SOURCE;
+}
+
 function fileFor(path: string): { path: string; source: string } | null {
-	if (path === GALLERY_PATH) return { path, source: SOURCE };
+	if (path === GALLERY_PATH) return { path, source: sourceFor(path) };
 	// The peek preview asks for an ABSOLUTE path, which is what a language server
 	// answers with.
 	if (path.endsWith(GALLERY_OTHER_PATH)) return { path, source: GALLERY_OTHER_SOURCE };
-	if (path.endsWith(GALLERY_PATH)) return { path, source: SOURCE };
+	if (path.endsWith(GALLERY_PATH)) return { path, source: sourceFor(GALLERY_PATH) };
 	return null;
 }
 

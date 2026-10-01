@@ -8,6 +8,9 @@ import type { OpenInTargets } from "./main/open-in-targets";
 import type { RunXcodegenResult } from "./main/run-xcodegen";
 import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
 import type { CompanionSettings } from "./main/companion-settings";
+import type { EditorSettings } from "./main/editor-settings";
+import type { FormatRequest, FormatResult } from "./main/format/formatters";
+import type { IndentStyle } from "./main/format/project-config";
 import type { JsonRpcMessage } from "./main/lsp/lsp-framing";
 import type { LspAttachment, LspHealth, LspResultOutcome, LspStateEvent } from "./main/lsp/lsp-registry";
 import type { InfillRequest, InfillResult } from "./main/inline-completion/infill";
@@ -173,6 +176,18 @@ const api = {
 	updateSettings: {
 		get: () => ipcRenderer.invoke("updateSettings:get") as Promise<UpdateSettings>,
 		set: (settings: UpdateSettings) => ipcRenderer.invoke("updateSettings:set", settings) as Promise<void>,
+	},
+	// How the code editor indents and formats, from ~/.ao/editor-settings.json.
+	editorSettings: {
+		get: () => ipcRenderer.invoke("editorSettings:get") as Promise<EditorSettings>,
+		set: (settings: EditorSettings) => ipcRenderer.invoke("editorSettings:set", settings) as Promise<EditorSettings>,
+	},
+	// A language's own formatter, run as the tool on this Mac (the renderer cannot
+	// spawn one), and what the project's config files say about indentation.
+	format: {
+		indentStyle: (input: { filePath: string; languageId: string; workspaceRoot?: string }) =>
+			ipcRenderer.invoke("format:indentStyle", input) as Promise<IndentStyle | null>,
+		run: (request: FormatRequest) => ipcRenderer.invoke("format:run", request) as Promise<FormatResult>,
 	},
 	companionSettings: {
 		get: () => ipcRenderer.invoke("companionSettings:get") as Promise<CompanionSettings>,

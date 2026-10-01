@@ -104,6 +104,7 @@ function handle(msg) {
 						// that to the reader as a fact.
 						...(process.env.FAKE_LSP_NO_HOVER === "1" ? {} : { hoverProvider: {} }),
 						...(process.env.FAKE_LSP_NO_REFERENCES === "1" ? {} : { referencesProvider: true }),
+						...(process.env.FAKE_LSP_NO_FORMATTING === "1" ? {} : { documentFormattingProvider: true }),
 						...(process.env.FAKE_LSP_NO_SEMANTIC_TOKENS === "1"
 							? {}
 							: {
