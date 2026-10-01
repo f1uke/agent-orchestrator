@@ -894,10 +894,11 @@ export default function MonacoFileEditor({
 		};
 	}, [editorGeneration]);
 
-	// Monaco's own auto-indent follows the "indent while typing" setting.
+	// Monaco's own auto-indent follows the "indent while typing" setting, and the
+	// right-click menu labels follow the shortcuts.
 	useEffect(() => {
 		formattingRef.current?.refresh();
-	}, [editorSettings.indentOnType, modelGeneration]);
+	}, [editorSettings.indentOnType, editorSettings.reindentShortcut, editorSettings.formatShortcut, modelGeneration]);
 
 	// The project's indentation - `.editorconfig`, `.swift-format`, Prettier's
 	// config - over what Monaco guessed from the file's content, once per model.

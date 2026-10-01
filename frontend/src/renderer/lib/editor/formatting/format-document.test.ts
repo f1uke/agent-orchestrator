@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FormatResult } from "../../../../main/format/formatters";
-import { applyLspEdits, type FormatInput, formatText, type LspFormatter } from "./format-document";
+import { applyLspEdits, fitToBuffer, type FormatInput, formatText, type LspFormatter } from "./format-document";
 
 const GO = "package main\nfunc main(){\nx()\n}\n";
 
@@ -130,6 +130,19 @@ describe("formatText", () => {
 			kind: "unsupported",
 			message: "There is no formatter for Python files.",
 		});
+	});
+});
+
+describe("fitToBuffer", () => {
+	it("drops the final newline a formatter adds to a buffer that holds none", () => {
+		// The model holds `package main` for a file whose bytes are `package main\n`.
+		expect(fitToBuffer("package main\n", "package main", "\n")).toBe("package main");
+		expect(fitToBuffer("a\n", "a\n", "\n")).toBe("a\n");
+	});
+
+	it("follows the buffer's line endings", () => {
+		expect(fitToBuffer("a\nb\n", "a\r\nb", "\r\n")).toBe("a\r\nb");
+		expect(fitToBuffer("a\r\nb\r\n", "a\nb\n", "\n")).toBe("a\nb\n");
 	});
 });
 

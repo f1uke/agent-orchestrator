@@ -1,8 +1,9 @@
 import type { FormatRequest, FormatResult } from "../../../../main/format/formatters";
 import type { EditorSettings } from "../../../../shared/editor-settings";
-import { matchesShortcut } from "../../../../shared/editor-shortcuts";
+import { matchesShortcut, normalizeShortcut } from "../../../../shared/editor-shortcuts";
+import { isMacPlatform } from "../../platform";
 import { monaco } from "../../monaco-setup";
-import { type FormatOutcome, formatText, type LspFormatter } from "./format-document";
+import { fitToBuffer, type FormatOutcome, formatText, type LspFormatter } from "./format-document";
 import { computeReindent, type IndentChange, type IndentUnit } from "./indent-engine";
 import { indentProfileFor } from "./indent-profiles";
 import { minimalEdits } from "./text-diff";
@@ -271,15 +272,15 @@ export function attachEditorFormatting(options: EditorFormattingOptions): Editor
 		if (m.isDisposed() || editor.getModel() !== m) return { applied: false };
 		if (outcome.kind === "unsupported") return say(`${outcome.message} Nothing was changed.`);
 		if (outcome.kind === "failed") {
-			const prefix = reason === "save" ? "Saved without formatting" : `Couldn't format with ${outcome.formatter}`;
-			return say(`${prefix}: ${outcome.message}`, true);
+			if (reason === "save") return say(`Saved without formatting: ${outcome.message}`, true);
+			return say(`Couldn't format with ${outcome.formatter}: ${outcome.message}. Nothing was changed.`, true);
 		}
 		// 🗝 The text was formatted as it was when this started. If the reader has
 		// typed since, applying it would undo their typing - so it is dropped.
 		if (m.getVersionId() !== version) {
 			return say("The file changed while it was being formatted, so nothing was applied.", true);
 		}
-		const formatted = toModelEol(outcome.text, m.getEOL());
+		const formatted = fitToBuffer(outcome.text, text, m.getEOL());
 		const edits = minimalEdits(text, formatted);
 		if (edits.length === 0) {
 			const message =
@@ -340,21 +341,82 @@ export function attachEditorFormatting(options: EditorFormattingOptions): Editor
 		editor.onDidChangeModel(applyAutoIndent),
 		editor.onDidChangeModelLanguage(applyAutoIndent),
 	);
-	applyAutoIndent();
+
+	// The right-click menu: the app's discoverable path (Peek Definition lives
+	// there too), labelled with the CURRENT shortcut so the menu teaches it.
+	// The shortcut itself is still matched above; Monaco's keybinding here only
+	// draws the label, and never sees a key the handler above already took.
+	let actions: monaco.IDisposable[] = [];
+	let boundTo = "";
+	const registerActions = () => {
+		const settings = options.getSettings();
+		const key = `${settings.reindentShortcut}|${settings.formatShortcut}`;
+		if (key === boundTo) return;
+		boundTo = key;
+		for (const a of actions) a.dispose();
+		actions = [];
+		const addAction = (
+			editor as monaco.editor.ICodeEditor & Partial<Pick<monaco.editor.IStandaloneCodeEditor, "addAction">>
+		).addAction;
+		if (typeof addAction !== "function") return;
+		const add = (descriptor: monaco.editor.IActionDescriptor) => actions.push(addAction.call(editor, descriptor));
+		const keys = (shortcut: string) => {
+			const binding = toMonacoKeybinding(shortcut, isMacPlatform());
+			return binding === null ? undefined : [binding];
+		};
+		add({
+			id: "ao.reindentLines",
+			label: "Re-Indent",
+			keybindings: keys(settings.reindentShortcut),
+			precondition: "!editorReadonly",
+			contextMenuGroupId: "1_modification",
+			contextMenuOrder: 1.3,
+			run: () => reindentSelection(),
+		});
+		add({
+			id: "ao.formatDocument",
+			label: "Format Document",
+			keybindings: keys(settings.formatShortcut),
+			precondition: "!editorReadonly",
+			contextMenuGroupId: "1_modification",
+			contextMenuOrder: 1.31,
+			run: () => void formatDocument("command"),
+		});
+	};
+	const refresh = () => {
+		applyAutoIndent();
+		registerActions();
+	};
+	refresh();
 
 	return {
 		reindentSelection,
 		formatDocument,
-		refresh: applyAutoIndent,
+		refresh,
 		dispose() {
-			for (const d of disposables) d.dispose();
+			for (const d of [...disposables, ...actions]) d.dispose();
 		},
 	};
 }
 
-function toModelEol(text: string, eol: string): string {
-	const lf = text.replace(/\r\n?/g, "\n");
-	return eol === "\n" ? lf : lf.replace(/\n/g, eol);
+/**
+ * A shortcut as a Monaco keybinding, for the menu's label. `Ctrl` is the
+ * Control key everywhere, which Monaco calls WinCtrl on a Mac and CtrlCmd
+ * elsewhere; `Meta` is the reverse.
+ */
+export function toMonacoKeybinding(shortcut: string, mac: boolean): number | null {
+	if (!normalizeShortcut(shortcut) || shortcut === "") return null;
+	const parts = shortcut.split("+");
+	const code = monaco.KeyCode[parts.pop() as keyof typeof monaco.KeyCode];
+	if (code === undefined) return null;
+	let binding: number = code;
+	for (const part of parts) {
+		if (part === "Ctrl") binding |= mac ? monaco.KeyMod.WinCtrl : monaco.KeyMod.CtrlCmd;
+		else if (part === "Meta") binding |= mac ? monaco.KeyMod.CtrlCmd : monaco.KeyMod.WinCtrl;
+		else if (part === "Alt") binding |= monaco.KeyMod.Alt;
+		else if (part === "Shift") binding |= monaco.KeyMod.Shift;
+	}
+	return binding;
 }
 
 function languageName(id: string): string {

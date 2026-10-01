@@ -176,6 +176,29 @@ test.describe("⌃I re-indent", () => {
 	});
 });
 
+test("the right-click menu offers both, labelled with their shortcuts, and runs them", async ({ page }) => {
+	await open(page, GO);
+	await selectLines(page, 5, 13);
+	// Inside the selection, or the right-click moves the caret and drops it.
+	const at = await page.evaluate(() => {
+		const monaco = (window as unknown as { __monaco: typeof import("monaco-editor") }).__monaco;
+		const editor = monaco.editor.getEditors()[0];
+		const pos = editor.getScrolledVisiblePosition({ lineNumber: 7, column: 4 });
+		const box = editor.getDomNode()?.getBoundingClientRect();
+		if (!pos || !box) throw new Error("line 7 is not on screen");
+		return { x: box.left + pos.left + 2, y: box.top + pos.top + pos.height / 2 };
+	});
+	await page.mouse.click(at.x, at.y, { button: "right" });
+	const item = page.locator(".action-item", { hasText: "Re-Indent" });
+	await expect(item).toBeVisible();
+	await expect(page.locator(".action-item", { hasText: "Format Document" })).toBeVisible();
+	await expect(item.locator(".keybinding")).toHaveText(/I/);
+	// Hover gives the item the menu's focus; Return runs it, as from the keyboard.
+	await item.hover();
+	await page.keyboard.press("Enter");
+	await expect.poll(async () => (await text(page)).split("\n").slice(4, 13)).toEqual(GO_REINDENTED);
+});
+
 test.describe("⌃⇧I format document", () => {
 	test("hands the file to its formatter and applies the answer as one undo step", async ({ page }) => {
 		await open(page, `${GO}&format=ok`);

@@ -112,6 +112,23 @@ export async function formatText(input: FormatInput): Promise<FormatOutcome> {
 }
 
 /**
+ * A formatter's output, in the buffer's own terms.
+ *
+ * 🗝 This editor's model holds a file WITHOUT its final newline - the newline
+ * is a property of the file, put back at save (`fileBytes`). Every formatter
+ * ends its output with one. Applied as-is, formatting an already-formatted
+ * file would append an empty last line and mark the buffer dirty, and
+ * "Already formatted" could never be said. So a final newline the buffer did
+ * not have is dropped, and line endings follow the buffer's.
+ */
+export function fitToBuffer(formatted: string, buffer: string, eol: string): string {
+	let out = formatted.replace(/\r\n?/g, "\n");
+	if (eol !== "\n") out = out.replace(/\n/g, eol);
+	if (!buffer.endsWith(eol) && out.endsWith(eol)) out = out.slice(0, -eol.length);
+	return out;
+}
+
+/**
  * Apply an LSP formatting answer to the text it was computed against.
  * Positions are UTF-16, which is what a JS string index already is.
  */
