@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Bot, FolderGit2, GitBranch, Inbox, Laptop, MessagesSquare, Trash2, Users } from "lucide-react";
+import { Bot, CodeXml, FolderGit2, GitBranch, Inbox, Laptop, MessagesSquare, Trash2, Users } from "lucide-react";
 
 // The two settings scopes share one two-pane shell; each scope shows only its own
 // section set. Under variant B (chosen 2026-09-08) the sections are cut by WHAT A
@@ -80,6 +80,14 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		hint: "what AO deletes once work is finished",
 		keywords:
 			"auto-reclaim reclaim finished sessions grace period tmux worktree build output derived data pods node_modules smoke test evidence retention screenshots clips delete age days purge sweep",
+	},
+	{
+		key: "editor",
+		label: "Code editor",
+		Icon: CodeXml,
+		hint: "the built-in editor, on this Mac",
+		keywords:
+			"predictive code completion inline ghost text suggestion prediction tab accept autocomplete model qwen coder llama llama.cpp llama-server local ai download",
 	},
 	{
 		key: "mac",

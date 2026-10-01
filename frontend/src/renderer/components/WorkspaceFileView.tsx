@@ -1,4 +1,14 @@
-import { type CSSProperties, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	lazy,
+	Suspense,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, FolderOpen, GitCompare } from "lucide-react";
 import { useSaveWorkspaceFile } from "../hooks/useSaveWorkspaceFile";
@@ -16,6 +26,7 @@ import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { isMacPlatform } from "../lib/platform";
 import { useUiStore } from "../stores/ui-store";
 import { type Drift, FileDriftBanner } from "./FileDriftBanner";
+import { InlineCompletionChip } from "./InlineCompletionChip";
 import type { EditorHandle } from "./MonacoFileEditor";
 
 // Monaco and its grammars are ~an order of magnitude larger than the rest of the
@@ -81,6 +92,13 @@ const SAVED_FLASH_MS = 1400;
  * shedding starts too late to help. Measured, not guessed — a plain file's
  * header now needs 676px with its path already at the 84px floor, and a file
  * with a language server adds the status and problem chips on top of that.
+ *
+ * It is a FLOOR, not the whole rule: the header's content varies (a Swift
+ * server's status reads longer than "no language server", the uncommitted
+ * count, the problems chip, the predictive-completion icon), and the busiest
+ * header measured 951px - so at 844px it overflowed by 107px and pushed Save
+ * out of the pane entirely. Above the floor the header therefore also sheds
+ * whenever it MEASURES as overflowing (see `fullNeed` below).
  */
 const COMPACT_WIDTH = 820;
 
@@ -248,7 +266,12 @@ export function WorkspaceFileView({
 	const handleRef = useRef<EditorHandle | null>(null);
 	const queryClient = useQueryClient();
 	const rootRef = useRef<HTMLDivElement | null>(null);
-	const [compact, setCompact] = useState(false);
+	const headerRef = useRef<HTMLDivElement | null>(null);
+	const [rootWidth, setRootWidth] = useState(0);
+	// The width the FULL header needed the last time it was laid out in full and
+	// did not fit. Zero until that happens.
+	const [fullNeed, setFullNeed] = useState(0);
+	const compact = rootWidth > 0 && rootWidth < Math.max(COMPACT_WIDTH, fullNeed);
 
 	// What the header drops when it runs out of room, in priority order: the FILE
 	// badge and the uncommitted count go first (both are repeated elsewhere), then
@@ -259,11 +282,27 @@ export function WorkspaceFileView({
 		if (!root || typeof ResizeObserver === "undefined") return;
 		const observer = new ResizeObserver((entries) => {
 			const width = entries[0]?.contentRect.width ?? 0;
-			if (width > 0) setCompact(width < COMPACT_WIDTH);
+			if (width > 0) setRootWidth(width);
 		});
 		observer.observe(root);
 		return () => observer.disconnect();
 	}, []);
+
+	// 🗝 Measured, every layout, before paint: a full header that overflows is
+	// recorded and shed in the same frame, so Save is never drawn clipped. It runs
+	// after EVERY render on purpose - what the header holds changes with the
+	// server's status, the problem counts, the dirty dot and Save's own label, and
+	// any of them can be the few pixels that push Save out.
+	useLayoutEffect(() => {
+		const header = headerRef.current;
+		if (!header || compact) return;
+		if (header.scrollWidth > header.clientWidth) setFullNeed(header.scrollWidth);
+	});
+
+	// A different file is a different header; measure it afresh.
+	useLayoutEffect(() => {
+		setFullNeed(0);
+	}, [path]);
 
 	// Stable, because MonacoFileEditor reports through these from effects.
 	const handleServerState = useCallback(
@@ -553,6 +592,7 @@ export function WorkspaceFileView({
 		>
 			{/* header */}
 			<div
+				ref={headerRef}
 				style={{
 					height: 52,
 					flex: "none",
@@ -679,6 +719,8 @@ export function WorkspaceFileView({
 						{serverLabel.text}
 					</span>
 				)}
+				{/* Predictions only ever land in a buffer that can take them. */}
+				{editability.editable && <InlineCompletionChip />}
 				{!editability.editable && file != null && (
 					<span
 						data-testid="read-only-chip"

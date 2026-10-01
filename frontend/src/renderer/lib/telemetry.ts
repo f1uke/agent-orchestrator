@@ -1,6 +1,7 @@
 import posthog from "posthog-js/dist/module.full.no-external";
 import { aoBridge } from "./bridge";
 import { DEFAULT_POSTHOG_HOST, DEFAULT_POSTHOG_PROJECT_KEY } from "../../shared/posthog-config";
+import { isMonacoCancellation } from "./monaco-cancellation";
 
 const POSTHOG_KEY = import.meta.env.VITE_AO_POSTHOG_KEY?.trim() || DEFAULT_POSTHOG_PROJECT_KEY;
 const POSTHOG_HOST = import.meta.env.VITE_AO_POSTHOG_HOST?.trim() || DEFAULT_POSTHOG_HOST;
@@ -253,6 +254,8 @@ function bindErrorHandlers() {
 		});
 	});
 	window.addEventListener("unhandledrejection", (event) => {
+		// The editor's own cancellations are not crashes (see monaco-cancellation.ts).
+		if (isMonacoCancellation(event.reason)) return;
 		void captureRendererException(normalizeException(event.reason), {
 			source: "unhandledrejection",
 			unhandled: true,

@@ -4,6 +4,7 @@ import { MONO } from "../lib/comment-inbox";
 import type { Hunk } from "../lib/editor/change-lanes";
 import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/gutter-lanes";
 import { revertEdit } from "../lib/editor/revert";
+import { ensureInlineCompletionProvider, noteFileOpened } from "../lib/inline-completion/provider";
 import { registerCompletion } from "../lib/lsp/completion-provider";
 import { registerLspNavigation } from "../lib/lsp/definition";
 import { registerDiagnostics } from "../lib/lsp/diagnostics";
@@ -123,6 +124,23 @@ const MINIMAP: monaco.editor.IEditorMinimapOptions = {
 	maxColumn: 80,
 };
 
+/**
+ * Ghost text from the local model (see `lib/inline-completion`). Monaco's own
+ * contribution draws and accepts it; these only shape it.
+ *
+ * - Off in a read-only pane, where there is nothing to accept it into.
+ * - No hover toolbar: there is only ever one suggestion, so "1/1  Accept" would
+ *   be chrome around nothing. Tab accepts and Esc dismisses, as in Xcode.
+ * - Plain grey rather than syntax-coloured, so a guess never reads as code that
+ *   is already there - the same reason Xcode greys its predictions.
+ * - The suggest widget is NOT suppressed: the language server's list and the
+ *   model's ghost text can both be on screen, and Tab belongs to the list while
+ *   it is open (Monaco's own keybinding condition).
+ */
+function INLINE_SUGGEST(enabled: boolean): monaco.editor.IInlineSuggestOptions {
+	return { enabled, showToolbar: "never", syntaxHighlightingEnabled: false, suppressSuggestions: false };
+}
+
 const BASE_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	readOnly: true,
 	domReadOnly: true,
@@ -174,6 +192,7 @@ const BASE_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	// Every file in this repo is full of typographic dashes and arrows. Monaco's
 	// ambiguous-character boxes would draw a warning around most comment lines.
 	unicodeHighlight: { ambiguousCharacters: false, invisibleCharacters: false, nonBasicASCII: false },
+	inlineSuggest: INLINE_SUGGEST(true),
 	scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
 	padding: { top: 10, bottom: 24 },
 	wordWrap: "off",
@@ -771,8 +790,24 @@ export default function MonacoFileEditor({
 
 	useEffect(() => {
 		if (editorGeneration === 0) return;
-		codeEditorRef.current?.updateOptions({ readOnly, domReadOnly: readOnly });
+		codeEditorRef.current?.updateOptions({ readOnly, domReadOnly: readOnly, inlineSuggest: INLINE_SUGGEST(!readOnly) });
 	}, [editorGeneration, readOnly]);
+
+	// Ghost text. Wired once per window by whichever editor mounts first; the
+	// provider itself exists only while the local model is ready.
+	useEffect(() => {
+		if (ready) ensureInlineCompletionProvider();
+	}, [ready]);
+
+	// What is on screen becomes context for predictions in OTHER files - the way a
+	// person who just read a type's definition is about to use it. Re-noted when
+	// the saved text changes (a save, or an agent writing the file).
+	useEffect(() => {
+		if (modelGeneration === 0) return;
+		const model = codeEditorRef.current?.getModel();
+		if (model) noteFileOpened(model, codeEditorRef.current?.getPosition()?.lineNumber ?? line ?? 1);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [modelGeneration, text]);
 
 	// Where the caret is, reported as it moves — the owner needs it so that going
 	// BACK returns to the line the reader jumped from rather than to line 1. It

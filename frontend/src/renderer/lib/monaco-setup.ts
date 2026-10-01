@@ -3,6 +3,7 @@ import * as monaco from "monaco-editor";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { isMonacoCancellation } from "./monaco-cancellation";
 import { AO_DARK_THEME, AO_LIGHT_THEME, type EditorThemeName } from "./monaco-theme";
 
 /**
@@ -52,6 +53,14 @@ globalThis.MonacoEnvironment = {
 		return new EditorWorker();
 	},
 };
+
+// Silences the console half of `isMonacoCancellation`'s leak (see there);
+// telemetry ignores the same errors itself, because it may be listening first.
+if (typeof window !== "undefined") {
+	window.addEventListener("unhandledrejection", (event) => {
+		if (isMonacoCancellation(event.reason)) event.preventDefault();
+	});
+}
 
 /** `setModeConfiguration({})` leaves every provider flag falsy → none registered. */
 const NO_PROVIDERS = {};

@@ -10,6 +10,12 @@ import { Textarea } from "../ui/textarea";
 import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
 import { SettingEditorControl } from "./SettingEditorControl";
 import { CompanionControls } from "./CompanionControls";
+import {
+	InlineCompletionControls,
+	InlineCompletionModelPicker,
+	inlineCompletionSummary,
+} from "./InlineCompletionControls";
+import { useInlineCompletionStatus } from "../../lib/inline-completion/status";
 import { CompanionPreview } from "./CompanionPreview";
 import { PetLibrary } from "./PetLibrary";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
@@ -74,6 +80,8 @@ export function GlobalSettingsContent({ form, activeSection }: { form: GlobalFor
 			return <WhileWorkRunsSection form={form} />;
 		case "cleanup":
 			return <CleaningUpSection form={form} />;
+		case "editor":
+			return <CodeEditorSection />;
 		case "mac":
 			return <ThisMacSection form={form} />;
 		default:
@@ -608,6 +616,49 @@ function ThisMacSection({ form }: { form: GlobalForm }) {
 					timing="instant"
 				>
 					<MigrationControls />
+				</SettingRow>
+			</SettingRows>
+		</>
+	);
+}
+
+// Predictive code completion. Both rows are instant: they start and stop a
+// process and a download, which is not something to stage behind a Save.
+function CodeEditorSection() {
+	const status = useInlineCompletionStatus();
+	return (
+		<>
+			<SectionHeading title="Code editor" hint={hint("editor")} />
+			<SettingRows>
+				<SettingRow
+					name="Predictive code completion"
+					summary="Shows what you are likely to type next as grey text after the cursor. Tab accepts it; Esc or typing something else dismisses it."
+					detail={
+						<>
+							A code model runs on this Mac: AO downloads llama.cpp and the model into <code>~/.ao/llm</code> the first
+							time, starts its own llama-server while this is on, and stops exactly that process when you turn it off or
+							quit. Your code never leaves this Mac. Language-server completions (⌃Space) keep working alongside it, and
+							Tab still indents when no prediction is showing.
+						</>
+					}
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+					value={inlineCompletionSummary(status)}
+					defaultOpen
+				>
+					<InlineCompletionControls />
+				</SettingRow>
+				<SettingRow
+					name="Prediction model"
+					summary="Larger models guess better but answer more slowly and hold more memory while on."
+					detail="Choosing a model you have not downloaded asks first, with its size; the current one keeps predicting until the new one is ready."
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+					value={status?.models.find((m) => m.id === status.modelId)?.label ?? "…"}
+					gate={status?.unsupported ?? undefined}
+					controlId="inlineCompletionModel"
+				>
+					<InlineCompletionModelPicker />
 				</SettingRow>
 			</SettingRows>
 		</>
