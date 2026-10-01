@@ -135,3 +135,27 @@ func TestRead_MissingJournalIsNotAnError(t *testing.T) {
 		t.Fatalf("Read on a fresh data dir = (%v, %v), want (empty, nil)", entries, err)
 	}
 }
+
+func TestClusterRuntimeLostNeedsEveryPaneProbedGone(t *testing.T) {
+	gone, there := false, true
+	cases := map[string]struct {
+		panes []*bool
+		want  bool
+	}{
+		"every pane gone":       {[]*bool{&gone, &gone, &gone}, true},
+		"one pane survived":     {[]*bool{&gone, &there, &gone}, false},
+		"one pane never probed": {[]*bool{&gone, nil, &gone}, false},
+		"empty":                 {nil, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			var c Cluster
+			for _, p := range tc.panes {
+				c.Entries = append(c.Entries, Entry{PaneAlive: p})
+			}
+			if got := c.RuntimeLost(); got != tc.want {
+				t.Fatalf("RuntimeLost = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

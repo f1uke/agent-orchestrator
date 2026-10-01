@@ -108,7 +108,7 @@ Phases (independently shippable):
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3:** Implement (drop the empty-prompt early return; fall through to `GetLaunchCommand`).
 - [ ] **Step 4:** `go test ./internal/session_manager/... -race` → PASS.
-- [ ] **Step 5:** Manual reboot-sim: spawn orchestrator → `tmux kill-server` (simulate reboot losing tmux) → restart daemon → orchestrator restored in the SAME id (not recreated).
+- [ ] **Step 5:** Manual reboot-sim: spawn orchestrator → kill the orchestrator's own tmux server with `tmux -S ~/.ao/data/tmux/<name> kill-server` (simulate reboot losing tmux; never a bare `tmux kill-server`) → restart daemon → orchestrator restored in the SAME id (not recreated).
 - [ ] **Step 6:** Commit `fix(core): restore promptless sessions in place (reboot recovery, no increment)`.
 
 ## Task 6 (optional, Phase D): `ao` on agent PATH in dev
@@ -122,7 +122,7 @@ Phases (independently shippable):
 - [ ] `go build ./... && go vet ./... && go test ./... -race` green; `cd frontend && pnpm vitest run && pnpm tsc --noEmit` green; full `pnpm build`.
 - [ ] **Graceful stop preserves sessions:** spawn orchestrator → `ao stop` → tmux session ALIVE → `ao start` → orchestrator adopted, SAME id (reproduces the fix for the recorded bug).
 - [ ] **Frontend death:** Cmd+Q AND `kill -9` Electron → daemon exits, sessions alive, reopen → adopted with context.
-- [ ] **Reboot recovery:** `tmux kill-server` then restart → orchestrator restored in the same id.
+- [ ] **Reboot recovery:** `tmux -S ~/.ao/data/tmux/<name> kill-server` then restart → orchestrator restored in the same id.
 - [ ] **Headless safety:** `ao start` from a terminal, no app → daemon runs forever, sessions intact.
 
 ## Self-Review

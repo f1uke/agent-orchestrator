@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -259,5 +260,64 @@ func TestAgentExit_FromWaitingInputStillEmitsTheDwell(t *testing.T) {
 	}
 	if got := sink.events[0].Payload["dwell_ms"]; got != int64(3000) {
 		t.Fatalf("dwell_ms = %#v, want 3000", got)
+	}
+}
+
+// A dev whose pane went WITH its agent did not end its task: its runtime died
+// under it (2026-10-01: a `tmux kill-server` in one pane ended every session, and
+// this fan-out then terminated a qa on top as dev_exited). dev records its own
+// ending; its crew is left alone for a restore.
+func TestAgentExit_DevWhoseRuntimeVanishedLeavesItsCrewAlone(t *testing.T) {
+	m, st, _ := newManager()
+	dev := devWithWorktree("mer-1")
+	dev.Metadata.RuntimeHandleID = "proj-feature-task"
+	st.sessions["mer-1"] = dev
+	st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1"}}
+	spy := &crewReaperSpy{}
+	m.SetCrewReaper(spy.fn(st))
+	var probed []string
+	m.SetRuntimeProbe(func(_ context.Context, handle string) (bool, error) {
+		probed = append(probed, handle)
+		return false, nil
+	})
+
+	if err := m.ApplyActivitySignal(ctx, "mer-1", exitSignal()); err != nil {
+		t.Fatal(err)
+	}
+	if len(probed) != 1 || probed[0] != "proj-feature-task" {
+		t.Fatalf("probed %v, want dev's own handle once", probed)
+	}
+	if len(spy.calls) != 0 {
+		t.Fatalf("a dev killed with its runtime reaped its crew: %v", spy.calls)
+	}
+	if !st.sessions["mer-1"].IsTerminated {
+		t.Fatal("dev's own ending was not recorded")
+	}
+}
+
+// Only a DEFINITIVE "gone" spares the crew: a pane that is there, or a probe
+// that cannot answer, leaves the ending on the path it always took.
+func TestAgentExit_DevCrewFanOutRunsUnlessThePaneIsDefinitelyGone(t *testing.T) {
+	for name, probe := range map[string]func(context.Context, string) (bool, error){
+		"pane alive":   func(context.Context, string) (bool, error) { return true, nil },
+		"probe failed": func(context.Context, string) (bool, error) { return false, errors.New("tmux wedged") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, st, _ := newManager()
+			dev := devWithWorktree("mer-1")
+			dev.Metadata.RuntimeHandleID = "proj-feature-task"
+			st.sessions["mer-1"] = dev
+			st.prs["mer-1"] = []domain.PullRequest{{URL: "pr1"}}
+			spy := &crewReaperSpy{}
+			m.SetCrewReaper(spy.fn(st))
+			m.SetRuntimeProbe(probe)
+
+			if err := m.ApplyActivitySignal(ctx, "mer-1", exitSignal()); err != nil {
+				t.Fatal(err)
+			}
+			if len(spy.calls) != 1 {
+				t.Fatalf("crew reaper calls = %v, want the usual one", spy.calls)
+			}
+		})
 	}
 }

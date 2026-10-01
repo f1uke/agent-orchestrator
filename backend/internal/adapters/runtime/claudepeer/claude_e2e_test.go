@@ -48,9 +48,24 @@ func TestAgainstRealClaude(t *testing.T) {
 	// a previous run's claude left behind, and the test would then message a
 	// pane that no longer exists.
 	sess := fmt.Sprintf("ao-claudepeer-e2e-%d", os.Getpid())
-	tmuxRun := func(args ...string) ([]byte, error) {
-		return exec.Command(tmuxBin, args...).CombinedOutput()
+	// A private socket dir, reached by explicit -S with tmux's pane variables
+	// dropped: run from inside an AO pane, a bare tmux would address the
+	// server hosting that pane (see tmux/socket.go). The session is started by
+	// hand on the socket the runtime will look for.
+	sockDir, err := os.MkdirTemp("", "aotm")
+	if err != nil {
+		t.Fatal(err)
 	}
+	sock := tmux.SocketPathIn(sockDir, sess)
+	tmuxRun := func(args ...string) ([]byte, error) {
+		cmd := exec.Command(tmuxBin, append([]string{"-S", sock}, args...)...)
+		cmd.Env = withoutTmuxPaneEnv(os.Environ())
+		return cmd.CombinedOutput()
+	}
+	t.Cleanup(func() {
+		_, _ = tmuxRun("kill-server")
+		_ = os.RemoveAll(sockDir)
+	})
 	_, _ = tmuxRun("kill-session", "-t", "="+sess)
 	// Strip the CLAUDE_* env a session inherits when this test is itself run
 	// from inside Claude Code: a child that sees them refuses to start its own
@@ -92,7 +107,7 @@ func TestAgainstRealClaude(t *testing.T) {
 	}
 
 	handle := ports.RuntimeHandle{ID: sess}
-	rt := New(tmux.New(tmux.Options{}), Options{})
+	rt := New(tmux.New(tmux.Options{SocketDir: sockDir}), Options{})
 	ctx := context.Background()
 
 	// The session must register itself before the adapter can find it.
@@ -164,4 +179,16 @@ func TestAgainstRealClaude(t *testing.T) {
 		t.Fatalf("the fallback message did not go through the pane's input line. Pane:\n%s", pane)
 	}
 	fmt.Println(pane)
+}
+
+// withoutTmuxPaneEnv drops the variables tmux sets inside a pane.
+func withoutTmuxPaneEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "TMUX=") || strings.HasPrefix(kv, "TMUX_PANE=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }

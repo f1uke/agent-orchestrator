@@ -857,6 +857,43 @@ flowchart TD
 
 ```
 
+### One tmux server per session
+
+On macOS/Linux every session's pane runs on a tmux server of its own, reached
+through an explicit socket under the data dir: `<dataDir>/tmux/<session-name>`
+(`backend/internal/adapters/runtime/tmux/socket.go`). Every command the runtime
+runs - create, probe, send, capture, attach, kill - names that socket with `-S`.
+
+The reason is `$TMUX`. tmux exports it into each pane, naming the server that
+hosts the pane, and a tmux client that sees it talks to that server whatever
+`TMUX_TMPDIR` or `-L` say. While every session shared the user's default server,
+one `tmux kill-server` typed in any pane - on 2026-10-01, an agent tearing down a
+sandbox with `TMUX_TMPDIR=<sandbox> tmux kill-server` - ended every session of
+every project at once. With a server per session it can end only its own
+session. `$TMUX` is deliberately left in the pane: Claude Code records its tmux
+target from it, and claudepeer delivery joins AO's handle on that record.
+
+Rooting the sockets in the data dir also isolates AO instances from each other:
+a sandbox or e2e run with its own `AO_DATA_DIR` gets its own servers, and its
+sessions cannot share a name with the real instance's.
+
+Sessions created before this change still live on tmux's default server. The
+runtime reaches them there (`tmux.Options.LegacySocket`) only when a session has
+no socket of its own AND its pane was launched from this instance's launch-script
+directory, so a sandbox never adopts the real instance's sessions; a new session
+under the same name retires a stale one there first, and refuses while a live
+agent still runs in it.
+
+To attach by hand: `tmux -S ~/.ao/data/tmux/<session-name> attach -t <session-name>`
+(`ao spawn` prints it).
+
+When an agent reports its own ending (SessionEnd) and its pane is already gone,
+the runtime died under it rather than the agent choosing to stop - an agent that
+quits leaves its pane behind, held by the keep-alive shell. The lifecycle reducer
+then does not run the crew fan-out for a dev (its qa is left for a restore), and
+`ao doctor` names a mass ending whose panes all went with their agents as a lost
+runtime and lists the `ao session restore` commands.
+
 ### Runtime Reaper
 
 ```mermaid

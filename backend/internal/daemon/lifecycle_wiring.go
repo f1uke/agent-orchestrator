@@ -61,6 +61,11 @@ type lifecycleStack struct {
 func startLifecycle(ctx context.Context, store *sqlite.Store, runtime ports.Runtime, messenger ports.AgentMessenger, notifier notificationSink, telemetry ports.EventSink, templates func() map[string]string, autoNudgeDefault func() bool, reg *looptelemetry.Registry, endings ports.SessionEndingSink, logger *slog.Logger) *lifecycleStack {
 	renderer := messagetemplates.NewRenderer(templates)
 	lcm := lifecycle.New(store, messenger, lifecycle.WithNotificationSink(notifier), lifecycle.WithTelemetry(telemetry), lifecycle.WithMessageRenderer(renderer), lifecycle.WithAutoNudgeDefault(autoNudgeDefault), lifecycle.WithTranscriptLocator(locateTranscript), lifecycle.WithEndingSink(endings))
+	// An agent's own ending asks whether its pane went with it: a runtime that
+	// died under a dev is not a dev that finished its task (see applyAgentExit).
+	lcm.SetRuntimeProbe(func(ctx context.Context, handleID string) (bool, error) {
+		return runtime.IsAlive(ctx, ports.RuntimeHandle{ID: handleID})
+	})
 	reaperRec := reg.Register(looptelemetry.Spec{
 		Name:        "reaper",
 		Display:     "Runtime liveness",

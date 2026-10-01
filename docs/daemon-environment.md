@@ -43,7 +43,9 @@ All of these were traced to the same root cause:
   therefore not restorable (`Restore` requires `IsTerminated`, otherwise
   `ErrNotRestorable`).
 - `tmux list-sessions` showing sessions as alive-but-unreachable or dead,
-  depending on which socket universe was inspected.
+  depending on which socket universe was inspected. (Each session now has its
+  own server under `~/.ao/data/tmux/`, so inspect one with
+  `tmux -S ~/.ao/data/tmux/<name> ls`.)
 
 The unifying cause: the running, GUI-launched daemon cannot execute
 `/opt/homebrew/bin/tmux` (and friends), so its liveness probes error

@@ -150,7 +150,8 @@ type serialRunner struct {
 	tags []byte
 }
 
-func (s *serialRunner) Run(_ context.Context, _ []string, _ string, args ...string) ([]byte, error) {
+func (s *serialRunner) Run(_ context.Context, _ []string, _ string, argv ...string) ([]byte, error) {
+	_, args := splitSocket(argv)
 	tag := byte('E') // the submitting Enter
 	if len(args) == 5 && args[3] == "-l" && len(args[4]) > 0 {
 		tag = args[4][0] // 'a' or 'b' — which message this chunk belongs to

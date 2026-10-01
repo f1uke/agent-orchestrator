@@ -49,8 +49,9 @@ type Options struct {
 	// one layer that always knows the answer and cannot be bypassed by a caller
 	// that forgets to ask.
 	Journal msgdelivery.Journal
-	// DataDir is the daemon's data dir, where the tmux runtime writes the launch
-	// scripts of panes whose env names no AO_DATA_DIR of its own.
+	// DataDir is the daemon's data dir, where the tmux runtime keeps its
+	// per-session sockets and writes the launch scripts of panes whose env names
+	// no AO_DATA_DIR of its own.
 	DataDir string
 }
 
@@ -59,5 +60,10 @@ func New(log *slog.Logger, opts Options) Runtime {
 	if runtime.GOOS == "windows" {
 		return conpty.New(conpty.Options{Journal: opts.Journal})
 	}
-	return claudepeer.New(tmux.New(tmux.Options{DataDir: opts.DataDir}), claudepeer.Options{Logger: log, Journal: opts.Journal})
+	// Each session gets a tmux server of its own under the data dir; sessions
+	// started before that change are still reached on the shared default server
+	// (see tmux.Options.LegacySocket).
+	rt := tmux.New(tmux.Options{DataDir: opts.DataDir, LegacySocket: tmux.LegacyDefaultSocket()})
+	tmux.SweepStaleSockets(tmux.SocketDir(opts.DataDir))
+	return claudepeer.New(rt, claudepeer.Options{Logger: log, Journal: opts.Journal})
 }
