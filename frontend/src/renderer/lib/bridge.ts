@@ -143,6 +143,31 @@ export const aoBridge: AoBridge =
 			onMessage: () => () => undefined,
 			onState: () => () => undefined,
 		},
+		// No main process, so no model server: the feature says why it is
+		// unavailable instead of offering a switch that can never turn on.
+		inlineCompletion: {
+			getStatus: async () => ({
+				unsupported: "Inline completion needs the desktop app: it runs a local model in the Electron main process.",
+				enabled: false,
+				modelId: "qwen2.5-coder-1.5b",
+				server: "off",
+				serverDetail: null,
+				pid: null,
+				confirm: null,
+				download: null,
+				downloadError: null,
+				models: [],
+			}),
+			enable: async () => undefined,
+			disable: async () => undefined,
+			selectModel: async () => undefined,
+			confirmDownload: async () => undefined,
+			cancelDownload: async () => undefined,
+			removeModel: async () => undefined,
+			complete: async () => null,
+			cancel: () => undefined,
+			onStatus: () => () => undefined,
+		},
 		updates: {
 			getStatus: async () => ({ state: "idle" }),
 			check: async () => undefined,

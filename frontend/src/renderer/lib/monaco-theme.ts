@@ -226,6 +226,9 @@ function buildTheme(name: EditorThemeName, type: "dark" | "light", t: Tokens) {
 			"scrollbarSlider.activeBackground": t["--scrollbar-thumb-hover"],
 			"editorStickyScroll.background": t["--viewer-bg"],
 			"editorStickyScrollHover.background": t["--interactive-hover"],
+			// Predicted text after the cursor: the passive grey, which reads as "not
+			// there yet" against every syntax role in both themes.
+			"editorGhostText.foreground": t["--fg-passive"],
 			"editorWidget.background": t["--bg-1"],
 			"editorWidget.foreground": t["--fg"],
 			"editorWidget.border": t["--border-1"],

@@ -11,6 +11,9 @@ import type { CompanionSettings } from "./main/companion-settings";
 import type { JsonRpcMessage } from "./main/lsp/lsp-framing";
 import type { LspState } from "./main/lsp/lsp-process";
 import type { LspAttachment, LspHealth, LspResultOutcome } from "./main/lsp/lsp-registry";
+import type { ModelId } from "./main/inline-completion/catalog";
+import type { InfillRequest, InfillResult } from "./main/inline-completion/infill";
+import type { InlineCompletionStatus } from "./main/inline-completion/service";
 
 export type BrowserBoundsInput = {
 	viewId: string;
@@ -130,6 +133,28 @@ const api = {
 			ipcRenderer.on("lsp:state", wrapped);
 			return () => {
 				ipcRenderer.off("lsp:state", wrapped);
+			};
+		},
+	},
+	// Ghost text from the local model AO runs. `complete` resolves null whenever
+	// there is nothing to show - off, starting, superseded or failed alike - so the
+	// editor never has an error path to render.
+	inlineCompletion: {
+		getStatus: () => ipcRenderer.invoke("inlineCompletion:getStatus") as Promise<InlineCompletionStatus>,
+		enable: () => ipcRenderer.invoke("inlineCompletion:enable") as Promise<void>,
+		disable: () => ipcRenderer.invoke("inlineCompletion:disable") as Promise<void>,
+		selectModel: (id: ModelId) => ipcRenderer.invoke("inlineCompletion:selectModel", id) as Promise<void>,
+		confirmDownload: () => ipcRenderer.invoke("inlineCompletion:confirmDownload") as Promise<void>,
+		cancelDownload: () => ipcRenderer.invoke("inlineCompletion:cancelDownload") as Promise<void>,
+		removeModel: (id: ModelId) => ipcRenderer.invoke("inlineCompletion:removeModel", id) as Promise<void>,
+		complete: (requestId: string, request: InfillRequest) =>
+			ipcRenderer.invoke("inlineCompletion:complete", { requestId, request }) as Promise<InfillResult | null>,
+		cancel: (requestId: string) => ipcRenderer.send("inlineCompletion:cancel", requestId),
+		onStatus: (listener: (status: InlineCompletionStatus) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, status: InlineCompletionStatus) => listener(status);
+			ipcRenderer.on("inlineCompletion:status", wrapped);
+			return () => {
+				ipcRenderer.off("inlineCompletion:status", wrapped);
 			};
 		},
 	},

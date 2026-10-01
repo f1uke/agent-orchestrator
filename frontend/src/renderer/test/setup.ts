@@ -175,6 +175,31 @@ if (typeof window !== "undefined") {
 			install: async () => undefined,
 			onStatus: () => () => undefined,
 		},
+		// The default: inline completion off and never answering, so no editor test
+		// sees ghost text it did not ask for.
+		inlineCompletion: {
+			getStatus: async () => ({
+				unsupported: null,
+				enabled: false,
+				modelId: "qwen2.5-coder-1.5b",
+				server: "off",
+				serverDetail: null,
+				pid: null,
+				confirm: null,
+				download: null,
+				downloadError: null,
+				models: [],
+			}),
+			enable: async () => undefined,
+			disable: async () => undefined,
+			selectModel: async () => undefined,
+			confirmDownload: async () => undefined,
+			cancelDownload: async () => undefined,
+			removeModel: async () => undefined,
+			complete: async () => null,
+			cancel: () => undefined,
+			onStatus: () => () => undefined,
+		},
 		// The default: no language server. A test that wants one installs its own
 		// `window.ao.lsp` over this, so a component under test never accidentally
 		// gets intelligence it did not ask for.

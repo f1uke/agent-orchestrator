@@ -65,6 +65,13 @@ import { detectOpenTargets, openInAndroidStudio, openInEditor, openInTerminal, o
 import { runXcodegen, type RunXcodegenResult } from "./main/run-xcodegen";
 import { isAllowedTerminalLink } from "./main/open-terminal-link";
 import { createLspRegistry, type LspRegistry, type LspResultOutcome } from "./main/lsp/lsp-registry";
+import type { ModelId } from "./main/inline-completion/catalog";
+import type { InfillRequest } from "./main/inline-completion/infill";
+import {
+	createInlineCompletionService,
+	inlineCompletionPaths,
+	type InlineCompletionService,
+} from "./main/inline-completion/service";
 import {
 	clampWindowState,
 	readWindowStateSync,
@@ -1191,6 +1198,40 @@ ipcMain.on("lsp:send", (_event, input: { handleId: string; message: Record<strin
 ipcMain.on("lsp:noteResult", (_event, input: { handleId: string; outcome: LspResultOutcome }) =>
 	lspRegistry?.noteResult(input.handleId, input.outcome),
 );
+// ---- inline completion ----------------------------------------------------
+// Ghost text in the editor, from a local llama-server that THIS process starts,
+// supervises and stops. Owned here rather than by the daemon for the reason the
+// language servers are: the editor is the only consumer, the renderer cannot
+// spawn, and the app's lifetime is exactly the lifetime the feature should have -
+// the daemon outlives the app on purpose and would keep gigabytes of model
+// resident with no editor open. Everything lives under the ~/.ao state dir.
+let inlineCompletion: InlineCompletionService | null = null;
+
+function ensureInlineCompletion(): InlineCompletionService {
+	if (inlineCompletion) return inlineCompletion;
+	const runFile = runFilePath();
+	const stateDir = runFile ? path.dirname(runFile) : path.join(os.homedir(), ".ao");
+	inlineCompletion = createInlineCompletionService({
+		paths: inlineCompletionPaths(stateDir),
+		onStatus: (status) => broadcastToRenderers("inlineCompletion:status", status),
+	});
+	void inlineCompletion.init().catch((err) => console.error("AO: inline completion failed to start:", err));
+	return inlineCompletion;
+}
+
+ipcMain.handle("inlineCompletion:getStatus", () => ensureInlineCompletion().status());
+ipcMain.handle("inlineCompletion:enable", () => ensureInlineCompletion().enable());
+ipcMain.handle("inlineCompletion:disable", () => ensureInlineCompletion().disable());
+ipcMain.handle("inlineCompletion:selectModel", (_event, id: ModelId) => ensureInlineCompletion().selectModel(id));
+ipcMain.handle("inlineCompletion:confirmDownload", () => ensureInlineCompletion().confirmDownload());
+ipcMain.handle("inlineCompletion:cancelDownload", () => ensureInlineCompletion().cancelDownload());
+ipcMain.handle("inlineCompletion:removeModel", (_event, id: ModelId) => ensureInlineCompletion().removeModel(id));
+ipcMain.handle("inlineCompletion:complete", (_event, input: { requestId: string; request: InfillRequest }) =>
+	ensureInlineCompletion().complete(input.requestId, input.request),
+);
+// Per-keystroke and hot, so fire-and-forget like lsp:send.
+ipcMain.on("inlineCompletion:cancel", (_event, requestId: string) => inlineCompletion?.cancel(requestId));
+
 async function chooseDirectory(title: string): Promise<string | null> {
 	const options: OpenDialogOptions = {
 		properties: ["openDirectory"],
@@ -1733,6 +1774,9 @@ app.whenReady().then(async () => {
 	void startDaemon();
 	initAutoUpdates();
 	initCompanionOverlay();
+	// Brings the feature back the way it was left: a server if it was on, a
+	// resumed download if a quit interrupted one, nothing at all if it was off.
+	ensureInlineCompletion();
 
 	app.on("activate", () => {
 		// Keyed on the MAIN window, not the window count: the companion overlay is
@@ -1843,6 +1887,10 @@ app.on("before-quit", () => {
 	// resident memory that nothing will reap.
 	void lspRegistry?.disposeAll();
 	lspRegistry = null;
+	// The same, for the model: SIGTERM goes to the pid AO started before this
+	// returns. A download in flight keeps its part for the next launch to resume.
+	inlineCompletion?.dispose();
+	inlineCompletion = null;
 	browserViewHost?.dispose();
 	browserViewHost = null;
 	companionOverlay?.dispose();
@@ -1862,6 +1910,8 @@ process.on("exit", () => {
 	if (daemonProcess && !supervisorLink?.connected) {
 		killDaemon(daemonProcess);
 	}
+	// A quit that skipped before-quit (a signal) must not orphan the model server.
+	inlineCompletion?.dispose();
 });
 
 app.on("window-all-closed", () => {
