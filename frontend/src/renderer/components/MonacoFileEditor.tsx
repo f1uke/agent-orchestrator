@@ -793,8 +793,8 @@ export default function MonacoFileEditor({
 		codeEditorRef.current?.updateOptions({ readOnly, domReadOnly: readOnly, inlineSuggest: INLINE_SUGGEST(!readOnly) });
 	}, [editorGeneration, readOnly]);
 
-	// Ghost text. One provider per window, registered by whichever editor mounts
-	// first; it answers nothing until the local model is ready.
+	// Ghost text. Wired once per window by whichever editor mounts first; the
+	// provider itself exists only while the local model is ready.
 	useEffect(() => {
 		if (ready) ensureInlineCompletionProvider();
 	}, [ready]);

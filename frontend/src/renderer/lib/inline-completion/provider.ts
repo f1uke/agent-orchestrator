@@ -4,7 +4,7 @@ import { inlineCompletionBridge } from "./bridge";
 import { CompletionCache } from "./cache";
 import { CHUNK_LINES, ChunkRing } from "./chunk-ring";
 import { buildInfillRequest, cleanCompletion, PREFIX_LINES, SUFFIX_LINES } from "./context";
-import { isInlineCompletionReady } from "./status";
+import { isInlineCompletionReady, subscribeInlineCompletionStatus } from "./status";
 
 /**
  * Ghost text: Monaco's own inline-completions contribution, fed by the local
@@ -211,18 +211,43 @@ const provider: monaco.languages.InlineCompletionsProvider = {
 	},
 };
 
-/** Register once per window. Every editor of every language shares it. */
+let wired = false;
+
+/**
+ * Wire once per window: the provider is REGISTERED only while the local model
+ * is ready, and disposed the moment it is not. Every editor of every language
+ * shares it.
+ *
+ * 🗝 Registered-but-silent is not the same as absent. With any inline provider
+ * registered, Monaco runs its inline-suggest machinery on every keystroke, and
+ * on a CPU throttled to CI speed that extra main-thread work was enough to let
+ * the language server's slow first answer land mid-burst and add a completion
+ * request (`editor-completion.spec.ts`, "typing faster than the server", 6/9
+ * runs at 6x throttling vs 0/9 without the provider). Off therefore means NO
+ * provider - the editor exactly as it was before this feature.
+ */
 export function ensureInlineCompletionProvider(): void {
-	if (registration) return;
-	// `ao-file` only: the buffers people edit. A diff's original side and a peek
-	// preview are other schemes and never get ghost text.
-	registration = monaco.languages.registerInlineCompletionsProvider({ scheme: "ao-file" }, provider);
+	if (wired) return;
+	wired = true;
+	const sync = () => {
+		if (isInlineCompletionReady()) {
+			// `ao-file` only: the buffers people edit. A diff's original side and a
+			// peek preview are other schemes and never get ghost text.
+			registration ??= monaco.languages.registerInlineCompletionsProvider({ scheme: "ao-file" }, provider);
+		} else {
+			registration?.dispose();
+			registration = null;
+		}
+	};
+	subscribeInlineCompletionStatus(sync);
+	sync();
 }
 
 /** For tests. */
 export function resetInlineCompletionProviderForTests(): void {
 	registration?.dispose();
 	registration = null;
+	wired = false;
 	cache.clear();
 	ring.clear();
 	if (flushTimer) clearTimeout(flushTimer);
