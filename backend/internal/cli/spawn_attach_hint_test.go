@@ -1,8 +1,14 @@
 package cli
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestTmuxAttachHintNamesTheSessionsOwnServer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the tmux runtime, and with it this hint, is macOS/Linux only")
+	}
 	cases := []struct {
 		dataDir, project, branch, id, want string
 	}{
