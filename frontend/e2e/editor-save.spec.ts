@@ -53,8 +53,15 @@ async function reopenFile(page: Page, query: string): Promise<void> {
  * before that handover lands nowhere at all. The buffer stays clean, `save-file`
  * stays disabled, and the failure surfaces 30 seconds later as a click timing out
  * on a disabled button — nowhere near the typing that actually went missing.
+ *
+ * And the BUFFER has to be there first. The editor mounts, and can take focus,
+ * before its model is attached (that waits on the grammar), so a click and a
+ * burst of typing can land in an editor with no model at all - then the model
+ * arrives, the caret sits at 1:1, and nothing was typed. Measured: about one run
+ * in five once the editor did a little more work at mount.
  */
 async function typeIntoEditor(page: Page, text: string): Promise<void> {
+	await expect(page.locator(".monaco-editor .view-lines").first()).toContainText(/\S/);
 	await page.locator(".monaco-editor .view-lines").first().click();
 	await expect(page.locator(".monaco-editor.focused").first()).toBeVisible();
 	await page.keyboard.type(text);
