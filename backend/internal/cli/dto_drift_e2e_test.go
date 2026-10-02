@@ -242,6 +242,12 @@ func (f *fakeSessionService) WorkspaceFileDiff(
 	return sessionsvc.DiffContextResult{}, nil
 }
 
+func (f *fakeSessionService) WorkspaceFileBase(
+	context.Context, domain.SessionID, sessionsvc.FileBaseQuery,
+) (sessionsvc.WorkspaceFileBaseResult, error) {
+	return sessionsvc.WorkspaceFileBaseResult{}, nil
+}
+
 type fakeAgentCatalog struct{}
 
 var _ controllers.AgentCatalog = (*fakeAgentCatalog)(nil)

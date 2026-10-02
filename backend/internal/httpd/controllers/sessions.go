@@ -146,6 +146,9 @@ type SessionService interface {
 	ListWorkspaceFiles(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceFilesResult, error)
 	SearchWorkspace(ctx context.Context, id domain.SessionID, q sessionsvc.SearchQuery) (sessionsvc.SearchResult, error)
 	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, q sessionsvc.FileDiffQuery) (sessionsvc.DiffContextResult, error)
+	// WorkspaceFileBase returns one file's text at HEAD or at the merge-base with
+	// the target, so the editor can measure its live buffer against git.
+	WorkspaceFileBase(ctx context.Context, id domain.SessionID, q sessionsvc.FileBaseQuery) (sessionsvc.WorkspaceFileBaseResult, error)
 }
 
 // ActivityRecorder applies an agent activity-state signal to a session. It is
@@ -191,6 +194,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/workspace/files", c.listWorkspaceFiles)
 	r.Get("/sessions/{sessionId}/workspace/search", c.searchWorkspace)
 	r.Get("/sessions/{sessionId}/workspace/file-diff", c.workspaceFileDiff)
+	r.Get("/sessions/{sessionId}/workspace/file-base", c.workspaceFileBase)
 	r.Post("/sessions/{sessionId}/pr/claim", c.claimPR)
 	r.Patch("/sessions/{sessionId}", c.rename)
 	r.Patch("/sessions/{sessionId}/spec", c.updateSpec)
@@ -809,6 +813,32 @@ func (c *SessionsController) workspaceFileDiff(w http.ResponseWriter, r *http.Re
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, diffContextResponse(res))
+}
+
+// workspaceFileBase returns one file's text at the base of a change level -
+// HEAD for "head", merge-base(target, branch) for "target" - so the editor's
+// change gutter can follow the live buffer instead of the file on disk.
+func (c *SessionsController) workspaceFileBase(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/file-base")
+		return
+	}
+	res, err := c.Svc.WorkspaceFileBase(r.Context(), sessionID(r), sessionsvc.FileBaseQuery{
+		Path: r.URL.Query().Get("path"),
+		Base: sessionsvc.DiffBase(r.URL.Query().Get("base")),
+	})
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, WorkspaceFileBaseResponse{
+		Available: res.Available,
+		Reason:    res.Reason,
+		Path:      res.Path,
+		Revision:  res.Revision,
+		Exists:    res.Exists,
+		Text:      res.Text,
+	})
 }
 
 func (c *SessionsController) claimPR(w http.ResponseWriter, r *http.Request) {

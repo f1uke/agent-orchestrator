@@ -1539,6 +1539,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/workspace/file-base": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return one file's text at HEAD or at the merge-base with the session's target branch */
+        get: operations["workspaceFileBase"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/workspace/file-diff": {
         parameters: {
             query?: never;
@@ -3874,6 +3891,19 @@ export interface components {
             targetFetchError?: string;
             targetSource?: string;
             truncated: boolean;
+        };
+        WorkspaceFileBaseResponse: {
+            /** @description False when no base can be offered; reason says why. */
+            available: boolean;
+            /** @description False when the file is not in that revision (new on the branch, or untracked): every line of it is an addition. */
+            exists: boolean;
+            path: string;
+            /** @description Why the base is unavailable: no_repo, no_target, not_on_branch (the worktree is not on the session's branch, so its files are not what the branch is measured to), symlink, submodule, directory, binary or too_large. */
+            reason?: string;
+            /** @description The commit the text was read from. Empty on an unborn HEAD. */
+            revision?: string;
+            /** @description The file's content at revision, in working-tree form (eol and smudge filters applied). */
+            text: string;
         };
         WorkspaceFileResponse: {
             available: boolean;
@@ -10118,6 +10148,70 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    workspaceFileBase: {
+        parameters: {
+            query?: {
+                /** @description Repo-relative path of the file. Absolute and ~/ paths are rejected. */
+                path?: string;
+                /** @description Which change level's base to read: "target" (default) is merge-base(target, branch); "head" is HEAD. Any other value is a 400. */
+                base?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFileBaseResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

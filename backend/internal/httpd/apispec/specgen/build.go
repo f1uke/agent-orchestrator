@@ -244,6 +244,8 @@ var schemaNames = map[string]string{
 	"ControllersWorkspaceChangesResponse":         "WorkspaceChangesResponse",
 	"ControllersChangedFileDTO":                   "ChangedFileDTO",
 	"ControllersWorkspaceFileDiffParams":          "WorkspaceFileDiffParams",
+	"ControllersWorkspaceFileBaseParams":          "WorkspaceFileBaseParams",
+	"ControllersWorkspaceFileBaseResponse":        "WorkspaceFileBaseResponse",
 	"ControllersSetActivityRequest":               "SetActivityRequest",
 	"DomainActivityDetail":                        "ActivityDetail",
 	"DomainActivityEvent":                         "ActivityEvent",
@@ -1647,6 +1649,18 @@ func sessionOperations() []operation {
 			pathParams: []any{controllers.SessionIDParam{}, controllers.WorkspaceFileDiffParams{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.DiffContextResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/workspace/file-base", id: "workspaceFileBase", tag: "sessions",
+			summary:    "Return one file's text at HEAD or at the merge-base with the session's target branch",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.WorkspaceFileBaseParams{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.WorkspaceFileBaseResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
