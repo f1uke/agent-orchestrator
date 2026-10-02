@@ -231,7 +231,8 @@ test("undoing back to the saved text clears the unsaved mark", async ({ page }) 
 	await openFile(page, ORDINARY);
 	await typeIntoEditor(page, "xyz");
 	await expect(page.locator(".line-numbers.ao-unsaved-line")).toHaveCount(1);
-	await page.keyboard.press("Meta+KeyZ");
+	// ControlOrMeta: CI runs this on Linux, where undo is Ctrl+Z.
+	await page.keyboard.press("ControlOrMeta+KeyZ");
 	await expect(page.locator(".line-numbers.ao-unsaved-line")).toHaveCount(0);
 	await expect(page.getByTestId("save-file")).toBeDisabled();
 });
