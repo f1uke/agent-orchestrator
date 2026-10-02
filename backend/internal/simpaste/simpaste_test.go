@@ -3,6 +3,7 @@ package simpaste_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -472,5 +473,112 @@ func TestSimctlWrite_PinsAUTF8LocaleForThePayload(t *testing.T) {
 	}
 	if !strings.Contains(script, "'สวัสดี'") {
 		t.Fatalf("script %q must carry the payload as one quoted literal", script)
+	}
+}
+
+// --- the focused field, and the keyboard that eats the first key -----------
+
+// focusedScreen is the XCTest reader's view: it knows which element has
+// keyboard focus, and an empty field reports its placeholder AS its value
+// until it holds text.
+func focusedScreen(kind, value, placeholder string, keyboardUp bool) simbridge.Snapshot {
+	children := []simbridge.XCTestNode{
+		{Type: "StaticText", Label: "name", Value: "name", Enabled: true, Frame: simbridge.Rect{X: 20, Y: 100, Width: 80, Height: 20}},
+		{Type: kind, Label: "name", Value: value, Placeholder: placeholder, Enabled: true, Focused: true,
+			Frame: simbridge.Rect{X: 20, Y: 130, Width: 360, Height: 44}},
+	}
+	if keyboardUp {
+		children = append(children, simbridge.XCTestNode{Type: "Keyboard", Enabled: true,
+			Frame:    simbridge.Rect{Y: 580, Width: 402, Height: 290},
+			Children: []simbridge.XCTestNode{{Type: "Key", Label: "q", Enabled: true, Frame: simbridge.Rect{X: 10, Y: 600, Width: 30, Height: 40}}}})
+	}
+	return simbridge.SnapshotFromXCTest(simbridge.XCTestHierarchy{
+		Screen: simbridge.Size{Width: 402, Height: 874},
+		Apps: []simbridge.XCTestApp{{BundleID: "com.example.app", Tree: simbridge.XCTestNode{
+			Type: "Application", Enabled: true, Frame: simbridge.Rect{Width: 402, Height: 874}, Children: children,
+		}}},
+	})
+}
+
+func TestVerify_ProvesOneCharacterInTheFocusedField(t *testing.T) {
+	// The label "name" and the placeholder "your name" both hold an "a"; a
+	// count across the screen is one before and one after. The focused field
+	// went from no text to "a".
+	landing, err := simpaste.Verify(focusedScreen("TextField", "your name", "", false),
+		focusedScreen("TextField", "a", "your name", false), "a")
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if landing.How != simpaste.EvidenceExact || landing.Shown != "a" {
+		t.Fatalf("landing = %+v", landing)
+	}
+}
+
+func TestVerify_FocusedFieldTypedTwiceIsTwoCopies(t *testing.T) {
+	if _, err := simpaste.Verify(focusedScreen("TextField", "a", "your name", false),
+		focusedScreen("TextField", "aa", "your name", false), "a"); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestVerify_FocusedSecureFieldCountsItsOwnDots(t *testing.T) {
+	landing, err := simpaste.Verify(focusedScreen("SecureTextField", "password", "", false),
+		focusedScreen("SecureTextField", "•••", "password", false), "abc")
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if landing.How != simpaste.EvidenceMasked {
+		t.Fatalf("evidence = %q, want masked", landing.How)
+	}
+	// Two of three is not proof.
+	if _, err := simpaste.Verify(focusedScreen("SecureTextField", "password", "", false),
+		focusedScreen("SecureTextField", "••", "password", false), "abc"); !errors.Is(err, simpaste.ErrNotProven) {
+		t.Fatalf("err = %v, want simpaste.ErrNotProven for a secure field that took two of three", err)
+	}
+}
+
+func TestVerify_TypingThePlaceholderItselfIsNotMistakenForAnEmptyField(t *testing.T) {
+	// Not proven, and not wrongly proven either: a value equal to its own hint
+	// reads as empty, and the screen-wide count has nothing new to find.
+	_, err := simpaste.Verify(focusedScreen("TextField", "your name", "", false),
+		focusedScreen("TextField", "your name", "your name", false), "your name")
+	if err == nil {
+		t.Fatal("a field reading its own placeholder proved a paste of the placeholder")
+	}
+}
+
+func TestRun_WakesTheKeyboardBeforeCommandV(t *testing.T) {
+	// The first key event a simulator gets while its software keyboard is up
+	// is spent hiding the keyboard: Command-V alone pasted nothing on a device,
+	// and the same Command-V a moment later pasted the text.
+	driver := &fakeDriver{snapshots: []simbridge.Snapshot{
+		focusedScreen("TextField", "your name", "", true),
+		focusedScreen("TextField", "your name", "", false), // the keyboard went away
+		focusedScreen("TextField", "hello", "your name", false),
+	}}
+	if _, err := simpaste.Run(context.Background(), &fakeHolder{}, driver, &fakePasteboard{}, "udid", "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(driver.events) != 2 {
+		t.Fatalf("performed %d gestures, want the wake and then the paste", len(driver.events))
+	}
+	if !reflect.DeepEqual(driver.events[0], simbridge.WakeKeyboard()) || !reflect.DeepEqual(driver.events[1], simbridge.Paste()) {
+		t.Fatalf("events = %+v, want WakeKeyboard then Paste", driver.events)
+	}
+	if driver.reads != 3 {
+		t.Fatalf("read the screen %d times, want 3: before, after the wake, after the paste", driver.reads)
+	}
+}
+
+func TestRun_DoesNotWakeAKeyboardThatIsNotUp(t *testing.T) {
+	driver := &fakeDriver{snapshots: []simbridge.Snapshot{
+		focusedScreen("TextField", "your name", "", false),
+		focusedScreen("TextField", "hello", "your name", false),
+	}}
+	if _, err := simpaste.Run(context.Background(), &fakeHolder{}, driver, &fakePasteboard{}, "udid", "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(driver.events) != 1 {
+		t.Fatalf("performed %d gestures, want only the paste", len(driver.events))
 	}
 }

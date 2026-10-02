@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -53,6 +54,9 @@ type fakeProc struct {
 	terms     atomic.Int32
 	kills     atomic.Int32
 	unhealthy atomic.Bool
+
+	mu    sync.Mutex
+	typed []map[string]any // every POST /type body
 }
 
 func (p *fakeProc) exit() {
@@ -117,6 +121,25 @@ func (f *fakeLauncher) Start(spec StartSpec) (Process, error) {
 				"type": "Application", "enabled": true, "frame": map[string]any{"x": 0, "y": 0, "width": 400, "height": 874},
 			}}},
 		})
+	})
+	mux.HandleFunc("/focus", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"version": WireVersion, "app": "app.for." + spec.UDID,
+			"keyboard": true, "field": map[string]any{"type": "TextField", "label": "email"}})
+	})
+	mux.HandleFunc("/type", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		p.mu.Lock()
+		p.typed = append(p.typed, in)
+		p.mu.Unlock()
+		if in["text"] == "nofocus" {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]any{"version": WireVersion, "keyboard": false,
+				"error": map[string]any{"code": TypeNoFocus, "message": "no element has keyboard focus"}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"version": WireVersion, "typed": true, "app": "app.for." + spec.UDID,
+			"keyboard": true, "typingMs": 120, "field": map[string]any{"type": "TextField", "label": "email"}})
 	})
 	mux.HandleFunc("/stop", func(w http.ResponseWriter, _ *http.Request) {
 		p.stops.Add(1)
@@ -529,5 +552,54 @@ func TestIsOurXcodebuild(t *testing.T) {
 	}
 	if isOurXcodebuild("xcodebuild", "") {
 		t.Error("an empty xctestrun matched")
+	}
+}
+
+func TestManager_TypesThroughTheRunnerAndCarriesItsAnswer(t *testing.T) {
+	f, w := &fakeLauncher{}, &world{}
+	m := newTestManager(t, f, w)
+
+	if _, err := m.Type(context.Background(), udidA, "hello", TypeOptions{}); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("unheld device: err %v, want ErrNotReady - nothing was sent", err)
+	}
+
+	w.hold(udidA)
+	if st, err := m.Await(context.Background(), udidA, 3*time.Second); err != nil || st.State != StateReady {
+		t.Fatalf("await: %+v %v", st, err)
+	}
+	focus, err := m.Focus(context.Background(), udidA)
+	if err != nil || focus.Field == nil || focus.Field.Label != "email" {
+		t.Fatalf("focus = %+v, %v", focus, err)
+	}
+
+	answer, err := m.Type(context.Background(), udidA, "สวัสดี hello", TypeOptions{Layout: LayoutLatin})
+	if err != nil || !answer.Typed || answer.TypingMs != 120 || answer.App != "app.for."+udidA {
+		t.Fatalf("type = %+v, %v", answer, err)
+	}
+	p := f.proc(0)
+	p.mu.Lock()
+	body := p.typed[0]
+	p.mu.Unlock()
+	if body["text"] != "สวัสดี hello" || body["layout"] != "latin" {
+		t.Fatalf("the runner was sent %v", body)
+	}
+
+	// A refusal is an answer, not a transport error: the caller needs its code.
+	answer, err = m.Type(context.Background(), udidA, "nofocus", TypeOptions{})
+	if err != nil || answer.Error == nil || answer.Error.Code != TypeNoFocus {
+		t.Fatalf("no focus = %+v, %v, want the runner's no_focus answer", answer, err)
+	}
+	p.mu.Lock()
+	_, hasLayout := p.typed[1]["layout"]
+	p.mu.Unlock()
+	if hasLayout {
+		t.Fatal("a type with no layout asked for must not send one")
+	}
+}
+
+func TestTypeTimeout_GrowsWithTheText(t *testing.T) {
+	short, long := TypeTimeout("hi"), TypeTimeout(strings.Repeat("ก", 100))
+	if long <= short || long > 30*time.Second {
+		t.Fatalf("timeouts %s / %s: want growth with the text, and a 100-character chunk inside 30s", short, long)
 	}
 }

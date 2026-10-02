@@ -3283,6 +3283,85 @@ paths:
       summary: Boot a simulator or shut one down from the desktop app's Device tab
       tags:
       - sim
+  /api/v1/sessions/{sessionId}/sim-devices/{udid}/type:
+    post:
+      operationId: typeSimText
+      parameters:
+      - description: Session identifier, e.g. project-1. The gesture is arbitrated
+          as this session.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1. The gesture is arbitrated
+            as this session.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimTypeInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimTypeResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Type text into the focused field through the device's XCTest runner,
+        as characters, and prove it arrived
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/sim-flows:
     get:
       operationId: listSimFlows
@@ -10325,6 +10404,99 @@ components:
       required:
       - width
       - height
+      type: object
+    SimTypeField:
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        placeholder:
+          type: string
+        type:
+          description: XCUIElement type, e.g. TextField, SecureTextField.
+          type: string
+      required:
+      - type
+      type: object
+    SimTypeInput:
+      properties:
+        text:
+          description: The characters to type, at most 100. A longer text is sent
+            in chunks, one request each.
+          type: string
+        waitMs:
+          description: How long to wait for a runner that is still starting, in milliseconds,
+            before taking the gesture hold. Capped at 15000.
+          type: integer
+      required:
+      - text
+      type: object
+    SimTypeLanding:
+      properties:
+        evidence:
+          description: 'exact: the text itself. case: apart from capitalisation. masked:
+            a secure field gained one dot per character. reformatted: its letters
+            and digits inside the field''s own formatting.'
+          enum:
+          - exact
+          - case
+          - masked
+          - reformatted
+          type: string
+        field:
+          description: The element's accessibility label.
+          type: string
+        path:
+          description: Its path in ao sim ax.
+          type: string
+        shown:
+          description: 'What it reads now: dots for a secure field.'
+          type: string
+      required:
+      - path
+      - shown
+      - evidence
+      type: object
+    SimTypeResponse:
+      properties:
+        app:
+          description: Bundle id of the application holding the field.
+          type: string
+        detail:
+          description: Where the text went, in the words the CLI prints.
+          type: string
+        field:
+          $ref: '#/components/schemas/SimTypeField'
+        keyboard:
+          description: The software keyboard was on screen before typing.
+          type: boolean
+        keyboardRestored:
+          description: The keyboard was switched back afterwards.
+          type: boolean
+        keyboardSwitchedTo:
+          description: The layout the software keyboard was switched to for a secure
+            field, which takes only what the keyboard on screen can type.
+          type: string
+        landed:
+          $ref: '#/components/schemas/SimTypeLanding'
+        typingMs:
+          description: How long XCTest took to type it.
+          type: integer
+        udid:
+          type: string
+        warning:
+          description: What XCTest said while typing, when it complained about text
+            the screen shows did arrive.
+          type: string
+      required:
+      - udid
+      - app
+      - field
+      - landed
+      - detail
+      - keyboard
+      - typingMs
       type: object
     SimVideoResponse:
       properties:

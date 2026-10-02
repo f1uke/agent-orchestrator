@@ -123,8 +123,11 @@ func TestSnapshotFromXCTest_KeepsARepeatedKeyboardOnce(t *testing.T) {
 	if len(keyboards) != 1 {
 		t.Fatalf("found %d keyboards, want the one on screen", len(keyboards))
 	}
-	if snap.Keyboard == nil || snap.Keyboard.Keys == 0 || snap.Keyboard.Latin {
-		t.Fatalf("keyboard = %+v, want a non-Latin (Thai) layout", snap.Keyboard)
+	// This capture's keyboard sits below the screen (y 952 of 874): the field
+	// had focus and the software keyboard was hidden. It is listed, and it is
+	// not "up".
+	if snap.Keyboard != nil {
+		t.Fatalf("keyboard = %+v, want none: the only one in this read is below the screen", snap.Keyboard)
 	}
 	if got := findAll(snap.Elements, func(e Element) bool { return e.Type == "Key" && e.Label == "ก" }); len(got) != 1 {
 		t.Fatalf("key ก found %d times, want 1", len(got))
@@ -162,6 +165,20 @@ func TestKeyboardOf(t *testing.T) {
 	}}})
 	if none.Keyboard != nil {
 		t.Fatalf("no keyboard on screen, got %+v", none.Keyboard)
+	}
+
+	// A focused field with the software keyboard hidden (a hardware keyboard,
+	// or the simulator believing in one after HID key presses) still lists the
+	// keyboard, below the bottom edge.
+	hidden := tree(key("q"), key("w"))
+	board := &hidden.Apps[0].Tree.Children[0]
+	board.Frame.Y = 952
+	for i := range board.Children {
+		board.Children[i].Frame.Y = 970
+	}
+	hidden.Apps[0].Tree.Children[1].Frame.Y = 1100
+	if kb := SnapshotFromXCTest(hidden).Keyboard; kb != nil {
+		t.Fatalf("a keyboard below the screen is not up, got %+v", kb)
 	}
 }
 

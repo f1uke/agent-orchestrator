@@ -212,10 +212,15 @@ type KeyboardState struct {
 // the device's language.
 const nextKeyboardLabel = "Next keyboard"
 
+// keyboardOf reads the keyboard that is ON SCREEN. A focused field with the
+// software keyboard hidden - a hardware keyboard attached, or the simulator
+// believing one is after HID key presses - still lists the keyboard, below
+// the bottom edge (seen at y 1.09-1.36 on iOS 26.3), and reading that one as
+// "up" says the opposite of what the screen shows.
 func keyboardOf(elements []Element) *KeyboardState {
 	var state *KeyboardState
 	walk(elements, func(e Element) {
-		if e.Type == "Keyboard" && state == nil {
+		if e.Type == "Keyboard" && !e.OffScreen && state == nil {
 			state = &KeyboardState{}
 		}
 	})
@@ -225,6 +230,7 @@ func keyboardOf(elements []Element) *KeyboardState {
 	letters, latin := 0, 0
 	walk(elements, func(e Element) {
 		switch {
+		case e.OffScreen:
 		case e.Type == "Key":
 			state.Keys++
 			if r := []rune(e.Label); len(r) == 1 && unicode.IsLetter(r[0]) {

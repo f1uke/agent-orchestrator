@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		479B2DCDD1C7CBAEF2FD47F1 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F98182ED556614357E76068 /* RunnerTests.swift */; };
 		54A71CDE298FDB7134F67114 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48270CC58DEE74C2539CB664 /* App.swift */; };
+		56143367BBC65BE3DB05EF4F /* Typist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89D21D99038E8F974C31C0B9 /* Typist.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,6 +26,7 @@
 		48270CC58DEE74C2539CB664 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 		4E2CA8A23E64EC251C2AB1D3 /* AORunnerHost.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AORunnerHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4F98182ED556614357E76068 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
+		89D21D99038E8F974C31C0B9 /* Typist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typist.swift; sourceTree = "<group>"; };
 		C616916E72C69ED552FD0537 /* AORunnerUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AORunnerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -42,6 +44,7 @@
 			isa = PBXGroup;
 			children = (
 				4F98182ED556614357E76068 /* RunnerTests.swift */,
+				89D21D99038E8F974C31C0B9 /* Typist.swift */,
 			);
 			path = UITests;
 			sourceTree = "<group>";
@@ -147,6 +150,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				479B2DCDD1C7CBAEF2FD47F1 /* RunnerTests.swift in Sources */,
+				56143367BBC65BE3DB05EF4F /* Typist.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

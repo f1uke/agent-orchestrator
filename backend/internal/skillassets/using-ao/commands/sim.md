@@ -34,6 +34,7 @@ ao sim swipe  <x1> <y1> <x2> <y2> [flags]
 ao sim drag   <x1> <y1> <x2> <y2> [<x3> <y3> ...] [flags]
 ao sim pinch  <x> <y> <from> <to>  [flags]
 ao sim type   <text>           [flags]
+ao sim key    <name>           [flags]
 ao sim button <name>           [flags]
 ao sim flow check <file>       [flags]
 ao sim flow run   <file>       [flags]
@@ -542,7 +543,7 @@ ao sim launch com.example.MyApp --terminate-first
 
 ---
 
-### ao sim tap / swipe / drag / pinch / type / button
+### ao sim tap / swipe / drag / pinch / type / key / button
 
 The ways to drive a screen. **All of them require this session to hold the device** (`ao sim claim`); they never claim it for you, because AO cannot see whether a human is driving the same simulator from Xcode.
 
@@ -555,7 +556,8 @@ All of them take a `--udid` and a `--json` flag, resolve the device exactly like
 | `ao sim swipe <x1> <y1> <x2> <y2> [--duration 300ms]`                | Drag between two points - how you scroll a list or dismiss a sheet                                                                                                                                                                                                                                  |
 | `ao sim drag <x1> <y1> <x2> <y2> [<x3> <y3> ...] [--duration 600ms]` | Hold one finger through a route of points without lifting. Two points is exactly a swipe; more is a path an app can tell apart from a flick - a scroll that changes direction, a drag onto a target. Sending the same route as separate swipes lifts between them, which reads as several gestures. |
 | `ao sim pinch <x> <y> <from> <to> [--duration 400ms]`                | Put **two** fingers either side of a point and move them together or apart - how you zoom a map, a photo or a web view. `<from>`/`<to>` are how far apart the fingers are at the start and at the end, as a fraction of the screen's width, so `<to>` / `<from>` is the scale the FINGERS describe: `0.2 0.6` spreads to 3x, `0.6 0.2` pinches back. What the app makes of it is usually a little less - a recognizer ignores the frames it spends latching both touches, so `0.2 0.6` arrived as x2.69 in mobile Safari at the default duration and x2.93 over `--duration 1500ms`. **Read the result**; a slower pinch lands closer, and an app already at its maximum zoom answers a perfect pinch with nothing. The fingers sit on the horizontal line through `<x> <y>`, which is what makes that ratio exact on a screen that is not square. Both gaps must keep the fingers on screen and at least `0.02` apart; a pinch that would not fit is refused rather than quietly narrowed. |
-| `ao sim type <text>`                                                 | Put text into whatever has keyboard focus (tap the field first). Uses key presses when the simulator will deliver them faithfully and the pasteboard when it would not, says which, and fails rather than claiming characters it did not deliver - see below.                                       |
+| `ao sim type <text>`                                                 | Put text into whatever has keyboard focus (tap the field first). Thai, English, mixed and emoji arrive as asked whatever language the Mac or the simulator keyboard is set to, it names the field the text landed in, and it fails rather than claiming characters it did not deliver - see below. |
+| `ao sim key <name> [--times n]`                                      | Press `enter`, `backspace`, `tab` or an arrow key. A hardware key press, the same in every keyboard language; `--times` repeats it, e.g. `ao sim key backspace --times 20` to clear a field. Nothing checks what it did - read the screen.                                                    |
 | `ao sim button <name>`                                               | `home` (the swipe-up home gesture - your way back to a known screen) or `app-switcher`. The list is short on purpose: only buttons observably verified to change a real device are offered, because the mechanism reports success for ones that do nothing.                                         |
 
 ```bash
@@ -563,6 +565,8 @@ ao sim claim
 ao sim ax                              # find the field's tap point
 ao sim tap 0.5 0.126                   # focus it
 ao sim type "hello@example.com"
+ao sim type "สวัสดี ครับ"                # Thai arrives as Thai, on any keyboard
+ao sim key enter                       # Return, as a key press
 ao sim swipe 0.5 0.8 0.5 0.2           # scroll down
 ao sim drag 0.5 0.8 0.5 0.5 0.2 0.5    # one finger, three points, never lifting
 ao sim pinch 0.5 0.5 0.2 0.6           # two fingers, spread to 3x about the middle
@@ -580,7 +584,7 @@ ao sim ax                              # confirm what actually happened
 | `node was not found on PATH`          | The interaction commands need Node.js 20+. `ao sim shot` and `ao sim list` still work.                                                                    |
 | `the simulator bridge could not load` | The native bridge calls private Apple frameworks and an Xcode/macOS upgrade broke it. Report it with your Xcode version; screenshots still work.          |
 | `... is not booted`                   | Boot it: `ao sim boot --udid <udid>`. It waits until the device can actually be driven.                                                                                                                                                |
-| exit 2                                | Bad arguments (a coordinate outside 0..1, an unknown button, `--paste` and `--raw-keys` together). Nothing reached the device.                            |
+| exit 2                                | Bad arguments (a coordinate outside 0..1, an unknown button or key, `--paste` and `--raw-keys` together). Nothing reached the device.                     |
 
 - **`ao sim tap` can take the NAME of the element instead of its point.** `--label` matches the name `ao sim ax` prints for an element (its label, or its value when it has none); `--id` matches its accessibility identifier. This reads the screen first, so it costs one accessibility read - and it replaces the `ao sim ax` you would have run anyway, so the loop is shorter, not longer. The coordinate form reads nothing and is unchanged.
 
@@ -602,33 +606,38 @@ ao sim ax                              # confirm what actually happened
 
   Matching ignores case and surrounding spaces. `--label` and `--id` are separate namespaces: an identifier is set for automation and is stable, a label is copy that changes.
 
-- **`ao sim type` puts the characters you asked for into the field - by whichever route can actually do that, and it tells you which.** The keys it can send are US-keyboard key presses and the SIMULATOR decides what each one produces. Simulator.app ships with _I/O > Keyboard > "Use the Same Keyboard Language as macOS"_ ticked, so a Mac set to Thai gives the simulator a Thai keyboard and `ao sim type "fa12345"` would arrive as `ดฟๅ/_ภถ`. So:
+- **`ao sim type` types CHARACTERS through AO's XCTest runner, so what arrives does not depend on any keyboard language.** It is the same mechanism XCUITest, WebDriverAgent and Maestro type with: the text goes through the simulator's software keyboard as characters, not as key positions. Thai, English, mixed text and emoji arrive as asked whether the Mac's input source and the simulator's keyboard are Thai or English, in any field on screen - a web sign-in sheet's (ASWebAuthenticationSession), a secure field, an in-app search box. The runner runs while your session holds the device (`ao sim claim`); the first type after a claim may wait a few seconds for it to start.
 
-  | Situation                                       | What happens                                                                                  | Output says             |
-  | ----------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------- |
-  | The simulator's keyboard sends US ASCII         | Key presses - the truer simulation, since an app sees each keystroke                          | `Typed …`               |
-  | It would remap them, or will not say what it is | The text goes through the simulator's **pasteboard**, and is **checked on screen afterwards** | `Pasted …` + the reason |
-  | The text is non-ASCII (Thai, emoji, accents)    | Pasteboard - no US keyboard key can send those at all                                         | `Pasted …`              |
-  | Neither route can deliver                       | **Fails, exit 1** - nothing is claimed that did not happen                                    | -                       |
+  ```
+  Typed 19 characters into TextField "อีเมล" on iPhone 17 Pro (iOS 26.3, 4ACD8EF6-...)
+  Checked on screen: the field "อีเมล" [0.1.1.0.2.2] now reads "qa.test@example.com"
+  Route: XCTest (characters, not key presses - the keyboard's language does not change what arrives; typed in 720ms, 1.03s in all)
+  ```
 
-  Two things this protects you from, and they are why the command is fussy: the failure is **selective** (fields that force an ASCII keyboard - email, URL - came out right while ordinary and secure fields did not, so it looked like bad test data rather than a broken tool), and in a **secure field the characters are hidden behind dots**, so you cannot see the damage or read it back. A worker already lost time concluding a perfectly good QA account was invalid.
+  **It is proven, never assumed.** The screen is read before and after, and the text counts as landed when the field with keyboard focus holds a copy it did not hold before (a copy appearing anywhere on screen counts too, when no single field has focus). The output NAMES the field and quotes what it reads now. A field may transform what it is given - capitalisation, a card or phone mask's punctuation - and a **secure field** shows one dot per character and nothing else, so for it the dot count is the proof, and the output says that is what was checked. Speed: about 30 ms a character; a type is 0.5-1.5 s end to end.
 
-  **The paste is proven, never assumed - and the proof is the text itself.** The screen is read before and after, and the paste counts as landed when a field on screen holds a copy of the text it did not hold before. The output then NAMES that field and quotes what it reads now (`Checked on screen: the field "email" [0.8] now reads "r8t3@a.com"`), so you can check the claim instead of taking it. A field is allowed to transform what it was given: capitalisation from an on-screen keyboard, a card or phone mask's punctuation, and a secure field's dots (one per character) all count, and the output says which kind of evidence it has. If an app refuses paste or the field never had focus, you get a loud failure, not a false success.
+  | Situation                                                     | What happens                                                                                                                                                                                                  |
+  | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Nothing has keyboard focus                                    | **Fails, exit 1**, typing nothing: `no element ... has keyboard focus`. Tap the field first.                                                                                                                 |
+  | A secure field, plain-ASCII text, a Thai keyboard on screen   | A secure field takes only what the keyboard on screen can type - a Thai layout drops every Latin letter there. The runner switches the keyboard to English with its globe key, types, and switches it back: `Keyboard: switched to "English (US)" for this secure field ... and switched back`. |
+  | A secure field with non-ASCII text, or no keyboard on screen  | Goes by the **pasteboard** instead (a secure field takes a paste whole), with a `Fallback:` line saying why.                                                                                                  |
+  | The runner is not running (still starting past 15 s, no Xcode) | Falls back to the older routes below, with a `Fallback:` line saying why.                                                                                                                                    |
+  | The text holds a control character (a newline, a tab)        | Those are key presses: it goes by the older routes. Prefer typing the text and pressing the key with `ao sim key enter`.                                                                                       |
+  | The text arrived only in part, or the field shows something else | `the text may be in the field ... but could not prove it`, naming the field and what it reads. Read it back with `ao sim ax`; **do not send it again**, or the part that arrived goes in twice.            |
 
-  **"Could not prove it" is not "did not arrive", and the command keeps them apart.** A field with a length limit truncates silently, and a field that reports its value only once it loses focus shows nothing either way - both come back as `the text may be in the field ... but could not prove it`, naming the field and what it reads. Read it back with `ao sim ax`; do not send the text again, or you may end up with it twice.
+  **The software keyboard may be hidden.** Any hardware key press - `ao sim key`, `--raw-keys`, a paste's Command-V - makes the simulator believe a hardware keyboard is attached, and it hides the software keyboard until it is rebooted. `ao sim ax` then shows no `Keyboard:` line. Typing still works; a secure field in that state goes by the pasteboard, since its layout cannot be seen.
 
-  **When a paste reports that nothing changed, it did not land** - on a device you hold, the before-and-after reads go through the XCTest reader, so they see a field inside a web sign-in sheet too. Some web fields do not take the keyboard shortcut a paste sends; use the field's own callout instead: put the text on the pasteboard (`printf '%s' "<text>" | xcrun simctl pbcopy <udid>`), tap the field until `ao sim ax` lists `MenuItem "Paste"`, then `ao sim tap --label Paste` and read the field back.
+  Long text is typed in chunks of 100 characters, each proven on its own; if a later chunk fails, the error says how much already arrived.
 
-  **Key presses are not checked at all.** What a key produces is the simulator's decision, so that route says what it sent and tells you to read the field yourself. `Typed …` and `Pasted …` are not equally confident claims, and the output says so.
+  **The older routes** - `--paste`, `--raw-keys`, and the fallback. Key presses are US-keyboard key positions and the SIMULATOR decides what each one produces: Simulator.app ships with _I/O > Keyboard > "Use the Same Keyboard Language as macOS"_ ticked, so on a Thai Mac `--raw-keys "fa12345"` arrives as `ดฟๅ/_ภถ`. The fallback therefore uses key presses only when the simulator's keyboard sends US ASCII, and the **pasteboard** otherwise (Command-V; checked on screen the same way, `Pasted …`). Key presses are not checked at all - that route says what it sent. A paste receives one paste, not N keystrokes, and while it happens your text sits briefly on the simulator's pasteboard, where any app on it could read it; it is put back afterwards, and if it cannot be, the command says so loudly. If a paste reports that nothing changed, use the field's own callout: `printf '%s' "<text>" | xcrun simctl pbcopy <udid>`, tap the field until `ao sim ax` lists `MenuItem "Paste"`, then `ao sim tap --label Paste`.
 
-  **Two caveats worth knowing.** A pasted field receives one paste, not N keystrokes, so an app with live validation or a character counter behaves differently - use `--raw-keys` when you need real key presses. And while the paste happens, your text sits briefly on the **guest's** pasteboard, where any app on that simulator could read it; it is put back afterwards, and if it cannot be, the command says so loudly.
+  | Flag         | What it promises                                                                                         |
+  | ------------ | -------------------------------------------------------------------------------------------------------- |
+  | _(none)_     | The characters arrive, through XCTest. A fallback is named on a `Fallback:` line.                        |
+  | `--paste`    | Always the pasteboard, skipping XCTest.                                                                  |
+  | `--raw-keys` | Key presses, and only key presses - whatever the simulator makes of them. Skips XCTest.                  |
 
-  | Flag         | What it promises                                                                                                                        |
-  | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-  | _(none)_     | The characters arrive. Route chosen per device, and reported.                                                                           |
-  | `--paste`    | Always the pasteboard.                                                                                                                  |
-  | `--raw-keys` | Key presses, and only key presses - whatever the simulator makes of them. This is how you deliberately enter Thai text on a Thai guest. |
-
+  `--json` carries the same facts: `via` (`xctest`, `pasteboard` or `keys`), `landed` (field, path, what it reads, and the evidence: `exact`, `case`, `masked` or `reformatted`), `fallback`, and `keyboardSwitchedTo`/`keyboardRestored`.
 
 - **A failed gesture always releases the touch.** If a gesture dies in flight, the command sends the release anyway and says so; only if that release also fails does it warn that the device may need attention.
 - **Success is not proof.** A tap can land on a disabled control or the wrong element and still report success. Always re-read with `ao sim ax`.

@@ -11,9 +11,10 @@ import XCTest
 // web sheet hosted by SafariViewService, SpringBoard's alerts, the keyboard -
 // which the in-app accessibility bridge cannot.
 //
-// It READS. It never touches the screen: every touch goes through `ao sim tap`
-// and friends, which hold the device's lease. Keeping input out of here is what
-// keeps the lease the only way anything drives the device.
+// It READS, and it TYPES when asked (see Typist.swift). Every other touch goes
+// through `ao sim tap` and friends. The daemon asks it to type only while the
+// caller holds the device's lease and gesture hold, so the lease stays the
+// only way anything drives the device.
 //
 // It is started and stopped by the AO daemon, one per device, and it does not
 // trust the daemon to be there to stop it: when nobody has asked it anything
@@ -22,12 +23,23 @@ import XCTest
 
 /// Bumped whenever the wire format changes. The daemon refuses a runner that
 /// reports a different one, because it may be a stale build left on a port.
-let runnerVersion = "1"
+let runnerVersion = "2"
 
 @_silgen_name("proc_pidpath")
 private func proc_pidpath(_ pid: Int32, _ buffer: UnsafeMutableRawPointer, _ size: UInt32) -> Int32
 
 final class RunnerTests: XCTestCase {
+    /// A typeText that fails records an issue rather than throwing. While the
+    /// runner is typing, the issue is the caller's answer (see Typist), not
+    /// this test's failure.
+    override func record(_ issue: XCTIssue) {
+        if Typist.collecting {
+            Typist.issues.append(issue.compactDescription)
+            return
+        }
+        super.record(issue)
+    }
+
     func testServe() throws {
         let env = ProcessInfo.processInfo.environment
         guard let portText = env["AO_RUNNER_PORT"], let port = NWEndpoint.Port(portText) else {
@@ -105,12 +117,40 @@ final class Server {
         }
     }
 
+    /// Set while typeText runs. XCTest spins the main run loop while it waits
+    /// for the app to settle, which would run another request's block in the
+    /// middle of the typing; such a block is put back on the queue instead.
+    private(set) var typing = false
+
+    /// Runs a request's work on the main thread, after any typing in progress.
+    func onMain(_ work: @escaping () -> Void) {
+        DispatchQueue.main.async { [self] in
+            if typing {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.onMain(work) }
+                return
+            }
+            work()
+        }
+    }
+
     /// Answers one request. Called on the main thread.
-    func handle(method: String, path: String, query: [String: String]) -> (Int, Any) {
+    func handle(method: String, path: String, query: [String: String], body: Data) -> (Int, Any) {
         touch()
         switch (method, path) {
         case ("GET", "/hierarchy"):
             return (200, Hierarchy.read(bundleIDs: query["app"].map { $0.split(separator: ",").map(String.init) } ?? []))
+        case ("GET", "/focus"):
+            let (status, out) = Typist.focus()
+            return (status, out)
+        case ("POST", "/type"):
+            guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let text = json["text"] as? String else {
+                return (400, ["error": ["code": "bad_request", "message": "the body must be {\"text\": \"...\"}"]])
+            }
+            typing = true
+            defer { typing = false }
+            let (status, out) = Typist.type(text, layout: json["layout"] as? String)
+            return (status, out)
         case ("POST", "/stop"):
             finished = true
             return (200, ["stopping": true])
@@ -168,8 +208,9 @@ final class Connection {
             send(200, server.status())
             return
         }
-        DispatchQueue.main.async { [self] in
-            let (status, body) = server.handle(method: request.method, path: request.path, query: request.query)
+        server.onMain { [self] in
+            let (status, body) = server.handle(
+                method: request.method, path: request.path, query: request.query, body: request.body)
             send(status, body)
         }
     }
@@ -188,18 +229,30 @@ struct Request {
     let method: String
     let path: String
     let query: [String: String]
+    let body: Data
 
-    /// A request is complete once its headers are; nothing this runner serves
-    /// takes a body.
+    /// A request is complete once its headers are, and its body when it has
+    /// a Content-Length (only /type sends one).
     static func parse(_ data: Data) -> Request? {
         guard let end = data.range(of: Data("\r\n\r\n".utf8)),
-              let head = String(data: data[data.startIndex..<end.lowerBound], encoding: .utf8),
-              let line = head.split(separator: "\r\n", maxSplits: 1).first else { return nil }
+              let head = String(data: data[data.startIndex..<end.lowerBound], encoding: .utf8) else { return nil }
+        let lines = head.components(separatedBy: "\r\n")
+        guard let line = lines.first else { return nil }
         let parts = line.split(separator: " ")
         guard parts.count >= 2, let components = URLComponents(string: String(parts[1])) else { return nil }
+        var length = 0
+        for header in lines.dropFirst() {
+            let pair = header.split(separator: ":", maxSplits: 1)
+            if pair.count == 2, pair[0].trimmingCharacters(in: .whitespaces).lowercased() == "content-length" {
+                length = Int(pair[1].trimmingCharacters(in: .whitespaces)) ?? 0
+            }
+        }
+        let bodyStart = end.upperBound
+        guard data.count - (bodyStart - data.startIndex) >= length else { return nil }
+        let body = data[bodyStart..<(bodyStart + length)]
         var query: [String: String] = [:]
         for item in components.queryItems ?? [] { query[item.name] = item.value ?? "" }
-        return Request(method: String(parts[0]), path: components.path, query: query)
+        return Request(method: String(parts[0]), path: components.path, query: query, body: Data(body))
     }
 }
 
@@ -221,16 +274,9 @@ enum Hierarchy {
         var targets: [(bundleID: String, pid: Int32)] = []
         var source = "explicit"
         if explicit.isEmpty {
-            (targets, source) = foreground()
+            (targets, source) = onScreenWithSource()
             if targets.isEmpty {
                 errors.append("XCTest reported no foreground application")
-            }
-            // A presented sheet is on top of the app that presented it.
-            for host in remoteViewHosts.reversed() where !targets.contains(where: { $0.bundleID == host }) {
-                let app = XCUIApplication(bundleIdentifier: host)
-                if app.state == .runningForeground {
-                    targets.insert((host, pid(of: app)), at: 0)
-                }
             }
         } else {
             targets = explicit.map { ($0, pid(of: XCUIApplication(bundleIdentifier: $0))) }
@@ -262,6 +308,24 @@ enum Hierarchy {
         ]
         if !errors.isEmpty { out["errors"] = errors }
         return out
+    }
+
+    /// Every application drawing on screen, frontmost first: a presented
+    /// remote-view sheet, then the foreground applications.
+    static func onScreen() -> [(bundleID: String, pid: Int32)] {
+        onScreenWithSource().0
+    }
+
+    static func onScreenWithSource() -> ([(bundleID: String, pid: Int32)], String) {
+        var (targets, source) = foreground()
+        // A presented sheet is on top of the app that presented it.
+        for host in remoteViewHosts.reversed() where !targets.contains(where: { $0.bundleID == host }) {
+            let app = XCUIApplication(bundleIdentifier: host)
+            if app.state == .runningForeground {
+                targets.insert((host, pid(of: app)), at: 0)
+            }
+        }
+        return (targets, source)
     }
 
     /// What XCTest says is in the foreground, as applications with a bundle
@@ -335,7 +399,9 @@ enum Hierarchy {
         if let value = snapshot.value.map({ "\($0)" }), !value.isEmpty { out["value"] = value }
         if let placeholder = snapshot.placeholderValue, !placeholder.isEmpty { out["placeholder"] = placeholder }
         if snapshot.isSelected { out["selected"] = true }
-        if snapshot.hasFocus { out["focused"] = true }
+        // Keyboard focus where XCTest reports it: inside a web view every
+        // element answers hasFocus, so "focused" would mark the whole page.
+        if Typist.hasKeyboardFocus(snapshot) ?? snapshot.hasFocus { out["focused"] = true }
         let children = snapshot.children.map(node)
         if !children.isEmpty { out["children"] = children }
         return out

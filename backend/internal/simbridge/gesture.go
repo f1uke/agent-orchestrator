@@ -763,6 +763,24 @@ func Paste() []Event {
 	}
 }
 
+// WakeKeyboard is a bare Command press and release: no character, no
+// shortcut, nothing for an app to act on.
+//
+// It exists because the first key event a simulator receives while its
+// SOFTWARE keyboard is on screen is lost: the simulator takes it as a
+// hardware keyboard arriving, hides the software keyboard, and drops the
+// event. Every later one lands. So a Command-V sent with the keyboard up
+// pasted nothing, and the same Command-V a moment later pasted the text -
+// measured on a web password field and a web email field (iOS 26.3,
+// 2026-10-02), and the likeliest reason the pasteboard route "sometimes
+// needed a second try". A paste sends this first when the keyboard is up.
+func WakeKeyboard() []Event {
+	return []Event{
+		{Kind: "key", Type: "down", Usage: usageLeftGUI},
+		{Kind: "key", Type: "up", Usage: usageLeftGUI},
+	}
+}
+
 // keyUsages is the set of keyboard keys that are NOT characters.
 //
 // 🗝 This table is the reason live typing can send these as key presses at all,

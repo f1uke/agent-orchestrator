@@ -179,6 +179,23 @@ func Run(
 		return result, fmt.Errorf("could not read the screen before pasting, so the paste could not be "+
 			"proven and was not attempted: %w", err)
 	}
+	if before.Keyboard != nil {
+		// The software keyboard is up, and the first key event would be spent
+		// hiding it (see simbridge.WakeKeyboard) - the Command-V would be lost.
+		// Spend a bare Command on it instead, and read the screen it leaves.
+		if _, err := driver.Perform(ctx, udid, simbridge.WakeKeyboard()); err != nil {
+			return result, &simgesture.FailedError{Action: "paste", Cause: err}
+		}
+		select {
+		case <-time.After(keyboardSettle):
+		case <-ctx.Done():
+			return result, ctx.Err()
+		}
+		if before, err = driver.AX(ctx, udid); err != nil {
+			return result, fmt.Errorf("could not read the screen before pasting, so the paste could not be "+
+				"proven and was not attempted: %w", err)
+		}
+	}
 	if _, err := driver.Perform(ctx, udid, events); err != nil {
 		return result, &simgesture.FailedError{Action: "paste", Cause: err}
 	}
@@ -198,8 +215,13 @@ func Run(
 // halfway through would hand the device away mid-proof.
 const screenReads = 10 * time.Second
 
+// keyboardSettle is how long the software keyboard is given to go away after
+// the waking key press, before the screen is read again.
+const keyboardSettle = 500 * time.Millisecond
+
 func pasteHoldFor(events []simbridge.Event) time.Duration {
-	return simbridge.Duration(events) + screenReads + simgesture.HoldSlack
+	// A third read and the settle, for a paste that has to wake the keyboard.
+	return simbridge.Duration(events) + screenReads + screenReads/2 + keyboardSettle + simgesture.HoldSlack
 }
 
 // Verify proves a paste landed by finding the text on screen afterwards.
@@ -248,6 +270,15 @@ func pasteHoldFor(events []simbridge.Event) time.Duration {
 func Verify(before, after simbridge.Snapshot, text string) (Landing, error) {
 	was, now := flatten(before), flatten(after)
 	want := len([]rune(text))
+	// The field with keyboard focus, when the reader knows it, is where the
+	// text went: its own value before and after is a sharper witness than a
+	// count across the screen, which cannot tell one "a" from the "a" in every
+	// label around it.
+	for _, rule := range rules {
+		if landing, ok := rule.gainedInFocused(was, now, text); ok {
+			return landing, nil
+		}
+	}
 	for _, rule := range rules {
 		if landing, ok := rule.gained(was, now, text); ok {
 			return landing, nil
@@ -256,9 +287,10 @@ func Verify(before, after simbridge.Snapshot, text string) (Landing, error) {
 
 	changed := changes(was, now)
 	if len(changed) == 0 {
+		// Route-neutral: `ao sim type` proves its XCTest typing with this too,
+		// and each caller adds the advice its own route needs.
 		return Landing{}, fmt.Errorf("%w: nothing on screen changed, so the text did not go anywhere. "+
-			"Tap the field first so it has keyboard focus - and note that some apps refuse paste outright",
-			ErrNotDelivered)
+			"Tap the field first so it has keyboard focus", ErrNotDelivered)
 	}
 	return Landing{}, fmt.Errorf("%w: it was sent, but nothing on screen can be shown to hold the %d "+
 		"character(s) it carried. What changed: %s. Some of it may be there and some not - a field with a "+
@@ -375,6 +407,91 @@ func (r rule) gained(before, after []simbridge.Element, text string) (Landing, b
 		return landing(*fallback, r.how), true
 	}
 	return Landing{}, false
+}
+
+// gainedInFocused is the rule applied to the focused field alone: the one
+// element with keyboard focus after, and the same field (type, label and id)
+// before. A screen without exactly one focused element, or whose field cannot
+// be found in the earlier read, proves nothing here and is left to the
+// screen-wide count.
+func (r rule) gainedInFocused(before, after []simbridge.Element, text string) (Landing, bool) {
+	field, ok := onlyFocused(after)
+	if !ok {
+		return Landing{}, false
+	}
+	prior, ok := sameField(before, field)
+	if !ok {
+		return Landing{}, false
+	}
+	was, now := typedValue(prior, field), typedValue(field, field)
+	if r.normalize == nil {
+		want := len([]rune(text))
+		if want == 0 || !allDots(now) || len([]rune(now))-dotsIn(was) < want {
+			return Landing{}, false
+		}
+		return landing(field, EvidenceMasked), true
+	}
+	needle := r.normalize(text)
+	if needle == "" || strings.Count(r.normalize(now), needle) <= strings.Count(r.normalize(was), needle) {
+		return Landing{}, false
+	}
+	return landing(field, r.how), true
+}
+
+func onlyFocused(elements []simbridge.Element) (simbridge.Element, bool) {
+	var found []simbridge.Element
+	for _, e := range elements {
+		if e.Focused {
+			found = append(found, e)
+		}
+	}
+	if len(found) != 1 {
+		return simbridge.Element{}, false
+	}
+	return found[0], true
+}
+
+// sameField finds field in an earlier read: by focus first, then by what it
+// is. A path is a position and moves when the keyboard comes up, so it is not
+// used; a match that is not unique is no match.
+func sameField(elements []simbridge.Element, field simbridge.Element) (simbridge.Element, bool) {
+	same := func(e simbridge.Element) bool {
+		return e.Type == field.Type && e.Label == field.Label && e.ID == field.ID
+	}
+	for _, pick := range []func(simbridge.Element) bool{
+		func(e simbridge.Element) bool { return e.Focused && same(e) },
+		same,
+	} {
+		var found []simbridge.Element
+		for _, e := range elements {
+			if pick(e) {
+				found = append(found, e)
+			}
+		}
+		if len(found) == 1 {
+			return found[0], true
+		}
+	}
+	return simbridge.Element{}, false
+}
+
+// typedValue is what a field holds that somebody typed, without its hint. An
+// empty field reports its placeholder as its value - with the placeholder
+// itself reported apart only once the field has text - so a value equal to
+// the field's placeholder in either read is no text at all.
+func typedValue(e, field simbridge.Element) string {
+	switch e.Value {
+	case "", e.Placeholder, field.Placeholder:
+		return ""
+	}
+	return e.Value
+}
+
+func dotsIn(value string) int {
+	if !allDots(value) {
+		return 0
+	}
+	return len([]rune(value))
 }
 
 // dots are what a secure field shows instead of its text. iOS uses U+2022; the
