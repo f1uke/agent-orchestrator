@@ -632,7 +632,7 @@ function CodeEditorSection() {
 			<SettingRows>
 				<SettingRow
 					name="Predictive code completion"
-					summary="Shows what you are likely to type next as grey text after the cursor. Tab accepts it; Esc or typing something else dismisses it."
+					summary="Shows what you are likely to type next as grey text after the cursor - or, with a next-edit model, the change you are likely to make next, drawn where it would land. Tab accepts it (jumping there first when it is further away); Esc or typing something else dismisses it."
 					detail={
 						<>
 							A code model runs on this Mac: AO downloads llama.cpp and the model into <code>~/.ao/llm</code> the first
@@ -650,7 +650,7 @@ function CodeEditorSection() {
 				</SettingRow>
 				<SettingRow
 					name="Prediction model"
-					summary="Larger models guess better but answer more slowly and hold more memory while on."
+					summary="Qwen models finish what you are typing. A next-edit model also predicts the change you are likely to make next, a few lines away. Larger models guess better but answer more slowly and hold more memory while on."
 					detail="Choosing a model you have not downloaded asks first, with its size; the current one keeps predicting until the new one is ready."
 					ownership={{ kind: "global-only" }}
 					timing="instant"

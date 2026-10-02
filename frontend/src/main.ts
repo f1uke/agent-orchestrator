@@ -67,6 +67,7 @@ import { isAllowedTerminalLink } from "./main/open-terminal-link";
 import { createLspRegistry, type LspRegistry, type LspResultOutcome } from "./main/lsp/lsp-registry";
 import type { ModelId } from "./main/inline-completion/catalog";
 import type { InfillRequest } from "./main/inline-completion/infill";
+import type { NextEditRequest } from "./main/inline-completion/next-edit";
 import {
 	createInlineCompletionService,
 	inlineCompletionPaths,
@@ -1228,6 +1229,9 @@ ipcMain.handle("inlineCompletion:cancelDownload", () => ensureInlineCompletion()
 ipcMain.handle("inlineCompletion:removeModel", (_event, id: ModelId) => ensureInlineCompletion().removeModel(id));
 ipcMain.handle("inlineCompletion:complete", (_event, input: { requestId: string; request: InfillRequest }) =>
 	ensureInlineCompletion().complete(input.requestId, input.request),
+);
+ipcMain.handle("inlineCompletion:predictEdit", (_event, input: { requestId: string; request: NextEditRequest }) =>
+	ensureInlineCompletion().predictEdit(input.requestId, input.request),
 );
 // Per-keystroke and hot, so fire-and-forget like lsp:send.
 ipcMain.on("inlineCompletion:cancel", (_event, requestId: string) => inlineCompletion?.cancel(requestId));

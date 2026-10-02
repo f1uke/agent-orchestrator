@@ -26,10 +26,13 @@ export function InlineCompletionChip() {
 	// thing a glance needs - accent when predicting, red when it stopped, muted
 	// otherwise. The words live in the tooltip and one click away.
 	const summary = inlineCompletionSummary(status);
+	const nextEdit = status.models.find((m) => m.id === status.modelId)?.kind === "next-edit";
 	const tone = status.server === "error" ? P.red : status.enabled && status.server === "ready" ? ACCENT : P.muted2;
 	const title =
 		status.server === "ready"
-			? "Predictive code completion is on: grey text after the cursor, Tab to accept. Click to change."
+			? nextEdit
+				? "Predictive code completion is on: your next edit, shown where it would land - Tab to jump there and accept. Click to change."
+				: "Predictive code completion is on: grey text after the cursor, Tab to accept. Click to change."
 			: status.server === "error"
 				? `Predictive code completion stopped: ${status.serverDetail ?? "llama-server failed"}`
 				: `Predictive code completion: ${summary}. Click to change.`;
@@ -62,7 +65,9 @@ export function InlineCompletionChip() {
 					<div className="flex flex-col gap-1">
 						<span className="text-[13px] font-medium text-foreground">Predictive code completion</span>
 						<span className="text-[11.5px] leading-[1.5] text-muted-foreground">
-							A code model on this Mac suggests the rest of what you are typing. Tab accepts.
+							{nextEdit
+								? "A code model on this Mac suggests the edit you are likely to make next, from what you just changed. Tab jumps to it and accepts it."
+								: "A code model on this Mac suggests the rest of what you are typing. Tab accepts."}
 						</span>
 					</div>
 					<InlineCompletionControls id="inlineCompletionEnabledEditor" />

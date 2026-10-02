@@ -55,12 +55,14 @@ if (withLsp) {
 
 // `?predict=1` gives the page a local model that is ready; `?predict=off` one
 // that is switched off, so a spec can ask that the editor then behaves exactly
-// as it did before the feature. `?predictDelay=` makes each answer that slow.
+// as it did before the feature; `?predict=edit` a ready NEXT-EDIT model.
+// `?predictDelay=` makes each answer that slow.
 // Installed AFTER the language server, which replaces `window.ao` wholesale.
 const predict = params.get("predict");
 if (predict) {
 	installFakeInlineCompletion({
-		ready: predict === "1",
+		ready: predict === "1" || predict === "edit",
+		kind: predict === "edit" ? "next-edit" : "fim",
 		delayMs: params.has("predictDelay") ? Number(params.get("predictDelay")) : undefined,
 	});
 }

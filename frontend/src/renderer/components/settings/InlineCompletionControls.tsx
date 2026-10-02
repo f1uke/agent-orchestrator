@@ -7,7 +7,7 @@ import { useInlineCompletionStatus } from "../../lib/inline-completion/status";
 import { cn } from "../../lib/utils";
 import { formatBytes } from "../../../shared/format-bytes";
 import { Button } from "../ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 
 // The predictive-completion controls, shared by Settings › Code editor and the
@@ -259,6 +259,11 @@ function DownloadProgress({
 	);
 }
 
+const MODEL_GROUPS: { kind: InlineCompletionStatus["models"][number]["kind"]; label: string }[] = [
+	{ kind: "fim", label: "Completes the line at the cursor" },
+	{ kind: "next-edit", label: "Predicts your next edit" },
+];
+
 /**
  * Which model runs. Picking one that is not downloaded asks first (with its
  * size) and leaves the current one serving until the new one is ready.
@@ -279,12 +284,23 @@ export function InlineCompletionModelPicker({ id = "inlineCompletionModel" }: { 
 					<SelectValue />
 				</SelectTrigger>
 				<SelectContent>
-					{status.models.map((m) => (
-						<SelectItem key={m.id} value={m.id}>
-							{m.label} · {formatBytes(m.sizeBytes)}
-							{m.installed ? " · downloaded" : ""}
-						</SelectItem>
-					))}
+					{/* Grouped by what the model DOES, which is the first choice to make;
+					    size and speed within a group come second. */}
+					{MODEL_GROUPS.map((group) => {
+						const members = status.models.filter((m) => m.kind === group.kind);
+						if (members.length === 0) return null;
+						return (
+							<SelectGroup key={group.kind}>
+								<SelectLabel>{group.label}</SelectLabel>
+								{members.map((m) => (
+									<SelectItem key={m.id} value={m.id}>
+										{m.label} · {formatBytes(m.sizeBytes)}
+										{m.installed ? " · downloaded" : ""}
+									</SelectItem>
+								))}
+							</SelectGroup>
+						);
+					})}
 				</SelectContent>
 			</Select>
 			{selected && <p className="max-w-[62ch] text-[11.5px] leading-[1.55] text-passive">{selected.blurb}</p>}

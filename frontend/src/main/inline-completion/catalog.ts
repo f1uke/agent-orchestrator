@@ -47,10 +47,22 @@ export function runtimeFor(platform: NodeJS.Platform, arch: string): RuntimeArti
 	return RUNTIMES[`${platform}-${arch}`] ?? null;
 }
 
-export type ModelId = "qwen2.5-coder-1.5b" | "qwen2.5-coder-3b" | "qwen2.5-coder-7b";
+export type ModelId = "qwen2.5-coder-1.5b" | "qwen2.5-coder-3b" | "qwen2.5-coder-7b" | "sweep-next-edit-1.5b";
+
+/**
+ * What a model is asked, which decides everything downstream of the download:
+ *
+ * - `fim`: fill-in-the-middle over llama-server's `/infill` - text AT the
+ *   cursor, shown as ghost text.
+ * - `next-edit`: rewrite the 21 lines around the cursor given the recent edits,
+ *   over a raw `/completion` prompt - an edit ANYWHERE in that window, shown at
+ *   its own location (see next-edit.ts).
+ */
+export type ModelKind = "fim" | "next-edit";
 
 export type ModelSpec = DownloadArtifact & {
 	id: ModelId;
+	kind: ModelKind;
 	/** The file name on disk under `llm/models/`. */
 	fileName: string;
 	/** One honest line for the picker: what this size buys and costs. */
@@ -72,6 +84,7 @@ export type ModelSpec = DownloadArtifact & {
 export const MODELS: readonly ModelSpec[] = [
 	{
 		id: "qwen2.5-coder-1.5b",
+		kind: "fim",
 		label: "Qwen2.5-Coder 1.5B",
 		fileName: "qwen2.5-coder-1.5b-q8_0.gguf",
 		url: "https://huggingface.co/ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF/resolve/8be1b8a895a84beea772817caaa71eba6b6e0d07/qwen2.5-coder-1.5b-q8_0.gguf",
@@ -81,6 +94,7 @@ export const MODELS: readonly ModelSpec[] = [
 	},
 	{
 		id: "qwen2.5-coder-3b",
+		kind: "fim",
 		label: "Qwen2.5-Coder 3B",
 		fileName: "qwen2.5-coder-3b-q8_0.gguf",
 		url: "https://huggingface.co/ggml-org/Qwen2.5-Coder-3B-Q8_0-GGUF/resolve/9c1de162ae417c9c3aacde97c729c4128de047d8/qwen2.5-coder-3b-q8_0.gguf",
@@ -90,6 +104,7 @@ export const MODELS: readonly ModelSpec[] = [
 	},
 	{
 		id: "qwen2.5-coder-7b",
+		kind: "fim",
 		label: "Qwen2.5-Coder 7B",
 		fileName: "qwen2.5-coder-7b-q8_0.gguf",
 		url: "https://huggingface.co/ggml-org/Qwen2.5-Coder-7B-Q8_0-GGUF/resolve/bca77e0a8c88fc224882bcc404170c3ef17efacc/qwen2.5-coder-7b-q8_0.gguf",
@@ -97,6 +112,24 @@ export const MODELS: readonly ModelSpec[] = [
 		sha256: "0ef48dc94a3c551a6736ac2601de38413dc9aa9318534b16e8baee08290a4aaf",
 		blurb:
 			"Best guesses, about three times as slow. About 8.7 GB of memory while on - heavy next to agents and language servers.",
+	},
+	/**
+	 * sweep-next-edit 1.5B (Qwen2.5-Coder 1.5B fine-tuned for next-edit by Sweep,
+	 * Apache-2.0). Sweep's own GGUF - the only one it publishes - addressed by
+	 * commit like the rest. Not a FIM model: it is asked through `/completion`
+	 * with its own prompt format (next-edit.ts), and the server runs it with
+	 * n-gram speculative decoding (service.ts `NEXT_EDIT_SPEC_ARGS`).
+	 */
+	{
+		id: "sweep-next-edit-1.5b",
+		kind: "next-edit",
+		label: "Sweep Next-Edit 1.5B",
+		fileName: "sweep-next-edit-1.5b-q8_0-v2.gguf",
+		url: "https://huggingface.co/sweepai/sweep-next-edit-1.5B/resolve/409016591c6c1a94f545f22328a85a3516118f34/sweep-next-edit-1.5b.q8_0.v2.gguf",
+		sizeBytes: 1_537_269_856,
+		sha256: "1321ea5e5d7529e60f9770c6a0b3a965f89542d16cf4ae51bab267f6a88150da",
+		blurb:
+			"Predicts your next edit, not only the rest of the line: carries a change you just made to the lines around it, and Tab jumps there. About 0.4 s a suggestion; about 2 GB of memory while on.",
 	},
 ];
 

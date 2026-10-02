@@ -12,6 +12,7 @@ import {
 const MODELS: InlineCompletionStatus["models"] = [
 	{
 		id: "qwen2.5-coder-1.5b",
+		kind: "fim",
 		label: "Qwen2.5-Coder 1.5B",
 		blurb: "Fastest.",
 		sizeBytes: 1_646_573_056,
@@ -19,6 +20,7 @@ const MODELS: InlineCompletionStatus["models"] = [
 	},
 	{
 		id: "qwen2.5-coder-7b",
+		kind: "fim",
 		label: "Qwen2.5-Coder 7B",
 		blurb: "Best guesses.",
 		sizeBytes: 8_098_525_600,
@@ -31,6 +33,7 @@ const OFF: InlineCompletionStatus = {
 	enabled: false,
 	modelId: "qwen2.5-coder-1.5b",
 	server: "off",
+	activeKind: null,
 	serverDetail: null,
 	pid: null,
 	confirm: null,

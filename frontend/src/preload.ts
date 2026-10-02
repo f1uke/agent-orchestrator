@@ -12,6 +12,7 @@ import type { JsonRpcMessage } from "./main/lsp/lsp-framing";
 import type { LspAttachment, LspHealth, LspResultOutcome, LspStateEvent } from "./main/lsp/lsp-registry";
 import type { ModelId } from "./main/inline-completion/catalog";
 import type { InfillRequest, InfillResult } from "./main/inline-completion/infill";
+import type { NextEditRequest, NextEditResult } from "./main/inline-completion/next-edit";
 import type { InlineCompletionStatus } from "./main/inline-completion/service";
 
 export type BrowserBoundsInput = {
@@ -145,6 +146,8 @@ const api = {
 		removeModel: (id: ModelId) => ipcRenderer.invoke("inlineCompletion:removeModel", id) as Promise<void>,
 		complete: (requestId: string, request: InfillRequest) =>
 			ipcRenderer.invoke("inlineCompletion:complete", { requestId, request }) as Promise<InfillResult | null>,
+		predictEdit: (requestId: string, request: NextEditRequest) =>
+			ipcRenderer.invoke("inlineCompletion:predictEdit", { requestId, request }) as Promise<NextEditResult | null>,
 		cancel: (requestId: string) => ipcRenderer.send("inlineCompletion:cancel", requestId),
 		onStatus: (listener: (status: InlineCompletionStatus) => void) => {
 			const wrapped = (_event: Electron.IpcRendererEvent, status: InlineCompletionStatus) => listener(status);

@@ -166,6 +166,6 @@ jobs:
         run: >-
           npx playwright test e2e/status-glyph.spec.ts e2e/card-header.spec.ts e2e/done-lane.spec.ts e2e/sidebar-qa-pip.spec.ts
           e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
-          e2e/editor-completion.spec.ts e2e/editor-inline-completion.spec.ts e2e/editor-lsp-surface.spec.ts e2e/files-perf.spec.ts
+          e2e/editor-completion.spec.ts e2e/editor-inline-completion.spec.ts e2e/editor-next-edit.spec.ts e2e/editor-lsp-surface.spec.ts e2e/files-perf.spec.ts
           e2e/files-state.spec.ts e2e/search-perf.spec.ts e2e/terminal-links.spec.ts
           e2e/pinch-dots.spec.ts

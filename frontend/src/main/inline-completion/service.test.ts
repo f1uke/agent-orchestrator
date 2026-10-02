@@ -11,6 +11,7 @@ import {
 	type InlineCompletionService,
 	type InlineCompletionStatus,
 	inlineCompletionPaths,
+	serverArgs,
 } from "./service";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +21,7 @@ const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 const RUNTIME_BYTES = Buffer.from("pretend tarball");
 const SMALL = Buffer.alloc(64_000, 1);
 const LARGE = Buffer.alloc(128_000, 2);
+const EDIT = Buffer.alloc(32_000, 3);
 
 const RUNTIME: RuntimeArtifact = {
 	tag: "b1",
@@ -31,6 +33,7 @@ const RUNTIME: RuntimeArtifact = {
 const MODELS: ModelSpec[] = [
 	{
 		id: "qwen2.5-coder-1.5b",
+		kind: "fim",
 		label: "Small",
 		fileName: "small.gguf",
 		url: "https://example.invalid/small.gguf",
@@ -40,6 +43,7 @@ const MODELS: ModelSpec[] = [
 	},
 	{
 		id: "qwen2.5-coder-3b",
+		kind: "fim",
 		label: "Large",
 		fileName: "large.gguf",
 		url: "https://example.invalid/large.gguf",
@@ -49,10 +53,22 @@ const MODELS: ModelSpec[] = [
 	},
 ];
 
+MODELS.push({
+	id: "sweep-next-edit-1.5b",
+	kind: "next-edit",
+	label: "Edit",
+	fileName: "edit.gguf",
+	url: "https://example.invalid/edit.gguf",
+	sizeBytes: EDIT.length,
+	sha256: sha(EDIT),
+	blurb: "edit",
+});
+
 const BODIES: Record<string, Buffer> = {
 	[RUNTIME.url]: RUNTIME_BYTES,
 	[MODELS[0].url]: SMALL,
 	[MODELS[1].url]: LARGE,
+	[MODELS[2].url]: EDIT,
 };
 
 /** Serves the pinned bytes, slowly enough that a test can cancel half way. */
@@ -141,7 +157,43 @@ function alive(pid: number): boolean {
 	}
 }
 
+describe("serverArgs", () => {
+	test("a next-edit model runs with n-gram speculative decoding; a FIM model without", () => {
+		expect(serverArgs("m.gguf", "s.sock", "next-edit")).toEqual(expect.arrayContaining(["--spec-type"]));
+		expect(serverArgs("m.gguf", "s.sock", "fim")).not.toContain("--spec-type");
+	});
+});
+
 describe("inline completion service", () => {
+	test("a next-edit model is asked for rewrites, and only for rewrites", async () => {
+		const { service, until } = setup();
+		await service.init();
+		await service.selectModel("sweep-next-edit-1.5b");
+		await service.enable();
+		await service.confirmDownload();
+		const ready = await until((s) => s.server === "ready");
+		expect(ready.activeKind).toBe("next-edit");
+
+		const request = {
+			path: "a.ts",
+			recent: [{ path: "a.ts", original: "let OLD = 1", updated: "let NEW = 1" }],
+			original: "let OLD = 1\nuse(OLD)",
+			current: "let NEW = 1\nuse(OLD)",
+		};
+		const answer = await service.predictEdit("e1", request);
+		expect(answer?.window).toBe("let NEW = 1\nuse(NEW)");
+		// The fill-in-the-middle path answers nothing while a next-edit model runs.
+		expect(
+			await service.complete("c1", { inputPrefix: "", prompt: "x", inputSuffix: "", inputExtra: [], nIndent: 0 }),
+		).toBeNull();
+
+		await service.selectModel("qwen2.5-coder-1.5b");
+		await service.confirmDownload();
+		const fim = await until((s) => s.server === "ready" && s.activeKind === "fim");
+		expect(fim.modelId).toBe("qwen2.5-coder-1.5b");
+		expect(await service.predictEdit("e2", request)).toBeNull();
+	});
+
 	test("enable on a clean state asks first - with the size - and downloads nothing", async () => {
 		const { service, fetch } = setup();
 		await service.init();
