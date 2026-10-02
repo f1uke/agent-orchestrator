@@ -46,6 +46,18 @@ export function isInlineCompletionReady(): boolean {
 	return inlineCompletionStatus()?.server === "ready";
 }
 
+/** What the running model is asked: ghost text at the cursor (`fim`) or a rewrite (`next-edit`). */
+export function inlineCompletionKind(): InlineCompletionStatus["activeKind"] {
+	const status = inlineCompletionStatus();
+	return status?.server === "ready" ? status.activeKind : null;
+}
+
+/** Whether the running model also answers fill-in-the-middle requests (every model so far does). */
+export function inlineCompletionInfill(): boolean {
+	const status = inlineCompletionStatus();
+	return status?.server === "ready" && status.activeInfill;
+}
+
 export function useInlineCompletionStatus(): InlineCompletionStatus | null {
 	return useSyncExternalStore(subscribeInlineCompletionStatus, inlineCompletionStatus, inlineCompletionStatus);
 }

@@ -87,7 +87,7 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		Icon: CodeXml,
 		hint: "the built-in editor, on this Mac",
 		keywords:
-			"predictive code completion inline ghost text suggestion prediction tab accept autocomplete model qwen coder llama llama.cpp llama-server local ai download",
+			"predictive code completion inline ghost text suggestion prediction tab accept autocomplete model llama llama.cpp llama-server local ai download next edit nes sweep jump rename",
 	},
 	{
 		key: "mac",

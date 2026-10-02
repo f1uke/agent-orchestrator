@@ -3,34 +3,26 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InlineCompletionStatus } from "../../../main/inline-completion/service";
 import { resetInlineCompletionStatusForTests } from "../../lib/inline-completion/status";
-import {
-	InlineCompletionControls,
-	InlineCompletionModelPicker,
-	inlineCompletionSummary,
-} from "./InlineCompletionControls";
+import { InlineCompletionControls, inlineCompletionSummary } from "./InlineCompletionControls";
 
 const MODELS: InlineCompletionStatus["models"] = [
 	{
-		id: "qwen2.5-coder-1.5b",
-		label: "Qwen2.5-Coder 1.5B",
-		blurb: "Fastest.",
-		sizeBytes: 1_646_573_056,
+		id: "sweep-next-edit-1.5b",
+		kind: "next-edit",
+		label: "Sweep Next-Edit 1.5B",
+		blurb: "Finishes the line, then predicts the next edit.",
+		sizeBytes: 1_537_269_856,
 		installed: false,
-	},
-	{
-		id: "qwen2.5-coder-7b",
-		label: "Qwen2.5-Coder 7B",
-		blurb: "Best guesses.",
-		sizeBytes: 8_098_525_600,
-		installed: true,
 	},
 ];
 
 const OFF: InlineCompletionStatus = {
 	unsupported: null,
 	enabled: false,
-	modelId: "qwen2.5-coder-1.5b",
+	modelId: "sweep-next-edit-1.5b",
 	server: "off",
+	activeKind: null,
+	activeInfill: false,
 	serverDetail: null,
 	pid: null,
 	confirm: null,
@@ -44,10 +36,8 @@ const bridge = {
 	getStatus: vi.fn(),
 	enable: vi.fn(),
 	disable: vi.fn(),
-	selectModel: vi.fn(),
 	confirmDownload: vi.fn(),
 	cancelDownload: vi.fn(),
-	removeModel: vi.fn(),
 	complete: vi.fn(),
 	cancel: vi.fn(),
 	onStatus: vi.fn(),
@@ -85,15 +75,15 @@ describe("InlineCompletionControls", () => {
 		await waitFor(() => expect(bridge.getStatus).toHaveBeenCalled());
 		publish({
 			confirm: {
-				modelId: "qwen2.5-coder-1.5b",
-				bytes: 1_658_402_526,
+				modelId: "sweep-next-edit-1.5b",
+				bytes: 1_549_099_326,
 				runtimeBytes: 11_829_470,
 				freeBytes: 250 * 1024 ** 3,
 			},
 		});
 		const confirm = await screen.findByTestId("inline-completion-confirm");
-		expect(confirm).toHaveTextContent("Download Qwen2.5-Coder 1.5B - 1.7 GB?");
-		expect(confirm).toHaveTextContent("1.6 GB model and 12 MB llama.cpp runtime, into ~/.ao/llm");
+		expect(confirm).toHaveTextContent("Download Sweep Next-Edit 1.5B - 1.5 GB?");
+		expect(confirm).toHaveTextContent("1.5 GB model and 12 MB llama.cpp runtime, into ~/.ao/llm");
 		expect(confirm).toHaveTextContent("268.4 GB free");
 		// The switch reads ON while the question it raised is open.
 		expect(screen.getByRole("switch")).toBeChecked();
@@ -108,8 +98,8 @@ describe("InlineCompletionControls", () => {
 		publish({
 			enabled: true,
 			download: {
-				modelId: "qwen2.5-coder-1.5b",
-				label: "Qwen2.5-Coder 1.5B",
+				modelId: "sweep-next-edit-1.5b",
+				label: "Sweep Next-Edit 1.5B",
 				receivedBytes: 512 * 1024 ** 2,
 				totalBytes: 1024 ** 3,
 			},
@@ -123,9 +113,9 @@ describe("InlineCompletionControls", () => {
 	it("says ready, with the pid of the server AO started, and turning it off disables", async () => {
 		render(<InlineCompletionControls />);
 		await waitFor(() => expect(bridge.getStatus).toHaveBeenCalled());
-		publish({ enabled: true, server: "ready", pid: 4242, serverDetail: "Qwen2.5-Coder 1.5B" });
+		publish({ enabled: true, server: "ready", pid: 4242, serverDetail: "Sweep Next-Edit 1.5B" });
 		const line = await screen.findByTestId("inline-completion-status");
-		expect(line).toHaveTextContent("Ready - Qwen2.5-Coder 1.5B");
+		expect(line).toHaveTextContent("Ready - Sweep Next-Edit 1.5B");
 		expect(line).toHaveTextContent("llama-server · pid 4242");
 		await userEvent.click(screen.getByRole("switch"));
 		expect(bridge.disable).toHaveBeenCalled();
@@ -148,12 +138,11 @@ describe("InlineCompletionControls", () => {
 	});
 });
 
-describe("InlineCompletionModelPicker", () => {
-	it("offers to remove a downloaded model that is not in use", async () => {
-		render(<InlineCompletionModelPicker />);
-		await screen.findByText(/Qwen2.5-Coder 7B is downloaded but not in use/);
-		await userEvent.click(screen.getByRole("button", { name: "Remove" }));
-		expect(bridge.removeModel).toHaveBeenCalledWith("qwen2.5-coder-7b");
+describe("the model", () => {
+	it("is said in one line beside the switch - there is one model, so there is no picker", async () => {
+		render(<InlineCompletionControls />);
+		expect(await screen.findByText("Finishes the line, then predicts the next edit.")).toBeInTheDocument();
+		expect(screen.queryByRole("combobox")).toBeNull();
 	});
 });
 
@@ -165,7 +154,7 @@ describe("inlineCompletionSummary", () => {
 		expect(
 			inlineCompletionSummary({
 				...OFF,
-				download: { modelId: "qwen2.5-coder-1.5b", label: "x", receivedBytes: 1, totalBytes: 4 },
+				download: { modelId: "sweep-next-edit-1.5b", label: "x", receivedBytes: 1, totalBytes: 4 },
 			}),
 		).toBe("Downloading 25%");
 		expect(inlineCompletionSummary({ ...OFF, unsupported: "no" })).toBe("Unavailable");
@@ -173,7 +162,7 @@ describe("inlineCompletionSummary", () => {
 		expect(
 			inlineCompletionSummary({
 				...OFF,
-				confirm: { modelId: "qwen2.5-coder-1.5b", bytes: 1, runtimeBytes: 0, freeBytes: null },
+				confirm: { modelId: "sweep-next-edit-1.5b", bytes: 1, runtimeBytes: 0, freeBytes: null },
 			}),
 		).toBe("Needs download");
 	});

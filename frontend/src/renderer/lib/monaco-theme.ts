@@ -65,6 +65,10 @@ export const EDITOR_THEME_TOKENS = {
 		// file, two places saying the same thing, and they have to agree.
 		"--diagnostic-error": "#ef6a63",
 		"--diagnostic-warning": "#e0a544",
+		// The Changes view's +/- inks, which a suggested edit's removed and
+		// inserted text are drawn in too: one meaning, one colour.
+		"--diff-add-sign": "#7fd8a0",
+		"--diff-del-sign": "#e88f8f",
 	},
 	light: {
 		"--code-plain": "#262626",
@@ -93,6 +97,8 @@ export const EDITOR_THEME_TOKENS = {
 		"--interactive-hover": "#0000000a",
 		"--diagnostic-error": "#c0392b",
 		"--diagnostic-warning": "#9a6b00",
+		"--diff-add-sign": "#177530",
+		"--diff-del-sign": "#c0392b",
 	},
 } as const;
 
@@ -229,6 +235,30 @@ function buildTheme(name: EditorThemeName, type: "dark" | "light", t: Tokens) {
 			// Predicted text after the cursor: the passive grey, which reads as "not
 			// there yet" against every syntax role in both themes.
 			"editorGhostText.foreground": t["--fg-passive"],
+			// A suggested edit somewhere else (a next-edit model): Monaco's inline-edit
+			// view, which otherwise falls back to VS Code's own diff greens and button
+			// blue. Removed text in the Changes view's red ink, inserted in its green,
+			// both as tints so the code under them stays legible; the gutter arrow in
+			// the accent, like every other "act on this" control.
+			"inlineEdit.originalBackground": tint(t["--diff-del-sign"], 0.08),
+			"inlineEdit.modifiedBackground": tint(t["--diff-add-sign"], 0.1),
+			"inlineEdit.originalChangedLineBackground": tint(t["--diff-del-sign"], 0.14),
+			"inlineEdit.originalChangedTextBackground": tint(t["--diff-del-sign"], 0.26),
+			"inlineEdit.modifiedChangedLineBackground": tint(t["--diff-add-sign"], 0.14),
+			"inlineEdit.modifiedChangedTextBackground": tint(t["--diff-add-sign"], 0.26),
+			"inlineEdit.originalBorder": tint(t["--diff-del-sign"], 0.55),
+			"inlineEdit.modifiedBorder": tint(t["--diff-add-sign"], 0.55),
+			"inlineEdit.tabWillAcceptOriginalBorder": t["--diff-del-sign"],
+			"inlineEdit.tabWillAcceptModifiedBorder": t["--diff-add-sign"],
+			"inlineEdit.gutterIndicator.primaryForeground": t["--fg"],
+			"inlineEdit.gutterIndicator.primaryBorder": accent,
+			"inlineEdit.gutterIndicator.primaryBackground": tint(accent, 0.3),
+			"inlineEdit.gutterIndicator.secondaryForeground": t["--fg-muted"],
+			"inlineEdit.gutterIndicator.secondaryBorder": t["--border-1"],
+			"inlineEdit.gutterIndicator.secondaryBackground": t["--bg-1"],
+			"inlineEdit.gutterIndicator.successfulForeground": t["--fg"],
+			"inlineEdit.gutterIndicator.successfulBorder": accent,
+			"inlineEdit.gutterIndicator.successfulBackground": accent,
 			"editorWidget.background": t["--bg-1"],
 			"editorWidget.foreground": t["--fg"],
 			"editorWidget.border": t["--border-1"],

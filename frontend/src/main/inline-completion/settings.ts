@@ -26,18 +26,30 @@ function coerce(raw: unknown): InlineCompletionSettings {
 	};
 }
 
-/** Read the settings, tolerating a missing or corrupt file (returns defaults). */
-export async function readInlineCompletionSettings(stateDir: string): Promise<InlineCompletionSettings> {
+/**
+ * Read the settings, tolerating a missing or corrupt file (returns defaults).
+ *
+ * `migrated` is true when the file names a model AO no longer ships (the
+ * retired Qwen2.5-Coder models): it reads as the default model, with the
+ * person's on/off kept as it was, and the caller writes that back so the file
+ * stops naming something that is not there.
+ */
+export async function readInlineCompletionSettings(
+	stateDir: string,
+): Promise<{ settings: InlineCompletionSettings; migrated: boolean }> {
 	let raw: string;
 	try {
 		raw = await readFile(path.join(stateDir, INLINE_COMPLETION_SETTINGS_FILE_NAME), "utf8");
 	} catch {
-		return { ...DEFAULTS };
+		return { settings: { ...DEFAULTS }, migrated: false };
 	}
 	try {
-		return coerce(JSON.parse(raw));
+		const parsed = JSON.parse(raw) as Record<string, unknown> | null;
+		const settings = coerce(parsed);
+		const named = parsed?.modelId;
+		return { settings, migrated: typeof named === "string" && named !== settings.modelId };
 	} catch {
-		return { ...DEFAULTS };
+		return { settings: { ...DEFAULTS }, migrated: false };
 	}
 }
 

@@ -1,6 +1,8 @@
 // A stand-in for llama-server, for the supervisor and service tests: it listens
 // on the `--host <path>.sock` it is given, answers GET /health (503 while
-// "loading", then 200) and POST /infill, and can be told to misbehave.
+// "loading", then 200), POST /infill, and POST /completion (streamed, as a
+// next-edit model is asked: it returns the prompt's `current/` window with
+// every OLD made NEW), and can be told to misbehave.
 //
 // Env:
 //   FAKE_LOAD_MS     how long /health answers 503 (default 50)
@@ -44,6 +46,23 @@ const server = http.createServer((req, res) => {
 					}),
 				);
 			}, infillMs);
+		});
+		return;
+	}
+	if (req.url === "/completion" && req.method === "POST") {
+		let body = "";
+		req.on("data", (d) => (body += d));
+		req.on("end", async () => {
+			const { prompt } = JSON.parse(body);
+			const current = /<\|file_sep\|>current\/[^\n]*\n([\s\S]*?)<\|file_sep\|>updated\//.exec(prompt)?.[1] ?? "";
+			res.writeHead(200, { "content-type": "text/event-stream" });
+			for (const line of current.replace(/OLD/g, "NEW").split(/(?<=\n)/)) {
+				res.write(`data: ${JSON.stringify({ content: line, stop: false })}\n\n`);
+				await new Promise((r) => setTimeout(r, 1));
+			}
+			res.end(
+				`data: ${JSON.stringify({ content: "", stop: true, timings: { prompt_n: 9, prompt_ms: 1, predicted_n: 4, predicted_ms: 1 } })}\n\n`,
+			);
 		});
 		return;
 	}

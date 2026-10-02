@@ -1,9 +1,18 @@
 import { execFile } from "node:child_process";
 import { access, mkdir, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_MODEL_ID, MODELS, type ModelId, type ModelSpec, type RuntimeArtifact, runtimeFor } from "./catalog";
+import {
+	DEFAULT_MODEL_ID,
+	MODELS,
+	type ModelId,
+	type ModelKind,
+	type ModelSpec,
+	type RuntimeArtifact,
+	runtimeFor,
+} from "./catalog";
 import { downloadVerified, type FetchLike, freeBytes, partialBytes } from "./download";
 import { type InfillRequest, type InfillResult, postInfill } from "./infill";
+import { type NextEditRequest, type NextEditResult, postNextEdit } from "./next-edit";
 import { createRequestLane } from "./request-lane";
 import {
 	type LlamaServer,
@@ -30,6 +39,14 @@ export type InlineCompletionStatus = {
 	/** The model that runs (or will run once its download finishes and it is chosen). */
 	modelId: ModelId;
 	server: "off" | "starting" | "ready" | "error";
+	/**
+	 * What the RUNNING model is asked - which decides the editor's whole request
+	 * path. Null while nothing runs. Not derived from `modelId`: while a new
+	 * model downloads, the old one keeps serving.
+	 */
+	activeKind: ModelKind | null;
+	/** Whether the running model also answers fill-in-the-middle (ghost text at the cursor). */
+	activeInfill: boolean;
 	/** The reason behind `error`, or what `starting` is doing. */
 	serverDetail: string | null;
 	/** The pid of the llama-server AO started, while it runs. */
@@ -39,7 +56,7 @@ export type InlineCompletionStatus = {
 	download: { modelId: ModelId; label: string; receivedBytes: number; totalBytes: number } | null;
 	/** The last download's failure, until the next attempt. */
 	downloadError: string | null;
-	models: { id: ModelId; label: string; blurb: string; sizeBytes: number; installed: boolean }[];
+	models: { id: ModelId; kind: ModelKind; label: string; blurb: string; sizeBytes: number; installed: boolean }[];
 };
 
 export type InlineCompletionPaths = {
@@ -86,17 +103,26 @@ export function inlineCompletionPaths(stateDir: string): InlineCompletionPaths {
  * - `--cache-reuse 256`: as typing pushes the prefix window forward, chunks of
  *   the previous prompt are shifted rather than recomputed.
  * - `--no-webui`: nobody browses to a Unix socket.
+ *
+ * A next-edit model differs in two ways (NEXT_EDIT_ARGS):
+ * - it is asked TWO kinds of prompt - fill-in-the-middle at the cursor and the
+ *   rewrite of the window - so it gets one slot per kind, each with the same
+ *   8192 tokens of context. On one shared slot every rewrite evicted the
+ *   ghost-text prompt's cache: the next keystroke reprocessed ~1k tokens and
+ *   took 322 ms (p50) instead of 172 ms. Cost: ~230 MB more KV cache.
+ *   llama-server routes a request to the slot whose cached prompt it shares the
+ *   most with, so the two kinds keep to their own slots.
+ * - n-gram speculative decoding: a rewrite is mostly the window it was given,
+ *   copied, and drafting from the prompt's own n-grams lets the server verify
+ *   those copied runs several tokens per step.
  */
-export function serverArgs(modelPath: string, socketPath: string): string[] {
+export function serverArgs(modelPath: string, socketPath: string, kind: ModelKind = "fim"): string[] {
 	return [
 		"-m",
 		modelPath,
 		"--host",
 		socketPath,
-		"-c",
-		"8192",
-		"-np",
-		"1",
+		...(kind === "next-edit" ? NEXT_EDIT_ARGS : ["-c", "8192", "-np", "1"]),
 		"-b",
 		"1024",
 		"-ub",
@@ -108,6 +134,16 @@ export function serverArgs(modelPath: string, socketPath: string): string[] {
 		"--no-webui",
 	];
 }
+
+/**
+ * Measured on sweep-next-edit-1.5B over 160 real next-edit positions (with the
+ * early stop in next-edit.ts): p50 / p90 1877 / 2636 ms with no speculation,
+ * 455 / 674 ms with `ngram-mod`, 387 / 607 ms with `ngram-simple` - the same
+ * answers every time (speculation verifies, it never changes a greedy result).
+ * `ngram-simple` drafts from the prompt's own n-grams, which is exactly where a
+ * rewrite of the window copies from.
+ */
+export const NEXT_EDIT_ARGS: readonly string[] = ["-c", "16384", "-np", "2", "--spec-type", "ngram-simple"];
 
 /**
  * The child's environment, built from nothing on purpose: llama-server reads
@@ -156,13 +192,15 @@ export type InlineCompletionServiceDeps = {
 	/** The executable inside an unpacked runtime directory. */
 	serverBinary?: (runtimeRoot: string) => string;
 	/** Overrides `serverArgs`, for a fake server in tests. */
-	serverArgs?: (modelPath: string, socketPath: string) => string[];
+	serverArgs?: (modelPath: string, socketPath: string, kind: ModelKind) => string[];
 	readyTimeoutMs?: number;
 	/** Disk headroom required beyond the download itself. */
 	diskMarginBytes?: number;
 	progressIntervalMs?: number;
 	requestTimeoutMs?: number;
 };
+
+type LaneRequest = { kind: "infill"; request: InfillRequest } | { kind: "nextEdit"; request: NextEditRequest };
 
 export type InlineCompletionService = ReturnType<typeof createInlineCompletionService>;
 
@@ -214,10 +252,19 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 	let downloadError: string | null = null;
 	let installed = new Set<ModelId>();
 	let runtimeInstalled = false;
-	const lane = createRequestLane((request, signal) => postInfill(paths.socketPath, request, signal), {
-		timeoutMs: requestTimeoutMs,
-		onError: (err) => console.warn("[inline-completion] request failed:", err instanceof Error ? err.message : err),
-	});
+	// One lane for both kinds: there is one server with one slot, running one model.
+	const lane = createRequestLane<LaneRequest, InfillResult | NextEditResult | null>(
+		(job, signal) =>
+			job.kind === "infill"
+				? postInfill(paths.socketPath, job.request, signal)
+				: postNextEdit(paths.socketPath, job.request, signal),
+		{
+			timeoutMs: requestTimeoutMs,
+			onError: (err) => console.warn("[inline-completion] request failed:", err instanceof Error ? err.message : err),
+			isWarmup: (job) => job.kind === "infill" && job.request.nPredict === 0,
+			abortsWhenSuperseded: (job) => job.kind === "nextEdit",
+		},
+	);
 	let lastProgressEmit = 0;
 	let disposed = false;
 	// Serialises every state transition. Two clicks in quick succession (enable,
@@ -228,6 +275,8 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 		queue = next.catch(() => {});
 		return next;
 	};
+
+	const activeKind = (): ModelKind | null => (serverModel ? specOf(serverModel).kind : null);
 
 	const unsupported = (): string | null => {
 		if (!runtime)
@@ -243,6 +292,8 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 		enabled: settings.enabled,
 		modelId: settings.modelId,
 		server: serverState,
+		activeKind: server ? activeKind() : null,
+		activeInfill: server !== null && serverModel !== null && specOf(serverModel).infill,
 		serverDetail,
 		pid: server?.pid ?? null,
 		confirm,
@@ -250,6 +301,7 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 		downloadError,
 		models: models.map((m) => ({
 			id: m.id,
+			kind: m.kind,
 			label: m.label,
 			blurb: m.blurb,
 			sizeBytes: m.sizeBytes,
@@ -317,7 +369,7 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 		serverModel = spec.id;
 		const handle = startLlamaServer({
 			command: serverPath,
-			args: argsFor(modelPath(spec), paths.socketPath),
+			args: argsFor(modelPath(spec), paths.socketPath, spec.kind),
 			socketPath: paths.socketPath,
 			pidFile: paths.pidFile,
 			logFile: paths.logFile,
@@ -467,7 +519,9 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 		/** Read the settings, clear up after a crashed run, and bring the feature back as it was left. */
 		init: () =>
 			serial(async () => {
-				settings = await readInlineCompletionSettings(paths.stateDir);
+				const read = await readInlineCompletionSettings(paths.stateDir);
+				settings = read.settings;
+				if (read.migrated) await persist(settings);
 				await refreshInstalled();
 				await reapOrphan(paths.pidFile, paths.runtimeDir).catch(() => false);
 				if (!settings.enabled || unsupported()) {
@@ -516,30 +570,6 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 				emit();
 			}),
 
-		/**
-		 * Pick a model. An installed one is switched to at once; one that is not
-		 * asks for the download first and leaves the current model serving.
-		 */
-		selectModel: (id: ModelId) =>
-			serial(async () => {
-				if (!models.some((m) => m.id === id)) return;
-				await refreshInstalled();
-				if (!settings.enabled) {
-					await persist({ ...settings, modelId: id });
-					confirm = null;
-					return emit();
-				}
-				if (installed.has(id) && runtimeInstalled) {
-					confirm = null;
-					await persist({ ...settings, modelId: id });
-					await startServer();
-					return emit();
-				}
-				if (download) await abortDownload(true);
-				await askToDownload(id);
-				emit();
-			}),
-
 		/** The person said yes to the size they were shown. */
 		confirmDownload: () =>
 			serial(async () => {
@@ -571,21 +601,16 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 				emit();
 			}),
 
-		/** Delete a downloaded model that is not the one running. */
-		removeModel: (id: ModelId) =>
-			serial(async () => {
-				if (server && serverModel === id) return;
-				const spec = models.find((m) => m.id === id);
-				if (!spec) return;
-				await rm(modelPath(spec), { force: true });
-				await refreshInstalled();
-				emit();
-			}),
-
 		/** One prediction. Null when the server is not ready, the request was superseded, or it failed. */
 		complete: async (requestId: string, request: InfillRequest): Promise<InfillResult | null> => {
-			if (serverState !== "ready" || !server) return null;
-			return lane.submit(requestId, request);
+			if (serverState !== "ready" || !server || !serverModel || !specOf(serverModel).infill) return null;
+			return (await lane.submit(requestId, { kind: "infill", request })) as InfillResult | null;
+		},
+
+		/** One next-edit prediction: the window rewritten. Null unless a next-edit model is ready. */
+		predictEdit: async (requestId: string, request: NextEditRequest): Promise<NextEditResult | null> => {
+			if (serverState !== "ready" || !server || activeKind() !== "next-edit") return null;
+			return (await lane.submit(requestId, { kind: "nextEdit", request })) as NextEditResult | null;
 		},
 
 		/** The editor moved on. See request-lane.ts for why that rarely means aborting. */

@@ -10,11 +10,7 @@ import { Textarea } from "../ui/textarea";
 import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
 import { SettingEditorControl } from "./SettingEditorControl";
 import { CompanionControls } from "./CompanionControls";
-import {
-	InlineCompletionControls,
-	InlineCompletionModelPicker,
-	inlineCompletionSummary,
-} from "./InlineCompletionControls";
+import { InlineCompletionControls, inlineCompletionSummary } from "./InlineCompletionControls";
 import { useInlineCompletionStatus } from "../../lib/inline-completion/status";
 import { CompanionPreview } from "./CompanionPreview";
 import { PetLibrary } from "./PetLibrary";
@@ -632,13 +628,13 @@ function CodeEditorSection() {
 			<SettingRows>
 				<SettingRow
 					name="Predictive code completion"
-					summary="Shows what you are likely to type next as grey text after the cursor. Tab accepts it; Esc or typing something else dismisses it."
+					summary="Shows what you are likely to type next as grey text after the cursor, and - when there is nothing to add there - the change you are likely to make next, drawn where it would land. Tab accepts it (jumping there first when it is further away); Esc or typing something else dismisses it."
 					detail={
 						<>
-							A code model runs on this Mac: AO downloads llama.cpp and the model into <code>~/.ao/llm</code> the first
-							time, starts its own llama-server while this is on, and stops exactly that process when you turn it off or
-							quit. Your code never leaves this Mac. Language-server completions (⌃Space) keep working alongside it, and
-							Tab still indents when no prediction is showing.
+							A code model (Sweep Next-Edit 1.5B) runs on this Mac: AO downloads llama.cpp and the model into{" "}
+							<code>~/.ao/llm</code> the first time, starts its own llama-server while this is on, and stops exactly
+							that process when you turn it off or quit. Your code never leaves this Mac. Language-server completions
+							(⌃Space) keep working alongside it, and Tab still indents when no prediction is showing.
 						</>
 					}
 					ownership={{ kind: "global-only" }}
@@ -647,18 +643,6 @@ function CodeEditorSection() {
 					defaultOpen
 				>
 					<InlineCompletionControls />
-				</SettingRow>
-				<SettingRow
-					name="Prediction model"
-					summary="Larger models guess better but answer more slowly and hold more memory while on."
-					detail="Choosing a model you have not downloaded asks first, with its size; the current one keeps predicting until the new one is ready."
-					ownership={{ kind: "global-only" }}
-					timing="instant"
-					value={status?.models.find((m) => m.id === status.modelId)?.label ?? "…"}
-					gate={status?.unsupported ?? undefined}
-					controlId="inlineCompletionModel"
-				>
-					<InlineCompletionModelPicker />
 				</SettingRow>
 			</SettingRows>
 		</>

@@ -190,7 +190,7 @@ test("the header chip says the model is ready, and opens its controls", async ({
 	await expect(chip).toHaveAttribute("data-state-server", "ready");
 	await chip.click();
 	await expect(page.getByTestId("inline-completion-controls")).toBeVisible();
-	await expect(page.getByTestId("inline-completion-status")).toContainText("Ready - Qwen2.5-Coder 1.5B");
+	await expect(page.getByTestId("inline-completion-status")).toContainText("Ready - Sweep Next-Edit 1.5B");
 });
 
 test("where there is no main process, there is no chip at all", async ({ page }) => {

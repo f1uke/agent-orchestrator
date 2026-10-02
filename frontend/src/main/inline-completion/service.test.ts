@@ -11,6 +11,7 @@ import {
 	type InlineCompletionService,
 	type InlineCompletionStatus,
 	inlineCompletionPaths,
+	serverArgs,
 } from "./service";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -19,7 +20,6 @@ const FAKE_SERVER = path.join(HERE, "fake-llama-server.mjs");
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 const RUNTIME_BYTES = Buffer.from("pretend tarball");
 const SMALL = Buffer.alloc(64_000, 1);
-const LARGE = Buffer.alloc(128_000, 2);
 
 const RUNTIME: RuntimeArtifact = {
 	tag: "b1",
@@ -28,9 +28,12 @@ const RUNTIME: RuntimeArtifact = {
 	sizeBytes: RUNTIME_BYTES.length,
 	sha256: sha(RUNTIME_BYTES),
 };
+/** One model, as AO ships: a next-edit model that also answers fill-in-the-middle. */
 const MODELS: ModelSpec[] = [
 	{
-		id: "qwen2.5-coder-1.5b",
+		id: "sweep-next-edit-1.5b",
+		kind: "next-edit",
+		infill: true,
 		label: "Small",
 		fileName: "small.gguf",
 		url: "https://example.invalid/small.gguf",
@@ -38,21 +41,11 @@ const MODELS: ModelSpec[] = [
 		sha256: sha(SMALL),
 		blurb: "small",
 	},
-	{
-		id: "qwen2.5-coder-3b",
-		label: "Large",
-		fileName: "large.gguf",
-		url: "https://example.invalid/large.gguf",
-		sizeBytes: LARGE.length,
-		sha256: sha(LARGE),
-		blurb: "large",
-	},
 ];
 
 const BODIES: Record<string, Buffer> = {
 	[RUNTIME.url]: RUNTIME_BYTES,
 	[MODELS[0].url]: SMALL,
-	[MODELS[1].url]: LARGE,
 };
 
 /** Serves the pinned bytes, slowly enough that a test can cancel half way. */
@@ -141,14 +134,88 @@ function alive(pid: number): boolean {
 	}
 }
 
+describe("serverArgs", () => {
+	test("a next-edit model runs with n-gram speculative decoding and a slot per kind of prompt", () => {
+		const nextEdit = serverArgs("m.gguf", "s.sock", "next-edit");
+		expect(nextEdit).toEqual(expect.arrayContaining(["--spec-type"]));
+		expect(nextEdit[nextEdit.indexOf("-np") + 1]).toBe("2");
+		// Each slot keeps a FIM model's whole context.
+		expect(nextEdit[nextEdit.indexOf("-c") + 1]).toBe("16384");
+		const fim = serverArgs("m.gguf", "s.sock", "fim");
+		expect(fim).not.toContain("--spec-type");
+		expect(fim[fim.indexOf("-np") + 1]).toBe("1");
+		expect(fim[fim.indexOf("-c") + 1]).toBe("8192");
+	});
+});
+
 describe("inline completion service", () => {
+	test("the model answers both: a rewrite of the window, and fill-in-the-middle at the cursor", async () => {
+		const { service, until } = setup();
+		await service.init();
+		await service.enable();
+		await service.confirmDownload();
+		const ready = await until((s) => s.server === "ready");
+		expect(ready.activeKind).toBe("next-edit");
+
+		const request = {
+			path: "a.ts",
+			recent: [{ path: "a.ts", original: "let OLD = 1", updated: "let NEW = 1" }],
+			original: "let OLD = 1\nuse(OLD)",
+			current: "let NEW = 1\nuse(OLD)",
+		};
+		const answer = await service.predictEdit("e1", request);
+		expect(answer?.window).toBe("let NEW = 1\nuse(NEW)");
+		// It answers fill-in-the-middle too: ghost text at the cursor.
+		expect(ready.activeInfill).toBe(true);
+		expect(
+			(await service.complete("c1", { inputPrefix: "", prompt: "x", inputSuffix: "", inputExtra: [], nIndent: 0 }))
+				?.content,
+		).toBe("<x>");
+
+		await service.disable();
+		expect(await service.predictEdit("e2", request)).toBeNull();
+	});
+
+	test("a setting that names a retired Qwen model moves to the shipped one, on or off as it was", async () => {
+		const on = setup();
+		writeFileSync(
+			path.join(on.stateDir, "inline-completion.json"),
+			JSON.stringify({ enabled: true, modelId: "qwen2.5-coder-1.5b" }),
+		);
+		await on.service.init();
+		let s = on.service.status();
+		// Still on: the switch reads on and the download is asked for, with its size.
+		expect(s).toMatchObject({ enabled: true, modelId: "sweep-next-edit-1.5b", server: "off" });
+		expect(s.confirm).toMatchObject({ modelId: "sweep-next-edit-1.5b", bytes: RUNTIME_BYTES.length + SMALL.length });
+		expect(on.fetch.asked).toHaveLength(0);
+		expect(JSON.parse(readFileSync(path.join(on.stateDir, "inline-completion.json"), "utf8"))).toEqual({
+			enabled: true,
+			modelId: "sweep-next-edit-1.5b",
+		});
+		await on.service.confirmDownload();
+		s = await on.until((x) => x.server === "ready");
+		expect(s.activeKind).toBe("next-edit");
+
+		const off = setup();
+		writeFileSync(
+			path.join(off.stateDir, "inline-completion.json"),
+			JSON.stringify({ enabled: false, modelId: "qwen2.5-coder-7b" }),
+		);
+		await off.service.init();
+		expect(off.service.status()).toMatchObject({ enabled: false, modelId: "sweep-next-edit-1.5b", confirm: null });
+		expect(JSON.parse(readFileSync(path.join(off.stateDir, "inline-completion.json"), "utf8"))).toEqual({
+			enabled: false,
+			modelId: "sweep-next-edit-1.5b",
+		});
+	});
+
 	test("enable on a clean state asks first - with the size - and downloads nothing", async () => {
 		const { service, fetch } = setup();
 		await service.init();
 		await service.enable();
 		const s = service.status();
 		expect(s.confirm).toEqual({
-			modelId: "qwen2.5-coder-1.5b",
+			modelId: "sweep-next-edit-1.5b",
 			bytes: RUNTIME_BYTES.length + SMALL.length,
 			runtimeBytes: RUNTIME_BYTES.length,
 			freeBytes: expect.any(Number),
@@ -167,7 +234,7 @@ describe("inline completion service", () => {
 		const pid = ready.pid as number;
 		expect(pid).toBeGreaterThan(0);
 		expect(alive(pid)).toBe(true);
-		expect(ready.models.find((m) => m.id === "qwen2.5-coder-1.5b")?.installed).toBe(true);
+		expect(ready.models.find((m) => m.id === "sweep-next-edit-1.5b")?.installed).toBe(true);
 		// Progress was reported across BOTH files, in one bar that ends full.
 		const downloads = statuses.map((s) => s.download).filter((d) => d !== null);
 		expect(downloads.at(-1)?.receivedBytes).toBe(RUNTIME_BYTES.length + SMALL.length);
@@ -176,7 +243,7 @@ describe("inline completion service", () => {
 		expect(existsSync(path.join(paths.modelsDir, "small.gguf"))).toBe(true);
 		expect(JSON.parse(readFileSync(path.join(stateDir, "inline-completion.json"), "utf8"))).toEqual({
 			enabled: true,
-			modelId: "qwen2.5-coder-1.5b",
+			modelId: "sweep-next-edit-1.5b",
 		});
 
 		const answer = await service.complete("r1", {
@@ -232,45 +299,6 @@ describe("inline completion service", () => {
 		const s = service.status();
 		expect(s).toMatchObject({ enabled: false, server: "off", download: null, confirm: null });
 		expect(existsSync(path.join(paths.downloadsDir, "small.gguf.part"))).toBe(false);
-		expect(existsSync(path.join(paths.modelsDir, "small.gguf"))).toBe(false);
-	});
-
-	test("switching to a model that is not downloaded asks first and keeps the current one serving", async () => {
-		const { service, until } = setup();
-		await service.init();
-		await service.enable();
-		await service.confirmDownload();
-		const first = await until((s) => s.server === "ready");
-
-		await service.selectModel("qwen2.5-coder-3b");
-		let s = service.status();
-		expect(s.confirm).toMatchObject({ modelId: "qwen2.5-coder-3b", bytes: LARGE.length });
-		expect(s.modelId).toBe("qwen2.5-coder-1.5b");
-		expect(s.server).toBe("ready");
-		expect(s.pid).toBe(first.pid);
-
-		// Cancelling the question leaves everything as it was.
-		await service.cancelDownload();
-		s = service.status();
-		expect(s).toMatchObject({ enabled: true, server: "ready", modelId: "qwen2.5-coder-1.5b", pid: first.pid });
-
-		await service.selectModel("qwen2.5-coder-3b");
-		await service.confirmDownload();
-		const switched = await until((x) => x.modelId === "qwen2.5-coder-3b" && x.server === "ready");
-		expect(switched.pid).not.toBe(first.pid);
-		expect(alive(first.pid as number)).toBe(false);
-	});
-
-	test("a removed model frees its file; the running one cannot be removed", async () => {
-		const { service, paths, until } = setup();
-		await service.init();
-		await service.enable();
-		await service.confirmDownload();
-		await until((s) => s.server === "ready");
-		await service.removeModel("qwen2.5-coder-1.5b");
-		expect(existsSync(path.join(paths.modelsDir, "small.gguf"))).toBe(true);
-		await service.disable();
-		await service.removeModel("qwen2.5-coder-1.5b");
 		expect(existsSync(path.join(paths.modelsDir, "small.gguf"))).toBe(false);
 	});
 

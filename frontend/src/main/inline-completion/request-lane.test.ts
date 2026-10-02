@@ -46,12 +46,14 @@ function controllable() {
 	return { send, pending, answer };
 }
 
+const isWarmup = (r: InfillRequest) => r.nPredict === 0;
+
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("createRequestLane", () => {
 	test("one on the wire; the newest replaces whatever was waiting", async () => {
 		const server = controllable();
-		const lane = createRequestLane(server.send, { timeoutMs: 5_000 });
+		const lane = createRequestLane(server.send, { timeoutMs: 5_000, isWarmup });
 		const a = lane.submit("a", req("f"));
 		const b = lane.submit("b", req("fo"));
 		const c = lane.submit("c", req("foo"));
@@ -69,7 +71,7 @@ describe("createRequestLane", () => {
 
 	test("cancelling the request on the wire lets it finish - its answer is still delivered", async () => {
 		const server = controllable();
-		const lane = createRequestLane(server.send, { timeoutMs: 5_000 });
+		const lane = createRequestLane(server.send, { timeoutMs: 5_000, isWarmup });
 		const a = lane.submit("a", req("f"));
 		await tick();
 		lane.cancel("a");
@@ -80,7 +82,7 @@ describe("createRequestLane", () => {
 
 	test("cancelling a waiting request drops it before it is sent", async () => {
 		const server = controllable();
-		const lane = createRequestLane(server.send, { timeoutMs: 5_000 });
+		const lane = createRequestLane(server.send, { timeoutMs: 5_000, isWarmup });
 		const a = lane.submit("a", req("f"));
 		const b = lane.submit("b", req("fo"));
 		lane.cancel("b");
@@ -93,7 +95,7 @@ describe("createRequestLane", () => {
 
 	test("a warm-up on the wire IS aborted when cancelled", async () => {
 		const server = controllable();
-		const lane = createRequestLane(server.send, { timeoutMs: 5_000 });
+		const lane = createRequestLane(server.send, { timeoutMs: 5_000, isWarmup });
 		const warm = lane.submit("w", req("", 0));
 		await tick();
 		lane.cancel("w");
@@ -107,7 +109,7 @@ describe("createRequestLane", () => {
 
 	test("a warm-up never displaces a prediction that is waiting", async () => {
 		const server = controllable();
-		const lane = createRequestLane(server.send, { timeoutMs: 5_000 });
+		const lane = createRequestLane(server.send, { timeoutMs: 5_000, isWarmup });
 		const a = lane.submit("a", req("f"));
 		const b = lane.submit("b", req("fo"));
 		const warm = lane.submit("w", req("", 0));
@@ -123,7 +125,7 @@ describe("createRequestLane", () => {
 	test("a request that hangs is given up at the timeout and the lane moves on", async () => {
 		const server = controllable();
 		const errors: unknown[] = [];
-		const lane = createRequestLane(server.send, { timeoutMs: 30, onError: (e) => errors.push(e) });
+		const lane = createRequestLane(server.send, { timeoutMs: 30, onError: (e) => errors.push(e), isWarmup });
 		const stuck = lane.submit("a", req("f"));
 		const next = lane.submit("b", req("fo"));
 		expect(await stuck).toBeNull();
@@ -137,7 +139,7 @@ describe("createRequestLane", () => {
 
 	test("clear() answers everything null", async () => {
 		const server = controllable();
-		const lane = createRequestLane(server.send, { timeoutMs: 5_000 });
+		const lane = createRequestLane(server.send, { timeoutMs: 5_000, isWarmup });
 		const a = lane.submit("a", req("f"));
 		const b = lane.submit("b", req("fo"));
 		await tick();

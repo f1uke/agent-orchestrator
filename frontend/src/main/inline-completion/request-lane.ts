@@ -1,5 +1,3 @@
-import type { InfillRequest, InfillResult } from "./infill";
-
 /**
  * How predictions reach the server: ONE on the wire, ONE waiting, the newest
  * wins the waiting place, and a request on the wire is NOT aborted when the
@@ -15,30 +13,44 @@ import type { InfillRequest, InfillResult } from "./infill";
  * wasted: the editor caches it, and the typed-through lookup turns it into the
  * ghost text for the characters typed since.
  *
- * The one exception is a cache warm-up (`nPredict: 0`): it generates nothing
- * anyone reads and can take seconds on a large ring, so it IS aborted - the
- * server keeps whatever prompt it had already processed.
+ * Two kinds of request ARE aborted, each named by a predicate:
+ * - `isWarmup`: a cache warm-up generates nothing anyone reads and can take
+ *   seconds on a large ring - it never takes a prediction's place, and is
+ *   aborted when cancelled (the server keeps whatever prompt it had processed).
+ * - `abortsWhenSuperseded`: a STREAMED request, which the server notices is gone
+ *   at its very next token, so aborting it frees the slot at once instead of
+ *   late. A next-edit rewrite is one, and its answer is tied to the exact buffer
+ *   it was asked about, so finishing it for a superseded state buys nothing.
  */
-export type RequestLane = {
-	submit(id: string, request: InfillRequest): Promise<InfillResult | null>;
+export type RequestLane<Req, Res> = {
+	submit(id: string, request: Req): Promise<Res | null>;
 	cancel(id: string): void;
 	/** Drop everything: the waiting request answers null, the one on the wire is aborted. */
 	clear(): void;
 };
 
-type Job = {
+type Job<Req, Res> = {
 	id: string;
-	request: InfillRequest;
-	resolve: (result: InfillResult | null) => void;
+	request: Req;
+	resolve: (result: Res | null) => void;
 	abort?: AbortController;
 };
 
-export function createRequestLane(
-	send: (request: InfillRequest, signal: AbortSignal) => Promise<InfillResult>,
-	options: { timeoutMs: number; onError?: (err: unknown) => void },
-): RequestLane {
-	let wire: Job | null = null;
-	let waiting: Job | null = null;
+export type RequestLaneOptions<Req> = {
+	timeoutMs: number;
+	onError?: (err: unknown) => void;
+	isWarmup?: (request: Req) => boolean;
+	abortsWhenSuperseded?: (request: Req) => boolean;
+};
+
+export function createRequestLane<Req, Res>(
+	send: (request: Req, signal: AbortSignal) => Promise<Res>,
+	options: RequestLaneOptions<Req>,
+): RequestLane<Req, Res> {
+	const isWarmup = options.isWarmup ?? (() => false);
+	const abortsWhenSuperseded = options.abortsWhenSuperseded ?? (() => false);
+	let wire: Job<Req, Res> | null = null;
+	let waiting: Job<Req, Res> | null = null;
 
 	const pump = () => {
 		if (wire || !waiting) return;
@@ -68,12 +80,13 @@ export function createRequestLane(
 			return new Promise((resolve) => {
 				// A warm-up never takes the place of a prediction someone is waiting
 				// for; it is only ever worth sending into an idle lane.
-				if (request.nPredict === 0 && waiting && waiting.request.nPredict !== 0) {
+				if (isWarmup(request) && waiting && !isWarmup(waiting.request)) {
 					resolve(null);
 					return;
 				}
 				waiting?.resolve(null);
 				waiting = { id, request, resolve };
+				if (wire && abortsWhenSuperseded(wire.request)) wire.abort?.abort();
 				pump();
 			});
 		},
@@ -83,7 +96,7 @@ export function createRequestLane(
 				waiting = null;
 				return;
 			}
-			if (wire?.id === id && wire.request.nPredict === 0) wire.abort?.abort();
+			if (wire?.id === id && (isWarmup(wire.request) || abortsWhenSuperseded(wire.request))) wire.abort?.abort();
 		},
 		clear() {
 			waiting?.resolve(null);

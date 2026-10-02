@@ -1,11 +1,7 @@
 import { Sparkles } from "lucide-react";
 import { ACCENT, PALETTE as P } from "../lib/comment-inbox";
 import { useInlineCompletionStatus } from "../lib/inline-completion/status";
-import {
-	InlineCompletionControls,
-	InlineCompletionModelPicker,
-	inlineCompletionSummary,
-} from "./settings/InlineCompletionControls";
+import { InlineCompletionControls, inlineCompletionSummary } from "./settings/InlineCompletionControls";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
 /**
@@ -29,7 +25,7 @@ export function InlineCompletionChip() {
 	const tone = status.server === "error" ? P.red : status.enabled && status.server === "ready" ? ACCENT : P.muted2;
 	const title =
 		status.server === "ready"
-			? "Predictive code completion is on: grey text after the cursor, Tab to accept. Click to change."
+			? "Predictive code completion is on: grey text after the cursor, or your next edit where it would land - Tab accepts. Click to change."
 			: status.server === "error"
 				? `Predictive code completion stopped: ${status.serverDetail ?? "llama-server failed"}`
 				: `Predictive code completion: ${summary}. Click to change.`;
@@ -62,11 +58,11 @@ export function InlineCompletionChip() {
 					<div className="flex flex-col gap-1">
 						<span className="text-[13px] font-medium text-foreground">Predictive code completion</span>
 						<span className="text-[11.5px] leading-[1.5] text-muted-foreground">
-							A code model on this Mac suggests the rest of what you are typing. Tab accepts.
+							A code model on this Mac suggests the rest of what you are typing, and the edit you are likely to make
+							next. Tab accepts.
 						</span>
 					</div>
-					<InlineCompletionControls id="inlineCompletionEnabledEditor" />
-					<InlineCompletionModelPicker id="inlineCompletionModelEditor" />
+					<InlineCompletionControls id="inlineCompletionEnabledEditor" describeModel={false} />
 				</div>
 			</PopoverContent>
 		</Popover>
