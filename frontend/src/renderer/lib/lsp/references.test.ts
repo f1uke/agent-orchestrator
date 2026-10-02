@@ -53,7 +53,7 @@ function token(cancelled = false): CancellationToken {
 	return { isCancellationRequested: cancelled, onCancellationRequested: () => ({ dispose: () => undefined }) } as never;
 }
 
-function harness(state = "ready", features = { hover: true, references: true }) {
+function harness(state = "ready", features = { hover: true, references: true, formatting: false }) {
 	const inFlight: Deferred[] = [];
 	const sent: { method: string; params: unknown }[] = [];
 	const shown: string[] = [];
@@ -268,7 +268,7 @@ describe("refusing", () => {
 	});
 
 	test("a server that offers no reference search says which silence it is", async () => {
-		const h = harness("ready", { hover: true, references: false });
+		const h = harness("ready", { hover: true, references: false, formatting: false });
 		register(h.document);
 		await expect(ask()).resolves.toBeUndefined();
 		await settle();

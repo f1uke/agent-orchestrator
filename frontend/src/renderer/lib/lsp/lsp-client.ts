@@ -43,7 +43,7 @@ export type CompletionCapability = { triggerCharacters?: string[]; resolveProvid
  * feature then says so instead of asking a question that comes back
  * `MethodNotFound` on every pointer rest.
  */
-export type ServerFeatures = { hover: boolean; references: boolean };
+export type ServerFeatures = { hover: boolean; references: boolean; formatting: boolean };
 
 export type LspTransport = {
 	send(handleId: string, message: JsonRpcMessage): void;
@@ -181,7 +181,7 @@ export function createLspClient(
 			return mapping.completion ?? null;
 		},
 		features() {
-			return mapping.features ?? { hover: false, references: false };
+			return mapping.features ?? { hover: false, references: false, formatting: false };
 		},
 		request<T>(method: string, params: unknown): Promise<T> {
 			if (disposed) return Promise.reject(new Error(`LSP client disposed (${method})`));

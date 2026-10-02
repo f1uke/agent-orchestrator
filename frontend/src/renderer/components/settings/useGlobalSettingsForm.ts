@@ -8,6 +8,8 @@ import { updateSettingsQueryKey } from "./SystemActions";
 import { wikiStatusQueryKey } from "../../hooks/useWiki";
 import { refLinkSettingsQueryKey, type RefLinkSettingsResponse } from "../../hooks/useRefLinkSettings";
 import { formatAliasLines, parseAliasLines } from "../../lib/ref-links";
+import { DEFAULT_EDITOR_SETTINGS } from "../../../shared/editor-settings";
+import { editorSettingsQueryKey } from "../../hooks/useEditorSettings";
 
 export type PromptKind = "orchestrator" | "worker" | "qa" | "reviewer";
 export type PromptItem = { kind: PromptKind; default: string; override: string | null };
@@ -54,6 +56,11 @@ export type GlobalDraft = {
 	evidenceRetentionDays: number;
 	updatesEnabled: boolean;
 	updateChannel: UpdateChannel;
+	// The code editor's preferences (~/.ao/editor-settings.json).
+	editorIndentOnType: boolean;
+	editorFormatOnSave: boolean;
+	editorReindentShortcut: string;
+	editorFormatShortcut: string;
 };
 
 export type GlobalScalarField =
@@ -71,7 +78,11 @@ export type GlobalScalarField =
 	| "evidenceRetentionEnabled"
 	| "evidenceRetentionDays"
 	| "updatesEnabled"
-	| "updateChannel";
+	| "updateChannel"
+	| "editorIndentOnType"
+	| "editorFormatOnSave"
+	| "editorReindentShortcut"
+	| "editorFormatShortcut";
 
 const EMPTY_DRAFT: GlobalDraft = {
 	prompts: {},
@@ -91,6 +102,10 @@ const EMPTY_DRAFT: GlobalDraft = {
 	evidenceRetentionDays: 30,
 	updatesEnabled: false,
 	updateChannel: "latest",
+	editorIndentOnType: DEFAULT_EDITOR_SETTINGS.indentOnType,
+	editorFormatOnSave: DEFAULT_EDITOR_SETTINGS.formatOnSave,
+	editorReindentShortcut: DEFAULT_EDITOR_SETTINGS.reindentShortcut,
+	editorFormatShortcut: DEFAULT_EDITOR_SETTINGS.formatShortcut,
 };
 
 function recordEqual(a: Record<string, string>, b: Record<string, string>): boolean {
@@ -187,6 +202,12 @@ export function useGlobalSettingsForm() {
 		},
 	});
 	const updateQuery = useQuery({ queryKey: updateSettingsQueryKey, queryFn: () => aoBridge.updateSettings.get() });
+	// Its own key under the editor's: this copy is the form's baseline, seeded
+	// once; a save invalidates the prefix, which reaches every open editor too.
+	const editorQuery = useQuery({
+		queryKey: [...editorSettingsQueryKey, "form"],
+		queryFn: () => aoBridge.editorSettings.get(),
+	});
 
 	const [draft, setDraft] = useState<GlobalDraft>(EMPTY_DRAFT);
 	const [baseline, setBaseline] = useState<GlobalDraft>(EMPTY_DRAFT);
@@ -299,6 +320,20 @@ export function useGlobalSettingsForm() {
 		setBaseline((b) => ({ ...b, updatesEnabled: enabled, updateChannel: channel }));
 	}, [updateQuery.data]);
 
+	useEffect(() => {
+		if (!editorQuery.data || seeded.current.has("editor")) return;
+		seeded.current.add("editor");
+		const e = editorQuery.data;
+		const v = {
+			editorIndentOnType: e.indentOnType,
+			editorFormatOnSave: e.formatOnSave,
+			editorReindentShortcut: e.reindentShortcut,
+			editorFormatShortcut: e.formatShortcut,
+		};
+		setDraft((d) => ({ ...d, ...v }));
+		setBaseline((b) => ({ ...b, ...v }));
+	}, [editorQuery.data]);
+
 	const prompts = promptsQuery.data ?? [];
 	const templates = templatesQuery.data ?? [];
 	const promptDefault = (kind: string) => prompts.find((p) => p.kind === kind)?.default ?? "";
@@ -322,7 +357,8 @@ export function useGlobalSettingsForm() {
 		draft.evidenceRetentionEnabled !== baseline.evidenceRetentionEnabled ||
 		draft.evidenceRetentionDays !== baseline.evidenceRetentionDays ||
 		draft.updatesEnabled !== baseline.updatesEnabled ||
-		draft.updateChannel !== baseline.updateChannel;
+		draft.updateChannel !== baseline.updateChannel ||
+		editorDirty(draft, baseline);
 
 	const touch = () => setSavedAt(null);
 	const setPrompt = (kind: string, value: string) => {
@@ -486,6 +522,18 @@ export function useGlobalSettingsForm() {
 				};
 				ops.push(aoBridge.updateSettings.set(next));
 			}
+			if (editorDirty(draft, baseline)) {
+				ops.push(
+					aoBridge.editorSettings
+						.set({
+							indentOnType: draft.editorIndentOnType,
+							formatOnSave: draft.editorFormatOnSave,
+							reindentShortcut: draft.editorReindentShortcut,
+							formatShortcut: draft.editorFormatShortcut,
+						})
+						.then(() => undefined),
+				);
+			}
 			await Promise.all(ops);
 			return saved;
 		},
@@ -518,6 +566,9 @@ export function useGlobalSettingsForm() {
 			void queryClient.invalidateQueries({ queryKey: reclaimSettingsQueryKey });
 			void queryClient.invalidateQueries({ queryKey: evidenceRetentionQueryKey });
 			void queryClient.invalidateQueries({ queryKey: updateSettingsQueryKey });
+			// Every open editor reads this key: a re-bound shortcut works on the
+			// next key press, without reopening the file.
+			void queryClient.invalidateQueries({ queryKey: editorSettingsQueryKey });
 		},
 	});
 
@@ -544,6 +595,15 @@ export function useGlobalSettingsForm() {
 		save: () => mutation.mutate(),
 		discard,
 	};
+}
+
+function editorDirty(draft: GlobalDraft, baseline: GlobalDraft): boolean {
+	return (
+		draft.editorIndentOnType !== baseline.editorIndentOnType ||
+		draft.editorFormatOnSave !== baseline.editorFormatOnSave ||
+		draft.editorReindentShortcut !== baseline.editorReindentShortcut ||
+		draft.editorFormatShortcut !== baseline.editorFormatShortcut
+	);
 }
 
 function refLinksDirty(draft: GlobalDraft, baseline: GlobalDraft): boolean {

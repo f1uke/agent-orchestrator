@@ -85,9 +85,10 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		key: "editor",
 		label: "Code editor",
 		Icon: CodeXml,
-		hint: "the built-in editor, on this Mac",
+		hint: "how the built-in editor completes, indents and formats",
 		keywords:
-			"predictive code completion inline ghost text suggestion prediction tab accept autocomplete model llama llama.cpp llama-server local ai download next edit nes sweep jump rename",
+			"predictive code completion inline ghost text suggestion prediction tab accept autocomplete model llama llama.cpp llama-server local ai download next edit nes sweep jump rename " +
+			"format formatter formatting indent indentation re-indent reindent xcode spaces shortcut keyboard keybinding ctrl control gofmt gopls swift-format sourcekit prettier format on save paste typing return enter brace editorconfig",
 	},
 	{
 		key: "mac",

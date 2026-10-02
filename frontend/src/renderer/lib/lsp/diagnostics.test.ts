@@ -35,7 +35,7 @@ function fakeClient(): LspClient & { publish: (params: unknown) => void; listene
 		documentUri: (p: string) => `file://${p}`,
 		semanticTokensLegend: () => null,
 		completionCapability: () => null,
-		features: () => ({ hover: true, references: true }),
+		features: () => ({ hover: true, references: true, formatting: false }),
 		request: vi.fn(),
 		notify: vi.fn(),
 		didOpen: vi.fn(),

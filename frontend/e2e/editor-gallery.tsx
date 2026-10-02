@@ -3,6 +3,7 @@
 import { GALLERY_PATH } from "./editor-gallery-api-stub";
 import { GALLERY_WORKSPACE_ROOT, installFakeLspBridge } from "./editor-gallery-lsp-stub";
 import { installFakeInlineCompletion } from "./editor-gallery-predict-stub";
+import { installFakeFormatBridge } from "./editor-gallery-format-stub";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
@@ -69,6 +70,14 @@ if (predict) {
 	});
 }
 
+// `?format=ok|fail` gives the page a formatter (and a workspace root, which is
+// what turns a relative path into the absolute one a tool is handed).
+// `?formatOnSave=1` turns format-on-save on.
+const formatMode = params.get("format");
+if (formatMode === "ok" || formatMode === "fail") {
+	installFakeFormatBridge({ mode: formatMode, formatOnSave: params.get("formatOnSave") === "1" });
+}
+
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 function Gallery() {
@@ -99,7 +108,7 @@ function Gallery() {
 							sessionId="gallery"
 							path={GALLERY_PATH}
 							line={line}
-							workspaceRoot={withLsp ? GALLERY_WORKSPACE_ROOT : undefined}
+							workspaceRoot={withLsp || formatMode ? GALLERY_WORKSPACE_ROOT : undefined}
 							onClose={() => {}}
 						/>
 					</div>

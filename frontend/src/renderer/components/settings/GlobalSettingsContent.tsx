@@ -16,6 +16,10 @@ import { CompanionPreview } from "./CompanionPreview";
 import { PetLibrary } from "./PetLibrary";
 import { MigrationControls, NotificationsControls, UpdateActions } from "./SystemActions";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
+import { ShortcutField } from "./ShortcutField";
+import { DEFAULT_EDITOR_SETTINGS } from "../../../shared/editor-settings";
+import { shortcutLabel } from "../../../shared/editor-shortcuts";
+import { isMacPlatform } from "../../lib/platform";
 import { GLOBAL_SECTIONS } from "./settings-sections";
 import type { PromptKind } from "./useGlobalSettingsForm";
 import type { useGlobalSettingsForm } from "./useGlobalSettingsForm";
@@ -77,7 +81,7 @@ export function GlobalSettingsContent({ form, activeSection }: { form: GlobalFor
 		case "cleanup":
 			return <CleaningUpSection form={form} />;
 		case "editor":
-			return <CodeEditorSection />;
+			return <CodeEditorSection form={form} />;
 		case "mac":
 			return <ThisMacSection form={form} />;
 		default:
@@ -394,6 +398,119 @@ function formatBytes(n: number): string {
 	return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+// The built-in editor: predictive completion (both rows instant - they start
+// and stop a process and a download, not something to stage behind a Save),
+// then indentation and formatting (saved with the bar like everything else).
+function CodeEditorSection({ form }: { form: GlobalForm }) {
+	const { draft, setField, isFieldDirty } = form;
+	const status = useInlineCompletionStatus();
+	const mac = isMacPlatform();
+	const shown = (shortcut: string) => (shortcut === "" ? "Not set" : shortcutLabel(shortcut, mac));
+	return (
+		<>
+			<SectionHeading title="Code editor" hint={hint("editor")} />
+			<SettingRows>
+				<SettingRow
+					name="Predictive code completion"
+					summary="Shows what you are likely to type next as grey text after the cursor, and - when there is nothing to add there - the change you are likely to make next, drawn where it would land. Tab accepts it (jumping there first when it is further away); Esc or typing something else dismisses it."
+					detail={
+						<>
+							A code model (Sweep Next-Edit 1.5B) runs on this Mac: AO downloads llama.cpp and the model into{" "}
+							<code>~/.ao/llm</code> the first time, starts its own llama-server while this is on, and stops exactly
+							that process when you turn it off or quit. Your code never leaves this Mac. Language-server completions
+							(⌃Space) keep working alongside it, and Tab still indents when no prediction is showing.
+						</>
+					}
+					ownership={{ kind: "global-only" }}
+					timing="instant"
+					value={inlineCompletionSummary(status)}
+					defaultOpen
+				>
+					<InlineCompletionControls />
+				</SettingRow>
+
+				<SettingRow
+					name="Indent while typing"
+					summary="Return starts the new line at the right depth, a closing } ] or ) on its own line moves back to its opener, and pasted code is re-indented to fit where it lands."
+					detail="Only indentation changes - nothing else on a line is rewritten. Undo takes back a pasted block's re-indent first, then the paste itself."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.editorIndentOnType ? "Enabled" : "Disabled"}
+					modified={isFieldDirty("editorIndentOnType")}
+					controlId="editorIndentOnType"
+				>
+					<OnOffSelect
+						id="editorIndentOnType"
+						value={draft.editorIndentOnType}
+						onChange={(v) => setField("editorIndentOnType", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Re-indent"
+					summary="Re-indents the selected lines, or the line with the cursor, like Xcode's Re-Indent. Only indentation changes."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={shown(draft.editorReindentShortcut)}
+					modified={isFieldDirty("editorReindentShortcut")}
+					controlId="editorReindentShortcut"
+				>
+					<ShortcutField
+						id="editorReindentShortcut"
+						value={draft.editorReindentShortcut}
+						defaultValue={DEFAULT_EDITOR_SETTINGS.reindentShortcut}
+						other={{ shortcut: draft.editorFormatShortcut, what: "Format Document" }}
+						onChange={(v) => setField("editorReindentShortcut", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Format Document"
+					summary="Formats the whole file with its language's own formatter, as one undo step."
+					detail={
+						<>
+							Go uses gopls, or gofmt when gopls is not running. Swift uses sourcekit-lsp or swift-format, and follows
+							the project's .swift-format. TypeScript, JavaScript and the other web languages use Prettier only when the
+							project configures it. Any other language with braces is re-indented instead. A formatter that is missing
+							or fails leaves the file exactly as it was and says why.
+						</>
+					}
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={shown(draft.editorFormatShortcut)}
+					modified={isFieldDirty("editorFormatShortcut")}
+					controlId="editorFormatShortcut"
+				>
+					<ShortcutField
+						id="editorFormatShortcut"
+						value={draft.editorFormatShortcut}
+						defaultValue={DEFAULT_EDITOR_SETTINGS.formatShortcut}
+						other={{ shortcut: draft.editorReindentShortcut, what: "Re-indent" }}
+						onChange={(v) => setField("editorFormatShortcut", v)}
+					/>
+				</SettingRow>
+
+				<SettingRow
+					name="Format on save"
+					summary="Formats the file just before it is saved."
+					detail="If the formatter is missing or refuses the file, it is saved as it is and the editor says why."
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={draft.editorFormatOnSave ? "Enabled" : "Disabled"}
+					modified={isFieldDirty("editorFormatOnSave")}
+					controlId="editorFormatOnSave"
+				>
+					<OnOffSelect
+						id="editorFormatOnSave"
+						value={draft.editorFormatOnSave}
+						onChange={(v) => setField("editorFormatOnSave", v)}
+					/>
+				</SettingRow>
+			</SettingRows>
+		</>
+	);
+}
+
 function ThisMacSection({ form }: { form: GlobalForm }) {
 	const { draft, setField, isFieldDirty } = form;
 	return (
@@ -612,37 +729,6 @@ function ThisMacSection({ form }: { form: GlobalForm }) {
 					timing="instant"
 				>
 					<MigrationControls />
-				</SettingRow>
-			</SettingRows>
-		</>
-	);
-}
-
-// Predictive code completion. Both rows are instant: they start and stop a
-// process and a download, which is not something to stage behind a Save.
-function CodeEditorSection() {
-	const status = useInlineCompletionStatus();
-	return (
-		<>
-			<SectionHeading title="Code editor" hint={hint("editor")} />
-			<SettingRows>
-				<SettingRow
-					name="Predictive code completion"
-					summary="Shows what you are likely to type next as grey text after the cursor, and - when there is nothing to add there - the change you are likely to make next, drawn where it would land. Tab accepts it (jumping there first when it is further away); Esc or typing something else dismisses it."
-					detail={
-						<>
-							A code model (Sweep Next-Edit 1.5B) runs on this Mac: AO downloads llama.cpp and the model into{" "}
-							<code>~/.ao/llm</code> the first time, starts its own llama-server while this is on, and stops exactly
-							that process when you turn it off or quit. Your code never leaves this Mac. Language-server completions
-							(⌃Space) keep working alongside it, and Tab still indents when no prediction is showing.
-						</>
-					}
-					ownership={{ kind: "global-only" }}
-					timing="instant"
-					value={inlineCompletionSummary(status)}
-					defaultOpen
-				>
-					<InlineCompletionControls />
 				</SettingRow>
 			</SettingRows>
 		</>
