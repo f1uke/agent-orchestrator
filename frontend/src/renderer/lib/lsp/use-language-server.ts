@@ -18,12 +18,25 @@ import {
  * path) or because this app ships no server for the language. Saying so is the
  * whole point: what this stack does wrong is answer nothing while looking fine.
  */
-export type LspState = "starting" | "initializing" | "indexing" | "ready" | "failed" | "stopped";
+export type LspState = "starting" | "initializing" | "indexing" | "ready" | "failed" | "stopped" | "unconfigured";
+
+/**
+ * What a workspace still needs before its server is worth starting. Mirrors
+ * `SetupNeed` in main: `build` (an Xcode project with no build of this worktree),
+ * `tool` (a helper to install), `project` (nothing to configure a server from).
+ */
+export type SetupNeed = "build" | "tool" | "project";
 
 export type LanguageServerHandle = {
 	client: LspClient | null;
 	state: LspState | "unavailable";
 	detail?: string;
+	/**
+	 * Set while `state` is `unconfigured`. 🗝 NOT a failure: main keeps checking
+	 * and reports `stopped` once the need is met, which re-attaches the pane - so
+	 * a person who runs the build sees the editor come alive without reopening it.
+	 */
+	need?: SetupNeed;
 	/**
 	 * Configured enough to run, but a feature will find nothing - an Xcode build
 	 * that produced compile settings and no index, say. Distinct from `detail`
@@ -38,6 +51,7 @@ type Bridge = {
 		handleId: string;
 		state: LspState;
 		detail?: string;
+		need?: SetupNeed;
 		documentRoot?: string;
 		warning?: string;
 		semanticTokens?: SemanticTokensLegend | null;
@@ -48,7 +62,9 @@ type Bridge = {
 	send(handleId: string, message: Record<string, unknown>): void;
 	noteResult(handleId: string, outcome: LspResultOutcome): void;
 	onMessage(cb: (e: { handleId: string; message: Record<string, unknown> }) => void): () => void;
-	onState(cb: (e: { handleId: string; key: string; state: LspState; detail?: string }) => void): () => void;
+	onState(
+		cb: (e: { handleId: string; key: string; state: LspState; detail?: string; need?: SetupNeed }) => void,
+	): () => void;
 };
 
 function bridge(): Bridge | null {
@@ -113,6 +129,10 @@ export function useLanguageServer(workspaceRoot: string | undefined, languageId:
 				setHandle({ client: null, state: "failed", detail: event.detail });
 				return;
 			}
+			if (event.state === "unconfigured") {
+				setHandle({ client: null, state: "unconfigured", detail: event.detail, need: event.need });
+				return;
+			}
 			setHandle((prev) => ({ ...prev, state: event.state, detail: event.detail }));
 		});
 
@@ -124,6 +144,12 @@ export function useLanguageServer(workspaceRoot: string | undefined, languageId:
 					return;
 				}
 				attachedId = attachment.handleId;
+				if (attachment.state === "unconfigured") {
+					// Attached to the WAIT, not to a server: there is nothing to build a
+					// client on, and the `stopped` that ends the wait re-attaches.
+					setHandle({ client: null, state: "unconfigured", detail: attachment.detail, need: attachment.need });
+					return;
+				}
 				const transport = lspTransport();
 				if (!transport) return;
 				client = createLspClient(attachment.handleId, transport, {

@@ -255,6 +255,11 @@ function fixtureDiagnostics(warnEvery = 0): unknown[] {
 	return out;
 }
 
+/** What main says about a worktree whose new path Xcode has never built - verbatim. */
+export const UNCONFIGURED_REASON =
+	"Xcode has never built NterWorkspace.xcworkspace from this worktree, so there are no compile settings to read. " +
+	"Build it in Xcode once; the editor connects by itself when the build finishes.";
+
 /** Installs the bridge `useLanguageServer` looks for. Call before React mounts. */
 export function installFakeLspBridge(
 	options: {
@@ -271,10 +276,18 @@ export function installFakeLspBridge(
 		diagnosticsDelayMs?: number;
 		/** Answer no hover / no references, so a spec can ask what is SAID about it. */
 		features?: { hover: boolean; references: boolean };
+		/**
+		 * The first attach WAITS - main's `unconfigured`, a worktree Xcode has not
+		 * built - and this many ms later main reports `stopped`, as it does when the
+		 * build lands. The re-attach after that is served.
+		 */
+		unconfiguredForMs?: number;
 	} = {},
 ): void {
 	const listeners = new Set<(event: { handleId: string; message: Message }) => void>();
+	const stateListeners = new Set<(event: { handleId: string; key: string; state: string; detail?: string }) => void>();
 	let handles = 0;
+	let waited = false;
 	// Read by the spec: a request that was never made is a different failure from
 	// one that was answered and thrown away.
 	const asked: string[] = [];
@@ -294,6 +307,24 @@ export function installFakeLspBridge(
 			attach: async () => {
 				if (options.failAttach) throw new Error(options.failAttach);
 				const handleId = `fake-${++handles}`;
+				if (options.unconfiguredForMs !== undefined && !waited) {
+					waited = true;
+					setTimeout(() => {
+						for (const listener of stateListeners) {
+							listener({ handleId, key: "swift", state: "stopped", detail: "set up: starting the language server" });
+						}
+					}, options.unconfiguredForMs);
+					return {
+						handleId,
+						state: "unconfigured" as const,
+						need: "build",
+						detail: UNCONFIGURED_REASON,
+						documentRoot: GALLERY_WORKSPACE_ROOT,
+						semanticTokens: null,
+						completion: null,
+						features: { hover: false, references: false },
+					};
+				}
 				return {
 					handleId,
 					state: "ready" as const,
@@ -424,7 +455,10 @@ export function installFakeLspBridge(
 				listeners.add(cb);
 				return () => listeners.delete(cb);
 			},
-			onState: () => () => undefined,
+			onState: (cb: (event: { handleId: string; key: string; state: string; detail?: string }) => void) => {
+				stateListeners.add(cb);
+				return () => stateListeners.delete(cb);
+			},
 		},
 	};
 }

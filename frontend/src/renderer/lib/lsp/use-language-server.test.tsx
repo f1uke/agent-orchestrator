@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { useLanguageServer } from "./use-language-server";
 
-type StateEvent = { handleId: string; key: string; state: string; detail?: string };
+type StateEvent = { handleId: string; key: string; state: string; detail?: string; need?: string };
 
 function installBridge() {
 	let seq = 0;
@@ -97,6 +97,57 @@ describe("useLanguageServer", () => {
 		await waitFor(() => expect(result.current.state).toBe("failed"));
 		await new Promise((r) => setTimeout(r, 50));
 		expect(harness.attach).toHaveBeenCalledTimes(1);
+	});
+
+	test("a workspace that is not set up yet waits, then comes alive once main says it is", async () => {
+		// 🗝 The 2026-10-02 report: a moved worktree with no Xcode build of its new
+		// path. That is a wait for one build, not a failure - and once the build
+		// lands, main reports `stopped` and the pane must re-attach on its own
+		// rather than ask the person to close and reopen the file.
+		const reason = "Xcode has never built NterWorkspace.xcworkspace from this worktree.";
+		let calls = 0;
+		harness.bridge.attach = vi.fn(async (input: { root: string; languageId: string }) => {
+			calls++;
+			return calls === 1
+				? {
+						handleId: "wait-1",
+						key: `${input.languageId} ${input.root}`,
+						state: "unconfigured" as const,
+						detail: reason,
+						need: "build",
+					}
+				: { handleId: "h2", key: `${input.languageId} ${input.root}`, state: "ready" as const };
+		}) as unknown as typeof harness.attach;
+		const { result } = renderHook(() => useLanguageServer("/root", "swift"));
+		await waitFor(() => expect(result.current.state).toBe("unconfigured"));
+		expect(result.current).toMatchObject({ client: null, detail: reason, need: "build" });
+
+		harness.emitState({ handleId: "wait-1", key: "swift /root", state: "stopped", detail: "set up" });
+		await waitFor(() => expect(result.current.state).toBe("ready"));
+		expect(result.current.client).not.toBeNull();
+		expect(calls).toBe(2);
+	});
+
+	test("a waiting pane follows a change of reason without re-attaching", async () => {
+		harness.bridge.attach = vi.fn(async () => ({
+			handleId: "wait-1",
+			key: "swift /root",
+			state: "unconfigured" as const,
+			detail: "install xcode-build-server",
+			need: "tool",
+		})) as unknown as typeof harness.attach;
+		const { result } = renderHook(() => useLanguageServer("/root", "swift"));
+		await waitFor(() => expect(result.current.need).toBe("tool"));
+		harness.emitState({
+			handleId: "wait-1",
+			key: "swift /root",
+			state: "unconfigured",
+			detail: "build it",
+			need: "build",
+		});
+		await waitFor(() => expect(result.current.need).toBe("build"));
+		expect(result.current.detail).toBe("build it");
+		expect(harness.bridge.attach).toHaveBeenCalledTimes(1);
 	});
 
 	test("no language and no root both mean `unavailable`, and never attach", () => {

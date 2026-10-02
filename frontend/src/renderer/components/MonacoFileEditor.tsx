@@ -213,6 +213,9 @@ export type EditorHandle = {
 	focus(): void;
 };
 
+/** What the chrome above the editor is told about its language server. */
+export type ServerStatus = Pick<LanguageServerHandle, "state" | "detail" | "need">;
+
 export type MonacoFileEditorProps = {
 	sessionId: string;
 	path: string;
@@ -248,7 +251,7 @@ export type MonacoFileEditorProps = {
 	/** The single file-open seam, so ⌘click opens a target the way everything else does. */
 	onOpenFile?: (file: WorkspaceFileOpen) => void;
 	/** Lets the chrome above report what the language server is doing. */
-	onServerState?: (state: { state: LanguageServerHandle["state"]; detail?: string }) => void;
+	onServerState?: (state: ServerStatus) => void;
 	/**
 	 * Errors and warnings currently on this file.
 	 *
@@ -391,8 +394,8 @@ export default function MonacoFileEditor({
 	const syncRef = useRef<DocumentSync | null>(null);
 
 	useEffect(() => {
-		onServerState?.({ state: server.state, detail: server.detail });
-	}, [server.state, server.detail, onServerState]);
+		onServerState?.({ state: server.state, detail: server.detail, need: server.need });
+	}, [server.state, server.detail, server.need, onServerState]);
 
 	// ⌘click. Both halves - the provider AND the opener - live in
 	// registerLspNavigation; a provider alone resolves the definition and then
@@ -560,6 +563,7 @@ export default function MonacoFileEditor({
 		});
 		const references = registerReferences({
 			...shared,
+			getDetail: () => serverRef.current.detail,
 			readFile,
 			// ⇧F12 is a deliberate gesture, so a refusal answers where the reader is
 			// looking — the same widget Monaco uses for "no definition found".

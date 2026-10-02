@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -66,7 +68,9 @@ describe("keying", () => {
 
 	test("a language with no server in the catalogue rejects by name", async () => {
 		const r = make();
-		await expect(r.attach({ root: HERE, languageId: "swift" })).rejects.toThrow(/swift/);
+		// A missing server is a REJECTION, unlike a workspace waiting to be set up:
+		// nothing the reader does will make one appear.
+		await expect(r.attach({ root: HERE, languageId: "cobol" })).rejects.toThrow(/no language server for "cobol"/);
 	});
 });
 
@@ -154,7 +158,7 @@ describe("disposeAll", () => {
 });
 
 describe("a workspace that cannot be served", () => {
-	test("attach REFUSES with the reason, and spawns nothing", async () => {
+	test("attach DECLINES with the reason, and spawns nothing", async () => {
 		// 🗝 The whole reason `prepare` exists. Pointed at a real .xcodeproj with no
 		// build settings, sourcekit-lsp initializes in ~60 ms, publishes
 		// diagnostics and answers documentSymbol - while returning 0 hits for every
@@ -171,8 +175,124 @@ describe("a workspace that cannot be served", () => {
 				HOME: path.join(HERE, "no-such-home"),
 			}),
 		});
-		await expect(r.attach({ root: HERE, languageId: "swift" })).rejects.toThrow(/Package\.swift|xcode/i);
+		const attachment = await r.attach({ root: HERE, languageId: "swift" });
+		expect(attachment.state).toBe("unconfigured");
+		expect(attachment.detail).toMatch(/Package\.swift|xcode/i);
 		expect(await r.health()).toHaveLength(0);
+	});
+});
+
+/**
+ * 🗝 The 2026-10-02 report, end to end through the registry: a moved worktree
+ * whose new path Xcode had never built. The pane must say it is waiting, spawn
+ * NOTHING while it waits, and come alive by itself once the build lands -
+ * without anyone closing and reopening the file.
+ */
+describe("a Swift worktree waiting for its first Xcode build", () => {
+	let tmp: string;
+	let worktree: string;
+	let derivedData: string;
+	let swiftEnv: () => NodeJS.ProcessEnv;
+
+	const writeBuild = () => {
+		const dir = path.join(derivedData, "NterWorkspace-fresh");
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(
+			path.join(dir, "info.plist"),
+			`<plist><dict><key>WorkspacePath</key><string>${path.join(worktree, "NterWorkspace.xcworkspace")}</string></dict></plist>`,
+		);
+	};
+
+	afterEach(() => {
+		fs.rmSync(tmp, { recursive: true, force: true });
+	});
+
+	const setUp = () => {
+		tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ao-lsp-wait-"));
+		worktree = path.join(tmp, "nter-ios-app");
+		fs.mkdirSync(path.join(worktree, "NterWorkspace.xcworkspace"), { recursive: true });
+		// `defaultDerivedDataDir` is `$HOME/Library/Developer/Xcode/DerivedData`.
+		derivedData = path.join(tmp, "home", "Library", "Developer", "Xcode", "DerivedData");
+		fs.mkdirSync(derivedData, { recursive: true });
+		const xbs = path.join(tmp, "xcode-build-server");
+		fs.writeFileSync(xbs, "#!/bin/sh\n");
+		swiftEnv = () => ({
+			...process.env,
+			HOME: path.join(tmp, "home"),
+			AO_LSP_XCODE_BUILD_SERVER: xbs,
+			AO_LSP_COMMAND_SWIFT: process.execPath,
+			AO_LSP_ARGS_SWIFT: FAKE,
+		});
+	};
+
+	test("waits without a process, then reports `stopped` once the build lands, and the re-attach serves", async () => {
+		setUp();
+		const events: { handleId: string; state: string; detail?: string }[] = [];
+		const r = make({
+			dataDir: path.join(tmp, "data"),
+			env: () => swiftEnv(),
+			setupPollMs: 20,
+			onState: (event) => events.push(event),
+		});
+
+		const waiting = await r.attach({ root: worktree, languageId: "swift" });
+		expect(waiting).toMatchObject({ state: "unconfigured", need: "build" });
+		expect(waiting.detail).toMatch(/never built NterWorkspace\.xcworkspace/);
+		// Nothing spawned, so nothing counts against the server cap.
+		expect(await r.health()).toHaveLength(0);
+
+		writeBuild();
+		await vi.waitFor(() => expect(events.find((e) => e.handleId === waiting.handleId)?.state).toBe("stopped"), {
+			timeout: 2_000,
+		});
+
+		// What the pane does on `stopped`: attach again. This time there is a server.
+		r.detach(waiting.handleId);
+		const served = await r.attach({ root: worktree, languageId: "swift" });
+		expect(served.state).not.toBe("unconfigured");
+		expect(served.documentRoot).not.toBe(worktree);
+		expect(await r.health()).toHaveLength(1);
+	});
+
+	test("two panes on one waiting workspace share one wait, and the last detach ends it", async () => {
+		setUp();
+		const events: { handleId: string; state: string }[] = [];
+		const r = make({
+			dataDir: path.join(tmp, "data"),
+			env: () => swiftEnv(),
+			setupPollMs: 20,
+			onState: (e) => events.push(e),
+		});
+		const a = await r.attach({ root: worktree, languageId: "swift" });
+		const b = await r.attach({ root: worktree, languageId: "swift" });
+		expect(a.handleId).not.toBe(b.handleId);
+		r.detach(a.handleId);
+		r.detach(b.handleId);
+		writeBuild();
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		// Nobody is waiting any more, so nobody is told.
+		expect(events).toHaveLength(0);
+	});
+
+	test("a waiting pane hears it when the REASON changes, without being told to re-attach", async () => {
+		setUp();
+		const events: { handleId: string; state: string; need?: string }[] = [];
+		const missing = path.join(tmp, "no-xcode-build-server");
+		let xbsOverride = missing;
+		const r = make({
+			dataDir: path.join(tmp, "data"),
+			env: () => ({ ...swiftEnv(), AO_LSP_XCODE_BUILD_SERVER: xbsOverride }),
+			setupPollMs: 20,
+			onState: (e) => events.push(e),
+		});
+		const waiting = await r.attach({ root: worktree, languageId: "swift" });
+		expect(waiting.need).toBe("tool");
+
+		xbsOverride = path.join(tmp, "xcode-build-server");
+		await vi.waitFor(() => expect(events.at(-1)).toMatchObject({ state: "unconfigured", need: "build" }), {
+			timeout: 2_000,
+		});
+		expect(events.some((e) => e.state === "stopped")).toBe(false);
 	});
 });
 
