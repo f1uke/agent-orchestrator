@@ -10,7 +10,7 @@ import {
 	type EditorFormatting,
 	type FormatReport,
 } from "../lib/editor/formatting/editor-formatting";
-import type { LspTextEdit } from "../lib/editor/formatting/format-document";
+import { lspFormatterFor } from "../lib/editor/formatting/format-document";
 import { formatBridge } from "../lib/editor/formatting/format-bridge";
 import { useEditorSettings } from "../hooks/useEditorSettings";
 import { registerCompletion } from "../lib/lsp/completion-provider";
@@ -862,24 +862,15 @@ export default function MonacoFileEditor({
 			getWorkspaceRoot: () => workspaceRootRef.current,
 			getSettings: () => editorSettingsRef.current,
 			isReadOnly: () => readOnlyRef.current,
-			// The attached server, only while it can format THIS buffer: ready (or
-			// indexing - formatting needs no index), advertising the feature, and
-			// holding the document.
-			getLsp: () => {
-				const { client, state } = serverRef.current;
-				const sync = syncRef.current;
-				if (!client || !sync || (state !== "ready" && state !== "indexing") || !client.features().formatting)
-					return null;
-				return {
+			// The attached server, only while it is running and can format THIS
+			// buffer - an `unconfigured` Swift worktree has none. See lspFormatterFor.
+			getLsp: () =>
+				lspFormatterFor({
 					name: FORMATTER_NAMES[lspLanguageRef.current ?? ""] ?? "the language server",
-					serverText: () => sync.serverText(),
-					request: (options) =>
-						client.request<LspTextEdit[] | null>("textDocument/formatting", {
-							textDocument: { uri: sync.uri },
-							options,
-						}),
-				};
-			},
+					state: serverRef.current.state,
+					client: serverRef.current.client,
+					sync: syncRef.current,
+				}),
 			runTool: (request) => formatBridge().run(request),
 			showMessage: (message) => {
 				const position = codeEditor.getPosition();

@@ -33,6 +33,39 @@ export type LspFormatter = {
 	request(options: { tabSize: number; insertSpaces: boolean }): Promise<LspTextEdit[] | null>;
 };
 
+/** The states in which a server is running and may be asked to format. */
+const FORMATTING_STATES: ReadonlySet<string> = new Set(["ready", "indexing"]);
+
+/**
+ * The attached language server as a formatter, or null when it must not be
+ * asked. Only a server that is running (`ready`, or `indexing` - formatting
+ * needs no index), advertised `documentFormattingProvider`, and holds this
+ * document qualifies.
+ *
+ * 🗝 Everything else is "no server", and Format Document falls through to the
+ * tool on this Mac: `starting`, `failed`, `stopped`, `unavailable` - and
+ * `unconfigured`, a Swift worktree still waiting for its Xcode build, where
+ * no sourcekit-lsp is running at all. Asking would only wait for a timeout.
+ */
+export function lspFormatterFor(input: {
+	name: string;
+	state: string;
+	client: {
+		features(): { formatting: boolean };
+		request<T>(method: string, params: unknown): Promise<T>;
+	} | null;
+	sync: { uri: string; serverText(): string } | null;
+}): LspFormatter | null {
+	const { client, sync } = input;
+	if (!client || !sync || !FORMATTING_STATES.has(input.state) || !client.features().formatting) return null;
+	return {
+		name: input.name,
+		serverText: () => sync.serverText(),
+		request: (options) =>
+			client.request<LspTextEdit[] | null>("textDocument/formatting", { textDocument: { uri: sync.uri }, options }),
+	};
+}
+
 export type FormatInput = {
 	/** Monaco language id. */
 	languageId: string;

@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FormatResult } from "../../../../main/format/formatters";
-import { applyLspEdits, fitToBuffer, type FormatInput, formatText, type LspFormatter } from "./format-document";
+import {
+	applyLspEdits,
+	fitToBuffer,
+	type FormatInput,
+	formatText,
+	type LspFormatter,
+	lspFormatterFor,
+} from "./format-document";
 
 const GO = "package main\nfunc main(){\nx()\n}\n";
 
@@ -130,6 +137,61 @@ describe("formatText", () => {
 			kind: "unsupported",
 			message: "There is no formatter for Python files.",
 		});
+	});
+});
+
+describe("lspFormatterFor", () => {
+	const request = vi.fn(async (_method: string, _params: unknown) => [] as never);
+	const client = {
+		features: () => ({ formatting: true }),
+		request: request as <T>(method: string, params: unknown) => Promise<T>,
+	};
+	const sync = { uri: "file:///repo/A.swift", serverText: () => "x" };
+
+	it("asks a running server that formats, about this document", async () => {
+		const lsp = lspFormatterFor({ name: "sourcekit-lsp", state: "ready", client, sync });
+		await lsp?.request({ tabSize: 4, insertSpaces: true });
+		expect(request).toHaveBeenCalledWith("textDocument/formatting", {
+			textDocument: { uri: "file:///repo/A.swift" },
+			options: { tabSize: 4, insertSpaces: true },
+		});
+		expect(lspFormatterFor({ name: "gopls", state: "indexing", client, sync })).not.toBeNull();
+	});
+
+	it("treats a Swift worktree waiting for its build (unconfigured) exactly like no server", () => {
+		for (const state of ["unconfigured", "starting", "initializing", "failed", "stopped", "unavailable"]) {
+			expect(lspFormatterFor({ name: "sourcekit-lsp", state, client, sync })).toBeNull();
+		}
+		// unconfigured comes with no client at all.
+		expect(lspFormatterFor({ name: "sourcekit-lsp", state: "unconfigured", client: null, sync: null })).toBeNull();
+		expect(
+			lspFormatterFor({
+				name: "gopls",
+				state: "ready",
+				client: { ...client, features: () => ({ formatting: false }) },
+				sync,
+			}),
+		).toBeNull();
+	});
+
+	it("so Format Document goes straight to the tool on this Mac, never to a server that is not running", async () => {
+		const runTool = vi.fn(async (): Promise<FormatResult> => ({
+			ok: true,
+			text: "formatted\n",
+			formatter: "swift-format",
+		}));
+		const outcome = await formatText(
+			input({
+				languageId: "swift",
+				languageName: "Swift",
+				path: "A.swift",
+				absolutePath: "/repo/A.swift",
+				lsp: lspFormatterFor({ name: "sourcekit-lsp", state: "unconfigured", client: null, sync: null }),
+				runTool,
+			}),
+		);
+		expect(outcome).toEqual({ kind: "formatted", text: "formatted\n", formatter: "swift-format" });
+		expect(runTool).toHaveBeenCalledTimes(1);
 	});
 });
 

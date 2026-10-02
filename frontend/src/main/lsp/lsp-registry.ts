@@ -403,7 +403,7 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 						documentRoot: root,
 						semanticTokens: null,
 						completion: null,
-						features: { hover: false, references: false },
+						features: { hover: false, references: false, formatting: false },
 					};
 				}
 				const waiting = pending.get(key);
