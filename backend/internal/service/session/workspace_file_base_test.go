@@ -70,7 +70,7 @@ func TestWorkspaceFileBase_NewAndUntrackedFilesDoNotExistAtTheBase(t *testing.T)
 		path string
 		base DiffBase
 	}{
-		{"added.go", DiffBaseTarget},  // committed on the branch, absent on main
+		{"added.go", DiffBaseTarget},   // committed on the branch, absent on main
 		{"untracked.go", DiffBaseHead}, // never committed at all
 		{"untracked.go", DiffBaseTarget},
 	} {

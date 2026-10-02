@@ -436,6 +436,22 @@ describe("the three states, and none of them is silence", () => {
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("the language server is starting"));
 	});
 
+	// Monaco's quick suggestions arrive as Invoke too - only the pane knows
+	// whether ⌃Space was pressed. A list offered while typing stays quiet.
+	test("an Invoke the reader did not ask for is quiet", async () => {
+		let asked = false;
+		const h = harness({ getClient: () => null, getState: () => "unconfigured", wasAskedFor: () => asked });
+		register(h.document);
+
+		expect(await ask(EXPLICIT)).toBeUndefined();
+		expect(h.shown).toEqual([]);
+		expect(warn).not.toHaveBeenCalled();
+
+		asked = true;
+		expect(await ask(EXPLICIT)).toBeUndefined();
+		expect(h.shown).toEqual(["the language server is unconfigured"]);
+	});
+
 	test("a request that FAILS is logged even when nobody asked explicitly", async () => {
 		const h = harness();
 		register(h.document);

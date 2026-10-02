@@ -61,6 +61,19 @@ sections below — where they conflict, **agent-orchestrator wins**. Do not re-f
   not widen it, and do not re-flag the editor's colours as a palette mismatch.
   Each role names the `xcode.syntax.*` key it came from in `styles.css`; the
   mapping from grammar scopes to roles lives in `lib/monaco-theme.ts`.
+- **Derived (2026-10-02), the reference has no editor:** the editor's **change
+  gutter** has three lanes, all measured against the live buffer. The two git
+  lanes sit in the glyph margin, coloured by kind in the Changes view's inks
+  (`--diff-add-sign` added, `--accent` modified, a `--diff-del-sign` notch for
+  removed): the **branch** lane (vs the target's merge-base) outboard and softer,
+  the **uncommitted** lane (vs HEAD) inboard at full strength, with a gap so they
+  never fuse. **Unsaved** edits are marked on the **line number** in the dirty
+  dot's `--accent` (tinted cell; a 2px rule where lines were removed) - a
+  different place and shape from the git bars, so a line can read as both.
+  Overview ruler: git kinds in the left lane, unsaved in the centre; minimap:
+  git kinds in its gutter strip, unsaved as a tinted line. Lives in
+  `styles.css` (`.ao-branch-bar`, `.ao-change-bar`, `.ao-unsaved-*`) and the
+  `aoChange.*` theme colours.
 - **Approved divergence (2026-06-10):** on macOS, a titlebar cluster (sidebar toggle +
   back/forward history arrows, `TitlebarNav`) sits beside the traffic lights,
   VS Code-style — the web reference has no window chrome, so no analogue exists.

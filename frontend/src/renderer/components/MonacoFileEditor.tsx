@@ -228,6 +228,9 @@ const SIDE_BY_SIDE_BREAKPOINT = 900;
  */
 const LANE_MEASURE_DELAY_MS = 90;
 
+/** How long after ⌃Space a completion request still counts as asked for. */
+const SUGGEST_ASK_WINDOW_MS = 2_000;
+
 /**
  * The overview-ruler and minimap colours, by kind. Theme colour ids rather than
  * values, so a theme switch recolours them without a re-measure - see
@@ -628,6 +631,22 @@ export default function MonacoFileEditor({
 		return () => forgetLane(modelUri);
 	}, [uri]);
 
+	// When the reader last asked for suggestions by key - ⌃Space, or Monaco's
+	// other two bindings for it - so a refusal is said at the caret only then.
+	// See `wasAskedFor` in completion-provider.ts.
+	const suggestAskedAtRef = useRef(Number.NEGATIVE_INFINITY);
+	useEffect(() => {
+		if (editorGeneration === 0) return;
+		const subscription = codeEditorRef.current?.onKeyDown((event) => {
+			const asks =
+				(event.ctrlKey && event.keyCode === monaco.KeyCode.Space) ||
+				(event.altKey && event.keyCode === monaco.KeyCode.Escape) ||
+				(event.metaKey && event.keyCode === monaco.KeyCode.KeyI);
+			if (asks) suggestAskedAtRef.current = performance.now();
+		});
+		return () => subscription?.dispose();
+	}, [editorGeneration]);
+
 	// Autocompletion.
 	useEffect(() => {
 		// 🗝 `hasLanguageServers()` and not the pane's state, for the same reason
@@ -654,6 +673,12 @@ export default function MonacoFileEditor({
 					const position = editor?.getPosition();
 					if (!editor || !position) return;
 					editor.getContribution<MessageContribution>(MESSAGE_CONTRIBUTION)?.showMessage(reason, position);
+				},
+				// One ask answers one request: the flag is spent on read.
+				wasAskedFor: () => {
+					const asked = performance.now() - suggestAskedAtRef.current < SUGGEST_ASK_WINDOW_MS;
+					suggestAskedAtRef.current = Number.NEGATIVE_INFINITY;
+					return asked;
 				},
 			},
 			// Null until the server has answered `initialize`, and null for good if

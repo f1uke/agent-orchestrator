@@ -75,6 +75,17 @@ export type CompletionDocument = {
 	getDetail: () => string | undefined;
 	/** Shown at the cursor, but only for an EXPLICIT invoke - never while typing. */
 	onUnavailable?: (reason: string) => void;
+	/**
+	 * Whether the reader asked for this list (⌃Space) rather than Monaco offering
+	 * it while they typed.
+	 *
+	 * 🗝 The trigger kind cannot say. Monaco's quick suggestions - the list that
+	 * opens by itself as a word is typed - reach the provider as
+	 * `CompletionTriggerKind.Invoke`, exactly like ⌃Space. Read on its own, every
+	 * keystroke in a Swift worktree with no build settings popped the "no build
+	 * settings" message at the caret. Absent means "trust the trigger kind".
+	 */
+	wasAskedFor?: () => boolean;
 };
 
 export type CompletionRegistration = monaco.IDisposable;
@@ -173,7 +184,8 @@ function provider(entry: LanguageEntry): monaco.languages.CompletionItemProvider
 		async provideCompletionItems(model, position, context, token) {
 			const source = entry.documents.get(model.uri.toString());
 			if (!source) return NO_ANSWER;
-			const explicit = context.triggerKind === monaco.languages.CompletionTriggerKind.Invoke;
+			const explicit =
+				context.triggerKind === monaco.languages.CompletionTriggerKind.Invoke && (source.wasAskedFor?.() ?? true);
 			const refuse = (reason: string, loud = false): NoAnswer => {
 				// 🗝 The message at the cursor is only ever for an EXPLICIT ⌃Space.
 				// The reader asked a question, so they get an answer where they are

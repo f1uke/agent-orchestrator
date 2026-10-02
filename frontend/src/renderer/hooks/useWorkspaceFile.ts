@@ -28,19 +28,25 @@ async function fetchWorkspaceFile(sessionId: string, path: string): Promise<Work
  * visual demo, and — because AO attaches a qa the first time a task drives the
  * app — it quietly cost that task its tester too.
  *
- * `watch` polls while there is something to lose. An AO worktree has agents
- * writing in it, so a file open in the editor drifts under the reader as a
- * matter of course; seeing that before they press save is worth far more than
- * handling the 409 well afterwards. A CLEAN buffer costs nothing to rebase, so
- * only a dirty one is worth polling for, and an idle pane must not poll the
- * daemon forever.
+ * Polled while the pane is open, faster while there is something to lose. An AO
+ * worktree has agents writing in it, so a file open in the editor drifts under
+ * the reader as a matter of course: a DIRTY buffer (`watch`) needs to hear about
+ * it before they press save, which is worth far more than handling the 409 well
+ * afterwards; a CLEAN one needs it to show what is on disk at all.
+ *
+ * 🗝 The clean poll is not optional, and "refetch on focus" does not replace it.
+ * react-query refetches on `visibilitychange`, and an Electron window that loses
+ * focus to another app stays visible - so switching to a terminal, letting an
+ * agent rewrite the file and switching back fired nothing, and the editor kept
+ * showing (and gutter-marking) the old text until the file was reopened.
+ * The poll pauses while the window is hidden.
  */
 export function useWorkspaceFile(sessionId: string, path: string, options?: { watch?: boolean }) {
 	return useQuery({
 		queryKey: workspaceFileQueryKey(sessionId, path),
 		queryFn: () => (usePreviewData ? Promise.resolve(mockWorkspaceFile(path)) : fetchWorkspaceFile(sessionId, path)),
 		refetchOnWindowFocus: true,
-		refetchInterval: options?.watch ? 5_000 : false,
+		refetchInterval: options?.watch ? 5_000 : 10_000,
 		staleTime: 5_000,
 		retry: 1,
 	});
