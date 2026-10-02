@@ -1,4 +1,4 @@
-import type { Hunk } from "./change-lanes";
+import type { Hunk } from "./live-changes";
 
 /** A whole-line replacement, in Monaco's 1-based inclusive line coordinates. */
 export type RevertEdit = {
@@ -26,6 +26,10 @@ export type RevertEdit = {
  */
 export function revertEdit(hunk: Hunk, lineCount: number, lastColumn: (line: number) => number): RevertEdit {
 	const restored = hunk.oldText.join("\n");
+	// 🗝 By line COUNT, never by the joined text: a hunk that replaced one EMPTY
+	// line joins to "" too, and reading that as "nothing to restore" deleted the
+	// blank line instead of putting it back.
+	const restoresLines = hunk.oldText.length > 0;
 
 	// A pure deletion occupies no line: put the removed text back BEFORE the
 	// line it used to precede, as a zero-width insertion.
@@ -50,7 +54,7 @@ export function revertEdit(hunk: Hunk, lineCount: number, lastColumn: (line: num
 			startColumn: 1,
 			endLine: end + 1,
 			endColumn: 1,
-			text: restored === "" ? "" : `${restored}\n`,
+			text: restoresLines ? `${restored}\n` : "",
 		};
 	}
 
@@ -62,7 +66,7 @@ export function revertEdit(hunk: Hunk, lineCount: number, lastColumn: (line: num
 			startColumn: lastColumn(start - 1),
 			endLine: end,
 			endColumn: lastColumn(end),
-			text: restored === "" ? "" : `\n${restored}`,
+			text: restoresLines ? `\n${restored}` : "",
 		};
 	}
 

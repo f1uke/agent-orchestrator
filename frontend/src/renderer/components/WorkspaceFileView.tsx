@@ -14,10 +14,10 @@ import { ChevronLeft, ChevronRight, FolderOpen, GitCompare } from "lucide-react"
 import { useSaveWorkspaceFile } from "../hooks/useSaveWorkspaceFile";
 import { useEditorSettings } from "../hooks/useEditorSettings";
 import { type WorkspaceFile, useWorkspaceFile, workspaceFileQueryKey } from "../hooks/useWorkspaceFile";
-import { useWorkspaceFileDiff } from "../hooks/useWorkspaceFileDiff";
+import { baseTextOf, useWorkspaceFileBase, type WorkspaceFileBase } from "../hooks/useWorkspaceFileBase";
 import { apiErrorMessage } from "../lib/api-client";
 import { ACCENT, MONO, PALETTE as P, VIEWER as V, accentMix } from "../lib/comment-inbox";
-import { branchLaneLines, firstHunkLine, hunksOf, originalTextFrom } from "../lib/editor/change-lanes";
+import { hunksBetween, linesOf } from "../lib/editor/live-changes";
 import { editabilityOf } from "../lib/editor/editability";
 import { fileBytes, modelTextFrom } from "../lib/editor/save-file";
 import type { SaveFailure } from "../lib/editor/save-errors";
@@ -77,6 +77,21 @@ function unavailableDetail(file: WorkspaceFile): string | null {
 		return `It holds ${file.entryCount.toLocaleString()} untracked ${file.entryCount === 1 ? "file" : "files"}, not listed here.`;
 	}
 	return null;
+}
+
+/** Why Changes mode cannot open, from the target base's own reason. */
+function targetUnavailableReason(base: WorkspaceFileBase | undefined): string {
+	switch (base?.reason) {
+		case "not_on_branch":
+			return "The worktree is not on this session's branch, so its files are not what the branch changed.";
+		case "no_target":
+			return "This session's target branch could not be resolved.";
+		case "binary":
+		case "too_large":
+			return "This file's target-branch version is too large or not text.";
+		default:
+			return "This file has no version on the target branch to compare against.";
+	}
 }
 
 /** How long "Saved" stays before clearing. A persistent badge would compete with the dirty dot. */
@@ -255,6 +270,8 @@ export function WorkspaceFileView({
 	const [serverState, setServerState] = useState<ServerStatus | null>(null);
 	const [problems, setProblems] = useState<{ errors: number; warnings: number }>({ errors: 0, warnings: 0 });
 	const [dirty, setDirty] = useState(false);
+	/** Uncommitted lines in the LIVE buffer, as the editor last measured them. Null until it has. */
+	const [liveUncommitted, setLiveUncommitted] = useState<number | null>(null);
 	const [mode, setMode] = useState<Mode>("browse");
 	const [drift, setDrift] = useState<Drift | null>(null);
 	const [failure, setFailure] = useState<SaveFailure | null>(null);
@@ -409,14 +426,15 @@ export function WorkspaceFileView({
 	const savedText = useMemo(() => modelTextFrom(lines), [lines]);
 	const changedLines = useMemo(() => file?.changedLines ?? [], [file]);
 
-	// The two change levels, each from its own call. `fullContext` on the branch
-	// one, because Changes mode replays its ORIGINAL side out of that payload and
-	// a windowed diff is missing everything between the hunks.
-	const branchDiff = useWorkspaceFileDiff(sessionId, path, inWorkspace, { base: "target", fullContext: true });
-	const headDiff = useWorkspaceFileDiff(sessionId, path, inWorkspace, { base: "head" });
-	const branchLines = useMemo(() => branchLaneLines(branchDiff.data), [branchDiff.data]);
-	const hunks = useMemo(() => hunksOf(headDiff.data), [headDiff.data]);
-	const targetOriginal = useMemo(() => originalTextFrom(branchDiff.data), [branchDiff.data]);
+	// The file at the base of each change level. The editor measures its LIVE
+	// buffer against these, so the gutter follows every keystroke rather than the
+	// last save; the target's is also Changes mode's original side.
+	const headBaseQuery = useWorkspaceFileBase(sessionId, path, "head", inWorkspace);
+	const targetBaseQuery = useWorkspaceFileBase(sessionId, path, "target", inWorkspace);
+	const headBase = baseTextOf(headBaseQuery.data);
+	const targetBase = baseTextOf(targetBaseQuery.data);
+	// In the model's own form: no final newline, LF.
+	const targetOriginal = useMemo(() => (targetBase === null ? null : linesOf(targetBase).join("\n")), [targetBase]);
 
 	const editability = useMemo(() => editabilityOf(file, path), [file, path]);
 	const save = useSaveWorkspaceFile(sessionId);
@@ -454,6 +472,7 @@ export function WorkspaceFileView({
 	// is shown in Browse without forgetting the choice - see `shownMode`.
 	useEffect(() => {
 		setDirty(false);
+		setLiveUncommitted(null);
 		setDrift(null);
 		setFailure(null);
 		setSavedFlash(false);
@@ -568,7 +587,14 @@ export function WorkspaceFileView({
 	// Where the editor should land. An explicit line always wins: a terminal
 	// `:42` reference and a go-to-definition target both name a line the reader
 	// asked for, and a Changes row's "first hunk" is only a default.
-	const landOn = line ?? (focus === "first-hunk" ? (firstHunkLine(branchDiff.data) ?? undefined) : undefined);
+	const firstBranchLine = useMemo(
+		() =>
+			focus === "first-hunk" && targetOriginal !== null
+				? (hunksBetween(linesOf(targetOriginal), linesOf(savedText))[0]?.start ?? null)
+				: null,
+		[focus, targetOriginal, savedText],
+	);
+	const landOn = line ?? (focus === "first-hunk" ? (firstBranchLine ?? undefined) : undefined);
 
 	// `mode` is what the reader picked and it outlives the file; `shownMode` is
 	// what THIS file can honour. A file with no diff to show falls back to Browse
@@ -578,17 +604,17 @@ export function WorkspaceFileView({
 	// While a file's branch diff is still in flight the pick is held, not
 	// dropped: the editor waits for the diff rather than mounting in Browse and
 	// rebuilding itself as a diff a moment later.
-	const waitingForChanges = mode === "changes" && inWorkspace && branchDiff.isPending;
+	const waitingForChanges = mode === "changes" && inWorkspace && targetBaseQuery.isPending;
 	const changesUnavailable = waitingForChanges
 		? null
-		: !inWorkspace || branchDiff.isPending
+		: !inWorkspace || targetBaseQuery.isPending
 			? "Changes mode needs this file's diff against the target branch."
-			: branchDiff.error
+			: targetBaseQuery.error
 				? "This file's diff against the target branch could not be loaded."
-				: branchDiff.data?.available === false
-					? "This file has no changes against the target branch."
-					: targetOriginal === null
-						? "This file's diff is too large to show side by side."
+				: targetOriginal === null
+					? targetUnavailableReason(targetBaseQuery.data)
+					: targetOriginal === savedText
+						? "This file has no changes against the target branch."
 						: null;
 	const shownMode: Mode = mode === "changes" && changesUnavailable === null ? "changes" : "browse";
 
@@ -720,9 +746,9 @@ export function WorkspaceFileView({
 					/>
 				)}
 
-				{changedCount > 0 && !compact && (
+				{(liveUncommitted ?? changedCount) > 0 && !compact && (
 					<span style={{ fontFamily: MONO, fontSize: 11.5, color: ACCENT, flex: "none" }}>
-						{changedCount} uncommitted
+						{liveUncommitted ?? changedCount} uncommitted
 					</span>
 				)}
 				{problems.errors + problems.warnings > 0 && (
@@ -792,6 +818,10 @@ export function WorkspaceFileView({
 					drift={drift}
 					onReview={() => setDrift({ ...drift, reviewing: true })}
 					onDiscardMine={() => {
+						// The BUFFER first. Clearing the banner and the dirty flag alone
+						// left every edit in the editor under a header that called it
+						// clean - and the next poll called it dirty again.
+						handleRef.current?.revertToSaved();
 						setDrift(null);
 						setDirty(false);
 						// Adopting the disk hash and refetching puts the pane back on the
@@ -875,8 +905,9 @@ export function WorkspaceFileView({
 						path={path}
 						text={savedText}
 						changedLines={changedLines}
-						branchLines={branchLines}
-						hunks={hunks}
+						headBase={headBase}
+						targetBase={targetBase}
+						onUncommittedCount={setLiveUncommitted}
 						line={landOn}
 						column={column}
 						theme={theme}

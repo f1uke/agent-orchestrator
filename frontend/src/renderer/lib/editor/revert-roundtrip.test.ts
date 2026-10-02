@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { components } from "../../../api/schema";
-import { hunksOf } from "./change-lanes";
+import { hunksBetween, linesOf } from "./live-changes";
 import { revertEdit } from "./revert";
 
 type Diff = components["schemas"]["DiffContextResponse"];
@@ -12,7 +12,7 @@ type Line = components["schemas"]["DiffContextLineDTO"];
  *
  * 🗝 `revert.test.ts` pins each shape of edit on its own, with the base text
  * written out by hand beside it. That cannot catch the failure that matters
- * here: `hunksOf` and `revertEdit` DISAGREEING about where a hunk sits. A hunk
+ * here: `hunksBetween` and `revertEdit` DISAGREEING about where a hunk sits. A hunk
  * classified one line off still reverts to something, and a hand-written
  * expectation written from the same misreading agrees with it. Deriving both
  * sides from ONE payload and demanding the working tree come back byte-identical
@@ -82,7 +82,7 @@ function applyRevert(text: string, edit: ReturnType<typeof revertEdit>): string 
 /** Discard every hunk in the file, bottom-up, and hand back what is left. */
 function discardEverything(d: Diff): string {
 	let text = workingText(d);
-	for (const hunk of hunksOf(d).reverse()) {
+	for (const hunk of hunksBetween(linesOf(baseText(d)), linesOf(text)).reverse()) {
 		const lines = text.split("\n");
 		text = applyRevert(
 			text,

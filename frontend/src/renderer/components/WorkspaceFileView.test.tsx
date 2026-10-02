@@ -42,19 +42,22 @@ const response = {
 
 // The body the mocked endpoint returns; overridden per test.
 let body: Record<string, unknown> = response;
-/** The branch-level diff, when a test needs one. */
-let diffBody: Record<string, unknown> | null = null;
+/** The file at the target's merge-base, when a test needs one. */
+let targetBaseBody: Record<string, unknown> | null = null;
+
+/** A base answer carrying `text`. */
+const baseOf = (text: string) => ({ available: true, path: "pkg/app.go", exists: true, revision: "abc", text });
 
 beforeEach(() => {
 	body = response;
 	editorProps.current = null;
 	putMock.mockReset();
-	diffBody = null;
-	// `/workspace/file-diff` also contains "/workspace/file", so the diff route is
-	// matched FIRST or the file body would be served as a diff.
+	targetBaseBody = null;
+	// `/workspace/file-base` also contains "/workspace/file", so the base route is
+	// matched FIRST or the file body would be served as a base.
 	getMock.mockReset().mockImplementation(async (path: string, init?: { params?: { query?: { base?: string } } }) => {
-		if (path.includes("/workspace/file-diff")) {
-			return { data: init?.params?.query?.base === "head" ? null : diffBody };
+		if (path.includes("/workspace/file-base")) {
+			return { data: init?.params?.query?.base === "head" ? null : targetBaseBody };
 		}
 		if (path.includes("/workspace/file")) return { data: body };
 		return { data: null };
@@ -93,6 +96,25 @@ describe("WorkspaceFileView", () => {
 	it("counts the uncommitted lines in the header", async () => {
 		renderView();
 		await waitFor(() => expect(screen.getByText("1 uncommitted")).toBeInTheDocument());
+	});
+
+	// The gutter follows the buffer, so the count beside it must too: once the
+	// editor has measured the live buffer, its number wins over the disk's.
+	it("counts the LIVE buffer's uncommitted lines once the editor reports them", async () => {
+		renderView();
+		await waitFor(() => expect(screen.getByText("1 uncommitted")).toBeInTheDocument());
+		act(() => (editorProps.current?.onUncommittedCount as (n: number) => void)(4));
+		expect(screen.getByText("4 uncommitted")).toBeInTheDocument();
+		act(() => (editorProps.current?.onUncommittedCount as (n: number) => void)(0));
+		expect(screen.queryByText(/uncommitted/)).toBeNull();
+	});
+
+	it("hands the editor both git bases, so it can measure the buffer against them", async () => {
+		targetBaseBody = baseOf("package app\n}\n");
+		renderView();
+		await waitFor(() => expect(editorProps.current?.targetBase).toBe("package app\n}\n"));
+		// HEAD answered nothing usable here: unknown, not "an empty file".
+		expect(editorProps.current?.headBase).toBeNull();
 	});
 
 	it("shows the file path in the header", async () => {
@@ -197,37 +219,21 @@ describe("WorkspaceFileView", () => {
 	// A Changes row means "show me this file's changes", and line 1 is almost
 	// never where they are.
 	it("lands on the first branch hunk when asked to, not on line 1", async () => {
-		diffBody = {
-			available: true,
-			truncated: false,
-			mode: "file",
-			path: "pkg/app.go",
-			lines: [
-				{ kind: "context", text: "package app", oldLine: 1, newLine: 1 },
-				{ kind: "context", text: "", oldLine: 2, newLine: 2 },
-				{ kind: "add", text: "func Run() {", oldLine: 0, newLine: 3 },
-			],
-		};
+		// The branch added line 2.
+		targetBaseBody = baseOf("package app\n}\n");
 		renderView(vi.fn(), "pkg/app.go", undefined, "first-hunk");
 
-		await waitFor(() => expect(editorProps.current?.branchLines).toEqual([3]));
-		expect(editorProps.current?.line).toBe(3);
+		await waitFor(() => expect(editorProps.current?.line).toBe(2));
 	});
 
 	// An explicit line always wins: a terminal `:42` and a go-to-definition
 	// target both name a line the reader actually asked for.
 	it("prefers an explicit line over the first hunk", async () => {
-		diffBody = {
-			available: true,
-			truncated: false,
-			mode: "file",
-			path: "pkg/app.go",
-			lines: [{ kind: "add", text: "x", oldLine: 0, newLine: 3 }],
-		};
-		renderView(vi.fn(), "pkg/app.go", 2, "first-hunk");
+		targetBaseBody = baseOf("package app\n");
+		renderView(vi.fn(), "pkg/app.go", 3, "first-hunk");
 
 		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
-		expect(editorProps.current?.line).toBe(2);
+		expect(editorProps.current?.line).toBe(3);
 	});
 
 	it("calls onClose when the back button is clicked", async () => {
@@ -247,28 +253,17 @@ describe("WorkspaceFileView", () => {
  * click made the reader re-pick the mode each time.
  */
 describe("WorkspaceFileView mode across files", () => {
-	/** A branch diff that changed the file's second line. */
-	const changedDiff = (path: string) => ({
-		available: true,
-		truncated: false,
-		mode: "file",
-		path,
-		lines: [
-			{ kind: "context", text: "package app", oldLine: 1, newLine: 1 },
-			{ kind: "del", text: "func Old() {", oldLine: 2, newLine: 0 },
-			{ kind: "add", text: "func Run() {", oldLine: 0, newLine: 2 },
-			{ kind: "context", text: "}", oldLine: 3, newLine: 3 },
-		],
-	});
-	/** What the route answers for a file the branch did not touch. */
-	const unchanged = (path: string) => ({ available: false, mode: "file", path });
+	/** A target base whose second line the branch changed. */
+	const changedDiff = (path: string) => ({ ...baseOf("package app\nfunc Old() {\n}\n"), path });
+	/** The target base of a file the branch did not touch: the file itself. */
+	const unchanged = (path: string) => ({ ...baseOf("package app\nfunc Run() {\n}\n"), path });
 
-	function serveDiffs(diffs: Record<string, Record<string, unknown>>) {
+	function serveDiffs(bases: Record<string, Record<string, unknown>>) {
 		getMock.mockImplementation(
 			async (route: string, init?: { params?: { query?: { base?: string; path?: string } } }) => {
 				const query = init?.params?.query;
-				if (route.includes("/workspace/file-diff")) {
-					return { data: query?.base === "head" ? null : (diffs[query?.path ?? ""] ?? null) };
+				if (route.includes("/workspace/file-base")) {
+					return { data: query?.base === "head" ? null : (bases[query?.path ?? ""] ?? null) };
 				}
 				if (route.includes("/workspace/file")) return { data: body };
 				return { data: null };
@@ -471,15 +466,20 @@ describe("WorkspaceFileView conflicts", () => {
 	function editor() {
 		return editorProps.current as unknown as {
 			onDirtyChange: (dirty: boolean) => void;
-			onHandle: (handle: { getValue: () => string | null; focus: () => void } | null) => void;
+			onHandle: (
+				handle: { getValue: () => string | null; focus: () => void; revertToSaved?: () => void } | null,
+			) => void;
 		};
 	}
 
+	const revertToSaved = vi.fn();
+
 	async function conflictOnSave() {
+		revertToSaved.mockReset();
 		renderView();
 		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
 		act(() => {
-			editor().onHandle({ getValue: () => "mine", focus: () => {} });
+			editor().onHandle({ getValue: () => "mine", focus: () => {}, revertToSaved });
 			editor().onDirtyChange(true);
 		});
 		putMock.mockResolvedValue({
@@ -586,7 +586,11 @@ describe("WorkspaceFileView conflicts", () => {
 		await userEvent.click(discard);
 		expect(screen.getByTestId("file-drift-banner")).toHaveTextContent(/really discard/i);
 
+		expect(revertToSaved).not.toHaveBeenCalled();
 		await userEvent.click(screen.getByRole("button", { name: /really discard/i }));
 		await waitFor(() => expect(screen.queryByTestId("file-drift-banner")).toBeNull());
+		// 🗝 The BUFFER is what gets discarded. Hiding the banner and clearing the
+		// dirty flag alone left the edits in the editor under a "clean" header.
+		expect(revertToSaved).toHaveBeenCalledTimes(1);
 	});
 });

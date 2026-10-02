@@ -101,7 +101,7 @@ test("a rename is suggested where it lands, on the next line, and Tab applies it
 
 	// One line from the cursor counts as at it: Tab applies at once.
 	await page.keyboard.press("Tab");
-	expect(await lineContaining(page, "offers.count")).toContain("guard position < offers.count");
+	await expect.poll(() => lineContaining(page, "offers.count")).toContain("guard position < offers.count");
 	expect((await caret(page)).lineNumber).toBe(await lineNumberOf(page, "guard position < offers.count"));
 	await expect(inlineEdit(page)).toHaveCount(0);
 });
@@ -116,13 +116,15 @@ test("an edit further away: the first Tab jumps to it, the second applies it", a
 	const guard = await lineNumberOf(page, "guard force || age");
 	expect(guard - signature).toBe(2);
 
+	// Polled: Tab is handled by Monaco's inline-edit controller, and under load
+	// the jump lands a frame after the key - a one-shot read flaked (~1 in 100).
 	await page.keyboard.press("Tab");
 	// Jumped, not applied.
-	expect((await caret(page)).lineNumber).toBe(guard);
+	await expect.poll(async () => (await caret(page)).lineNumber).toBe(guard);
 	expect(await lineContaining(page, "|| age > deadline")).toContain("guard force ||");
 
 	await page.keyboard.press("Tab");
-	expect(await lineContaining(page, "|| age > deadline")).toContain("guard forced ||");
+	await expect.poll(() => lineContaining(page, "|| age > deadline")).toContain("guard forced ||");
 });
 
 test("Esc dismisses the suggestion and leaves the buffer as typed", async ({ page }) => {

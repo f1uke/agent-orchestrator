@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { components } from "../../api/schema";
 import { MONO } from "../lib/comment-inbox";
-import type { Hunk } from "../lib/editor/change-lanes";
-import { branchMarks, GUTTER_LANE_CLASS, uncommittedMarks } from "../lib/editor/gutter-lanes";
+import { GUTTER_LANE_CLASS, type LaneMark, laneMarks } from "../lib/editor/gutter-lanes";
+import { type Hunk, linesOf, liveLanes, markedLineCount, modelLines } from "../lib/editor/live-changes";
 import { revertEdit } from "../lib/editor/revert";
 import { ensureInlineCompletionProvider, noteFileOpened } from "../lib/inline-completion/provider";
 import {
@@ -221,6 +221,80 @@ const BASE_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
  */
 const SIDE_BY_SIDE_BREAKPOINT = 900;
 
+/**
+ * How long typing must pause before the change lanes are re-measured. Short
+ * enough that a mark lands while the eye is still on the line; long enough that
+ * a burst of keystrokes is diffed once, not once per key.
+ */
+const LANE_MEASURE_DELAY_MS = 90;
+
+/** How long after ⌃Space a completion request still counts as asked for. */
+const SUGGEST_ASK_WINDOW_MS = 2_000;
+
+/**
+ * The overview-ruler and minimap colours, by kind. Theme colour ids rather than
+ * values, so a theme switch recolours them without a re-measure - see
+ * `monaco-theme.ts`, which defines them from the same tokens the bars use.
+ */
+const KIND_COLOUR: Record<Hunk["kind"], string> = {
+	added: "aoChange.added",
+	modified: "aoChange.modified",
+	removed: "aoChange.removed",
+};
+
+const KIND_HOVER: Record<Exclude<LaneMark["lane"], "unsaved">, Record<Hunk["kind"], string>> = {
+	branch: {
+		added: "Added on this branch",
+		modified: "Changed on this branch",
+		removed: "Lines removed here on this branch",
+	},
+	uncommitted: {
+		added: "Not committed: added since the last commit",
+		modified: "Not committed: changed since the last commit",
+		removed: "Not committed: lines removed here since the last commit",
+	},
+};
+
+/**
+ * One lane mark as a Monaco decoration.
+ *
+ * The git lanes add a kind-coloured mark at the left of the overview ruler and
+ * in the minimap's gutter strip (where VS Code puts its own). The unsaved lane
+ * tints the whole minimap line instead, and takes the ruler's centre: a
+ * different shape again, in the colour of the dirty dot beside the file name.
+ */
+function laneDecoration(mark: LaneMark, canDiscard: boolean): monaco.editor.IModelDeltaDecoration {
+	const range = new monaco.Range(mark.start, 1, mark.end, 1);
+	const stickiness = monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges;
+	if (mark.lane === "unsaved") {
+		return {
+			range,
+			options: {
+				lineNumberClassName: mark.lineNumberClassName,
+				lineNumberHoverMessage: { value: mark.kind === "removed" ? "Not saved: lines removed here" : "Not saved yet" },
+				overviewRuler: { color: { id: "aoChange.unsaved" }, position: monaco.editor.OverviewRulerLane.Center },
+				minimap: { color: { id: "aoChange.unsavedMinimap" }, position: monaco.editor.MinimapPosition.Inline },
+				stickiness,
+			},
+		};
+	}
+	return {
+		range,
+		options: {
+			glyphMarginClassName: mark.glyphClassName,
+			glyphMarginHoverMessage: {
+				value:
+					mark.lane === "uncommitted" && canDiscard
+						? `${KIND_HOVER.uncommitted[mark.kind]}. Click to ${mark.kind === "removed" ? "restore" : "discard"}.`
+						: KIND_HOVER[mark.lane][mark.kind],
+			},
+			overviewRuler: { color: { id: KIND_COLOUR[mark.kind] }, position: monaco.editor.OverviewRulerLane.Left },
+			minimap: { color: { id: KIND_COLOUR[mark.kind] }, position: monaco.editor.MinimapPosition.Gutter },
+			stickiness,
+		},
+	};
+}
+
 /** What the chrome above can do to the buffer without knowing it is Monaco. */
 export type EditorHandle = {
 	/** The buffer's current text, or null before a model exists. */
@@ -228,6 +302,11 @@ export type EditorHandle = {
 	focus(): void;
 	/** Format Document - as ⌃⇧I does it, or quietly before a save. One undo step. */
 	formatDocument(reason: "command" | "save"): Promise<FormatReport>;
+	/**
+	 * Throw the unsaved edits away: the buffer becomes the saved `text` again, as
+	 * ONE undoable step, so ⌘Z can still bring the work back.
+	 */
+	revertToSaved(): void;
 };
 
 /** What the chrome above the editor is told about its language server. */
@@ -241,14 +320,21 @@ export type MonacoFileEditorProps = {
 	path: string;
 	/** The content considered SAVED. Dirty is measured against this. */
 	text: string;
+	/**
+	 * The daemon's working-tree-vs-HEAD map of the file ON DISK. Only a fallback:
+	 * with `headBase` known, the uncommitted lane is measured against the buffer.
+	 */
 	changedLines: LineChange[];
 	/**
-	 * New-side lines the BRANCH lane marks: everything this branch changed,
-	 * committed or not. Flat and kindless on purpose — see `gutter-lanes.ts`.
+	 * The file at HEAD: the uncommitted lane, and the hunks Discard Change
+	 * restores, are measured from it to the LIVE buffer. `""` for a file HEAD
+	 * does not have; null or absent when unknown.
 	 */
-	branchLines?: readonly number[];
-	/** The uncommitted hunks, with the old text each replaced, for Discard Change. */
-	hunks?: readonly Hunk[];
+	headBase?: string | null;
+	/** The file at merge-base(target, branch): the branch lane's base. Null when unknown. */
+	targetBase?: string | null;
+	/** How many buffer lines are uncommitted right now, as the lanes are recomputed. */
+	onUncommittedCount?: (lines: number) => void;
 	line?: number;
 	/** 1-based column. Slice 2 left this field on the seam for exactly this. */
 	column?: number;
@@ -314,8 +400,9 @@ export default function MonacoFileEditor({
 	path,
 	text,
 	changedLines,
-	branchLines,
-	hunks,
+	headBase,
+	targetBase,
+	onUncommittedCount,
 	line,
 	column,
 	theme,
@@ -390,8 +477,11 @@ export default function MonacoFileEditor({
 	onSaveRef.current = onSave;
 	const onDirtyRef = useRef(onDirtyChange);
 	onDirtyRef.current = onDirtyChange;
-	const hunksRef = useRef(hunks);
-	hunksRef.current = hunks;
+	// The uncommitted hunks a gutter click can discard, as of the last time the
+	// lanes were measured against the buffer.
+	const hunksRef = useRef<Hunk[]>([]);
+	const onUncommittedCountRef = useRef(onUncommittedCount);
+	onUncommittedCountRef.current = onUncommittedCount;
 	// The text the model was last SET to. A model whose value has moved away from
 	// it carries unsaved edits, and must never be overwritten by an incoming
 	// refetch — which is exactly what the read-only version did on every `text`
@@ -541,6 +631,22 @@ export default function MonacoFileEditor({
 		return () => forgetLane(modelUri);
 	}, [uri]);
 
+	// When the reader last asked for suggestions by key - ⌃Space, or Monaco's
+	// other two bindings for it - so a refusal is said at the caret only then.
+	// See `wasAskedFor` in completion-provider.ts.
+	const suggestAskedAtRef = useRef(Number.NEGATIVE_INFINITY);
+	useEffect(() => {
+		if (editorGeneration === 0) return;
+		const subscription = codeEditorRef.current?.onKeyDown((event) => {
+			const asks =
+				(event.ctrlKey && event.keyCode === monaco.KeyCode.Space) ||
+				(event.altKey && event.keyCode === monaco.KeyCode.Escape) ||
+				(event.metaKey && event.keyCode === monaco.KeyCode.KeyI);
+			if (asks) suggestAskedAtRef.current = performance.now();
+		});
+		return () => subscription?.dispose();
+	}, [editorGeneration]);
+
 	// Autocompletion.
 	useEffect(() => {
 		// 🗝 `hasLanguageServers()` and not the pane's state, for the same reason
@@ -567,6 +673,12 @@ export default function MonacoFileEditor({
 					const position = editor?.getPosition();
 					if (!editor || !position) return;
 					editor.getContribution<MessageContribution>(MESSAGE_CONTRIBUTION)?.showMessage(reason, position);
+				},
+				// One ask answers one request: the flag is spent on read.
+				wasAskedFor: () => {
+					const asked = performance.now() - suggestAskedAtRef.current < SUGGEST_ASK_WINDOW_MS;
+					suggestAskedAtRef.current = Number.NEGATIVE_INFINITY;
+					return asked;
 				},
 			},
 			// Null until the server has answered `initialize`, and null for good if
@@ -964,6 +1076,20 @@ export default function MonacoFileEditor({
 			getValue: () => codeEditorRef.current?.getModel()?.getValue() ?? null,
 			focus: () => codeEditorRef.current?.focus(),
 			formatDocument: (reason) => formattingRef.current?.formatDocument(reason) ?? Promise.resolve({ applied: false }),
+			revertToSaved: () => {
+				const model = codeEditorRef.current?.getModel();
+				if (!model) return;
+				const saved = textRef.current;
+				// 🗝 Adopted FIRST. The content effect only takes incoming text into a
+				// buffer that has not moved away from what it last put there, so a
+				// "discard" that only flipped the dirty flag left every edit in place
+				// under a header that called the buffer clean.
+				appliedTextRef.current = saved;
+				if (model.getValue() === saved) return;
+				model.pushStackElement();
+				model.pushEditOperations(null, [{ range: model.getFullModelRange(), text: saved }], () => null);
+				model.pushStackElement();
+			},
 		});
 		return () => onHandle?.(null);
 	}, [editorGeneration, onHandle]);
@@ -974,22 +1100,43 @@ export default function MonacoFileEditor({
 		monaco.editor.setTheme(themeName);
 	}, [ready, themeName]);
 
-	// The two gutter lanes. Branch first so it draws on the outside, nearer the
-	// line number; the uncommitted bar sits inboard of it, next to the code.
+	// The three change lanes, measured against the LIVE buffer: branch and
+	// uncommitted against git, unsaved against the text the buffer was loaded or
+	// saved from. Re-measured a beat after typing pauses; in between, Monaco
+	// carries the marks along with the text they sit on.
 	useEffect(() => {
 		if (modelGeneration === 0) return;
 		const collection = decorationsRef.current;
 		const model = codeEditorRef.current?.getModel();
 		if (!collection || !model) return;
-		const lineCount = model.getLineCount();
-		const marks = [...branchMarks(branchLines ?? [], lineCount), ...uncommittedMarks(changedLines, lineCount)];
-		collection.set(
-			marks.map((mark) => ({
-				range: new monaco.Range(mark.line, 1, mark.line, 1),
-				options: { glyphMarginClassName: mark.className },
-			})),
-		);
-	}, [modelGeneration, editorGeneration, changedLines, branchLines]);
+		const head = headBase == null ? null : linesOf(headBase);
+		const target = targetBase == null ? null : linesOf(targetBase);
+		const measure = () => {
+			if (model.isDisposed()) return;
+			const current = modelLines(model.getLinesContent());
+			const lanes = liveLanes({
+				current,
+				saved: linesOf(appliedTextRef.current ?? text),
+				head,
+				target,
+				diskUncommitted: changedLines,
+			});
+			hunksRef.current = lanes.discardable;
+			const canDiscard = !readOnly && head !== null;
+			collection.set(laneMarks(lanes, model.getLineCount()).map((mark) => laneDecoration(mark, canDiscard)));
+			onUncommittedCountRef.current?.(markedLineCount(lanes.uncommitted));
+		};
+		measure();
+		let timer: number | undefined;
+		const subscription = model.onDidChangeContent(() => {
+			window.clearTimeout(timer);
+			timer = window.setTimeout(measure, LANE_MEASURE_DELAY_MS);
+		});
+		return () => {
+			window.clearTimeout(timer);
+			subscription.dispose();
+		};
+	}, [modelGeneration, editorGeneration, text, changedLines, headBase, targetBase, readOnly]);
 
 	// A click on an uncommitted bar opens the discard popover. Never discards on
 	// the first click: a gutter bar is a one-pixel target beside a line number.
@@ -1007,7 +1154,11 @@ export default function MonacoFileEditor({
 			if (!element || !element.className.includes(GUTTER_LANE_CLASS)) return;
 			const lineNumber = event.target.position?.lineNumber;
 			if (lineNumber == null) return;
-			const hunk = (hunksRef.current ?? []).find((h) => lineNumber >= h.start && lineNumber <= h.end);
+			// A removal past the last line is drawn on the last line, so it is found there.
+			const last = codeEditor.getModel()?.getLineCount() ?? lineNumber;
+			const hunk = hunksRef.current.find(
+				(h) => lineNumber >= Math.min(h.start, last) && lineNumber <= Math.min(h.end, last),
+			);
 			if (!hunk) {
 				setDiscarding(null);
 				return;

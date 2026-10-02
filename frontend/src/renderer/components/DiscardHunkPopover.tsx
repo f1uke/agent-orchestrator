@@ -1,5 +1,5 @@
 import { MONO, PALETTE as P, VIEWER as V } from "../lib/comment-inbox";
-import type { Hunk } from "../lib/editor/change-lanes";
+import type { Hunk } from "../lib/editor/live-changes";
 
 const KIND_TITLE: Record<Hunk["kind"], string> = {
 	added: "Discard this addition?",

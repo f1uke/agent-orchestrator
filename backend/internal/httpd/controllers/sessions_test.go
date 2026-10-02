@@ -90,6 +90,8 @@ type fakeSessionService struct {
 	workspaceFileDiffPath string
 	workspaceFileDiffBase sessionsvc.DiffBase
 	workspaceFileDiffFull bool
+	workspaceFileBase     sessionsvc.WorkspaceFileBaseResult
+	workspaceFileBaseQ    sessionsvc.FileBaseQuery
 	// lastSpawnCfg captures the SpawnConfig passed to the most recent Spawn
 	// call so tests can assert on fields (e.g. BaseBranch) that don't surface
 	// in the response.
@@ -565,6 +567,13 @@ func (f *fakeSessionService) WorkspaceFileDiff(
 	f.workspaceFileDiffBase = q.Base
 	f.workspaceFileDiffFull = q.FullContext
 	return f.workspaceFileDiff, nil
+}
+
+func (f *fakeSessionService) WorkspaceFileBase(
+	_ context.Context, _ domain.SessionID, q sessionsvc.FileBaseQuery,
+) (sessionsvc.WorkspaceFileBaseResult, error) {
+	f.workspaceFileBaseQ = q
+	return f.workspaceFileBase, nil
 }
 
 func (f *fakeSessionService) ClaimPR(_ context.Context, id domain.SessionID, ref string, opts sessionsvc.ClaimPROptions) (sessionsvc.ClaimPRResult, error) {
@@ -2322,6 +2331,38 @@ func TestSessionsAPI_WorkspaceFileDiff_PassesBaseThrough(t *testing.T) {
 	}
 	if !svc.workspaceFileDiffFull {
 		t.Fatal("fullContext=true must reach the service")
+	}
+}
+
+func TestSessionsAPI_WorkspaceFileBase(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.workspaceFileBase = sessionsvc.WorkspaceFileBaseResult{
+		Available: true, Path: "a.go", Revision: "abc", Exists: true, Text: "l1\n",
+	}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/file-base?path=a.go&base=head", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceFileBaseQ.Path != "a.go" || svc.workspaceFileBaseQ.Base != sessionsvc.DiffBaseHead {
+		t.Fatalf("service got %+v", svc.workspaceFileBaseQ)
+	}
+	for _, want := range []string{`"available":true`, `"exists":true`, `"text":"l1\n"`, `"revision":"abc"`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body %s lacks %s", body, want)
+		}
+	}
+
+	// An unavailable base says why, and still answers 200: "no base" is a state
+	// the editor degrades on, not a failure.
+	svc.workspaceFileBase = sessionsvc.WorkspaceFileBaseResult{Path: "a.go", Reason: sessionsvc.BaseUnavailableNotOnBranch}
+	body, status, _ = doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/file-base?path=a.go", "")
+	if status != http.StatusOK || !strings.Contains(string(body), `"reason":"not_on_branch"`) {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	if svc.workspaceFileBaseQ.Base != "" {
+		t.Fatalf("no base on the query must reach the service empty, got %q", svc.workspaceFileBaseQ.Base)
 	}
 }
 

@@ -1630,6 +1630,23 @@ type WorkspaceFileDiffParams struct {
 	FullContext bool   `query:"fullContext" description:"Include every unchanged line rather than git's default three, so the caller can replay either whole side of the file. Off by default: the windowed payload is what carries the skip markers telling a reader that lines were left out."`
 }
 
+// WorkspaceFileBaseParams is the query string accepted by
+// GET /api/v1/sessions/{sessionId}/workspace/file-base.
+type WorkspaceFileBaseParams struct {
+	Path string `query:"path" description:"Repo-relative path of the file. Absolute and ~/ paths are rejected."`
+	Base string `query:"base" description:"Which change level's base to read: \"target\" (default) is merge-base(target, branch); \"head\" is HEAD. Any other value is a 400."`
+}
+
+// WorkspaceFileBaseResponse is one file's text at the base of a change level.
+type WorkspaceFileBaseResponse struct {
+	Available bool   `json:"available" description:"False when no base can be offered; reason says why."`
+	Reason    string `json:"reason,omitempty" description:"Why the base is unavailable: no_repo, no_target, not_on_branch (the worktree is not on the session's branch, so its files are not what the branch is measured to), symlink, submodule, directory, binary or too_large."`
+	Path      string `json:"path"`
+	Revision  string `json:"revision,omitempty" description:"The commit the text was read from. Empty on an unborn HEAD."`
+	Exists    bool   `json:"exists" description:"False when the file is not in that revision (new on the branch, or untracked): every line of it is an addition."`
+	Text      string `json:"text" description:"The file's content at revision, in working-tree form (eol and smudge filters applied)."`
+}
+
 // workspaceFileResponse maps the service result to the wire DTO.
 func workspaceFileResponse(res sessionsvc.WorkspaceFileResult) WorkspaceFileResponse {
 	lines := make([]DiffContextLineDTO, 0, len(res.Lines))

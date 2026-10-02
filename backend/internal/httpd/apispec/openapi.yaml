@@ -5139,6 +5139,66 @@ paths:
       summary: Replace a workspace file's content (confined, hash-preconditioned)
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/workspace/file-base:
+    get:
+      operationId: workspaceFileBase
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Repo-relative path of the file. Absolute and ~/ paths are rejected.
+        in: query
+        name: path
+        schema:
+          description: Repo-relative path of the file. Absolute and ~/ paths are rejected.
+          type: string
+      - description: 'Which change level''s base to read: "target" (default) is merge-base(target,
+          branch); "head" is HEAD. Any other value is a 400.'
+        in: query
+        name: base
+        schema:
+          description: 'Which change level''s base to read: "target" (default) is
+            merge-base(target, branch); "head" is HEAD. Any other value is a 400.'
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceFileBaseResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Return one file's text at HEAD or at the merge-base with the session's
+        target branch
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/workspace/file-diff:
     get:
       operationId: workspaceFileDiff
@@ -10919,6 +10979,35 @@ components:
       - files
       - truncated
       - includesWorktree
+      type: object
+    WorkspaceFileBaseResponse:
+      properties:
+        available:
+          description: False when no base can be offered; reason says why.
+          type: boolean
+        exists:
+          description: 'False when the file is not in that revision (new on the branch,
+            or untracked): every line of it is an addition.'
+          type: boolean
+        path:
+          type: string
+        reason:
+          description: 'Why the base is unavailable: no_repo, no_target, not_on_branch
+            (the worktree is not on the session''s branch, so its files are not what
+            the branch is measured to), symlink, submodule, directory, binary or too_large.'
+          type: string
+        revision:
+          description: The commit the text was read from. Empty on an unborn HEAD.
+          type: string
+        text:
+          description: The file's content at revision, in working-tree form (eol and
+            smudge filters applied).
+          type: string
+      required:
+      - available
+      - path
+      - exists
+      - text
       type: object
     WorkspaceFileResponse:
       properties:

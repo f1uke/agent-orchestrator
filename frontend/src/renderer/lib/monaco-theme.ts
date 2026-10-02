@@ -219,6 +219,15 @@ function buildTheme(name: EditorThemeName, type: "dark" | "light", t: Tokens) {
 			"editorOverviewRuler.infoForeground": tint(accent, 0.8),
 			"minimap.errorHighlight": tint(t["--diagnostic-error"], 0.8),
 			"minimap.warningHighlight": tint(t["--diagnostic-warning"], 0.8),
+			// The change lanes' overview-ruler and minimap marks (`MonacoFileEditor`
+			// names these ids on its decorations). The same inks the gutter bars and
+			// the Changes view use, and the unsaved mark in the dirty dot's accent,
+			// so the ruler, the minimap and the gutter say one thing.
+			"aoChange.added": t["--diff-add-sign"],
+			"aoChange.modified": accent,
+			"aoChange.removed": t["--diff-del-sign"],
+			"aoChange.unsaved": accent,
+			"aoChange.unsavedMinimap": tint(accent, 0.42),
 			"editorOverviewRuler.border": "#00000000",
 			"editorOverviewRuler.findMatchForeground": tint(accent, 0.6),
 			"minimap.background": t["--viewer-bg"],
