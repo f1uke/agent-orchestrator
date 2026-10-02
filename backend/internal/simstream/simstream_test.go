@@ -1022,3 +1022,44 @@ func TestHub_ABehindViewerOfAnImageStreamIsNotResynchronized(t *testing.T) {
 		t.Fatalf("want an image, got %+v", got.Frame)
 	}
 }
+
+// The daemon's own reads (the paste proof, the gesture recorder) go through
+// the XCTest reader when it answers, and through the bridge when it does not.
+// Touches never leave the bridge.
+func TestScreen_ReadsThroughTheAXReaderAndFallsBack(t *testing.T) {
+	bridge := &closableDriver{}
+	screen := simstream.NewScreenForTest(bridge, nil, nil)
+	ctx := context.Background()
+
+	runner := simbridge.Snapshot{Frontmost: simbridge.Frontmost{BundleID: "from.the.runner"}}
+	answer := true
+	screen.SetAXReader(func(_ context.Context, udid string) (simbridge.Snapshot, bool) {
+		if udid != "U" {
+			t.Errorf("read %q, want U", udid)
+		}
+		return runner, answer
+	})
+
+	snap, err := screen.AX(ctx, "U")
+	if err != nil || snap.Frontmost.BundleID != "from.the.runner" {
+		t.Fatalf("AX = %+v, %v; want the runner's read", snap, err)
+	}
+	answer = false
+	snap, err = screen.AX(ctx, "U")
+	if err != nil || snap.Frontmost.BundleID != "" {
+		t.Fatalf("AX = %+v, %v; want the bridge's read when the runner cannot answer", snap, err)
+	}
+	// The wrapped driver is still the bridge for everything else, and
+	// Shutdown still finds the bridge to close.
+	driver, err := screen.Driver(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := driver.Perform(ctx, "U", nil); err != nil {
+		t.Fatal(err)
+	}
+	screen.Shutdown()
+	if bridge.closeCount() != 1 {
+		t.Fatalf("bridge closed %d times, want 1", bridge.closeCount())
+	}
+}

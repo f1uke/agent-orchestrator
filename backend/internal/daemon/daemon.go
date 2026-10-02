@@ -24,6 +24,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
 	"github.com/aoagents/agent-orchestrator/backend/internal/locale"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
@@ -172,6 +173,22 @@ func Run() error {
 	// than interrupted is a file no player will open.
 	simVideo := newSimVideoRecorder(cfg.DataDir, store, log)
 	defer simVideo.Shutdown()
+	// The warm XCTest readers behind `ao sim ax`: one per simulator a session
+	// holds, stopped by pid when the lease goes. Constructing it reaps any a
+	// previous daemon left; the deferred Shutdown stops every one on the way
+	// out. nil where there is no Xcode.
+	simRunner := newSimRunner(cfg.DataDir, store, simScreen, log)
+	var simRunnerReader controllers.SimRunner
+	var simLeaseNudge []simsvc.Option
+	if simRunner != nil {
+		defer simRunner.Shutdown()
+		simRunnerReader = simRunner
+		simLeaseNudge = append(simLeaseNudge, simsvc.WithLeaseChanged(simRunner.Kick))
+		// The daemon's own reads - the paste proof, the gesture recorder -
+		// see what `ao sim ax` sees, so a paste into a web sign-in field can
+		// be proven and a recorded tap on one resolves to its name.
+		simScreen.SetAXReader(simRunnerAXReader(simRunner))
+	}
 
 	// The durable inbox for sessions that cannot receive a message right now: a
 	// suspended session's tmux is gone, so typing at its stored handle fails and
@@ -453,11 +470,12 @@ func Run() error {
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
 		CrewRuns:           crewRunSvc,
-		Sim:                newSimService(store, simScreen, sessMgr),
+		Sim:                newSimService(store, simScreen, sessMgr, simLeaseNudge...),
 		IOSRun:             iosRunSvc,
 		SimScreen:          simScreen,
 		SimVideo:           simVideo,
 		SimDrags:           simDrags,
+		SimRunner:          simRunnerReader,
 		Notifications:      notifier,
 		NotificationStream: notificationHub,
 		ActivityFeed:       activityHub,

@@ -154,6 +154,7 @@ func Fingerprint(snap Snapshot) uint64 {
 			writeString(h, el.Value)
 			writeString(h, strconv.FormatBool(el.Enabled))
 			writeString(h, strconv.FormatBool(el.OffScreen))
+			writeString(h, strconv.FormatBool(el.Focused))
 			for _, v := range []float64{el.Frame.X, el.Frame.Y, el.Frame.Width, el.Frame.Height} {
 				writeString(h, strconv.FormatInt(int64(math.Round(v)), 10))
 			}

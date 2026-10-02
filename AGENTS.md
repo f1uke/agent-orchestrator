@@ -63,6 +63,8 @@ Never read an app's output with `xcrun simctl launch --console-pipe`: a pipe nob
 
 `ao sim ax` reports each element's edges (`box left,top->right,bottom`, same 0..1 units as the tap point) and says which are **off screen** - those carry no tap point at all, because a coordinate clamped onto the screen's edge lands on whatever is really there. The header counts both (`99 elements (39 on screen, 60 off screen)`), and a box past 1.0 is how far to scroll: `ao sim drag` up, read again, then tap.
 
+On a device some session holds, `ao sim ax` reads through an AO-owned XCTest runner the daemon keeps warm per leased device (`backend/internal/simrunner`, Swift sources embedded and built once per AO build and Xcode under `~/.ao`), so it sees out-of-process UI - a web sign-in sheet, SpringBoard alerts, the Paste menu, the keyboard. The runner is stopped by the pid AO started it with when the lease goes, ends itself after a minute without a request if the daemon died, and is swept by the next daemon. Anywhere it is not up, `ao sim ax` falls back to the accessibility bridge and its `Reader:` line says why. The runner only reads; touches stay on `ao sim tap` and friends under the lease.
+
 To play the desktop app's own Device tab - press its buttons, drag on the screen it draws - `cd frontend && npm run package && npm run test:device`. It runs the real Electron build against a throwaway AO (its own daemon, data and profile) and a real simulator; `frontend/e2e-device/sandbox.ts` is the harness to reuse for a one-off. It skips, with the reason, on a machine that cannot run it - and refuses to start while the live AO holds a simulator lease, since two daemons cannot arbitrate one device.
 
 ## Where to look first

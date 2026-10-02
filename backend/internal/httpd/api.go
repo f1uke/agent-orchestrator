@@ -64,6 +64,11 @@ type APIDeps struct {
 	// per-daemon because one drag spans several requests, and the daemon owns
 	// its lifetime so no finger is left down when the process goes away.
 	SimDrags *simgesture.Drags
+	// SimRunner is the warm XCTest screen reader behind `ao sim ax`: one
+	// runner per simulator a session holds. nil on a machine without Xcode,
+	// and the hierarchy route then answers "unavailable" so the CLI reads
+	// through the accessibility bridge instead.
+	SimRunner controllers.SimRunner
 	// SimProfiles resolves a boot's slimming profile. Left nil, the router
 	// builds one over Sessions and Projects; a test sets it to control the
 	// answer without standing up either service.
@@ -112,6 +117,7 @@ type API struct {
 	simFlows      *controllers.SimFlowsController
 	simVideo      *controllers.SimVideoController
 	simScreen     *controllers.SimScreenController
+	simHierarchy  *controllers.SimHierarchyController
 	notifications *controllers.NotificationsController
 	activity      *controllers.ActivityController
 	imports       *controllers.ImportController
@@ -152,6 +158,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		simFlows:      &controllers.SimFlowsController{DataDir: cfg.DataDir},
 		simVideo:      &controllers.SimVideoController{Svc: deps.SimVideo},
 		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver},
+		simHierarchy:  &controllers.SimHierarchyController{Runner: deps.SimRunner},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
@@ -197,6 +204,7 @@ func (a *API) Register(root chi.Router) {
 			a.simFlows.Register(r)
 			a.simVideo.Register(r)
 			a.simScreen.Register(r)
+			a.simHierarchy.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)

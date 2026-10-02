@@ -33,6 +33,11 @@ type Screen struct {
 	run      simctl.Runner
 	now      func() time.Time
 
+	// axMu guards axReader, the XCTest reader the daemon wires in once it has
+	// one (see SetAXReader).
+	axMu     sync.Mutex
+	axReader AXReader
+
 	// The device list is read again for every gesture, to refuse a device this
 	// machine has not booted before anything reaches it. That check cost more
 	// than everything else in a touch put together: `xcrun simctl list` is a
@@ -311,8 +316,30 @@ func (s *Screen) Subscribe(ctx context.Context, udid string) (<-chan Event, erro
 	return hub.Subscribe(ctx, udid)
 }
 
+// AXReader reads a device's whole screen through something better than the
+// bridge, answering false when it cannot right now. The daemon's XCTest
+// runners (internal/simrunner) are the one implementation.
+type AXReader func(ctx context.Context, udid string) (simbridge.Snapshot, bool)
+
+// SetAXReader makes every screen read through this surface - the gesture
+// recorder's, the paste proof's - try reader first. It is a setter rather
+// than a constructor argument because the runners are built after the screen
+// they read for.
+func (s *Screen) SetAXReader(reader AXReader) {
+	s.axMu.Lock()
+	defer s.axMu.Unlock()
+	s.axReader = reader
+}
+
+func (s *Screen) reader() AXReader {
+	s.axMu.Lock()
+	defer s.axMu.Unlock()
+	return s.axReader
+}
+
 // Driver returns the screen driver a gesture goes through, building it on first
-// use.
+// use. Its reads go through the AXReader when one is wired and answering;
+// its touches always go through the bridge.
 func (s *Screen) Driver(context.Context) (simbridge.Driver, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -324,7 +351,27 @@ func (s *Screen) Driver(context.Context) (simbridge.Driver, error) {
 			s.driver = driver
 		}
 	}
-	return s.driver, s.drvErr
+	if s.drvErr != nil {
+		return nil, s.drvErr
+	}
+	// Wrapped per call rather than stored, so Shutdown still finds the
+	// bridge's own Close.
+	return readingDriver{Driver: s.driver, screen: s}, nil
+}
+
+// readingDriver overrides AX with the screen's AXReader.
+type readingDriver struct {
+	simbridge.Driver
+	screen *Screen
+}
+
+func (d readingDriver) AX(ctx context.Context, udid string) (simbridge.Snapshot, error) {
+	if reader := d.screen.reader(); reader != nil {
+		if snap, ok := reader(ctx, udid); ok {
+			return snap, nil
+		}
+	}
+	return d.Driver.AX(ctx, udid)
 }
 
 // AX reads a device's accessibility tree through the same resident driver a

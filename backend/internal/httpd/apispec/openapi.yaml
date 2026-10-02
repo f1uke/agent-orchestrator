@@ -6156,6 +6156,41 @@ paths:
       summary: List this machine's iOS Simulators with their lease state
       tags:
       - sim
+  /api/v1/sim/devices/{udid}/hierarchy:
+    get:
+      operationId: getSimHierarchy
+      parameters:
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      - description: How long to wait for a runner that is still starting, in milliseconds.
+          0 answers at once. Capped at 30000.
+        in: query
+        name: waitMs
+        schema:
+          description: How long to wait for a runner that is still starting, in milliseconds.
+            0 answers at once. Capped at 30000.
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimHierarchyResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+      summary: Read a simulator's whole screen through its warm XCTest runner
+      tags:
+      - sim
   /api/v1/sim/devices/{udid}/keyboard:
     get:
       operationId: getSimKeyboard
@@ -10059,6 +10094,15 @@ components:
       - kind
       - detail
       type: object
+    SimHierarchyResponse:
+      properties:
+        hierarchy:
+          $ref: '#/components/schemas/SimXCTestHierarchy'
+        runner:
+          $ref: '#/components/schemas/SimRunnerView'
+      required:
+      - runner
+      type: object
     SimHold:
       properties:
         expiresAt:
@@ -10230,6 +10274,58 @@ components:
       - stepCount
       - steps
       type: object
+    SimRect:
+      properties:
+        height:
+          format: double
+          type: number
+        width:
+          format: double
+          type: number
+        x:
+          format: double
+          type: number
+        "y":
+          format: double
+          type: number
+      required:
+      - x
+      - "y"
+      - width
+      - height
+      type: object
+    SimRunnerView:
+      properties:
+        reason:
+          description: Why the runner is not answering, in words a person can act
+            on.
+          type: string
+        state:
+          description: 'off: no session holds the device. starting: launching. ready:
+            answering. failed: the last attempt failed and is retried. unavailable:
+            this daemon cannot run one.'
+          enum:
+          - "off"
+          - starting
+          - ready
+          - failed
+          - unavailable
+          type: string
+      required:
+      - state
+      type: object
+    SimSize:
+      properties:
+        height:
+          format: double
+          type: number
+        width:
+          format: double
+          type: number
+      required:
+      - width
+      - height
+      type: object
     SimVideoResponse:
       properties:
         video:
@@ -10273,6 +10369,73 @@ components:
       - startedAt
       - maxDurationSeconds
       - bytes
+      type: object
+    SimXCTestApp:
+      properties:
+        bundleId:
+          type: string
+        pid:
+          type: integer
+        remoteView:
+          type: boolean
+        tree:
+          $ref: '#/components/schemas/SimXCTestNode'
+      required:
+      - bundleId
+      - tree
+      type: object
+    SimXCTestHierarchy:
+      properties:
+        apps:
+          items:
+            $ref: '#/components/schemas/SimXCTestApp'
+          type: array
+        elapsedMs:
+          type: integer
+        errors:
+          items:
+            type: string
+          type: array
+        foregroundSource:
+          type: string
+        screen:
+          $ref: '#/components/schemas/SimSize'
+        version:
+          type: string
+      required:
+      - version
+      - screen
+      - apps
+      - elapsedMs
+      type: object
+    SimXCTestNode:
+      properties:
+        children:
+          items:
+            $ref: '#/components/schemas/SimXCTestNode'
+          type: array
+        enabled:
+          type: boolean
+        focused:
+          type: boolean
+        frame:
+          $ref: '#/components/schemas/SimRect'
+        id:
+          type: string
+        label:
+          type: string
+        placeholder:
+          type: string
+        selected:
+          type: boolean
+        type:
+          type: string
+        value:
+          type: string
+      required:
+      - type
+      - frame
+      - enabled
       type: object
     SmokeAuthoredCaseInput:
       properties:
