@@ -4,11 +4,18 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrunner"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simvideo"
 )
 
@@ -34,8 +41,65 @@ import (
 // halves. Wired here rather than in the controller so a take-over counts exactly
 // as a claim does. It creates nobody - dev asks for its own qa with
 // `ao crew review`; the fact is what the unreviewed-work warning reads.
-func newSimService(store simsvc.Store, screen simsvc.ScreenReader, crew simsvc.RuntimeWatcher) *simsvc.Service {
-	return simsvc.New(store, simsvc.WithRecorder(screen), simsvc.WithRuntimeWatcher(crew))
+//
+// extra carries the rest of the daemon's wiring, such as the nudge that tells
+// the XCTest runners a lease changed.
+func newSimService(store simsvc.Store, screen simsvc.ScreenReader, crew simsvc.RuntimeWatcher, extra ...simsvc.Option) *simsvc.Service {
+	opts := append([]simsvc.Option{simsvc.WithRecorder(screen), simsvc.WithRuntimeWatcher(crew)}, extra...)
+	return simsvc.New(store, opts...)
+}
+
+// simRunnerLeases is what the runner manager reconciles against: the devices
+// some session holds right now, read from the lease table itself.
+type simRunnerLeases interface {
+	ListSimLeases(ctx context.Context, now time.Time) ([]domain.SimLease, error)
+}
+
+// simRunnerDevices is the daemon's resident device listing.
+type simRunnerDevices interface {
+	Devices(ctx context.Context) (simctl.Listing, error)
+}
+
+// newSimRunner builds the warm XCTest readers behind `ao sim ax`, or nil on a
+// machine that cannot run one (not macOS, or no Xcode). Constructing it reaps
+// any runner a previous daemon left, which is why it is built at startup.
+//
+// The booted check goes through the resident listing, so a runner start pays
+// a cache read rather than a `simctl list`; a device the listing does not know
+// is not booted as far as the runner is concerned, because starting
+// `xcodebuild test` against it would boot it.
+func newSimRunner(dataDir string, leases simRunnerLeases, devices simRunnerDevices, log *slog.Logger) *simrunner.Manager {
+	if goruntime.GOOS != "darwin" {
+		return nil
+	}
+	if _, err := exec.LookPath("xcodebuild"); err != nil {
+		log.Info("simrunner: xcodebuild is not on PATH; `ao sim ax` reads through the accessibility bridge only")
+		return nil
+	}
+	held := func(ctx context.Context) ([]string, error) {
+		list, err := leases.ListSimLeases(ctx, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		udids := make([]string, 0, len(list))
+		for _, lease := range list {
+			udids = append(udids, lease.UDID)
+		}
+		return udids, nil
+	}
+	booted := func(ctx context.Context, udid string) (bool, error) {
+		listing, err := devices.Devices(ctx)
+		if err != nil {
+			return false, err
+		}
+		for _, d := range listing.Devices {
+			if domain.NormalizeSimUDID(d.UDID) == domain.NormalizeSimUDID(udid) {
+				return d.Booted(), nil
+			}
+		}
+		return false, nil
+	}
+	return simrunner.New(dataDir, held, booted, simrunner.WithLogger(log))
 }
 
 // newSimVideoRecorder builds the screen recorder behind `ao sim record`, and
@@ -99,4 +163,18 @@ func aoBinaryPath() string {
 		return "ao"
 	}
 	return exe
+}
+
+// simRunnerAXReader adapts the runners to the screen surface's reader: a
+// ready runner's read, or false so the bridge answers. It never waits for a
+// runner that is starting - these reads sit inside a gesture.
+func simRunnerAXReader(runner *simrunner.Manager) simstream.AXReader {
+	return func(ctx context.Context, udid string) (simbridge.Snapshot, bool) {
+		h, _, err := runner.Read(ctx, udid, 0)
+		if err != nil {
+			return simbridge.Snapshot{}, false
+		}
+		snap := simbridge.SnapshotFromXCTest(h)
+		return snap, snap.Usable()
+	}
 }

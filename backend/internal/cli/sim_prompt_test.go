@@ -201,7 +201,12 @@ var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 // there was no other way to get a build onto a device. `ao sim run` is the way,
 // so the block can finally name a command instead of a rule to remember - and a
 // rule an agent can walk past is what the last two raises bought.
-const simGuidanceBudget = 3900
+// Raised 3900 -> 4200 for the XCTest reader. Agents read a web sign-in sheet,
+// the Paste callout and the keyboard off screenshots and tapped estimated
+// points - the e2e notes taught "Paste is roughly x 0.16, one row up" - because
+// `ao sim ax` could not see them. On a held device it now can, and the one
+// thing an agent would not guess is that it may tap them by name.
+const simGuidanceBudget = 4200
 
 func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 	guidance := prompts.SimulatorGuidance()

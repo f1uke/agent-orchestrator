@@ -298,6 +298,14 @@ var schemaNames = map[string]string{
 	"ControllersSimGestureInput":               "SimGestureInput",
 	"ControllersSimGestureResponse":            "SimGestureResponse",
 	"ControllersSimKeyboardView":               "SimKeyboardView",
+	"ControllersSimHierarchyQuery":             "SimHierarchyQuery",
+	"ControllersSimHierarchyResponse":          "SimHierarchyResponse",
+	"ControllersSimRunnerView":                 "SimRunnerView",
+	"SimbridgeXCTestHierarchy":                 "SimXCTestHierarchy",
+	"SimbridgeXCTestApp":                       "SimXCTestApp",
+	"SimbridgeXCTestNode":                      "SimXCTestNode",
+	"SimbridgeRect":                            "SimRect",
+	"SimbridgeSize":                            "SimSize",
 	"ControllersStartSimRecordingInput":        "StartSimRecordingInput",
 	"ControllersSimRecordingResponse":          "SimRecordingResponse",
 	"ControllersSimRecordingWithStepsResponse": "SimRecordingWithStepsResponse",
@@ -892,6 +900,15 @@ func simOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.SimKeyboardView{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sim/devices/{udid}/hierarchy", id: "getSimHierarchy", tag: "sim",
+			summary:    "Read a simulator's whole screen through its warm XCTest runner",
+			pathParams: []any{controllers.SimDeviceParam{}, controllers.SimHierarchyQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimHierarchyResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 			},
 		},
 		{

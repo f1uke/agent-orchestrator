@@ -78,13 +78,21 @@ type Element struct {
 	Path string `json:"path"`
 	// ID is AXUniqueId when the app sets one. Apps frequently do not, so it is
 	// reported when present and never depended on.
-	ID      string `json:"id,omitempty"`
-	Role    string `json:"role,omitempty"`
-	Type    string `json:"type,omitempty"`
-	Label   string `json:"label,omitempty"`
-	Value   string `json:"value,omitempty"`
-	Enabled bool   `json:"enabled"`
-	Frame   Rect   `json:"frame"`
+	ID    string `json:"id,omitempty"`
+	Role  string `json:"role,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Label string `json:"label,omitempty"`
+	Value string `json:"value,omitempty"`
+	// Placeholder is a field's hint text, reported apart from its value by
+	// the XCTest reader. (The addon folds it into Value, which is why an
+	// empty login field there reads "example@email.com".)
+	Placeholder string `json:"placeholder,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	// Focused is the element with keyboard focus - the field a paste or a key
+	// press lands in. Only the XCTest reader knows it.
+	Focused  bool `json:"focused,omitempty"`
+	Selected bool `json:"selected,omitempty"`
+	Frame    Rect `json:"frame"`
 	// Tap is where to touch this element, and is absent when there is nowhere
 	// to touch: an element scrolled off the screen has no point that reaches it.
 	// It used to be clamped onto the screen's edge instead, which is how a tap
@@ -121,6 +129,13 @@ type Snapshot struct {
 	// publishes its screen - and read as an ordinary result it says the app is
 	// blank, which is the wrong thing to act on.
 	OnlyStatusBar bool `json:"onlyStatusBar,omitempty"`
+	// Reader is which mechanism read this screen. Absent means the addon,
+	// from a caller that predates the XCTest reader.
+	Reader *Reader `json:"reader,omitempty"`
+	// Keyboard is the software keyboard when it is up. Only the XCTest reader
+	// can see it, so its absence from an addon read means "unknown", not
+	// "down".
+	Keyboard *KeyboardState `json:"keyboard,omitempty"`
 }
 
 // newSnapshot converts the addon's tree, computing a tap point per element.

@@ -1,0 +1,48 @@
+# The source of truth for AORunner.xcodeproj. AO embeds the generated project,
+# so after editing this file regenerate it with `xcodegen generate` in this
+# directory and commit both (simrunner's tests fail if a source file is missing
+# from the embed).
+name: AORunner
+options:
+  bundleIdPrefix: dev.aoagents.simrunner
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    # Ad-hoc signed, never unsigned: a simulator build always runs, and an
+    # unsigned one (CODE_SIGNING_ALLOWED=NO) loses its entitlements.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    SWIFT_VERSION: "5.0"
+    GENERATE_INFOPLIST_FILE: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  AORunnerHost:
+    type: application
+    platform: iOS
+    sources: [Host]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.aoagents.simrunner.host
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: AO Runner
+  AORunnerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: AORunnerHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.aoagents.simrunner.uitests
+        TEST_TARGET_NAME: AORunnerHost
+schemes:
+  AORunner:
+    build:
+      targets:
+        AORunnerHost: all
+        AORunnerUITests: [test]
+    test:
+      targets: [AORunnerUITests]

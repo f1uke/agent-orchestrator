@@ -1889,6 +1889,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sim/devices/{udid}/hierarchy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a simulator's whole screen through its warm XCTest runner */
+        get: operations["getSimHierarchy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sim/devices/{udid}/keyboard": {
         parameters: {
             query?: never;
@@ -3520,6 +3537,10 @@ export interface components {
             rescued?: boolean;
             udid: string;
         };
+        SimHierarchyResponse: {
+            hierarchy?: components["schemas"]["SimXCTestHierarchy"];
+            runner: components["schemas"]["SimRunnerView"];
+        };
         SimHold: {
             /** Format: date-time */
             expiresAt: string;
@@ -3597,6 +3618,31 @@ export interface components {
             stepCount: number;
             steps: components["schemas"]["SimRecordingStep"][];
         };
+        SimRect: {
+            /** Format: double */
+            height: number;
+            /** Format: double */
+            width: number;
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
+        };
+        SimRunnerView: {
+            /** @description Why the runner is not answering, in words a person can act on. */
+            reason?: string;
+            /**
+             * @description off: no session holds the device. starting: launching. ready: answering. failed: the last attempt failed and is retried. unavailable: this daemon cannot run one.
+             * @enum {string}
+             */
+            state: "off" | "starting" | "ready" | "failed" | "unavailable";
+        };
+        SimSize: {
+            /** Format: double */
+            height: number;
+            /** Format: double */
+            width: number;
+        };
         SimVideoResponse: {
             video: components["schemas"]["SimVideoView"];
         };
@@ -3620,6 +3666,32 @@ export interface components {
             stoppedAt?: string;
             /** @description The simulator being recorded. */
             udid: string;
+        };
+        SimXCTestApp: {
+            bundleId: string;
+            pid?: number;
+            remoteView?: boolean;
+            tree: components["schemas"]["SimXCTestNode"];
+        };
+        SimXCTestHierarchy: {
+            apps: components["schemas"]["SimXCTestApp"][];
+            elapsedMs: number;
+            errors?: string[];
+            foregroundSource?: string;
+            screen: components["schemas"]["SimSize"];
+            version: string;
+        };
+        SimXCTestNode: {
+            children?: components["schemas"]["SimXCTestNode"][];
+            enabled: boolean;
+            focused?: boolean;
+            frame: components["schemas"]["SimRect"];
+            id?: string;
+            label?: string;
+            placeholder?: string;
+            selected?: boolean;
+            type: string;
+            value?: string;
         };
         SmokeAuthoredCaseInput: {
             /** @description Expected result. */
@@ -11386,6 +11458,41 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSimHierarchy: {
+        parameters: {
+            query?: {
+                /** @description How long to wait for a runner that is still starting, in milliseconds. 0 answers at once. Capped at 30000. */
+                waitMs?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimHierarchyResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

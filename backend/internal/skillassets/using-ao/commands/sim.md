@@ -251,6 +251,21 @@ Read what is on a booted simulator's screen as a structured accessibility tree. 
 
 The device is resolved exactly like `ao sim shot`. Reading takes no lease and is never blocked by one, but the output always reports who holds the device.
 
+**Two readers, and the `Reader:` line says which one answered.**
+
+- **XCTest - on a device some session holds.** While a lease is held, the daemon keeps an AO-owned XCTest runner warm on that device, and `ao sim ax` reads through it (about 0.1 s inside the runner). XCTest sees **every process on screen**: an `ASWebAuthenticationSession` / `SFSafariViewController` page (SafariViewService - a web sign-in is listed as an `Application "Safari" id "com.apple.SafariViewService"` root above the app that presented it), SpringBoard's alerts, the text-edit callout (`MenuItem "Paste"`, `MenuItem "AutoFill"`), and the software keyboard. It also reports which element has keyboard focus (`(focused)`) and a field's placeholder apart from its value. Tap any of it by name: `ao sim tap --label Paste`.
+- **The accessibility bridge - otherwise.** It reads the frontmost app's own process only, so a web sign-in sheet can come back as little more than the status bar, and the Paste menu and the keyboard never appear. The `Reader:` line says why the runner did not answer: nobody holds the device (`ao sim claim` starts the runner), it is still starting, or it failed (and is retried).
+
+The runner starts when the device is claimed and is stopped - by the pid AO started it with - when the lease goes, however it goes: `ao sim release`, a lapsed TTL, a take-over, or the session ending. A read right after a claim waits up to 15 s for it (the very first one on a machine also builds it, once per AO build and Xcode version). The runner only reads: every touch still goes through `ao sim tap` and friends under the lease. Its process lives under the AO data dir (`sim/runner/`), never `~/Library`.
+
+With the keyboard up the header says what it is, and the keys are folded onto one line (`keys: q w e ...`; `--json` keeps each key's point):
+
+```
+Keyboard: up, 49 keys, NOT Latin letters (a non-English input mode); the globe key switches to "English (US)"
+```
+
+`NOT Latin letters` is the Thai-input-mode trap seen from the screen: typed text would arrive remapped. The globe key's value is the mode it switches **to**, not the current one.
+
 Text output is one line per element, indented by nesting:
 
 ```
@@ -258,8 +273,9 @@ iPhone 17 Pro Max - 440x956 points, 24 elements (18 on screen, 6 off screen)
 Foreground app: com.example.app (pid 42)
 Device: 00000000-0000-0000-0000-000000000000
 Lease: You hold this device until 2026-08-13T07:51:02Z. ...
+Reader: XCTest (every process on screen)
 
-Application  tap 0.500 0.500  box 0.000,0.000->1.000,1.000  [0]
+Application "Example" id "com.example.app"  tap 0.500 0.500  box 0.000,0.000->1.000,1.000  [0]
   TextField "Search"  tap 0.500 0.126  box 0.045,0.105->0.955,0.146  [0.0]
   Button "Continue" (disabled)  tap 0.500 0.863  box 0.045,0.837->0.955,0.889  [0.1]
   Button "See all"  off screen  box 0.802,1.010->0.964,1.040  [0.2]
@@ -293,6 +309,7 @@ JSON shape (`--json`):
 	"truncated": false,
 	"onScreenCount": 18,
 	"offScreenCount": 6,
+	"reader": { "source": "xctest" },
 	"udid": "00000000-0000-0000-0000-000000000000",
 	"name": "iPhone 17 Pro Max",
 	"lease": { "state": "held", "holder": "your-project-12" }
@@ -304,6 +321,7 @@ JSON shape (`--json`):
 - **`box` is the element's four edges** (left, top, right, bottom) in the same 0..1 units, and is **not clipped to the screen**: a `y1` of 1.36 means "a third of a screen further down", which is how far to scroll. It also tells you the size and shape of a target - whether a row is a whole card or the chevron at the end of one.
 - **`path`** (`0.1.2`) is the index path in this tree. It always exists; `id` (the app's own accessibility identifier) often does not.
 - **`enabled: false`** means tapping it does nothing. Check it before blaming a tap that "did not work".
+- **`reader.source`** is `xctest` or `accessibility`; with `accessibility`, `reader.note` says why the runner did not answer. Only an XCTest read carries `focused`, `placeholder`, `selected` and `keyboard` (`{ "keys", "latin", "nextInputMode" }`) - their absence from an `accessibility` read means unknown, not false. An XCTest read has no `role`.
 - **`truncated: true`** means the cap cut the tree; `totalNodeCount` is the real size and `--max-nodes` raises the cap. Nothing is ever dropped silently.
 - **An empty tree fails** rather than reporting "no elements": the error names the frontmost bundle, which is usually the explanation (`com.apple.springboard` means you are looking at the home screen, not your app).
 - **An empty tree is also checked against the app itself.** Before reporting one, `ao sim ax` samples the foreground app's main thread. If that thread never moves and is not in its run loop's own wait, the error says the app has a **blocked main thread**, names the frames it is stuck in, and says a tap will report success and change nothing too - because the same block eats touches. Accessibility is not the problem in that case. The check costs nothing on a read that worked, and falls back to the ordinary message whenever it cannot tell.
@@ -599,6 +617,8 @@ ao sim ax                              # confirm what actually happened
 
   **"Could not prove it" is not "did not arrive", and the command keeps them apart.** A field with a length limit truncates silently, and a field that reports its value only once it loses focus shows nothing either way - both come back as `the text may be in the field ... but could not prove it`, naming the field and what it reads. Read it back with `ao sim ax`; do not send the text again, or you may end up with it twice.
 
+  **When a paste reports that nothing changed, it did not land** - on a device you hold, the before-and-after reads go through the XCTest reader, so they see a field inside a web sign-in sheet too. Some web fields do not take the keyboard shortcut a paste sends; use the field's own callout instead: put the text on the pasteboard (`printf '%s' "<text>" | xcrun simctl pbcopy <udid>`), tap the field until `ao sim ax` lists `MenuItem "Paste"`, then `ao sim tap --label Paste` and read the field back.
+
   **Key presses are not checked at all.** What a key produces is the simulator's decision, so that route says what it sent and tells you to read the field yourself. `Typed …` and `Pasted …` are not equally confident claims, and the output says so.
 
   **Two caveats worth knowing.** A pasted field receives one paste, not N keystrokes, so an app with live validation or a character counter behaves differently - use `--raw-keys` when you need real key presses. And while the paste happens, your text sits briefly on the **guest's** pasteboard, where any app on that simulator could read it; it is put back afterwards, and if it cannot be, the command says so loudly.
@@ -763,10 +783,10 @@ These are selectors, not a flow. You decide which steps belong in the test, in
 what order, and behind which waits.
 
 ⚠ The ambiguity count is a lower bound. It is counted against the tree `ao sim
-ax` reads; Maestro walks the XCUITest hierarchy, which reports far more nodes for
-the same screen because one label commonly sits on both a container and its
-child. A selector reported as unique can still match several nodes for Maestro.
-The only way to know is to run it.
+ax` reads, which drops unnamed layout containers; Maestro walks the full XCUITest
+hierarchy, which reports far more nodes for the same screen because one label
+commonly sits on both a container and its child. A selector reported as unique
+can still match several nodes for Maestro. The only way to know is to run it.
 
 ### ao sim flow
 

@@ -17,6 +17,12 @@ import (
 type simDaemon struct {
 	leases map[string]simLeaseClient // udid -> lease
 
+	// hierarchy is the XCTest runner's answer for GET .../hierarchy. Empty
+	// answers "off", the state of a device with no runner. hierarchyQuery is
+	// the query that read was asked with.
+	hierarchy      string
+	hierarchyQuery string
+
 	acquireStatus int
 	acquireBody   string
 
@@ -134,6 +140,15 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 			_, _ = io.WriteString(w, `{"hold":{"udid":"x","sessionId":"mer-9","token":"hold-token-1","expiresAt":"2026-08-13T07:41:32Z"}}`)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/hold/"):
 			_, _ = io.WriteString(w, `{"released":true}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/hierarchy"):
+			d.mu.Lock()
+			answer := d.hierarchy
+			d.hierarchyQuery = r.URL.RawQuery
+			d.mu.Unlock()
+			if answer == "" {
+				answer = `{"runner":{"state":"off","reason":"no AO session holds this simulator"}}`
+			}
+			_, _ = io.WriteString(w, answer)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sim/devices":
 			_ = json.NewEncoder(w).Encode(listSimDevicesResponse{Devices: d.powerDevices})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/power"):

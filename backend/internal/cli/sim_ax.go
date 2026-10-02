@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -205,7 +206,7 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 	if err != nil {
 		return simAXResult{}, err
 	}
-	driver, err := c.simDriver(device)
+	driver, err := c.simDriverWaiting(device, simAXRunnerWait)
 	if err != nil {
 		return simAXResult{}, err
 	}
@@ -368,16 +369,33 @@ func (c *commandContext) resolveBootedSimDevice(ctx context.Context, udid string
 // needs (simbridge.BootFunc) is already in the caller's hands: every command
 // that touches a screen resolves the device first, and a second `simctl list`
 // is the single most expensive thing in a touch.
+//
+// Its reads go through the daemon's XCTest runner when one is up for the
+// device (see sim_xctest.go), and through the bridge otherwise; its touches
+// always go through the bridge. A read here never waits for a runner that is
+// still starting - simDriverWaiting is for the one command whose job is to read.
 func (c *commandContext) simDriver(device simDevice) (simbridge.Driver, error) {
+	return c.simDriverWaiting(device, 0)
+}
+
+// simDriverWaiting is simDriver whose reads wait up to wait for a starting
+// runner.
+func (c *commandContext) simDriverWaiting(device simDevice, wait time.Duration) (simbridge.Driver, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
+	var bridge simbridge.Driver
 	if c.deps.SimDriver != nil {
-		return c.deps.SimDriver(cfg.DataDir)
+		bridge, err = c.deps.SimDriver(cfg.DataDir)
+	} else {
+		boot := func(context.Context, string) (string, error) { return device.Boot() }
+		bridge, err = simbridge.NewNodeDriver(cfg.DataDir, c.deps.LookPath, boot, nil)
 	}
-	boot := func(context.Context, string) (string, error) { return device.Boot() }
-	return simbridge.NewNodeDriver(cfg.DataDir, c.deps.LookPath, boot, nil)
+	if err != nil {
+		return nil, err
+	}
+	return xctestReadingDriver{Driver: bridge, read: c.readSimHierarchy, wait: wait}, nil
 }
 
 func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {
@@ -393,8 +411,24 @@ func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(out, "Device: %s\nLease: %s\n", result.UDID, result.Lease.captureLine(sessionID)); err != nil {
+	if _, err := fmt.Fprintf(out, "Device: %s\nLease: %s\nReader: %s\n", result.UDID, result.Lease.captureLine(sessionID), readerLine(result.Reader)); err != nil {
 		return err
+	}
+	if kb := result.Keyboard; kb != nil {
+		line := fmt.Sprintf("Keyboard: up, %d keys, ", kb.Keys)
+		if kb.Latin {
+			line += "Latin letters"
+		} else {
+			// The layout typing would go through - the thing that decides
+			// whether text arrives as typed.
+			line += "NOT Latin letters (a non-English input mode)"
+		}
+		if kb.NextInputMode != "" {
+			line += "; the globe key switches to " + quoteIfPresent(kb.NextInputMode)
+		}
+		if _, err := fmt.Fprintln(out, line); err != nil {
+			return err
+		}
 	}
 	if result.Settle != nil && !result.Settle.Settled {
 		// The bound exists so an animation cannot hang the command; saying so
@@ -439,11 +473,21 @@ func writeSimAXElements(out io.Writer, elements []simbridge.Element, depth int) 
 			label = e.Value
 		}
 		line := strings.TrimSpace(e.Type + " " + quoteIfPresent(label))
+		if (label == "" || e.Type == "Application") && e.ID != "" {
+			// Nameless, but addressable: the id is what `ao sim tap --id` takes.
+			line += " id " + quoteIfPresent(e.ID)
+		}
 		if e.Value != "" && e.Value != label {
 			line += " = " + quoteIfPresent(e.Value)
 		}
+		if e.Placeholder != "" && e.Placeholder != e.Value {
+			line += " placeholder " + quoteIfPresent(e.Placeholder)
+		}
 		if !e.Enabled {
 			line += " (disabled)"
+		}
+		if e.Focused {
+			line += " (focused)"
 		}
 		// Where to touch it, or that there is nowhere to - never a coordinate
 		// that reaches something else.
@@ -462,11 +506,50 @@ func writeSimAXElements(out io.Writer, elements []simbridge.Element, depth int) 
 		if _, err := fmt.Fprintf(out, "%s%s  [%s]\n", strings.Repeat("  ", depth), line, e.Path); err != nil {
 			return err
 		}
-		if err := writeSimAXElements(out, e.Children, depth+1); err != nil {
+		children := e.Children
+		if e.Type == "Keyboard" {
+			// Forty lines of one letter each say less than one line naming them
+			// all. The keys keep their points in --json; typing goes through
+			// `ao sim type`, not through taps on them.
+			var keys []string
+			children, keys = splitKeys(children)
+			if len(keys) > 0 {
+				if _, err := fmt.Fprintf(out, "%s  keys: %s\n", strings.Repeat("  ", depth), strings.Join(keys, " ")); err != nil {
+					return err
+				}
+			}
+		}
+		if err := writeSimAXElements(out, children, depth+1); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// splitKeys separates a keyboard's character keys, at any depth, from the rest
+// of what it holds (shift, return, the globe key), naming each key by what it
+// types.
+func splitKeys(children []simbridge.Element) ([]simbridge.Element, []string) {
+	rest := make([]simbridge.Element, 0, len(children))
+	var keys []string
+	for _, child := range children {
+		if child.Type == "Key" {
+			name := child.Label
+			if strings.TrimSpace(name) == "" {
+				name = child.ID
+			}
+			if strings.Contains(name, " ") {
+				name = strconv.Quote(name)
+			}
+			keys = append(keys, name)
+			continue
+		}
+		var nested []string
+		child.Children, nested = splitKeys(child.Children)
+		keys = append(keys, nested...)
+		rest = append(rest, child)
+	}
+	return rest, keys
 }
 
 func quoteIfPresent(s string) string {

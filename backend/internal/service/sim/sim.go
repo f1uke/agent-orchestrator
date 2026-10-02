@@ -145,6 +145,8 @@ type Service struct {
 	tokens   func() string
 	recorder ScreenReader
 	crew     RuntimeWatcher
+	// leaseChanged is told after a lease is granted, taken over or released.
+	leaseChanged func()
 
 	// recMu guards pending and screens: the recorder's in-memory bookkeeping.
 	// See recording.go - both are keyed by hold token or udid, never touched
@@ -178,6 +180,15 @@ type Option func(*Service)
 // before the fact was recorded at all.
 func WithRuntimeWatcher(watcher RuntimeWatcher) Option {
 	return func(s *Service) { s.crew = watcher }
+}
+
+// WithLeaseChanged registers a nudge for whatever follows the lease table -
+// the daemon's XCTest runners (internal/simrunner) - so a claim or a release
+// takes effect now rather than on its next reconcile. It is only a nudge: the
+// follower re-reads the table itself, which is what makes a lease that lapses
+// or a session that ends (neither of which passes through here) count too.
+func WithLeaseChanged(f func()) Option {
+	return func(s *Service) { s.leaseChanged = f }
 }
 
 // WithClock overrides the service clock for tests.
@@ -304,6 +315,7 @@ func (s *Service) Acquire(ctx context.Context, sessionID domain.SessionID, udid 
 		return domain.SimLease{}, &HeldError{Lease: holder, Now: now}
 	}
 	s.noteRuntimeTouch(ctx, sessionID)
+	s.noteLeaseChanged()
 	return holder, nil
 }
 
@@ -346,6 +358,7 @@ func (s *Service) TakeOver(ctx context.Context, sessionID domain.SessionID, udid
 		return domain.SimLease{}, &HeldError{Lease: holder, Now: now, MidGesture: true}
 	}
 	s.noteRuntimeTouch(ctx, sessionID)
+	s.noteLeaseChanged()
 	return holder, nil
 }
 
@@ -362,6 +375,7 @@ func (s *Service) Release(ctx context.Context, sessionID domain.SessionID, udid 
 		return err
 	}
 	if released {
+		s.noteLeaseChanged()
 		return nil
 	}
 	now := s.now()
@@ -373,6 +387,12 @@ func (s *Service) Release(ctx context.Context, sessionID domain.SessionID, udid 
 		return &HeldError{Lease: holder, Now: now}
 	}
 	return fmt.Errorf("%w: no lease on simulator %s to release", ErrNotFound, key)
+}
+
+func (s *Service) noteLeaseChanged() {
+	if s.leaseChanged != nil {
+		s.leaseChanged()
+	}
 }
 
 // List returns every lease still live now.
