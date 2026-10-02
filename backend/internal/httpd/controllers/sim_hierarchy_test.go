@@ -29,6 +29,18 @@ func (f *fakeSimRunner) Read(_ context.Context, udid string, wait time.Duration)
 	return f.tree, f.status, f.err
 }
 
+func (f *fakeSimRunner) Await(context.Context, string, time.Duration) (simrunner.Status, error) {
+	return f.status, f.err
+}
+
+func (f *fakeSimRunner) Focus(context.Context, string) (simrunner.TypeAnswer, error) {
+	return simrunner.TypeAnswer{}, simrunner.ErrNotReady
+}
+
+func (f *fakeSimRunner) Type(context.Context, string, string, simrunner.TypeOptions) (simrunner.TypeAnswer, error) {
+	return simrunner.TypeAnswer{}, simrunner.ErrNotReady
+}
+
 func hierarchyServer(t *testing.T, runner SimRunner) *httptest.Server {
 	t.Helper()
 	r := chi.NewRouter()

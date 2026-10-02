@@ -69,7 +69,21 @@ type simGestureResult struct {
 	// evidence. Absent for every other gesture: no other command on this device
 	// can say what its touch did, and one that cannot must not appear to.
 	Landed *simPasteLanding `json:"landed,omitempty"`
-	Note   string           `json:"note"`
+	// Via is the route `type` took: "xctest" (characters through the XCTest
+	// runner, the default), "pasteboard" or "keys". Empty for every other
+	// gesture.
+	Via string `json:"via,omitempty"`
+	// App is the bundle id of the application holding the field, when the
+	// XCTest runner typed.
+	App string `json:"app,omitempty"`
+	// Fallback is why `type` did not go through XCTest, when it did not and
+	// was not asked to stay off it. A fallback is never silent.
+	Fallback string `json:"fallback,omitempty"`
+	// KeyboardSwitchedTo is the layout XCTest switched the software keyboard
+	// to for a secure field, and KeyboardRestored that it switched it back.
+	KeyboardSwitchedTo string `json:"keyboardSwitchedTo,omitempty"`
+	KeyboardRestored   bool   `json:"keyboardRestored,omitempty"`
+	Note               string `json:"note"`
 }
 
 // simPasteLanding is where a paste landed, in the `--json` payload. The same
@@ -383,7 +397,18 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 		Short: "Type text into a claimed simulator's focused field",
 		Long: "Put text into whatever has keyboard focus.\n\n" +
 			"Tap the field first: this types, it does not choose where the text goes.\n\n" +
-			"HOW IT GETS THERE depends on the simulator, and the command says which route it " +
+			"By default the text goes through AO's XCTest runner, which types CHARACTERS through the " +
+			"software keyboard, the way XCUITest does: Thai, English, mixed and emoji arrive as asked " +
+			"whatever language the Mac or the simulator keyboard is set to, in any field on screen - a " +
+			"web sign-in sheet's, a secure field, an in-app search box. The screen is read before and " +
+			"after, and the command names the field the text landed in and what it reads now (a secure " +
+			"field shows one dot per character, and that count is what is checked). It fails, typing " +
+			"nothing, when no field has keyboard focus. The runner runs while this session holds the " +
+			"device (`ao sim claim`).\n\n" +
+			"When the runner cannot type - it is still starting, or this machine has no Xcode - the " +
+			"command falls back to the routes below and says so on a `Fallback:` line. Text holding a " +
+			"control character (Return, Tab) also takes them: those are key presses.\n\n" +
+			"THE FALLBACK ROUTES depend on the simulator, and the command says which it " +
 			"took. Key presses are used wherever they can be trusted, because an app that " +
 			"watches each keystroke - a live validator, a character counter, a masked field - " +
 			"then sees what a person would. But the keys sent are US-keyboard key presses and " +
@@ -397,12 +422,13 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 			"more. Key presses are NOT checked that way: what a key produces is the simulator's " +
 			"to decide, so that route says what it sent and leaves the reading to you.\n\n" +
 			"Non-ASCII text also goes by pasteboard, because no US keyboard key can send it.\n\n" +
-			"`--paste` always uses the pasteboard. `--raw-keys` always sends key presses and " +
-			"promises only key presses, which is how Thai text is deliberately entered on a " +
-			"Thai guest.\n\n" +
+			"`--paste` always uses the pasteboard and `--raw-keys` always sends key presses, skipping " +
+			"XCTest. `--raw-keys` " +
+			"promises only key presses.\n\n" +
 			"The device must be claimed by this session (`ao sim claim`) first.",
 		Example: `  ao sim tap 0.5 0.125
   ao sim type "hello@example.com"
+  ao sim type "สวัสดี ครับ"
   ao sim type "fa12345" --raw-keys`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -421,12 +447,28 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			route, err := ctx.planSimType(cmd.Context(), device, text, rawKeys, forcePaste)
-			if err != nil {
+			if rawKeys && forcePaste {
+				// PlanText says why; before XCTest is tried, not after.
+				_, err := ctx.planSimType(cmd.Context(), device, text, rawKeys, forcePaste)
 				return err
 			}
+			var fallback simTypeFallbackRoute
+			if !rawKeys && !forcePaste && text != "" {
+				fallback.Reason = xctestTypeUnsuitable(text)
+				if fallback.Reason == "" {
+					if fallback, err = ctx.runSimTypeXCTest(cmd, opts, device, text); err != nil || fallback.Reason == "" {
+						return err
+					}
+				}
+			}
+			route := simbridge.TextRoute{Paste: true, Why: "a secure field takes only what the keyboard on screen can type"}
+			if !fallback.Paste {
+				if route, err = ctx.planSimType(cmd.Context(), device, text, rawKeys, forcePaste); err != nil {
+					return err
+				}
+			}
 			if route.Paste {
-				return ctx.runSimPaste(cmd, opts, device, text, route)
+				return ctx.runSimPaste(cmd, opts, device, text, route, fallback.Reason)
 			}
 			runes := strconv.Itoa(len([]rune(text)))
 			detail := runes + " characters"
@@ -439,6 +481,7 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 				events:   route.Events,
 				keyboard: route.Keyboard.Identifier,
 				text:     text,
+				fallback: fallback.Reason,
 			})
 		},
 	}
@@ -477,6 +520,7 @@ func (c *commandContext) planSimType(ctx context.Context, device simDevice, text
 // gesture hold every other way of touching this device takes.
 func (c *commandContext) runSimPaste(
 	cmd *cobra.Command, opts simTouchOptions, device simDevice, text string, route simbridge.TextRoute,
+	fallback string,
 ) error {
 	ctx := cmd.Context()
 	sessionID, err := simSessionID("`ao sim type`")
@@ -496,7 +540,7 @@ func (c *commandContext) runSimPaste(
 	result, err := simpaste.Run(ctx, holder, driver,
 		simpaste.Simctl{Run: c.deps.CommandOutput}, device.UDID, text)
 	if err != nil {
-		return c.explainSimPasteFailure(ctx, device, route, err)
+		return withSimTypeFallback(c.explainSimPasteFailure(ctx, device, route, err), fallback)
 	}
 
 	out := simGestureResult{
@@ -512,7 +556,9 @@ func (c *commandContext) runSimPaste(
 			Field: result.Landing.Field, Path: result.Landing.Path,
 			Shown: result.Landing.Shown, Evidence: string(result.Landing.How),
 		},
-		Note: simSharedDeviceNote,
+		Via:      "pasteboard",
+		Fallback: fallback,
+		Note:     simSharedDeviceNote,
 	}
 	if !result.Restored {
 		out.PasteboardLeftBehind = true
@@ -612,6 +658,8 @@ type simGesture struct {
 	durationMS int
 	text       string
 	name       string
+	// fallback is why a `type` went by key presses rather than XCTest.
+	fallback string
 }
 
 // intent is what this gesture asks the daemon's recorder to capture, in the
@@ -666,7 +714,7 @@ func (c *commandContext) runSimGestureOn(
 	result, err := simgesture.Run(ctx, holder, driver, device.UDID,
 		simgesture.Gesture{Action: gesture.action, Detail: gesture.detail, Events: gesture.events, Last: gesture.last})
 	if err != nil {
-		return c.explainSimGestureFailure(device, err)
+		return withSimTypeFallback(c.explainSimGestureFailure(device, err), gesture.fallback)
 	}
 
 	out := simGestureResult{
@@ -678,7 +726,11 @@ func (c *commandContext) runSimGestureOn(
 		Detail:            gesture.detail,
 		Rescued:           result.Lifted,
 		Keyboard:          gesture.keyboard,
+		Fallback:          gesture.fallback,
 		Note:              simSharedDeviceNote,
+	}
+	if gesture.action == "type" {
+		out.Via = "keys"
 	}
 	if opts.json {
 		return writeJSON(cmd.OutOrStdout(), out)
@@ -827,6 +879,9 @@ func parseSimSpan(what, raw string) (float64, error) {
 // when it receives one paste instead, and a caller who is debugging that needs
 // to know which of the two happened without having to guess.
 func writeSimPaste(out io.Writer, result simGestureResult, landing simpaste.Landing, restoreErr error) error {
+	if err := writeSimTypeFallback(out, result.Fallback); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprintf(out, "Pasted %s into %s (%s, %s)\n%s, so the text went through the simulator's "+
 		"pasteboard rather than its keyboard.\n",
 		result.Detail, result.Name, result.Runtime, result.UDID,
@@ -861,7 +916,11 @@ func writeSimGesture(out io.Writer, result simGestureResult) error {
 		"pinch":  "Pinched",
 		"type":   "Typed",
 		"button": "Pressed",
+		"key":    "Pressed",
 	}[result.Action]
+	if err := writeSimTypeFallback(out, result.Fallback); err != nil {
+		return err
+	}
 	if _, err := fmt.Fprintf(out, "%s %s on %s (%s, %s)\n",
 		verb, result.Detail, result.Name, result.Runtime, result.UDID); err != nil {
 		return err
@@ -903,4 +962,24 @@ func writeSimTapMatch(out io.Writer, target *simTapMatch) error {
 	_, err := fmt.Fprintf(out, "No element has the %s %q exactly; this was the only one containing it  [%s]\n",
 		target.Kind, target.Selector, target.Path)
 	return err
+}
+
+// writeSimTypeFallback is the `Fallback:` line: why `type` did not go through
+// XCTest. First, because it changes how every line after it should be read.
+func writeSimTypeFallback(out io.Writer, fallback string) error {
+	if fallback == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(out, "Fallback: %s, so this did not go through XCTest.\n", fallback)
+	return err
+}
+
+// withSimTypeFallback adds the fallback's reason to a failure on the fallback
+// route: "the paste did not land" reads differently once you know XCTest was
+// not there to try first.
+func withSimTypeFallback(err error, fallback string) error {
+	if err == nil || fallback == "" {
+		return err
+	}
+	return fmt.Errorf("%w\n(XCTest typing was not used: %s)", err, fallback)
 }

@@ -1087,6 +1087,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/sim-devices/{udid}/type": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Type text into the focused field through the device's XCTest runner, as characters, and prove it arrived */
+        post: operations["typeSimText"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/sim-flows": {
         parameters: {
             query?: never;
@@ -3642,6 +3659,51 @@ export interface components {
             height: number;
             /** Format: double */
             width: number;
+        };
+        SimTypeField: {
+            id?: string;
+            label?: string;
+            placeholder?: string;
+            /** @description XCUIElement type, e.g. TextField, SecureTextField. */
+            type: string;
+        };
+        SimTypeInput: {
+            /** @description The characters to type, at most 100. A longer text is sent in chunks, one request each. */
+            text: string;
+            /** @description How long to wait for a runner that is still starting, in milliseconds, before taking the gesture hold. Capped at 15000. */
+            waitMs?: number;
+        };
+        SimTypeLanding: {
+            /**
+             * @description exact: the text itself. case: apart from capitalisation. masked: a secure field gained one dot per character. reformatted: its letters and digits inside the field's own formatting.
+             * @enum {string}
+             */
+            evidence: "exact" | "case" | "masked" | "reformatted";
+            /** @description The element's accessibility label. */
+            field?: string;
+            /** @description Its path in ao sim ax. */
+            path: string;
+            /** @description What it reads now: dots for a secure field. */
+            shown: string;
+        };
+        SimTypeResponse: {
+            /** @description Bundle id of the application holding the field. */
+            app: string;
+            /** @description Where the text went, in the words the CLI prints. */
+            detail: string;
+            field: components["schemas"]["SimTypeField"];
+            /** @description The software keyboard was on screen before typing. */
+            keyboard: boolean;
+            /** @description The keyboard was switched back afterwards. */
+            keyboardRestored?: boolean;
+            /** @description The layout the software keyboard was switched to for a secure field, which takes only what the keyboard on screen can type. */
+            keyboardSwitchedTo?: string;
+            landed: components["schemas"]["SimTypeLanding"];
+            /** @description How long XCTest took to type it. */
+            typingMs: number;
+            udid: string;
+            /** @description What XCTest said while typing, when it complained about text the screen shows did arrive. */
+            warning?: string;
         };
         SimVideoResponse: {
             video: components["schemas"]["SimVideoView"];
@@ -8115,6 +8177,98 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    typeSimText: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. The gesture is arbitrated as this session. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimTypeInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimTypeResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

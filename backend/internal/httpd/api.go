@@ -64,7 +64,7 @@ type APIDeps struct {
 	// per-daemon because one drag spans several requests, and the daemon owns
 	// its lifetime so no finger is left down when the process goes away.
 	SimDrags *simgesture.Drags
-	// SimRunner is the warm XCTest screen reader behind `ao sim ax`: one
+	// SimRunner is the warm XCTest runner behind `ao sim ax` and `ao sim type`: one
 	// runner per simulator a session holds. nil on a machine without Xcode,
 	// and the hierarchy route then answers "unavailable" so the CLI reads
 	// through the accessibility bridge instead.
@@ -118,6 +118,7 @@ type API struct {
 	simVideo      *controllers.SimVideoController
 	simScreen     *controllers.SimScreenController
 	simHierarchy  *controllers.SimHierarchyController
+	simType       *controllers.SimTypeController
 	notifications *controllers.NotificationsController
 	activity      *controllers.ActivityController
 	imports       *controllers.ImportController
@@ -159,6 +160,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		simVideo:      &controllers.SimVideoController{Svc: deps.SimVideo},
 		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver},
 		simHierarchy:  &controllers.SimHierarchyController{Runner: deps.SimRunner},
+		simType:       &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
@@ -205,6 +207,7 @@ func (a *API) Register(root chi.Router) {
 			a.simVideo.Register(r)
 			a.simScreen.Register(r)
 			a.simHierarchy.Register(r)
+			a.simType.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)

@@ -26,6 +26,14 @@ type simDaemon struct {
 	acquireStatus int
 	acquireBody   string
 
+	// typeStatus/typeBody answer POST .../sim-devices/{udid}/type, the XCTest
+	// typing route. Unset answers 503 "the runner is off", the answer of a
+	// device with no runner, so a test of the older routes reaches them the
+	// way a real fallback does. typeRequests is every body it was sent.
+	typeStatus   int
+	typeBody     string
+	typeRequests []string
+
 	// holdStatus/holdBody override the gesture-hold response, so a test can
 	// make the daemon refuse a touch the way contention does.
 	holdStatus int
@@ -140,6 +148,21 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 			_, _ = io.WriteString(w, `{"hold":{"udid":"x","sessionId":"mer-9","token":"hold-token-1","expiresAt":"2026-08-13T07:41:32Z"}}`)
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/hold/"):
 			_, _ = io.WriteString(w, `{"released":true}`)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/sim-devices/") &&
+			strings.HasSuffix(r.URL.Path, "/type"):
+			d.mu.Lock()
+			d.typeRequests = append(d.typeRequests, string(body))
+			status, answer := d.typeStatus, d.typeBody
+			d.mu.Unlock()
+			if status == 0 && answer == "" {
+				status = http.StatusServiceUnavailable
+				answer = `{"error":"unavailable","code":"SIM_RUNNER_NOT_READY","message":"the XCTest runner is off",` +
+					`"details":{"state":"off","reason":"no AO session holds this simulator"}}`
+			}
+			if status != 0 {
+				w.WriteHeader(status)
+			}
+			_, _ = io.WriteString(w, answer)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/hierarchy"):
 			d.mu.Lock()
 			answer := d.hierarchy

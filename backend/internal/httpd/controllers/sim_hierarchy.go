@@ -13,9 +13,13 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simrunner"
 )
 
-// SimRunner is the daemon's XCTest screen reader (internal/simrunner).
+// SimRunner is the daemon's XCTest runner (internal/simrunner): it reads the
+// screen, and types for `ao sim type` (SimTypeController).
 type SimRunner interface {
 	Read(ctx context.Context, udid string, wait time.Duration) (simbridge.XCTestHierarchy, simrunner.Status, error)
+	Await(ctx context.Context, udid string, wait time.Duration) (simrunner.Status, error)
+	Focus(ctx context.Context, udid string) (simrunner.TypeAnswer, error)
+	Type(ctx context.Context, udid, text string, opts simrunner.TypeOptions) (simrunner.TypeAnswer, error)
 }
 
 // SimHierarchyController serves the screen as XCTest reads it.

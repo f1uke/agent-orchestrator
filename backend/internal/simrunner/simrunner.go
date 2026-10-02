@@ -9,8 +9,9 @@
 // per read it costs 14-26 s (an xcodebuild launch each time); kept warm and
 // asked over HTTP it answers in 0.05-0.3 s.
 //
-// The runner READS. Every touch still goes through `ao sim tap` and friends,
-// under the device's lease and gesture hold; nothing here can drive a device.
+// The runner READS, and it TYPES (Type) - which the daemon asks of it only
+// inside the device's gesture hold (internal/simtype). Every other touch still
+// goes through `ao sim tap` and friends, under the same lease and hold.
 //
 // Lifecycle, and the ways it ends:
 //
@@ -48,6 +49,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
@@ -583,6 +585,29 @@ func (m *Manager) terminate(r *runner) {
 // still starting it waits up to wait for it. Any other answer than a tree is
 // ErrNotReady with a Status saying why, for the caller's fallback to report.
 func (m *Manager) Read(ctx context.Context, udid string, wait time.Duration) (simbridge.XCTestHierarchy, Status, error) {
+	port, status, err := m.await(ctx, udid, wait)
+	if err != nil {
+		return simbridge.XCTestHierarchy{}, status, err
+	}
+	readCtx, cancel := context.WithTimeout(ctx, readTimeout)
+	defer cancel()
+	h, err := m.client(port).hierarchy(readCtx)
+	if err != nil {
+		return simbridge.XCTestHierarchy{}, Status{State: StateReady, Reason: "the read failed: " + err.Error()},
+			fmt.Errorf("%w: %w", ErrNotReady, err)
+	}
+	return h, Status{State: StateReady}, nil
+}
+
+// Await waits up to wait for the device's runner to be ready. Anything but
+// ready is ErrNotReady with a Status saying why.
+func (m *Manager) Await(ctx context.Context, udid string, wait time.Duration) (Status, error) {
+	_, status, err := m.await(ctx, udid, wait)
+	return status, err
+}
+
+// await is Await with the ready runner's port.
+func (m *Manager) await(ctx context.Context, udid string, wait time.Duration) (int, Status, error) {
 	key := domain.NormalizeSimUDID(udid)
 	m.mu.Lock()
 	r := m.runners[key]
@@ -595,7 +620,7 @@ func (m *Manager) Read(ctx context.Context, udid string, wait time.Duration) (si
 		m.mu.Unlock()
 	}
 	if r == nil {
-		return simbridge.XCTestHierarchy{}, m.Status(key), ErrNotReady
+		return 0, m.Status(key), ErrNotReady
 	}
 	if wait > 0 {
 		timer := time.NewTimer(wait)
@@ -610,17 +635,72 @@ func (m *Manager) Read(ctx context.Context, udid string, wait time.Duration) (si
 	state, port := r.state, r.port
 	m.mu.Unlock()
 	if state != StateReady {
-		return simbridge.XCTestHierarchy{}, m.Status(key), ErrNotReady
+		return 0, m.Status(key), ErrNotReady
 	}
-	readCtx, cancel := context.WithTimeout(ctx, readTimeout)
-	defer cancel()
-	h, err := m.client(port).hierarchy(readCtx)
-	if err != nil {
-		return simbridge.XCTestHierarchy{}, Status{State: StateReady, Reason: "the read failed: " + err.Error()},
-			fmt.Errorf("%w: %w", ErrNotReady, err)
-	}
-	return h, Status{State: StateReady}, nil
+	return port, Status{State: StateReady}, nil
 }
+
+// Type types text into whatever has keyboard focus on the device, through its
+// runner. It does not wait for a runner that is starting: the caller holds
+// the device's gesture hold by now, and waiting belongs before that (Await).
+//
+// ErrNotReady means nothing was sent. Any other error means the request may
+// have reached the runner, so some of the text may have arrived and the
+// screen is the only way to tell.
+func (m *Manager) Type(ctx context.Context, udid, text string, opts TypeOptions) (TypeAnswer, error) {
+	port, _, err := m.await(ctx, udid, 0)
+	if err != nil {
+		return TypeAnswer{}, err
+	}
+	typeCtx, cancel := context.WithTimeout(ctx, TypeTimeout(text))
+	defer cancel()
+	return m.client(port).typeText(typeCtx, text, opts)
+}
+
+// TypeOptions shape one Type.
+type TypeOptions struct {
+	// Layout switches the software keyboard, by its globe key, to a layout of
+	// this kind before typing, and back afterwards. Empty types on whatever
+	// keyboard is up.
+	Layout Layout
+}
+
+// Layout is a kind of keyboard layout, by its letters.
+type Layout string
+
+// LayoutLatin is a layout whose letter keys are a-z. The runner also knows
+// "other" (any layout whose letters are not); nothing asks for it, since a
+// secure field does not take every Thai character typed through one.
+const LayoutLatin Layout = "latin"
+
+// Focus says what a Type would go into right now - the focused element, the
+// application holding it, and whether the keyboard is up - without typing.
+func (m *Manager) Focus(ctx context.Context, udid string) (TypeAnswer, error) {
+	port, _, err := m.await(ctx, udid, 0)
+	if err != nil {
+		return TypeAnswer{}, err
+	}
+	focusCtx, cancel := context.WithTimeout(ctx, readTimeout)
+	defer cancel()
+	return m.client(port).focus(focusCtx)
+}
+
+// TypeTimeout bounds one /type. XCTest types about 30 characters a second
+// (measured 25-40 ms each, iOS 26.3) and waits for the app to settle before
+// it starts; the allowance per character is several times that, so a long
+// text on a busy app is not cut off halfway.
+func TypeTimeout(text string) time.Duration {
+	return typeSettle + time.Duration(utf8.RuneCountInString(text))*typePerRune
+}
+
+const (
+	// typeSettle covers XCTest's wait for the app to idle, and the focus
+	// lookup before it types (0.1-0.2 s).
+	typeSettle = 10 * time.Second
+	// typePerRune is the allowance per character, about three times the
+	// measured rate.
+	typePerRune = 100 * time.Millisecond
+)
 
 // Status is the device's runner now.
 func (m *Manager) Status(udid string) Status {

@@ -83,6 +83,10 @@ var simPromptDecisions = map[string]bool{
 	// nothing) are reported by the commands themselves at the moment of use.
 	"type":   false,
 	"button": false,
+	// `key` presses Return, Backspace, Tab and the arrows: a thing an agent
+	// already knows it wants once a field needs one, and `ao sim type` names it
+	// when text holds a control character.
+	"key": false,
 	// `pinch` is the only gesture that is not one finger, and it is reached
 	// only when a task asks about zooming - a task instruction, not a standing
 	// hazard, which is the only thing the always-seen layer buys. What it DID
