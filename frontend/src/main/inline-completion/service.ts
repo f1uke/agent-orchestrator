@@ -45,6 +45,8 @@ export type InlineCompletionStatus = {
 	 * model downloads, the old one keeps serving.
 	 */
 	activeKind: ModelKind | null;
+	/** Whether the running model also answers fill-in-the-middle (ghost text at the cursor). */
+	activeInfill: boolean;
 	/** The reason behind `error`, or what `starting` is doing. */
 	serverDetail: string | null;
 	/** The pid of the llama-server AO started, while it runs. */
@@ -102,10 +104,17 @@ export function inlineCompletionPaths(stateDir: string): InlineCompletionPaths {
  *   the previous prompt are shifted rather than recomputed.
  * - `--no-webui`: nobody browses to a Unix socket.
  *
- * A next-edit model adds n-gram speculative decoding: its answer is mostly the
- * window it was given, copied, and drafting from the prompt's own n-grams lets
- * the server verify those copied runs several tokens per step (see
- * NEXT_EDIT_SPEC_ARGS).
+ * A next-edit model differs in two ways (NEXT_EDIT_ARGS):
+ * - it is asked TWO kinds of prompt - fill-in-the-middle at the cursor and the
+ *   rewrite of the window - so it gets one slot per kind, each with the same
+ *   8192 tokens of context. On one shared slot every rewrite evicted the
+ *   ghost-text prompt's cache: the next keystroke reprocessed ~1k tokens and
+ *   took 322 ms (p50) instead of 172 ms. Cost: ~230 MB more KV cache.
+ *   llama-server routes a request to the slot whose cached prompt it shares the
+ *   most with, so the two kinds keep to their own slots.
+ * - n-gram speculative decoding: a rewrite is mostly the window it was given,
+ *   copied, and drafting from the prompt's own n-grams lets the server verify
+ *   those copied runs several tokens per step.
  */
 export function serverArgs(modelPath: string, socketPath: string, kind: ModelKind = "fim"): string[] {
 	return [
@@ -113,10 +122,7 @@ export function serverArgs(modelPath: string, socketPath: string, kind: ModelKin
 		modelPath,
 		"--host",
 		socketPath,
-		"-c",
-		"8192",
-		"-np",
-		"1",
+		...(kind === "next-edit" ? NEXT_EDIT_ARGS : ["-c", "8192", "-np", "1"]),
 		"-b",
 		"1024",
 		"-ub",
@@ -126,7 +132,6 @@ export function serverArgs(modelPath: string, socketPath: string, kind: ModelKin
 		"-ngl",
 		"99",
 		"--no-webui",
-		...(kind === "next-edit" ? NEXT_EDIT_SPEC_ARGS : []),
 	];
 }
 
@@ -138,7 +143,7 @@ export function serverArgs(modelPath: string, socketPath: string, kind: ModelKin
  * `ngram-simple` drafts from the prompt's own n-grams, which is exactly where a
  * rewrite of the window copies from.
  */
-export const NEXT_EDIT_SPEC_ARGS: readonly string[] = ["--spec-type", "ngram-simple"];
+export const NEXT_EDIT_ARGS: readonly string[] = ["-c", "16384", "-np", "2", "--spec-type", "ngram-simple"];
 
 /**
  * The child's environment, built from nothing on purpose: llama-server reads
@@ -288,6 +293,7 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 		modelId: settings.modelId,
 		server: serverState,
 		activeKind: server ? activeKind() : null,
+		activeInfill: server !== null && serverModel !== null && specOf(serverModel).infill,
 		serverDetail,
 		pid: server?.pid ?? null,
 		confirm,
@@ -630,7 +636,7 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 
 		/** One prediction. Null when the server is not ready, the request was superseded, or it failed. */
 		complete: async (requestId: string, request: InfillRequest): Promise<InfillResult | null> => {
-			if (serverState !== "ready" || !server || activeKind() !== "fim") return null;
+			if (serverState !== "ready" || !server || !serverModel || !specOf(serverModel).infill) return null;
 			return (await lane.submit(requestId, { kind: "infill", request })) as InfillResult | null;
 		},
 

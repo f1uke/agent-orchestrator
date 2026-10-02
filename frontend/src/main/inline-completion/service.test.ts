@@ -34,6 +34,7 @@ const MODELS: ModelSpec[] = [
 	{
 		id: "qwen2.5-coder-1.5b",
 		kind: "fim",
+		infill: true,
 		label: "Small",
 		fileName: "small.gguf",
 		url: "https://example.invalid/small.gguf",
@@ -44,6 +45,7 @@ const MODELS: ModelSpec[] = [
 	{
 		id: "qwen2.5-coder-3b",
 		kind: "fim",
+		infill: true,
 		label: "Large",
 		fileName: "large.gguf",
 		url: "https://example.invalid/large.gguf",
@@ -56,6 +58,7 @@ const MODELS: ModelSpec[] = [
 MODELS.push({
 	id: "sweep-next-edit-1.5b",
 	kind: "next-edit",
+	infill: true,
 	label: "Edit",
 	fileName: "edit.gguf",
 	url: "https://example.invalid/edit.gguf",
@@ -158,9 +161,16 @@ function alive(pid: number): boolean {
 }
 
 describe("serverArgs", () => {
-	test("a next-edit model runs with n-gram speculative decoding; a FIM model without", () => {
-		expect(serverArgs("m.gguf", "s.sock", "next-edit")).toEqual(expect.arrayContaining(["--spec-type"]));
-		expect(serverArgs("m.gguf", "s.sock", "fim")).not.toContain("--spec-type");
+	test("a next-edit model runs with n-gram speculative decoding and a slot per kind of prompt", () => {
+		const nextEdit = serverArgs("m.gguf", "s.sock", "next-edit");
+		expect(nextEdit).toEqual(expect.arrayContaining(["--spec-type"]));
+		expect(nextEdit[nextEdit.indexOf("-np") + 1]).toBe("2");
+		// Each slot keeps a FIM model's whole context.
+		expect(nextEdit[nextEdit.indexOf("-c") + 1]).toBe("16384");
+		const fim = serverArgs("m.gguf", "s.sock", "fim");
+		expect(fim).not.toContain("--spec-type");
+		expect(fim[fim.indexOf("-np") + 1]).toBe("1");
+		expect(fim[fim.indexOf("-c") + 1]).toBe("8192");
 	});
 });
 
@@ -182,10 +192,12 @@ describe("inline completion service", () => {
 		};
 		const answer = await service.predictEdit("e1", request);
 		expect(answer?.window).toBe("let NEW = 1\nuse(NEW)");
-		// The fill-in-the-middle path answers nothing while a next-edit model runs.
+		// It answers fill-in-the-middle too: ghost text at the cursor.
+		expect(ready.activeInfill).toBe(true);
 		expect(
-			await service.complete("c1", { inputPrefix: "", prompt: "x", inputSuffix: "", inputExtra: [], nIndent: 0 }),
-		).toBeNull();
+			(await service.complete("c1", { inputPrefix: "", prompt: "x", inputSuffix: "", inputExtra: [], nIndent: 0 }))
+				?.content,
+		).toBe("<x>");
 
 		await service.selectModel("qwen2.5-coder-1.5b");
 		await service.confirmDownload();

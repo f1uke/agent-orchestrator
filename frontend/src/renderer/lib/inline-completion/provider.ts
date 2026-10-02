@@ -9,7 +9,12 @@ import { buildInfillRequest, cleanCompletion, PREFIX_LINES, SUFFIX_LINES } from 
 import { EditHistory, type LineChange } from "./edit-history";
 import { buildNextEditRequest, nextEditKey } from "./next-edit";
 import { suggestionFrom } from "./next-edit-suggestion";
-import { inlineCompletionKind, isInlineCompletionReady, subscribeInlineCompletionStatus } from "./status";
+import {
+	inlineCompletionInfill,
+	inlineCompletionKind,
+	isInlineCompletionReady,
+	subscribeInlineCompletionStatus,
+} from "./status";
 
 /**
  * Ghost text: Monaco's own inline-completions contribution, fed by the local
@@ -246,6 +251,84 @@ async function provideNextEdit(
 	return { items: [{ insertText: suggestion.text, range, isInlineEdit: true }] };
 }
 
+/** Ghost text at the cursor from a fill-in-the-middle request, or undefined when there is none. */
+async function provideFim(
+	model: monaco.editor.ITextModel,
+	position: monaco.Position,
+	context: monaco.languages.InlineCompletionContext,
+	token: monaco.CancellationToken,
+): Promise<monaco.languages.InlineCompletions | undefined> {
+	/**
+	 * 🗝 The suggest widget is open with a row selected. The language server's
+	 * list keeps Tab (Monaco's own keybinding condition), so the model must not
+	 * offer anything that competes with it - but it can CONTINUE it. The
+	 * prediction is made as if the selected row were already inserted, and
+	 * offered as that row plus what follows; Monaco shows it only because it
+	 * extends the row. Accepting the row with Tab then lands exactly on the
+	 * place this request asked about, so the continuation comes straight out
+	 * of the cache, and a second Tab takes it. A snippet row is left alone:
+	 * its placeholders are not text the model can continue.
+	 */
+	const selected = context.selectedSuggestionInfo;
+	if (
+		selected &&
+		(selected.isSnippetText ||
+			selected.range.startLineNumber !== position.lineNumber ||
+			selected.range.endLineNumber !== position.lineNumber)
+	) {
+		return undefined;
+	}
+	cancelWarmup();
+	scheduleFlush();
+
+	const filename = fileLabel(model.uri);
+	pickFarChunks(model, filename, position.lineNumber);
+	// Only the window the request is made of is read out of the model: a
+	// keystroke in a 10,000-line file must not copy 10,000 lines.
+	const first = Math.max(0, position.lineNumber - 1 - PREFIX_LINES);
+	const window = linesOf(model, first, position.lineNumber - first + SUFFIX_LINES);
+	const at = position.lineNumber - 1 - first;
+	let column = position.column;
+	if (selected) {
+		const line = window[at] ?? "";
+		const head = `${line.slice(0, selected.range.startColumn - 1)}${selected.text}`;
+		window[at] = `${head}${line.slice(selected.range.endColumn - 1)}`;
+		column = head.length + 1;
+	}
+	const view = { lines: window, lineNumber: at + 1, column };
+	const request = buildInfillRequest(view, ring.extra(filename, window));
+	if (!request) return undefined;
+
+	let completion = cache.get(request);
+	if (completion === null) {
+		const id = requestId();
+		const cancelled = token.onCancellationRequested(() => inlineCompletionBridge().cancel(id));
+		let content: string | null = null;
+		try {
+			content = (await inlineCompletionBridge().complete(id, request))?.content ?? null;
+		} catch {
+			content = null;
+		} finally {
+			cancelled.dispose();
+		}
+		if (content === null) return undefined;
+		completion = cleanCompletion(content, view) ?? "";
+		// Cached EVEN WHEN superseded: main lets a request on the wire finish
+		// rather than abort it (see request-lane.ts), and this answer is exactly
+		// what the typed-through lookup needs for the keystrokes since. An empty
+		// answer is cached too - asking again at the same spot would only spend
+		// model time to be told the same nothing.
+		cache.set(request, completion);
+		if (token.isCancellationRequested) return undefined;
+	}
+	if (!completion) return undefined;
+	if (selected) {
+		return { items: [{ insertText: `${selected.text}${completion}`, range: selected.range }] };
+	}
+	const range = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column);
+	return { items: [{ insertText: completion, range }] };
+}
+
 const provider: monaco.languages.InlineCompletionsProvider = {
 	displayName: "AO local model",
 	debounceDelayMs: DEBOUNCE_MS,
@@ -254,76 +337,22 @@ const provider: monaco.languages.InlineCompletionsProvider = {
 		// Off, downloading, starting or failed: exactly the editor that existed
 		// before this feature. No request, no message, no log line.
 		if (!isInlineCompletionReady()) return undefined;
-		if (inlineCompletionKind() === "next-edit") return provideNextEdit(model, position, context, token);
+		if (inlineCompletionKind() !== "next-edit") return provideFim(model, position, context, token);
 		/**
-		 * 🗝 The suggest widget is open with a row selected. The language server's
-		 * list keeps Tab (Monaco's own keybinding condition), so the model must not
-		 * offer anything that competes with it - but it can CONTINUE it. The
-		 * prediction is made as if the selected row were already inserted, and
-		 * offered as that row plus what follows; Monaco shows it only because it
-		 * extends the row. Accepting the row with Tab then lands exactly on the
-		 * place this request asked about, so the continuation comes straight out
-		 * of the cache, and a second Tab takes it. A snippet row is left alone:
-		 * its placeholders are not text the model can continue.
+		 * 🗝 A next-edit model answers BOTH questions, cursor first. sweep-next-edit
+		 * kept its base model's fill-in-the-middle: over /infill it finishes the line
+		 * as well as Qwen2.5-Coder 1.5B (53% vs 53% of held-out lines exactly right),
+		 * while its own rewrite does that job far worse (34%). So where the cursor
+		 * can be continued, the fill-in-the-middle answer is asked for first and
+		 * shown as ghost text; only when there is nothing to add at the cursor is
+		 * the model asked what the person is likely to change NEXT. (The server
+		 * keeps one slot per kind of prompt, so neither evicts the other's cache.)
 		 */
-		const selected = context.selectedSuggestionInfo;
-		if (
-			selected &&
-			(selected.isSnippetText ||
-				selected.range.startLineNumber !== position.lineNumber ||
-				selected.range.endLineNumber !== position.lineNumber)
-		) {
-			return undefined;
+		if (inlineCompletionInfill()) {
+			const atCursor = await provideFim(model, position, context, token);
+			if (atCursor || token.isCancellationRequested) return atCursor;
 		}
-		cancelWarmup();
-		scheduleFlush();
-
-		const filename = fileLabel(model.uri);
-		pickFarChunks(model, filename, position.lineNumber);
-		// Only the window the request is made of is read out of the model: a
-		// keystroke in a 10,000-line file must not copy 10,000 lines.
-		const first = Math.max(0, position.lineNumber - 1 - PREFIX_LINES);
-		const window = linesOf(model, first, position.lineNumber - first + SUFFIX_LINES);
-		const at = position.lineNumber - 1 - first;
-		let column = position.column;
-		if (selected) {
-			const line = window[at] ?? "";
-			const head = `${line.slice(0, selected.range.startColumn - 1)}${selected.text}`;
-			window[at] = `${head}${line.slice(selected.range.endColumn - 1)}`;
-			column = head.length + 1;
-		}
-		const view = { lines: window, lineNumber: at + 1, column };
-		const request = buildInfillRequest(view, ring.extra(filename, window));
-		if (!request) return undefined;
-
-		let completion = cache.get(request);
-		if (completion === null) {
-			const id = requestId();
-			const cancelled = token.onCancellationRequested(() => inlineCompletionBridge().cancel(id));
-			let content: string | null = null;
-			try {
-				content = (await inlineCompletionBridge().complete(id, request))?.content ?? null;
-			} catch {
-				content = null;
-			} finally {
-				cancelled.dispose();
-			}
-			if (content === null) return undefined;
-			completion = cleanCompletion(content, view) ?? "";
-			// Cached EVEN WHEN superseded: main lets a request on the wire finish
-			// rather than abort it (see request-lane.ts), and this answer is exactly
-			// what the typed-through lookup needs for the keystrokes since. An empty
-			// answer is cached too - asking again at the same spot would only spend
-			// model time to be told the same nothing.
-			cache.set(request, completion);
-			if (token.isCancellationRequested) return undefined;
-		}
-		if (!completion) return undefined;
-		if (selected) {
-			return { items: [{ insertText: `${selected.text}${completion}`, range: selected.range }] };
-		}
-		const range = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column);
-		return { items: [{ insertText: completion, range }] };
+		return provideNextEdit(model, position, context, token);
 	},
 
 	disposeInlineCompletions() {

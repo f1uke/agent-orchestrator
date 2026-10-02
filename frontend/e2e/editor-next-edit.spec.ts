@@ -141,7 +141,9 @@ test("Esc dismisses the suggestion and leaves the buffer as typed", async ({ pag
 	expect(await lineContaining(page, "offers.count")).toContain("guard index < offers.count");
 });
 
-test("finishing the line being typed is ghost text, as with a fill-in-the-middle model", async ({ page }) => {
+test("finishing the line being typed is ghost text from the model's fill-in-the-middle, before any next edit", async ({
+	page,
+}) => {
 	await page.goto(GALLERY.replace("line=36", "line=1"));
 	const anchor = page.locator(".view-lines .view-line", { hasText: "super.viewDidLoad()" }).first();
 	await expect(anchor).toBeVisible();
@@ -153,6 +155,15 @@ test("finishing the line being typed is ghost text, as with a fill-in-the-middle
 
 	await expect(ghost(page).first()).toContainText("tionTitle");
 	await expect(inlineEdit(page)).toHaveCount(0);
+	// Answered at the cursor, so the model was never asked to rewrite the window
+	// for that keystroke.
+	const asked = await page.evaluate(
+		() => (globalThis as { __aoPredictAsked?: { prompt: string }[] }).__aoPredictAsked ?? [],
+	);
+	expect(asked.some((a) => a.prompt.endsWith("let promo"))).toBe(true);
+	expect((await edits(page)).some((e) => e.current.includes("let promo\n") || e.current.endsWith("let promo"))).toBe(
+		false,
+	);
 	await page.keyboard.press("Tab");
 	expect((await lineContaining(page, "let promo")).trim()).toBe("let promotionTitle = offersTitle");
 });

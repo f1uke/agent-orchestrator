@@ -34,6 +34,7 @@ const OFF: InlineCompletionStatus = {
 	modelId: "qwen2.5-coder-1.5b",
 	server: "off",
 	activeKind: null,
+	activeInfill: false,
 	serverDetail: null,
 	pid: null,
 	confirm: null,

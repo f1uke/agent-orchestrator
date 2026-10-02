@@ -64,6 +64,8 @@ export function installFakeInlineCompletion(options: {
 		modelId: "qwen2.5-coder-1.5b",
 		server: options.ready ? "ready" : "off",
 		activeKind: options.ready ? kind : null,
+		// Like sweep-next-edit, the next-edit stub answers fill-in-the-middle too.
+		activeInfill: options.ready,
 		serverDetail: options.ready ? "Qwen2.5-Coder 1.5B" : null,
 		pid: options.ready ? 4242 : null,
 		confirm: null,
