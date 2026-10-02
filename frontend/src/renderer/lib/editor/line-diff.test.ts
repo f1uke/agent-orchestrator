@@ -50,7 +50,8 @@ describe("diffLines", () => {
 		for (let round = 0; round < 400; round++) {
 			const a = Array.from({ length: Math.floor(random() * 30) }, () => words[Math.floor(random() * words.length)]);
 			const b = a.filter(() => random() > 0.2);
-			for (let i = 0; i < 5; i++) b.splice(Math.floor(random() * (b.length + 1)), 0, words[Math.floor(random() * words.length)]);
+			for (let i = 0; i < 5; i++)
+				b.splice(Math.floor(random() * (b.length + 1)), 0, words[Math.floor(random() * words.length)]);
 			const runs = diffLines(a, b);
 			expect(apply(a, b, runs)).toEqual(b);
 			// Runs are ordered and never touch: adjacent edits fold into one.

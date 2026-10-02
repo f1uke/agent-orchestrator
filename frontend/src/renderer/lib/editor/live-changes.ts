@@ -139,7 +139,8 @@ function carryThrough(changes: readonly LineChange[], runs: readonly LineRun[], 
 		if (kind !== "added" && kind !== "modified" && kind !== "removed") continue;
 		if (kind === "removed") {
 			const at = mapLine(change.start);
-			if (at !== null) out.push({ start: Math.min(at, lineCount + 1), end: Math.min(at, lineCount + 1), kind, oldText: [] });
+			if (at !== null)
+				out.push({ start: Math.min(at, lineCount + 1), end: Math.min(at, lineCount + 1), kind, oldText: [] });
 			continue;
 		}
 		// Line by line, then re-joined: an edit in the middle of a run splits it.

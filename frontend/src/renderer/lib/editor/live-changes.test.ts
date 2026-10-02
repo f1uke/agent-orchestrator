@@ -70,7 +70,9 @@ function applyEdit(
 		return at + column - 1;
 	};
 	const next =
-		joined.slice(0, offset(edit.startLine, edit.startColumn)) + edit.text + joined.slice(offset(edit.endLine, edit.endColumn));
+		joined.slice(0, offset(edit.startLine, edit.startColumn)) +
+		edit.text +
+		joined.slice(offset(edit.endLine, edit.endColumn));
 	return next.split("\n");
 }
 

@@ -466,7 +466,9 @@ describe("WorkspaceFileView conflicts", () => {
 	function editor() {
 		return editorProps.current as unknown as {
 			onDirtyChange: (dirty: boolean) => void;
-			onHandle: (handle: { getValue: () => string | null; focus: () => void; revertToSaved?: () => void } | null) => void;
+			onHandle: (
+				handle: { getValue: () => string | null; focus: () => void; revertToSaved?: () => void } | null,
+			) => void;
 		};
 	}
 

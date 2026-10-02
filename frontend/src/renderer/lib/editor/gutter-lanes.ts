@@ -60,9 +60,7 @@ export function laneMarks(
 			const mark: LaneMark = { lane, kind: hunk.kind, start, end };
 			if (lane === "unsaved") {
 				mark.lineNumberClassName =
-					hunk.kind === "removed"
-						? `ao-unsaved-removed${atEnd ? " ao-unsaved-removed--end" : ""}`
-						: "ao-unsaved-line";
+					hunk.kind === "removed" ? `ao-unsaved-removed${atEnd ? " ao-unsaved-removed--end" : ""}` : "ao-unsaved-line";
 			} else {
 				const prefix = GLYPH_PREFIX[lane];
 				mark.glyphClassName = `${GUTTER_LANE_CLASS} ${prefix} ${prefix}--${hunk.kind}${atEnd ? ` ${prefix}--end` : ""}`;

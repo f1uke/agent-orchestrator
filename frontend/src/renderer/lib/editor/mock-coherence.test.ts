@@ -12,7 +12,11 @@ const PATH = "frontend/src/renderer/components/FilesPanel.tsx";
  * those look like editor bugs when they are fixture bugs.
  */
 describe("preview fixtures describe one file", () => {
-	const current = linesOf(mockWorkspaceFile(PATH).lines.map((l) => l.text).join("\n"));
+	const current = linesOf(
+		mockWorkspaceFile(PATH)
+			.lines.map((l) => l.text)
+			.join("\n"),
+	);
 
 	it("the full-context diff's new side is exactly the file the editor opens", () => {
 		const diff = mockWorkspaceFileDiff(PATH, { base: "target", fullContext: true });
