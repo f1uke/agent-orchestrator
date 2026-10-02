@@ -49,7 +49,14 @@ export function inlineCompletionSummary(status: InlineCompletionStatus | null): 
  * the question about a download (with its size, before anything starts) or the
  * download's progress with its Cancel.
  */
-export function InlineCompletionControls({ id = "inlineCompletionEnabled" }: { id?: string }) {
+export function InlineCompletionControls({
+	id = "inlineCompletionEnabled",
+	describeModel = true,
+}: {
+	id?: string;
+	/** The model's one line (what it does, what it costs). Off where the surrounding text already says it. */
+	describeModel?: boolean;
+}) {
 	const status = useInlineCompletionStatus();
 	const [busy, setBusy] = useState(false);
 	const act = (fn: () => Promise<void>) => {
@@ -92,7 +99,9 @@ export function InlineCompletionControls({ id = "inlineCompletionEnabled" }: { i
 			</div>
 
 			{/* What runs - one model, so a line rather than a picker. */}
-			{model && <p className="max-w-[62ch] text-[11.5px] leading-[1.55] text-passive">{model.blurb}</p>}
+			{describeModel && model && (
+				<p className="max-w-[62ch] text-[11.5px] leading-[1.55] text-passive">{model.blurb}</p>
+			)}
 
 			<StatusLine status={status} onRetry={() => act(() => inlineCompletionBridge().enable())} />
 

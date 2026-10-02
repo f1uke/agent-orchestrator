@@ -62,7 +62,7 @@ export function InlineCompletionChip() {
 							next. Tab accepts.
 						</span>
 					</div>
-					<InlineCompletionControls id="inlineCompletionEnabledEditor" />
+					<InlineCompletionControls id="inlineCompletionEnabledEditor" describeModel={false} />
 				</div>
 			</PopoverContent>
 		</Popover>
