@@ -54,6 +54,8 @@ export type ReferencesDocument = {
 	getAbsolutePath: () => string | null;
 	/** Slice 3's state, so a 0-hit answer can say WHY rather than look like a dead feature. */
 	getState: () => string;
+	/** The server's own reason, when it has one: on Swift it is what to do about it. */
+	getDetail?: () => string | undefined;
 	/** Reads a file for the peek preview. Null for one that cannot be shown. */
 	readFile: (absolutePath: string) => Promise<string | null>;
 	/** Shown at the cursor — this is an EXPLICIT ask, so a refusal gets an answer. */
@@ -111,7 +113,7 @@ function provider(documents: Map<string, ReferencesDocument>): monaco.languages.
 
 			const client = source.getClient();
 			const absolute = source.getAbsolutePath();
-			if (!client || !absolute) return refuse(`the language server is ${source.getState()}`);
+			if (!client || !absolute) return refuse(source.getDetail?.() || `the language server is ${source.getState()}`);
 			if (!client.features().references) {
 				return refuse(`${languageServerName(source.languageId)} offers no reference search for this file`);
 			}

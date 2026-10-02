@@ -21,13 +21,12 @@ import { editabilityOf } from "../lib/editor/editability";
 import { fileBytes, modelTextFrom } from "../lib/editor/save-file";
 import type { SaveFailure } from "../lib/editor/save-errors";
 import { languageDisplayName, languageServerName, lspLanguageForPath } from "../lib/lsp/language-ids";
-import type { LanguageServerHandle } from "../lib/lsp/use-language-server";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { isMacPlatform } from "../lib/platform";
 import { useUiStore } from "../stores/ui-store";
 import { type Drift, FileDriftBanner } from "./FileDriftBanner";
 import { InlineCompletionChip } from "./InlineCompletionChip";
-import type { EditorHandle } from "./MonacoFileEditor";
+import type { EditorHandle, ServerStatus } from "./MonacoFileEditor";
 
 // Monaco and its grammars are ~an order of magnitude larger than the rest of the
 // renderer, so the editor is a lazy chunk: the app's cold start never pays for
@@ -252,9 +251,7 @@ export function WorkspaceFileView({
 	forward?: { to: string; go: () => void } | null;
 }) {
 	const theme = useUiStore((s) => s.theme);
-	const [serverState, setServerState] = useState<{ state: LanguageServerHandle["state"]; detail?: string } | null>(
-		null,
-	);
+	const [serverState, setServerState] = useState<ServerStatus | null>(null);
 	const [problems, setProblems] = useState<{ errors: number; warnings: number }>({ errors: 0, warnings: 0 });
 	const [dirty, setDirty] = useState(false);
 	const [mode, setMode] = useState<Mode>("browse");
@@ -305,10 +302,7 @@ export function WorkspaceFileView({
 	}, [path]);
 
 	// Stable, because MonacoFileEditor reports through these from effects.
-	const handleServerState = useCallback(
-		(next: { state: LanguageServerHandle["state"]; detail?: string }) => setServerState(next),
-		[],
-	);
+	const handleServerState = useCallback((next: ServerStatus) => setServerState(next), []);
 	const handleEditorHandle = useCallback((next: EditorHandle | null) => {
 		handleRef.current = next;
 	}, []);
@@ -370,6 +364,22 @@ export function WorkspaceFileView({
 						"Go to definition (⌘click), completion (⌃space), the type under the pointer on hover, " +
 							"and — from the editor's right-click menu — Peek Definition (⌥F12) and " +
 							"Go to References (⇧F12).",
+				};
+			case "unconfigured":
+				// 🗝 NOT "no language server", and not red. Every reason that lands here
+				// is something a person does once - build the project, install a tool -
+				// and main is already watching for it. Painting it as a failure is what
+				// turned a moved worktree that needed one Xcode build into a reported
+				// regression of the install that happened the same morning (2026-10-02).
+				return {
+					text:
+						serverState.need === "build"
+							? "waiting for a build"
+							: serverState.need === "tool"
+								? "needs setup"
+								: "no build settings",
+					tone: serverState.need === "project" ? P.muted2 : P.amber,
+					title: serverState.detail || `The ${language} language server needs setting up before it can start.`,
 				};
 			case "failed":
 				return {

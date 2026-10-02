@@ -64,8 +64,9 @@ function renderPalette(
  * rather than bypassed.
  */
 function installLanguageServer(options: {
-	state: "indexing" | "ready" | "failed";
+	state: "indexing" | "ready" | "failed" | "unconfigured";
 	detail?: string;
+	need?: string;
 	symbols?: unknown[];
 	onRequest?: (method: string, params: unknown) => Promise<unknown>;
 }) {
@@ -73,7 +74,7 @@ function installLanguageServer(options: {
 	const bridge = {
 		attach: async () => {
 			if (options.state === "failed") throw new Error(options.detail ?? "gopls: spawn ENOENT");
-			return { handleId: "h1", key: "go /w", state: options.state, detail: options.detail };
+			return { handleId: "h1", key: "go /w", state: options.state, detail: options.detail, need: options.need };
 		},
 		detach: () => undefined,
 		send: (handleId: string, message: Record<string, unknown>) => {
@@ -359,17 +360,35 @@ describe("OpenQuicklyPalette", () => {
 			// person can act on. "Build it in Xcode once" and "install
 			// xcode-build-server" are the difference between a fixable setup and a
 			// feature that reads as broken; a generic "not running" throws that away.
+			const restore = installLanguageServer({ state: "failed", detail: "sourcekit-lsp exited (1): no toolchain" });
+			try {
+				const user = userEvent.setup();
+				renderPalette(vi.fn(), { workspaceRoot: "/w" });
+				await pressOpenQuickly(user);
+				await user.type(searchBox(), "confined");
+				expect(await screen.findByText(/no toolchain/i)).toBeInTheDocument();
+			} finally {
+				restore();
+			}
+		});
+
+		it("unconfigured → the reason, as a note rather than an error", async () => {
+			// A worktree with no Xcode build of its path is waiting for one build, not
+			// broken: the sentence is the message, and it is not painted as a failure.
 			const restore = installLanguageServer({
-				state: "failed",
+				state: "unconfigured",
+				need: "build",
 				detail:
-					"Xcode has never built NterWorkspace.xcworkspace from this worktree. Build it in Xcode once and reopen this file.",
+					"Xcode has never built NterWorkspace.xcworkspace from this worktree, so there are no compile settings to read. Build it in Xcode once; the editor connects by itself when the build finishes.",
 			});
 			try {
 				const user = userEvent.setup();
 				renderPalette(vi.fn(), { workspaceRoot: "/w" });
 				await pressOpenQuickly(user);
 				await user.type(searchBox(), "confined");
-				expect(await screen.findByText(/build it in xcode once/i)).toBeInTheDocument();
+				const note = await screen.findByText(/build it in xcode once/i);
+				expect(note).not.toHaveClass("open-quickly__note--error");
+				expect(screen.queryByText(/loading this workspace/i)).toBeNull();
 			} finally {
 				restore();
 			}

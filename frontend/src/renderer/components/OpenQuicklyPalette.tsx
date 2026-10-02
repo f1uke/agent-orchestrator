@@ -342,6 +342,13 @@ export function OpenQuicklyPalette({
 										{server.detail ||
 											`${languageServerName(symbolLanguage ?? "")} isn’t running, so symbols aren’t searchable.`}
 									</p>
+								) : server.state === "unconfigured" ? (
+									/* Same sentence, without the error colour: a project waiting
+									   for its first build is not broken, and main is watching for
+									   the build. */
+									<p className="open-quickly__note">
+										{server.detail || `${languageLabel} symbols need this project set up first.`}
+									</p>
 								) : server.state !== "ready" ? (
 									/* Gate on READINESS, not latency: an empty list here would be a
 								   lie told in exactly the seconds people use this most.

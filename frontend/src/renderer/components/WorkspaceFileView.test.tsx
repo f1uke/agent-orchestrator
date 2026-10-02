@@ -557,6 +557,28 @@ describe("WorkspaceFileView conflicts", () => {
 		expect(new Set(texts).size, `the pill said the same thing twice: ${texts.join(" | ")}`).toBe(4);
 	});
 
+	/**
+	 * 🗝 The 2026-10-02 report, at the pill. A worktree that only needs one Xcode
+	 * build must not read as "no language server" in red: that sent the user, and
+	 * then an agent, hunting a regression in an install that had not caused it.
+	 */
+	it("a workspace waiting for its build says so, not 'no language server'", async () => {
+		renderView();
+		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
+		const report = editorProps.current?.onServerState as (s: { state: string; detail?: string; need?: string }) => void;
+		const reason =
+			"This worktree moved here from /w/old after Xcode last built it. Build NterWorkspace.xcworkspace in Xcode once from here; the editor connects by itself when the build finishes.";
+
+		act(() => report({ state: "unconfigured", need: "build", detail: reason }));
+		const pill = await screen.findByTestId("lsp-status");
+		expect(pill).toHaveTextContent(/waiting for a build/i);
+		expect(pill).not.toHaveTextContent(/no language server/i);
+		expect(pill.getAttribute("title")).toBe(reason);
+
+		act(() => report({ state: "unconfigured", need: "tool", detail: "Install xcode-build-server." }));
+		expect(await screen.findByTestId("lsp-status")).toHaveTextContent(/needs setup/i);
+	});
+
 	it("asks twice before discarding the reader's edits", async () => {
 		await conflictOnSave();
 

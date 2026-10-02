@@ -47,6 +47,9 @@ if (withLsp) {
 			hover: params.get("lspNoHover") !== "1",
 			references: params.get("lspNoReferences") !== "1",
 		},
+		// `?lspUnconfiguredMs=` - the first attach waits for an Xcode build that
+		// lands that many ms later, so a spec can watch the pane come alive alone.
+		unconfiguredForMs: params.has("lspUnconfiguredMs") ? Number(params.get("lspUnconfiguredMs")) : undefined,
 	});
 }
 

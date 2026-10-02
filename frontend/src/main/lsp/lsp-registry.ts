@@ -1,4 +1,4 @@
-import { serverForLanguage } from "./language-servers";
+import { type LanguageServerSpec, type SetupNeed, serverForLanguage } from "./language-servers";
 import type { JsonRpcMessage } from "./lsp-framing";
 import {
 	type CompletionCapability,
@@ -40,11 +40,23 @@ export type LspHealth = {
 	peakRssMb: number | null;
 };
 
+/**
+ * What a pane can be told about its server. `unconfigured` is the registry's own:
+ * the workspace still needs something (see `SetupNeed`), no process exists, and
+ * the registry keeps checking - when the need is met it reports `stopped`, which
+ * is what tells a pane to attach again.
+ */
+export type LspAttachState = LspState | "unconfigured";
+
+export type LspStateEvent = { handleId: string; key: string; state: LspAttachState; detail?: string; need?: SetupNeed };
+
 export type LspAttachment = {
 	handleId: string;
 	key: string;
-	state: LspState;
+	state: LspAttachState;
 	detail?: string;
+	/** Set only while `state` is `unconfigured`: what the workspace is missing. */
+	need?: SetupNeed;
 	/**
 	 * The directory the renderer must address documents under.
 	 *
@@ -91,7 +103,9 @@ export type LspRegistryOptions = {
 	killGraceMs?: number;
 	readinessSettleMs?: number;
 	indexTimeoutMs?: number;
-	onState: (event: { handleId: string; key: string; state: LspState; detail?: string }) => void;
+	/** How often a workspace that is not set up yet is checked again. */
+	setupPollMs?: number;
+	onState: (event: LspStateEvent) => void;
 	onMessage: (event: { handleId: string; message: JsonRpcMessage }) => void;
 	/** Injected in tests. */
 	startProcess?: typeof startLspProcess;
@@ -125,6 +139,21 @@ type Entry = {
 };
 
 /**
+ * A workspace that `prepare` turned down, held so the registry can notice when it
+ * stops being turned down. No process, so it costs nothing against the cap.
+ */
+type Pending = {
+	key: string;
+	languageId: string;
+	root: string;
+	spec: LanguageServerSpec;
+	need: SetupNeed;
+	reason: string;
+	handles: Set<string>;
+	timer: ReturnType<typeof setInterval>;
+};
+
+/**
  * Worst case ~2 GB on a 24 GB machine, given GOMEMLIMIT=1GiB per server. gopls
  * unbounded rests at ~2.4 GB for one mid-size Go module, so this pair of knobs
  * is what makes an in-app language server affordable at all.
@@ -139,6 +168,15 @@ const DEFAULT_IDLE_GRACE_MS = 60_000;
 
 const RSS_SAMPLE_MS = 5_000;
 
+/**
+ * 🗝 Why the registry polls at all: "build it in Xcode once" is only half an
+ * answer if the pane then has to be closed and reopened to notice the build. A
+ * check is a readdir of DerivedData and one small plist per entry, so asking
+ * every few seconds while a pane is waiting is free next to a person wondering
+ * whether the build they just ran did anything.
+ */
+const SETUP_POLL_MS = 3_000;
+
 export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 	const maxServers = options.maxServers ?? DEFAULT_MAX_SERVERS;
 	const idleGraceMs = options.idleGraceMs ?? DEFAULT_IDLE_GRACE_MS;
@@ -146,6 +184,8 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 
 	const entries = new Map<string, Entry>();
 	const handles = new Map<string, Entry>();
+	const pending = new Map<string, Pending>();
+	const pendingHandles = new Map<string, Pending>();
 	let handleSeq = 0;
 
 	const keyFor = (languageId: string, root: string) => `${languageId} ${root}`;
@@ -195,24 +235,88 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 		}
 	}
 
-	function startEntry(languageId: string, root: string, key: string): Entry {
-		const env = options.env();
-		const spec = serverForLanguage(languageId, env);
-		if (!spec) throw new Error(`no language server for "${languageId}"`);
-		// 🗝 Asked BEFORE anything is spawned, and allowed to say no.
-		//
-		// An unconfigured sourcekit-lsp is the sharpest example of this stack's
-		// characteristic failure: pointed at a real .xcodeproj with no build
-		// settings it initializes in ~60 ms, publishes diagnostics and answers
-		// documentSymbol, while returning 0 hits for every ⌘click and 0 results for
-		// every symbol query. Spawning it and letting the user discover that is
-		// strictly worse than refusing with a sentence they can act on.
-		const prepared = spec.prepare?.({ workspaceRoot: root, dataDir: options.dataDir, env }) ?? {
-			ok: true as const,
-			lspRoot: root,
-			documentRoot: root,
+	// 🗝 Asked BEFORE anything is spawned, and allowed to say no.
+	//
+	// An unconfigured sourcekit-lsp is the sharpest example of this stack's
+	// characteristic failure: pointed at a real .xcodeproj with no build settings
+	// it initializes in ~60 ms, publishes diagnostics and answers documentSymbol,
+	// while returning 0 hits for every ⌘click and 0 results for every symbol
+	// query. Spawning it and letting the user discover that is strictly worse than
+	// declining with a sentence they can act on.
+	function prepare(spec: LanguageServerSpec, root: string, env: NodeJS.ProcessEnv) {
+		return (
+			spec.prepare?.({ workspaceRoot: root, dataDir: options.dataDir, env }) ?? {
+				ok: true as const,
+				lspRoot: root,
+				documentRoot: root,
+			}
+		);
+	}
+
+	function emitPending(entry: Pending, state: LspAttachState, detail?: string, need?: SetupNeed) {
+		for (const handleId of entry.handles) options.onState({ handleId, key: entry.key, state, detail, need });
+	}
+
+	function dropPending(entry: Pending): void {
+		clearInterval(entry.timer);
+		pending.delete(entry.key);
+		for (const handleId of entry.handles) pendingHandles.delete(handleId);
+		entry.handles.clear();
+	}
+
+	function startPending(input: {
+		key: string;
+		languageId: string;
+		root: string;
+		spec: LanguageServerSpec;
+		need: SetupNeed;
+		reason: string;
+	}): Pending {
+		const entry: Pending = {
+			...input,
+			handles: new Set(),
+			timer: setInterval(() => {
+				let prepared: ReturnType<typeof prepare>;
+				try {
+					prepared = prepare(entry.spec, entry.root, options.env());
+				} catch {
+					// A timer must not throw into the main process. Hand it to the pane's
+					// re-attach instead, which meets the same error inside `attach` and
+					// reports it as `failed`, with its message.
+					emitPending(entry, "stopped", "setup check failed");
+					dropPending(entry);
+					return;
+				}
+				if (prepared.ok) {
+					// `stopped` is the word a pane already re-attaches on, and the
+					// re-attach goes through `prepare` again and starts the real server.
+					emitPending(entry, "stopped", "set up: starting the language server");
+					dropPending(entry);
+					return;
+				}
+				// Still not ready, but maybe for a different reason - xcode-build-server
+				// installed, the project not built yet - and the pane should say so.
+				if (prepared.reason !== entry.reason || prepared.need !== entry.need) {
+					entry.reason = prepared.reason;
+					entry.need = prepared.need;
+					emitPending(entry, "unconfigured", entry.reason, entry.need);
+				}
+			}, options.setupPollMs ?? SETUP_POLL_MS),
 		};
-		if (!prepared.ok) throw new Error(prepared.reason);
+		// `unref` so a waiting pane never holds the app - or a test run - open.
+		entry.timer.unref?.();
+		pending.set(entry.key, entry);
+		return entry;
+	}
+
+	function startEntry(
+		languageId: string,
+		root: string,
+		key: string,
+		spec: LanguageServerSpec,
+		env: NodeJS.ProcessEnv,
+		prepared: { lspRoot: string; documentRoot: string; detail?: string; warning?: string },
+	): Entry {
 		let entry: Entry | undefined;
 		const proc = startProcess({
 			spec,
@@ -273,8 +377,43 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 			const key = keyFor(languageId, root);
 			let entry = entries.get(key);
 			if (!entry) {
+				const env = options.env();
+				const spec = serverForLanguage(languageId, env);
+				if (!spec) throw new Error(`no language server for "${languageId}"`);
+				// A workspace already waiting is asked again rather than trusted: this
+				// attach may be the re-mount of a person who just finished the build.
+				const prepared = prepare(spec, root, env);
+				if (!prepared.ok) {
+					let waiting = pending.get(key);
+					if (waiting) {
+						waiting.reason = prepared.reason;
+						waiting.need = prepared.need;
+					} else {
+						waiting = startPending({ key, languageId, root, spec, need: prepared.need, reason: prepared.reason });
+					}
+					const handleId = `lsp-${++handleSeq}`;
+					waiting.handles.add(handleId);
+					pendingHandles.set(handleId, waiting);
+					return {
+						handleId,
+						key,
+						state: "unconfigured",
+						detail: prepared.reason,
+						need: prepared.need,
+						documentRoot: root,
+						semanticTokens: null,
+						completion: null,
+						features: { hover: false, references: false },
+					};
+				}
+				const waiting = pending.get(key);
+				if (waiting) {
+					// Set up between two checks: the panes still waiting re-attach too.
+					emitPending(waiting, "stopped", "set up: starting the language server");
+					dropPending(waiting);
+				}
 				await enforceCap(key);
-				entry = startEntry(languageId, root, key);
+				entry = startEntry(languageId, root, key, spec, env, prepared);
 			}
 			if (entry.idleTimer) {
 				clearTimeout(entry.idleTimer);
@@ -307,6 +446,13 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 		},
 
 		detach(handleId) {
+			const waiting = pendingHandles.get(handleId);
+			if (waiting) {
+				pendingHandles.delete(handleId);
+				waiting.handles.delete(handleId);
+				if (waiting.handles.size === 0) dropPending(waiting);
+				return;
+			}
 			const entry = handles.get(handleId);
 			if (!entry) return;
 			handles.delete(handleId);
@@ -360,6 +506,7 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 		async disposeAll() {
 			// A language server left running after the app quits is ~1 GB of orphaned
 			// resident memory with nothing to reap it.
+			for (const waiting of [...pending.values()]) dropPending(waiting);
 			await Promise.all([...entries.values()].map((entry) => destroy(entry, "app quit")));
 		},
 	};

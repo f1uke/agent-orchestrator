@@ -9,8 +9,7 @@ import type { RunXcodegenResult } from "./main/run-xcodegen";
 import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
 import type { CompanionSettings } from "./main/companion-settings";
 import type { JsonRpcMessage } from "./main/lsp/lsp-framing";
-import type { LspState } from "./main/lsp/lsp-process";
-import type { LspAttachment, LspHealth, LspResultOutcome } from "./main/lsp/lsp-registry";
+import type { LspAttachment, LspHealth, LspResultOutcome, LspStateEvent } from "./main/lsp/lsp-registry";
 import type { ModelId } from "./main/inline-completion/catalog";
 import type { InfillRequest, InfillResult } from "./main/inline-completion/infill";
 import type { InlineCompletionStatus } from "./main/inline-completion/service";
@@ -125,11 +124,8 @@ const api = {
 				ipcRenderer.off("lsp:message", wrapped);
 			};
 		},
-		onState: (listener: (event: { handleId: string; key: string; state: LspState; detail?: string }) => void) => {
-			const wrapped = (
-				_event: Electron.IpcRendererEvent,
-				payload: { handleId: string; key: string; state: LspState; detail?: string },
-			) => listener(payload);
+		onState: (listener: (event: LspStateEvent) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, payload: LspStateEvent) => listener(payload);
 			ipcRenderer.on("lsp:state", wrapped);
 			return () => {
 				ipcRenderer.off("lsp:state", wrapped);

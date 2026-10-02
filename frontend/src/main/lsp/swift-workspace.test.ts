@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import {
+	findBuildFromBeforeMove,
 	findBuildRoot,
 	findXcodeBuildServer,
 	findXcodeContainer,
@@ -143,7 +144,7 @@ describe("resolveSwiftWorkspace", () => {
 			derivedDataDir,
 		});
 		expect(resolved.kind).toBe("unconfigured");
-		expect(resolved).toMatchObject({ reason: INSTALL_XCODE_BUILD_SERVER });
+		expect(resolved).toMatchObject({ need: "tool", reason: INSTALL_XCODE_BUILD_SERVER });
 		expect(INSTALL_XCODE_BUILD_SERVER).toContain("brew install xcode-build-server");
 	});
 
@@ -156,6 +157,78 @@ describe("resolveSwiftWorkspace", () => {
 		// And nothing was created: refusing has to be free, or a project that can
 		// never be served accumulates shadow roots every time a file is opened.
 		expect(fs.existsSync(path.join(dataDir, "lsp"))).toBe(false);
+	});
+
+	test("a never-built worktree is a wait for a build, and says the editor will notice it", () => {
+		const resolved = resolveSwiftWorkspace({ workspaceRoot: checkout, dataDir, env: env(), derivedDataDir });
+		expect(resolved).toMatchObject({ kind: "unconfigured", need: "build" });
+		if (resolved.kind !== "unconfigured") throw new Error("unreachable");
+		// The registry polls, so "reopen this file" would be a lie and a chore.
+		expect(resolved.reason).toMatch(/connects by itself when the build finishes/);
+		expect(resolved.reason).not.toMatch(/reopen/i);
+	});
+
+	describe("a worktree that MOVED after Xcode built it", () => {
+		// 🗝 The 2026-10-02 report, reproduced on disk. `git worktree move` took
+		// feature/chat-logout-storm-6-7-0 to hotfix/MOBILITY-4902-chat-logout-storm;
+		// the admin dir kept its first name and DerivedData kept the old path.
+		let repo: string;
+		let moved: string;
+		let formerRoot: string;
+		beforeEach(() => {
+			repo = path.join(tmp, "repo");
+			formerRoot = path.join(tmp, "worktrees", "feature", "chat-logout-storm-6-7-0");
+			moved = path.join(tmp, "worktrees", "hotfix", "MOBILITY-4902-chat-logout-storm");
+			fs.mkdirSync(path.join(repo, ".git", "worktrees", "chat-logout-storm-6-7-0"), { recursive: true });
+			fs.mkdirSync(path.join(moved, "NterWorkspace.xcworkspace"), { recursive: true });
+			fs.writeFileSync(
+				path.join(moved, ".git"),
+				`gitdir: ${path.join(repo, ".git", "worktrees", "chat-logout-storm-6-7-0")}\n`,
+			);
+			writeInfoPlist(
+				path.join(derivedDataDir, "NterWorkspace-bhypydralpvsnqgiegtfbnoescgl"),
+				path.join(formerRoot, "NterWorkspace.xcworkspace"),
+			);
+		});
+
+		test("names where it was built, rather than claiming it never was", () => {
+			const resolved = resolveSwiftWorkspace({ workspaceRoot: moved, dataDir, env: env(), derivedDataDir });
+			expect(resolved).toMatchObject({ kind: "unconfigured", need: "build" });
+			if (resolved.kind !== "unconfigured") throw new Error("unreachable");
+			expect(resolved.reason).toContain(formerRoot);
+			expect(resolved.reason).toMatch(/moved here/);
+			expect(resolved.reason).not.toMatch(/never built/);
+			// And the stale build is NOT used: its compile args name files that are gone.
+			expect(fs.existsSync(path.join(dataDir, "lsp"))).toBe(false);
+		});
+
+		test("a sibling worktree's build is never mistaken for this one's", () => {
+			// Same container name, old path gone - but git named THIS worktree
+			// differently when it was added, so it is someone else's build.
+			fs.rmSync(path.join(derivedDataDir, "NterWorkspace-bhypydralpvsnqgiegtfbnoescgl"), { recursive: true });
+			writeInfoPlist(
+				path.join(derivedDataDir, "NterWorkspace-other"),
+				path.join(tmp, "worktrees", "feature", "STAR-2603-deleted", "NterWorkspace.xcworkspace"),
+			);
+			expect(findBuildFromBeforeMove(moved, path.join(moved, "NterWorkspace.xcworkspace"), derivedDataDir)).toBeNull();
+		});
+
+		test("an old path that still exists is a different checkout, not this one before a move", () => {
+			fs.mkdirSync(formerRoot, { recursive: true });
+			expect(findBuildFromBeforeMove(moved, path.join(moved, "NterWorkspace.xcworkspace"), derivedDataDir)).toBeNull();
+		});
+
+		test("a main checkout (a .git DIRECTORY) has no move history to report", () => {
+			expect(
+				findBuildFromBeforeMove(checkout, path.join(checkout, "NterWorkspace.xcworkspace"), derivedDataDir),
+			).toBeNull();
+		});
+
+		test("once Xcode builds it from here, it is served", () => {
+			writeInfoPlist(path.join(derivedDataDir, "NterWorkspace-fresh"), path.join(moved, "NterWorkspace.xcworkspace"));
+			const resolved = resolveSwiftWorkspace({ workspaceRoot: moved, dataDir, env: env(), derivedDataDir });
+			expect(resolved.kind).toBe("buildServer");
+		});
 	});
 
 	test("unconfigured, with a distinct reason, when there is no Swift project at all", () => {

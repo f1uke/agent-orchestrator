@@ -32,7 +32,22 @@ export type PreparedWorkspace = {
 	warning?: string;
 };
 
-export type WorkspacePreparation = ({ ok: true } & PreparedWorkspace) | { ok: false; reason: string };
+/**
+ * What a workspace still needs before its server is worth starting, as a code the
+ * editor can phrase in a few words - the full sentence travels as `reason`.
+ *
+ * `build` - the project has to be built once (an Xcode project with no build of
+ * this worktree in DerivedData). `tool` - a helper has to be installed.
+ * `project` - there is nothing here a server could be configured from.
+ *
+ * 🗝 None of these is a failure, and the editor must not paint them as one. A
+ * red "no language server" on a worktree that only needed one Xcode build read,
+ * to the user and to the agent sent to fix it, as a regression in the install
+ * that happened the same morning (2026-10-02).
+ */
+export type SetupNeed = "build" | "tool" | "project";
+
+export type WorkspacePreparation = ({ ok: true } & PreparedWorkspace) | { ok: false; need: SetupNeed; reason: string };
 
 /**
  * How this server says it has finished loading its index.
@@ -150,7 +165,7 @@ const SERVERS: LanguageServerSpec[] = [
 		env: ({ dataDir }) => ({ XDG_CONFIG_HOME: sourcekitConfigHome(dataDir) }),
 		prepare: ({ workspaceRoot, dataDir, env }) => {
 			const resolved = resolveSwiftWorkspace({ workspaceRoot, dataDir, env });
-			if (resolved.kind === "unconfigured") return { ok: false, reason: resolved.reason };
+			if (resolved.kind === "unconfigured") return { ok: false, need: resolved.need, reason: resolved.reason };
 			return {
 				ok: true,
 				lspRoot: resolved.lspRoot,

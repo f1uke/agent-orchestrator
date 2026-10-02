@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import type { SetupNeed } from "./language-servers";
 
 /**
  * Everything Xcode-shaped about running SourceKit-LSP, kept out of the process
@@ -28,7 +29,7 @@ export type SwiftWorkspace =
 			warning?: string;
 	  }
 	| { kind: "swiftpm"; lspRoot: string; documentRoot: string; detail: string; warning: string }
-	| { kind: "unconfigured"; reason: string };
+	| { kind: "unconfigured"; need: SetupNeed; reason: string };
 
 export type SwiftWorkspaceOptions = {
 	/** The session's worktree, absolute. */
@@ -153,7 +154,16 @@ export function defaultDerivedDataDir(env: NodeJS.ProcessEnv): string {
  * DerivedData, is not an edge case but the normal state.
  */
 export function findBuildRoot(containerPath: string, derivedDataDir: string): string | null {
-	for (const name of readdirSafe(derivedDataDir)) {
+	for (const { dir, workspacePath } of derivedDataBuilds(derivedDataDir)) {
+		if (workspacePath === containerPath) return dir;
+	}
+	return null;
+}
+
+/** Every DerivedData directory, with the container path Xcode recorded for it. */
+function derivedDataBuilds(derivedDataDir: string): { dir: string; workspacePath: string }[] {
+	const builds: { dir: string; workspacePath: string }[] = [];
+	for (const name of readdirSafe(derivedDataDir).sort()) {
 		const dir = path.join(derivedDataDir, name);
 		let plist: string;
 		try {
@@ -162,7 +172,62 @@ export function findBuildRoot(containerPath: string, derivedDataDir: string): st
 			continue;
 		}
 		const match = /<key>WorkspacePath<\/key>\s*<string>([^<]*)<\/string>/.exec(plist);
-		if (match?.[1] === containerPath) return dir;
+		if (match?.[1]) builds.push({ dir, workspacePath: match[1] });
+	}
+	return builds;
+}
+
+/**
+ * The name git gave this linked worktree when it was ADDED, or null for a main
+ * checkout (or anything that is not a git worktree at all).
+ *
+ * `git worktree move` relocates the directory and leaves the admin directory
+ * `<repo>/.git/worktrees/<name>` where it was, so the name still says where the
+ * worktree was first created - which is what lets a moved worktree be told apart
+ * from one that was simply never built.
+ */
+function gitWorktreeName(workspaceRoot: string): string | null {
+	let dotGit: string;
+	try {
+		dotGit = fs.readFileSync(path.join(workspaceRoot, ".git"), "utf8");
+	} catch {
+		return null;
+	}
+	const match = /^gitdir:\s*(.+?)\s*$/m.exec(dotGit);
+	if (!match?.[1]) return null;
+	const gitdir = match[1];
+	return path.basename(path.dirname(gitdir)) === "worktrees" ? path.basename(gitdir) : null;
+}
+
+/**
+ * Where this worktree used to live, when Xcode built it THERE and it has since
+ * moved - or null.
+ *
+ * 🗝 Measured on the real iOS app (2026-10-02): a worktree renamed from
+ * `feature/chat-logout-storm-6-7-0` to `hotfix/MOBILITY-4902-chat-logout-storm`
+ * kept a DerivedData whose `WorkspacePath` names the OLD path, so `findBuildRoot`
+ * rightly misses it and the editor said "Xcode has never built" a project the
+ * user had built the day before. Re-using that build is not an option: its
+ * compile arguments name source files at the old path, which no longer exist.
+ * What this buys is a reason that matches what happened.
+ *
+ * A build counts as this worktree's only when its old directory is gone AND is
+ * named the way git named this worktree when it was added, so a sibling
+ * worktree's build is never mistaken for this one's.
+ */
+export function findBuildFromBeforeMove(
+	workspaceRoot: string,
+	containerPath: string,
+	derivedDataDir: string,
+): string | null {
+	const name = gitWorktreeName(workspaceRoot);
+	if (!name) return null;
+	for (const { workspacePath } of derivedDataBuilds(derivedDataDir)) {
+		if (path.basename(workspacePath) !== path.basename(containerPath)) continue;
+		const formerRoot = path.dirname(workspacePath);
+		if (formerRoot === workspaceRoot || path.basename(formerRoot) !== name) continue;
+		if (fs.existsSync(formerRoot)) continue;
+		return formerRoot;
 	}
 	return null;
 }
@@ -196,7 +261,7 @@ export function findXcodeBuildServer(env: NodeJS.ProcessEnv): string | null {
 }
 
 export const INSTALL_XCODE_BUILD_SERVER =
-	"Swift needs xcode-build-server to read this project's build settings. Install it with `brew install xcode-build-server`.";
+	"Swift needs xcode-build-server to read this project's build settings. Install it with `brew install xcode-build-server`; the editor connects by itself once it is there.";
 
 /**
  * Create (or repair) the shadow root, and return the directory documents must be
@@ -298,20 +363,29 @@ export function resolveSwiftWorkspace(options: SwiftWorkspaceOptions): SwiftWork
 		}
 		return {
 			kind: "unconfigured",
+			need: "project",
 			reason: "No .xcworkspace, .xcodeproj or Package.swift here, so there are no Swift build settings to read.",
 		};
 	}
 
 	const buildServerCommand = findXcodeBuildServer(env);
-	if (!buildServerCommand) return { kind: "unconfigured", reason: INSTALL_XCODE_BUILD_SERVER };
+	if (!buildServerCommand) return { kind: "unconfigured", need: "tool", reason: INSTALL_XCODE_BUILD_SERVER };
 
 	const buildRoot = findBuildRoot(container, derivedDataDir);
 	if (!buildRoot) {
+		const containerName = path.basename(container);
+		const formerRoot = findBuildFromBeforeMove(workspaceRoot, container, derivedDataDir);
 		return {
 			kind: "unconfigured",
+			need: "build",
 			reason:
-				`Xcode has never built ${path.basename(container)} from this worktree, so there are no compile settings to read. ` +
-				"Build it in Xcode once and reopen this file.",
+				(formerRoot
+					? `This worktree moved here from ${formerRoot} after Xcode last built it, and that build's compile settings name files at the old path. ` +
+						`Build ${containerName} in Xcode once from here`
+					: `Xcode has never built ${containerName} from this worktree, so there are no compile settings to read. ` +
+						"Build it in Xcode once") +
+				// True because the registry keeps asking: see `SETUP_POLL_MS`.
+				"; the editor connects by itself when the build finishes.",
 		};
 	}
 

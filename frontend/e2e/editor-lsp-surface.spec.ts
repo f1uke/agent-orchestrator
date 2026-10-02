@@ -358,3 +358,27 @@ test.describe("what the server actually holds", () => {
 		await expectHover(page, "neverSavedName", "let neverSavedName: PromotionOffer");
 	});
 });
+
+/**
+ * 🗝 The 2026-10-02 report, in a real browser. A worktree that moved after Xcode
+ * built it has no build of its NEW path, so main declines to start sourcekit-lsp
+ * and waits. The pane said "no language server" in red, which read to the user -
+ * and to the agent sent after it - as a regression in that morning's install.
+ * It must say it is waiting, and come alive on its own when the build lands.
+ */
+test("a worktree waiting for its Xcode build says so, then comes alive without a reopen", async ({ page }) => {
+	await page.goto(`${GALLERY}&lspUnconfiguredMs=1500`);
+	const pill = page.getByTestId("lsp-status");
+	await expect(pill).toHaveText(/waiting for a build/i);
+	await expect(pill).not.toHaveText(/no language server/i);
+	await expect(pill).toHaveAttribute("title", /Build it in Xcode once/);
+	// Amber, not red: a wait for one build is not a failure.
+	const waitingColour = await pill.evaluate((el) => getComputedStyle(el).color);
+
+	// The build "lands": main reports `stopped`, the pane re-attaches by itself.
+	await expect(pill).toHaveText(/⌘click/, { timeout: 5_000 });
+	const readyColour = await pill.evaluate((el) => getComputedStyle(el).color);
+	expect(waitingColour).not.toBe(readyColour);
+	// And it is a working server, not a relabelled wait: diagnostics arrive.
+	await expect(editor(page).locator(".squiggly-error").first()).toBeAttached();
+});
