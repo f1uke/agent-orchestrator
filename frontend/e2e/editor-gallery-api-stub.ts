@@ -97,12 +97,21 @@ function fileFor(path: string): { path: string; source: string } | null {
 	// No branch-level diff: this harness measures the minimap, and a diff built
 	// from a DIFFERENT file's text would mark lanes on lines that do not match.
 	diff: () => ({ available: false, truncated: false, mode: "file", path: GALLERY_PATH, lines: [] }),
+	// No git base either, for the same reason: the uncommitted lane falls back to
+	// `GALLERY_CHANGED_LINES`, carried through any edits a spec makes.
+	base: () => ({ available: false, reason: "no_repo", path: GALLERY_PATH, exists: false, text: "" }),
 };
 
 const realFetch = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 	const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 	if (!url.includes("/workspace/file")) return realFetch(input, init);
+	if (url.includes("/workspace/file-base")) {
+		return new Response(JSON.stringify({ available: false, reason: "no_repo", path: GALLERY_PATH, exists: false, text: "" }), {
+			status: 200,
+			headers: { "content-type": "application/json" },
+		});
+	}
 	// The peek preview asks for a file BY PATH — a different one from the pane's —
 	// so the stub has to answer for more than one.
 	const asked = new URL(url, window.location.origin).searchParams.get("path") ?? GALLERY_PATH;

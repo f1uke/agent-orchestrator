@@ -4891,90 +4891,139 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 }
 
 /* ===========================================================================
-   Monaco file editor — the uncommitted-change gutter.
+   Monaco file editor - the change gutter: three lanes, all measured against the
+   LIVE buffer (`lib/editor/live-changes.ts`).
 
-   Monaco paints these into its lines-decorations lane (between the line numbers
-   and the code, where Xcode puts the same bar). The colours are the ones
-   `DiffRows` already uses for the identical meaning — working tree vs HEAD —
-   so the editor and the review diff never disagree about what "changed" is.
+   glyph margin (20px)           line number       code
+   |  branch  uncommitted |      unsaved           |
+   |   ▌         ▌        |       42               |
+
+   - BRANCH (outboard): merge-base of the target vs buffer. A thinner, softer bar.
+   - UNCOMMITTED (inboard): HEAD vs buffer. Full strength; a click on it opens
+     Discard Change.
+   - UNSAVED: the text the buffer was loaded or saved from vs buffer. Drawn ON
+     THE LINE NUMBER, in the dirty dot's accent - a different place and a
+     different shape, so a line that is both unsaved and uncommitted reads as both.
+
+   Both git lanes are coloured by kind in the Changes view's inks: added green,
+   modified the accent blue, removed a red notch on the boundary where the lines
+   used to be.
    =========================================================================== */
 /*
- * Both lanes are drawn in Monaco's GLYPH MARGIN — see MonacoFileEditor's
+ * Both git lanes are drawn in Monaco's GLYPH MARGIN - see MonacoFileEditor's
  * BASE_OPTIONS for why they cannot live in the line-decorations margin beside
  * the code (a folding chevron covers the whole of that one, and swallowed every
  * click aimed at a change bar).
+ *
+ * 🗝 The glyph margin holds ONE node per line, and on a line in both lanes
+ * Monaco concatenates both lanes' classes onto it. So the branch lane draws with
+ * ::before and the uncommitted lane with ::after, and each lane carries its ink
+ * in its OWN custom property: a shared `color` (what this used before the branch
+ * lane had kinds) would let whichever kind rule came last paint both bars.
  */
+.ao-branch-bar,
 .ao-change-bar {
 	position: relative;
 	width: 100%;
 }
 
-/*
- * 🗝 ::after, while the branch lane uses ::before — and that is load-bearing.
- * The glyph margin holds ONE node per line, so on a line that is in both lanes
- * Monaco concatenates both class names onto that single element. Two rules both
- * claiming ::before would then draw one bar, not two, and the branch lane would
- * silently vanish from exactly the lines that carry uncommitted work.
- *
- * Inboard of the branch hairline: branch lane, uncommitted bar, line numbers,
- * code. The uncommitted lane sits nearer the code because it is the one you act
- * on - it is what Discard Change undoes.
- */
+.ao-branch-bar::before,
 .ao-change-bar::after {
 	content: "";
 	position: absolute;
-	left: 8px;
 	top: 0;
 	bottom: 0;
 	width: 3px;
-	border-radius: 1px;
-	background: currentcolor;
+	/* Square: each line is its own node, so a rounded end on every line notched
+	   a run of changed lines into beads instead of one bar. */
 }
 
 /*
- * The BRANCH lane: everything this branch changed, committed or not.
- *
- * A single neutral hairline, never coloured by kind. Colouring it the way the
- * uncommitted lane is coloured was tried and was wrong: on a branch under
- * review nearly every line is changed, so the two kind-coloured bars sat side
- * by side and read as ONE thick bar. This lane answers only "is this line part
- * of what my branch changed"; which kind it is already lives in the rail's
- * +N -M.
+ * Outboard and softer. It is the superset - everything the branch changed - so
+ * on a branch under review it runs down most of the file; at full strength next
+ * to the uncommitted bar the pair would fuse into one thick bar (the reason this
+ * lane was once a single neutral grey, which in turn read as no signal at all).
+ * The 3px gap and the lighter ink keep the two apart while both say their kind.
  */
-.ao-branch-bar {
-	position: relative;
-	width: 100%;
+.ao-branch-bar::before {
+	left: 3px;
+	background: color-mix(in oklab, var(--ao-branch-ink) 55%, transparent);
 }
 
-.ao-branch-bar::before {
+.ao-change-bar::after {
+	left: 9px;
+	background: var(--ao-change-ink);
+}
+
+.ao-branch-bar--added {
+	--ao-branch-ink: var(--diff-add-sign);
+}
+.ao-branch-bar--modified {
+	--ao-branch-ink: var(--accent);
+}
+.ao-branch-bar--removed {
+	--ao-branch-ink: var(--diff-del-sign);
+}
+.ao-change-bar--added {
+	--ao-change-ink: var(--diff-add-sign);
+}
+.ao-change-bar--modified {
+	--ao-change-ink: var(--accent);
+}
+.ao-change-bar--removed {
+	--ao-change-ink: var(--diff-del-sign);
+}
+
+/*
+ * A deletion has no line of its own: a notch pointing at the code, centred on
+ * the boundary the removed lines used to sit on (the line's top edge; the
+ * bottom edge for lines removed after the last one).
+ */
+.ao-branch-bar--removed::before,
+.ao-change-bar--removed::after {
+	top: -4px;
+	bottom: auto;
+	width: 0;
+	height: 0;
+	background: none;
+	border-top: 4px solid transparent;
+	border-bottom: 4px solid transparent;
+}
+.ao-branch-bar--removed::before {
+	border-left: 5px solid color-mix(in oklab, var(--ao-branch-ink) 70%, transparent);
+}
+.ao-change-bar--removed::after {
+	border-left: 5px solid var(--ao-change-ink);
+}
+.ao-branch-bar--end::before,
+.ao-change-bar--end::after {
+	top: auto;
+	bottom: -4px;
+}
+
+/*
+ * The UNSAVED lane, on the line number. Monaco colours line numbers with
+ * `.monaco-editor .line-numbers` (and `.active-line-number` for the caret's), so
+ * the margin container is named to outrank both.
+ */
+.monaco-editor .margin-view-overlays .line-numbers.ao-unsaved-line {
+	color: var(--accent);
+	background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+
+.monaco-editor .margin-view-overlays .line-numbers.ao-unsaved-removed::before {
 	content: "";
 	position: absolute;
 	left: 3px;
-	top: 0;
-	bottom: 0;
-	width: 2px;
+	right: 0;
+	top: -1px;
+	height: 2px;
 	border-radius: 1px;
-	background: color-mix(in oklab, var(--fg-passive) 62%, transparent);
+	background: var(--accent);
 }
-
-.ao-change-bar--added {
-	color: var(--diff-add-sign);
-}
-
-.ao-change-bar--modified {
-	color: var(--accent);
-}
-
-/* A deletion has no line of its own: mark the boundary the removed lines used
-   to sit above, the way a zero-height marker does in the diff rows. */
-.ao-change-bar--removed {
-	color: var(--red);
-}
-
-.ao-change-bar--removed::after {
-	bottom: auto;
-	height: 7px;
-	transform: translateY(-3px);
+.monaco-editor .margin-view-overlays .line-numbers.ao-unsaved-removed--end::before {
+	top: auto;
+	bottom: -1px;
 }
 
 /* ===========================================================================

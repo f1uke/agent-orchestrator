@@ -1,72 +1,74 @@
-import type { components } from "../../../api/schema";
-
-type LineChange = components["schemas"]["LineChangeDTO"];
-
-/** One gutter mark, in Monaco's 1-based line coordinates. */
-export type GutterMark = { line: number; className: string };
+import type { Hunk } from "./live-changes";
 
 /**
- * On BOTH lanes. The gutter margin also holds Monaco's folding controls, so a
+ * On both GIT lanes. The gutter margin also holds Monaco's folding controls, so a
  * click has to be attributable to one of ours before it opens the discard
- * popover — and the two lanes overlap each other in that margin, so either one
- * can be the element under the cursor.
+ * popover - and the two lanes share one node per line in that margin, so either
+ * one can be the element under the cursor.
  */
 export const GUTTER_LANE_CLASS = "ao-gutter-lane";
 
-/** The uncommitted lane's classes; colours live in `styles.css` beside the diff tokens. */
-const UNCOMMITTED_CLASS: Record<string, string> = {
-	added: `${GUTTER_LANE_CLASS} ao-change-bar ao-change-bar--added`,
-	modified: `${GUTTER_LANE_CLASS} ao-change-bar ao-change-bar--modified`,
-	removed: `${GUTTER_LANE_CLASS} ao-change-bar ao-change-bar--removed`,
+export type LaneName = "branch" | "uncommitted" | "unsaved";
+
+/** One lane's mark over a run of lines, in Monaco's 1-based inclusive lines. */
+export type LaneMark = {
+	lane: LaneName;
+	kind: Hunk["kind"];
+	start: number;
+	end: number;
+	/** For the two git lanes: the glyph-margin node's classes. */
+	glyphClassName?: string;
+	/** For the unsaved lane: the line-number cell's classes. */
+	lineNumberClassName?: string;
 };
 
-/** The branch lane's single class. There is deliberately only one — see below. */
-export const BRANCH_LANE_CLASS = `${GUTTER_LANE_CLASS} ao-branch-bar`;
-
-function clamp(line: number, lineCount: number): number {
-	return Math.min(Math.max(line, 1), Math.max(lineCount, 1));
-}
-
-/**
- * The UNCOMMITTED lane: working tree vs HEAD, coloured by kind, in the same
- * three colours the diff rows use. This is the lane whose bars can be clicked to
- * discard.
+/*
+ * 🗝 Every class is LANE-SCOPED, kind included (`ao-branch-bar--added`, never a
+ * shared `--added`). The glyph margin holds ONE node per line, so on a line in
+ * both git lanes Monaco concatenates both lanes' classes onto that node - and a
+ * shared kind class would then colour whichever lane's bar it reached first,
+ * with the other lane's kind on it.
  */
-export function uncommittedMarks(changes: readonly LineChange[], lineCount: number): GutterMark[] {
-	const out: GutterMark[] = [];
-	for (const change of changes) {
-		const className = UNCOMMITTED_CLASS[change.kind];
-		if (!className) continue;
-		if (change.kind === "removed") {
-			out.push({ line: clamp(change.start, lineCount), className });
-			continue;
-		}
-		const start = clamp(change.start, lineCount);
-		const end = clamp(Math.max(change.end, change.start), lineCount);
-		for (let line = start; line <= end; line++) out.push({ line, className });
-	}
-	return out;
-}
+const GLYPH_PREFIX: Record<Exclude<LaneName, "unsaved">, string> = {
+	branch: "ao-branch-bar",
+	uncommitted: "ao-change-bar",
+};
 
 /**
- * The BRANCH lane: merge-base(target, HEAD) vs working tree — everything this
- * branch did, committed or not.
+ * The three lanes as gutter marks.
  *
- * 🗝 One neutral class for every line, never coloured by kind. That was tried the
- * other way in the spike and was wrong: on a branch under review nearly every
- * line is changed, so a kind-coloured branch bar sat beside the kind-coloured
- * uncommitted bar and the pair read as ONE thick bar. This lane answers only
- * "is this line part of what my branch changed"; which kind it is already lives
- * in the rail's `+N −M`.
+ * - The two GIT lanes - branch (merge-base of the target) and uncommitted
+ *   (HEAD) - draw in the glyph margin, coloured by kind.
+ * - The UNSAVED lane draws on the line NUMBER: a different place and a
+ *   different shape, so a line that is both unsaved and changed against git
+ *   reads as both at once rather than as one ambiguous bar.
+ *
+ * A removal past the last line has no line to sit above, so it moves to the
+ * last line's bottom edge (`--end`) instead of pretending to be above it.
  */
-export function branchMarks(lines: readonly number[], lineCount: number): GutterMark[] {
-	const seen = new Set<number>();
-	const out: GutterMark[] = [];
-	for (const line of lines) {
-		const at = clamp(line, lineCount);
-		if (seen.has(at)) continue;
-		seen.add(at);
-		out.push({ line: at, className: BRANCH_LANE_CLASS });
+export function laneMarks(
+	lanes: { branch: readonly Hunk[]; uncommitted: readonly Hunk[]; unsaved: readonly Hunk[] },
+	lineCount: number,
+): LaneMark[] {
+	const last = Math.max(lineCount, 1);
+	const out: LaneMark[] = [];
+	for (const lane of ["branch", "uncommitted", "unsaved"] as const) {
+		for (const hunk of lanes[lane]) {
+			const atEnd = hunk.kind === "removed" && hunk.start > last;
+			const start = Math.min(Math.max(hunk.start, 1), last);
+			const end = hunk.kind === "removed" ? start : Math.min(Math.max(hunk.end, start), last);
+			const mark: LaneMark = { lane, kind: hunk.kind, start, end };
+			if (lane === "unsaved") {
+				mark.lineNumberClassName =
+					hunk.kind === "removed"
+						? `ao-unsaved-removed${atEnd ? " ao-unsaved-removed--end" : ""}`
+						: "ao-unsaved-line";
+			} else {
+				const prefix = GLYPH_PREFIX[lane];
+				mark.glyphClassName = `${GUTTER_LANE_CLASS} ${prefix} ${prefix}--${hunk.kind}${atEnd ? ` ${prefix}--end` : ""}`;
+			}
+			out.push(mark);
+		}
 	}
 	return out;
 }

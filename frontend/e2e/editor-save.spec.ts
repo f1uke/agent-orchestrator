@@ -126,51 +126,136 @@ test("discarding an edit is a two-step gesture that asks first", async ({ page }
 	await expect(page.getByRole("button", { name: /really discard my edits/i })).toBeVisible();
 	await page.getByRole("button", { name: /really discard my edits/i }).click();
 	await expect(page.getByTestId("file-drift-banner")).toBeHidden();
+	// 🗝 And the edit is actually GONE. Hiding the banner was all this used to
+	// do: the typed text stayed in the buffer under a header that called it
+	// clean, with Save disabled - work neither saved nor discarded.
+	await expect(page.locator(".monaco-editor .view-lines").first()).not.toContainText("// my edit");
+	await expect(page.getByLabel("unsaved changes")).toBeHidden();
+	await expect(page.getByTestId("save-file")).toBeDisabled();
 });
 
-test("both change lanes are drawn, and the branch lane is not coloured by kind", async ({ page }) => {
-	await openFile(page, ORDINARY);
-	await expect(page.getByTestId("monaco-file-editor")).toBeVisible();
+/** The glyph-margin node and line number of buffer line `n`, read off the paint. */
+async function gutterOf(page: Page, n: number) {
+	return page.evaluate((line) => {
+		const editor = document.querySelector(".monaco-editor") as HTMLElement;
+		const numbers = [...editor.querySelectorAll<HTMLElement>(".line-numbers")];
+		const number = numbers.find((node) => node.textContent?.trim() === String(line));
+		if (!number) return null;
+		const top = number.parentElement?.style.top ?? (number as HTMLElement).style.top;
+		const glyph = [...editor.querySelectorAll<HTMLElement>(".ao-gutter-lane")].find((node) => node.style.top === top);
+		const rect = glyph?.getBoundingClientRect();
+		return {
+			glyph: glyph?.className ?? "",
+			unsaved: number.classList.contains("ao-unsaved-line"),
+			// Where the uncommitted bar is drawn (::after, 9px in), for a real click.
+			bar: rect ? { x: rect.left + 10, y: rect.top + rect.height / 2 } : null,
+		};
+	}, n);
+}
 
+test("both git lanes are drawn coloured by kind, in two columns that never fuse", async ({ page }) => {
+	await openFile(page, ORDINARY);
 	await expect(page.locator(".ao-branch-bar").first()).toBeVisible();
 	await expect(page.locator(".ao-change-bar").first()).toBeVisible();
 
 	// 🗝 Asserted on the PAINT, not on class names. The glyph margin holds one
-	// node per line, so Monaco concatenates both lanes' classes onto it — the
-	// two bars are ::before and ::after of the same element, and only their
-	// computed styles can tell whether both actually drew and whether the branch
-	// one is neutral.
-	//
-	// The finding this pins: colouring the branch lane by kind, like the
-	// uncommitted one, made two same-coloured bars sit side by side and read as
-	// ONE thick bar on a branch under review.
+	// node per line, so Monaco concatenates both lanes' classes onto it - the two
+	// bars are ::before and ::after of the same element, and only their computed
+	// styles say whether both drew, in which colour and where.
 	const painted = await page
-		.locator(".ao-branch-bar.ao-change-bar")
+		.locator(".ao-branch-bar--modified.ao-change-bar--modified")
 		.first()
 		.evaluate((node) => {
 			const before = getComputedStyle(node, "::before");
 			const after = getComputedStyle(node, "::after");
 			return {
-				branch: { colour: before.backgroundColor, left: before.left, width: before.width },
-				uncommitted: { colour: after.backgroundColor, left: after.left, width: after.width },
+				branch: { colour: before.backgroundColor, left: parseFloat(before.left), width: parseFloat(before.width) },
+				uncommitted: { colour: after.backgroundColor, left: parseFloat(after.left), width: parseFloat(after.width) },
 			};
 		});
-
-	// Both drew.
-	expect(painted.branch.width).not.toBe("0px");
-	expect(painted.uncommitted.width).not.toBe("0px");
-	// In different columns, so the two levels are readable apart.
-	expect(painted.branch.left).not.toBe(painted.uncommitted.left);
-	// And in different colours, so they cannot merge into one bar.
+	expect(painted.branch.width).toBeGreaterThan(0);
+	expect(painted.uncommitted.width).toBeGreaterThan(0);
+	// A visible gap between the columns: two same-kind bars touching read as ONE
+	// thick bar, which is how the branch lane once ended up a kindless grey.
+	expect(painted.uncommitted.left - (painted.branch.left + painted.branch.width)).toBeGreaterThanOrEqual(2);
+	// The branch lane is the softer of the two, so the pair still reads as two.
 	expect(painted.branch.colour).not.toBe(painted.uncommitted.colour);
 
-	// The branch lane is the SAME colour on every line it marks, whatever kind
-	// of change is under it. That is what "not coloured by kind" means.
-	const branchColours = await page
-		.locator(".ao-branch-bar")
-		.evaluateAll((nodes) => nodes.map((n) => getComputedStyle(n, "::before").backgroundColor));
-	expect(branchColours.length).toBeGreaterThan(1);
-	expect(new Set(branchColours).size).toBe(1);
+	// Coloured BY KIND: an added line and a modified line differ in both lanes.
+	const inks = await page.evaluate(() => {
+		const ink = (selector: string, pseudo: string) => {
+			const node = document.querySelector(selector);
+			return node ? getComputedStyle(node, pseudo).backgroundColor : null;
+		};
+		return {
+			branchAdded: ink(".ao-branch-bar--added", "::before"),
+			branchModified: ink(".ao-branch-bar--modified", "::before"),
+			changeAdded: ink(".ao-change-bar--added", "::after"),
+			changeModified: ink(".ao-change-bar--modified", "::after"),
+		};
+	});
+	expect(inks.branchAdded).not.toBeNull();
+	expect(inks.branchAdded).not.toBe(inks.branchModified);
+	expect(inks.changeAdded).not.toBe(inks.changeModified);
+});
+
+// 🗝 The 2026-10-02 report: a line typed and not yet saved had no mark at all,
+// because every lane was measured against the file ON DISK.
+test("a typed line is marked at once - in both git lanes and as unsaved - and saving clears only the unsaved mark", async ({
+	page,
+}) => {
+	await openFile(page, ORDINARY);
+	await expect(page.locator(".ao-change-bar").first()).toBeVisible();
+	// Line 6 is untouched in the fixture; open a new line under it.
+	await page.locator(".monaco-editor .view-line").nth(5).click();
+	await expect(page.locator(".monaco-editor.focused").first()).toBeVisible();
+	await page.keyboard.press("End");
+	await page.keyboard.press("Enter");
+	await page.keyboard.type("const typedButNotSaved = true;");
+
+	await expect.poll(() => gutterOf(page, 7)).toMatchObject({ unsaved: true });
+	const typed = await gutterOf(page, 7);
+	expect(typed?.glyph).toContain("ao-branch-bar--added");
+	expect(typed?.glyph).toContain("ao-change-bar--added");
+	// Only the typed line is unsaved.
+	await expect(page.locator(".line-numbers.ao-unsaved-line")).toHaveCount(1);
+
+	await page.getByTestId("save-file").click();
+	await expect(page.getByTestId("save-file")).toBeDisabled();
+	await expect(page.locator(".line-numbers.ao-unsaved-line")).toHaveCount(0);
+	// Saved is not committed: the git lanes keep it.
+	expect((await gutterOf(page, 7))?.glyph).toContain("ao-change-bar--added");
+});
+
+test("undoing back to the saved text clears the unsaved mark", async ({ page }) => {
+	await openFile(page, ORDINARY);
+	await typeIntoEditor(page, "xyz");
+	await expect(page.locator(".line-numbers.ao-unsaved-line")).toHaveCount(1);
+	await page.keyboard.press("Meta+KeyZ");
+	await expect(page.locator(".line-numbers.ao-unsaved-line")).toHaveCount(0);
+	await expect(page.getByTestId("save-file")).toBeDisabled();
+});
+
+// The uncommitted lane is live, so the hunk a click discards is the live one -
+// including a line that has never been saved.
+test("a gutter click discards an unsaved, uncommitted line", async ({ page }) => {
+	await openFile(page, ORDINARY);
+	await expect(page.locator(".ao-change-bar").first()).toBeVisible();
+	await page.locator(".monaco-editor .view-line").nth(5).click();
+	await expect(page.locator(".monaco-editor.focused").first()).toBeVisible();
+	await page.keyboard.press("End");
+	await page.keyboard.press("Enter");
+	await page.keyboard.type("const discardMe = 1;");
+	await expect.poll(() => gutterOf(page, 7)).toMatchObject({ unsaved: true });
+
+	const bar = (await gutterOf(page, 7))?.bar;
+	expect(bar).toBeTruthy();
+	await page.mouse.click(bar!.x, bar!.y);
+	const popover = page.getByTestId("discard-hunk-popover");
+	await expect(popover).toBeVisible();
+	await popover.getByRole("button", { name: "Discard", exact: true }).click();
+	await expect(page.locator(".monaco-editor .view-lines").first()).not.toContainText("discardMe");
+	await expect(page.getByTestId("save-file")).toBeDisabled();
 });
 
 test("Changes mode diffs against the target branch over the same buffer", async ({ page }) => {

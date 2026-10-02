@@ -69,9 +69,9 @@ beforeEach(() => {
 	body = BASE;
 	editorProps.current = null;
 	putMock.mockReset();
-	// "/workspace/file-diff" also contains "/workspace/file", so it is matched first.
+	// "/workspace/file-base" also contains "/workspace/file", so it is matched first.
 	getMock.mockReset().mockImplementation(async (path: string) => {
-		if (path.includes("/workspace/file-diff")) return { data: null };
+		if (path.includes("/workspace/file-base")) return { data: null };
 		if (path.includes("/workspace/file")) return { data: body };
 		return { data: null };
 	});

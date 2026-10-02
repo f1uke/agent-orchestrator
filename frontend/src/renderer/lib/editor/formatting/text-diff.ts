@@ -1,3 +1,5 @@
+import { diffLines } from "../line-diff";
+
 /**
  * The smallest set of edits that turns one text into another, for applying a
  * formatter's output to a live buffer.
@@ -6,8 +8,9 @@
  * wrong: the caret jumps to the end, the scroll position is lost, every
  * decoration and marker is reset, and the undo step contains the entire file.
  * gofmt typically touches a handful of lines; this finds those lines (Myers'
- * diff, line by line) and then trims each changed line down to the characters
- * that differ, so a caret on a re-indented line stays on its word.
+ * diff, line by line, in `../line-diff.ts`) and then trims each changed line
+ * down to the characters that differ, so a caret on a re-indented line stays on
+ * its word.
  */
 
 /** Replace `before.slice(start, end)` with `text`. Offsets are into `before`. */
@@ -35,7 +38,7 @@ export function minimalEdits(before: string, after: string): TextEdit[] {
 	const midB = b.slice(head, b.length - tail);
 
 	const offsets = lineOffsets(a);
-	const hunks = diffLines(midA, midB) ?? [{ a0: 0, a1: midA.length, b0: 0, b1: midB.length }];
+	const hunks = diffLines(midA, midB, MAX_EDIT_DISTANCE);
 	const edits: TextEdit[] = [];
 	for (const hunk of hunks) {
 		const oldLines = midA.slice(hunk.a0, hunk.a1);
@@ -99,79 +102,4 @@ function trimmed(start: number, oldText: string, newText: string): TextEdit | nu
 		end: start + oldText.length - suffix,
 		text: newText.slice(prefix, newText.length - suffix),
 	};
-}
-
-type Hunk = { a0: number; a1: number; b0: number; b1: number };
-
-/**
- * Myers' O((N+M)·D) diff over lines, as hunks of `a[a0, a1)` replaced by
- * `b[b0, b1)`. Null when the edit distance passes `MAX_EDIT_DISTANCE`.
- */
-function diffLines(a: readonly string[], b: readonly string[]): Hunk[] | null {
-	const n = a.length;
-	const m = b.length;
-	const max = n + m;
-	if (max === 0) return [];
-	const offset = max;
-	const v = new Int32Array(2 * max + 2).fill(-1);
-	v[offset + 1] = 0;
-	const trace: Int32Array[] = [];
-	let found = false;
-	for (let d = 0; d <= max && d <= MAX_EDIT_DISTANCE; d++) {
-		trace.push(v.slice());
-		for (let k = -d; k <= d; k += 2) {
-			const down = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1]);
-			let x = down ? v[offset + k + 1] : v[offset + k - 1] + 1;
-			let y = x - k;
-			while (x < n && y < m && a[x] === b[y]) {
-				x++;
-				y++;
-			}
-			v[offset + k] = x;
-			if (x >= n && y >= m) {
-				found = true;
-				break;
-			}
-		}
-		if (found) break;
-	}
-	if (!found) return null;
-
-	// Walk the trace back from (n, m), recording every non-diagonal step.
-	type Step = { kind: "del" | "ins"; x: number; y: number };
-	const steps: Step[] = [];
-	let x = n;
-	let y = m;
-	for (let d = trace.length - 1; d > 0; d--) {
-		const vd = trace[d];
-		const k = x - y;
-		const down = k === -d || (k !== d && vd[offset + k - 1] < vd[offset + k + 1]);
-		const prevK = down ? k + 1 : k - 1;
-		const prevX = vd[offset + prevK];
-		const prevY = prevX - prevK;
-		while (x > prevX && y > prevY) {
-			x--;
-			y--;
-		}
-		if (down) steps.push({ kind: "ins", x: prevX, y: prevY });
-		else steps.push({ kind: "del", x: prevX, y: prevY });
-		x = prevX;
-		y = prevY;
-	}
-	steps.reverse();
-
-	// Adjacent steps fold into one hunk.
-	const hunks: Hunk[] = [];
-	for (const step of steps) {
-		const last = hunks[hunks.length - 1];
-		const a1 = step.kind === "del" ? step.x + 1 : step.x;
-		const b1 = step.kind === "ins" ? step.y + 1 : step.y;
-		if (last && last.a1 === step.x && last.b1 === step.y) {
-			last.a1 = a1;
-			last.b1 = b1;
-		} else {
-			hunks.push({ a0: step.x, a1, b0: step.y, b1 });
-		}
-	}
-	return hunks;
 }

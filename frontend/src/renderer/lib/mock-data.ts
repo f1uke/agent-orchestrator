@@ -5,6 +5,7 @@ import type { components } from "../../api/schema";
 type WorkspaceChangesResponse = components["schemas"]["WorkspaceChangesResponse"];
 type WorkspaceFilesResponse = components["schemas"]["WorkspaceFilesResponse"];
 type DiffContextResponse = components["schemas"]["DiffContextResponse"];
+type WorkspaceFileBaseResponse = components["schemas"]["WorkspaceFileBaseResponse"];
 
 const now = new Date().toISOString();
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
@@ -2070,6 +2071,25 @@ export function mockWorkspaceFileDiff(
 }
 
 /**
+ * A file's text at HEAD or at the target's merge-base, replayed from the old
+ * side of the same edits the mock diffs apply - so the live gutter, the diffs
+ * and the file read all describe ONE file.
+ */
+export function mockWorkspaceFileBase(path: string, base: "target" | "head"): WorkspaceFileBaseResponse {
+	const supplied = mockOverride()?.base?.(path, base);
+	if (supplied) return supplied;
+	const diff = mockWorkspaceFileDiff(path, { base, fullContext: true });
+	// A diff that could not be made is a base that cannot be read - never an
+	// empty file, which would mark every line as added.
+	if (!diff.available) return { available: false, reason: "no_repo", path, exists: false, text: "" };
+	const text = diff.lines
+		.filter((l) => l.oldLine > 0)
+		.map((l) => l.text)
+		.join("\n");
+	return { available: true, path, revision: `mock-${base}`, exists: true, text: `${text}\n` };
+}
+
+/**
  * Trim a whole-file diff to git's default three lines of context, inserting the
  * `hunk` skip marker wherever lines were dropped — the same marker the daemon
  * emits, and the reason the windowed payload can never be replayed as a file.
@@ -2407,6 +2427,8 @@ function mockFileText(path: string): string {
 type MockFileOverride = {
 	file?(path: string): WorkspaceFileResponse | null;
 	diff?(path: string): DiffContextResponse | null;
+	/** A file's git base text - the editor's live change gutter measures against it. */
+	base?(path: string, base: "target" | "head"): WorkspaceFileBaseResponse | null;
 	/** The Files rail's Browse index — how `e2e/files-bench` supplies a 7k-file tree. */
 	files?(sessionId: string): WorkspaceFilesResponse | null;
 	/** ⌘⇧F results — how `e2e/search-bench` supplies a high-hit result set. */

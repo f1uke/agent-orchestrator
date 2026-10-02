@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Hunk } from "./change-lanes";
+import type { Hunk } from "./live-changes";
 import { revertEdit } from "./revert";
-import { branchMarks, uncommittedMarks, BRANCH_LANE_CLASS } from "./gutter-lanes";
 
 /**
  * A stand-in model: enough of Monaco's line API to apply an edit and read the
@@ -32,6 +31,13 @@ function revertOn(text: string, hunk: Hunk): string {
 }
 
 describe("revertEdit", () => {
+	// The joined old text of one blank line is "", which used to read as
+	// "nothing to restore" and deleted the line instead of blanking it.
+	it("restores a line that was blank before it was typed on", () => {
+		expect(revertOn("a\ntyped\nc", { start: 2, end: 2, kind: "modified", oldText: [""] })).toBe("a\n\nc");
+		expect(revertOn("a\ntyped", { start: 2, end: 2, kind: "modified", oldText: [""] })).toBe("a\n");
+	});
+
 	it("restores a modified run mid-file", () => {
 		const out = revertOn("a\nCHANGED\nc\n", { start: 2, end: 2, kind: "modified", oldText: ["b"] });
 
@@ -82,42 +88,5 @@ describe("revertEdit", () => {
 		const out = revertOn("NEW", { start: 1, end: 1, kind: "modified", oldText: ["was"] });
 
 		expect(out).toBe("was");
-	});
-});
-
-describe("gutter lanes", () => {
-	it("colours the uncommitted lane by kind, one mark per covered line", () => {
-		const marks = uncommittedMarks(
-			[
-				{ start: 2, end: 3, kind: "added" },
-				{ start: 9, end: 9, kind: "removed" },
-			],
-			20,
-		);
-
-		expect(marks).toEqual([
-			{ line: 2, className: "ao-gutter-lane ao-change-bar ao-change-bar--added" },
-			{ line: 3, className: "ao-gutter-lane ao-change-bar ao-change-bar--added" },
-			{ line: 9, className: "ao-gutter-lane ao-change-bar ao-change-bar--removed" },
-		]);
-	});
-
-	it("clamps a mark past the end of the buffer instead of decorating nothing", () => {
-		expect(uncommittedMarks([{ start: 99, end: 99, kind: "added" }], 4)).toEqual([
-			{ line: 4, className: "ao-gutter-lane ao-change-bar ao-change-bar--added" },
-		]);
-	});
-
-	// 🗝 One class for the whole branch lane. Two kind-coloured bars side by side
-	// read as one thick bar on a branch under review.
-	it("gives every branch-lane line the same neutral class", () => {
-		const marks = branchMarks([2, 3, 9], 20);
-
-		expect(new Set(marks.map((m) => m.className))).toEqual(new Set([BRANCH_LANE_CLASS]));
-		expect(BRANCH_LANE_CLASS).not.toMatch(/added|modified|removed/);
-	});
-
-	it("does not decorate the same branch line twice", () => {
-		expect(branchMarks([5, 5, 5], 20)).toEqual([{ line: 5, className: BRANCH_LANE_CLASS }]);
 	});
 });
