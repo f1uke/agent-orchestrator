@@ -341,7 +341,7 @@ const provider: monaco.languages.InlineCompletionsProvider = {
 		/**
 		 * 🗝 A next-edit model answers BOTH questions, cursor first. sweep-next-edit
 		 * kept its base model's fill-in-the-middle: over /infill it finishes the line
-		 * as well as Qwen2.5-Coder 1.5B (53% vs 53% of held-out lines exactly right),
+		 * as well as the Qwen2.5-Coder 1.5B AO used to ship (53% vs 53% of held-out lines exactly right),
 		 * while its own rewrite does that job far worse (34%). So where the cursor
 		 * can be continued, the fill-in-the-middle answer is asked for first and
 		 * shown as ghost text; only when there is nothing to add at the cursor is

@@ -10,7 +10,6 @@ import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
 import type { CompanionSettings } from "./main/companion-settings";
 import type { JsonRpcMessage } from "./main/lsp/lsp-framing";
 import type { LspAttachment, LspHealth, LspResultOutcome, LspStateEvent } from "./main/lsp/lsp-registry";
-import type { ModelId } from "./main/inline-completion/catalog";
 import type { InfillRequest, InfillResult } from "./main/inline-completion/infill";
 import type { NextEditRequest, NextEditResult } from "./main/inline-completion/next-edit";
 import type { InlineCompletionStatus } from "./main/inline-completion/service";
@@ -140,10 +139,8 @@ const api = {
 		getStatus: () => ipcRenderer.invoke("inlineCompletion:getStatus") as Promise<InlineCompletionStatus>,
 		enable: () => ipcRenderer.invoke("inlineCompletion:enable") as Promise<void>,
 		disable: () => ipcRenderer.invoke("inlineCompletion:disable") as Promise<void>,
-		selectModel: (id: ModelId) => ipcRenderer.invoke("inlineCompletion:selectModel", id) as Promise<void>,
 		confirmDownload: () => ipcRenderer.invoke("inlineCompletion:confirmDownload") as Promise<void>,
 		cancelDownload: () => ipcRenderer.invoke("inlineCompletion:cancelDownload") as Promise<void>,
-		removeModel: (id: ModelId) => ipcRenderer.invoke("inlineCompletion:removeModel", id) as Promise<void>,
 		complete: (requestId: string, request: InfillRequest) =>
 			ipcRenderer.invoke("inlineCompletion:complete", { requestId, request }) as Promise<InfillResult | null>,
 		predictEdit: (requestId: string, request: NextEditRequest) =>

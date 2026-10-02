@@ -519,7 +519,9 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 		/** Read the settings, clear up after a crashed run, and bring the feature back as it was left. */
 		init: () =>
 			serial(async () => {
-				settings = await readInlineCompletionSettings(paths.stateDir);
+				const read = await readInlineCompletionSettings(paths.stateDir);
+				settings = read.settings;
+				if (read.migrated) await persist(settings);
 				await refreshInstalled();
 				await reapOrphan(paths.pidFile, paths.runtimeDir).catch(() => false);
 				if (!settings.enabled || unsupported()) {
@@ -568,30 +570,6 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 				emit();
 			}),
 
-		/**
-		 * Pick a model. An installed one is switched to at once; one that is not
-		 * asks for the download first and leaves the current model serving.
-		 */
-		selectModel: (id: ModelId) =>
-			serial(async () => {
-				if (!models.some((m) => m.id === id)) return;
-				await refreshInstalled();
-				if (!settings.enabled) {
-					await persist({ ...settings, modelId: id });
-					confirm = null;
-					return emit();
-				}
-				if (installed.has(id) && runtimeInstalled) {
-					confirm = null;
-					await persist({ ...settings, modelId: id });
-					await startServer();
-					return emit();
-				}
-				if (download) await abortDownload(true);
-				await askToDownload(id);
-				emit();
-			}),
-
 		/** The person said yes to the size they were shown. */
 		confirmDownload: () =>
 			serial(async () => {
@@ -620,17 +598,6 @@ export function createInlineCompletionService(deps: InlineCompletionServiceDeps)
 					await persist({ ...settings, enabled: false });
 					await stopServer("cancelled");
 				}
-				emit();
-			}),
-
-		/** Delete a downloaded model that is not the one running. */
-		removeModel: (id: ModelId) =>
-			serial(async () => {
-				if (server && serverModel === id) return;
-				const spec = models.find((m) => m.id === id);
-				if (!spec) return;
-				await rm(modelPath(spec), { force: true });
-				await refreshInstalled();
 				emit();
 			}),
 

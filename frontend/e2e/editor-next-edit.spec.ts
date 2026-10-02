@@ -169,7 +169,7 @@ test("finishing the line being typed is ghost text from the model's fill-in-the-
 });
 
 test("a fill-in-the-middle model is never asked for a rewrite, and keeps no edit history", async ({ page }) => {
-	await page.goto(GALLERY.replace("predict=edit", "predict=1"));
+	await page.goto(GALLERY.replace("predict=edit", "predict=fim"));
 	await selectWord(page, "didSelect(offer", "index");
 	await page.keyboard.type("position");
 	await page.waitForTimeout(300);

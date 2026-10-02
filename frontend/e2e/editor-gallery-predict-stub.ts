@@ -61,23 +61,23 @@ export function installFakeInlineCompletion(options: {
 	const status: InlineCompletionStatus = {
 		unsupported: null,
 		enabled: options.ready,
-		modelId: "qwen2.5-coder-1.5b",
+		modelId: "sweep-next-edit-1.5b",
 		server: options.ready ? "ready" : "off",
 		activeKind: options.ready ? kind : null,
 		// Like sweep-next-edit, the next-edit stub answers fill-in-the-middle too.
 		activeInfill: options.ready,
-		serverDetail: options.ready ? "Qwen2.5-Coder 1.5B" : null,
+		serverDetail: options.ready ? "Sweep Next-Edit 1.5B" : null,
 		pid: options.ready ? 4242 : null,
 		confirm: null,
 		download: null,
 		downloadError: null,
 		models: [
 			{
-				id: "qwen2.5-coder-1.5b",
-				kind: "fim",
-				label: "Qwen2.5-Coder 1.5B",
-				blurb: "Fastest.",
-				sizeBytes: 1_646_573_056,
+				id: "sweep-next-edit-1.5b",
+				kind,
+				label: "Sweep Next-Edit 1.5B",
+				blurb: "Finishes the line, then predicts the next edit.",
+				sizeBytes: 1_537_269_856,
 				installed: options.ready,
 			},
 		],
@@ -89,10 +89,8 @@ export function installFakeInlineCompletion(options: {
 			getStatus: async () => status,
 			enable: async () => undefined,
 			disable: async () => undefined,
-			selectModel: async () => undefined,
 			confirmDownload: async () => undefined,
 			cancelDownload: async () => undefined,
-			removeModel: async () => undefined,
 			complete: async (_id: string, request: InfillRequest) => {
 				asked.push({ prompt: request.prompt, nPredict: request.nPredict });
 				if (options.delayMs) await new Promise((r) => setTimeout(r, options.delayMs));

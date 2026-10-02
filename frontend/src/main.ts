@@ -65,7 +65,6 @@ import { detectOpenTargets, openInAndroidStudio, openInEditor, openInTerminal, o
 import { runXcodegen, type RunXcodegenResult } from "./main/run-xcodegen";
 import { isAllowedTerminalLink } from "./main/open-terminal-link";
 import { createLspRegistry, type LspRegistry, type LspResultOutcome } from "./main/lsp/lsp-registry";
-import type { ModelId } from "./main/inline-completion/catalog";
 import type { InfillRequest } from "./main/inline-completion/infill";
 import type { NextEditRequest } from "./main/inline-completion/next-edit";
 import {
@@ -1223,10 +1222,8 @@ function ensureInlineCompletion(): InlineCompletionService {
 ipcMain.handle("inlineCompletion:getStatus", () => ensureInlineCompletion().status());
 ipcMain.handle("inlineCompletion:enable", () => ensureInlineCompletion().enable());
 ipcMain.handle("inlineCompletion:disable", () => ensureInlineCompletion().disable());
-ipcMain.handle("inlineCompletion:selectModel", (_event, id: ModelId) => ensureInlineCompletion().selectModel(id));
 ipcMain.handle("inlineCompletion:confirmDownload", () => ensureInlineCompletion().confirmDownload());
 ipcMain.handle("inlineCompletion:cancelDownload", () => ensureInlineCompletion().cancelDownload());
-ipcMain.handle("inlineCompletion:removeModel", (_event, id: ModelId) => ensureInlineCompletion().removeModel(id));
 ipcMain.handle("inlineCompletion:complete", (_event, input: { requestId: string; request: InfillRequest }) =>
 	ensureInlineCompletion().complete(input.requestId, input.request),
 );
