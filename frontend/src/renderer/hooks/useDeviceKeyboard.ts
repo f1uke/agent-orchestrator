@@ -34,9 +34,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * else's alphabet, silently. The reasoning now lives in the daemon as a CHECK
  * rather than an assumption - see simbridge.forwardingIsFaithful.
  *
- * ⚠ The related trap is `ao sim type`'s: an agent chose the string `fa12345`,
+ * ⚠ The related trap is `ao sim type`'s: an agent chose the string `lf86428`,
  * no person pressed anything, so a US usage for `f` is a guess about the
- * guest's layout and on a Thai guest it arrives as `ดฟๅ/_ภถ` - bug #198. Both
+ * guest's layout and on a Thai guest it arrives as `สดคุภ/ค` - bug #198. Both
  * bugs are the same mistake from opposite ends: believing one side's layout on
  * the strength of the other's.
  *

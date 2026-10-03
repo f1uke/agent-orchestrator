@@ -308,8 +308,8 @@ type KeyboardState struct {
 	// Keys is how many character keys are showing.
 	Keys int `json:"keys"`
 	// Latin says every letter key is an a-z letter. A Thai (or any other
-	// non-Latin) layout is false, and is the input mode that turns
-	// "finno123" into three Thai characters.
+	// non-Latin) layout is false, and is the input mode that turns an
+	// 8-character Latin password into three Thai characters.
 	Latin bool `json:"latin"`
 	// NextInputMode is what the globe key switches TO - iOS reports the next
 	// mode as the key's value, not the current one (measured: a Thai layout

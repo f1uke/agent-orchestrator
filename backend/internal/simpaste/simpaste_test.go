@@ -57,7 +57,7 @@ func TestVerify_AcceptsTextThatReplacedAPlaceholder(t *testing.T) {
 	for _, tc := range []struct {
 		name, typed string
 	}{
-		{"shorter than the placeholder", "r8t3@a.com"},
+		{"shorter than the placeholder", "qa@test.io"},
 		{"the same length as the placeholder", "exactly@email.xy"},
 		{"longer than the placeholder", "a-very-long-address@example.com"},
 	} {
@@ -227,7 +227,7 @@ func TestVerify_RefusesAPasteProvenOnlyByATreeThatReflowed(t *testing.T) {
 		field{"0.2", "", "18:44"},
 		field{"0.3", "Continue", ""},
 	)
-	_, err := simpaste.Verify(before, after, "r8t3@a.com")
+	_, err := simpaste.Verify(before, after, "qa@test.io")
 	if err == nil {
 		t.Fatal("a screen that merely MOVED must never prove a paste: the field still reads its placeholder")
 	}
@@ -241,12 +241,12 @@ func TestVerify_NamesTheFieldItFound(t *testing.T) {
 	// field's label and its path are both here so the claim can be checked with
 	// `ao sim ax` rather than taken on trust.
 	before := screen(field{"0.11", "email", "example@email.com"})
-	after := screen(field{"0.11", "email", "r8t3@a.com"})
-	landing, err := simpaste.Verify(before, after, "r8t3@a.com")
+	after := screen(field{"0.11", "email", "qa@test.io"})
+	landing, err := simpaste.Verify(before, after, "qa@test.io")
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	for _, want := range []string{`"email"`, "[0.11]", `"r8t3@a.com"`} {
+	for _, want := range []string{`"email"`, "[0.11]", `"qa@test.io"`} {
 		if !strings.Contains(landing.String(), want) {
 			t.Fatalf("report %q must contain %s", landing.String(), want)
 		}

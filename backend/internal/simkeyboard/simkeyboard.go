@@ -6,8 +6,8 @@
 // it is the GUEST that turns a usage into a character, using whichever input
 // mode it currently has selected. Simulator.app ships with I/O > Keyboard >
 // "Use the Same Keyboard Language as macOS" ticked, so a developer whose Mac is
-// set to Thai has a guest set to Thai, and `type "fa12345"` lands as
-// "ดฟๅ/_ภถ" - the Kedmanee mapping of those exact keys.
+// set to Thai has a guest set to Thai, and `type "lf86428"` lands as
+// "สดคุภ/ค" - the Kedmanee mapping of those exact keys.
 //
 // That failure is nasty in a specific way. It is SELECTIVE: fields that force
 // an ASCII keyboard (.emailAddress, .URL) make iOS switch input mode by itself

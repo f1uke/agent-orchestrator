@@ -5,7 +5,7 @@ import XCTest
 //
 // `ao sim type` used to synthesize HID key USAGES, and the guest turned each
 // into whatever its input mode said that key meant: on a guest set to Thai,
-// "fa12345" arrived as "ดฟๅ/_ภถ", and Thai text had no key to send at all. The
+// "lf86428" arrived as "สดคุภ/ค", and Thai text had no key to send at all. The
 // pasteboard route that worked around it lost its Command-V whenever the
 // software keyboard was up (the first key event only hides it - see
 // simbridge.WakeKeyboard), and an app watching each keystroke sees one paste.
