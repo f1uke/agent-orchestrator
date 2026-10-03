@@ -46,17 +46,20 @@ func TestDrafts_FlagsAcceptedSuggestionsAndResolvesSupersedes(t *testing.T) {
 	turns := []domain.LearnExcerpt{turn(21, "yes always squash before merge", domain.LearnSourceSuggestionAccepted)}
 	open := []domain.LearnDraft{{ID: 7, Statement: "Merge commits are fine."}}
 	answer := `{"lessons":[{"kind":"rule","statement":"Squash before merging.","applies_when":"merging","scope_hint":"weird",
-	  "quote":"always squash before merge","turn":"t1","agent_before":"","supersedes":"d7","confidence":1.7},
-	 {"kind":"rule","statement":"Another.","applies_when":"","scope_hint":"repo","quote":"always squash","turn":"t1","agent_before":"","supersedes":"d99","confidence":-1}]}`
+	  "quote":"always squash before merge","turn":"t1","agent_before":"","supersedes":"d7","confidence":1.7,"about":"agent_practice"},
+	 {"kind":"rule","statement":"Another.","applies_when":"","scope_hint":"repo","quote":"always squash","turn":"t1","agent_before":"","supersedes":"d99","confidence":-1,"about":"invented"}]}`
 	drafts, _, err := Drafts(json.RawMessage(answer), domain.LearnDraft{SessionID: "p-1"}, turns, open)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !drafts[0].Weak || drafts[0].SupersedesID != 7 || drafts[0].ScopeHint != "" || drafts[0].Confidence != 1 {
+	if !drafts[0].Weak || drafts[0].SupersedesID != 7 || drafts[0].ScopeHint != "" || drafts[0].Confidence != 1 || drafts[0].About != domain.LearnAboutAgentPractice {
 		t.Errorf("first = %+v", drafts[0])
 	}
 	if drafts[1].SupersedesID != 0 || drafts[1].Confidence != 0 {
 		t.Errorf("an unknown draft id must not supersede anything: %+v", drafts[1])
+	}
+	if drafts[1].About != "" {
+		t.Errorf("an unknown about tag must be stored as untagged, not refused by the column check: %q", drafts[1].About)
 	}
 }
 

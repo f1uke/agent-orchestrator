@@ -7757,6 +7757,15 @@ components:
       type: object
     ControllersLearningDraftDTO:
       properties:
+        about:
+          description: What the lesson concerns, as the collect model tagged it. Only
+            agent_practice is about how agents work.
+          enum:
+          - agent_practice
+          - product_decision
+          - one_off
+          - question
+          type: string
         agentBefore:
           type: string
         anchorExcerptId:

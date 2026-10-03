@@ -401,6 +401,7 @@ type learnDraftDTO struct {
 	AppliesWhen       string     `json:"appliesWhen,omitempty"`
 	ScopeHint         string     `json:"scopeHint,omitempty"`
 	Confidence        float64    `json:"confidence"`
+	About             string     `json:"about,omitempty"`
 	Quote             string     `json:"quote"`
 	AnchorSourceClass string     `json:"anchorSourceClass,omitempty"`
 	AnchorTurnAt      *time.Time `json:"anchorTurnAt,omitempty"`
@@ -464,7 +465,7 @@ func writeLearnDrafts(out io.Writer, project string, drafts []learnDraftDTO) err
 		if d.Status != "open" {
 			flags += " " + d.Status
 		}
-		fmt.Fprintf(&b, "#%d %s%s  @%s  conf %.2f  %s\n", d.ID, d.Kind, flags, d.SessionID, d.Confidence, d.ScopeHint)
+		fmt.Fprintf(&b, "#%d %s%s  @%s  conf %.2f  %s  %s\n", d.ID, d.Kind, flags, d.SessionID, d.Confidence, d.ScopeHint, d.About)
 		fmt.Fprintf(&b, "  %s\n", d.Statement)
 		if d.AppliesWhen != "" {
 			fmt.Fprintf(&b, "  when: %s\n", d.AppliesWhen)

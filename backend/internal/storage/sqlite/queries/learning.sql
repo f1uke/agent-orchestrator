@@ -185,9 +185,9 @@ ORDER BY id DESC LIMIT 1;
 -- A statement the session already has a draft for is not stored again; the
 -- returned id is 0 then.
 INSERT INTO learn_draft (project_id, session_id, task_key, job_id, kind, statement, statement_hash,
-    applies_when, scope_hint, confidence, quote, anchor_excerpt_id, evidence_json, agent_before,
+    applies_when, scope_hint, confidence, about, quote, anchor_excerpt_id, evidence_json, agent_before,
     weak, supersedes_id, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
 ON CONFLICT (session_id, statement_hash) DO NOTHING
 RETURNING id;
 
@@ -201,7 +201,7 @@ ORDER BY id;
 
 -- name: ListLearnDraftsByProject :many
 SELECT d.id, d.project_id, d.session_id, d.task_key, d.job_id, d.kind, d.statement, d.applies_when,
-    d.scope_hint, d.confidence, d.quote, d.anchor_excerpt_id, d.evidence_json, d.agent_before, d.weak,
+    d.scope_hint, d.confidence, d.about, d.quote, d.anchor_excerpt_id, d.evidence_json, d.agent_before, d.weak,
     d.supersedes_id, d.status, d.created_at,
     e.source_class AS anchor_source_class,
     e.turn_at AS anchor_turn_at

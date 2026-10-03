@@ -315,9 +315,9 @@ func (q *Queries) InsertDeliveredFingerprint(ctx context.Context, arg InsertDeli
 
 const insertLearnDraft = `-- name: InsertLearnDraft :one
 INSERT INTO learn_draft (project_id, session_id, task_key, job_id, kind, statement, statement_hash,
-    applies_when, scope_hint, confidence, quote, anchor_excerpt_id, evidence_json, agent_before,
+    applies_when, scope_hint, confidence, about, quote, anchor_excerpt_id, evidence_json, agent_before,
     weak, supersedes_id, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
 ON CONFLICT (session_id, statement_hash) DO NOTHING
 RETURNING id
 `
@@ -333,6 +333,7 @@ type InsertLearnDraftParams struct {
 	AppliesWhen     string
 	ScopeHint       string
 	Confidence      float64
+	About           string
 	Quote           string
 	AnchorExcerptID int64
 	EvidenceJson    string
@@ -356,6 +357,7 @@ func (q *Queries) InsertLearnDraft(ctx context.Context, arg InsertLearnDraftPara
 		arg.AppliesWhen,
 		arg.ScopeHint,
 		arg.Confidence,
+		arg.About,
 		arg.Quote,
 		arg.AnchorExcerptID,
 		arg.EvidenceJson,
@@ -598,7 +600,7 @@ func (q *Queries) ListLearnCursorsByProject(ctx context.Context, projectID strin
 
 const listLearnDraftsByProject = `-- name: ListLearnDraftsByProject :many
 SELECT d.id, d.project_id, d.session_id, d.task_key, d.job_id, d.kind, d.statement, d.applies_when,
-    d.scope_hint, d.confidence, d.quote, d.anchor_excerpt_id, d.evidence_json, d.agent_before, d.weak,
+    d.scope_hint, d.confidence, d.about, d.quote, d.anchor_excerpt_id, d.evidence_json, d.agent_before, d.weak,
     d.supersedes_id, d.status, d.created_at,
     e.source_class AS anchor_source_class,
     e.turn_at AS anchor_turn_at
@@ -625,6 +627,7 @@ type ListLearnDraftsByProjectRow struct {
 	AppliesWhen       string
 	ScopeHint         string
 	Confidence        float64
+	About             string
 	Quote             string
 	AnchorExcerptID   int64
 	EvidenceJson      string
@@ -657,6 +660,7 @@ func (q *Queries) ListLearnDraftsByProject(ctx context.Context, arg ListLearnDra
 			&i.AppliesWhen,
 			&i.ScopeHint,
 			&i.Confidence,
+			&i.About,
 			&i.Quote,
 			&i.AnchorExcerptID,
 			&i.EvidenceJson,
