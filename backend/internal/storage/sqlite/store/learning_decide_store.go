@@ -56,7 +56,7 @@ func (s *Store) ListSkillProposals(ctx context.Context) ([]domain.LearnProposal,
 		p := domain.LearnProposal{
 			ID: r.ID, ProjectID: domain.ProjectID(r.ProjectID), TaskKey: r.TaskKey, Action: domain.LearnProposalAction(r.Action),
 			TargetPath: r.TargetPath, Scope: r.Scope, Title: r.Title, Rationale: r.Rationale, BaseSHA256: r.BaseSha256,
-			NewContent: r.NewContent, Diff: r.Diff, Confidence: r.Confidence, Outcome: domain.LearnOutcome(r.Outcome),
+			NewContent: r.NewContent, IndexLine: r.IndexLine, Diff: r.Diff, Confidence: r.Confidence, Outcome: domain.LearnOutcome(r.Outcome),
 			Status: domain.LearnProposalStatus(r.Status), DropReason: r.DropReason, EvidenceIDs: byProposal[r.ID],
 			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 		}
@@ -96,7 +96,7 @@ func (s *Store) CommitDecide(ctx context.Context, res domain.LearnDecideResult, 
 				id, err = q.InsertSkillProposal(ctx, gen.InsertSkillProposalParams{
 					ProjectID: string(p.ProjectID), TaskKey: p.TaskKey, Action: string(p.Action), TargetPath: p.TargetPath,
 					Scope: p.Scope, Title: p.Title, Rationale: p.Rationale, BaseSha256: p.BaseSHA256, NewContent: p.NewContent,
-					Diff: p.Diff, Confidence: p.Confidence, Outcome: string(p.Outcome), RuleVerdictsJson: string(verdicts),
+					IndexLine: p.IndexLine, Diff: p.Diff, Confidence: p.Confidence, Outcome: string(p.Outcome), RuleVerdictsJson: string(verdicts),
 					VerifierJson: string(verifier), Status: string(status), DropReason: p.DropReason, CreatedAt: now, UpdatedAt: now,
 				})
 				if err != nil {
@@ -108,7 +108,7 @@ func (s *Store) CommitDecide(ctx context.Context, res domain.LearnDecideResult, 
 			} else {
 				if err := q.AmendSkillProposal(ctx, gen.AmendSkillProposalParams{
 					TaskKey: p.TaskKey, Action: string(p.Action), Scope: p.Scope, Title: p.Title, Rationale: p.Rationale,
-					BaseSha256: p.BaseSHA256, NewContent: p.NewContent, Diff: p.Diff, Confidence: p.Confidence,
+					BaseSha256: p.BaseSHA256, NewContent: p.NewContent, IndexLine: p.IndexLine, Diff: p.Diff, Confidence: p.Confidence,
 					Outcome: string(p.Outcome), RuleVerdictsJson: string(verdicts), VerifierJson: string(verifier),
 					UpdatedAt: now, ID: id,
 				}); err != nil {

@@ -39,8 +39,8 @@ func TestDecide_StartsListsAndShows(t *testing.T) {
 	now := time.Now().UTC()
 	if err := st.CommitDecide(ctx, domain.LearnDecideResult{TaskKey: "solo:x", ProjectID: "p", Outcome: domain.LearnOutcomeMerged,
 		Proposals: []domain.LearnProposal{
-			{ProjectID: "p", TaskKey: "solo:x", Action: domain.LearnProposeCreateSkill, TargetPath: "/a", Scope: "project:p", Title: "kept"},
-			{ProjectID: "p", TaskKey: "solo:x", Action: domain.LearnProposeCreateSkill, TargetPath: "/b", Scope: "project:p", Title: "dropped",
+			{ProjectID: "p", TaskKey: "solo:x", Action: domain.LearnProposeCreateMemory, TargetPath: "/a", Scope: "project:p", Title: "kept"},
+			{ProjectID: "p", TaskKey: "solo:x", Action: domain.LearnProposeCreateMemory, TargetPath: "/b", Scope: "project:p", Title: "dropped",
 				Status: domain.LearnProposalDropped, DropReason: "why"},
 		}}, now); err != nil {
 		t.Fatal(err)

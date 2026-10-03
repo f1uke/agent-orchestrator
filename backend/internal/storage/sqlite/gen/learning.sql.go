@@ -29,8 +29,8 @@ func (q *Queries) AbandonRunningLearnJobs(ctx context.Context, finishedAt sql.Nu
 }
 
 const amendSkillProposal = `-- name: AmendSkillProposal :exec
-UPDATE skill_proposal
-SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, diff = ?,
+UPDATE learn_proposal
+SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, index_line = ?, diff = ?,
     confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?
 WHERE id = ? AND status = 'pending'
 `
@@ -43,6 +43,7 @@ type AmendSkillProposalParams struct {
 	Rationale        string
 	BaseSha256       string
 	NewContent       string
+	IndexLine        string
 	Diff             string
 	Confidence       float64
 	Outcome          string
@@ -61,6 +62,7 @@ func (q *Queries) AmendSkillProposal(ctx context.Context, arg AmendSkillProposal
 		arg.Rationale,
 		arg.BaseSha256,
 		arg.NewContent,
+		arg.IndexLine,
 		arg.Diff,
 		arg.Confidence,
 		arg.Outcome,
@@ -308,7 +310,7 @@ func (q *Queries) DeletePromptFingerprintsByProject(ctx context.Context, project
 }
 
 const deleteSkillProposalsByProject = `-- name: DeleteSkillProposalsByProject :execrows
-DELETE FROM skill_proposal WHERE project_id = ?
+DELETE FROM learn_proposal WHERE project_id = ?
 `
 
 func (q *Queries) DeleteSkillProposalsByProject(ctx context.Context, projectID string) (int64, error) {
@@ -638,10 +640,10 @@ func (q *Queries) InsertPromptFingerprint(ctx context.Context, arg InsertPromptF
 }
 
 const insertSkillProposal = `-- name: InsertSkillProposal :one
-INSERT INTO skill_proposal (project_id, task_key, action, target_path, scope, title, rationale, base_sha256,
-    new_content, diff, confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason,
+INSERT INTO learn_proposal (project_id, task_key, action, target_path, scope, title, rationale, base_sha256,
+    new_content, index_line, diff, confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason,
     created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -655,6 +657,7 @@ type InsertSkillProposalParams struct {
 	Rationale        string
 	BaseSha256       string
 	NewContent       string
+	IndexLine        string
 	Diff             string
 	Confidence       float64
 	Outcome          string
@@ -677,6 +680,7 @@ func (q *Queries) InsertSkillProposal(ctx context.Context, arg InsertSkillPropos
 		arg.Rationale,
 		arg.BaseSha256,
 		arg.NewContent,
+		arg.IndexLine,
 		arg.Diff,
 		arg.Confidence,
 		arg.Outcome,
@@ -693,7 +697,7 @@ func (q *Queries) InsertSkillProposal(ctx context.Context, arg InsertSkillPropos
 }
 
 const insertSkillProposalEvidence = `-- name: InsertSkillProposalEvidence :exec
-INSERT INTO skill_proposal_evidence (proposal_id, draft_id) VALUES (?, ?)
+INSERT INTO learn_proposal_evidence (proposal_id, draft_id) VALUES (?, ?)
 ON CONFLICT DO NOTHING
 `
 
@@ -1370,18 +1374,18 @@ func (q *Queries) ListSessionTranscriptsByProject(ctx context.Context, projectID
 }
 
 const listSkillProposalEvidence = `-- name: ListSkillProposalEvidence :many
-SELECT proposal_id, draft_id FROM skill_proposal_evidence ORDER BY proposal_id, draft_id
+SELECT proposal_id, draft_id FROM learn_proposal_evidence ORDER BY proposal_id, draft_id
 `
 
-func (q *Queries) ListSkillProposalEvidence(ctx context.Context) ([]SkillProposalEvidence, error) {
+func (q *Queries) ListSkillProposalEvidence(ctx context.Context) ([]LearnProposalEvidence, error) {
 	rows, err := q.db.QueryContext(ctx, listSkillProposalEvidence)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SkillProposalEvidence{}
+	items := []LearnProposalEvidence{}
 	for rows.Next() {
-		var i SkillProposalEvidence
+		var i LearnProposalEvidence
 		if err := rows.Scan(&i.ProposalID, &i.DraftID); err != nil {
 			return nil, err
 		}
@@ -1397,20 +1401,20 @@ func (q *Queries) ListSkillProposalEvidence(ctx context.Context) ([]SkillProposa
 }
 
 const listSkillProposals = `-- name: ListSkillProposals :many
-SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, diff,
+SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, index_line, diff,
     confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at
-FROM skill_proposal ORDER BY id
+FROM learn_proposal ORDER BY id
 `
 
-func (q *Queries) ListSkillProposals(ctx context.Context) ([]SkillProposal, error) {
+func (q *Queries) ListSkillProposals(ctx context.Context) ([]LearnProposal, error) {
 	rows, err := q.db.QueryContext(ctx, listSkillProposals)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SkillProposal{}
+	items := []LearnProposal{}
 	for rows.Next() {
-		var i SkillProposal
+		var i LearnProposal
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -1422,6 +1426,7 @@ func (q *Queries) ListSkillProposals(ctx context.Context) ([]SkillProposal, erro
 			&i.Rationale,
 			&i.BaseSha256,
 			&i.NewContent,
+			&i.IndexLine,
 			&i.Diff,
 			&i.Confidence,
 			&i.Outcome,

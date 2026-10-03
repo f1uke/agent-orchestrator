@@ -62,3 +62,13 @@ func IsTranscriptPath(path string) bool {
 	// <projectsDir>/<project dir>/<id>.jsonl - exactly one directory deep.
 	return len(strings.Split(rel, string(filepath.Separator))) == 2
 }
+
+// MemoryDir is where Claude Code keeps the memory of a repo: the per-project
+// directory of the repo's main checkout, so every worktree's session shares it.
+func MemoryDir(repoPath string) (string, error) {
+	dir, err := WorkspaceTranscriptDir(repoPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "memory"), nil
+}

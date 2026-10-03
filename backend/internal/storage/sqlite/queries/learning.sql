@@ -291,32 +291,32 @@ ON CONFLICT (task_key) DO UPDATE SET
     decided_at = excluded.decided_at;
 
 -- name: InsertSkillProposal :one
-INSERT INTO skill_proposal (project_id, task_key, action, target_path, scope, title, rationale, base_sha256,
-    new_content, diff, confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason,
+INSERT INTO learn_proposal (project_id, task_key, action, target_path, scope, title, rationale, base_sha256,
+    new_content, index_line, diff, confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason,
     created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: AmendSkillProposal :exec
-UPDATE skill_proposal
-SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, diff = ?,
+UPDATE learn_proposal
+SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, index_line = ?, diff = ?,
     confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?
 WHERE id = ? AND status = 'pending';
 
 -- name: InsertSkillProposalEvidence :exec
-INSERT INTO skill_proposal_evidence (proposal_id, draft_id) VALUES (?, ?)
+INSERT INTO learn_proposal_evidence (proposal_id, draft_id) VALUES (?, ?)
 ON CONFLICT DO NOTHING;
 
 -- name: ListSkillProposals :many
-SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, diff,
+SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, index_line, diff,
     confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at
-FROM skill_proposal ORDER BY id;
+FROM learn_proposal ORDER BY id;
 
 -- name: ListSkillProposalEvidence :many
-SELECT proposal_id, draft_id FROM skill_proposal_evidence ORDER BY proposal_id, draft_id;
+SELECT proposal_id, draft_id FROM learn_proposal_evidence ORDER BY proposal_id, draft_id;
 
 -- name: DeleteSkillProposalsByProject :execrows
-DELETE FROM skill_proposal WHERE project_id = ?;
+DELETE FROM learn_proposal WHERE project_id = ?;
 
 -- name: DeleteDecidedTasksByProject :execrows
 DELETE FROM learn_decided_task WHERE project_id = ?;

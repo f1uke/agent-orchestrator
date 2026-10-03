@@ -64,9 +64,11 @@ type Store interface {
 
 // Dirs are where decide reads skills, rule files and plans.
 type Dirs struct {
-	Home         string
-	DataDir      string
-	Learned      string
+	Home    string
+	DataDir string
+	// MemoryDir maps a repo path to its Claude Code memory directory
+	// (claudecode.MemoryDir in production).
+	MemoryDir    func(repoPath string) (string, error)
 	KnowledgeDir string
 }
 
@@ -323,7 +325,7 @@ func (o *Observer) load(ctx context.Context) (shared, error) {
 			repos[p.ID] = p.Path
 		}
 	}
-	sh.skills = skills.Index(skills.Dirs{Home: o.dirs.Home, DataDir: o.dirs.DataDir, Learned: o.dirs.Learned, Repos: repos})
+	sh.skills = skills.Index(skills.Dirs{Home: o.dirs.Home, DataDir: o.dirs.DataDir, Repos: repos})
 	var dict []redact.Value
 	if o.cfg.Dictionary != nil {
 		dict = o.cfg.Dictionary(sh.projects)
@@ -488,7 +490,7 @@ func (o *Observer) decideTask(ctx context.Context, sh shared, t task) (result, e
 		return res, err
 	}
 	env := decide.Env{
-		ProjectID: pid, TaskKey: t.key, Outcome: t.outcome, Home: o.dirs.Home, Learned: o.dirs.Learned,
+		ProjectID: pid, TaskKey: t.key, Outcome: t.outcome, Home: o.dirs.Home, MemoryDir: o.memoryDir(t.project), Now: o.clock,
 		KnowledgeDir: o.dirs.KnowledgeDir, Skills: sh.skills, Shaped: shaped, Protected: sh.protected,
 		Proposals: proposals, Redactor: sh.redactor, Read: readFile,
 	}
@@ -581,8 +583,8 @@ func (o *Observer) call(ctx context.Context, t task, kind domain.LearnJobKind, s
 // ruleFiles are the files a lesson may be added to, with their headings.
 func (o *Observer) ruleFiles() []decide.RuleFile {
 	var out []decide.RuleFile
-	// Project rules are learned skills of the project (the person's decision,
-	// 2026-10-04), so the only rule file is the global CLAUDE.md.
+	// A project's lessons go to its memory (decision 11), so the only rule
+	// file is the global CLAUDE.md.
 	for _, f := range []struct{ path, scope string }{
 		{filepath.Join(o.dirs.Home, ".claude", "CLAUDE.md"), "global"},
 	} {
@@ -593,6 +595,18 @@ func (o *Observer) ruleFiles() []decide.RuleFile {
 		out = append(out, decide.RuleFile{Path: f.path, Scope: f.scope, Headings: decide.Headings(text)})
 	}
 	return out
+}
+
+// memoryDir is the Claude Code memory directory of the project's repo.
+func (o *Observer) memoryDir(p domain.ProjectRecord) string {
+	if p.Path == "" || o.dirs.MemoryDir == nil {
+		return ""
+	}
+	dir, err := o.dirs.MemoryDir(p.Path)
+	if err != nil {
+		return ""
+	}
+	return dir
 }
 
 func readFile(path string) (string, bool, error) {

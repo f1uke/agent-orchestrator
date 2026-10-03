@@ -47,7 +47,7 @@ func startLearnRules(ctx context.Context, store *sqlite.Store, dataDir string, s
 	// (knowledgestore.Root, the path they spell as knowledgestore.PromptDir),
 	// not under the data dir.
 	files := learnrules.Files{Home: home, DataDir: dataDir, KnowledgeDir: knowledgestore.Root(home),
-		Projects: store.ListProjects, Prompts: prompts}
+		Projects: store.ListProjects, Prompts: prompts, MemoryDir: claudecode.MemoryDir}
 	runner := llm.ClaudeCLI{Binary: claudecode.ResolveClaudeBinary}
 	observer := learnrules.New(store, runner, files.List, settings.Get, learnrules.Config{Logger: logger, OnTick: rec.Tick})
 	done := observer.Start(ctx)

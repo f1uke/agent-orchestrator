@@ -83,13 +83,14 @@ type LearningProposalDTO struct {
 	ID           int64                    `json:"id"`
 	ProjectID    string                   `json:"projectId"`
 	TaskKey      string                   `json:"taskKey"`
-	Action       string                   `json:"action" enum:"create_skill,update_skill,edit_rule_file,conflict"`
+	Action       string                   `json:"action" enum:"create_memory,update_memory,update_skill,edit_rule_file,conflict"`
 	TargetPath   string                   `json:"targetPath" description:"The file it would change, or rule:<id> for a conflict card."`
 	Scope        string                   `json:"scope"`
 	Title        string                   `json:"title"`
 	Rationale    string                   `json:"rationale"`
 	BaseSHA256   string                   `json:"baseSha256,omitempty" description:"The target's hash when the diff was computed; empty for a new file."`
 	NewContent   string                   `json:"newContent"`
+	IndexLine    string                   `json:"indexLine,omitempty" description:"For a new memory file: the line it adds to MEMORY.md, written with it."`
 	Diff         string                   `json:"diff" description:"Unified diff AO computed from the target as it was."`
 	Confidence   float64                  `json:"confidence"`
 	Outcome      string                   `json:"outcome" enum:"merged,abandoned,unknown,ongoing,day"`
@@ -217,7 +218,7 @@ func (c *LearningDecideController) get(w http.ResponseWriter, r *http.Request) {
 func proposalDTO(p domain.LearnProposal) LearningProposalDTO {
 	out := LearningProposalDTO{
 		ID: p.ID, ProjectID: string(p.ProjectID), TaskKey: p.TaskKey, Action: string(p.Action), TargetPath: p.TargetPath,
-		Scope: p.Scope, Title: p.Title, Rationale: p.Rationale, BaseSHA256: p.BaseSHA256, NewContent: p.NewContent,
+		Scope: p.Scope, Title: p.Title, Rationale: p.Rationale, BaseSHA256: p.BaseSHA256, NewContent: p.NewContent, IndexLine: p.IndexLine,
 		Diff: p.Diff, Confidence: p.Confidence, Outcome: string(p.Outcome), Status: string(p.Status), DropReason: p.DropReason,
 		Verifier: LearningVerifierDTO{ContradictsRule: p.Verifier.ContradictsRule, Grounded: p.Verifier.Grounded,
 			SensitiveData: p.Verifier.SensitiveData, Notes: p.Verifier.Notes},

@@ -244,9 +244,13 @@ func TestFiles_ListsOnlyWhileAProjectLearns(t *testing.T) {
 	write(filepath.Join(repo, "CLAUDE.md"), "repo rules")
 	write(filepath.Join(repo, ".claude", "skills", "deploy", "SKILL.md"), "deploy skill")
 	write(filepath.Join(home, ".ao", "knowledge", "nter", "INDEX.md"), "- entry")
+	mem := filepath.Join(home, ".claude", "projects", "-repo", "memory")
+	write(filepath.Join(mem, "MEMORY.md"), "- [QA](feedback_qa.md) - hand work to qa")
+	write(filepath.Join(mem, "feedback_qa.md"), "---\nname: feedback-qa\ndescription: \"Hand finished work to qa\"\n---\n\nHand finished work to qa.\n")
 	learning := false
 	f := learnrules.Files{
 		Home: home, DataDir: data, KnowledgeDir: filepath.Join(home, ".ao", "knowledge"),
+		MemoryDir: func(string) (string, error) { return mem, nil },
 		Projects: func(context.Context) ([]domain.ProjectRecord, error) {
 			return []domain.ProjectRecord{
 				{ID: "nter", Path: repo, Config: domain.ProjectConfig{LearnFromSessions: learning}},
@@ -269,8 +273,8 @@ func TestFiles_ListsOnlyWhileAProjectLearns(t *testing.T) {
 	var keys []string
 	for _, s := range got {
 		keys = append(keys, s.Key)
-		if s.Kind == domain.LearnRuleSourceKnowledgeIndex != s.Deterministic {
-			t.Errorf("%s: only the knowledge INDEX is split without a model", s.Key)
+		if s.Kind == domain.LearnRuleSourceKnowledgeIndex != s.Deterministic || s.Kind == domain.LearnRuleSourceMemory != s.Memory {
+			t.Errorf("%s: only the knowledge INDEX and memory files are split without a model", s.Key)
 		}
 	}
 	want := []string{
@@ -280,9 +284,24 @@ func TestFiles_ListsOnlyWhileAProjectLearns(t *testing.T) {
 		"project:nter:claude_md:" + filepath.Join(repo, "CLAUDE.md"),
 		"project:nter:skill:" + filepath.Join(repo, ".claude", "skills", "deploy", "SKILL.md"),
 		"project:nter:knowledge_index:~/.ao/knowledge/nter/INDEX.md",
+		"project:nter:memory:~/.claude/projects/-repo/memory/feedback_qa.md",
 		"project:nter:ao_prompt:AO worker prompt (nter)",
 	}
 	if strings.Join(keys, "\n") != strings.Join(want, "\n") {
 		t.Errorf("keys =\n%s\nwant\n%s", strings.Join(keys, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestPoll_AMemoryFileIsOneRuleWithoutAModel(t *testing.T) {
+	r := newRig(t)
+	r.sources = []learnrules.Source{{Key: "m", Scope: domain.LearnRuleProject, ProjectID: "nter", Kind: domain.LearnRuleSourceMemory, Label: "mem", Memory: true,
+		Text: "---\nname: feedback-qa\ndescription: \"Hand finished work to qa\"\n---\n\n# Handoff\n\nHand finished work to qa.\n\n## Why\n\nThe person asked.\n"}}
+	r.poll()
+	got := r.corpus("nter")
+	if r.runner.calls() != 0 || len(got) != 1 {
+		t.Fatalf("calls %d, rules %+v", r.runner.calls(), got)
+	}
+	if got[0].Heading != "feedback-qa" || got[0].Quote != "Hand finished work to qa" || !strings.Contains(got[0].Text, "The person asked.") {
+		t.Errorf("rule = %+v", got[0])
 	}
 }

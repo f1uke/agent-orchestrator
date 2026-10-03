@@ -49,16 +49,13 @@ func TestIndex_EverySource(t *testing.T) {
 	write(filepath.Join(home, ".claude", "plugins", "cache", "m", "figma", "0.9", "skills", "old", "SKILL.md"), skill("old"))
 	write(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), `{"version":2,"plugins":{"figma@m":[{"installPath":"`+plugin+`"}]}}`)
 	write(filepath.Join(data, "skills", "using-ao", "SKILL.md"), skill("using-ao"))
-	learned := filepath.Join(home, ".ao", "learned")
-	write(filepath.Join(learned, "global", "skills", "g", "SKILL.md"), skill("g"))
-	write(filepath.Join(learned, "projects", "nter", "skills", "p", "SKILL.md"), skill("p"))
 	write(filepath.Join(repo, ".claude", "skills", "team", "SKILL.md"), skill("team"))
 
 	var got []string
-	for _, s := range Index(Dirs{Home: home, DataDir: data, Learned: learned, Repos: map[string]string{"nter": repo}}) {
+	for _, s := range Index(Dirs{Home: home, DataDir: data, Repos: map[string]string{"nter": repo}}) {
 		got = append(got, string(s.Source)+":"+s.Scope+":"+s.Name)
 	}
-	want := "user:global:broken user:global:release plugin:global:figma-use ao:global:using-ao learned:global:g learned:project:nter:p repo:project:nter:team"
+	want := "user:global:broken user:global:release plugin:global:figma-use ao:global:using-ao repo:project:nter:team"
 	if strings.Join(got, " ") != want {
 		t.Errorf("index =\n%s\nwant\n%s", strings.Join(got, " "), want)
 	}

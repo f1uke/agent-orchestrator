@@ -46,7 +46,7 @@ type ForbiddenHit struct {
 
 // Forbidden reports every forbidden pattern of the protected rules that apply
 // to projectID (global ones and the project's own) that matches text. It is the
-// deterministic gate a learned skill must pass: no model judgment can talk a
+// deterministic gate every proposed change must pass: no model judgment can talk a
 // match away.
 func Forbidden(text string, projectID domain.ProjectID, protected []domain.LearnProtectedRule) []ForbiddenHit {
 	var hits []ForbiddenHit

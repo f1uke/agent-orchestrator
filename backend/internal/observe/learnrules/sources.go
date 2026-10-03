@@ -28,6 +28,9 @@ type Files struct {
 	KnowledgeDir string
 	// Projects lists the registered projects.
 	Projects func(ctx context.Context) ([]domain.ProjectRecord, error)
+	// MemoryDir maps a repo path to its Claude Code memory directory
+	// (claudecode.MemoryDir in production). Nil leaves memory out.
+	MemoryDir func(repoPath string) (string, error)
 	// Prompts returns AO's assembled standing prompt per session kind
 	// ("orchestrator", "worker") for a project. Nil leaves them out.
 	Prompts func(ctx context.Context, projectID domain.ProjectID) (map[string]string, error)
@@ -78,6 +81,7 @@ func (f Files) List(ctx context.Context) ([]Source, error) {
 			}
 		}
 		add(domain.LearnRuleProject, id, domain.LearnRuleSourceKnowledgeIndex, filepath.Join(f.KnowledgeDir, p.ID, "INDEX.md"), true)
+		out = append(out, f.memory(p)...)
 		if f.Prompts == nil {
 			continue
 		}
@@ -131,4 +135,36 @@ func (f Files) label(path string) string {
 
 func key(scope domain.LearnRuleScope, project domain.ProjectID, kind domain.LearnRuleSourceKind, label string) string {
 	return string(scope) + ":" + string(project) + ":" + string(kind) + ":" + label
+}
+
+// memory lists the Claude Code memory files of a project's repo, one source
+// each (MEMORY.md is only the index of them, so it is left out).
+func (f Files) memory(p domain.ProjectRecord) []Source {
+	if f.MemoryDir == nil || p.Path == "" {
+		return nil
+	}
+	dir, err := f.MemoryDir(p.Path)
+	if err != nil {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	id := domain.ProjectID(p.ID)
+	var out []Source
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".md") || name == "MEMORY.md" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || len(b) == 0 || len(b) > maxSourceBytes {
+			continue
+		}
+		label := f.label(filepath.Join(dir, name))
+		out = append(out, Source{Key: key(domain.LearnRuleProject, id, domain.LearnRuleSourceMemory, label), Scope: domain.LearnRuleProject,
+			ProjectID: id, Kind: domain.LearnRuleSourceMemory, Label: label, Text: string(b), Memory: true})
+	}
+	return out
 }
