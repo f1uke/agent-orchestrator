@@ -210,6 +210,10 @@ func TestUpdateMemory_OnlyThisProjectsMemoryAndKeepsItsName(t *testing.T) {
 	if ok.Drop != "" || !strings.Contains(ok.Proposal.Diff, "+Hand finished work to qa right away") || ok.Proposal.BaseSHA256 == "" {
 		t.Fatalf("update = %+v", ok)
 	}
+	bare := upd(file, "---\nname: feedback-qa\ndescription: MR rule: hand work to qa\nmetadata:\n  type: feedback\n---\n\nHand finished work to qa within the day.\n")
+	if bare.Drop != "" || !strings.Contains(bare.Proposal.NewContent, `description: "MR rule: hand work to qa"`) {
+		t.Errorf("a bare description with a colon is quoted, not refused: %q\n%s", bare.Drop, bare.Proposal.NewContent)
+	}
 	if c := upd(file, "---\nname: renamed\n---\n\nx\n"); !strings.Contains(c.Drop, "name must stay") {
 		t.Errorf("drop = %q", c.Drop)
 	}

@@ -403,7 +403,7 @@ func (env Env) updateMemory(c *Candidate, p Proposed) string {
 	if err != nil || !ok {
 		return "the memory file cannot be read"
 	}
-	content := noEmDash(strings.TrimSpace(p.Content)) + "\n"
+	content := quoteDescription(noEmDash(strings.TrimSpace(p.Content)) + "\n")
 	before, _, berr := skills.Parse(old)
 	after, body, aerr := skills.Parse(content)
 	switch {
@@ -423,6 +423,27 @@ func (env Env) updateMemory(c *Candidate, p Proposed) string {
 		return "it changes nothing"
 	}
 	return env.contentGates(c)
+}
+
+// quoteDescription quotes a frontmatter description written bare: a model
+// copying a memory file writes "description: a: b", which is not YAML, and the
+// lesson is not worth losing over punctuation.
+func quoteDescription(content string) string {
+	if _, _, err := skills.Parse(content); err == nil {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, l := range lines {
+		if i > 0 && strings.TrimSpace(l) == "---" {
+			break
+		}
+		v, ok := strings.CutPrefix(l, "description:")
+		v = strings.TrimSpace(v)
+		if ok && v != "" && !strings.HasPrefix(v, `"`) && !strings.HasPrefix(v, "'") {
+			lines[i] = "description: " + strconv.Quote(v)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // pendingContent is the new content of the open proposal on target, or
