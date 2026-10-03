@@ -1033,7 +1033,7 @@ func TestScreen_ReadsThroughTheAXReaderAndFallsBack(t *testing.T) {
 
 	runner := simbridge.Snapshot{Frontmost: simbridge.Frontmost{BundleID: "from.the.runner"}}
 	answer := true
-	screen.SetAXReader(func(_ context.Context, udid string) (simbridge.Snapshot, bool) {
+	screen.SetAXReader(func(_ context.Context, udid string, _ *simbridge.Point) (simbridge.Snapshot, bool) {
 		if udid != "U" {
 			t.Errorf("read %q, want U", udid)
 		}
@@ -1062,4 +1062,35 @@ func TestScreen_ReadsThroughTheAXReaderAndFallsBack(t *testing.T) {
 	if bridge.closeCount() != 1 {
 		t.Fatalf("bridge closed %d times, want 1", bridge.closeCount())
 	}
+}
+
+// LiveAX is the recorder's read in front of a touch: the runner or nothing,
+// never the bridge, and the point it asks about reaches the reader.
+func TestScreen_LiveAXNeverFallsBackToTheBridge(t *testing.T) {
+	bridge := &closableDriver{}
+	screen := simstream.NewScreenForTest(bridge, nil, nil)
+	ctx := context.Background()
+
+	if _, ok := screen.LiveAX(ctx, "U", nil); ok {
+		t.Fatal("LiveAX answered with no reader wired; want false")
+	}
+
+	var asked *simbridge.Point
+	answer := true
+	screen.SetAXReader(func(_ context.Context, _ string, at *simbridge.Point) (simbridge.Snapshot, bool) {
+		asked = at
+		return simbridge.Snapshot{Frontmost: simbridge.Frontmost{BundleID: "from.the.runner"}}, answer
+	})
+	snap, ok := screen.LiveAX(ctx, "U", &simbridge.Point{X: 0.25, Y: 0.75})
+	if !ok || snap.Frontmost.BundleID != "from.the.runner" {
+		t.Fatalf("LiveAX = %+v, %v; want the runner's read", snap, ok)
+	}
+	if asked == nil || asked.X != 0.25 || asked.Y != 0.75 {
+		t.Fatalf("reader asked about %+v, want (0.25, 0.75)", asked)
+	}
+	answer = false
+	if _, ok := screen.LiveAX(ctx, "U", nil); ok {
+		t.Fatal("LiveAX answered when the runner could not; want false, not a bridge read")
+	}
+	screen.Shutdown()
 }

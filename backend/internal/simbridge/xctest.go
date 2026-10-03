@@ -47,6 +47,19 @@ type XCTestHierarchy struct {
 	// HitTest is present when the read was asked to hit-test (see
 	// XCTestNode.Covered).
 	HitTest *XCTestHitTest `json:"hitTest,omitempty"`
+	// At is present when the read was asked what a touch at one point
+	// reaches (see XCTestNode.Reached).
+	At *XCTestAt `json:"at,omitempty"`
+}
+
+// XCTestAt is the answer to "what does a touch here reach": the point in
+// device points, whether an element was found (it carries Reached), and why
+// not when it was not.
+type XCTestAt struct {
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	Found bool    `json:"found"`
+	Error string  `json:"error,omitempty"`
 }
 
 // XCTestHitTest summarizes a read's hit-test: how many elements were asked
@@ -104,7 +117,9 @@ type XCTestNode struct {
 	Focused     bool   `json:"focused,omitempty"`
 	// Covered is set when the read hit-tested and a touch at this element's
 	// centre lands on something drawn over it.
-	Covered  *XCTestCover `json:"covered,omitempty"`
+	Covered *XCTestCover `json:"covered,omitempty"`
+	// Reached marks the element a touch at the read's At point lands on.
+	Reached  bool         `json:"reached,omitempty"`
 	Children []XCTestNode `json:"children,omitempty"`
 }
 
@@ -156,6 +171,12 @@ func SnapshotFromXCTest(h XCTestHierarchy) Snapshot {
 	}
 	snap.OnlyStatusBar = onlyStatusBar(snap.Elements, snap.Screen)
 	snap.Keyboard = keyboardOf(snap.Elements)
+	if h.At != nil {
+		snap.Reached = &Reached{Path: c.reached, Error: h.At.Error}
+		if c.reached == "" && snap.Reached.Error == "" {
+			snap.Reached.Error = "the runner marked no element"
+		}
+	}
 	return snap
 }
 
@@ -163,6 +184,10 @@ type xctestConverter struct {
 	screen Size
 	seen   map[string]bool
 	count  int
+	// reached is the path of the element the runner marked Reached - or,
+	// when it marked one this tree does not report, of the nearest reported
+	// element holding it.
+	reached string
 }
 
 // children converts a sibling list into *into. A dropped element's children
@@ -176,6 +201,9 @@ func (c *xctestConverter) children(nodes []XCTestNode, prefix string, into *[]El
 		zero := node.Frame.Width <= 0 || node.Frame.Height <= 0
 		if zero || c.seen[key] || isLayoutContainer(node) {
 			// Not reported itself, but whatever it holds is still on screen.
+			if node.Reached {
+				c.reached = prefix
+			}
 			c.children(node.Children, prefix, into)
 			continue
 		}
@@ -186,6 +214,9 @@ func (c *xctestConverter) children(nodes []XCTestNode, prefix string, into *[]El
 
 func (c *xctestConverter) element(node XCTestNode, path string) Element {
 	c.count++
+	if node.Reached {
+		c.reached = path
+	}
 	value := node.Value
 	if value == node.Label {
 		// XCTest reports a web page's text as both; the addon never did.

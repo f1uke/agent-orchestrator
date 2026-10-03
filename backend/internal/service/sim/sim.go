@@ -203,6 +203,9 @@ type Service struct {
 	// gestures counts holds taken per device, so a scheduled refresh can tell
 	// that the human has moved on and step aside.
 	gestures map[string]uint64
+	// typing is the field a run of typing on a device is going into, so the
+	// keystrokes after the first need not read the screen again.
+	typing map[string]typingRun
 }
 
 // Option customizes a Service.
@@ -316,6 +319,7 @@ func New(store Store, opts ...Option) *Service {
 		sleep:        time.Sleep,
 		refreshDelay: DefaultScreenRefreshDelay,
 		gestures:     make(map[string]uint64),
+		typing:       make(map[string]typingRun),
 	}
 	for _, opt := range opts {
 		opt(s)

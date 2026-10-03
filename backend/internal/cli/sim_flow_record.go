@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simflow"
 )
 
 // `ao sim flow record` turns what a session drives on a device - through
@@ -321,10 +323,11 @@ type simFlowRecordStopResult struct {
 
 func newSimFlowRecordStopCommand(ctx *commandContext) *cobra.Command {
 	var opts struct {
-		udid  string
-		out   string
-		entry string
-		json  bool
+		udid   string
+		out    string
+		entry  string
+		params []string
+		json   bool
 	}
 	cmd := &cobra.Command{
 		Use:   "stop",
@@ -336,13 +339,18 @@ func newSimFlowRecordStopCommand(ctx *commandContext) *cobra.Command {
 			"prepended as `runFlow`. Nothing here ever fabricates `launchApp`.\n\n" +
 			"The flow lands under this session's own artifact directory " +
 			"(<AO data dir>/sim/<session id>/), outside any repository, so it can never be " +
-			"committed by accident. Use --out to write somewhere else.",
+			"committed by accident. Use --out to write somewhere else.\n\n" +
+			"A script carries no data: --param NAME=VALUE writes every typed text and selector " +
+			"equal to VALUE as ${MAESTRO_NAME}, the variable bin/flow sets from its own --param " +
+			"(and from --account: ACCOUNT_EMAIL). What was typed into a secure field is never " +
+			"recorded at all - the flow pastes the account password instead.",
 		Example: `  ao sim flow record stop
-  ao sim flow record stop --entry ../flows/sign-in.yaml
+  ao sim flow record stop --entry ../start/fresh_logged_out.yaml --out reach/port.yaml
+  ao sim flow record stop --param FUND_QUERY=K-USA --param 'FUND_CODE=K-USA-A\(D\)'
   ao sim flow record stop --out /tmp/flow.yaml --json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result, err := ctx.stopSimRecording(cmd.Context(), opts.udid, opts.out, opts.entry)
+			result, err := ctx.stopSimRecording(cmd.Context(), opts.udid, opts.out, opts.entry, opts.params)
 			if err != nil {
 				return err
 			}
@@ -357,11 +365,20 @@ func newSimFlowRecordStopCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.out, "out", "", "Write the flow here instead of the session artifact directory")
 	f.StringVar(&opts.entry, "entry", "",
 		"Path to a shared entry-point flow, emitted as `runFlow` before the recorded steps")
+	f.StringArrayVar(&opts.params, "param", nil,
+		"NAME=VALUE: write typed text and selectors equal to VALUE as ${MAESTRO_NAME} (repeatable)")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
 	return cmd
 }
 
-func (c *commandContext) stopSimRecording(ctx context.Context, udid, out, entry string) (simFlowRecordStopResult, error) {
+func (c *commandContext) stopSimRecording(ctx context.Context, udid, out, entry string, params []string) (simFlowRecordStopResult, error) {
+	// Checked before anything is stopped: a bad param found after the stop
+	// would leave a closed recording and no flow.
+	for _, p := range params {
+		if _, err := simflow.ParseParam(p); err != nil {
+			return simFlowRecordStopResult{}, err
+		}
+	}
 	sessionID, err := simSessionID("`ao sim flow record stop`")
 	if err != nil {
 		return simFlowRecordStopResult{}, err
@@ -389,6 +406,9 @@ func (c *commandContext) stopSimRecording(ctx context.Context, udid, out, entry 
 	}
 	if trimmed := strings.TrimSpace(entry); trimmed != "" {
 		query.Set("entry", trimmed)
+	}
+	for _, p := range params {
+		query.Add("param", p)
 	}
 
 	var res simRecordingWithStepsResponse

@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
@@ -41,6 +42,36 @@ type GestureIntent struct {
 // exist.
 type ScreenReader interface {
 	AX(ctx context.Context, udid string) (simbridge.Snapshot, error)
+}
+
+// LiveScreenReader is a ScreenReader that can also read the screen at the
+// moment of a gesture - and say which element a touch at a point reaches.
+//
+// It exists because the screen a gesture is described from has to be the
+// screen the finger lands on. The maintained screen (seenScreen) is read in
+// the background after the previous gesture, and with the XCTest reader that
+// is regularly the wrong screen: a web sign-in sheet takes seconds to load,
+// and a step described from the half-loaded one was recorded as the app's
+// root ("Finnomena") - every tap of a recorded sign-in, measured. The XCTest
+// runner answers in ~100 ms and does not queue behind the bridge's touches, so
+// it can afford to sit in front of a discrete gesture; the bridge cannot, and
+// a reader that only has the bridge answers false.
+type LiveScreenReader interface {
+	LiveAX(ctx context.Context, udid string, at *simbridge.Point) (simbridge.Snapshot, bool)
+}
+
+// liveReadTimeout bounds the read in front of a gesture. A runner answers in
+// 80-200 ms; this is for one that has wedged, after which the gesture is
+// described from the maintained screen as before.
+const liveReadTimeout = 2 * time.Second
+
+// typingRun is the field a run of typing is going into: decided once, at its
+// first keystroke, from a screen read then, and kept for the rest of the run.
+// The Device tab sends one request per character and must answer in
+// milliseconds, so the keystrokes after the first never read.
+type typingRun struct {
+	choice simflow.Choice
+	secure bool
 }
 
 // pending is a step that has been resolved but not yet earned. It lives in
@@ -180,6 +211,7 @@ func (s *Service) StartRecording(ctx context.Context, sessionID domain.SessionID
 	s.recMu.Lock()
 	delete(s.screens, key)
 	delete(s.seen, key)
+	delete(s.typing, key)
 	s.recMu.Unlock()
 	s.primeScreen(ctx, key)
 	return outcome.Recording, nil
@@ -201,6 +233,7 @@ func (s *Service) StopRecording(ctx context.Context, sessionID domain.SessionID,
 	}
 	s.recMu.Lock()
 	delete(s.screens, key)
+	delete(s.typing, key)
 	s.recMu.Unlock()
 
 	rec, ok, err := s.store.GetSimRecording(ctx, key)
@@ -267,7 +300,7 @@ func coalesceTypeRuns(steps []domain.SimRecordingStep) []domain.SimRecordingStep
 	out := make([]domain.SimRecordingStep, 0, len(steps))
 	for _, step := range steps {
 		last := len(out) - 1
-		if step.Kind == "type" && last >= 0 && out[last].Kind == "type" {
+		if step.Kind == "type" && last >= 0 && out[last].Kind == "type" && out[last].Secure == step.Secure {
 			out[last].Text += step.Text
 			continue
 		}
@@ -321,6 +354,189 @@ func worthDescribingFrom(snap simbridge.Snapshot) bool {
 // function exists to avoid.
 func stableEnough(snap simbridge.Snapshot, resolved bool) bool {
 	return resolved && !snap.OnlyStatusBar
+}
+
+// described is what the recorder made of one gesture.
+//
+// intent can differ from the gesture that arrived: a tap that landed on a key
+// of the software keyboard is typing, and is recorded as the character (or
+// the key) it typed rather than as a tap on a "q" the flow would look for.
+type described struct {
+	snap   simbridge.Snapshot
+	choice simflow.Choice
+	el     simbridge.Element
+	found  bool
+	intent GestureIntent
+	// secure: a type step going into a secure field; choice is that field.
+	secure bool
+}
+
+// describe resolves a gesture into what a step records.
+//
+// A discrete gesture - a tap, a one-shot swipe or drag, the first keystroke
+// of a run of typing - is described from a read taken NOW when a
+// LiveScreenReader can give one: the screen it acts on, and, for a point,
+// which element the touch reaches. Everything else, and every gesture when no
+// fast read is to be had, is described from the maintained screen exactly as
+// before (resolveScreen) - a drag streamed from the Device tab included,
+// because a read in front of its first segment is what used to break drags.
+func (s *Service) describe(ctx context.Context, udid string, intent GestureIntent) described {
+	s.recMu.Lock()
+	run, typing := s.typing[udid]
+	if intent.Kind != "type" {
+		// Anything but typing ends a run: the next keystroke may be in
+		// another field.
+		delete(s.typing, udid)
+	}
+	s.recMu.Unlock()
+
+	if intent.Kind == "type" && typing {
+		snap, _ := s.rememberedScreen(udid)
+		return described{snap: snap, intent: intent, choice: run.choice, secure: run.secure}
+	}
+	if live, ok := s.recorder.(LiveScreenReader); ok && readsLive(intent) {
+		var at *simbridge.Point
+		if targetsAnElement(intent.Kind) && intent.Label == "" && intent.ID == "" {
+			at = &simbridge.Point{X: intent.X, Y: intent.Y}
+		}
+		readCtx, cancel := context.WithTimeout(ctx, liveReadTimeout)
+		snap, ok := live.LiveAX(readCtx, udid, at)
+		cancel()
+		if ok {
+			s.rememberScreen(udid, snap)
+			return s.describeFrom(udid, snap, intent)
+		}
+	}
+	if intent.Kind == "type" {
+		snap, _ := s.rememberedScreen(udid)
+		return s.describeFrom(udid, snap, intent)
+	}
+	snap, choice, el, found := s.resolveScreen(udid, intent)
+	return described{snap: snap, choice: choice, el: el, found: found, intent: intent}
+}
+
+// readsLive says whether a gesture is worth a read in front of it: it acts at
+// one moment, so the screen of that moment describes it. A drag streamed from
+// the Device tab (drag-begin/-move/-end) is not - its first segment cannot
+// wait - and neither is a key or a button, which act on no element.
+func readsLive(intent GestureIntent) bool {
+	switch intent.Kind {
+	case "tap", "swipe", "drag", "type":
+		return true
+	default:
+		return false
+	}
+}
+
+// describeFrom describes a gesture from a screen in hand.
+func (s *Service) describeFrom(udid string, snap simbridge.Snapshot, intent GestureIntent) described {
+	if intent.Kind == "type" {
+		d := described{snap: snap, intent: intent}
+		if field, ok := focusedField(snap); ok {
+			d.secure = field.Type == "SecureTextField"
+			if d.secure {
+				// Only a secure field needs its name: the flow long-presses
+				// it to paste. Plain typing is written as it always was.
+				d.choice = simflow.For(snap, field)
+				if field.Tap != nil {
+					// Typing has no coordinates of its own; a field that can
+					// only be named by a point is long-pressed at its own.
+					d.intent.X, d.intent.Y = field.Tap.X, field.Tap.Y
+				}
+			}
+		}
+		s.recMu.Lock()
+		s.typing[udid] = typingRun{choice: d.choice, secure: d.secure}
+		s.recMu.Unlock()
+		return d
+	}
+	choice, el, found := elementFor(snap, intent)
+	if found && intent.Kind == "tap" && inKeyboard(snap, el) {
+		if typed, ok := keyTyping(el); ok {
+			return s.describeFrom(udid, snap, typed)
+		}
+		// A key with nothing to type (shift, the globe, dictation) has no
+		// Maestro command and no selector worth writing: it replays as the
+		// coordinate it was, marked for review.
+		return described{snap: snap, choice: undescribed(intent), intent: intent}
+	}
+	if !found {
+		// Nothing but an application's whole screen under the finger: the
+		// step replays as the coordinate it was, marked for review - exactly
+		// what resolveScreen does for a screen it cannot describe.
+		choice = undescribed(intent)
+	}
+	return described{snap: snap, choice: choice, el: el, found: found, intent: intent}
+}
+
+// keyTyping is what a tap on a software keyboard key typed. A key is part of
+// the keyboard, not the app: Maestro types characters with inputText and
+// presses keys with pressKey, and a flow that looked for a button labelled
+// "q" would be asserting the keyboard's layout rather than doing what the
+// person did.
+//
+// The special keys are known by their id, never their label: the label is in
+// the keyboard's language (the Thai layout's delete key reads "ลบ", its space
+// bar shows a suggestion) while the id is the same on every layout - and the
+// return key is a Button named for the field's action ("Go", "Search").
+func keyTyping(key simbridge.Element) (GestureIntent, bool) {
+	switch strings.ToLower(strings.TrimSpace(key.ID)) {
+	case "delete":
+		return GestureIntent{Kind: "key", Name: "backspace"}, true
+	case "space":
+		return GestureIntent{Kind: "type", Text: " "}, true
+	case "return", "go", "search", "next", "done", "send", "join", "route", "continue":
+		return GestureIntent{Kind: "key", Name: "enter"}, true
+	case "":
+	default:
+		// shift, more, emoji, dictation: nothing Maestro can press.
+		return GestureIntent{}, false
+	}
+	if label := strings.TrimSpace(key.Label); key.Type == "Key" && utf8.RuneCountInString(label) == 1 {
+		return GestureIntent{Kind: "type", Text: label}, true
+	}
+	return GestureIntent{}, false
+}
+
+// inKeyboard says el is part of the software keyboard: it is a Key, or it
+// lies inside the Keyboard element (the return and shift keys are Buttons).
+func inKeyboard(snap simbridge.Snapshot, el simbridge.Element) bool {
+	if el.Type == "Key" {
+		return true
+	}
+	var walk func(els []simbridge.Element) bool
+	walk = func(els []simbridge.Element) bool {
+		for _, candidate := range els {
+			if !strings.HasPrefix(el.Path, candidate.Path+".") {
+				continue
+			}
+			if candidate.Type == "Keyboard" {
+				return true
+			}
+			return walk(candidate.Children)
+		}
+		return false
+	}
+	return walk(snap.Elements)
+}
+
+// focusedField is the element with keyboard focus - the field typing goes
+// into. The deepest one wins: inside a web view a field's wrapper can report
+// focus along with the field.
+func focusedField(snap simbridge.Snapshot) (simbridge.Element, bool) {
+	var found simbridge.Element
+	depth := -1
+	var walk func(els []simbridge.Element, d int)
+	walk = func(els []simbridge.Element, d int) {
+		for _, el := range els {
+			if el.Focused && d > depth {
+				found, depth = el, d
+			}
+			walk(el.Children, d+1)
+		}
+	}
+	walk(snap.Elements, 0)
+	return found, depth >= 0
 }
 
 // resolveScreen produces the screen a step is described from, and whatever the
@@ -609,11 +825,13 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 		return
 	}
 
-	// ⚠ There is no failure path here any more, and that is the point: the
-	// recorder no longer performs I/O to describe a gesture, so there is
-	// nothing left that can fail. It describes the step from the screen it
-	// already had, or says it could not.
-	snap, choice, el, found := s.resolveScreen(udid, intent)
+	// ⚠ There is no failure path here, and that is the point: a gesture is
+	// described from a read taken now when a fast one is to be had (see
+	// LiveScreenReader), from the screen the recorder already had when not,
+	// or it says it could not - never by failing the gesture.
+	d := s.describe(ctx, udid, intent)
+	snap, choice, el, found := d.snap, d.choice, d.el, d.found
+	intent = d.intent
 	s.recMu.Lock()
 	prev, hasPrev := s.screens[udid]
 	s.recMu.Unlock()
@@ -650,6 +868,12 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 		DurationMS:    int64(intent.DurationMS),
 		Text:          intent.Text,
 		Detail:        intent.Name,
+		Secure:        d.secure,
+	}
+	if d.secure {
+		// What went into a secure field is never kept - not here, not in the
+		// database, not in the flow. The flow pastes it instead.
+		step.Text = ""
 	}
 	switch choice.Rung {
 	case simflow.RungText, simflow.RungTextIndex:
@@ -660,6 +884,8 @@ func (s *Service) recordIntent(ctx context.Context, udid, token string, intent G
 		step.SelectorAnchorRel = string(choice.Relation)
 	case simflow.RungID:
 		step.Selector = choice.ID
+		step.SelectorAnchor = choice.Anchor
+		step.SelectorAnchorRel = string(choice.Relation)
 	}
 
 	s.recMu.Lock()
@@ -753,11 +979,6 @@ func recordingRefusedReason(outcome domain.SimRecordingOutcome, caller domain.Se
 	}
 }
 
-// hitTest finds the element at a normalized 0..1 point, preferring the
-// deepest (most specific) match: a label sitting on a whole row and on the
-// text inside it are the same real control, and the child is what a tap
-// actually lands on. Later siblings are tried first because on a real screen
-// later usually means drawn on top.
 // elementFor resolves what a step targeted into the Choice it should be
 // recorded as, plus a representative element for screen-change fingerprinting
 // (fingerprintKeyFor, below) when there is one. Both answers come from the
@@ -775,12 +996,38 @@ func elementFor(snap simbridge.Snapshot, intent GestureIntent) (simflow.Choice, 
 	case intent.ID != "":
 		return selectorChoice(snap, simbridge.Selector{Kind: simbridge.SelectByID, Text: intent.ID})
 	default:
-		el, found := hitTest(snap.Elements, intent.X, intent.Y)
+		el, found := reachedElement(snap)
+		if !found {
+			el, found = hitTest(snap, intent.X, intent.Y)
+		}
 		if !found {
 			return simflow.Choice{Rung: simflow.RungNone}, simbridge.Element{}, false
 		}
 		return simflow.For(snap, el), el, true
 	}
+}
+
+// reachedElement is the element the reader said a touch at the gesture's
+// point reaches (Snapshot.Reached) - the one answer that knows what is drawn
+// on top of what. An application's root is not an answer: it is the whole
+// screen of an app, never the thing a finger meant.
+func reachedElement(snap simbridge.Snapshot) (simbridge.Element, bool) {
+	if snap.Reached == nil || snap.Reached.Path == "" || !strings.Contains(snap.Reached.Path, ".") {
+		return simbridge.Element{}, false
+	}
+	return elementAtPath(snap.Elements, snap.Reached.Path)
+}
+
+func elementAtPath(elements []simbridge.Element, path string) (simbridge.Element, bool) {
+	for _, el := range elements {
+		if el.Path == path {
+			return el, true
+		}
+		if strings.HasPrefix(path, el.Path+".") {
+			return elementAtPath(el.Children, path)
+		}
+	}
+	return simbridge.Element{}, false
 }
 
 // selectorChoice resolves a by-name selector against snap.
@@ -825,13 +1072,41 @@ func selectorChoice(snap simbridge.Snapshot, selector simbridge.Selector) (simfl
 	return simflow.Choice{Rung: simflow.RungNone}, simbridge.Element{}, false
 }
 
-func hitTest(elements []simbridge.Element, x, y float64) (simbridge.Element, bool) {
+// hitTest finds the element at a normalized 0..1 point from geometry alone -
+// the fallback for a screen read without Snapshot.Reached. It prefers the
+// deepest (most specific) match: a label sitting on a whole row and on the
+// text inside it are the same real control, and the child is what a tap
+// actually lands on. Later siblings are tried first because later usually
+// means drawn on top - usually: measured on nter, a chart and a background
+// image listed after the controls they do not cover won 38 of 433 points,
+// which is why a reader that can say what is on top is asked first.
+func hitTest(snap simbridge.Snapshot, x, y float64) (simbridge.Element, bool) {
+	if snap.Reader != nil && snap.Reader.Source == simbridge.SourceXCTest {
+		// One root per application on screen, FRONTMOST FIRST: a web sign-in
+		// sheet's host, then the app under it. Walked last-first, the app's
+		// root - the whole screen, and empty while the sheet is up - won
+		// every point, and every tap on the sheet was recorded as the app's
+		// name. A root itself is never the answer either.
+		for _, root := range snap.Elements {
+			if el, ok := deepestAt(root.Children, x, y); ok {
+				return el, true
+			}
+		}
+		return simbridge.Element{}, false
+	}
+	return deepestAt(snap.Elements, x, y)
+}
+
+// deepestAt is the deepest element holding the point, later siblings first.
+// A scroll indicator is skipped: it lies along a scroll view's edge, and a
+// finger there reaches the content.
+func deepestAt(elements []simbridge.Element, x, y float64) (simbridge.Element, bool) {
 	for i := len(elements) - 1; i >= 0; i-- {
 		el := elements[i]
-		if child, ok := hitTest(el.Children, x, y); ok {
+		if child, ok := deepestAt(el.Children, x, y); ok {
 			return child, true
 		}
-		if boxContains(el.Box, x, y) {
+		if boxContains(el.Box, x, y) && !simflow.IsScrollIndicator(el) {
 			return el, true
 		}
 	}

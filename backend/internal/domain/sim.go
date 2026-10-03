@@ -201,8 +201,13 @@ type SimRecordingStep struct {
 	ToX        float64 `json:"toX"`
 	ToY        float64 `json:"toY"`
 	DurationMS int64   `json:"durationMs,omitempty"`
-	// Text is what was typed, for kind "type".
+	// Text is what was typed, for kind "type" - except into a secure field,
+	// whose text is never kept (Secure).
 	Text string `json:"text,omitempty"`
+	// Secure: a "type" step that went into a secure field. Its Text is empty
+	// on purpose and its Selector names the field, which the flow
+	// long-presses to paste instead of typing.
+	Secure bool `json:"secure,omitempty"`
 	// Detail is free-form context for steps a selector cannot describe.
 	Detail string `json:"detail,omitempty"`
 }

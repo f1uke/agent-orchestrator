@@ -417,6 +417,17 @@ func (c *SimController) stopRecording(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	udid := chi.URLParam(r, "udid")
+	// Read before the stop, so a bad one refuses with the recording still
+	// open rather than closing it and then failing to write its flow.
+	var params []simflow.Param
+	for _, text := range r.URL.Query()["param"] {
+		p, err := simflow.ParseParam(text)
+		if err != nil {
+			envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "SIM_INVALID", err.Error(), nil)
+			return
+		}
+		params = append(params, p)
+	}
 	recording, steps, err := rec.StopRecording(r.Context(), sessionID(r), udid)
 	if err != nil {
 		writeSimRecordingError(w, r, err)
@@ -427,7 +438,7 @@ func (c *SimController) stopRecording(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body := SimRecordingWithStepsResponse{Recording: recording, StepCount: len(steps), Steps: steps}
-	flow, err := c.writeFlow(r, recording, steps)
+	flow, err := c.writeFlow(r, recording, steps, params)
 	if err != nil {
 		// The recording has already stopped on the daemon side. That side
 		// effect happened and cannot be undone here, so the failure has to say
@@ -448,7 +459,7 @@ func (c *SimController) stopRecording(w http.ResponseWriter, r *http.Request) {
 // A nil flow with a nil error is the honest answer for a daemon with no data
 // directory: the steps are in the response, and nothing pretends a file was
 // written.
-func (c *SimController) writeFlow(r *http.Request, recording domain.SimRecording, steps []domain.SimRecordingStep) (*SimFlowView, error) {
+func (c *SimController) writeFlow(r *http.Request, recording domain.SimRecording, steps []domain.SimRecordingStep, params []simflow.Param) (*SimFlowView, error) {
 	if c.DataDir == "" {
 		return nil, nil
 	}
@@ -462,6 +473,8 @@ func (c *SimController) writeFlow(r *http.Request, recording domain.SimRecording
 		Runtime:    runtime,
 		RecordedAt: recordedAt.UTC().Format(time.RFC3339),
 		Entry:      strings.TrimSpace(r.URL.Query().Get("entry")),
+		Name:       recording.Name,
+		Params:     params,
 	})
 	if err != nil {
 		return nil, err
