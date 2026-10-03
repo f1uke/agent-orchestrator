@@ -54,6 +54,40 @@ let registration: monaco.IDisposable | null = null;
 /** Next-edit models only: what the person changed, and the rewrites already asked for. */
 const history = new EditHistory();
 const rewrites = new Map<string, string>();
+/**
+ * Buffers a next-edit suggestion is on screen for, as Monaco was handed it.
+ *
+ * 🗝 Monaco keeps an inline edit through the person's later typing for as long
+ * as the typing does not touch the edit's own range (up to 20 versions) - right
+ * for an edit that stands alone, wrong for this model's, which is a rewrite of
+ * the window AS IT WAS. Typing "forced" over "force" asks the model once per
+ * letter, and the answer to "f" is "rename force to f" on the line below. When
+ * the answer to "forced" is still on its way, that one is the edit Tab takes:
+ * measured, the buffer ended "guard f || ..." (5/5 with a 600 ms model; CI's
+ * `editor-next-edit.spec.ts` once). So the first change to a buffer after a
+ * suggestion was shown takes it down, and the request the change itself starts
+ * brings the next one.
+ */
+const offered = new Set<string>();
+
+/** The slice of Monaco's inline-suggest controller this file uses. */
+type InlineSuggestController = { model: { get(): { stop(): void } | undefined } };
+
+/** Take the next-edit suggestion off every editor showing this buffer. */
+function withdrawOffer(model: monaco.editor.ITextModel): void {
+	if (!offered.delete(model.uri.toString())) return;
+	for (const editor of monaco.editor.getEditors()) {
+		if (editor.getModel() !== model) continue;
+		// Synchronously, inside the content event: the keystroke's own trigger
+		// (Monaco's onDidType) runs after it and must find the stale one gone.
+		editor
+			.getContribution<monaco.editor.IEditorContribution & InlineSuggestController>(
+				"editor.contrib.inlineCompletionsController",
+			)
+			?.model.get()
+			?.stop();
+	}
+}
 const MAX_REWRITES = 64;
 let following: monaco.IDisposable[] = [];
 
@@ -164,8 +198,12 @@ function follow(model: monaco.editor.ITextModel): void {
 			// edit anyone made here, and no coordinates survive it.
 			if (event.isFlush) history.track(key, fileLabel(model.uri), model.getValue());
 			else history.apply(key, event.changes.map(lineChange));
+			withdrawOffer(model);
 		}),
-		model.onWillDispose(() => history.untrack(key)),
+		model.onWillDispose(() => {
+			history.untrack(key);
+			offered.delete(key);
+		}),
 	);
 }
 
@@ -184,6 +222,7 @@ function syncFollowing(): void {
 		following = [];
 		history.clear();
 		rewrites.clear();
+		offered.clear();
 	}
 }
 
@@ -248,6 +287,7 @@ async function provideNextEdit(
 		suggestion.endLineNumber,
 		suggestion.endColumn,
 	);
+	offered.add(key);
 	return { items: [{ insertText: suggestion.text, range, isInlineEdit: true }] };
 }
 
@@ -430,6 +470,7 @@ export function resetInlineCompletionProviderForTests(): void {
 	following = [];
 	history.clear();
 	rewrites.clear();
+	offered.clear();
 }
 
 export const inlineCompletionInternals = { cache, ring, provider, history, rewrites };

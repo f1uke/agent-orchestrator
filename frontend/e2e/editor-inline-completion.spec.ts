@@ -34,6 +34,16 @@ async function caretOnNewLineAfter(page: Page, needle: string): Promise<void> {
 	await line.click();
 	// Monaco takes focus asynchronously; keystrokes before the handover vanish.
 	await expect(page.locator(".monaco-editor.focused").first()).toBeVisible();
+	// Monaco's word-based quick suggestions open 10 ms after a keystroke. The
+	// stub's ghost text usually lands first, but on a loaded machine the list
+	// wins (1 in ~80 runs: "promotion" selected), and with a row selected the
+	// model only continues that row - the behaviour the suggest-widget spec
+	// below measures, opening its list with a trigger character, which this
+	// leaves on. Everything else here measures the ghost text alone.
+	await page.evaluate(() => {
+		const m = (globalThis as unknown as { __monaco: typeof import("monaco-editor") }).__monaco;
+		for (const editor of m.editor.getEditors()) editor.updateOptions({ quickSuggestions: false });
+	});
 	await page.keyboard.press("End");
 	await page.keyboard.press("Enter");
 }
