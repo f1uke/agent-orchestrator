@@ -488,6 +488,7 @@ func operations() []operation {
 	ops = append(ops, activityOperations()...)
 	ops = append(ops, importOperations()...)
 	ops = append(ops, daemonOperations()...)
+	ops = append(ops, learningOperations()...)
 	return ops
 }
 
@@ -500,6 +501,59 @@ func daemonOperations() []operation {
 			summary: "List the daemon's fixed-interval background loops with timing",
 			resps: []respUnit{
 				{http.StatusOK, controllers.ListDaemonLoopsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
+}
+
+// learningOperations declares learning capture's operations. Must stay 1:1
+// with the routes LearningController.Register mounts (enforced by the parity test).
+func learningOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/transcript-ref", id: "reportSessionTranscriptRef", tag: "learning",
+			summary:    "Report the conversation file a session is writing, and a submitted prompt's fingerprint",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.TranscriptRefRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.TranscriptRefResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/status", id: "getLearningStatus", tag: "learning",
+			summary: "Report what learning capture stored per project, and whether it is healthy",
+			resps: []respUnit{
+				{http.StatusOK, controllers.LearningStatusResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/excerpts", id: "listLearningExcerpts", tag: "learning",
+			summary:    "List a project's captured human turns, newest first",
+			pathParams: []any{controllers.LearningExcerptsQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListLearningExcerptsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/learning/projects/{id}", id: "forgetProjectLearning", tag: "learning",
+			summary:    "Delete everything learning capture kept for a project that no longer learns from sessions",
+			pathParams: []any{controllers.ProjectIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ForgetLearningResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

@@ -12,7 +12,10 @@ package claudecode
 // lines repeats the SAME message.usage (usage is for the whole message, not the
 // block). Summing every "assistant" line therefore double/triple-counts. The parser
 // counts each message.id exactly once. Only aggregate numbers are read; transcript
-// content is never retained or sent anywhere.
+// content is never retained or sent anywhere. (Learning capture reads content
+// under its own, separately declared contract - see "Learning capture" in
+// docs/architecture.md and observe/learncapture - and only for opted-in
+// projects. This reader's promise is unchanged.)
 
 import (
 	"bufio"

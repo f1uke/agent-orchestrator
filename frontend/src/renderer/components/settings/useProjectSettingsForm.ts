@@ -60,6 +60,7 @@ export type ProjectSettingsFormState = {
 	simTrustCaFiles: string;
 	disableAutoCrew: boolean;
 	pauseBeforeImplementing: boolean;
+	learnFromSessions: boolean;
 	intakeEnabled: boolean;
 	intakeRepo: string;
 	intakeAssignee: string;
@@ -99,6 +100,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		simTrustCaFiles: formatCaFileLines(config.simTrust?.caFiles ?? []),
 		disableAutoCrew: config.disableAutoCrew ?? false,
 		pauseBeforeImplementing: config.pauseBeforeImplementing ?? false,
+		learnFromSessions: config.learnFromSessions ?? false,
 		intakeEnabled: intake.enabled ?? false,
 		intakeRepo: intake.repo ?? "",
 		intakeAssignee: intake.assignee ?? "",
@@ -295,6 +297,8 @@ export function useProjectSettingsForm({
 				// Running straight from brief to code IS the default, so "off" is the
 				// absence of the field, same as the toggles above.
 				pauseBeforeImplementing: form.pauseBeforeImplementing || undefined,
+				// Learning is opt-in, so "off" is the absence of the field.
+				learnFromSessions: form.learnFromSessions || undefined,
 				trackerIntake: buildIntake(intakeForm),
 				gitConvention: buildGitConvention(form.gitWorkflow, form.branchPrefix),
 				approvalRule: buildApprovalRule(form.approvalRuleEnabled, form.approvalThreshold),

@@ -186,6 +186,20 @@ type ProjectConfig struct {
 	// recomputes the prompt) picks the new value up.
 	PauseBeforeImplementing bool `json:"pauseBeforeImplementing,omitempty"`
 
+	// LearnFromSessions lets AO read this project's Claude Code transcripts and
+	// keep REDACTED excerpts of what the human typed - with a bounded window of
+	// what the agent did just before and after - so a later stage can propose
+	// skills from what the human taught (see internal/learn and the
+	// "Learning capture" section of docs/architecture.md).
+	//
+	// It is opt-in (false) and it is a hard gate, not a filter: for a project
+	// that has it off, AO opens no transcript, records no prompt or delivery
+	// fingerprint, and stores nothing. Some projects carry personal or customer
+	// data in their conversations and must never be read; leaving the switch off
+	// is how they are excluded. Turning it off later stops capture at once; what
+	// was already captured stays until `ao learn forget` deletes it.
+	LearnFromSessions bool `json:"learnFromSessions,omitempty"`
+
 	// ApprovalRule gates when a PR/MR in this project may be reported as Ready to
 	// merge. It is OFF by default; when enabled it AND-s a minimum-approvals
 	// condition onto the existing ready-to-merge conditions. Approvals are only

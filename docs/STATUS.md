@@ -57,6 +57,11 @@ surface (`npm run sqlc`, `npm run api`).
   registry and `ao hooks` activity dispatch.
 - OpenAPI spec generated from Go DTOs; frontend TS types generated from it and
   drift-checked in CI.
+- Learning capture (opt-in per project, `learnFromSessions`): a background loop
+  keeps redacted excerpts of the human's own turns from Claude Code transcripts,
+  telling them apart from AO-delivered text by delivery fingerprints; inspected
+  and erased with `ao learn status|excerpts|forget`. See "Learning capture" in
+  `architecture.md`. No model is called yet.
 
 ### Frontend (Electron + React)
 

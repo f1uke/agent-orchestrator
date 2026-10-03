@@ -962,6 +962,25 @@ flowchart LR
 
 ```
 
+### Learning capture
+
+The human teaches workers in the pane - corrections, rules, the steps of a flow, the reason behind a decision - and none of it survives into a final report. Claude Code deletes a transcript 30 days after it was last written. Learning capture keeps those turns so a later stage can propose skills from them. It calls no model.
+
+It is opt-in per project (`ProjectConfig.LearnFromSessions`, `ao project set-config --learn-from-sessions`) and the switch is a hard gate: for a project that has it off, no transcript is opened, no prompt or delivery fingerprint is recorded, nothing is stored.
+
+**The contract.** This is the one place AO reads transcript CONTENT; `claudecode/usage.go` still reads aggregate token counts only.
+
+- _What is read:_ the project's Claude Code transcripts - the file AO pinned with `--session-id`, files a session's hooks reported, and other files in the worktree's directory whose recorded `cwd` is that worktree (a `/clear` continuation). Each file is read from a stored byte offset with `Seek`, never whole.
+- _What is kept:_ only the human's own turns (`learn_excerpt`), redacted, each with a bounded window - the agent's nearest words (1,500 bytes before, 800 after) and a curated action list (tool name plus one whitelisted target, as the activity feed shows them; never a command line, a file body or a tool result). Turns that are not the human's - the spawn brief, another session's `ao send`, AO's nudges and notices, task notifications - are recognised and skipped.
+- _Redaction_ (`internal/learn/redact`): exact secret values AO already knows (test-account credentials in each mobile project's script store, secret-named env values), high-precision token formats and secret assignments, emails and Thai id/phone shapes, and pasted blobs collapsed to their size. No generic digit rule: timestamps, ids and line numbers survive.
+- _Where it goes:_ nowhere. It stays in AO's SQLite under `~/.ao`. `ao learn forget` deletes a project's capture once its switch is off.
+
+**Telling the human from AO.** Claude Code tags every user turn with `origin.kind` (`human`, `peer`, `task-notification`, ...), but text AO types into the pane is tagged `human` too. So AO records, at delivery, a fingerprint and an author for everything it puts into a session (`delivered_fingerprint`, written by `runtimeMessenger.Send`): `human` for the app's send box, a person's `ao send` outside any session and the Tests tab's report; `agent` for a `[from @<id>]` send; `ao` for nudges and notices. The session's brief is matched by the fingerprint of `sessions.prompt`. A fingerprint is a sha256 of the text with whitespace collapsed (`internal/learn/fingerprint`) - the body itself is never stored.
+
+**Bookkeeping from hooks.** `ao hooks claude-code` reports, on session start, prompt submit, stop and end, the transcript path and native id on its own route (`POST /sessions/{id}/transcript-ref`) - not on `/activity`, whose contract forbids paths and native ids. On a prompt submit it adds the prompt's fingerprint, computed inside the hook process. Capture stamps each such fingerprint when it reads the matching typed turn; `ao learn status` reports prompts that stay unmatched, which is the canary for a change in Claude Code's undocumented transcript format.
+
+**Exactly-once.** A pass over one file lands its excerpts, the prompt matches and the advanced cursor in one transaction (`CommitLearnPass`), and `(transcript_path, turn_uuid)` is unique, so a crash or a rewritten file never loses or duplicates a turn. A human turn whose answer is still being written is left open: the cursor stops at it and carries its "before" window to the next pass. The loop (`observe/learncapture`, every 10 minutes, `learn-capture` in `/daemon/loops`) is additive like the token-usage observer and never touches lifecycle; a failing file is recorded on its cursor and reported by `ao learn status`.
+
 ---
 
 ## HTTP Layer

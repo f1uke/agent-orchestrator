@@ -121,6 +121,10 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--pause-before-implementing"},
 		want: domain.ProjectConfig{PauseBeforeImplementing: true},
 	},
+	"learn-from-sessions": {
+		args: []string{"--learn-from-sessions"},
+		want: domain.ProjectConfig{LearnFromSessions: true},
+	},
 }
 
 // captureSetConfig runs `ao project set-config demo <args...>` against a stub

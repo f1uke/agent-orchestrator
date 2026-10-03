@@ -105,6 +105,9 @@ type APIDeps struct {
 	Events            cdcSubscriber
 	Telemetry         ports.EventSink
 	LoopTelemetry     controllers.LoopTelemetrySource
+	// Learning is learning capture: the transcript bookkeeping agent hooks
+	// report, and the read-only view of what capture stored.
+	Learning controllers.LearningService
 }
 
 // API owns one controller per resource and is the single Register call the
@@ -132,6 +135,7 @@ type API struct {
 	settings      *controllers.SettingsController
 	wiki          *controllers.WikiController
 	daemon        *controllers.DaemonController
+	learning      *controllers.LearningController
 	events        *EventsController
 }
 
@@ -178,6 +182,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, SimTrust: simTrustSettings(deps.SimTrust), EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:          &controllers.WikiController{Svc: deps.Wiki},
 		daemon:        &controllers.DaemonController{Loops: deps.LoopTelemetry},
+		learning:      &controllers.LearningController{Svc: deps.Learning},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }
@@ -233,6 +238,9 @@ func (a *API) Register(root chi.Router) {
 			// turning it into a silent one-pane-per-task rule here would hide it.
 			a.iosRun.Register(r)
 			a.daemon.Register(r)
+			// Agent-scoped: a transcript belongs to the session whose hook
+			// reported it, never to its crewmate.
+			a.learning.Register(r)
 			// Sibling REST controllers plug in here.
 
 			// THE TASK-SCOPED SURFACES, and the only place that list lives.
