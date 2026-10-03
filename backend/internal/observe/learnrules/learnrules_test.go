@@ -243,10 +243,10 @@ func TestFiles_ListsOnlyWhileAProjectLearns(t *testing.T) {
 	write(filepath.Join(data, "skills", "using-ao", "SKILL.md"), "ao skill")
 	write(filepath.Join(repo, "CLAUDE.md"), "repo rules")
 	write(filepath.Join(repo, ".claude", "skills", "deploy", "SKILL.md"), "deploy skill")
-	write(filepath.Join(data, "knowledge", "nter", "INDEX.md"), "- entry")
+	write(filepath.Join(home, ".ao", "knowledge", "nter", "INDEX.md"), "- entry")
 	learning := false
 	f := learnrules.Files{
-		Home: home, DataDir: data,
+		Home: home, DataDir: data, KnowledgeDir: filepath.Join(home, ".ao", "knowledge"),
 		Projects: func(context.Context) ([]domain.ProjectRecord, error) {
 			return []domain.ProjectRecord{
 				{ID: "nter", Path: repo, Config: domain.ProjectConfig{LearnFromSessions: learning}},
@@ -279,7 +279,7 @@ func TestFiles_ListsOnlyWhileAProjectLearns(t *testing.T) {
 		"global::skill:" + filepath.Join(data, "skills", "using-ao", "SKILL.md"),
 		"project:nter:claude_md:" + filepath.Join(repo, "CLAUDE.md"),
 		"project:nter:skill:" + filepath.Join(repo, ".claude", "skills", "deploy", "SKILL.md"),
-		"project:nter:knowledge_index:" + filepath.Join(data, "knowledge", "nter", "INDEX.md"),
+		"project:nter:knowledge_index:~/.ao/knowledge/nter/INDEX.md",
 		"project:nter:ao_prompt:AO worker prompt (nter)",
 	}
 	if strings.Join(keys, "\n") != strings.Join(want, "\n") {

@@ -21,8 +21,11 @@ const maxSourceBytes = 1 << 20
 type Files struct {
 	// Home is the human's home directory (~/.claude lives under it).
 	Home string
-	// DataDir is AO's data dir: AO's own skills and the knowledge store.
+	// DataDir is AO's data dir, where AO installs its own skills.
 	DataDir string
+	// KnowledgeDir is the knowledge store whose <project>/INDEX.md agents are
+	// told to read (prompts.go names ~/.ao/knowledge).
+	KnowledgeDir string
 	// Projects lists the registered projects.
 	Projects func(ctx context.Context) ([]domain.ProjectRecord, error)
 	// Prompts returns AO's assembled standing prompt per session kind
@@ -74,7 +77,7 @@ func (f Files) List(ctx context.Context) ([]Source, error) {
 				add(domain.LearnRuleProject, id, domain.LearnRuleSourceSkill, s, false)
 			}
 		}
-		add(domain.LearnRuleProject, id, domain.LearnRuleSourceKnowledgeIndex, filepath.Join(f.DataDir, "knowledge", p.ID, "INDEX.md"), true)
+		add(domain.LearnRuleProject, id, domain.LearnRuleSourceKnowledgeIndex, filepath.Join(f.KnowledgeDir, p.ID, "INDEX.md"), true)
 		if f.Prompts == nil {
 			continue
 		}

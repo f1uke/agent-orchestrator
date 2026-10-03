@@ -215,7 +215,7 @@ func (s *Service) Protect(ctx context.Context, req ProtectRequest) (domain.Learn
 		return domain.LearnProtectedRule{}, fmt.Errorf("%w: the rule text is required", ErrInvalidProtectedRule)
 	}
 	if _, err := rules.CompilePatterns(req.Patterns); err != nil {
-		return domain.LearnProtectedRule{}, fmt.Errorf("%w: %v", ErrInvalidProtectedRule, err)
+		return domain.LearnProtectedRule{}, fmt.Errorf("%w: %w", ErrInvalidProtectedRule, err)
 	}
 	now := s.clock()
 	r := domain.LearnProtectedRule{ProjectID: req.ProjectID, Text: text, Patterns: req.Patterns, Note: strings.TrimSpace(req.Note), CreatedAt: now, UpdatedAt: now}

@@ -6,6 +6,8 @@ A project with `learnFromSessions` on (`ao project set-config <id> --learn-from-
 
 **Collect** then asks a model, through the human's own `claude` login, which of those redacted turns teach something durable, and keeps them as drafts. Only redacted turns are sent; the call runs sealed (no tools, no settings, no transcript of its own) and stops at the daily budget.
 
+**Rules** is the corpus a lesson is checked against: what agents are already told (the human's CLAUDE.md and skills, each learning project's repo CLAUDE.md, AGENTS.md and skills, AO's standing prompt, the knowledge INDEX), split into statements and refreshed hourly. Repo files are only read. **Protected rules** are the ones the human pins; their forbidden patterns block any learned skill that matches.
+
 ## Subcommands
 
 ### `ao learn status`
@@ -53,15 +55,36 @@ The candidate lessons the model found, newest first: kind (correction, rule, pro
 | `--limit n` | Most drafts to show (at most 500) | `20` |
 | `--json` | Output as JSON | - |
 
+### `ao learn rules`
+
+The standing rules that apply in a project (its own and every global one), in source order, or the best matches for `--search`. Each has an id (`<chunk>-<n>`) that `protect --from` takes.
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--project id` | Project | the current session's project; none lists global rules only |
+| `--search text` | Rank the rules against this text (BM25) | - |
+| `--limit n` | Most rules to show | `20` |
+| `--json` | Output as JSON | - |
+
+Subcommands:
+
+- `ao learn rules sources [--project id]` - every file and prompt the corpus is built from, with chunks, rules and why any chunk is not atomized yet, then the last refresh.
+- `ao learn rules refresh [--budget dollars]` - refresh now under its own budget (default `1`); the hourly loop does it within the daily budget.
+- `ao learn rules protect (--text "rule" | --from <rule-id>) [--pattern re]... [--project id] [--note why]` - pin a rule. Patterns are RE2, case-insensitive; without `--project` the rule applies everywhere.
+- `ao learn rules protected [--project id]` - list pinned rules and their patterns.
+- `ao learn rules unprotect <id>` - unpin.
+- `ao learn rules check (--text "..." | --file path) [--project id]` - report every forbidden pattern a text matches; exits 1 when one does.
+
 ### `ao learn settings`
 
-Shows the collect model, effort and daily budget, or changes them.
+Shows the collect model, effort, rules model and daily budget, or changes them.
 
 | Flag | Meaning | Default / Required |
 |---|---|---|
 | `--model id` | Collect model | `claude-sonnet-5-5` |
 | `--effort level` | `low`, `medium`, `high`, `xhigh` or `max` | `low` |
-| `--daily-budget dollars` | Background collect stops for the day at this spend; `0` pauses it | `2` |
+| `--rules-model id` | Model that splits the standing rules into statements | `claude-haiku-4-5-20251001` |
+| `--daily-budget dollars` | Background model runs (collect and rules) stop for the day at this spend; `0` pauses them | `2` |
 
 ### `ao learn forget`
 
@@ -81,4 +104,10 @@ ao learn status
 ```bash
 # The last five things the human typed to this project's sessions, with context
 ao learn excerpts --project agent-orchestrator --limit 5 --context
+```
+
+```bash
+# What are agents already told about the simulator? Pin the rule and forbid taps.
+ao learn rules --project nter-ios-app --search "tap the simulator"
+ao learn rules protect --from 3f2a9c0d1e2b-4 --pattern '\bao sim (tap|type|drag)\b'
 ```

@@ -64,6 +64,10 @@ surface (`npm run sqlc`, `npm run api`).
   `architecture.md`. Collect asks a model (the human's own `claude` CLI, sealed;
   Sonnet 5.5 at low effort, within a daily budget) which redacted turns teach
   something durable and keeps them as drafts (`ao learn collect|drafts|settings`).
+  The standing-rules corpus splits what agents are already told (CLAUDE.md,
+  AGENTS.md, skills, AO's standing prompt, the knowledge INDEX) into statements,
+  cached by content hash and searchable with BM25; the human pins protected rules
+  with forbidden patterns (`ao learn rules`).
 
 ### Frontend (Electron + React)
 

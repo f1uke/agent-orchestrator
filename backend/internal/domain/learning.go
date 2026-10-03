@@ -332,10 +332,15 @@ const (
 type LearnRuleSourceKind string
 
 const (
-	LearnRuleSourceClaudeMD       LearnRuleSourceKind = "claude_md"
-	LearnRuleSourceAgentsMD       LearnRuleSourceKind = "agents_md"
-	LearnRuleSourceSkill          LearnRuleSourceKind = "skill"
-	LearnRuleSourceAOPrompt       LearnRuleSourceKind = "ao_prompt"
+	// LearnRuleSourceClaudeMD is a CLAUDE.md, the human's or a repo's.
+	LearnRuleSourceClaudeMD LearnRuleSourceKind = "claude_md"
+	// LearnRuleSourceAgentsMD is a repo's AGENTS.md.
+	LearnRuleSourceAgentsMD LearnRuleSourceKind = "agents_md"
+	// LearnRuleSourceSkill is a skill's SKILL.md.
+	LearnRuleSourceSkill LearnRuleSourceKind = "skill"
+	// LearnRuleSourceAOPrompt is AO's assembled standing prompt for a project.
+	LearnRuleSourceAOPrompt LearnRuleSourceKind = "ao_prompt"
+	// LearnRuleSourceKnowledgeIndex is a project's knowledge INDEX.md.
 	LearnRuleSourceKnowledgeIndex LearnRuleSourceKind = "knowledge_index"
 )
 

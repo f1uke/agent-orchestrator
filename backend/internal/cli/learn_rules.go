@@ -207,14 +207,18 @@ func newLearnRulesSourcesCommand(ctx *commandContext) *cobra.Command {
 }
 
 func writeLearnRuleSources(w io.Writer, res learnRuleSourcesResponse) error {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "SOURCE\tKIND\tSCOPE\tCHUNKS\tRULES\tERROR")
+	var table strings.Builder
+	table.WriteString("SOURCE\tKIND\tSCOPE\tCHUNKS\tRULES\tERROR\n")
 	for _, s := range res.Sources {
 		scope := s.Scope
 		if s.ProjectID != "" {
 			scope = s.ProjectID
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\n", s.Label, s.Kind, scope, s.Chunks, s.Rules, s.Error)
+		fmt.Fprintf(&table, "%s\t%s\t%s\t%d\t%d\t%s\n", s.Label, s.Kind, scope, s.Chunks, s.Rules, s.Error)
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if _, err := io.WriteString(tw, table.String()); err != nil {
+		return err
 	}
 	if err := tw.Flush(); err != nil {
 		return err

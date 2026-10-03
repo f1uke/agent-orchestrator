@@ -11,6 +11,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/claudecode"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -42,8 +43,12 @@ func startLearnRules(ctx context.Context, store *sqlite.Store, dataDir string, s
 		Description: "Splits the rules your agents are already told into statements, so a lesson is checked against them.",
 		Interval:    learnrules.DefaultTickInterval,
 	})
-	files := learnrules.Files{Home: home, DataDir: dataDir, Projects: store.ListProjects, Prompts: prompts}
+	// The knowledge INDEX is read where the standing prompts tell agents it is
+	// (prompts.go: ~/.ao/knowledge), not under the data dir.
+	files := learnrules.Files{Home: home, DataDir: dataDir, KnowledgeDir: filepath.Join(home, ".ao", "knowledge"),
+		Projects: store.ListProjects, Prompts: prompts}
 	runner := llm.ClaudeCLI{Binary: claudecode.ResolveClaudeBinary}
 	observer := learnrules.New(store, runner, files.List, settings.Get, learnrules.Config{Logger: logger, OnTick: rec.Tick})
-	return observer, observer.Start(ctx)
+	done := observer.Start(ctx)
+	return observer, done
 }
