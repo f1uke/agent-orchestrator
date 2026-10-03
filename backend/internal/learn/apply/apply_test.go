@@ -118,3 +118,36 @@ func TestAllowed_OnlyMemorySkillsAndClaudeMD(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateMemory_LongPathsBackUpAndAFailedIndexLeavesNothing(t *testing.T) {
+	r, _ := setup(t)
+	deep := filepath.Join(r.Home, ".claude", "projects", "-"+strings.Repeat("very-long-project-path-", 9), "memory")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deep, "MEMORY.md"), []byte("- [Old](old.md) - old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := domain.LearnProposal{Action: domain.LearnProposeCreateMemory, TargetPath: filepath.Join(deep, "feedback_x.md"),
+		NewContent: "x\n", IndexLine: "- [X](feedback_x.md) - x"}
+	if _, err := Apply(r, p, "", now); err != nil {
+		t.Fatalf("a long memory path must back up and write: %v", err)
+	}
+
+	// The index cannot be written: the memory file must not stay behind alone.
+	ro := filepath.Join(r.Home, ".claude", "projects", "-ro", "memory")
+	if err := os.MkdirAll(ro, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(ro, "MEMORY.md")
+	if err := os.Mkdir(index, 0o755); err != nil { // a directory where MEMORY.md should be
+		t.Fatal(err)
+	}
+	bad := domain.LearnProposal{Action: domain.LearnProposeCreateMemory, TargetPath: filepath.Join(ro, "feedback_y.md"), NewContent: "y\n", IndexLine: "- [Y](feedback_y.md) - y"}
+	if _, err := Apply(r, bad, "", now); err == nil {
+		t.Fatal("expected the failed index to fail the apply")
+	}
+	if _, err := os.Stat(bad.TargetPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the memory file must be taken back when its index line cannot be written: %v", err)
+	}
+}

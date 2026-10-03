@@ -69,35 +69,38 @@ func (r Roots) createMemory(p domain.LearnProposal, content string, now time.Tim
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
+	// Everything that can fail before a write is done first, so a failure
+	// leaves nothing behind: the index's next content and its backup.
+	index := filepath.Join(filepath.Dir(p.TargetPath), "MEMORY.md")
+	old, err := os.ReadFile(index)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	writeIndex := p.IndexLine != "" && !strings.Contains(string(old), p.IndexLine)
+	next := string(old)
+	if writeIndex {
+		if len(old) > 0 {
+			if err := r.backup(index, old, now); err != nil {
+				return "", err
+			}
+		}
+		if next != "" && !strings.HasSuffix(next, "\n") {
+			next += "\n"
+		}
+		next += p.IndexLine + "\n"
+	}
 	if err := os.MkdirAll(filepath.Dir(p.TargetPath), 0o750); err != nil {
 		return "", err
 	}
 	if err := writeAtomic(p.TargetPath, []byte(content)); err != nil {
 		return "", err
 	}
-	if p.IndexLine == "" {
-		return sha([]byte(content)), nil
-	}
-	index := filepath.Join(filepath.Dir(p.TargetPath), "MEMORY.md")
-	old, err := os.ReadFile(index)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	if strings.Contains(string(old), p.IndexLine) {
-		return sha([]byte(content)), nil
-	}
-	if len(old) > 0 {
-		if err := r.backup(index, old, now); err != nil {
-			return "", err
+	if writeIndex {
+		if err := writeAtomic(index, []byte(next)); err != nil {
+			// A memory without its index line is half a change: take it back.
+			_ = os.Remove(p.TargetPath)
+			return "", fmt.Errorf("write MEMORY.md: %w", err)
 		}
-	}
-	next := string(old)
-	if next != "" && !strings.HasSuffix(next, "\n") {
-		next += "\n"
-	}
-	next += p.IndexLine + "\n"
-	if err := writeAtomic(index, []byte(next)); err != nil {
-		return "", fmt.Errorf("the memory file is written, but its MEMORY.md line is not: %w", err)
 	}
 	return sha([]byte(content)), nil
 }
@@ -144,12 +147,17 @@ func resolve(p string) string {
 	}
 }
 
-// backup keeps the version a write replaces under History, by path and time.
+// backup keeps the version a write replaces under History, mirroring its path
+// under Home (every directory name stays short) with a timestamped file.
 func (r Roots) backup(path string, content []byte, now time.Time) error {
 	if r.History == "" {
 		return errors.New("no backup directory")
 	}
-	dir := filepath.Join(r.History, strings.ReplaceAll(strings.TrimPrefix(filepath.Clean(path), "/"), "/", "__"))
+	rel, err := filepath.Rel(r.Home, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		rel = filepath.Base(path)
+	}
+	dir := filepath.Join(r.History, rel)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
