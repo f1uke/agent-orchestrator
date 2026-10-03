@@ -414,6 +414,52 @@ func TestSimDevices_LeaseStateIsHeldOrUnknownWithAReason(t *testing.T) {
 	}
 }
 
+// A device held, or being booted, through another AO daemon on this machine
+// is listed as such - the listing is what the Device tab draws and what `ao sim
+// boot` counts the cap from.
+func TestSimDevices_ReportTheOtherDaemonsLeaseAndBoot(t *testing.T) {
+	now := time.Now().UTC()
+	sandbox := &domain.SimDaemon{DataDir: "/tmp/ao-sandbox", PID: 4242, Port: 3399}
+	svc := &fakeSimService{leases: []domain.SimLease{{
+		UDID: testSimUDID, SessionID: "agent-orchestrator-360", AcquiredAt: now, ExpiresAt: now.Add(9 * time.Minute),
+		OtherDaemon: sandbox,
+	}}}
+	screen := &fakeScreen{listing: twoBooted(), powerStatus: map[string]simpower.Status{
+		domain.NormalizeSimUDID(otherSimUDID): {
+			Op: simpower.Boot, State: simpower.Running, StartedAt: now, Phase: simpower.PhaseSlimming, OtherDaemon: sandbox,
+		},
+	}}
+	srv := newScreenTestServer(t, svc, screen)
+	var out struct {
+		Devices []struct {
+			UDID  string `json:"udid"`
+			Lease struct {
+				Holder      string            `json:"holder"`
+				OtherDaemon *domain.SimDaemon `json:"otherDaemon"`
+			} `json:"lease"`
+			Power *struct {
+				State       string            `json:"state"`
+				OtherDaemon *domain.SimDaemon `json:"otherDaemon"`
+			} `json:"power"`
+		} `json:"devices"`
+	}
+	if code := getJSON(t, srv.URL+"/api/v1/sim/devices", &out); code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	for _, d := range out.Devices {
+		switch d.UDID {
+		case testSimUDID:
+			if d.Lease.OtherDaemon == nil || *d.Lease.OtherDaemon != *sandbox || d.Lease.Holder != "agent-orchestrator-360" {
+				t.Fatalf("lease through the sandbox reported as %+v", d.Lease)
+			}
+		case otherSimUDID:
+			if d.Power == nil || d.Power.State != "running" || d.Power.OtherDaemon == nil {
+				t.Fatalf("the sandbox's boot reported as %+v", d.Power)
+			}
+		}
+	}
+}
+
 func TestSimGesture_WithoutAScreenIs501(t *testing.T) {
 	srv := newScreenTestServer(t, &fakeSimService{}, nil)
 	code, _ := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",

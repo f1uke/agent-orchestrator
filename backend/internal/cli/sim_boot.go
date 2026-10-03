@@ -142,6 +142,9 @@ type simDevicePowerListing struct {
 	// profile - see SimDevicePowerView, which this mirrors.
 	Profile       string `json:"profile,omitempty"`
 	ProfileReason string `json:"profileReason,omitempty"`
+	// OtherDaemon is set on a boot another AO daemon on this machine is
+	// running - a sandbox daemon's included, which is why the cap counts it.
+	OtherDaemon *domain.SimDaemon `json:"otherDaemon,omitempty"`
 }
 
 // simDeviceListing mirrors controllers.SimDeviceView - the daemon's own view of
@@ -375,6 +378,8 @@ func checkSimBootBudget(devices []simDevice, listings []simDeviceListing, target
 	type charge struct {
 		device  simDevice
 		booting bool
+		// elsewhere is the AO daemon running the boot, when it is not ours.
+		elsewhere *domain.SimDaemon
 	}
 	var booted []charge
 	for _, d := range devices {
@@ -386,7 +391,7 @@ func checkSimBootBudget(devices []simDevice, listings []simDeviceListing, target
 			booted = append(booted, charge{device: d})
 		case listing != nil && listing.Power != nil &&
 			listing.Power.Op == string(simpower.Boot) && listing.Power.State == string(simpower.Running):
-			booted = append(booted, charge{device: d, booting: true})
+			booted = append(booted, charge{device: d, booting: true, elsewhere: listing.Power.OtherDaemon})
 		}
 	}
 	if len(booted) < simBootMaxBooted {
@@ -398,7 +403,10 @@ func checkSimBootBudget(devices []simDevice, listings []simDeviceListing, target
 		len(booted), simBootMaxBooted)
 	for _, c := range booted {
 		state := "booted"
-		if c.booting {
+		switch {
+		case c.booting && c.elsewhere != nil:
+			state = "still coming up in " + c.elsewhere.Describe()
+		case c.booting:
 			state = "still coming up"
 		}
 		fmt.Fprintf(&b, "\n  %s (%s, %s) - %s", c.device.Name, c.device.Runtime, c.device.UDID, state)

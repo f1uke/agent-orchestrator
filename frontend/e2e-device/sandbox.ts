@@ -16,11 +16,13 @@
  * harness at all:
  *
  *   - It never touches the human's AO. Its own HOME, data dir, run file and
- *     port; the app attaches to the sandbox daemon and nothing else.
- *   - It never fights the human for the device. The lease that stops two agents
- *     driving one simulator lives in a daemon's own database, so a second daemon
- *     cannot see the first one's leases - and the machine has one simulator with
- *     one finger. So this refuses to start while the live AO holds a lease.
+ *     port; the app attaches to the sandbox daemon and nothing else. The one
+ *     thing it shares is the machine-wide simulator ownership record
+ *     (~/.ao/sim-ownership.db, by the account's home rather than $HOME), so the
+ *     sandbox daemon and the human's honour each other's leases and boots.
+ *   - It never fights the human for the device. A lease the live AO holds
+ *     would refuse the sandbox's claim anyway; this refuses to START instead,
+ *     so a busy device is a skip with the holder's name rather than a failure.
  *
  * Requires a mac with Xcode, a booted simulator, and a built renderer
  * (`npm run package`). Anything missing is a skip with the reason, never a
@@ -62,7 +64,7 @@ export function skipReason(): string | null {
 	const target = targetUDID();
 	if (target.udid === null) return target.reason;
 	const busy = liveLeaseHolder(target.udid);
-	if (busy) return `the live AO holds this simulator (@${busy}) - two daemons cannot arbitrate one device`;
+	if (busy) return `the live AO holds this simulator (@${busy}), so the sandbox daemon could not claim it`;
 	return null;
 }
 
@@ -117,8 +119,8 @@ function targetUDID(): { udid: string | null; reason: string | null } {
 
 /**
  * liveLeaseHolder is the session driving a simulator on the human's own AO, if
- * one is. The sandbox daemon cannot see that lease, so this is the only thing
- * standing between an agent's drag and a human's.
+ * one is - asked up front so a held device is a clean skip. The sandbox daemon
+ * would be refused the claim regardless: leases are machine-wide.
  */
 function liveLeaseHolder(udid: string): string | null {
 	try {
@@ -132,8 +134,7 @@ function liveLeaseHolder(udid: string): string | null {
 			// two simulators booted means a human working on one of them blocks
 			// every test against the other - and the two do not collide: the
 			// lease is per device, and this harness only ever touches the one it
-			// was given. The guard is still the only thing standing between an
-			// agent's drag and a human's, so it stays exact rather than eager.
+			// was given. It stays exact rather than eager.
 			if (device.udid.toLowerCase() !== udid.toLowerCase()) continue;
 			if (device.lease?.state === "held") return device.lease.holder ?? "another session";
 		}

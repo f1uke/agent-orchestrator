@@ -62,6 +62,10 @@ type HoldRefusedError struct {
 func (e *HoldRefusedError) Error() string {
 	switch e.Reason {
 	case HoldRefusedLeasedByOther:
+		if e.Lease.OtherDaemon != nil {
+			return fmt.Sprintf("simulator %s is leased by @%s through %s for another %s, so this session may not touch it",
+				e.UDID, e.Lease.SessionID, e.Lease.OtherDaemon.Describe(), humanizeDuration(e.Lease.ExpiresAt.Sub(e.Now)))
+		}
 		return fmt.Sprintf("simulator %s is leased by @%s for another %s, so this session may not touch it",
 			e.UDID, e.Lease.SessionID, humanizeDuration(e.Lease.ExpiresAt.Sub(e.Now)))
 	case HoldRefusedBusy:
@@ -106,12 +110,21 @@ func (s *Service) AcquireHold(ctx context.Context, sessionID domain.SessionID, u
 		return domain.SimHold{}, err
 	}
 	if !outcome.Granted {
-		return domain.SimHold{}, &HoldRefusedError{
+		refused := &HoldRefusedError{
 			UDID:   key,
 			Reason: holdRefusedReason(outcome, sessionID),
 			Lease:  outcome.Lease,
 			Now:    now,
 		}
+		// Not leased HERE can mean leased through another AO daemon on this
+		// machine, and "claim it" is the wrong advice for that. Asked only on
+		// a refusal, so a gesture that goes through pays nothing for it.
+		if refused.Reason == HoldRefusedNotLeased && s.owners != nil {
+			if foreign, ok, err := s.owners.Foreign(ctx, key, now); err == nil && ok {
+				refused.Reason, refused.Lease = HoldRefusedLeasedByOther, foreign
+			}
+		}
+		return domain.SimHold{}, refused
 	}
 	if s.recorder != nil {
 		s.recordIntent(ctx, key, outcome.Hold.Token, intent, outcome.Hold.ExpiresAt)

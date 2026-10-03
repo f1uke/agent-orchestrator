@@ -518,6 +518,9 @@ func writeSimRecordingError(w http.ResponseWriter, r *http.Request, err error) {
 			details["holder"] = string(refused.Lease.SessionID)
 			details["expiresAt"] = refused.Lease.ExpiresAt.UTC().Format(time.RFC3339)
 		}
+		if refused.Lease.OtherDaemon != nil {
+			details["otherDaemon"] = refused.Lease.OtherDaemon
+		}
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_RECORDING_REFUSED", err.Error(), details)
 	case errors.Is(err, simsvc.ErrNotFound):
 		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "SIM_NOT_FOUND", err.Error(), nil)
@@ -547,13 +550,23 @@ func writeSimError(w http.ResponseWriter, r *http.Request, err error) {
 			details["holder"] = string(refused.Lease.SessionID)
 			details["expiresAt"] = refused.Lease.ExpiresAt.UTC().Format(time.RFC3339)
 		}
+		if refused.Lease.OtherDaemon != nil {
+			details["otherDaemon"] = refused.Lease.OtherDaemon
+		}
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DEVICE_BUSY", err.Error(), details)
 	case errors.As(err, &held):
-		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DEVICE_LEASED", err.Error(), map[string]any{
+		details := map[string]any{
 			"udid":      held.Lease.UDID,
 			"holder":    string(held.Lease.SessionID),
 			"expiresAt": held.Lease.ExpiresAt.UTC().Format(time.RFC3339),
-		})
+		}
+		if held.Lease.OtherDaemon != nil {
+			// The holder is a session of another AO daemon on this machine:
+			// its id means nothing to this daemon, and the caller has to be
+			// able to say where to look for it.
+			details["otherDaemon"] = held.Lease.OtherDaemon
+		}
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DEVICE_LEASED", err.Error(), details)
 	case errors.Is(err, simsvc.ErrInvalid):
 		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", err.Error(), nil)
 	case errors.Is(err, simsvc.ErrNotFound):

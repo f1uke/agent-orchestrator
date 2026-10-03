@@ -837,6 +837,12 @@ func (c *commandContext) explainSimHoldRefusal(device simDevice, err error) erro
 				left = fmt.Sprintf(" for another %s", simRemaining(&expiresAt, c.deps.Now().UTC()))
 			}
 		}
+		if other := simContentionDaemon(apiErr.ErrorBody.Details["otherDaemon"]); other != nil {
+			return fmt.Errorf("%s is leased by %s%s, so nothing was sent to the device.\n"+
+				"`ao sim ax` and `ao sim shot` are read-only and still work. The lease ends when @%s runs `ao sim release` "+
+				"in that daemon, when it lapses, or as soon as that daemon (pid %d) exits",
+				device.Label(), simHolderLabel(holder, other), left, holder, other.PID)
+		}
 		return fmt.Errorf("%s is leased by @%s%s, so nothing was sent to the device.\n"+
 			"`ao sim ax` and `ao sim shot` are read-only and still work. Wait for the lease to lapse, or ask @%s to run `ao sim release`",
 			device.Label(), holder, left, holder)
