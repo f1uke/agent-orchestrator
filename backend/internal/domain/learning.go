@@ -499,6 +499,11 @@ type LearnRuleVerdict struct {
 	RuleID  string `json:"ruleId"`
 	Verdict string `json:"verdict"`
 	Note    string `json:"note,omitempty"`
+	// RuleText and RuleSource snapshot the rule when the proposal was made:
+	// the corpus is rebuilt hourly, and the person must still see what the
+	// proposal was weighed against.
+	RuleText   string `json:"ruleText,omitempty"`
+	RuleSource string `json:"ruleSource,omitempty"`
 }
 
 // LearnVerifierResult is the adversarial check of one proposal.

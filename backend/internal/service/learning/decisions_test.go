@@ -192,8 +192,8 @@ func TestProposalRules_ResolvesPinnedAndCorpusRules(t *testing.T) {
 	ctx := context.Background()
 	pinned, _ := r.svc.Protect(ctx, learning.ProtectRequest{Text: "Pinned rule."})
 	refs, err := r.svc.ProposalRules(ctx, domain.LearnProposal{ProjectID: "p", TargetPath: "rule:protected-" + strconv.FormatInt(pinned.ID, 10),
-		RuleVerdicts: []domain.LearnRuleVerdict{{RuleID: "gone-0", Verdict: "consistent"}}})
-	if err != nil || len(refs) != 1 || refs[0].Text != "Pinned rule." || !refs[0].Protected {
+		RuleVerdicts: []domain.LearnRuleVerdict{{RuleID: "gone-0", Verdict: "consistent", RuleText: "An old rule.", RuleSource: "~/.claude/CLAUDE.md"}, {RuleID: "gone-1"}}})
+	if err != nil || len(refs) != 2 || refs[0].Text != "Pinned rule." || !refs[0].Protected || refs[1].Text != "An old rule." {
 		t.Errorf("refs = %+v %v", refs, err)
 	}
 }

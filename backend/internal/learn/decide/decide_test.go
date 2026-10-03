@@ -281,6 +281,7 @@ func TestReviewsAndFinalize(t *testing.T) {
 	if cands[2].Proposal.Action != domain.LearnProposeConflict || cands[2].Proposal.TargetPath != "rule:abc-0" {
 		t.Errorf("a contradiction becomes a conflict card: %+v", cands[2].Proposal)
 	}
+	env.Shaped.Rules["abc-0"] = domain.LearnRule{ID: "abc-0", LearnRuleAtom: domain.LearnRuleAtom{Text: "Never do X."}, SourceLabel: "~/.claude/CLAUDE.md"}
 	cands[0].Proposal.NewContent = strings.Replace(cands[0].Proposal.NewContent, "Run the Maestro script for the screen.", "Run the Maestro script for the screen.\nKeep the run's screenshot.", 1)
 	Finalize(env, cands)
 	if cands[0].Proposal.ID != 40 || len(cands[0].Proposal.EvidenceIDs) != 2 {
@@ -288,6 +289,9 @@ func TestReviewsAndFinalize(t *testing.T) {
 	}
 	if got := cands[0].Proposal.NewContent; !strings.HasPrefix(got, pendingContent) || !strings.HasSuffix(got, "\nKeep the run's screenshot.\n") {
 		t.Errorf("the same memory taught again keeps the open file and adds only its new lines:\n%s", got)
+	}
+	if v := cands[2].Proposal.RuleVerdicts; len(v) == 0 || v[0].RuleText != "Never do X." || v[0].RuleSource != "~/.claude/CLAUDE.md" {
+		t.Errorf("the contradicted rule is snapshotted with the proposal: %+v", v)
 	}
 	if cands[1].Proposal.Status != domain.LearnProposalDropped || cands[1].Proposal.DropReason == "" {
 		t.Errorf("dropped candidates keep their reason: %+v", cands[1].Proposal)

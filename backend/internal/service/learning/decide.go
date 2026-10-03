@@ -165,6 +165,17 @@ func (s *Service) ProposalRules(ctx context.Context, p domain.LearnProposal) ([]
 	for _, r := range corpus {
 		if want[r.ID] {
 			out = append(out, RuleRef{ID: r.ID, Text: r.Text, Source: r.SourceLabel, Heading: r.Heading})
+			delete(want, r.ID)
+		}
+	}
+	for _, r := range out {
+		delete(want, r.ID)
+	}
+	// A rule the corpus no longer holds is shown as it was when proposed.
+	for _, v := range p.RuleVerdicts {
+		if want[v.RuleID] && v.RuleText != "" {
+			out = append(out, RuleRef{ID: v.RuleID, Text: v.RuleText, Source: v.RuleSource, Protected: strings.HasPrefix(v.RuleID, "protected-")})
+			delete(want, v.RuleID)
 		}
 	}
 	return out, nil
