@@ -72,6 +72,9 @@ type Service struct {
 	// runCtx outlives a request: a manual collect run continues on it after
 	// the request that started it has been answered.
 	runCtx context.Context
+
+	rulesStore RulesStore
+	rules      RulesRefresher
 }
 
 // WithCollect wires the collect stage in. runCtx is the daemon's context.

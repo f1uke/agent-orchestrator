@@ -3218,6 +3218,22 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, pr
 	return prompt, systemPrompt, nil
 }
 
+// StandingPrompts returns the standing instructions AO gives an orchestrator
+// and a solo worker of the project right now, keyed "orchestrator" and
+// "worker". Learning's rules corpus reads them so a lesson is checked against
+// what AO itself already tells every agent.
+func (m *Manager) StandingPrompts(ctx context.Context, projectID domain.ProjectID) (map[string]string, error) {
+	out := map[string]string{}
+	for name, kind := range map[string]domain.SessionKind{"orchestrator": domain.KindOrchestrator, "worker": domain.KindWorker} {
+		p, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: kind, ProjectID: projectID})
+		if err != nil {
+			return nil, fmt.Errorf("%s prompt: %w", name, err)
+		}
+		out[name] = p
+	}
+	return out, nil
+}
+
 // systemPromptSpec is what the standing instructions are derived FROM: the
 // session facts that shape them, separate from the project state buildSystemPrompt
 // reads for itself. PRTarget is the session's own resolved `--target` (empty on

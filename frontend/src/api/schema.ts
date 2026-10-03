@@ -294,6 +294,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/learning/protected-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the rules the human pinned as protected */
+        get: operations["listLearningProtectedRules"];
+        put?: never;
+        /** Pin a rule as protected, with patterns a learned skill must never contain */
+        post: operations["protectLearningRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/protected-rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unpin a protected rule */
+        delete: operations["unprotectLearningRule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/protected-rules/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report every forbidden pattern a text matches */
+        post: operations["checkLearningForbidden"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List or search the standing rules agents are already told, for a project */
+        get: operations["listLearningRules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/rules/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a refresh of the standing-rules corpus, under its own budget */
+        post: operations["refreshLearningRules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/rules/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the files and prompts the standing-rules corpus is built from, and the last refresh */
+        get: operations["listLearningRuleSources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/learning/settings": {
         parameters: {
             query?: never;
@@ -2461,6 +2564,14 @@ export interface components {
             /** @description The calling session's own id, used to attribute the write. */
             from?: string;
         };
+        ControllersCheckLearningForbiddenRequest: {
+            /** @description Project whose rules apply besides the global ones. */
+            project?: string;
+            text: string;
+        };
+        ControllersCheckLearningForbiddenResponse: {
+            hits: components["schemas"]["ControllersLearningForbiddenHitDTO"][];
+        };
         ControllersCrewSendRequest: {
             about?: string;
             message: string;
@@ -2609,6 +2720,13 @@ export interface components {
             error: string;
             path: string;
         };
+        ControllersLearningForbiddenHitDTO: {
+            match: string;
+            pattern: string;
+            rule: string;
+            /** Format: int64 */
+            ruleId: number;
+        };
         ControllersLearningProjectStatusDTO: {
             /** @description Transcripts with unread turns whose last write is 25 days old or more; Claude Code deletes them at 30. */
             atRiskTranscripts: number;
@@ -2646,15 +2764,84 @@ export interface components {
             /** @description Prompts the hooks saw more than 30 minutes ago that capture never found in a transcript. Non-zero means the transcript format may have changed. */
             unmatchedPrompts: number;
         };
+        ControllersLearningProtectedRuleDTO: {
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: int64 */
+            id: number;
+            note?: string;
+            /** @description RE2 patterns, matched case-insensitively, that a learned skill must never contain. */
+            patterns: string[];
+            /** @description Empty means every project. */
+            projectId?: string;
+            text: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ControllersLearningRuleDTO: {
+            heading?: string;
+            /** @description Chunk hash prefix and position; stable while the source text of that chunk is. */
+            id: string;
+            projectId?: string;
+            /** @description The span of the source that states the rule. */
+            quote: string;
+            /** @enum {string} */
+            scope: "global" | "project";
+            /**
+             * Format: double
+             * @description Search score; set only when the request had a query.
+             */
+            score?: number;
+            sourceKey: string;
+            /** @enum {string} */
+            sourceKind: "claude_md" | "agents_md" | "skill" | "ao_prompt" | "knowledge_index";
+            sourceLabel: string;
+            tags: string[];
+            text: string;
+        };
+        ControllersLearningRuleSourceDTO: {
+            chunks: number;
+            /** @description Why some chunks are not atomized yet; the ones that are still count. */
+            error?: string;
+            key: string;
+            /** @enum {string} */
+            kind: "claude_md" | "agents_md" | "skill" | "ao_prompt" | "knowledge_index";
+            label: string;
+            projectId?: string;
+            /** Format: date-time */
+            refreshedAt: string;
+            rules: number;
+            /** @enum {string} */
+            scope: "global" | "project";
+        };
+        ControllersLearningRulesRefreshDTO: {
+            atomized: number;
+            /** Format: double */
+            budgetUsd: number;
+            /** Format: double */
+            costUsd: number;
+            failed: number;
+            /** Format: date-time */
+            finishedAt?: null | string;
+            lastError?: string;
+            manual: boolean;
+            running: boolean;
+            sources: number;
+            /** Format: date-time */
+            startedAt?: null | string;
+            stopReason?: string;
+        };
         ControllersLearningSettingsDTO: {
             /** @enum {string} */
             collectEffort: "low" | "medium" | "high" | "xhigh" | "max";
             collectModel: string;
             /**
              * Format: double
-             * @description The background collect stops for the rest of the local day at this spend; 0 pauses it.
+             * @description The background model runs (collect and rules) stop for the rest of the local day at this spend; 0 pauses them.
              */
             dailyBudgetUsd: number;
+            /** @description Model that splits the standing rules into statements. Empty on a write keeps the current one. */
+            rulesModel?: string;
         };
         ControllersLearningStatusResponse: {
             collect: components["schemas"]["ControllersLearningCollectStatusDTO"];
@@ -2675,6 +2862,16 @@ export interface components {
         ControllersListLearningExcerptsResponse: {
             excerpts: components["schemas"]["ControllersLearningExcerptDTO"][];
         };
+        ControllersListLearningProtectedRulesResponse: {
+            rules: components["schemas"]["ControllersLearningProtectedRuleDTO"][];
+        };
+        ControllersListLearningRuleSourcesResponse: {
+            refresh: components["schemas"]["ControllersLearningRulesRefreshDTO"];
+            sources: components["schemas"]["ControllersLearningRuleSourceDTO"][];
+        };
+        ControllersListLearningRulesResponse: {
+            rules: components["schemas"]["ControllersLearningRuleDTO"][];
+        };
         ControllersListSimFlowsResponse: {
             flows: components["schemas"]["ControllersSimFlowView"][];
         };
@@ -2687,6 +2884,26 @@ export interface components {
             path: "socket" | "pane" | "none";
             reason?: string;
             sender?: string;
+        };
+        ControllersProtectLearningRuleRequest: {
+            /** @description Id of a corpus rule to copy the text from. */
+            from?: string;
+            note?: string;
+            patterns?: string[];
+            /** @description Project the rule applies in; empty means every project. */
+            project?: string;
+            /** @description The rule. Give this or from. */
+            text?: string;
+        };
+        ControllersRefreshLearningRulesRequest: {
+            /**
+             * Format: double
+             * @description Most this refresh may spend on model runs, at API prices. At most 50.
+             */
+            budgetUsd: number;
+        };
+        ControllersRefreshLearningRulesResponse: {
+            started: boolean;
         };
         ControllersRenameSimFlowInput: {
             /** @description What to call it. Slugified; an empty name puts it back to its timestamp alone. */
@@ -2883,6 +3100,9 @@ export interface components {
         ControllersUncommittedFileDTO: {
             path: string;
             status: string;
+        };
+        ControllersUnprotectLearningRuleResponse: {
+            deleted: boolean;
         };
         ControllersUnreviewedRuntimeView: {
             /**
@@ -5454,6 +5674,399 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listLearningProtectedRules: {
+        parameters: {
+            query?: {
+                /** @description Project id. The project's pinned rules and every global one; empty lists all. */
+                project?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListLearningProtectedRulesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    protectLearningRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersProtectLearningRuleRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProtectedRuleDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    unprotectLearningRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Protected rule id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersUnprotectLearningRuleResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    checkLearningForbidden: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersCheckLearningForbiddenRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersCheckLearningForbiddenResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listLearningRules: {
+        parameters: {
+            query?: {
+                /** @description Project id. The project's rules and every global one; empty lists the global rules only. */
+                project?: string;
+                /** @description Search the rules (BM25 over text, heading and tags). Empty lists them in source order. */
+                q?: string;
+                /** @description Most rules to return. Default 50, at most 2000. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListLearningRulesResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    refreshLearningRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersRefreshLearningRulesRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersRefreshLearningRulesResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listLearningRuleSources: {
+        parameters: {
+            query?: {
+                /** @description Project id. The project's sources and every global one; empty lists every source. */
+                project?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListLearningRuleSourcesResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

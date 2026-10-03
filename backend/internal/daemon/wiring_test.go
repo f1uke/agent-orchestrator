@@ -641,6 +641,10 @@ func (f *fakeSessionLifecycle) CloseIdleSessions(_ context.Context) error { retu
 
 func (f *fakeSessionLifecycle) ReapOrphanedPromptFiles(_ context.Context) (int, error) { return 0, nil }
 
+func (f *fakeSessionLifecycle) StandingPrompts(context.Context, domain.ProjectID) (map[string]string, error) {
+	return nil, nil
+}
+
 func (f *fakeSessionLifecycle) SetSimDeviceAssigner(fn func(context.Context, domain.SessionID) (string, error)) {
 	f.simDeviceAssigner = fn
 }

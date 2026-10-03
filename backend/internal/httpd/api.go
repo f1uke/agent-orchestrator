@@ -108,6 +108,9 @@ type APIDeps struct {
 	// Learning is learning capture: the transcript bookkeeping agent hooks
 	// report, and the read-only view of what capture stored.
 	Learning controllers.LearningService
+	// LearningRules is the standing-rules corpus learning checks lessons
+	// against, and the rules the human pinned.
+	LearningRules controllers.LearningRulesService
 }
 
 // API owns one controller per resource and is the single Register call the
@@ -136,6 +139,7 @@ type API struct {
 	wiki          *controllers.WikiController
 	daemon        *controllers.DaemonController
 	learning      *controllers.LearningController
+	learningRules *controllers.LearningRulesController
 	events        *EventsController
 }
 
@@ -183,6 +187,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		wiki:          &controllers.WikiController{Svc: deps.Wiki},
 		daemon:        &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		learning:      &controllers.LearningController{Svc: deps.Learning},
+		learningRules: &controllers.LearningRulesController{Svc: deps.LearningRules},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }
@@ -241,6 +246,7 @@ func (a *API) Register(root chi.Router) {
 			// Agent-scoped: a transcript belongs to the session whose hook
 			// reported it, never to its crewmate.
 			a.learning.Register(r)
+			a.learningRules.Register(r)
 			// Sibling REST controllers plug in here.
 
 			// THE TASK-SCOPED SURFACES, and the only place that list lives.
