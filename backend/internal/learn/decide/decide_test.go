@@ -236,3 +236,21 @@ func TestReviewsAndFinalize(t *testing.T) {
 		t.Errorf("a rejection is not re-proposed on the same evidence: %q", again[0].Drop)
 	}
 }
+
+func TestPrepare_MergesOneTasksEditsOfTheSameFile(t *testing.T) {
+	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice), draft(2, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
+	env.ProjectID = "nter"
+	edit := func(ev, heading, text string) Proposed {
+		return Proposed{Action: "edit_rule_file", Target: "~/.ao/knowledge/nter/INDEX.md", UnderHeading: heading, Content: text,
+			Scope: "project", Title: text, Evidence: []string{ev}, Confidence: 0.8}
+	}
+	got, _ := Prepare(env, []Proposed{edit("d1", "Git", "- one"), edit("d2", "Builds", "- two")})
+	if len(got) != 1 || got[0].Drop != "" {
+		t.Fatalf("candidates = %+v", got)
+	}
+	p := got[0].Proposal
+	if len(p.EvidenceIDs) != 2 || !strings.Contains(p.NewContent, "## Git\n\n- one\n") || !strings.Contains(p.NewContent, "## Builds\n\n- two\n") ||
+		!strings.HasPrefix(p.Diff, "--- /dev/null") || !strings.Contains(p.Diff, "+- two") {
+		t.Errorf("merged = %+v", p)
+	}
+}

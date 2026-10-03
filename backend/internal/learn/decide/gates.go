@@ -52,6 +52,8 @@ type Candidate struct {
 	Proposal domain.LearnProposal
 	Added    string
 	Drop     string
+	// base is the target's content the diff is computed against.
+	base string
 }
 
 // Prepare turns decide's answer into candidates: it resolves each target,
@@ -59,6 +61,7 @@ type Candidate struct {
 // applies every gate that needs no model. no_action answers are counted, not
 // returned.
 func Prepare(env Env, answer []Proposed) (out []Candidate, noAction int) {
+	ruleEdit := map[string]int{}
 	for i, p := range answer {
 		if p.Action == "no_action" {
 			noAction++
@@ -73,9 +76,33 @@ func Prepare(env Env, answer []Proposed) (out []Candidate, noAction int) {
 			c.Proposal.RuleVerdicts = append(c.Proposal.RuleVerdicts, domain.LearnRuleVerdict{RuleID: v.Rule, Verdict: v.Verdict, Note: v.Note})
 		}
 		c.Drop = env.prepare(&c, p)
+		if c.Drop == "" && c.Proposal.Action == domain.LearnProposeEditRuleFile {
+			if j, ok := ruleEdit[c.Proposal.TargetPath]; ok {
+				// Lines one task adds to one file are one proposal: the
+				// person approves the file's change as a whole.
+				mergeRuleEdit(&out[j], c, p.UnderHeading)
+				continue
+			}
+			ruleEdit[c.Proposal.TargetPath] = len(out)
+		}
 		out = append(out, c)
 	}
 	return out, noAction
+}
+
+// mergeRuleEdit folds a second edit of the same rule file into the first:
+// its lines are inserted into the first's new content, the diff recomputed
+// against the same base, and evidence, titles and rationales joined.
+func mergeRuleEdit(into *Candidate, c Candidate, underHeading string) {
+	p := &into.Proposal
+	p.NewContent = InsertUnder(p.NewContent, underHeading, c.Added)
+	p.Diff = Diff(p.TargetPath, into.base, p.NewContent)
+	into.Added += "\n" + c.Added
+	p.EvidenceIDs = union(p.EvidenceIDs, c.Proposal.EvidenceIDs)
+	p.Title += "; " + c.Proposal.Title
+	p.Rationale += " " + c.Proposal.Rationale
+	p.RuleVerdicts = append(p.RuleVerdicts, c.Proposal.RuleVerdicts...)
+	p.Confidence = max(p.Confidence, c.Proposal.Confidence)
 }
 
 func (env Env) prepare(c *Candidate, p Proposed) string {
@@ -287,6 +314,7 @@ func (env Env) editRuleFile(c *Candidate, p Proposed) string {
 		return "it adds nothing"
 	}
 	c.Proposal.NewContent = InsertUnder(old, p.UnderHeading, text)
+	c.base = old
 	c.Proposal.BaseSHA256 = sha(old)
 	c.Proposal.Diff = Diff(target, old, c.Proposal.NewContent)
 	c.Added = text
