@@ -2943,6 +2943,7 @@ export interface components {
         ControllersLearningProposalResponse: {
             evidence: components["schemas"]["ControllersLearningDraftDTO"][];
             proposal: components["schemas"]["ControllersLearningProposalDTO"];
+            rules: components["schemas"]["ControllersLearningRuleRefDTO"][];
         };
         ControllersLearningProtectedRuleDTO: {
             /** Format: date-time */
@@ -2977,6 +2978,13 @@ export interface components {
             sourceKind: "claude_md" | "agents_md" | "skill" | "ao_prompt" | "knowledge_index" | "memory";
             sourceLabel: string;
             tags: string[];
+            text: string;
+        };
+        ControllersLearningRuleRefDTO: {
+            heading?: string;
+            id: string;
+            protected?: boolean;
+            source: string;
             text: string;
         };
         ControllersLearningRuleSourceDTO: {

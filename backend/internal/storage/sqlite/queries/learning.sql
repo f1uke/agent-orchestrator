@@ -300,7 +300,9 @@ RETURNING id;
 -- name: AmendSkillProposal :exec
 UPDATE learn_proposal
 SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, index_line = ?, diff = ?,
-    confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?
+    confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?,
+    -- Taught again: a snoozed proposal comes back with its new evidence.
+    snoozed_until = NULL
 WHERE id = ? AND status = 'pending';
 
 -- name: InsertSkillProposalEvidence :exec

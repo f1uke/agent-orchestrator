@@ -25,6 +25,10 @@ type fakeDecide struct {
 	gotUntil   time.Time
 }
 
+func (f *fakeDecide) ProposalRules(context.Context, domain.LearnProposal) ([]learning.RuleRef, error) {
+	return []learning.RuleRef{{ID: "protected-1", Text: "Drive simulators through scripts.", Protected: true}}, nil
+}
+
 func (f *fakeDecide) Approve(_ context.Context, id int64, content string, r domain.LearnResolution) (domain.LearnProposal, error) {
 	f.gotContent, f.gotRes = content, r
 	return domain.LearnProposal{ID: id, Status: domain.LearnProposalApplied}, f.err
@@ -71,7 +75,7 @@ func TestLearningDecide_Routes(t *testing.T) {
 		!strings.Contains(w.Body.String(), `"evidenceIds":[]`) || !strings.Contains(w.Body.String(), `"proposals":2`) {
 		t.Errorf("list -> %d %s", w.Code, w.Body)
 	}
-	if w := serveDecide(t, f, http.MethodGet, "/learning/proposals/1", ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"quote":"q"`) {
+	if w := serveDecide(t, f, http.MethodGet, "/learning/proposals/1", ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"quote":"q"`) || !strings.Contains(w.Body.String(), `"protected":true`) {
 		t.Errorf("show -> %d %s", w.Code, w.Body)
 	}
 	if w := serveDecide(t, f, http.MethodGet, "/learning/proposals/x", ""); w.Code != http.StatusBadRequest {

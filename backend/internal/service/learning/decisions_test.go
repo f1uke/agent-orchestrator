@@ -168,3 +168,32 @@ func TestRejectAndSnooze(t *testing.T) {
 		t.Error("a rejected proposal writes nothing")
 	}
 }
+
+func TestSnoozedProposalComesBackWhenTaughtAgain(t *testing.T) {
+	r := newDecisionsRig(t)
+	ctx := context.Background()
+	p := memoryProposal(r.mem)
+	id := r.propose(t, p)
+	if _, err := r.svc.Snooze(ctx, id, time.Now().Add(80*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	p.ID, p.ProjectID, p.TaskKey, p.Status, p.Scope = id, "p", "solo:y", domain.LearnProposalPending, "project:p"
+	if err := r.st.CommitDecide(ctx, domain.LearnDecideResult{TaskKey: "solo:y", ProjectID: "p", Outcome: domain.LearnOutcomeMerged,
+		Proposals: []domain.LearnProposal{p}}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := r.svc.Proposal(ctx, id); !got.SnoozedUntil.IsZero() {
+		t.Errorf("an amendment must clear the snooze: %v", got.SnoozedUntil)
+	}
+}
+
+func TestProposalRules_ResolvesPinnedAndCorpusRules(t *testing.T) {
+	r := newDecisionsRig(t)
+	ctx := context.Background()
+	pinned, _ := r.svc.Protect(ctx, learning.ProtectRequest{Text: "Pinned rule."})
+	refs, err := r.svc.ProposalRules(ctx, domain.LearnProposal{ProjectID: "p", TargetPath: "rule:protected-" + strconv.FormatInt(pinned.ID, 10),
+		RuleVerdicts: []domain.LearnRuleVerdict{{RuleID: "gone-0", Verdict: "consistent"}}})
+	if err != nil || len(refs) != 1 || refs[0].Text != "Pinned rule." || !refs[0].Protected {
+		t.Errorf("refs = %+v %v", refs, err)
+	}
+}

@@ -22,6 +22,7 @@ import {
 	Trash2,
 	X,
 	XCircle,
+	GraduationCap,
 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
@@ -87,6 +88,7 @@ import aoLogo from "../assets/ao-logo.png";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 import { useWikiStatus } from "../hooks/useWiki";
+import { isWaiting, useLearningStatus, useProposals } from "../hooks/useSkills";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
@@ -182,11 +184,13 @@ function useSelection() {
 	return {
 		isHome: pathname === "/",
 		isWiki: pathname === "/wiki",
+		isSkills: pathname === "/skills",
 		activeProjectId: params.projectId,
 		activeSessionId: params.sessionId,
 		goHome: () => void navigate({ to: "/" }),
 		goPrs: () => void navigate({ to: "/prs" }),
 		goWiki: () => void navigate({ to: "/wiki" }),
+		goSkills: () => void navigate({ to: "/skills" }),
 		goGlobalSettings: () => void navigate({ to: "/settings" }),
 		goSettings: (projectId: string) => void navigate({ to: "/projects/$projectId/settings", params: { projectId } }),
 		// Search opens the settings two-pane (where the in-settings search field
@@ -340,7 +344,7 @@ export function Sidebar({
             separated from it by a hairline. It is not a project, so it has no
             disclosure triangle and no children. It appears only once a vault
             path is set (Settings › System › Wiki vault). */}
-				<WikiNavItem selection={selection} />
+				<TopDestinations selection={selection} />
 
 				<SidebarGroup className="p-0">
 					{/* Section label (project-sidebar__nav-label) */}
@@ -1333,12 +1337,90 @@ function CopySessionIdButton({ sessionId }: { sessionId: string }) {
 }
 
 /**
+ * The destinations above the Projects section: the Wiki (once a vault is set)
+ * and Skills (once any project learns from sessions, or proposals exist), with
+ * the hairline that makes them a section of their own rather than the first
+ * entries of Projects.
+ */
+function TopDestinations({ selection }: { selection: ReturnType<typeof useSelection> }) {
+	const wiki = useWikiStatus({ poll: false }).data?.configured === true;
+	// An older daemon answers neither route; the row then stays away.
+	const learning = useLearningStatus().data?.projects?.some((p) => p.enabled) ?? false;
+	const proposals = useProposals().data?.proposals ?? [];
+	const skills = learning || proposals.length > 0;
+	if (!wiki && !skills) return null;
+	return (
+		<>
+			{wiki && <WikiNavItem selection={selection} />}
+			{skills && <SkillsNavItem selection={selection} waiting={proposals.filter((p) => isWaiting(p)).length} />}
+			<div className="mx-2 my-3 h-px bg-border group-data-[collapsible=icon]:mx-0 group-data-[collapsible=icon]:w-5" />
+		</>
+	);
+}
+
+/**
+ * The Skills row: where learning's proposals wait for the person. The count
+ * is the proposals waiting for a decision, in the needs-you amber, and moves
+ * onto the glyph in the icon rail like the Wiki's dot.
+ */
+function SkillsNavItem({ selection, waiting }: { selection: ReturnType<typeof useSelection>; waiting: number }) {
+	const { state } = useSidebar();
+	return (
+		<SidebarMenu className="gap-0 pb-0">
+			<SidebarMenuItem>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<SidebarMenuButton
+							aria-label={waiting > 0 ? `Skills, ${waiting} waiting` : "Skills"}
+							isActive={selection.isSkills}
+							onClick={selection.goSkills}
+							className={cn(
+								"h-8 gap-2.5 rounded-md px-2 text-[12.5px] font-semibold",
+								"group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0!",
+								selection.isSkills
+									? "bg-accent-weak text-accent shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]"
+									: "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
+							)}
+						>
+							<span className="relative grid shrink-0 place-items-center">
+								<GraduationCap aria-hidden="true" className="size-[15px]!" />
+								{waiting > 0 && (
+									<span
+										className="absolute -right-1.5 -top-1.5 hidden size-2 rounded-full ring-2 ring-sidebar group-data-[collapsible=icon]:block"
+										style={{ background: "var(--amber)" }}
+									/>
+								)}
+							</span>
+							<span className="min-w-0 flex-1 truncate tracking-[-0.006em] group-data-[collapsible=icon]:hidden">
+								Skills
+							</span>
+							{waiting > 0 && (
+								<span
+									className="shrink-0 rounded-full px-1.5 font-mono text-[10.5px] font-semibold leading-[17px] group-data-[collapsible=icon]:hidden"
+									style={{ color: "var(--amber)", background: "color-mix(in srgb, var(--amber) 14%, transparent)" }}
+								>
+									{waiting}
+								</span>
+							)}
+						</SidebarMenuButton>
+					</TooltipTrigger>
+					<TooltipContent side="right" hidden={state !== "collapsed"}>
+						{waiting > 0 ? `Skills · ${waiting} waiting` : "Skills"}
+					</TooltipContent>
+				</Tooltip>
+			</SidebarMenuItem>
+		</SidebarMenu>
+	);
+}
+
+/**
  * The Wiki row.
  *
  * A destination, not a project: one row, no disclosure triangle, no children.
- * It renders only when a vault path is configured — an unset Wiki is not an
- * empty state to explain in the rail, it is a feature the user has not turned
- * on, and a permanent dead row would be noise for everyone who never will.
+ * TopDestinations shows it only when a vault path is configured: an unset Wiki
+ * is not an empty state to explain in the rail, it is a feature the user has
+ * not turned on, and a permanent dead row would be noise for everyone who never
+ * will.
  *
  * The green dot mirrors the page's agent pill, so the rail says at a glance
  * whether an agent is still sitting in the vault. It collapses into the 48px
@@ -1350,9 +1432,7 @@ function WikiNavItem({ selection }: { selection: ReturnType<typeof useSelection>
 	// No poll here: the row only has to exist. The Wiki page polls while it is
 	// open, and this shares its cache entry, so the dot stays live for free.
 	const status = useWikiStatus({ poll: false }).data;
-	if (status?.configured !== true) return null;
-
-	const running = status.running === true;
+	const running = status?.running === true;
 	return (
 		<>
 			<SidebarMenu className="gap-0 pb-0">
@@ -1398,9 +1478,6 @@ function WikiNavItem({ selection }: { selection: ReturnType<typeof useSelection>
 					</Tooltip>
 				</SidebarMenuItem>
 			</SidebarMenu>
-			{/* The hairline that makes Wiki a section of its own rather than the
-          first entry of Projects. */}
-			<div className="mx-2 my-3 h-px bg-border group-data-[collapsible=icon]:mx-0 group-data-[collapsible=icon]:w-5" />
 		</>
 	);
 }

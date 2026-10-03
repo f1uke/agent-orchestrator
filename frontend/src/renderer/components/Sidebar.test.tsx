@@ -1425,3 +1425,40 @@ describe("Sidebar — the Wiki row", () => {
 		expect(getMock).not.toHaveBeenCalledWith("/api/v1/wiki", expect.anything());
 	});
 });
+
+describe("Sidebar — the Skills row", () => {
+	const skillsRow = (name: RegExp | string = /^Skills/) => screen.queryByRole("button", { name });
+	const routes = (learning: boolean, proposals: unknown[]) =>
+		getMock.mockImplementation((path: string) => {
+			if (path === "/api/v1/learning/status")
+				return Promise.resolve({ data: { projects: [{ project: "p", enabled: learning }] } });
+			if (path === "/api/v1/learning/proposals")
+				return Promise.resolve({ data: { proposals, run: { running: false } } });
+			return Promise.resolve({ data: undefined, error: undefined });
+		});
+
+	it("shows the count of proposals waiting, not the snoozed or decided ones", async () => {
+		const later = new Date(Date.now() + 86_400_000).toISOString();
+		routes(true, [
+			{ id: 1, status: "pending" },
+			{ id: 2, status: "pending" },
+			{ id: 3, status: "pending", snoozedUntil: later },
+			{ id: 4, status: "applied" },
+		]);
+		renderSidebar();
+		expect(await screen.findByRole("button", { name: "Skills, 2 waiting" })).toBeInTheDocument();
+	});
+
+	it("is there with no count once a project learns", async () => {
+		routes(true, []);
+		renderSidebar();
+		expect(await screen.findByRole("button", { name: "Skills" })).toBeInTheDocument();
+	});
+
+	it("stays away while no project learns and nothing was ever proposed", async () => {
+		routes(false, []);
+		renderSidebar();
+		await screen.findByText("Project One");
+		expect(skillsRow()).not.toBeInTheDocument();
+	});
+});

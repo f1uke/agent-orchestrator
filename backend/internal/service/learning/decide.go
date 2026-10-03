@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learndecide"
@@ -121,4 +123,49 @@ func (s *Service) Proposal(ctx context.Context, id int64) (domain.LearnProposal,
 		return p, ev, nil
 	}
 	return domain.LearnProposal{}, nil, fmt.Errorf("%w: %d", ErrUnknownProposal, id)
+}
+
+// RuleRef is a standing rule a proposal names, as the inbox shows it.
+type RuleRef struct {
+	ID        string
+	Text      string
+	Source    string
+	Heading   string
+	Protected bool
+}
+
+// ProposalRules resolves the rules a proposal names - its verdicts and, for a
+// conflict card, the rule it contradicts - to their text and source. A rule
+// that left the corpus since is left out.
+func (s *Service) ProposalRules(ctx context.Context, p domain.LearnProposal) ([]RuleRef, error) {
+	want := map[string]bool{}
+	for _, v := range p.RuleVerdicts {
+		want[v.RuleID] = true
+	}
+	if id, ok := strings.CutPrefix(p.TargetPath, "rule:"); ok {
+		want[id] = true
+	}
+	if len(want) == 0 || s.rulesStore == nil {
+		return nil, nil
+	}
+	var out []RuleRef
+	protected, err := s.rulesStore.ListLearnProtectedRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range protected {
+		if id := "protected-" + strconv.FormatInt(r.ID, 10); want[id] {
+			out = append(out, RuleRef{ID: id, Text: r.Text, Source: "protected rule", Protected: true})
+		}
+	}
+	corpus, err := s.corpus(ctx, p.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range corpus {
+		if want[r.ID] {
+			out = append(out, RuleRef{ID: r.ID, Text: r.Text, Source: r.SourceLabel, Heading: r.Heading})
+		}
+	}
+	return out, nil
 }

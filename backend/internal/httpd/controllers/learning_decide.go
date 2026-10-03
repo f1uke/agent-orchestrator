@@ -22,6 +22,7 @@ type LearningDecideService interface {
 	DecideProgress() (learndecide.Progress, error)
 	Proposals(ctx context.Context, project domain.ProjectID, all bool) ([]domain.LearnProposal, error)
 	Proposal(ctx context.Context, id int64) (domain.LearnProposal, []domain.LearnDraft, error)
+	ProposalRules(ctx context.Context, p domain.LearnProposal) ([]learning.RuleRef, error)
 	Approve(ctx context.Context, id int64, content string, resolution domain.LearnResolution) (domain.LearnProposal, error)
 	Reject(ctx context.Context, id int64, reason string) (domain.LearnProposal, error)
 	Snooze(ctx context.Context, id int64, until time.Time) (domain.LearnProposal, error)
@@ -141,6 +142,17 @@ type LearningProposalIDParam struct {
 type LearningProposalResponse struct {
 	Proposal LearningProposalDTO `json:"proposal"`
 	Evidence []LearningDraftDTO  `json:"evidence"`
+	// Rules are the standing rules the proposal names, resolved to text.
+	Rules []LearningRuleRefDTO `json:"rules"`
+}
+
+// LearningRuleRefDTO is a standing rule a proposal names.
+type LearningRuleRefDTO struct {
+	ID        string `json:"id"`
+	Text      string `json:"text"`
+	Source    string `json:"source"`
+	Heading   string `json:"heading,omitempty"`
+	Protected bool   `json:"protected,omitempty"`
 }
 
 // Register mounts the decide routes.
@@ -240,9 +252,16 @@ func (c *LearningDecideController) get(w http.ResponseWriter, r *http.Request) {
 	if writeDecideError(w, r, "GET", path, err) {
 		return
 	}
-	out := LearningProposalResponse{Proposal: proposalDTO(p), Evidence: make([]LearningDraftDTO, 0, len(ev))}
+	refs, err := c.Svc.ProposalRules(r.Context(), p)
+	if writeDecideError(w, r, "GET", path, err) {
+		return
+	}
+	out := LearningProposalResponse{Proposal: proposalDTO(p), Evidence: make([]LearningDraftDTO, 0, len(ev)), Rules: make([]LearningRuleRefDTO, 0, len(refs))}
 	for _, d := range ev {
 		out.Evidence = append(out.Evidence, draftDTO(d))
+	}
+	for _, ref := range refs {
+		out.Rules = append(out.Rules, LearningRuleRefDTO{ID: ref.ID, Text: ref.Text, Source: ref.Source, Heading: ref.Heading, Protected: ref.Protected})
 	}
 	envelope.WriteJSON(w, http.StatusOK, out)
 }

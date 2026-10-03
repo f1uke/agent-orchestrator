@@ -8905,9 +8905,14 @@ components:
           type: array
         proposal:
           $ref: '#/components/schemas/ControllersLearningProposalDTO'
+        rules:
+          items:
+            $ref: '#/components/schemas/ControllersLearningRuleRefDTO'
+          type: array
       required:
       - proposal
       - evidence
+      - rules
       type: object
     ControllersLearningProtectedRuleDTO:
       properties:
@@ -8990,6 +8995,23 @@ components:
       - sourceLabel
       - sourceKind
       - scope
+      type: object
+    ControllersLearningRuleRefDTO:
+      properties:
+        heading:
+          type: string
+        id:
+          type: string
+        protected:
+          type: boolean
+        source:
+          type: string
+        text:
+          type: string
+      required:
+      - id
+      - text
+      - source
       type: object
     ControllersLearningRuleSourceDTO:
       properties:
