@@ -552,7 +552,11 @@ func (c *SimScreenController) paste(
 		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture")
 		return
 	}
-	result, err := simpaste.Run(r.Context(), holder, driver, pb, udid, text)
+	// Command-V, and the keyboard left as it is: the person at the Device tab
+	// is typing on the Mac's keyboard, which IS a hardware keyboard to the
+	// device, and every key they forward minimizes the software keyboard the
+	// same way.
+	result, err := simpaste.Run(r.Context(), holder, driver, simpaste.KeyPaster{Driver: driver}, pb, udid, text)
 	if err != nil {
 		// Two different answers, kept apart on purpose: nothing arrived, or
 		// something may have arrived and could not be shown. The second must

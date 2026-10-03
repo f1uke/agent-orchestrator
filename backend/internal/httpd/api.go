@@ -175,7 +175,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		simVideo:      &controllers.SimVideoController{Svc: deps.SimVideo},
 		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver},
 		simHierarchy:  &controllers.SimHierarchyController{Runner: deps.SimRunner},
-		simType:       &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim},
+		simType:       &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim, Screen: screenProvider(deps.SimScreen)},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},

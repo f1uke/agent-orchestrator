@@ -32,11 +32,15 @@ import (
 type SimTypeController struct {
 	Runner SimRunner
 	Leases simsvc.Manager
+	// Screen is the device's pasteboard and touch driver, for a paste. Nil
+	// refuses /paste.
+	Screen SimScreenProvider
 }
 
-// Register mounts the route.
+// Register mounts the routes.
 func (c *SimTypeController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/sim-devices/{udid}/type", c.typeText)
+	r.Post("/sessions/{sessionId}/sim-devices/{udid}/paste", c.paste)
 }
 
 // SimTypeInput is the body of POST .../sim-devices/{udid}/type.
@@ -139,6 +143,120 @@ func (c *SimTypeController) typeText(w http.ResponseWriter, r *http.Request) {
 		KeyboardSwitchedTo: result.KeyboardSwitchedTo,
 		KeyboardRestored:   result.KeyboardRestored,
 	})
+}
+
+// SimPasteInput is the body of POST .../sim-devices/{udid}/paste.
+type SimPasteInput struct {
+	Text   string `json:"text" description:"The text to put on the device's pasteboard and paste into the focused field."`
+	WaitMs int    `json:"waitMs,omitempty" description:"How long to wait for a runner that is still starting, in milliseconds, before taking the gesture hold. Capped at 15000."`
+}
+
+// SimPasteResponse is a paste that was proven on screen.
+type SimPasteResponse struct {
+	UDID     string         `json:"udid"`
+	App      string         `json:"app,omitempty" description:"Bundle id of the application holding the field."`
+	Landed   SimTypeLanding `json:"landed"`
+	Detail   string         `json:"detail" description:"Where the text went, in the words the CLI prints."`
+	Via      string         `json:"via" enum:"edit-menu" description:"How the paste was performed: edit-menu is the field held and Paste tapped in its edit menu - touches, no key press."`
+	MenuItem string         `json:"menuItem,omitempty" description:"The edit menu item tapped, in the device's language."`
+	Warning  string         `json:"warning,omitempty" description:"What the runner said while pasting, when it complained about text the screen shows did arrive."`
+	// The pasteboard is readable by every app on the device, and the payload
+	// is a password often enough that a restore that failed is said.
+	PasteboardRestored bool   `json:"pasteboardRestored" description:"The device's pasteboard was put back to what it held before."`
+	PasteboardError    string `json:"pasteboardError,omitempty" description:"Why it could not be, when it could not: the text is still on the device's pasteboard."`
+}
+
+// paste puts text on the device's pasteboard and pastes it through the edit
+// menu, the way a person does: the field held and Paste tapped, with the
+// bridge's touches, found through the runner's reads. Never Command-V, whose
+// hardware key press leaves the software keyboard minimized for every field
+// after it. It is
+// `ao sim type`'s pasteboard route, for what XCTest would type wrongly (a
+// secure field takes only what the keyboard on screen can type) and for
+// `--paste`. A runner that is not ready is SIM_RUNNER_NOT_READY, a daemon
+// that cannot touch the device SIM_DRIVER_UNAVAILABLE, and a field with no
+// Paste in its menu SIM_PASTE_NO_ITEM: nothing was pasted, and the CLI falls
+// back to Command-V and says so.
+func (c *SimTypeController) paste(w http.ResponseWriter, r *http.Request) {
+	if c.Leases == nil || c.Screen == nil || c.Screen.Pasteboard() == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/sim-devices/{udid}/paste")
+		return
+	}
+	var in SimPasteInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	if in.Text == "" {
+		envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_INVALID", "nothing to paste", nil)
+		return
+	}
+	if c.Runner == nil {
+		writeSimRunnerNotReady(w, r, SimRunnerView{State: "unavailable",
+			Reason: "this daemon cannot run the XCTest runner (it needs macOS with Xcode)"})
+		return
+	}
+	udid := chi.URLParam(r, "udid")
+	sessionID := chi.URLParam(r, "sessionId")
+	wait := min(time.Duration(max(in.WaitMs, 0))*time.Millisecond, maxTypeWait)
+	if status, err := c.Runner.Await(r.Context(), udid, wait); err != nil {
+		writeSimRunnerNotReady(w, r, SimRunnerView{State: string(status.State), Reason: status.Reason})
+		return
+	}
+
+	// Recorded as a "type" step, as every route into a field is: a recording
+	// captures what the app saw, not the mechanism that delivered it.
+	holder := &leaseHolder{leases: c.Leases, sessionID: domain.SessionID(sessionID),
+		intent: simsvc.GestureIntent{Kind: "type", Text: in.Text}}
+	driver, err := c.Screen.Driver(r.Context())
+	if err != nil {
+		// Nothing was touched: the CLI falls back to its own Command-V.
+		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "not_implemented", "SIM_DRIVER_UNAVAILABLE", err.Error(), nil)
+		return
+	}
+	reader := runnerReader{c.Runner}
+	result, err := simpaste.Run(r.Context(), holder, reader,
+		simpaste.MenuPaster{Runner: c.Runner, Reader: reader, Driver: driver}, c.Screen.Pasteboard(), udid, in.Text)
+	if err != nil {
+		writeSimPasteError(w, r, err)
+		return
+	}
+	response := SimPasteResponse{
+		UDID: udid,
+		App:  result.Pasted.App,
+		Landed: SimTypeLanding{Field: result.Landing.Field, Path: result.Landing.Path,
+			Shown: result.Landing.Shown, Evidence: string(result.Landing.How)},
+		Detail:             result.Landing.String(),
+		Via:                string(result.Pasted.Via),
+		MenuItem:           result.Pasted.MenuItem,
+		Warning:            result.Warning,
+		PasteboardRestored: result.Restored,
+	}
+	if result.RestoreErr != nil {
+		response.PasteboardError = result.RestoreErr.Error()
+	}
+	envelope.WriteJSON(w, http.StatusOK, response)
+}
+
+// writeSimPasteError keeps apart, as writeSimTypeError does, nothing pasted
+// (another route may be taken, or the field tapped) from something that may
+// have been (read it back, never paste again).
+func writeSimPasteError(w http.ResponseWriter, r *http.Request, err error) {
+	var notPasted *simpaste.NotPastedError
+	if errors.As(err, &notPasted) {
+		switch notPasted.Code {
+		case simpaste.NotPastedNoFocus:
+			envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_TYPE_NO_FOCUS",
+				err.Error(), nil)
+		case simpaste.NotPastedNoItem:
+			envelope.WriteAPIError(w, r, http.StatusUnprocessableEntity, "unprocessable", "SIM_PASTE_NO_ITEM",
+				err.Error(), map[string]any{"menu": notPasted.Menu})
+		default:
+			writeSimRunnerNotReady(w, r, SimRunnerView{State: string(simrunner.StateFailed), Reason: err.Error()})
+		}
+		return
+	}
+	writeSimTypeError(w, r, err)
 }
 
 // writeSimRunnerNotReady is a type that never reached the runner. Nothing was

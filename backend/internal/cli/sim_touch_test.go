@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -258,8 +259,13 @@ func TestSimType_RawKeysSendsAnywayAndPromisesKeysNotCharacters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("--raw-keys must send anyway: %v\nstderr=%s", err, errOut)
 	}
-	if len(driver.calls()) != 1 {
-		t.Fatalf("driver saw %d gestures, want 1", len(driver.calls()))
+	// The key presses, then - apart from them - the toggle that shows the
+	// software keyboard they minimized.
+	if calls := driver.calls(); len(calls) != 2 || !reflect.DeepEqual(calls[1], simbridge.ShowKeyboard()) {
+		t.Fatalf("driver saw %+v, want the keys and then the keyboard toggle", calls)
+	}
+	if !strings.Contains(out, "Keyboard: the key presses minimized the on-screen keyboard") {
+		t.Errorf("output must say what the key presses did to the keyboard:\n%s", out)
 	}
 	// It must not claim the characters landed - that claim is the bug.
 	if strings.Contains(out, "Typed 7 characters") {
@@ -364,11 +370,13 @@ func pasteDeps(t *testing.T, driver *fakeSimDriver, keyboard string, landed stri
 		}
 		return inner(ctx, name, args...)
 	}
-	// Before and after the paste: the focused field gains the text.
+	// Before and after the paste: the focused field gains the text. Every
+	// read after the first is "after" - the Command-V route also reads the
+	// screen to look at the keyboard it minimized.
 	driver.snapshotQueue = []simbridge.Snapshot{
 		{Elements: []simbridge.Element{{Path: "0.1", Value: ""}}},
-		{Elements: []simbridge.Element{{Path: "0.1", Value: landed}}},
 	}
+	driver.snapshot = simbridge.Snapshot{Elements: []simbridge.Element{{Path: "0.1", Value: landed}}}
 	return deps, daemon, &pasteboard
 }
 

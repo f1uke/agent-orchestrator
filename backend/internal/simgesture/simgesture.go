@@ -70,6 +70,21 @@ type Gesture struct {
 	// where a recovery lift has to land. A gesture that holds two fingers says
 	// where they are in its own events instead - see simbridge.Recover.
 	Last simbridge.Point
+	// ShowKeyboard brings the software keyboard back after events that press
+	// hardware keys, which minimize it for every field after (see
+	// simbridge.ShowKeyboard), under the same hold; Result.Keyboard says what
+	// came of it. The Device tab
+	// leaves it off: a person typing on the Mac's keyboard IS a hardware
+	// keyboard, and a minimized software keyboard is what one looks like.
+	ShowKeyboard bool
+}
+
+// Result is what a gesture that ran did besides its own events.
+type Result struct {
+	simbridge.PerformResult
+	// Keyboard is set when the gesture pressed keys that minimize the
+	// software keyboard and ShowKeyboard brought it back.
+	Keyboard *Keyboard
 }
 
 // FailedError is a gesture that did not complete, and what was done about it.
@@ -101,11 +116,15 @@ const ScreenRead = 10 * time.Second
 // Run performs one gesture under a hold. Nothing reaches the device unless the
 // hold was granted, and the hold is given back on every path out - including
 // one where the gesture failed and had to be recovered from.
-func Run(ctx context.Context, holder Holder, driver simbridge.Driver, udid string, gesture Gesture) (simbridge.PerformResult, error) {
+func Run(ctx context.Context, holder Holder, driver simbridge.Driver, udid string, gesture Gesture) (Result, error) {
 	// The hold is sized from the gesture itself, not from a flag: a hold that
 	// lapsed mid-gesture would be exactly the window another caller needs to
 	// take the finger while this one is still touching the screen.
-	_, result, err := run(ctx, holder, driver, udid, simbridge.Duration(gesture.Events)+HoldSlack,
+	ttl := simbridge.Duration(gesture.Events) + HoldSlack
+	if gesture.ShowKeyboard {
+		ttl += KeyboardCheck
+	}
+	_, result, err := run(ctx, holder, driver, udid, ttl,
 		func(context.Context) (Gesture, error) { return gesture, nil })
 	return result, err
 }
@@ -122,16 +141,17 @@ func RunComposed(
 	ctx context.Context, holder Holder, driver simbridge.Driver, udid string,
 	compose func(context.Context) (Gesture, error),
 ) (Gesture, simbridge.PerformResult, error) {
-	return run(ctx, holder, driver, udid, ScreenRead+HoldSlack, compose)
+	gesture, result, err := run(ctx, holder, driver, udid, ScreenRead+HoldSlack, compose)
+	return gesture, result.PerformResult, err
 }
 
 func run(
 	ctx context.Context, holder Holder, driver simbridge.Driver, udid string,
 	ttl time.Duration, compose func(context.Context) (Gesture, error),
-) (Gesture, simbridge.PerformResult, error) {
+) (Gesture, Result, error) {
 	token, err := holder.Acquire(ctx, udid, ttl)
 	if err != nil {
-		return Gesture{}, simbridge.PerformResult{}, err
+		return Gesture{}, Result{}, err
 	}
 	// performed starts false and is only ever raised on the one path where the
 	// gesture actually reached the device: driver.Perform returning cleanly. A
@@ -147,12 +167,16 @@ func run(
 	if err != nil {
 		// Nothing was sent: composing is what decides whether there is anything
 		// to send at all.
-		return gesture, simbridge.PerformResult{}, err
+		return gesture, Result{}, err
 	}
 
-	result, performErr := driver.Perform(ctx, udid, gesture.Events)
+	performResult, performErr := driver.Perform(ctx, udid, gesture.Events)
 	if performErr == nil {
 		performed = true
+		result := Result{PerformResult: performResult}
+		if gesture.ShowKeyboard {
+			result.Keyboard = ShowKeyboardAfter(ctx, driver, udid, gesture.Events)
+		}
 		return gesture, result, nil
 	}
 	if errors.Is(performErr, simbridge.ErrNotSent) {
@@ -161,7 +185,7 @@ func run(
 		// about. Recovering anyway would answer a device that was never
 		// touched with "it may have a finger held down", which is the same
 		// class of untruth - just pointing the other way.
-		return gesture, simbridge.PerformResult{}, performErr
+		return gesture, Result{}, performErr
 	}
 
 	failed := &FailedError{Action: gesture.Action, Cause: performErr}
@@ -170,7 +194,7 @@ func run(
 	// simbridge composes the release from what the events actually did.
 	release := simbridge.Recover(gesture.Events, gesture.Last)
 	if len(release) == 0 {
-		return gesture, simbridge.PerformResult{}, failed
+		return gesture, Result{}, failed
 	}
 	// A release with nothing held is harmless; a finger left down wedges the
 	// device until it is rebooted, so the lift is always attempted and its
@@ -179,5 +203,5 @@ func run(
 	if _, liftErr := driver.Perform(ctx, udid, release); liftErr != nil {
 		failed.LiftErr = liftErr
 	}
-	return gesture, simbridge.PerformResult{}, failed
+	return gesture, Result{}, failed
 }
