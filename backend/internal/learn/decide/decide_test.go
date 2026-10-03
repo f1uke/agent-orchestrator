@@ -168,7 +168,10 @@ func TestPrepare_ScopeTargetsAndContent(t *testing.T) {
 	always := draft(7, "solo:s1", 0.9, domain.LearnAboutAgentPractice)
 	always.Quote = "always paste passwords"
 	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice), always)
-	global := func(p Proposed, ev string) Proposed { p.Scope, p.Evidence, p.Confidence = "global", []string{ev}, 1; return p }
+	global := func(p Proposed, ev string) Proposed {
+		p.Scope, p.Evidence, p.Confidence = "global", []string{ev}, 1
+		return p
+	}
 
 	got, _ := Prepare(env, []Proposed{
 		global(Proposed{Action: "create_skill", SkillName: "verify-on-device", Content: goodSkill}, "d1"),

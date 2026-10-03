@@ -196,9 +196,7 @@ func Build(c Context) (Shaped, error) {
 		for _, r := range scored {
 			in.Rules = append(in.Rules, ruleIn{ID: r.ID, Text: r.Text, Source: r.SourceLabel, Heading: r.Heading})
 		}
-		for _, p := range protected {
-			in.Rules = append(in.Rules, p)
-		}
+		in.Rules = append(in.Rules, protected...)
 		in.Skills = in.Skills[:0]
 		for _, s := range index {
 			in.Skills = append(in.Skills, skillIn{Name: s.Name, Description: clip(s.Description, descriptionCap), Source: string(s.Source), Scope: s.Scope, Path: s.Path})
@@ -259,8 +257,9 @@ func relatedDraftsFor(c Context, q string) []domain.LearnDraft {
 		docs = append(docs, rules.Doc{ID: id, Text: d.Statement + " " + d.AppliesWhen})
 		byID[id] = d
 	}
-	var out []domain.LearnDraft
-	for _, h := range rules.NewIndex(docs).Search(q, relatedDrafts) {
+	hits := rules.NewIndex(docs).Search(q, relatedDrafts)
+	out := make([]domain.LearnDraft, 0, len(hits))
+	for _, h := range hits {
 		out = append(out, byID[h.ID])
 	}
 	return out
@@ -284,8 +283,9 @@ func bestSkills(all []skills.Skill, q string, n int) []skills.Skill {
 	for i, s := range all {
 		docs[i] = rules.Doc{ID: strconv.Itoa(i), Text: strings.ReplaceAll(s.Name, "-", " ") + " " + s.Description}
 	}
-	var out []skills.Skill
-	for _, h := range rules.NewIndex(docs).Search(q, n) {
+	hits := rules.NewIndex(docs).Search(q, n)
+	out := make([]skills.Skill, 0, len(hits))
+	for _, h := range hits {
 		i, _ := strconv.Atoi(h.ID)
 		out = append(out, all[i])
 	}

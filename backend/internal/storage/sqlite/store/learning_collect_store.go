@@ -313,19 +313,7 @@ func (s *Store) ListLearnDrafts(ctx context.Context, projectID domain.ProjectID,
 	}
 	out := make([]domain.LearnDraft, 0, len(rows))
 	for _, r := range rows {
-		d := domain.LearnDraft{
-			ID: r.ID, ProjectID: domain.ProjectID(r.ProjectID), SessionID: domain.SessionID(r.SessionID),
-			TaskKey: r.TaskKey, JobID: r.JobID, Kind: domain.LearnDraftKind(r.Kind), Statement: r.Statement,
-			AppliesWhen: r.AppliesWhen, ScopeHint: r.ScopeHint, Confidence: r.Confidence, About: domain.LearnDraftAbout(r.About), Quote: r.Quote,
-			AnchorExcerptID: r.AnchorExcerptID, AgentBefore: r.AgentBefore, Weak: r.Weak != 0,
-			SupersedesID: r.SupersedesID, Status: domain.LearnDraftStatus(r.Status), CreatedAt: r.CreatedAt,
-			AnchorSourceClass: domain.LearnSourceClass(r.AnchorSourceClass.String),
-		}
-		if r.AnchorTurnAt.Valid {
-			d.AnchorTurnAt = r.AnchorTurnAt.Time
-		}
-		_ = json.Unmarshal([]byte(r.EvidenceJson), &d.EvidenceExcerptIDs)
-		out = append(out, d)
+		out = append(out, draftFromRow(r))
 	}
 	return out, nil
 }
@@ -347,4 +335,22 @@ func (s *Store) LearnCollectCounts(ctx context.Context, projectID domain.Project
 		out.Drafts[domain.LearnDraftStatus(r.Status)] = int(r.Drafts)
 	}
 	return out, nil
+}
+
+// draftFromRow maps a draft row (the by-project and all-projects queries
+// return the same columns).
+func draftFromRow(r gen.ListLearnDraftsByProjectRow) domain.LearnDraft {
+	d := domain.LearnDraft{
+		ID: r.ID, ProjectID: domain.ProjectID(r.ProjectID), SessionID: domain.SessionID(r.SessionID),
+		TaskKey: r.TaskKey, JobID: r.JobID, Kind: domain.LearnDraftKind(r.Kind), Statement: r.Statement,
+		AppliesWhen: r.AppliesWhen, ScopeHint: r.ScopeHint, Confidence: r.Confidence, About: domain.LearnDraftAbout(r.About), Quote: r.Quote,
+		AnchorExcerptID: r.AnchorExcerptID, AgentBefore: r.AgentBefore, Weak: r.Weak != 0,
+		SupersedesID: r.SupersedesID, Status: domain.LearnDraftStatus(r.Status), CreatedAt: r.CreatedAt,
+		AnchorSourceClass: domain.LearnSourceClass(r.AnchorSourceClass.String),
+	}
+	if r.AnchorTurnAt.Valid {
+		d.AnchorTurnAt = r.AnchorTurnAt.Time
+	}
+	_ = json.Unmarshal([]byte(r.EvidenceJson), &d.EvidenceExcerptIDs)
+	return d
 }

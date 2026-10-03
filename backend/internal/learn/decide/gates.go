@@ -361,25 +361,25 @@ func (env Env) confined(path string, roots ...string) string {
 	if resolve == nil {
 		resolve = filepath.EvalSymlinks
 	}
-	real, err := resolve(path)
+	resolved, err := resolve(path)
 	if err != nil {
 		// A file that does not exist yet resolves through its directory.
 		dir, derr := resolve(filepath.Dir(path))
 		if derr != nil {
 			return ""
 		}
-		real = filepath.Join(dir, filepath.Base(path))
+		resolved = filepath.Join(dir, filepath.Base(path))
 	}
 	for _, r := range roots {
 		rr, err := resolve(r)
 		if err != nil {
 			rr = r
 		}
-		if rel, err := filepath.Rel(rr, real); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if rel, err := filepath.Rel(rr, resolved); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return ""
 		}
 	}
-	return "the target resolves to " + real + ", outside the directories learning may change"
+	return "the target resolves to " + resolved + ", outside the directories learning may change"
 }
 
 func (env Env) expand(p string) string {
@@ -489,10 +489,10 @@ func union(a, b []int64) []int64 {
 	return out
 }
 
-// added is the text new adds to old: the lines the diff marks +.
-func added(old, new string) string {
+// added is the text next adds to old: the lines the diff marks +.
+func added(old, next string) string {
 	var b strings.Builder
-	for _, o := range lcsOps(splitLines(old), splitLines(new)) {
+	for _, o := range lcsOps(splitLines(old), splitLines(next)) {
 		if o.kind == '+' {
 			b.WriteString(o.text)
 		}

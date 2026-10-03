@@ -378,7 +378,7 @@ func (o *Observer) readyTasks(ctx context.Context, sh shared, opts RunOpts) []ta
 				t.prs = append(t.prs, "#"+strconv.Itoa(pr.Number)+" "+pr.URL)
 			}
 		}
-		t.plans = o.plans(string(t.project.ID), branches)
+		t.plans = o.plans(t.project.ID, branches)
 		out = append(out, *t)
 	}
 	return out
@@ -401,7 +401,7 @@ func (o *Observer) sessionFacts(ctx context.Context, t *task) ([]decide.SessionF
 			recs = append(recs, r)
 		}
 	}
-	var facts []decide.SessionFacts
+	facts := make([]decide.SessionFacts, 0, len(recs))
 	var branches []string
 	for _, r := range recs {
 		prs, _ := o.store.ListPRsBySession(ctx, r.ID)

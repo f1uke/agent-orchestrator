@@ -18,19 +18,7 @@ func (s *Store) ListAllLearnDrafts(ctx context.Context) ([]domain.LearnDraft, er
 	}
 	out := make([]domain.LearnDraft, 0, len(rows))
 	for _, r := range rows {
-		d := domain.LearnDraft{
-			ID: r.ID, ProjectID: domain.ProjectID(r.ProjectID), SessionID: domain.SessionID(r.SessionID),
-			TaskKey: r.TaskKey, JobID: r.JobID, Kind: domain.LearnDraftKind(r.Kind), Statement: r.Statement,
-			AppliesWhen: r.AppliesWhen, ScopeHint: r.ScopeHint, Confidence: r.Confidence, About: domain.LearnDraftAbout(r.About),
-			Quote: r.Quote, AnchorExcerptID: r.AnchorExcerptID, AgentBefore: r.AgentBefore, Weak: r.Weak != 0,
-			SupersedesID: r.SupersedesID, Status: domain.LearnDraftStatus(r.Status), CreatedAt: r.CreatedAt,
-			AnchorSourceClass: domain.LearnSourceClass(r.AnchorSourceClass.String),
-		}
-		if r.AnchorTurnAt.Valid {
-			d.AnchorTurnAt = r.AnchorTurnAt.Time
-		}
-		_ = json.Unmarshal([]byte(r.EvidenceJson), &d.EvidenceExcerptIDs)
-		out = append(out, d)
+		out = append(out, draftFromRow(gen.ListLearnDraftsByProjectRow(r)))
 	}
 	return out, nil
 }

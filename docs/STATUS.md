@@ -67,7 +67,10 @@ surface (`npm run sqlc`, `npm run api`).
   The standing-rules corpus splits what agents are already told (CLAUDE.md,
   AGENTS.md, skills, AO's standing prompt, the knowledge INDEX) into statements,
   cached by content hash and searchable with BM25; the human pins protected rules
-  with forbidden patterns (`ao learn rules`).
+  with forbidden patterns (`ao learn rules`). Decide turns a finished task's drafts
+  into proposals (skill create/update, rule-file additions, conflict cards) with an
+  AO-computed diff, checked by an adversarial second call and code gates
+  (`ao learn decide|proposals`); nothing is applied yet.
 
 ### Frontend (Electron + React)
 

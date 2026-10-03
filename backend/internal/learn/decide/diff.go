@@ -11,11 +11,11 @@ const diffContext = 3
 // Diff is a unified diff of old to new for path, computed by AO so the human
 // reviews exactly what would be written - never a model's account of it. It
 // is "" when nothing changes.
-func Diff(path, old, new string) string {
-	if old == new {
+func Diff(path, old, next string) string {
+	if old == next {
 		return ""
 	}
-	a, b := splitLines(old), splitLines(new)
+	a, b := splitLines(old), splitLines(next)
 	ops := lcsOps(a, b)
 	var out strings.Builder
 	fromName := "a/" + strings.TrimPrefix(path, "/")
