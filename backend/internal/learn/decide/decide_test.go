@@ -270,7 +270,7 @@ func TestAddProjectRule_BuildsTheWorkingRulesSkillAndNeverLosesLines(t *testing.
 	rule := func(ev, text string) Proposed {
 		return Proposed{Action: "add_project_rule", Content: text, Scope: "project", Title: text, Evidence: []string{ev}, Confidence: 0.8}
 	}
-	got, _ := Prepare(env, []Proposed{rule("d1", "- Open finished diagrams in Chrome."), rule("d2", "- Hand finished work to QA.")})
+	got, _ := Prepare(env, []Proposed{rule("d1", "- Open finished diagrams in Chrome."), rule("d2", "Hand finished work to QA.")})
 	if len(got) != 1 || got[0].Drop != "" {
 		t.Fatalf("one task's project rules are one proposal: %+v", got)
 	}

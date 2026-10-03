@@ -399,12 +399,25 @@ func (env Env) addProjectRule(c *Candidate, p Proposed) string {
 	}
 	c.base, c.start = old, start
 	c.Proposal.BaseSHA256 = sha(old)
-	c.inserts = []insert{{workingRulesHeading(env.ProjectID), text}}
+	c.inserts = []insert{{workingRulesHeading(env.ProjectID), bullets(text)}}
 	c.render()
 	if _, err := skills.Check(c.Proposal.NewContent); err != nil {
 		return "skill file: " + err.Error()
 	}
 	return env.contentGates(c)
+}
+
+// bullets makes every non-empty line a list item, so a working-rules skill
+// stays one rule per line whoever wrote it.
+func bullets(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if t != "" && !strings.HasPrefix(t, "- ") && !strings.HasPrefix(t, "* ") {
+			lines[i] = "- " + t
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // WorkingRulesSkill is the name of a project's learned working-rules skill.
