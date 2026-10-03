@@ -39,9 +39,7 @@ func Default() Settings {
 
 // Validate rejects a path that can only be a mistake. The rules are the
 // project override's, so the two spellings of this setting cannot drift.
-func (s Settings) Validate() error {
-	return domain.SimTrustConfig{CAFiles: s.CAFiles}.Validate()
-}
+func (s Settings) Validate() error { return domain.ValidateCAFiles("caFiles", s.CAFiles) }
 
 // Store is a mutex-guarded, file-backed Settings holder, modeled on
 // responselang.

@@ -395,15 +395,20 @@ type SimTrustConfig struct {
 // Validate rejects a path that cannot name a file on this Mac. A relative path
 // would resolve against whatever directory the daemon happens to run in, which
 // is a CA that is quietly never found.
-func (c SimTrustConfig) Validate() error {
-	for i, path := range c.CAFiles {
+func (c SimTrustConfig) Validate() error { return ValidateCAFiles("simTrust.caFiles", c.CAFiles) }
+
+// ValidateCAFiles holds the path rules for both spellings of the root-CA
+// setting - this per-project override and the global one - so they cannot
+// drift. field names the list the way its own surface spells it.
+func ValidateCAFiles(field string, files []string) error {
+	for i, path := range files {
 		switch {
 		case path == "":
-			return fmt.Errorf("simTrust.caFiles[%d]: empty path", i)
+			return fmt.Errorf("%s[%d]: empty path", field, i)
 		case strings.TrimSpace(path) != path:
-			return fmt.Errorf("simTrust.caFiles[%d]: %q has surrounding whitespace", i, path)
+			return fmt.Errorf("%s[%d]: %q has surrounding whitespace", field, i, path)
 		case !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/"):
-			return fmt.Errorf("simTrust.caFiles[%d]: %q must be absolute or start with ~/", i, path)
+			return fmt.Errorf("%s[%d]: %q must be absolute or start with ~/", field, i, path)
 		}
 	}
 	return nil
