@@ -199,7 +199,8 @@ type ListLearningDraftsResponse struct {
 type LearningSettingsDTO struct {
 	CollectModel   string  `json:"collectModel"`
 	CollectEffort  string  `json:"collectEffort" enum:"low,medium,high,xhigh,max"`
-	DailyBudgetUSD float64 `json:"dailyBudgetUsd" description:"The background collect stops for the rest of the local day at this spend; 0 pauses it."`
+	RulesModel     string  `json:"rulesModel,omitempty" description:"Model that splits the standing rules into statements. Empty on a write keeps the current one."`
+	DailyBudgetUSD float64 `json:"dailyBudgetUsd" description:"The background model runs (collect and rules) stop for the rest of the local day at this spend; 0 pauses them."`
 }
 
 // Register mounts the learning routes.
@@ -301,7 +302,7 @@ func (c *LearningController) getSettings(w http.ResponseWriter, r *http.Request)
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, LearningSettingsDTO{CollectModel: s.CollectModel, CollectEffort: s.CollectEffort, DailyBudgetUSD: s.DailyBudgetUSD})
+	envelope.WriteJSON(w, http.StatusOK, LearningSettingsDTO{CollectModel: s.CollectModel, CollectEffort: s.CollectEffort, RulesModel: s.RulesModel, DailyBudgetUSD: s.DailyBudgetUSD})
 }
 
 func (c *LearningController) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -314,7 +315,14 @@ func (c *LearningController) putSettings(w http.ResponseWriter, r *http.Request)
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
-	next := learnsettings.Settings{CollectModel: in.CollectModel, CollectEffort: in.CollectEffort, DailyBudgetUSD: in.DailyBudgetUSD}
+	next := learnsettings.Settings{CollectModel: in.CollectModel, CollectEffort: in.CollectEffort, RulesModel: in.RulesModel, DailyBudgetUSD: in.DailyBudgetUSD}
+	if next.RulesModel == "" {
+		// A client from before rulesModel existed keeps the current one.
+		if cur, err := c.Svc.Settings(); err == nil {
+			next.RulesModel = cur.RulesModel
+		}
+		in.RulesModel = next.RulesModel
+	}
 	err := c.Svc.SetSettings(next)
 	switch {
 	case errors.Is(err, learning.ErrCollectUnavailable):

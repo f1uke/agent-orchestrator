@@ -448,6 +448,9 @@ func Run() error {
 	// Learning collect: candidate lessons from captured turns, via the human's
 	// own claude CLI, within the daily budget.
 	learnCollector, learnSettings, learnCollectDone := startLearnCollect(ctx, store, cfg.DataDir, loopReg, log)
+	// Learning rules: the standing rules agents are already told, split into
+	// statements a lesson is checked against.
+	learnRules, learnRulesDone := startLearnRules(ctx, store, cfg.DataDir, learnSettings, sessMgr.StandingPrompts, loopReg, log)
 	agentSvc := agentsvc.New()
 	go func() {
 		if _, err := agentSvc.Refresh(ctx); err != nil {
@@ -479,6 +482,7 @@ func Run() error {
 		<-tokenUsageDone
 		<-learnCaptureDone
 		<-learnCollectDone
+		<-learnRulesDone
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
@@ -501,6 +505,7 @@ func Run() error {
 		log.Warn("simowner: initial sync of simulator leases failed", "err", err)
 	}
 
+	learningSvc := learningService(ctx, store, learnCollector, learnSettings, learnRules)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
 		Agents:             agentSvc,
@@ -537,7 +542,8 @@ func Run() error {
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
 		LoopTelemetry:      loopReg,
-		Learning:           learningService(ctx, store, learnCollector, learnSettings),
+		Learning:           learningSvc,
+		LearningRules:      learningSvc,
 	})
 	if err != nil {
 		stop()
@@ -546,6 +552,7 @@ func Run() error {
 		<-tokenUsageDone
 		<-learnCaptureDone
 		<-learnCollectDone
+		<-learnRulesDone
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
@@ -734,6 +741,7 @@ func Run() error {
 	<-tokenUsageDone
 	<-learnCaptureDone
 	<-learnCollectDone
+	<-learnRulesDone
 	lcStack.Stop()
 	if err := cdcPipe.Stop(); err != nil {
 		log.Error("cdc pipeline shutdown", "err", err)

@@ -209,6 +209,36 @@ func (q *Queries) DeleteLearnJobsByProject(ctx context.Context, projectID string
 	return result.RowsAffected()
 }
 
+const deleteLearnProtectedRule = `-- name: DeleteLearnProtectedRule :execrows
+DELETE FROM learn_protected_rule WHERE id = ?
+`
+
+func (q *Queries) DeleteLearnProtectedRule(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteLearnProtectedRule, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteLearnRuleChunk = `-- name: DeleteLearnRuleChunk :exec
+DELETE FROM learn_rule_chunk WHERE hash = ?
+`
+
+func (q *Queries) DeleteLearnRuleChunk(ctx context.Context, hash string) error {
+	_, err := q.db.ExecContext(ctx, deleteLearnRuleChunk, hash)
+	return err
+}
+
+const deleteLearnRuleSource = `-- name: DeleteLearnRuleSource :exec
+DELETE FROM learn_rule_source WHERE key = ?
+`
+
+func (q *Queries) DeleteLearnRuleSource(ctx context.Context, key string) error {
+	_, err := q.db.ExecContext(ctx, deleteLearnRuleSource, key)
+	return err
+}
+
 const deletePromptFingerprintsByProject = `-- name: DeletePromptFingerprintsByProject :execrows
 DELETE FROM prompt_fingerprint WHERE project_id = ?
 `
@@ -443,6 +473,70 @@ func (q *Queries) InsertLearnJob(ctx context.Context, arg InsertLearnJobParams) 
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const insertLearnProtectedRule = `-- name: InsertLearnProtectedRule :one
+INSERT INTO learn_protected_rule (project_id, text, patterns_json, note, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type InsertLearnProtectedRuleParams struct {
+	ProjectID    sql.NullString
+	Text         string
+	PatternsJson string
+	Note         string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+func (q *Queries) InsertLearnProtectedRule(ctx context.Context, arg InsertLearnProtectedRuleParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertLearnProtectedRule,
+		arg.ProjectID,
+		arg.Text,
+		arg.PatternsJson,
+		arg.Note,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertLearnRuleChunk = `-- name: InsertLearnRuleChunk :exec
+INSERT INTO learn_rule_chunk (hash, model, atoms_json, atoms, rejected, cost_usd, input_tokens, output_tokens, duration_ms, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (hash) DO NOTHING
+`
+
+type InsertLearnRuleChunkParams struct {
+	Hash         string
+	Model        string
+	AtomsJson    string
+	Atoms        int64
+	Rejected     int64
+	CostUsd      float64
+	InputTokens  int64
+	OutputTokens int64
+	DurationMs   int64
+	CreatedAt    time.Time
+}
+
+func (q *Queries) InsertLearnRuleChunk(ctx context.Context, arg InsertLearnRuleChunkParams) error {
+	_, err := q.db.ExecContext(ctx, insertLearnRuleChunk,
+		arg.Hash,
+		arg.Model,
+		arg.AtomsJson,
+		arg.Atoms,
+		arg.Rejected,
+		arg.CostUsd,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.DurationMs,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const insertPromptFingerprint = `-- name: InsertPromptFingerprint :exec
@@ -740,6 +834,151 @@ func (q *Queries) ListLearnExcerptsByProject(ctx context.Context, arg ListLearnE
 			&i.AfterJson,
 			&i.RedactionsJson,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLearnProtectedRules = `-- name: ListLearnProtectedRules :many
+SELECT id, project_id, text, patterns_json, note, created_at, updated_at
+FROM learn_protected_rule ORDER BY id
+`
+
+func (q *Queries) ListLearnProtectedRules(ctx context.Context) ([]LearnProtectedRule, error) {
+	rows, err := q.db.QueryContext(ctx, listLearnProtectedRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LearnProtectedRule{}
+	for rows.Next() {
+		var i LearnProtectedRule
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Text,
+			&i.PatternsJson,
+			&i.Note,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLearnRuleChunkHashes = `-- name: ListLearnRuleChunkHashes :many
+SELECT hash, created_at FROM learn_rule_chunk
+`
+
+type ListLearnRuleChunkHashesRow struct {
+	Hash      string
+	CreatedAt time.Time
+}
+
+func (q *Queries) ListLearnRuleChunkHashes(ctx context.Context) ([]ListLearnRuleChunkHashesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLearnRuleChunkHashes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLearnRuleChunkHashesRow{}
+	for rows.Next() {
+		var i ListLearnRuleChunkHashesRow
+		if err := rows.Scan(&i.Hash, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLearnRuleChunks = `-- name: ListLearnRuleChunks :many
+SELECT hash, model, atoms_json, atoms, rejected, cost_usd, input_tokens, output_tokens, duration_ms, created_at
+FROM learn_rule_chunk
+`
+
+func (q *Queries) ListLearnRuleChunks(ctx context.Context) ([]LearnRuleChunk, error) {
+	rows, err := q.db.QueryContext(ctx, listLearnRuleChunks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LearnRuleChunk{}
+	for rows.Next() {
+		var i LearnRuleChunk
+		if err := rows.Scan(
+			&i.Hash,
+			&i.Model,
+			&i.AtomsJson,
+			&i.Atoms,
+			&i.Rejected,
+			&i.CostUsd,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.DurationMs,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLearnRuleSources = `-- name: ListLearnRuleSources :many
+SELECT key, scope, project_id, kind, label, content_hash, chunks_json, refreshed_at, error
+FROM learn_rule_source ORDER BY key
+`
+
+func (q *Queries) ListLearnRuleSources(ctx context.Context) ([]LearnRuleSource, error) {
+	rows, err := q.db.QueryContext(ctx, listLearnRuleSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LearnRuleSource{}
+	for rows.Next() {
+		var i LearnRuleSource
+		if err := rows.Scan(
+			&i.Key,
+			&i.Scope,
+			&i.ProjectID,
+			&i.Kind,
+			&i.Label,
+			&i.ContentHash,
+			&i.ChunksJson,
+			&i.RefreshedAt,
+			&i.Error,
 		); err != nil {
 			return nil, err
 		}
@@ -1079,6 +1318,17 @@ func (q *Queries) SumLearnJobCostSince(ctx context.Context, startedAt time.Time)
 	return column_1, err
 }
 
+const sumLearnRuleChunkCostSince = `-- name: SumLearnRuleChunkCostSince :one
+SELECT CAST(COALESCE(SUM(cost_usd), 0) AS REAL) FROM learn_rule_chunk WHERE created_at >= ?
+`
+
+func (q *Queries) SumLearnRuleChunkCostSince(ctx context.Context, createdAt time.Time) (float64, error) {
+	row := q.db.QueryRowContext(ctx, sumLearnRuleChunkCostSince, createdAt)
+	var column_1 float64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const upsertLearnCursor = `-- name: UpsertLearnCursor :exec
 INSERT INTO learn_cursor (transcript_path, project_id, session_id, attribution, byte_offset, file_size,
     file_mtime, pending_carry, human_turns, machine_turns, last_error, updated_at)
@@ -1126,6 +1376,42 @@ func (q *Queries) UpsertLearnCursor(ctx context.Context, arg UpsertLearnCursorPa
 		arg.MachineTurns,
 		arg.LastError,
 		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertLearnRuleSource = `-- name: UpsertLearnRuleSource :exec
+INSERT INTO learn_rule_source (key, scope, project_id, kind, label, content_hash, chunks_json, refreshed_at, error)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (key) DO UPDATE SET
+    scope = excluded.scope, project_id = excluded.project_id, kind = excluded.kind, label = excluded.label,
+    content_hash = excluded.content_hash, chunks_json = excluded.chunks_json,
+    refreshed_at = excluded.refreshed_at, error = excluded.error
+`
+
+type UpsertLearnRuleSourceParams struct {
+	Key         string
+	Scope       string
+	ProjectID   sql.NullString
+	Kind        string
+	Label       string
+	ContentHash string
+	ChunksJson  string
+	RefreshedAt time.Time
+	Error       string
+}
+
+func (q *Queries) UpsertLearnRuleSource(ctx context.Context, arg UpsertLearnRuleSourceParams) error {
+	_, err := q.db.ExecContext(ctx, upsertLearnRuleSource,
+		arg.Key,
+		arg.Scope,
+		arg.ProjectID,
+		arg.Kind,
+		arg.Label,
+		arg.ContentHash,
+		arg.ChunksJson,
+		arg.RefreshedAt,
+		arg.Error,
 	)
 	return err
 }

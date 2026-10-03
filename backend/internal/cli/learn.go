@@ -109,6 +109,7 @@ func newLearnCommand(ctx *commandContext) *cobra.Command {
 	cmd.AddCommand(newLearnCollectCommand(ctx))
 	cmd.AddCommand(newLearnDraftsCommand(ctx))
 	cmd.AddCommand(newLearnSettingsCommand(ctx))
+	cmd.AddCommand(newLearnRulesCommand(ctx))
 	return cmd
 }
 
@@ -479,18 +480,20 @@ func writeLearnDrafts(out io.Writer, project string, drafts []learnDraftDTO) err
 type learnSettingsDTO struct {
 	CollectModel   string  `json:"collectModel"`
 	CollectEffort  string  `json:"collectEffort"`
+	RulesModel     string  `json:"rulesModel,omitempty"`
 	DailyBudgetUSD float64 `json:"dailyBudgetUsd"`
 }
 
 func newLearnSettingsCommand(ctx *commandContext) *cobra.Command {
 	var (
-		model  string
-		effort string
-		budget float64
+		model      string
+		effort     string
+		rulesModel string
+		budget     float64
 	)
 	cmd := &cobra.Command{
 		Use:   "settings",
-		Short: "Show or change the collect model, effort and daily budget",
+		Short: "Show or change the collect model, effort, rules model and daily budget",
 		Args:  noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var cur learnSettingsDTO
@@ -498,12 +501,15 @@ func newLearnSettingsCommand(ctx *commandContext) *cobra.Command {
 				return err
 			}
 			flags := cmd.Flags()
-			if flags.Changed("model") || flags.Changed("effort") || flags.Changed("daily-budget") {
+			if flags.Changed("model") || flags.Changed("effort") || flags.Changed("rules-model") || flags.Changed("daily-budget") {
 				if flags.Changed("model") {
 					cur.CollectModel = model
 				}
 				if flags.Changed("effort") {
 					cur.CollectEffort = effort
+				}
+				if flags.Changed("rules-model") {
+					cur.RulesModel = rulesModel
 				}
 				if flags.Changed("daily-budget") {
 					cur.DailyBudgetUSD = budget
@@ -512,12 +518,13 @@ func newLearnSettingsCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "collect model   %s\ncollect effort  %s\ndaily budget    $%.2f\n", cur.CollectModel, cur.CollectEffort, cur.DailyBudgetUSD)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "collect model   %s\ncollect effort  %s\nrules model     %s\ndaily budget    $%.2f\n", cur.CollectModel, cur.CollectEffort, cur.RulesModel, cur.DailyBudgetUSD)
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&model, "model", "", "Collect model id")
 	cmd.Flags().StringVar(&effort, "effort", "", "Collect effort: low, medium, high, xhigh or max")
-	cmd.Flags().Float64Var(&budget, "daily-budget", 0, "Daily budget for the background collect, in dollars at API prices (0 pauses it)")
+	cmd.Flags().StringVar(&rulesModel, "rules-model", "", "Model that splits the standing rules into statements")
+	cmd.Flags().Float64Var(&budget, "daily-budget", 0, "Daily budget for the background model runs (collect and rules), in dollars at API prices (0 pauses them)")
 	return cmd
 }

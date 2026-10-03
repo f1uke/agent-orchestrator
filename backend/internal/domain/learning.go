@@ -317,3 +317,95 @@ type LearnCollectCounts struct {
 	Uncollected int
 	Drafts      map[LearnDraftStatus]int
 }
+
+// LearnRuleScope is who a standing rule applies to.
+type LearnRuleScope string
+
+const (
+	// LearnRuleGlobal applies in every project (the human's own files).
+	LearnRuleGlobal LearnRuleScope = "global"
+	// LearnRuleProject applies in one project.
+	LearnRuleProject LearnRuleScope = "project"
+)
+
+// LearnRuleSourceKind is what kind of file or text a standing rule came from.
+type LearnRuleSourceKind string
+
+const (
+	LearnRuleSourceClaudeMD       LearnRuleSourceKind = "claude_md"
+	LearnRuleSourceAgentsMD       LearnRuleSourceKind = "agents_md"
+	LearnRuleSourceSkill          LearnRuleSourceKind = "skill"
+	LearnRuleSourceAOPrompt       LearnRuleSourceKind = "ao_prompt"
+	LearnRuleSourceKnowledgeIndex LearnRuleSourceKind = "knowledge_index"
+)
+
+// LearnRuleChunkRef is one chunk of a source, in source order.
+type LearnRuleChunkRef struct {
+	Hash    string `json:"hash"`
+	Heading string `json:"heading,omitempty"`
+}
+
+// LearnRuleSource is one file (or AO prompt) the standing-rules corpus is built
+// from, with the chunks its current content splits into. Key is stable across
+// refreshes: the scope, project, kind and path.
+type LearnRuleSource struct {
+	Key         string
+	Scope       LearnRuleScope
+	ProjectID   ProjectID
+	Kind        LearnRuleSourceKind
+	Label       string
+	ContentHash string
+	Chunks      []LearnRuleChunkRef
+	RefreshedAt time.Time
+	// Error is why the last refresh could not atomize every chunk; the chunks
+	// that were atomized before still count.
+	Error string
+}
+
+// LearnRuleAtom is one standing rule as atomized from a chunk.
+type LearnRuleAtom struct {
+	Text    string   `json:"text"`
+	Quote   string   `json:"quote"`
+	Tags    []string `json:"tags,omitempty"`
+	Heading string   `json:"heading,omitempty"`
+}
+
+// LearnRuleChunk is a content-addressed cache entry: the rules one chunk of
+// text was split into, and what that cost. Model is empty for a chunk split
+// without a model.
+type LearnRuleChunk struct {
+	Hash         string
+	Model        string
+	Atoms        []LearnRuleAtom
+	Rejected     int
+	CostUSD      float64
+	InputTokens  int64
+	OutputTokens int64
+	DurationMS   int64
+	CreatedAt    time.Time
+}
+
+// LearnRule is one atom of the corpus with where it came from. ID is the
+// chunk hash prefix and the atom's position: stable while the chunk is.
+type LearnRule struct {
+	ID string
+	LearnRuleAtom
+	SourceKey   string
+	SourceLabel string
+	SourceKind  LearnRuleSourceKind
+	Scope       LearnRuleScope
+	ProjectID   ProjectID
+}
+
+// LearnProtectedRule is a rule the human pinned: the decide stage always
+// checks a proposal against it, and its forbidden patterns block any learned
+// skill that matches. ProjectID empty means every project.
+type LearnProtectedRule struct {
+	ID        int64
+	ProjectID ProjectID
+	Text      string
+	Patterns  []string
+	Note      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}

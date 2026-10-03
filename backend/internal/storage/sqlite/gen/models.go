@@ -143,6 +143,41 @@ type LearnJob struct {
 	FinishedAt   sql.NullTime
 }
 
+type LearnProtectedRule struct {
+	ID           int64
+	ProjectID    sql.NullString
+	Text         string
+	PatternsJson string
+	Note         string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type LearnRuleChunk struct {
+	Hash         string
+	Model        string
+	AtomsJson    string
+	Atoms        int64
+	Rejected     int64
+	CostUsd      float64
+	InputTokens  int64
+	OutputTokens int64
+	DurationMs   int64
+	CreatedAt    time.Time
+}
+
+type LearnRuleSource struct {
+	Key         string
+	Scope       string
+	ProjectID   sql.NullString
+	Kind        string
+	Label       string
+	ContentHash string
+	ChunksJson  string
+	RefreshedAt time.Time
+	Error       string
+}
+
 type Notification struct {
 	ID        string
 	SessionID domain.SessionID

@@ -22,7 +22,11 @@ const fileName = "learning-settings.json"
 const (
 	DefaultCollectModel  = "claude-sonnet-5-5"
 	DefaultCollectEffort = "low"
-	DefaultDailyBudget   = 2.0
+	// DefaultRulesModel atomizes the standing-rules corpus: rewriting a file
+	// into statements takes no judgment about what is a lesson, so it stays on
+	// the cheapest model (decision 7).
+	DefaultRulesModel  = "claude-haiku-4-5-20251001"
+	DefaultDailyBudget = 2.0
 	// MaxDailyBudget caps a typo.
 	MaxDailyBudget = 100.0
 )
@@ -31,14 +35,17 @@ const (
 type Settings struct {
 	CollectModel  string `json:"collectModel"`
 	CollectEffort string `json:"collectEffort"`
-	// DailyBudgetUSD stops the background collect for the rest of the local
-	// day once the day's model runs have cost this much. Zero pauses it.
+	// RulesModel splits the rules agents are already told into statements.
+	RulesModel string `json:"rulesModel"`
+	// DailyBudgetUSD stops the background model runs (collect and rules) for
+	// the rest of the local day once the day's runs have cost this much. Zero
+	// pauses them.
 	DailyBudgetUSD float64 `json:"dailyBudgetUSD"`
 }
 
 // Default returns the out-of-the-box settings.
 func Default() Settings {
-	return Settings{CollectModel: DefaultCollectModel, CollectEffort: DefaultCollectEffort, DailyBudgetUSD: DefaultDailyBudget}
+	return Settings{CollectModel: DefaultCollectModel, CollectEffort: DefaultCollectEffort, RulesModel: DefaultRulesModel, DailyBudgetUSD: DefaultDailyBudget}
 }
 
 var validEffort = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
@@ -47,6 +54,9 @@ var validEffort = map[string]bool{"low": true, "medium": true, "high": true, "xh
 func (s Settings) Validate() error {
 	if s.CollectModel == "" {
 		return errors.New("learnsettings: collectModel is required")
+	}
+	if s.RulesModel == "" {
+		return errors.New("learnsettings: rulesModel is required")
 	}
 	if !validEffort[s.CollectEffort] {
 		return fmt.Errorf("learnsettings: collectEffort must be low, medium, high, xhigh or max, got %q", s.CollectEffort)

@@ -716,6 +716,315 @@ paths:
         learns from sessions
       tags:
       - learning
+  /api/v1/learning/protected-rules:
+    get:
+      operationId: listLearningProtectedRules
+      parameters:
+      - description: Project id. The project's pinned rules and every global one;
+          empty lists all.
+        in: query
+        name: project
+        schema:
+          description: Project id. The project's pinned rules and every global one;
+            empty lists all.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListLearningProtectedRulesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the rules the human pinned as protected
+      tags:
+      - learning
+    post:
+      operationId: protectLearningRule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersProtectLearningRuleRequest'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProtectedRuleDTO'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Pin a rule as protected, with patterns a learned skill must never contain
+      tags:
+      - learning
+  /api/v1/learning/protected-rules/{id}:
+    delete:
+      operationId: unprotectLearningRule
+      parameters:
+      - description: Protected rule id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Protected rule id.
+          format: int64
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersUnprotectLearningRuleResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Unpin a protected rule
+      tags:
+      - learning
+  /api/v1/learning/protected-rules/check:
+    post:
+      operationId: checkLearningForbidden
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersCheckLearningForbiddenRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersCheckLearningForbiddenResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Report every forbidden pattern a text matches
+      tags:
+      - learning
+  /api/v1/learning/rules:
+    get:
+      operationId: listLearningRules
+      parameters:
+      - description: Project id. The project's rules and every global one; empty lists
+          the global rules only.
+        in: query
+        name: project
+        schema:
+          description: Project id. The project's rules and every global one; empty
+            lists the global rules only.
+          type: string
+      - description: Search the rules (BM25 over text, heading and tags). Empty lists
+          them in source order.
+        in: query
+        name: q
+        schema:
+          description: Search the rules (BM25 over text, heading and tags). Empty
+            lists them in source order.
+          type: string
+      - description: Most rules to return. Default 50, at most 2000.
+        in: query
+        name: limit
+        schema:
+          description: Most rules to return. Default 50, at most 2000.
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListLearningRulesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List or search the standing rules agents are already told, for a project
+      tags:
+      - learning
+  /api/v1/learning/rules/refresh:
+    post:
+      operationId: refreshLearningRules
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersRefreshLearningRulesRequest'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersRefreshLearningRulesResponse'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Start a refresh of the standing-rules corpus, under its own budget
+      tags:
+      - learning
+  /api/v1/learning/rules/sources:
+    get:
+      operationId: listLearningRuleSources
+      parameters:
+      - description: Project id. The project's sources and every global one; empty
+          lists every source.
+        in: query
+        name: project
+        schema:
+          description: Project id. The project's sources and every global one; empty
+            lists every source.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListLearningRuleSourcesResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the files and prompts the standing-rules corpus is built from,
+        and the last refresh
+      tags:
+      - learning
   /api/v1/learning/settings:
     get:
       operationId: getLearningSettings
@@ -7545,6 +7854,25 @@ components:
       required:
       - cases
       type: object
+    ControllersCheckLearningForbiddenRequest:
+      properties:
+        project:
+          description: Project whose rules apply besides the global ones.
+          type: string
+        text:
+          type: string
+      required:
+      - text
+      type: object
+    ControllersCheckLearningForbiddenResponse:
+      properties:
+        hits:
+          items:
+            $ref: '#/components/schemas/ControllersLearningForbiddenHitDTO'
+          type: array
+      required:
+      - hits
+      type: object
     ControllersCrewSendRequest:
       properties:
         about:
@@ -7895,6 +8223,23 @@ components:
       - path
       - error
       type: object
+    ControllersLearningForbiddenHitDTO:
+      properties:
+        match:
+          type: string
+        pattern:
+          type: string
+        rule:
+          type: string
+        ruleId:
+          format: int64
+          type: integer
+      required:
+      - ruleId
+      - rule
+      - pattern
+      - match
+      type: object
     ControllersLearningProjectStatusDTO:
       properties:
         atRiskTranscripts:
@@ -7979,6 +8324,169 @@ components:
       - uncollected
       - drafts
       type: object
+    ControllersLearningProtectedRuleDTO:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        note:
+          type: string
+        patterns:
+          description: RE2 patterns, matched case-insensitively, that a learned skill
+            must never contain.
+          items:
+            type: string
+          type: array
+        projectId:
+          description: Empty means every project.
+          type: string
+        text:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - text
+      - patterns
+      - createdAt
+      - updatedAt
+      type: object
+    ControllersLearningRuleDTO:
+      properties:
+        heading:
+          type: string
+        id:
+          description: Chunk hash prefix and position; stable while the source text
+            of that chunk is.
+          type: string
+        projectId:
+          type: string
+        quote:
+          description: The span of the source that states the rule.
+          type: string
+        scope:
+          enum:
+          - global
+          - project
+          type: string
+        score:
+          description: Search score; set only when the request had a query.
+          format: double
+          type: number
+        sourceKey:
+          type: string
+        sourceKind:
+          enum:
+          - claude_md
+          - agents_md
+          - skill
+          - ao_prompt
+          - knowledge_index
+          type: string
+        sourceLabel:
+          type: string
+        tags:
+          items:
+            type: string
+          type: array
+        text:
+          type: string
+      required:
+      - id
+      - text
+      - quote
+      - tags
+      - sourceKey
+      - sourceLabel
+      - sourceKind
+      - scope
+      type: object
+    ControllersLearningRuleSourceDTO:
+      properties:
+        chunks:
+          type: integer
+        error:
+          description: Why some chunks are not atomized yet; the ones that are still
+            count.
+          type: string
+        key:
+          type: string
+        kind:
+          enum:
+          - claude_md
+          - agents_md
+          - skill
+          - ao_prompt
+          - knowledge_index
+          type: string
+        label:
+          type: string
+        projectId:
+          type: string
+        refreshedAt:
+          format: date-time
+          type: string
+        rules:
+          type: integer
+        scope:
+          enum:
+          - global
+          - project
+          type: string
+      required:
+      - key
+      - scope
+      - kind
+      - label
+      - chunks
+      - rules
+      - refreshedAt
+      type: object
+    ControllersLearningRulesRefreshDTO:
+      properties:
+        atomized:
+          type: integer
+        budgetUsd:
+          format: double
+          type: number
+        costUsd:
+          format: double
+          type: number
+        failed:
+          type: integer
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        lastError:
+          type: string
+        manual:
+          type: boolean
+        running:
+          type: boolean
+        sources:
+          type: integer
+        startedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        stopReason:
+          type: string
+      required:
+      - running
+      - manual
+      - sources
+      - atomized
+      - failed
+      - costUsd
+      - budgetUsd
+      type: object
     ControllersLearningSettingsDTO:
       properties:
         collectEffort:
@@ -7992,10 +8500,14 @@ components:
         collectModel:
           type: string
         dailyBudgetUsd:
-          description: The background collect stops for the rest of the local day
-            at this spend; 0 pauses it.
+          description: The background model runs (collect and rules) stop for the
+            rest of the local day at this spend; 0 pauses them.
           format: double
           type: number
+        rulesModel:
+          description: Model that splits the standing rules into statements. Empty
+            on a write keeps the current one.
+          type: string
       required:
       - collectModel
       - collectEffort
@@ -8054,6 +8566,36 @@ components:
       required:
       - excerpts
       type: object
+    ControllersListLearningProtectedRulesResponse:
+      properties:
+        rules:
+          items:
+            $ref: '#/components/schemas/ControllersLearningProtectedRuleDTO'
+          type: array
+      required:
+      - rules
+      type: object
+    ControllersListLearningRuleSourcesResponse:
+      properties:
+        refresh:
+          $ref: '#/components/schemas/ControllersLearningRulesRefreshDTO'
+        sources:
+          items:
+            $ref: '#/components/schemas/ControllersLearningRuleSourceDTO'
+          type: array
+      required:
+      - sources
+      - refresh
+      type: object
+    ControllersListLearningRulesResponse:
+      properties:
+        rules:
+          items:
+            $ref: '#/components/schemas/ControllersLearningRuleDTO'
+          type: array
+      required:
+      - rules
+      type: object
     ControllersListSimFlowsResponse:
       properties:
         flows:
@@ -8081,6 +8623,41 @@ components:
           type: string
       required:
       - path
+      type: object
+    ControllersProtectLearningRuleRequest:
+      properties:
+        from:
+          description: Id of a corpus rule to copy the text from.
+          type: string
+        note:
+          type: string
+        patterns:
+          items:
+            type: string
+          type: array
+        project:
+          description: Project the rule applies in; empty means every project.
+          type: string
+        text:
+          description: The rule. Give this or from.
+          type: string
+      type: object
+    ControllersRefreshLearningRulesRequest:
+      properties:
+        budgetUsd:
+          description: Most this refresh may spend on model runs, at API prices. At
+            most 50.
+          format: double
+          type: number
+      required:
+      - budgetUsd
+      type: object
+    ControllersRefreshLearningRulesResponse:
+      properties:
+        started:
+          type: boolean
+      required:
+      - started
       type: object
     ControllersRenameSimFlowInput:
       properties:
@@ -8525,6 +9102,13 @@ components:
       required:
       - path
       - status
+      type: object
+    ControllersUnprotectLearningRuleResponse:
+      properties:
+        deleted:
+          type: boolean
+      required:
+      - deleted
       type: object
     ControllersUnreviewedRuntimeView:
       properties:

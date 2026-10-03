@@ -604,6 +604,87 @@ func learningOperations() []operation {
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/rules", id: "listLearningRules", tag: "learning",
+			summary:    "List or search the standing rules agents are already told, for a project",
+			pathParams: []any{controllers.LearningRulesQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListLearningRulesResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/rules/sources", id: "listLearningRuleSources", tag: "learning",
+			summary:    "List the files and prompts the standing-rules corpus is built from, and the last refresh",
+			pathParams: []any{controllers.LearningRuleSourcesQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListLearningRuleSourcesResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/learning/rules/refresh", id: "refreshLearningRules", tag: "learning",
+			summary: "Start a refresh of the standing-rules corpus, under its own budget",
+			reqBody: controllers.RefreshLearningRulesRequest{},
+			resps: []respUnit{
+				{http.StatusAccepted, controllers.RefreshLearningRulesResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/protected-rules", id: "listLearningProtectedRules", tag: "learning",
+			summary:    "List the rules the human pinned as protected",
+			pathParams: []any{controllers.LearningProtectedRulesQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListLearningProtectedRulesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/learning/protected-rules", id: "protectLearningRule", tag: "learning",
+			summary: "Pin a rule as protected, with patterns a learned skill must never contain",
+			reqBody: controllers.ProtectLearningRuleRequest{},
+			resps: []respUnit{
+				{http.StatusCreated, controllers.LearningProtectedRuleDTO{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/learning/protected-rules/check", id: "checkLearningForbidden", tag: "learning",
+			summary: "Report every forbidden pattern a text matches",
+			reqBody: controllers.CheckLearningForbiddenRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.CheckLearningForbiddenResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/learning/protected-rules/{id}", id: "unprotectLearningRule", tag: "learning",
+			summary:    "Unpin a protected rule",
+			pathParams: []any{controllers.LearningProtectedRuleIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.UnprotectLearningRuleResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
 	}
 }
 

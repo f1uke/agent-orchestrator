@@ -224,14 +224,19 @@ func (s *Store) RecentLearnJobs(ctx context.Context, sessionID domain.SessionID,
 	return out, nil
 }
 
-// LearnSpendSince sums what every model run since the moment cost, in US
-// dollars as the harness reports them.
+// LearnSpendSince sums what every model run since the moment cost - collect
+// runs and rule atomizing alike, under one budget - in US dollars as the
+// harness reports them.
 func (s *Store) LearnSpendSince(ctx context.Context, since time.Time) (float64, error) {
 	v, err := s.qr.SumLearnJobCostSince(ctx, since)
 	if err != nil {
 		return 0, fmt.Errorf("sum learn job cost: %w", err)
 	}
-	return v, nil
+	rules, err := s.learnRuleSpendSince(ctx, since)
+	if err != nil {
+		return 0, err
+	}
+	return v + rules, nil
 }
 
 // LastFailedLearnJob returns the project's most recent failed run.

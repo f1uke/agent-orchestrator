@@ -219,3 +219,48 @@ DELETE FROM learn_draft WHERE project_id = ?;
 
 -- name: DeleteLearnJobsByProject :execrows
 DELETE FROM learn_job WHERE project_id = ?;
+
+-- name: ListLearnRuleSources :many
+SELECT key, scope, project_id, kind, label, content_hash, chunks_json, refreshed_at, error
+FROM learn_rule_source ORDER BY key;
+
+-- name: UpsertLearnRuleSource :exec
+INSERT INTO learn_rule_source (key, scope, project_id, kind, label, content_hash, chunks_json, refreshed_at, error)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (key) DO UPDATE SET
+    scope = excluded.scope, project_id = excluded.project_id, kind = excluded.kind, label = excluded.label,
+    content_hash = excluded.content_hash, chunks_json = excluded.chunks_json,
+    refreshed_at = excluded.refreshed_at, error = excluded.error;
+
+-- name: DeleteLearnRuleSource :exec
+DELETE FROM learn_rule_source WHERE key = ?;
+
+-- name: ListLearnRuleChunkHashes :many
+SELECT hash, created_at FROM learn_rule_chunk;
+
+-- name: ListLearnRuleChunks :many
+SELECT hash, model, atoms_json, atoms, rejected, cost_usd, input_tokens, output_tokens, duration_ms, created_at
+FROM learn_rule_chunk;
+
+-- name: InsertLearnRuleChunk :exec
+INSERT INTO learn_rule_chunk (hash, model, atoms_json, atoms, rejected, cost_usd, input_tokens, output_tokens, duration_ms, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (hash) DO NOTHING;
+
+-- name: DeleteLearnRuleChunk :exec
+DELETE FROM learn_rule_chunk WHERE hash = ?;
+
+-- name: SumLearnRuleChunkCostSince :one
+SELECT CAST(COALESCE(SUM(cost_usd), 0) AS REAL) FROM learn_rule_chunk WHERE created_at >= ?;
+
+-- name: InsertLearnProtectedRule :one
+INSERT INTO learn_protected_rule (project_id, text, patterns_json, note, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id;
+
+-- name: ListLearnProtectedRules :many
+SELECT id, project_id, text, patterns_json, note, created_at, updated_at
+FROM learn_protected_rule ORDER BY id;
+
+-- name: DeleteLearnProtectedRule :execrows
+DELETE FROM learn_protected_rule WHERE id = ?;

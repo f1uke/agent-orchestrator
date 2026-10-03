@@ -138,6 +138,9 @@ type sessionLifecycle interface {
 	// ended while the daemon was down; the boot half of the reap every ending
 	// runs through ReapSessionPanes.
 	ReapOrphanedPromptFiles(ctx context.Context) (int, error)
+	// StandingPrompts is what AO tells an orchestrator and a worker of a
+	// project, for learning's rules corpus.
+	StandingPrompts(ctx context.Context, projectID domain.ProjectID) (map[string]string, error)
 }
 
 // startSession builds the controller-facing session service: a session manager
