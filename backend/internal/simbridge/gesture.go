@@ -96,6 +96,19 @@ func Tap(at Point) ([]Event, error) {
 	}, nil
 }
 
+// Press holds one point down for hold, then releases it: a long press, which
+// is how a text field's edit menu is opened.
+func Press(at Point, hold time.Duration) ([]Event, error) {
+	if err := validatePoint("press", at); err != nil {
+		return nil, err
+	}
+	return []Event{
+		{Kind: "touch", Type: "begin", X: at.X, Y: at.Y},
+		{Kind: "sleep", MS: int(hold.Milliseconds())},
+		{Kind: "touch", Type: "end", X: at.X, Y: at.Y},
+	}, nil
+}
+
 // Swipe drags from one point to another over duration.
 func Swipe(from, to Point, duration time.Duration) ([]Event, error) {
 	return Path([]Point{from, to}, duration)
@@ -773,13 +786,58 @@ func Paste() []Event {
 // pasted nothing, and the same Command-V a moment later pasted the text -
 // measured on a web password field and a web email field (iOS 26.3,
 // 2026-10-02), and the likeliest reason the pasteboard route "sometimes
-// needed a second try". A paste sends this first when the keyboard is up.
+// needed a second try". A Command-V paste sends this first when the keyboard
+// is up. On a device that already believes in a hardware keyboard it changes
+// nothing, being a modifier alone (see ShowKeyboard).
+//
+// A Command-V paste is the fallback now: the default holds the field and taps
+// Paste in its edit menu, touches that press no key at all (see
+// simpaste.MenuPaster).
 func WakeKeyboard() []Event {
 	return []Event{
 		{Kind: "key", Type: "down", Usage: usageLeftGUI},
 		{Kind: "key", Type: "up", Usage: usageLeftGUI},
 	}
 }
+
+// ShowKeyboard is Simulator.app's I/O > Keyboard > Toggle Software Keyboard,
+// sent after hardware key presses to undo what they do to the on-screen
+// keyboard.
+//
+// A key press from the HID path is a HARDWARE keyboard as far as iOS knows.
+// The first one tells it a hardware keyboard is attached (for the rest of the
+// boot), and from then on every press of a key that is not a modifier -
+// a letter, Return, Backspace, an arrow, Command-V's V - MINIMIZES the
+// software keyboard, the way typing on a real keyboard does on an iPad. It is
+// one setting, not one per field: every field tapped afterwards comes up with
+// no keyboard on screen, which is how a paste fallback broke the next tap,
+// the next recording and the next script. A bare modifier changes nothing on
+// a device that already believes in the keyboard. This toggle flips the
+// setting back, with or without a focused field (all measured on iOS 26.3,
+// 2026-10-03).
+//
+// It is a toggle, so it is sent only after events that minimized the
+// keyboard (MinimizesKeyboard): sent on its own it would hide a keyboard that
+// is showing. And it is sent apart from them, once they have landed - see
+// simgesture.ShowKeyboardAfter for why.
+func ShowKeyboard() []Event {
+	return []Event{{Kind: "software-keyboard"}}
+}
+
+// MinimizesKeyboard says whether events press a key that leaves the software
+// keyboard minimized (see ShowKeyboard): any key that is not a modifier.
+func MinimizesKeyboard(events []Event) bool {
+	for _, e := range events {
+		if e.Kind == "key" && e.Type == "down" && !isModifier(e.Usage) {
+			return true
+		}
+	}
+	return false
+}
+
+// isModifier is Control, Shift, Option and Command, left and right: the USB
+// HID usages 0xE0-0xE7.
+func isModifier(usage int) bool { return usage >= 0xE0 && usage <= 0xE7 }
 
 // keyUsages is the set of keyboard keys that are NOT characters.
 //

@@ -3500,6 +3500,85 @@ paths:
         gesture hold `ao sim tap` uses
       tags:
       - sim
+  /api/v1/sessions/{sessionId}/sim-devices/{udid}/paste:
+    post:
+      operationId: pasteSimText
+      parameters:
+      - description: Session identifier, e.g. project-1. The gesture is arbitrated
+          as this session.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1. The gesture is arbitrated
+            as this session.
+          type: string
+      - description: Simulator udid (matched case-insensitively).
+        in: path
+        name: udid
+        required: true
+        schema:
+          description: Simulator udid (matched case-insensitively).
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimPasteInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimPasteResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Paste text into the focused field through its edit menu, via the device's
+        XCTest runner - no key press - and prove it arrived
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/sim-devices/{udid}/power:
     post:
       operationId: setSimDevicePower
@@ -11113,6 +11192,58 @@ components:
           $ref: '#/components/schemas/SimTrustView'
       required:
       - lease
+      type: object
+    SimPasteInput:
+      properties:
+        text:
+          description: The text to put on the device's pasteboard and paste into the
+            focused field.
+          type: string
+        waitMs:
+          description: How long to wait for a runner that is still starting, in milliseconds,
+            before taking the gesture hold. Capped at 15000.
+          type: integer
+      required:
+      - text
+      type: object
+    SimPasteResponse:
+      properties:
+        app:
+          description: Bundle id of the application holding the field.
+          type: string
+        detail:
+          description: Where the text went, in the words the CLI prints.
+          type: string
+        landed:
+          $ref: '#/components/schemas/SimTypeLanding'
+        menuItem:
+          description: The edit menu item tapped, in the device's language.
+          type: string
+        pasteboardError:
+          description: 'Why it could not be, when it could not: the text is still
+            on the device''s pasteboard.'
+          type: string
+        pasteboardRestored:
+          description: The device's pasteboard was put back to what it held before.
+          type: boolean
+        udid:
+          type: string
+        via:
+          description: 'How the paste was performed: edit-menu is the field held and
+            Paste tapped in its edit menu - touches, no key press.'
+          enum:
+          - edit-menu
+          type: string
+        warning:
+          description: What the runner said while pasting, when it complained about
+            text the screen shows did arrive.
+          type: string
+      required:
+      - udid
+      - landed
+      - detail
+      - via
+      - pasteboardRestored
       type: object
     SimRecording:
       properties:
