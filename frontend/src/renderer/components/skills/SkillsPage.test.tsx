@@ -241,3 +241,15 @@ describe("skills model", () => {
 		expect(order).toEqual([2, 3, 1]);
 	});
 });
+
+describe("a decided conflict card", () => {
+	it("shows the side that won and cannot change", async () => {
+		proposals = [{ ...conflict, status: "applied", resolution: "words_win", decidedAt: "2026-10-04T01:00:00Z" }];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		const won = await screen.findByRole("radio", { name: /Your newer words win/ });
+		expect(won.getAttribute("aria-checked")).toBe("true");
+		expect((screen.getByRole("radio", { name: /Keep the rule/ }) as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.queryByRole("button", { name: /Use my newer words/ })).toBeNull();
+	});
+});

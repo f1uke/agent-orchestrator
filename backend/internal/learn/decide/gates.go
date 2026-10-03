@@ -478,6 +478,11 @@ func (env Env) conflict(c *Candidate, rule, content string) string {
 			return "the conflict names a rule it was not given"
 		}
 	}
+	if c.Proposal.IndexLine != "" {
+		// A memory's lesson is its body; the MEMORY.md line it would add is
+		// not part of the person's new rule.
+		content = strings.Replace(content, c.Proposal.IndexLine, "", 1)
+	}
 	c.Proposal.Action = domain.LearnProposeConflict
 	c.Proposal.TargetPath = "rule:" + rule
 	c.Proposal.NewContent = noEmDash(strings.TrimSpace(content))

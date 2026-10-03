@@ -281,8 +281,10 @@ type Side = "keep_rule" | "words_win" | "both";
 
 /** Two columns: the rule you have, your newer words. You pick which wins; learning never resolves it. */
 export function ConflictDetail({ p, detail, loading, busy, error, onDecide }: DecideProps) {
-	const [side, setSide] = useState<Side | null>(null);
-	const [scope, setScope] = useState("");
+	const settled = p.status !== "pending";
+	// A decided card shows the side that won, and nothing on it can change.
+	const [side, setSide] = useState<Side | null>(settled && p.resolution ? (p.resolution as Side) : null);
+	const [scope, setScope] = useState(settled && p.resolution === "both" ? p.newContent : "");
 	const ruleId = p.targetPath.replace(/^rule:/, "");
 	const rule = ruleFor(detail, ruleId);
 	const words = detail?.evidence[0];
@@ -352,10 +354,13 @@ export function ConflictDetail({ p, detail, loading, busy, error, onDecide }: De
 								type="button"
 								role="radio"
 								aria-checked={side === s}
+								disabled={settled}
 								onClick={() => setSide(s)}
 								className={cn(
-									"flex items-start gap-3 rounded-lg border px-3.5 py-2.5 text-left",
-									side === s ? "border-accent bg-accent-weak" : "border-border hover:bg-interactive-hover",
+									"flex items-start gap-3 rounded-lg border px-3.5 py-2.5 text-left disabled:cursor-default",
+									side === s ? "border-accent bg-accent-weak" : "border-border",
+									!settled && side !== s && "hover:bg-interactive-hover",
+									settled && side !== s && "opacity-50",
 								)}
 							>
 								<span
@@ -379,6 +384,7 @@ export function ConflictDetail({ p, detail, loading, busy, error, onDecide }: De
 					</div>
 					{side === "both" && (
 						<Textarea
+							readOnly={settled}
 							value={scope}
 							onChange={(e) => setScope(e.target.value)}
 							rows={2}

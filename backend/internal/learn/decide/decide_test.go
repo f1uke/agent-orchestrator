@@ -257,7 +257,8 @@ func TestPrepare_ScopeTargetsAndContent(t *testing.T) {
 			t.Errorf("proposal %d: drop = %q, want %q", i, got[i].Drop, want)
 		}
 	}
-	if got[5].Drop != "" || got[5].Proposal.Action != domain.LearnProposeConflict || got[5].Proposal.TargetPath != "rule:protected-1" || got[5].Proposal.IndexLine != "" {
+	if got[5].Drop != "" || got[5].Proposal.Action != domain.LearnProposeConflict || got[5].Proposal.TargetPath != "rule:protected-1" || got[5].Proposal.IndexLine != "" ||
+		got[5].Proposal.NewContent != "Then ao sim tap the button." {
 		t.Errorf("a forbidden pattern makes a conflict card, never a memory: %+v", got[5])
 	}
 }
