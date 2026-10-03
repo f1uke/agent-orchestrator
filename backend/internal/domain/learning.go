@@ -194,6 +194,32 @@ func (k LearnDraftKind) Valid() bool {
 	return false
 }
 
+// LearnDraftAbout is what a candidate lesson concerns, as the collect model
+// tagged it. Only agent_practice is a lesson about how agents work; the other
+// tags mark what the human's labels showed to be the usual false lessons, so
+// the decide stage can weigh them instead of collect dropping them.
+type LearnDraftAbout string
+
+const (
+	// LearnAboutAgentPractice is how an agent should work from now on.
+	LearnAboutAgentPractice LearnDraftAbout = "agent_practice"
+	// LearnAboutProductDecision is a decision about the thing being built.
+	LearnAboutProductDecision LearnDraftAbout = "product_decision"
+	// LearnAboutOneOff is tied to one task, one time, or decided case by case.
+	LearnAboutOneOff LearnDraftAbout = "one_off"
+	// LearnAboutQuestion is a question rather than a stated rule.
+	LearnAboutQuestion LearnDraftAbout = "question"
+)
+
+// Valid reports whether a is one of the tags.
+func (a LearnDraftAbout) Valid() bool {
+	switch a {
+	case LearnAboutAgentPractice, LearnAboutProductDecision, LearnAboutOneOff, LearnAboutQuestion:
+		return true
+	}
+	return false
+}
+
 // LearnDraftStatus is where a draft is in its life.
 type LearnDraftStatus string
 
@@ -225,6 +251,9 @@ type LearnDraft struct {
 	// project or repo. Code clamps it when a proposal is made.
 	ScopeHint  string
 	Confidence float64
+	// About is the collect model's tag of what the lesson concerns; empty
+	// for drafts collected before tagging existed.
+	About LearnDraftAbout
 	// Quote is the human's own words, a checked substring of the anchor turn.
 	Quote           string
 	AnchorExcerptID int64

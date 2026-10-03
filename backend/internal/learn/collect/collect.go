@@ -29,6 +29,14 @@ const (
 // SystemPrompt is the collect instruction. It is judgment-based on purpose:
 // the measured failure was not missing lessons but turning ordinary task
 // steering ("make it toggleable in our app") into general rules.
+//
+// It asks for an "about" tag rather than for fewer lessons. Measured against
+// 60 drafts the human labelled (2026-10-03, three runs each): telling the
+// model to leave product decisions and one-off directions out raised
+// precision from 82% to 86% but lost about 30% of the real lessons, while
+// tagging them kept recall and let a filter on agent_practice reach 94%
+// (29 real lessons, 2 not). Collect keeps every lesson with its tag; the decide
+// stage weighs it.
 const SystemPrompt = `You find durable lessons a human taught AI coding agents, in excerpts of one work session run by Agent Orchestrator (AO).
 
 The input is JSON: the session, the lessons already found earlier in this session (open_drafts), and the turns. Each turn has an id, what the agent said and did just before it, the human's words, what the agent said and did just after, and how the human sent it.
@@ -55,14 +63,22 @@ For each lesson give:
 - supersedes: the id of an open draft this turn takes back or replaces, or "" if none;
 - confidence: 0 to 1 that this is a durable lesson rather than task steering.
 
+Also tag each lesson with what it is about:
+- agent_practice: how an agent should work from now on - its habits, tools, process, communication, or a fact about the environment it must respect;
+- product_decision: a decision about the thing being built - what a feature does, how a screen or menu looks, what something is named, which side or component a fix belongs in;
+- one_off: tied to this task, this time or this document, or a preference the human says is case by case;
+- question: the human asked something rather than stating a rule.
+Tag honestly; a lesson tagged other than agent_practice is still returned.
+
 If a later turn in the batch takes back an earlier one, keep only the later. Return an empty list when nothing is durable - that is the common case. Never copy a secret, email, account name or customer data into any field; placeholders such as [email] or [account:x] may stay.`
 
 // Schema is the JSON Schema the model's answer must satisfy.
 const Schema = `{"type":"object","additionalProperties":false,"required":["lessons"],"properties":{"lessons":{"type":"array","items":{"type":"object","additionalProperties":false,
-"required":["kind","statement","applies_when","scope_hint","quote","turn","agent_before","supersedes","confidence"],
+"required":["kind","statement","applies_when","scope_hint","quote","turn","agent_before","supersedes","confidence","about"],
 "properties":{"kind":{"enum":["correction","rule","procedure","fact","preference"]},"statement":{"type":"string"},"applies_when":{"type":"string"},
 "scope_hint":{"enum":["global","project","repo"]},"quote":{"type":"string"},"turn":{"type":"string"},"agent_before":{"type":"string"},
-"supersedes":{"type":"string"},"confidence":{"type":"number"}}}}}}`
+"supersedes":{"type":"string"},"confidence":{"type":"number"},
+"about":{"enum":["agent_practice","product_decision","one_off","question"]}}}}}}`
 
 // Session is what the model is told about the session the turns come from.
 type Session struct {
@@ -163,6 +179,7 @@ type Lesson struct {
 	AgentBefore string  `json:"agent_before"`
 	Supersedes  string  `json:"supersedes"`
 	Confidence  float64 `json:"confidence"`
+	About       string  `json:"about"`
 }
 
 // Rejection is a lesson the checks refused, and why. It is kept for the job's
@@ -213,6 +230,7 @@ func Drafts(output json.RawMessage, base domain.LearnDraft, turns []domain.Learn
 		d.AppliesWhen = strings.TrimSpace(l.AppliesWhen)
 		d.ScopeHint = scopeHint(l.ScopeHint)
 		d.Confidence = clamp01(l.Confidence)
+		d.About = about(l.About)
 		d.Quote = quote
 		d.AnchorExcerptID = turns[anchor].ID
 		d.EvidenceExcerptIDs = []int64{turns[anchor].ID}
@@ -255,6 +273,14 @@ func scopeHint(s string) string {
 	switch s {
 	case "global", "project", "repo":
 		return s
+	}
+	return ""
+}
+
+func about(s string) domain.LearnDraftAbout {
+	a := domain.LearnDraftAbout(s)
+	if a.Valid() {
+		return a
 	}
 	return ""
 }

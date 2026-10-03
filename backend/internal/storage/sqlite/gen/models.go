@@ -102,6 +102,7 @@ type LearnDraft struct {
 	SupersedesID    int64
 	Status          string
 	CreatedAt       time.Time
+	About           string
 }
 
 type LearnExcerpt struct {

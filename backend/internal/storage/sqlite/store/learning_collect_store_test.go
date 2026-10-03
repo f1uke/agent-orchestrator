@@ -68,7 +68,8 @@ func TestCommitLearnJob_StoresDraftsAndMarksTurnsCollected(t *testing.T) {
 	}
 	draft := func(stmt string, sup int64) domain.LearnDraft {
 		return domain.LearnDraft{ProjectID: "mer", SessionID: "mer-1", TaskKey: "solo:mer-1", Kind: domain.LearnDraftRule,
-			Statement: stmt, Quote: "q", AnchorExcerptID: turns[0].ID, EvidenceExcerptIDs: []int64{turns[0].ID}, SupersedesID: sup}
+			Statement: stmt, Quote: "q", AnchorExcerptID: turns[0].ID, EvidenceExcerptIDs: []int64{turns[0].ID}, SupersedesID: sup,
+			About: domain.LearnAboutAgentPractice}
 	}
 	if n := run([]domain.LearnDraft{draft("Drive simulators only through scripts.", 0)}, []int64{turns[0].ID, turns[1].ID}); n != 1 {
 		t.Fatalf("first job stored %d drafts", n)
@@ -89,6 +90,9 @@ func TestCommitLearnJob_StoresDraftsAndMarksTurnsCollected(t *testing.T) {
 	statuses := map[string]domain.LearnDraftStatus{}
 	for _, d := range all {
 		statuses[d.Statement] = d.Status
+		if d.About != domain.LearnAboutAgentPractice {
+			t.Errorf("draft %q about = %q, want the tag it was stored with", d.Statement, d.About)
+		}
 	}
 	if statuses["Drive simulators only through scripts."] != domain.LearnDraftReversed || statuses["Taps are fine for one-off checks."] != domain.LearnDraftOpen {
 		t.Errorf("statuses = %v", statuses)

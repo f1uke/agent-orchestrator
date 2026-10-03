@@ -178,6 +178,7 @@ type LearningDraftDTO struct {
 	AppliesWhen       string     `json:"appliesWhen,omitempty"`
 	ScopeHint         string     `json:"scopeHint,omitempty"`
 	Confidence        float64    `json:"confidence"`
+	About             string     `json:"about,omitempty" enum:"agent_practice,product_decision,one_off,question" description:"What the lesson concerns, as the collect model tagged it. Only agent_practice is about how agents work."`
 	Quote             string     `json:"quote" description:"The human's own words the draft rests on, a checked substring of the anchor turn."`
 	AnchorExcerptID   int64      `json:"anchorExcerptId"`
 	AnchorSourceClass string     `json:"anchorSourceClass,omitempty"`
@@ -273,7 +274,7 @@ func (c *LearningController) drafts(w http.ResponseWriter, r *http.Request) {
 		dto := LearningDraftDTO{
 			ID: d.ID, ProjectID: string(d.ProjectID), SessionID: string(d.SessionID), TaskKey: d.TaskKey,
 			Kind: string(d.Kind), Statement: d.Statement, AppliesWhen: d.AppliesWhen, ScopeHint: d.ScopeHint,
-			Confidence: d.Confidence, Quote: d.Quote, AnchorExcerptID: d.AnchorExcerptID,
+			Confidence: d.Confidence, About: string(d.About), Quote: d.Quote, AnchorExcerptID: d.AnchorExcerptID,
 			AnchorSourceClass: string(d.AnchorSourceClass), AgentBefore: d.AgentBefore, Weak: d.Weak,
 			SupersedesID: d.SupersedesID, Status: string(d.Status), CreatedAt: d.CreatedAt,
 		}

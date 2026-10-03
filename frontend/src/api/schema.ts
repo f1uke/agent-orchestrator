@@ -2552,6 +2552,11 @@ export interface components {
             todaySpendUsd: number;
         };
         ControllersLearningDraftDTO: {
+            /**
+             * @description What the lesson concerns, as the collect model tagged it. Only agent_practice is about how agents work.
+             * @enum {string}
+             */
+            about?: "agent_practice" | "product_decision" | "one_off" | "question";
             agentBefore?: string;
             /** Format: int64 */
             anchorExcerptId: number;
