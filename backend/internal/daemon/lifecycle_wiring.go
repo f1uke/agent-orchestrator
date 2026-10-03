@@ -185,6 +185,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		Messenger:    messenger,
 		Lifecycle:    lcm,
 		DataDir:      cfg.DataDir,
+		KnowledgeDir: cfg.KnowledgeDir,
 		RunFile:      cfg.RunFilePath,
 		Logger:       log,
 		IdleCloseTTL: cfg.SessionIdleClose,

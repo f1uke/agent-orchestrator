@@ -10,17 +10,17 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/knowledgestore"
 )
 
-// managerWithDataDir builds a Manager whose knowledge store lives under dataDir,
-// mirroring newManager() but exposing the store root the teardown safety net
-// writes into.
-func managerWithDataDir(dataDir string) (*Manager, *fakeStore) {
+// managerWithKnowledgeDir builds a Manager whose knowledge store is rooted at
+// knowledgeDir, mirroring newManager() but exposing the store root the
+// teardown safety net writes into.
+func managerWithKnowledgeDir(dataDir, knowledgeDir string) (*Manager, *fakeStore) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
 	lookPath := func(string) (string, error) { return "/bin/true", nil }
 	m := New(Deps{
 		Runtime: &fakeRuntime{}, Agents: fakeAgents{}, Workspace: &fakeWorkspace{},
 		Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st},
-		DataDir: dataDir, LookPath: lookPath,
+		DataDir: dataDir, KnowledgeDir: knowledgeDir, LookPath: lookPath,
 	})
 	return m, st
 }
@@ -37,15 +37,16 @@ func writeWorktreeFile(t *testing.T, path, content string) {
 
 // TestKill_PreservesWorkerPlanningDocs verifies the belt-and-suspenders net:
 // killing a worker copies stray planning docs out of the worktree into the
-// project's private knowledge store before the worktree is torn down.
+// project's private knowledge store before the worktree is torn down - the
+// store the prompts name, never one under the data dir.
 func TestKill_PreservesWorkerPlanningDocs(t *testing.T) {
-	dataDir := t.TempDir()
+	dataDir, knowledgeDir := t.TempDir(), t.TempDir()
 	wt := t.TempDir()
 	writeWorktreeFile(t, filepath.Join(wt, "PLAN.md"), "the plan")
 	writeWorktreeFile(t, filepath.Join(wt, "docs", "plans", "auth.md"), "auth design")
 	writeWorktreeFile(t, filepath.Join(wt, "README.md"), "ignore me")
 
-	m, st := managerWithDataDir(dataDir)
+	m, st := managerWithKnowledgeDir(dataDir, knowledgeDir)
 	st.sessions["mer-1"] = domain.SessionRecord{
 		ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker,
 		Metadata: domain.SessionMetadata{WorkspacePath: wt, Branch: "feat/topic", RuntimeHandleID: "h1"},
@@ -56,7 +57,7 @@ func TestKill_PreservesWorkerPlanningDocs(t *testing.T) {
 		t.Fatalf("Kill: %v", err)
 	}
 
-	plansDir := knowledgestore.PlansDir(dataDir, "mer")
+	plansDir := knowledgestore.PlansDir(knowledgeDir, "mer")
 	for _, name := range []string{"feat-topic--PLAN.md", "feat-topic--docs-plans-auth.md"} {
 		if _, err := os.Stat(filepath.Join(plansDir, name)); err != nil {
 			t.Fatalf("expected preserved %q in the knowledge store: %v", name, err)
@@ -66,17 +67,20 @@ func TestKill_PreservesWorkerPlanningDocs(t *testing.T) {
 	if entries, _ := os.ReadDir(plansDir); len(entries) != 2 {
 		t.Fatalf("want exactly 2 preserved docs, got %d", len(entries))
 	}
+	if _, err := os.Stat(filepath.Join(dataDir, "knowledge")); !os.IsNotExist(err) {
+		t.Fatalf("nothing may land under <dataDir>/knowledge, stat err = %v", err)
+	}
 }
 
 // TestKill_SkipsOrchestratorKnowledge confirms only workers are scanned: an
 // orchestrator's worktree docs are never copied into the plans store (the
 // orchestrator curates the store, it does not seed plans from a worktree).
 func TestKill_SkipsOrchestratorKnowledge(t *testing.T) {
-	dataDir := t.TempDir()
+	knowledgeDir := t.TempDir()
 	wt := t.TempDir()
 	writeWorktreeFile(t, filepath.Join(wt, "PLAN.md"), "orchestrator scratch")
 
-	m, st := managerWithDataDir(dataDir)
+	m, st := managerWithKnowledgeDir(t.TempDir(), knowledgeDir)
 	st.sessions["mer-1"] = domain.SessionRecord{
 		ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator,
 		Metadata: domain.SessionMetadata{WorkspacePath: wt, Branch: "ao/mer/root", RuntimeHandleID: "h1"},
@@ -86,7 +90,7 @@ func TestKill_SkipsOrchestratorKnowledge(t *testing.T) {
 	if _, err := m.Kill(context.Background(), "mer-1", KillOptions{}); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
-	if _, err := os.Stat(knowledgestore.PlansDir(dataDir, "mer")); !os.IsNotExist(err) {
+	if _, err := os.Stat(knowledgestore.PlansDir(knowledgeDir, "mer")); !os.IsNotExist(err) {
 		t.Fatalf("orchestrator teardown must not create a plans store, stat err = %v", err)
 	}
 }
@@ -94,11 +98,11 @@ func TestKill_SkipsOrchestratorKnowledge(t *testing.T) {
 // TestSaveAndTeardownAll_PreservesWorkerPlanningDocs verifies the shutdown/crash
 // teardown path also runs the safety net before the worktree is force-removed.
 func TestSaveAndTeardownAll_PreservesWorkerPlanningDocs(t *testing.T) {
-	dataDir := t.TempDir()
+	knowledgeDir := t.TempDir()
 	wt := t.TempDir()
 	writeWorktreeFile(t, filepath.Join(wt, "implementation-plan.md"), "shutdown plan")
 
-	m, st := managerWithDataDir(dataDir)
+	m, st := managerWithKnowledgeDir(t.TempDir(), knowledgeDir)
 	st.sessions["mer-1"] = domain.SessionRecord{
 		ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker,
 		Metadata: domain.SessionMetadata{WorkspacePath: wt, Branch: "feat/x", RuntimeHandleID: "h1"},
@@ -108,7 +112,7 @@ func TestSaveAndTeardownAll_PreservesWorkerPlanningDocs(t *testing.T) {
 	if err := m.SaveAndTeardownAll(context.Background()); err != nil {
 		t.Fatalf("SaveAndTeardownAll: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(knowledgestore.PlansDir(dataDir, "mer"), "feat-x--implementation-plan.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(knowledgestore.PlansDir(knowledgeDir, "mer"), "feat-x--implementation-plan.md")); err != nil {
 		t.Fatalf("expected preserved plan after shutdown teardown: %v", err)
 	}
 }

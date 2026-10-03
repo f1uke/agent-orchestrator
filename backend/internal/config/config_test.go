@@ -51,6 +51,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DataDir != wantDataDir {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, wantDataDir)
 	}
+	if want := filepath.Join(homeDir, ".ao", "knowledge"); cfg.KnowledgeDir != want {
+		t.Errorf("KnowledgeDir = %q, want %q", cfg.KnowledgeDir, want)
+	}
 	if cfg.Telemetry.Remote != TelemetryRemoteOff || cfg.Telemetry.PostHogHost != DefaultTelemetryPostHogHost {
 		t.Fatalf("Telemetry defaults = %+v", cfg.Telemetry)
 	}
@@ -228,4 +231,22 @@ func TestLoadSessionIdleClose(t *testing.T) {
 			t.Errorf("SessionIdleClose = %s, want default %s", cfg.SessionIdleClose, DefaultSessionIdleClose)
 		}
 	})
+}
+
+// TestLoadKnowledgeDirIgnoresDataDir pins the knowledge store to HOME: the
+// agent prompts name it as ~/.ao/knowledge, so an AO_DATA_DIR override (a
+// sandbox daemon) must not move where AO writes rescued docs away from where
+// its agents are told to read them.
+func TestLoadKnowledgeDirIgnoresDataDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AO_DATA_DIR", filepath.Join(t.TempDir(), "sandbox-data"))
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := filepath.Join(home, ".ao", "knowledge"); cfg.KnowledgeDir != want {
+		t.Fatalf("KnowledgeDir = %q, want %q", cfg.KnowledgeDir, want)
+	}
 }

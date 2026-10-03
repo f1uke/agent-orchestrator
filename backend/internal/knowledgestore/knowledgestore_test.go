@@ -8,9 +8,27 @@ import (
 	"testing"
 )
 
-func TestPlansDir_UnderDataDirKnowledge(t *testing.T) {
-	got := PlansDir("/home/u/.ao", "demo-ios-app")
-	want := filepath.Join("/home/u/.ao", "knowledge", "demo-ios-app", "plans")
+// TestRoot_IsWhereThePromptsPoint pins the one definition of the store's
+// location: Root resolves the same home-relative path the prompts spell as
+// PromptDir, so what an agent is told to read is where AO writes.
+func TestRoot_IsWhereThePromptsPoint(t *testing.T) {
+	if PromptDir != "~/.ao/knowledge" {
+		t.Fatalf("PromptDir = %q, want ~/.ao/knowledge", PromptDir)
+	}
+	home := filepath.FromSlash("/home/u")
+	want := filepath.Join(home, ".ao", "knowledge")
+	if got := Root(home); got != want {
+		t.Fatalf("Root = %q, want %q", got, want)
+	}
+	if got := filepath.Join(home, strings.TrimPrefix(PromptDir, "~/")); got != want {
+		t.Fatalf("PromptDir expands to %q, want %q", got, want)
+	}
+}
+
+func TestPlansDir(t *testing.T) {
+	root := filepath.FromSlash("/home/u/.ao/knowledge")
+	got := PlansDir(root, "demo-ios-app")
+	want := filepath.Join(root, "demo-ios-app", "plans")
 	if got != want {
 		t.Fatalf("PlansDir = %q, want %q", got, want)
 	}
@@ -197,5 +215,60 @@ func TestPreserveStrayDocs_EmptyBranchStillCopies(t *testing.T) {
 	}
 	if names := destBaseNames(t, dest); len(names) != 1 || !strings.HasSuffix(names[0], "--PLAN.md") {
 		t.Fatalf("empty branch should still produce a prefixed name, got %v", names)
+	}
+}
+
+// TestPreserveStrayDocs_SkipsDocsCommittedOnAnyBranch is the tracked-file skip:
+// a doc whose exact content is committed at its path, on the worktree's branch
+// or any other, is safe in git and is not copied again. Uncommitted content -
+// untracked, edited and not committed, or committed only under another path -
+// is still rescued.
+func TestPreserveStrayDocs_SkipsDocsCommittedOnAnyBranch(t *testing.T) {
+	repo := newRepo(t)
+	commitFiles(t, repo, map[string]string{
+		"docs/plans/tracked.md": "committed on main",
+		"edited-plan.md":        "committed version",
+	})
+	git(t, repo, "checkout", "-q", "-b", "other")
+	commitFiles(t, repo, map[string]string{"other-branch-plan.md": "committed on other"})
+	git(t, repo, "checkout", "-q", "main")
+	dest := filepath.Join(t.TempDir(), "plans")
+
+	// Untracked on main, but this exact content is committed at this path on
+	// "other": skip.
+	writeFile(t, filepath.Join(repo, "other-branch-plan.md"), "committed on other")
+	// Tracked and edited without a commit: the edit exists nowhere else.
+	writeFile(t, filepath.Join(repo, "edited-plan.md"), "uncommitted edit")
+	// Untracked; its content is committed, but only under another path.
+	writeFile(t, filepath.Join(repo, "moved-plan.md"), "committed on main")
+	// Plainly untracked.
+	writeFile(t, filepath.Join(repo, "docs", "plans", "fresh.md"), "never committed")
+
+	written, err := PreserveStrayDocs(repo, "feat/x", dest)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"feat-x--docs-plans-fresh.md", "feat-x--edited-plan.md", "feat-x--moved-plan.md"}
+	if got := destBaseNames(t, dest); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("preserved = %v, want %v", got, want)
+	}
+	if len(written) != len(want) {
+		t.Fatalf("written = %v", written)
+	}
+}
+
+// TestPreserveStrayDocs_AllCommittedWritesNothing: a clean checkout whose only
+// planning docs are committed leaves the store untouched, not even a dir.
+func TestPreserveStrayDocs_AllCommittedWritesNothing(t *testing.T) {
+	repo := newRepo(t)
+	commitFiles(t, repo, map[string]string{"docs/batch-redemption-ui-PLAN.md": "tracked"})
+	dest := filepath.Join(t.TempDir(), "plans")
+
+	written, err := PreserveStrayDocs(repo, "feature/a", dest)
+	if err != nil || len(written) != 0 {
+		t.Fatalf("written=%v err=%v, want nothing", written, err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("dest dir should not be created when nothing is preserved")
 	}
 }

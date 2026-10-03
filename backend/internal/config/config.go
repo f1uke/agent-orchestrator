@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/knowledgestore"
 )
 
 const (
@@ -94,6 +96,11 @@ type Config struct {
 	// DataDir is the directory holding durable SQLite state: DB and WAL files.
 	// It is created on first use by the storage layer.
 	DataDir string
+	// KnowledgeDir is the root of AO's private, per-project knowledge store
+	// (~/.ao/knowledge). It follows HOME, never AO_DATA_DIR: the agent prompts
+	// name it by that home-relative path (see knowledgestore.HomeRelDir). Empty
+	// disables the teardown rescue into it.
+	KnowledgeDir string
 	// Agent is the compatibility agent adapter id selected by AO_AGENT;
 	// startSession fails fast if no adapter with this id is registered.
 	Agent string
@@ -251,6 +258,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.DataDir = dataDir
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve knowledge store: %w", err)
+	}
+	cfg.KnowledgeDir = knowledgestore.Root(homeDir)
 
 	return cfg, nil
 }
