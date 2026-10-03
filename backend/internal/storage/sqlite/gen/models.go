@@ -82,6 +82,28 @@ type LearnCursor struct {
 	UpdatedAt      time.Time
 }
 
+type LearnDraft struct {
+	ID              int64
+	ProjectID       string
+	SessionID       string
+	TaskKey         string
+	JobID           int64
+	Kind            string
+	Statement       string
+	StatementHash   string
+	AppliesWhen     string
+	ScopeHint       string
+	Confidence      float64
+	Quote           string
+	AnchorExcerptID int64
+	EvidenceJson    string
+	AgentBefore     string
+	Weak            int64
+	SupersedesID    int64
+	Status          string
+	CreatedAt       time.Time
+}
+
 type LearnExcerpt struct {
 	ID             int64
 	ProjectID      string
@@ -97,6 +119,27 @@ type LearnExcerpt struct {
 	AfterJson      string
 	RedactionsJson string
 	CreatedAt      time.Time
+	CollectedAt    sql.NullTime
+	CollectedJobID int64
+}
+
+type LearnJob struct {
+	ID           int64
+	ProjectID    string
+	SessionID    string
+	State        string
+	Model        string
+	Turns        int64
+	Drafts       int64
+	Rejected     int64
+	CostUsd      float64
+	InputTokens  int64
+	OutputTokens int64
+	DurationMs   int64
+	Error        string
+	StderrTail   string
+	StartedAt    time.Time
+	FinishedAt   sql.NullTime
 }
 
 type Notification struct {

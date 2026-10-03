@@ -559,6 +559,51 @@ func learningOperations() []operation {
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
+		{
+			method: http.MethodPost, path: "/api/v1/learning/collect", id: "startLearningCollect", tag: "learning",
+			summary: "Start a collect run over every uncollected captured turn, under its own budget",
+			reqBody: controllers.StartLearningCollectRequest{},
+			resps: []respUnit{
+				{http.StatusAccepted, controllers.StartLearningCollectResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/drafts", id: "listLearningDrafts", tag: "learning",
+			summary:    "List a project's candidate lessons, newest first",
+			pathParams: []any{controllers.LearningDraftsQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListLearningDraftsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/settings", id: "getLearningSettings", tag: "learning",
+			summary: "Read learning's model and budget settings",
+			resps: []respUnit{
+				{http.StatusOK, controllers.LearningSettingsDTO{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/learning/settings", id: "setLearningSettings", tag: "learning",
+			summary: "Set learning's model and budget settings",
+			reqBody: controllers.LearningSettingsDTO{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.LearningSettingsDTO{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learnsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learncollect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -39,14 +41,43 @@ type Store interface {
 	ListLearnExcerpts(ctx context.Context, projectID domain.ProjectID, limit int) ([]domain.LearnExcerpt, error)
 	ForgetLearning(ctx context.Context, projectID domain.ProjectID) (int, error)
 	LearnCounts(ctx context.Context, projectID domain.ProjectID, unmatchedBefore time.Time) (domain.LearnCounts, error)
+	LearnCollectCounts(ctx context.Context, projectID domain.ProjectID) (domain.LearnCollectCounts, error)
+	LastFailedLearnJob(ctx context.Context, projectID domain.ProjectID) (domain.LearnJob, bool, error)
+	LastFinishedLearnJob(ctx context.Context, projectID domain.ProjectID) (domain.LearnJob, bool, error)
+	LearnSpendSince(ctx context.Context, since time.Time) (float64, error)
+	ListLearnDrafts(ctx context.Context, projectID domain.ProjectID, limit int) ([]domain.LearnDraft, error)
 }
 
-// Service is the learning-capture service.
+// Collector is the collect loop, as the service drives it.
+type Collector interface {
+	RunNow(ctx context.Context, project string, budgetUSD float64) error
+	Progress() learncollect.Progress
+}
+
+// SettingsStore holds learning's model knobs.
+type SettingsStore interface {
+	Get() learnsettings.Settings
+	Set(learnsettings.Settings) error
+}
+
+// Service is the learning service.
 type Service struct {
 	store Store
 	// validPath confines a hook-reported path to Claude Code's transcripts.
 	validPath func(string) bool
 	clock     func() time.Time
+
+	collector Collector
+	settings  SettingsStore
+	// runCtx outlives a request: a manual collect run continues on it after
+	// the request that started it has been answered.
+	runCtx context.Context
+}
+
+// WithCollect wires the collect stage in. runCtx is the daemon's context.
+func (s *Service) WithCollect(runCtx context.Context, c Collector, settings SettingsStore) *Service {
+	s.runCtx, s.collector, s.settings = runCtx, c, settings
+	return s
 }
 
 // New builds the service. validPath is the claude-code adapter's
@@ -119,6 +150,13 @@ type ProjectStatus struct {
 	LastCaptureAt     time.Time
 	FailingFiles      []FailingFile
 	AtRiskTranscripts int
+
+	// Collect: turns no model has seen, drafts by status, the last run and
+	// the last failure.
+	Uncollected     int
+	Drafts          map[domain.LearnDraftStatus]int
+	LastCollectAt   time.Time
+	LastCollectFail *domain.LearnJob
 }
 
 // FailingFile is a transcript whose last pass failed.
@@ -173,6 +211,23 @@ func (s *Service) Status(ctx context.Context) ([]ProjectStatus, error) {
 			}
 		}
 		sort.Slice(st.FailingFiles, func(i, j int) bool { return st.FailingFiles[i].Path < st.FailingFiles[j].Path })
+		cc, err := s.store.LearnCollectCounts(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		st.Uncollected, st.Drafts = cc.Uncollected, cc.Drafts
+		if last, ok, err := s.store.LastFinishedLearnJob(ctx, id); err != nil {
+			return nil, err
+		} else if ok {
+			st.LastCollectAt = last.FinishedAt
+			if last.State == domain.LearnJobFailed {
+				if failed, ok, err := s.store.LastFailedLearnJob(ctx, id); err != nil {
+					return nil, err
+				} else if ok {
+					st.LastCollectFail = &failed
+				}
+			}
+		}
 		out = append(out, st)
 	}
 	return out, nil
@@ -211,4 +266,99 @@ func (s *Service) Forget(ctx context.Context, projectID domain.ProjectID) (int, 
 		return 0, ErrStillLearning
 	}
 	return s.store.ForgetLearning(ctx, projectID)
+}
+
+// CollectStatus is the collect stage across projects: today's spend against
+// the daily budget, the settings, and the current or last run.
+type CollectStatus struct {
+	Enabled        bool
+	TodaySpendUSD  float64
+	DailyBudgetUSD float64
+	Model          string
+	Effort         string
+	Run            learncollect.Progress
+}
+
+// CollectStatus reports the collect stage.
+func (s *Service) CollectStatus(ctx context.Context) (CollectStatus, error) {
+	if s.collector == nil || s.settings == nil {
+		return CollectStatus{}, nil
+	}
+	set := s.settings.Get()
+	now := s.clock().Local()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	spent, err := s.store.LearnSpendSince(ctx, dayStart.UTC())
+	if err != nil {
+		return CollectStatus{}, err
+	}
+	return CollectStatus{
+		Enabled: true, TodaySpendUSD: spent, DailyBudgetUSD: set.DailyBudgetUSD,
+		Model: set.CollectModel, Effort: set.CollectEffort, Run: s.collector.Progress(),
+	}, nil
+}
+
+// ErrCollectUnavailable is a collect request on a daemon without the stage.
+var ErrCollectUnavailable = errors.New("collect is not available")
+
+// ErrNotLearning refuses to collect a project that does not learn.
+var ErrNotLearning = errors.New("project does not learn from sessions")
+
+// MaxManualBudgetUSD caps one manual run.
+const MaxManualBudgetUSD = 50.0
+
+// StartCollect starts a manual collect run over every uncollected turn of one
+// project ("" = every learning project), spending at most budgetUSD. It
+// returns once the run has started.
+func (s *Service) StartCollect(ctx context.Context, project string, budgetUSD float64) error {
+	if s.collector == nil || s.runCtx == nil {
+		return ErrCollectUnavailable
+	}
+	if budgetUSD <= 0 || budgetUSD > MaxManualBudgetUSD {
+		return fmt.Errorf("budget must be between 0 and %.0f dollars", MaxManualBudgetUSD)
+	}
+	if project != "" {
+		proj, ok, err := s.store.GetProject(ctx, project)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%w: %s", ErrUnknownProject, project)
+		}
+		if !proj.Config.LearnFromSessions {
+			return fmt.Errorf("%w: %s", ErrNotLearning, project)
+		}
+	}
+	return s.collector.RunNow(s.runCtx, project, budgetUSD)
+}
+
+// Drafts returns a project's newest drafts first.
+func (s *Service) Drafts(ctx context.Context, projectID domain.ProjectID, limit int) ([]domain.LearnDraft, error) {
+	if _, ok, err := s.store.GetProject(ctx, string(projectID)); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrUnknownProject, projectID)
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > MaxExcerptsLimit {
+		limit = MaxExcerptsLimit
+	}
+	return s.store.ListLearnDrafts(ctx, projectID, limit)
+}
+
+// Settings returns learning's model knobs.
+func (s *Service) Settings() (learnsettings.Settings, error) {
+	if s.settings == nil {
+		return learnsettings.Settings{}, ErrCollectUnavailable
+	}
+	return s.settings.Get(), nil
+}
+
+// SetSettings validates and stores learning's model knobs.
+func (s *Service) SetSettings(next learnsettings.Settings) error {
+	if s.settings == nil {
+		return ErrCollectUnavailable
+	}
+	return s.settings.Set(next)
 }
