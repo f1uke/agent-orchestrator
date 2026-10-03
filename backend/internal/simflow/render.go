@@ -28,6 +28,10 @@ func (c Choice) NeedsReview() bool {
 		// A by-name tap that matched several candidates is stored as RungText
 		// with no Index - see ForAmbiguousText. It is a guess too.
 		return c.Ambiguity > 1
+	case RungID:
+		// A repeated id pinned by an anchor is narrowed, like RungTextAnchor;
+		// one left to an index (or to Maestro's first match) is a guess.
+		return c.Ambiguity > 1 && c.Anchor == ""
 	default:
 		return false
 	}
@@ -44,6 +48,13 @@ func (c Choice) NeedsReview() bool {
 // plain is the unescaped label; it is what a human reads in a comment and what
 // scrollUntilVisible matches on.
 func Render(c Choice, plain string) string {
+	return RenderAction("tapOn", c, plain)
+}
+
+// RenderAction is Render for any Maestro command that takes an element the way
+// tapOn does - longPressOn, for the paste of a secure field. Everything about
+// the selector is the same; only the verb differs.
+func RenderAction(verb string, c Choice, plain string) string {
 	var b strings.Builder
 
 	if c.OffScreen {
@@ -83,7 +94,7 @@ func Render(c Choice, plain string) string {
 		if c.Escaped {
 			b.WriteString("# escaped: the label contains regex characters, and Maestro matches text as a regex\n")
 		}
-		fmt.Fprintf(&b, "- tapOn: %q\n", c.Text)
+		fmt.Fprintf(&b, "- %s: %q\n", verb, c.Text)
 	case RungTextAnchor:
 		// Narrowed, not guessed. The anchor is resolved by Maestro inside its
 		// own hierarchy, so unlike an index it does not depend on our tree and
@@ -93,7 +104,7 @@ func Render(c Choice, plain string) string {
 		if c.Escaped || c.AnchorEscaped {
 			b.WriteString("# escaped: a label contains regex characters, and Maestro matches text as a regex\n")
 		}
-		b.WriteString("- tapOn:\n")
+		fmt.Fprintf(&b, "- %s:\n", verb)
 		fmt.Fprintf(&b, "    text: %q\n", c.Text)
 		fmt.Fprintf(&b, "    %s:\n", c.Relation)
 		fmt.Fprintf(&b, "      text: %q\n", c.Anchor)
@@ -116,13 +127,28 @@ func Render(c Choice, plain string) string {
 		if c.Escaped {
 			b.WriteString("# escaped: the label contains regex characters, and Maestro matches text as a regex\n")
 		}
-		b.WriteString("- tapOn:\n")
+		fmt.Fprintf(&b, "- %s:\n", verb)
 		fmt.Fprintf(&b, "    text: %q\n", c.Text)
 		fmt.Fprintf(&b, "    index: %d\n", c.Index)
 	case RungID:
-		b.WriteString("# no label; matched on the accessibility id\n")
-		b.WriteString("- tapOn:\n")
+		switch {
+		case c.Ambiguity > 1 && c.Anchor != "":
+			fmt.Fprintf(&b, "# no label; %d elements share this accessibility id - pinned by the unique label %q\n", c.Ambiguity, c.Anchor)
+		case c.Ambiguity > 1:
+			fmt.Fprintf(&b, "%s no label, and %d elements share this accessibility id with no unique nearby\n", reviewMarker, c.Ambiguity)
+			b.WriteString("#   label to pin this one. The index is counted in the tree we recorded from. Check it.\n")
+		default:
+			b.WriteString("# no label; matched on the accessibility id\n")
+		}
+		fmt.Fprintf(&b, "- %s:\n", verb)
 		fmt.Fprintf(&b, "    id: %q\n", c.ID)
+		switch {
+		case c.Ambiguity > 1 && c.Anchor != "":
+			fmt.Fprintf(&b, "    %s:\n", c.Relation)
+			fmt.Fprintf(&b, "      text: %q\n", c.Anchor)
+		case c.Ambiguity > 1:
+			fmt.Fprintf(&b, "    index: %d\n", c.Index)
+		}
 	case RungPoint:
 		// ⚠ The marker, not a bare comment. NeedsReview counts this rung, so the
 		// banner at the top of the flow already tells a reader that a step below
@@ -131,7 +157,7 @@ func Render(c Choice, plain string) string {
 		// same untruth as a header that claims a flow is clean.
 		fmt.Fprintf(&b, "%s no label and no id, so this replays as a coordinate: it is where the finger went,\n", reviewMarker)
 		b.WriteString("#   not what was touched, and it breaks on any layout change. Check it.\n")
-		b.WriteString("- tapOn:\n")
+		fmt.Fprintf(&b, "- %s:\n", verb)
 		fmt.Fprintf(&b, "    point: \"%d%%,%d%%\"\n", c.PercentX, c.PercentY)
 	default:
 		b.WriteString("# no label, no id and no reachable point - this element cannot be addressed\n")
@@ -143,8 +169,10 @@ func Render(c Choice, plain string) string {
 // label: scrolling to an element is a search, and an escaped pattern reads as
 // noise in a flow a human will edit.
 func scrollTarget(c Choice, plain string) string {
-	if trimmed := strings.TrimSpace(plain); trimmed != "" {
-		return trimmed
+	// Not trimmed: scrollUntilVisible matches the element's whole text, the
+	// same as tapOn.
+	if strings.TrimSpace(plain) != "" {
+		return plain
 	}
 	return c.ID
 }

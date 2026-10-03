@@ -2,6 +2,7 @@ package simflow
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -28,6 +29,10 @@ const (
 	// inputText, while this promises a key and is written as pressKey. A flow
 	// that turned Enter into inputText "\n" would submit nothing.
 	StepKey StepKind = "key"
+	// StepLongPress is a finger held in one place - a drag that never moved.
+	// It is how a text field's callout (Paste, AutoFill) is raised, and a
+	// swipe of zero length does not raise it.
+	StepLongPress StepKind = "long-press"
 )
 
 // Step is one recorded gesture or observation, shaped for Emit.
@@ -64,8 +69,14 @@ type Step struct {
 	// exactly as simbridge reports them. Unused for every other Kind.
 	X, Y, ToX, ToY float64
 
-	// Text is what was typed, for StepType.
+	// Text is what was typed, for StepType. Empty for a Secure one: the
+	// recorder never keeps what went into a secure field.
 	Text string
+
+	// Secure says a StepType went into a secure field. It is emitted as the
+	// paste mobile-ui-scripts requires (rule 11) rather than as inputText,
+	// and Choice then names the field to long-press for the Paste menu.
+	Secure bool
 
 	// Detail names the button pressed, for StepButton ("home",
 	// "app-switcher", ...).
@@ -76,7 +87,7 @@ type Step struct {
 // about the entry point a recording never captures.
 //
 // There is deliberately no AppID field here. House style keeps
-// `appId: ${APP_ID}` an environment variable (spec §5), and Emit always
+// `appId: ${MAESTRO_APP_ID}` an environment variable (spec §5), and Emit always
 // writes that literal placeholder regardless of what device the recording
 // ran on - so a field a caller could set and watch silently do nothing would
 // be worse than no field at all. If a bundle id ever needs to be explained to
@@ -103,6 +114,72 @@ type EmitOptions struct {
 	// `- runFlow: <Entry>` as the very first step, in place of the comment
 	// that otherwise tells a human to add their own.
 	Entry string
+	// Name, when set, is the flow's `name:` - the recording's own name.
+	Name string
+	// Params turn recorded values back into the variables they came from: a
+	// typed text or a selector equal to a Param's Value is written as
+	// ${MAESTRO_<Name>}. A script must carry no data (mobile-ui-scripts rule
+	// 3) - the account's email, the fund searched for - and the recorder
+	// cannot tell data from a stable label by itself.
+	Params []Param
+}
+
+// Param is one `--param NAME=VALUE`. Name is the bare upper-snake name; the
+// MAESTRO_ prefix is added where it is written, because that prefix is what
+// makes Maestro read the variable from the environment bin/flow sets.
+type Param struct {
+	Name  string
+	Value string
+}
+
+var paramName = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+// plainPath is a path that needs no quoting in YAML.
+var plainPath = regexp.MustCompile(`^[\w./-]+$`)
+
+// ParseParam reads one `NAME=VALUE`, the same shape and the same rule for the
+// name as bin/flow's own --param, so a recording stopped with a param runs
+// with the same one.
+func ParseParam(text string) (Param, error) {
+	name, value, ok := strings.Cut(text, "=")
+	switch {
+	case !ok:
+		return Param{}, fmt.Errorf("--param needs NAME=VALUE, got %q", text)
+	case !paramName.MatchString(name):
+		return Param{}, fmt.Errorf("--param name must be UPPER_SNAKE_CASE, got %q", name)
+	case value == "":
+		return Param{}, fmt.Errorf("--param %s has no value to replace", name)
+	}
+	return Param{Name: name, Value: value}, nil
+}
+
+// placeholder is how a Param is written into a flow.
+func (p Param) placeholder() string { return "${MAESTRO_" + p.Name + "}" }
+
+// substitute puts the Params into one step. It changes what the step SAYS,
+// never what it does: a selector equal to a Value names the same element
+// through the variable, so the wait in front of it and the tap itself both
+// read ${MAESTRO_<Name>}.
+func substitute(step Step, params []Param) Step {
+	for _, p := range params {
+		if p.Value == "" {
+			continue
+		}
+		if step.Kind == StepType && !step.Secure && step.Text == p.Value {
+			step.Text = p.placeholder()
+		}
+		c := &step.Choice
+		switch c.Rung {
+		case RungText, RungTextIndex, RungTextAnchor:
+			if c.Text == p.Value || step.Plain == p.Value {
+				c.Text, c.Escaped, step.Plain = p.placeholder(), false, p.placeholder()
+			}
+		}
+		if c.Anchor != "" && c.Anchor == p.Value {
+			c.Anchor, c.AnchorEscaped = p.placeholder(), false
+		}
+	}
+	return step
 }
 
 // Emit turns a recording's steps into a house-style Maestro flow.
@@ -112,7 +189,7 @@ type EmitOptions struct {
 //     was; the header states that fact, it does not invent the step that got
 //     there.
 //   - write a literal bundle id into the appId line. That line is always the
-//     `${APP_ID}` environment-variable placeholder.
+//     `${MAESTRO_APP_ID}` environment-variable placeholder.
 //
 // And one thing it refuses to do silently: a step this package has no
 // Maestro translation for - today, only the app-switcher button - fails Emit
@@ -122,15 +199,33 @@ type EmitOptions struct {
 func Emit(steps []Step, opts EmitOptions) (string, error) {
 	var b strings.Builder
 
-	b.WriteString("appId: ${APP_ID}\n---\n")
+	// MAESTRO_APP_ID, because a MAESTRO_ variable is the one kind Maestro
+	// reads from the environment by itself: bin/flow sets it, and
+	// `ao sim flow run` passes the environment through, so the flow runs as
+	// written. An APP_ID needs `-e APP_ID=...` on every run, which nothing
+	// here passes - every recorded flow used to fail on its first line.
+	b.WriteString("appId: ${MAESTRO_APP_ID}\n")
+	if name := strings.TrimSpace(opts.Name); name != "" {
+		fmt.Fprintf(&b, "name: %q\n", name)
+	}
+	b.WriteString("---\n")
 	fmt.Fprintf(&b, "# recorded by ao sim at %s, device %s (%s)\n", opts.RecordedAt, opts.Device, opts.Runtime)
 	// Beside the provenance, not below the entry point: both lines say what
 	// this file IS, and a reader listing flows reads this one back.
 	writeCounts(&b, steps)
 	if opts.Entry != "" {
-		// Quoted like every other scalar this package writes: a path holding a
-		// colon or a '#' is ordinary on disk and unparseable as bare YAML.
-		fmt.Fprintf(&b, "- runFlow: %q\n", opts.Entry)
+		// Bare when the path is plain, the way every script in the store
+		// writes one - and the way bin/flow looks for subflows: it finds the
+		// account a script needs by following `runFlow: <path>` into
+		// start/ and common/, and a quoted path hid the login inside
+		// start/fresh_logged_in, so the run typed "undefined" for the email.
+		// Quoted otherwise: a path holding a colon or a '#' is unparseable
+		// as bare YAML.
+		if plainPath.MatchString(opts.Entry) {
+			fmt.Fprintf(&b, "- runFlow: %s\n", opts.Entry)
+		} else {
+			fmt.Fprintf(&b, "- runFlow: %q\n", opts.Entry)
+		}
 	} else {
 		b.WriteString("# add your own entry point above if this flow must start from a cold app,\n")
 		b.WriteString("#   e.g. `- runFlow: ../flows/<entry>.yaml`\n")
@@ -139,6 +234,7 @@ func Emit(steps []Step, opts EmitOptions) (string, error) {
 	writeReviewHeader(&b, steps)
 
 	for _, step := range steps {
+		step = substitute(step, opts.Params)
 		if step.ScreenChange && actsOnAnElement(step.Kind) {
 			writeExtendedWait(&b, step.Choice)
 		}
@@ -185,7 +281,15 @@ func writeReviewHeader(b *strings.Builder, steps []Step) {
 // one. The step itself is still emitted; only the wait in front of it is
 // dropped.
 func actsOnAnElement(kind StepKind) bool {
-	return kind == StepTap || kind == StepSwipe
+	return kind == StepTap || kind == StepSwipe || kind == StepLongPress
+}
+
+// needsReview is the one rule for "a reader must check this step": a step
+// aimed at an element whose selector was a guess - and a secure field whose
+// paste has to long-press a field the recorder could not name for certain.
+func needsReview(step Step) bool {
+	aimed := actsOnAnElement(step.Kind) || (step.Kind == StepType && step.Secure)
+	return aimed && step.Choice.NeedsReview()
 }
 
 // writeExtendedWait emits the "wait for the new screen" stanza (spec §8.1)
@@ -245,7 +349,18 @@ func writeStep(b *strings.Builder, step Step) error {
 		// this file).
 		b.WriteString(Render(step.Choice, step.Plain))
 	case StepType:
-		fmt.Fprintf(b, "- inputText: %q\n", step.Text)
+		if step.Secure {
+			writeSecurePaste(b, step)
+			return nil
+		}
+		if strings.HasPrefix(step.Text, "${MAESTRO_") && strings.HasSuffix(step.Text, "}") {
+			// A Param, written bare the way the scripts write one.
+			fmt.Fprintf(b, "- inputText: %s\n", step.Text)
+		} else {
+			fmt.Fprintf(b, "- inputText: %q\n", step.Text)
+		}
+	case StepLongPress:
+		b.WriteString(RenderAction("longPressOn", step.Choice, step.Plain))
 	case StepSwipe:
 		// A swipe's coordinates are exact, so it always replays - but if the
 		// recorder could not say WHAT it was made on, the flow has to say that
@@ -269,6 +384,36 @@ func writeStep(b *strings.Builder, step Step) error {
 		return fmt.Errorf("step %d: kind %q has no Maestro translation", step.Seq, step.Kind)
 	}
 	return nil
+}
+
+// writeSecurePaste emits what typing into a secure field becomes: the paste
+// mobile-ui-scripts requires (README rule 11, projects/nter/common/login.yaml).
+//
+// Typed, a password is at the mercy of the simulator's keyboard: in a Thai
+// input mode Maestro's inputText turns 8 characters into 3 Thai ones. So it is
+// pasted - bin/flow keeps the account password on the simulator pasteboard for
+// the run - through the system menu a long press raises, and the dots prove
+// every character arrived. The recorder never kept the text, so there is
+// nothing here that could leak it either.
+func writeSecurePaste(b *strings.Builder, step Step) {
+	b.WriteString("# a secure field: pasted, never typed (mobile-ui-scripts rule 11). bin/flow keeps the\n")
+	b.WriteString("#   account password on the simulator pasteboard; the dots prove every character arrived.\n")
+	b.WriteString("#   Not the account password? Put the value on the pasteboard and assert its own dots.\n")
+	b.WriteString("- retry:\n")
+	b.WriteString("    maxRetries: 2\n")
+	b.WriteString("    commands:\n")
+	b.WriteString("      - eraseText: 40\n")
+	if step.Choice.Rung == RungNone || step.Choice.OffScreen {
+		fmt.Fprintf(b, "      %s no field to long-press: the recorder could not tell which field had focus\n", reviewMarker)
+	} else {
+		for _, line := range strings.SplitAfter(RenderAction("longPressOn", step.Choice, step.Plain), "\n") {
+			if line != "" {
+				b.WriteString("      " + line)
+			}
+		}
+	}
+	b.WriteString("      - tapOn: \"Paste\"\n")
+	b.WriteString("      - assertVisible: ${MAESTRO_ACCOUNT_PASSWORD_DOTS}\n")
 }
 
 // writePressKey emits the one YAML shape a hardware button and a keyboard key

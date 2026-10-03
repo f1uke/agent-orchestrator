@@ -312,8 +312,9 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	// (and is named as such); `flow check` is what `bin/flow check` runs, so
 	// the block teaches the store's command instead. `flow record start/stop`
 	// is how a missing script gets authored, with `--out` pointing it into the
-	// store's reach/ folder. `status` and `--entry` are for a recording in
-	// progress and a flow that does not start from the store's start/ states.
+	// store's reach/ folder, `--entry` starting it from one of the store's
+	// start/ states (rule 2) and `--param` keeping data out of it (rule 3).
+	// `status` is for a recording in progress.
 	"flow":                     scriptTeaches,
 	"flow check":               scriptOmits,
 	"flow run":                 scriptTeaches,
@@ -323,7 +324,8 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	"flow record status":       scriptOmits,
 	"flow record stop":         scriptTeaches,
 	"flow record stop --out":   scriptTeaches,
-	"flow record stop --entry": scriptOmits,
+	"flow record stop --entry": scriptTeaches,
+	"flow record stop --param": scriptTeaches,
 	// The screen recorder: a video is something a task asks for, and the
 	// script's own screenshot is the evidence the rule asks for.
 	"record": scriptOmits,

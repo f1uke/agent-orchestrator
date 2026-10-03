@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 )
@@ -686,6 +687,41 @@ func TestSimBoot_CapCountsADeviceTheDaemonIsStillBooting(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "coming up") {
 		t.Errorf("error = %q, want it to say one of them is not up yet", err)
+	}
+	if reqs := daemon.powerRequests(); len(reqs) != 0 {
+		t.Errorf("the cap must refuse before anything is started: %v", reqs)
+	}
+}
+
+// The cap is machine-wide: a boot still coming up in ANOTHER AO daemon on this
+// machine - a sandbox daemon a worker verifies its branch with - counts exactly
+// like one of this daemon's, and the refusal says where it is running.
+func TestSimBoot_CapCountsABootInAnotherDaemon(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	inFlight := bootListing(simUDIDPro, "iPhone 17 Pro", "Shutdown")
+	inFlight.Power = &simDevicePowerListing{
+		Op: "boot", State: "running", Phase: "slimming",
+		OtherDaemon: &domain.SimDaemon{DataDir: "/tmp/ao-sandbox", PID: 4242, Port: 3399},
+	}
+	daemon := newSimPowerDaemon(t, cfg,
+		bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
+		inFlight,
+		bootListing(simUDIDAir, "iPhone Air", "Shutdown"),
+	)
+	daemon.bootsAfter = -1
+	deps := simBootDeps(t,
+		simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
+		simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
+		simDeviceFixture(simUDIDAir, "iPhone Air", "Shutdown"),
+	)
+
+	_, _, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDAir)
+	if err == nil {
+		t.Fatal("a boot in another daemon holds several GB too; booting a third must be refused")
+	}
+	if !strings.Contains(err.Error(), "still coming up in the AO daemon on port 3399") {
+		t.Errorf("error = %q, want the other daemon's boot named with where it runs", err)
 	}
 	if reqs := daemon.powerRequests(); len(reqs) != 0 {
 		t.Errorf("the cap must refuse before anything is started: %v", reqs)

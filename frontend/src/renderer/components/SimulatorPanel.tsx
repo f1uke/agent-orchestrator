@@ -5,7 +5,7 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
 import { useSessionNames } from "../hooks/useSessionNames";
 import { useSessionTask } from "../hooks/useSessionTask";
-import { crewHolderLabel, type SessionNames, type Task } from "../lib/crew";
+import { simLeaseHolderLabel, type SessionNames, type Task } from "../lib/crew";
 import { useSimKeyboard } from "../hooks/useSimKeyboard";
 import { useSimPower, type SimPowerRequest } from "../hooks/useSimPower";
 import { usePageVisible, useSimulatorStream, type SimStreamStatus } from "../hooks/useSimulatorStream";
@@ -267,8 +267,13 @@ export function SimulatorPanel({
 
 	const device = booted.find((d) => d.udid === chosen) ?? null;
 	const lease = device?.lease;
-	const heldByThisSession = lease?.state === "held" && lease.holder === sessionId;
-	const heldByOther = lease?.state === "held" && lease.holder !== sessionId;
+	// A lease held through another AO daemon on this machine (a sandbox daemon)
+	// is never this session's, whatever its id says, and cannot be taken over
+	// from here: its gesture hold lives in that daemon, out of this one's sight.
+	const otherDaemon = lease?.state === "held" ? lease.otherDaemon : undefined;
+	const heldByThisSession = lease?.state === "held" && lease.holder === sessionId && !otherDaemon;
+	const heldByOther = lease?.state === "held" && (lease.holder !== sessionId || Boolean(otherDaemon));
+	const holderLabel = simLeaseHolderLabel(lease, task, holderNames);
 
 	// ⚠ Losing the device TO SOMEBODY ELSE is different from merely losing it,
 	// and the difference is what may be resumed. Another session holding it may
@@ -371,8 +376,11 @@ export function SimulatorPanel({
 	const driveBlockedReason = ((): string => {
 		if (canDrive) return "";
 		if (!chosen) return "No simulator is chosen yet, so there is nothing to touch. Pick one first.";
+		if (heldByOther && otherDaemon) {
+			return `${holderLabel} is holding this device, so nothing here may touch it. It frees up when that session releases it, when its lease lapses, or when that daemon exits.`;
+		}
 		if (heldByOther) {
-			return `${crewHolderLabel(task, lease?.holder, holderNames)} is holding this device, so nothing here may touch it. Take it over to drive it.`;
+			return `${holderLabel} is holding this device, so nothing here may touch it. Take it over to drive it.`;
 		}
 		if (!heldByThisSession) {
 			return "This session is not holding this device, so nothing here may touch it. Claim it to drive it.";
@@ -898,7 +906,7 @@ export function SimulatorPanel({
 							device={device}
 							heldByOther={Boolean(heldByOther)}
 							heldByThisSession={heldByThisSession}
-							holder={crewHolderLabel(task, lease?.holder, holderNames)}
+							holder={holderLabel}
 							onRefresh={refreshDevices}
 							onRelease={() => device && release.mutate(device.udid)}
 							sessionId={sessionId}
@@ -928,12 +936,12 @@ export function SimulatorPanel({
 					    pill and is never shown beside it: there is one control here or
 					    none, so turning driving on and off - the thing done over and
 					    over - never changes the row. */}
-					{!heldByThisSession && device ? (
+					{!heldByThisSession && !otherDaemon && device ? (
 						<SimpleTooltip
 							label={
 								<span className="block max-w-[220px]">
 									{heldByOther
-										? `Take the device from ${crewHolderLabel(task, device.lease?.holder, holderNames)} (@${device.lease?.holder}). Refused while their agent is mid-gesture, so a touch in flight is never cut in half.`
+										? `Take the device from ${holderLabel} (@${device.lease?.holder}). Refused while their agent is mid-gesture, so a touch in flight is never cut in half.`
 										: "Take the same lease `ao sim tap` takes. Watching never needs one; touching the device always does."}
 								</span>
 							}
@@ -941,11 +949,7 @@ export function SimulatorPanel({
 							<button
 								// Named after the holder, so taking a device from another
 								// session reads as a decision rather than a slip.
-								aria-label={
-									heldByOther
-										? `Take over from ${crewHolderLabel(task, device.lease?.holder, holderNames)}`
-										: "Claim to drive"
-								}
+								aria-label={heldByOther ? `Take over from ${holderLabel}` : "Claim to drive"}
 								className="flex h-9 items-center rounded-full border border-border bg-raised px-3 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay disabled:opacity-40 disabled:hover:bg-raised"
 								disabled={claim.isPending}
 								onClick={() => claim.mutate({ udid: device.udid, takeOver: heldByOther ? true : undefined })}

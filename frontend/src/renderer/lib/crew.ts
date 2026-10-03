@@ -366,6 +366,35 @@ export function crewHolderLabel(task: Task | undefined, holder: string | undefin
 	return named || `@${holder ?? "another session"}`;
 }
 
+/** The AO daemon a simulator lease was taken through, when it is not this one. */
+export interface OtherSimDaemon {
+	dataDir: string;
+	pid: number;
+	port?: number;
+}
+
+/**
+ * The holder of a simulator lease, as a person would say it.
+ *
+ * A lease taken through ANOTHER AO daemon on this machine - a sandbox daemon a
+ * worker runs from its branch with its own data dir - is named by its raw id and
+ * that daemon, never by a role or a board name: its session id is numbered in
+ * another database, so looking it up here would name whichever of OUR sessions
+ * happens to share it.
+ */
+export function simLeaseHolderLabel(
+	lease: { holder?: string; otherDaemon?: OtherSimDaemon } | undefined,
+	task: Task | undefined,
+	names?: SessionNames,
+): string {
+	const other = lease?.otherDaemon;
+	if (other) {
+		const where = other.port ? `port ${other.port}` : other.dataDir;
+		return `@${lease?.holder ?? "another session"} (another AO daemon, ${where})`;
+	}
+	return crewHolderLabel(task, lease?.holder, names);
+}
+
 /**
  * The review GATE - not a teammate.
  *

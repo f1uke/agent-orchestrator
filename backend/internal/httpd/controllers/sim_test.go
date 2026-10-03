@@ -186,6 +186,60 @@ func TestSimAcquireConflictNamesTheHolder(t *testing.T) {
 	}
 }
 
+// A holder that is a session of ANOTHER AO daemon on this machine (a sandbox
+// daemon) is named with that daemon: its id means nothing here, and may even
+// equal one of this daemon's own sessions.
+func TestSimAcquireConflictNamesTheOtherDaemon(t *testing.T) {
+	now := time.Date(2026, 10, 3, 20, 7, 0, 0, time.UTC)
+	svc := &fakeSimService{acquireErr: &simsvc.HeldError{
+		Lease: domain.SimLease{
+			UDID: testSimUDID, SessionID: "agent-orchestrator-360", AcquiredAt: now, ExpiresAt: now.Add(7 * time.Minute),
+			OtherDaemon: &domain.SimDaemon{DataDir: "/tmp/ao-sandbox", PID: 4242, Port: 3399},
+		},
+		Now: now,
+	}}
+	srv := newSimTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/mer-7/sim-leases", `{"udid":"`+testSimUDID+`"}`)
+	assertErrorCode(t, body, status, http.StatusConflict, "SIM_DEVICE_LEASED")
+	for _, want := range []string{`"otherDaemon"`, `"dataDir":"/tmp/ao-sandbox"`, `"pid":4242`, `"port":3399`, "port 3399"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("409 body missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestSimHoldRefusalNamesTheOtherDaemon(t *testing.T) {
+	now := time.Date(2026, 10, 3, 20, 7, 0, 0, time.UTC)
+	svc := &fakeSimService{holdErr: &simsvc.HoldRefusedError{
+		UDID: testSimUDID, Reason: simsvc.HoldRefusedLeasedByOther, Now: now,
+		Lease: domain.SimLease{
+			UDID: testSimUDID, SessionID: "agent-orchestrator-360", ExpiresAt: now.Add(time.Minute),
+			OtherDaemon: &domain.SimDaemon{DataDir: "/tmp/ao-sandbox", PID: 4242, Port: 3399},
+		},
+	}}
+	srv := newSimTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/mer-7/sim-leases/"+testSimUDID+"/hold", `{}`)
+	assertErrorCode(t, body, status, http.StatusConflict, "SIM_DEVICE_BUSY")
+	for _, want := range []string{`"leased_by_other"`, `"otherDaemon"`, `"pid":4242`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("409 body missing %s: %s", want, body)
+		}
+	}
+}
+
+func TestSimListLeasesCarriesTheOtherDaemon(t *testing.T) {
+	now := time.Date(2026, 10, 3, 20, 7, 0, 0, time.UTC)
+	svc := &fakeSimService{leases: []domain.SimLease{{
+		UDID: testSimUDID, SessionID: "agent-orchestrator-360", AcquiredAt: now, ExpiresAt: now.Add(time.Minute),
+		OtherDaemon: &domain.SimDaemon{DataDir: "/tmp/ao-sandbox", PID: 4242, Port: 3399},
+	}}}
+	srv := newSimTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sim/leases", "")
+	if status != http.StatusOK || !strings.Contains(string(body), `"otherDaemon":{"dataDir":"/tmp/ao-sandbox","pid":4242,"port":3399}`) {
+		t.Fatalf("status=%d body=%s", status, body)
+	}
+}
+
 func TestSimAcquireInvalidIs422(t *testing.T) {
 	svc := &fakeSimService{acquireErr: simsvc.ErrInvalid}
 	srv := newSimTestServer(t, svc)

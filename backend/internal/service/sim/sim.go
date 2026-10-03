@@ -13,6 +13,13 @@
 // holding a lock. Likewise a lease is released when its owning session ends by
 // a trigger on sessions.is_terminated, so it holds for every path that ends a
 // session - including ones that never call this package.
+//
+// That table is one daemon's, and a machine runs more than one daemon (the
+// human's, and any sandbox daemon a worker verifies its branch with). Wired
+// WithOwnership, every claim also goes through the machine-wide registry
+// (internal/simowner), so a device held through ANY daemon is refused here
+// with its holder named, and listed here too. This table still arbitrates
+// between this daemon's own sessions; the registry only says which daemon may.
 package sim
 
 import (
@@ -67,6 +74,10 @@ type HeldError struct {
 }
 
 func (e *HeldError) Error() string {
+	if e.Lease.OtherDaemon != nil {
+		return fmt.Sprintf("simulator %s is leased by @%s through %s for another %s",
+			e.Lease.UDID, e.Lease.SessionID, e.Lease.OtherDaemon.Describe(), humanizeDuration(e.Lease.ExpiresAt.Sub(e.Now)))
+	}
 	if e.MidGesture {
 		return fmt.Sprintf("simulator %s has a gesture in flight from @%s: retry in a moment",
 			e.Lease.UDID, e.Lease.SessionID)
@@ -120,6 +131,22 @@ type Store interface {
 	ListSimRecordingSteps(ctx context.Context, udid string) ([]domain.SimRecordingStep, error)
 }
 
+// Ownership is the machine-wide record of which daemon holds which device
+// (internal/simowner). Leases it returns for another daemon carry OtherDaemon.
+type Ownership interface {
+	// Claim records the lease machine-wide, or returns the other daemon's
+	// lease that already holds the device.
+	Claim(ctx context.Context, lease domain.SimLease, now time.Time) (domain.SimLease, bool, error)
+	Release(ctx context.Context, udid string, sessionID domain.SessionID) error
+	// Foreign is the live lease another running daemon holds on a device.
+	Foreign(ctx context.Context, udid string, now time.Time) (domain.SimLease, bool, error)
+	// Others is every live lease held through another running daemon.
+	Others(ctx context.Context, now time.Time) ([]domain.SimLease, error)
+	// Sync re-records this daemon's live leases and returns the ones another
+	// daemon has taken meanwhile.
+	Sync(ctx context.Context, local []domain.SimLease, now time.Time) ([]domain.SimLease, error)
+}
+
 // RuntimeWatcher is told when a session takes a device, so AO knows this task
 // has driven the app. The lease is the signal because the daemon already owns
 // it: no new instrumentation, and nothing routed through the agent's judgement.
@@ -147,6 +174,12 @@ type Service struct {
 	crew     RuntimeWatcher
 	// leaseChanged is told after a lease is granted, taken over or released.
 	leaseChanged func()
+	// owners is the machine-wide registry; nil keeps leases to this daemon.
+	owners Ownership
+	// leaseMu serialises this daemon's lease writes, so the local grant and
+	// the machine-wide record are one step as far as this daemon is concerned.
+	// The exclusion itself is still each table's own conditional upsert.
+	leaseMu sync.Mutex
 
 	// recMu guards pending and screens: the recorder's in-memory bookkeeping.
 	// See recording.go - both are keyed by hold token or udid, never touched
@@ -170,6 +203,9 @@ type Service struct {
 	// gestures counts holds taken per device, so a scheduled refresh can tell
 	// that the human has moved on and step aside.
 	gestures map[string]uint64
+	// typing is the field a run of typing on a device is going into, so the
+	// keystrokes after the first need not read the screen again.
+	typing map[string]typingRun
 }
 
 // Option customizes a Service.
@@ -189,6 +225,13 @@ func WithRuntimeWatcher(watcher RuntimeWatcher) Option {
 // or a session that ends (neither of which passes through here) count too.
 func WithLeaseChanged(f func()) Option {
 	return func(s *Service) { s.leaseChanged = f }
+}
+
+// WithOwnership makes leases machine-wide: a device another AO daemon holds is
+// refused and listed. Left unset, leases are this daemon's alone, which is
+// what every test and every non-daemon caller wants.
+func WithOwnership(owners Ownership) Option {
+	return func(s *Service) { s.owners = owners }
 }
 
 // WithClock overrides the service clock for tests.
@@ -276,6 +319,7 @@ func New(store Store, opts ...Option) *Service {
 		sleep:        time.Sleep,
 		refreshDelay: DefaultScreenRefreshDelay,
 		gestures:     make(map[string]uint64),
+		typing:       make(map[string]typingRun),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -301,7 +345,12 @@ func (s *Service) Acquire(ctx context.Context, sessionID domain.SessionID, udid 
 		return domain.SimLease{}, err
 	}
 
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
 	now := s.now()
+	if err := s.refuseForeign(ctx, key, now); err != nil {
+		return domain.SimLease{}, err
+	}
 	holder, granted, err := s.store.AcquireSimLease(ctx, domain.SimLease{
 		UDID:       key,
 		SessionID:  sessionID,
@@ -313,6 +362,9 @@ func (s *Service) Acquire(ctx context.Context, sessionID domain.SessionID, udid 
 	}
 	if !granted {
 		return domain.SimLease{}, &HeldError{Lease: holder, Now: now}
+	}
+	if err := s.recordMachineWide(ctx, holder, now); err != nil {
+		return domain.SimLease{}, err
 	}
 	s.noteRuntimeTouch(ctx, sessionID)
 	s.noteLeaseChanged()
@@ -344,7 +396,17 @@ func (s *Service) TakeOver(ctx context.Context, sessionID domain.SessionID, udid
 		return domain.SimLease{}, err
 	}
 
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
 	now := s.now()
+	// A take-over stops at another daemon's lease. Its one non-negotiable is
+	// not cutting a gesture in half, and the gesture hold lives in THAT
+	// daemon's database, so from here a touch in flight is invisible. Its
+	// holder lets go the ordinary ways - a release, the TTL, or its daemon
+	// exiting - and the refusal says which daemon that is.
+	if err := s.refuseForeign(ctx, key, now); err != nil {
+		return domain.SimLease{}, err
+	}
 	holder, granted, err := s.store.TakeOverSimLease(ctx, domain.SimLease{
 		UDID:       key,
 		SessionID:  sessionID,
@@ -356,6 +418,9 @@ func (s *Service) TakeOver(ctx context.Context, sessionID domain.SessionID, udid
 	}
 	if !granted {
 		return domain.SimLease{}, &HeldError{Lease: holder, Now: now, MidGesture: true}
+	}
+	if err := s.recordMachineWide(ctx, holder, now); err != nil {
+		return domain.SimLease{}, err
 	}
 	s.noteRuntimeTouch(ctx, sessionID)
 	s.noteLeaseChanged()
@@ -370,11 +435,19 @@ func (s *Service) Release(ctx context.Context, sessionID domain.SessionID, udid 
 	if err != nil {
 		return err
 	}
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
 	released, err := s.store.ReleaseSimLease(ctx, key, sessionID)
 	if err != nil {
 		return err
 	}
 	if released {
+		if s.owners != nil {
+			// The device is released either way: this daemon's own table is
+			// what its sessions and holds go by. A machine-wide row left
+			// behind by a failed write is dropped by the next SyncOwnership.
+			_ = s.owners.Release(ctx, key, sessionID)
+		}
 		s.noteLeaseChanged()
 		return nil
 	}
@@ -386,7 +459,85 @@ func (s *Service) Release(ctx context.Context, sessionID domain.SessionID, udid 
 	if ok {
 		return &HeldError{Lease: holder, Now: now}
 	}
+	if err := s.refuseForeign(ctx, key, now); err != nil {
+		return err
+	}
 	return fmt.Errorf("%w: no lease on simulator %s to release", ErrNotFound, key)
+}
+
+// refuseForeign is a *HeldError when another running AO daemon holds the
+// device. Checked before this daemon writes anything, so the ordinary refusal
+// leaves no trace; recordMachineWide is what settles a race with it.
+func (s *Service) refuseForeign(ctx context.Context, key string, now time.Time) error {
+	if s.owners == nil {
+		return nil
+	}
+	foreign, ok, err := s.owners.Foreign(ctx, key, now)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return &HeldError{Lease: foreign, Now: now}
+	}
+	return nil
+}
+
+// recordMachineWide records a lease this daemon just granted in the
+// machine-wide registry. If another daemon got there first - it claimed in the
+// instant between refuseForeign and here - the local grant is undone and the
+// claim is refused with that daemon's holder, so a device never has two
+// drivers. A registry that cannot be written refuses the claim the same way:
+// granting it would be granting a device nobody else can see is taken, which
+// is the failure this registry exists to end.
+func (s *Service) recordMachineWide(ctx context.Context, lease domain.SimLease, now time.Time) error {
+	if s.owners == nil {
+		return nil
+	}
+	holder, granted, err := s.owners.Claim(ctx, lease, now)
+	if err == nil && granted {
+		return nil
+	}
+	if _, undoErr := s.store.ReleaseSimLease(ctx, lease.UDID, lease.SessionID); undoErr != nil {
+		return errors.Join(err, undoErr)
+	}
+	s.noteLeaseChanged()
+	if err != nil {
+		return fmt.Errorf("record the lease on simulator %s machine-wide, so it was not granted: %w", lease.UDID, err)
+	}
+	return &HeldError{Lease: holder, Now: now}
+}
+
+// SyncOwnership brings the machine-wide registry in line with this daemon's
+// own leases. The daemon runs it at startup, before it serves anything, and
+// then every few seconds: a lease that ends without passing through Release -
+// its session ended, so sim_lease's trigger deleted it - is otherwise still
+// recorded machine-wide until its TTL, and a daemon that restarted must
+// reclaim its rows under its new pid. A lease another daemon took while this
+// one was down is given up here, because that daemon granted it first.
+func (s *Service) SyncOwnership(ctx context.Context) error {
+	if s.owners == nil {
+		return nil
+	}
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	now := s.now()
+	local, err := s.store.ListSimLeases(ctx, now)
+	if err != nil {
+		return err
+	}
+	lost, err := s.owners.Sync(ctx, local, now)
+	if err != nil {
+		return err
+	}
+	for _, lease := range lost {
+		if _, err := s.store.ReleaseSimLease(ctx, lease.UDID, lease.SessionID); err != nil {
+			return err
+		}
+	}
+	if len(lost) > 0 {
+		s.noteLeaseChanged()
+	}
+	return nil
 }
 
 func (s *Service) noteLeaseChanged() {
@@ -395,9 +546,19 @@ func (s *Service) noteLeaseChanged() {
 	}
 }
 
-// List returns every lease still live now.
+// List returns every lease still live now: this daemon's, then those held
+// through every other running AO daemon on the machine (OtherDaemon set).
 func (s *Service) List(ctx context.Context) ([]domain.SimLease, error) {
-	return s.store.ListSimLeases(ctx, s.now())
+	now := s.now()
+	leases, err := s.store.ListSimLeases(ctx, now)
+	if err != nil || s.owners == nil {
+		return leases, err
+	}
+	others, err := s.owners.Others(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	return append(leases, others...), nil
 }
 
 // leaseKey validates and canonicalizes the device key. Normalization matters

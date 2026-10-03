@@ -14,6 +14,7 @@ import (
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simowner"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simrunner"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simvideo"
@@ -169,12 +170,49 @@ func aoBinaryPath() string {
 // ready runner's read, or false so the bridge answers. It never waits for a
 // runner that is starting - these reads sit inside a gesture.
 func simRunnerAXReader(runner *simrunner.Manager) simstream.AXReader {
-	return func(ctx context.Context, udid string) (simbridge.Snapshot, bool) {
-		h, _, err := runner.Read(ctx, udid, simrunner.ReadOptions{})
+	return func(ctx context.Context, udid string, at *simbridge.Point) (simbridge.Snapshot, bool) {
+		h, _, err := runner.Read(ctx, udid, simrunner.ReadOptions{At: at})
 		if err != nil {
 			return simbridge.Snapshot{}, false
 		}
 		snap := simbridge.SnapshotFromXCTest(h)
 		return snap, snap.Usable()
 	}
+}
+
+// simOwnershipSyncInterval is how often this daemon re-records its leases in
+// the machine-wide registry. It bounds how long a lease whose session ended
+// (sim_lease's trigger, which the registry cannot see) still reads as held to
+// the OTHER daemons on the machine; this daemon itself stops honouring it at
+// once. The work per tick is two small indexed reads.
+const simOwnershipSyncInterval = 5 * time.Second
+
+// openSimOwnership opens the machine-wide simulator ownership registry
+// (internal/simowner) on behalf of this daemon, or returns nil with a warning
+// when it cannot - leases then stay this daemon's alone, which is how every
+// daemon behaved before the registry existed. It is shared by every AO daemon
+// on the machine whatever their AO_DATA_DIR, so a device a sandbox daemon's
+// session drives is refused and listed by the human's daemon and vice versa.
+func openSimOwnership(dataDir string, port int, log *slog.Logger) *simowner.Registry {
+	path, err := simowner.DefaultPath()
+	if err != nil {
+		log.Warn("simowner: no machine-wide simulator registry; leases are visible to this daemon only", "err", err)
+		return nil
+	}
+	reg, err := simowner.Open(path, simowner.Self{DataDir: dataDir, PID: os.Getpid(), Port: port})
+	if err != nil {
+		log.Warn("simowner: no machine-wide simulator registry; leases are visible to this daemon only", "path", path, "err", err)
+		return nil
+	}
+	return reg
+}
+
+// simOwnershipOptions wires the registry into the lease service and the
+// device assigner, or nothing when there is no registry. (A nil
+// *simowner.Registry must never become a non-nil interface value.)
+func simOwnershipOptions(reg *simowner.Registry) ([]simsvc.Option, []simsvc.AssignerOption) {
+	if reg == nil {
+		return nil, nil
+	}
+	return []simsvc.Option{simsvc.WithOwnership(reg)}, []simsvc.AssignerOption{simsvc.WithAssignerOwnership(reg)}
 }

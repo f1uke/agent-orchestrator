@@ -21,6 +21,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
 const (
@@ -124,6 +126,11 @@ func (f *fakeLauncher) Start(spec StartSpec) (Process, error) {
 		// The real runner hit-tests only when asked, and says so.
 		if r.URL.Query().Get("hitTest") == "1" {
 			answer["hitTest"] = map[string]any{"checked": 1, "covered": 0, "elapsedMs": 1}
+		}
+		// And answers "what does a touch here reach" only when asked, echoing
+		// the point so a test can see what was sent.
+		if at := r.URL.Query().Get("at"); at != "" {
+			answer["at"] = map[string]any{"found": false, "error": "asked " + at}
 		}
 		_ = json.NewEncoder(w).Encode(answer)
 	})
@@ -306,6 +313,18 @@ func TestManager_ARunnerLivesExactlyAsLongAsTheLease(t *testing.T) {
 	// Only a read that hands out tap points pays for the hit-test.
 	if tested, _, err := m.Read(context.Background(), udidA, ReadOptions{HitTest: true}); err != nil || tested.HitTest == nil {
 		t.Fatalf("a hit-test read was not hit-tested: %+v, %v", tested.HitTest, err)
+	}
+	if h.At != nil {
+		t.Fatalf("a plain read asked what a point reaches: %+v", h.At)
+	}
+	// A recorder's read names the point, normalized, as the runner takes it.
+	at, _, err := m.Read(context.Background(), udidA, ReadOptions{At: &simbridge.Point{X: 0.5, Y: 0.25}})
+	if err != nil || at.At == nil || at.At.Error != "asked 0.5000,0.2500" {
+		t.Fatalf("an at read = %+v, %v; want the runner asked about 0.5000,0.2500", at.At, err)
+	}
+	// A point off the screen is refused here, not sent.
+	if _, _, err := m.Read(context.Background(), udidA, ReadOptions{At: &simbridge.Point{X: 1.5, Y: 0.25}}); err == nil {
+		t.Fatal("a read about a point off the screen was sent; want it refused")
 	}
 	p := f.proc(0)
 	if p.spec.Idle != DefaultIdle || p.spec.UDID != udidA {

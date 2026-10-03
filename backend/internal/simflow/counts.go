@@ -53,7 +53,7 @@ type Counts struct {
 func ReviewCount(steps []Step) int {
 	n := 0
 	for _, step := range steps {
-		if actsOnAnElement(step.Kind) && step.Choice.NeedsReview() {
+		if needsReview(step) {
 			n++
 		}
 	}

@@ -320,6 +320,7 @@ var schemaNames = map[string]string{
 	"ControllersSimVideoView":                  "SimVideoView",
 	// domain simulator entities
 	"DomainSimLease":         "SimLease",
+	"DomainSimDaemon":        "SimDaemon",
 	"DomainSimHold":          "SimHold",
 	"DomainSimRecording":     "SimRecording",
 	"DomainSimRecordingStep": "SimRecordingStep",

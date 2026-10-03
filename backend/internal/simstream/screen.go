@@ -66,6 +66,8 @@ type Screen struct {
 	// pass. One instance serves both a boot (through power) and a claim, so
 	// the listing reports whichever ran last.
 	trust *simtrust.Truster
+	// bootLedger is carried across newPower, which rebuilds power.
+	bootLedger simpower.BootLedger
 
 	mu       sync.Mutex
 	hub      *Hub
@@ -148,6 +150,16 @@ func (s *Screen) newPower() {
 	s.power = simpower.New(s.lookPath, s.run)
 	s.power.UseTruster(s.trust)
 	s.power.OnSettled(s.forgetListing)
+	if s.bootLedger != nil {
+		s.power.SetBootLedger(s.bootLedger)
+	}
+}
+
+// SetBootLedger shares this daemon's boots with the other AO daemons on the
+// machine and folds theirs into PowerStatus. See simpower.BootLedger.
+func (s *Screen) SetBootLedger(ledger simpower.BootLedger) {
+	s.bootLedger = ledger
+	s.power.SetBootLedger(ledger)
 }
 
 // Boot names the boot session of the device a gesture is about to touch, so
@@ -326,9 +338,10 @@ func (s *Screen) Subscribe(ctx context.Context, udid string) (<-chan Event, erro
 }
 
 // AXReader reads a device's whole screen through something better than the
-// bridge, answering false when it cannot right now. The daemon's XCTest
-// runners (internal/simrunner) are the one implementation.
-type AXReader func(ctx context.Context, udid string) (simbridge.Snapshot, bool)
+// bridge, answering false when it cannot right now. With at set it also
+// answers what a touch at that point reaches (Snapshot.Reached). The daemon's
+// XCTest runners (internal/simrunner) are the one implementation.
+type AXReader func(ctx context.Context, udid string, at *simbridge.Point) (simbridge.Snapshot, bool)
 
 // SetAXReader makes every screen read through this surface - the gesture
 // recorder's, the paste proof's - try reader first. It is a setter rather
@@ -376,7 +389,7 @@ type readingDriver struct {
 
 func (d readingDriver) AX(ctx context.Context, udid string) (simbridge.Snapshot, error) {
 	if reader := d.screen.reader(); reader != nil {
-		if snap, ok := reader(ctx, udid); ok {
+		if snap, ok := reader(ctx, udid, nil); ok {
 			return snap, nil
 		}
 	}
@@ -399,6 +412,22 @@ func (s *Screen) AX(ctx context.Context, udid string) (simbridge.Snapshot, error
 		return simbridge.Snapshot{}, err
 	}
 	return driver.AX(ctx, udid)
+}
+
+// LiveAX reads a device's screen through the AXReader alone, asking what a
+// touch at `at` reaches when at is set, and answers false when no reader is
+// wired or it cannot answer right now.
+//
+// It never falls back to the bridge, which is the point of it: the gesture
+// recorder calls it IN FRONT OF a touch, where a runner read costs ~100 ms and
+// does not queue behind the bridge, and a bridge read costs 0.5-1 s and does.
+// A caller that gets false describes the gesture from what it already had.
+func (s *Screen) LiveAX(ctx context.Context, udid string, at *simbridge.Point) (simbridge.Snapshot, bool) {
+	reader := s.reader()
+	if reader == nil {
+		return simbridge.Snapshot{}, false
+	}
+	return reader(ctx, udid, at)
 }
 
 // Keyboard asks a device which input mode it will read key presses through.

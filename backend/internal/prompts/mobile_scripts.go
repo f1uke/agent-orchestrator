@@ -90,7 +90,7 @@ ao sim release                  # when you are done with the device` + "\n```" +
 - **The device that is yours is ` + "`$AO_SIM_UDID`" + `**, and ` + "`bin/flow`" + ` and ` + "`ao sim`" + ` already mean it. Unset means none was free: name a scratch device (` + "`--device`" + ` / ` + "`--udid`" + `), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase.
 - **A lease guards the device, not the command.** ` + "`ao sim run`" + ` and ` + "`ao sim install`" + ` take it as they install; a raw ` + "`xcrun simctl`" + ` or ` + "`xcodebuild -destination`" + ` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
 - **A screenshot says which build it was of.** Compare its ` + "`Build:`" + ` line before the pictures.
-- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: ` + "`ao sim claim`" + `, ` + "`ao sim flow record start --name <screen>`" + `, drive the route once, ` + "`ao sim flow record stop --out {{store}}/projects/{{product}}/reach/<name>.yaml`" + ` - or write the YAML yourself.`
+- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: ` + "`ao sim claim`" + `, ` + "`ao sim flow record start --name <screen>`" + `, drive the route once, ` + "`ao sim flow record stop --out {{store}}/projects/{{product}}/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE`" + ` (every typed or tapped VALUE becomes ` + "`${MAESTRO_NAME}`" + `; a password is pasted, never recorded) - or write the YAML yourself.`
 
 const mobileScriptAndroid = "\n\n" + `## Driving the Android emulator: scripts only (AO)
 

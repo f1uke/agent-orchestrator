@@ -117,7 +117,7 @@ JSON shape:
 
 `defaultUdid` is `null` when there is no unambiguous choice, and `defaultReason` says why.
 
-**Lease state is only ever `held` or `unknown` - never `free`.** `held` means an AO session holds it and names who. `unknown` means no AO session holds it AND AO cannot tell whether a human is driving it from Xcode: Xcode takes its own exclusive lock that AO has no way to see. `unknown` also covers "the daemon is not running so nobody could be asked" - the `reason` field says which. Treat `unknown` as "probably yours to claim", never as "proven idle".
+**Lease state is only ever `held` or `unknown` - never `free`.** `held` means an AO session holds it and names who - through any AO daemon on this machine; `otherDaemon` (`dataDir`, `pid`, `port`) is set when the holder is a session of a daemon other than the one you asked. `unknown` means no AO session holds it AND AO cannot tell whether a human is driving it from Xcode: Xcode takes its own exclusive lock that AO has no way to see. `unknown` also covers "the daemon is not running so nobody could be asked" - the `reason` field says which. Treat `unknown` as "probably yours to claim", never as "proven idle".
 
 ---
 
@@ -149,7 +149,7 @@ Power a simulator on and wait until it can actually be driven. This is what you 
 
 **Booting an already-booted device is a no-op, so retrying is always safe.** So is racing: if another session is booting the same device, this waits for their boot instead of failing.
 
-**It stops at two booted simulators.** Each is a virtual machine of several GB, and three at once has run this kind of machine out of memory. Past two, `ao sim boot` refuses and names what is already up - drive one of those, or ask the human, who can boot another from the desktop app's Device tab.
+**It stops at two booted simulators.** Each is a virtual machine of several GB, and three at once has run this kind of machine out of memory. Past two, `ao sim boot` refuses and names what is already up - drive one of those, or ask the human, who can boot another from the desktop app's Device tab. The count is machine-wide: every booted device, plus every boot still coming up in ANY AO daemon on the machine (a sandbox daemon's included - a slimming boot reboots the device, so for tens of seconds it is not `Booted` while its memory is very much in use).
 
 **It needs a running daemon and an AO session** (`AO_SESSION_ID`), unlike `ao sim list` and `ao sim shot`. So does `ao sim claim`, which is what you run next.
 
@@ -409,6 +409,7 @@ The device is resolved exactly like `ao sim shot` (see the table above): with se
 - **Renewal:** claiming a device you already hold extends it, so calling `ao sim claim` again before a long stretch of work is safe and is the intended way to keep a device.
 - **Automatic release:** the lease lapses on its own after the TTL, and is released the moment this session ends. You can never permanently poison a device by crashing.
 - **Contention:** if another session holds it, the command **fails (exit 1)** and names the holder and the time left. It never waits and never silently proceeds. Do something else and try later, or ask that session to release it.
+- **Machine-wide, across every AO daemon:** a lease taken through ANY AO daemon on this machine - the human's, or a sandbox daemon a worker runs from its branch with its own `AO_DATA_DIR` - is seen and refused by all of them. A holder on another daemon is named with that daemon (`@agent-orchestrator-360 through the AO daemon on port 3399 (data dir ..., pid ...)`), in `ao sim list` too. Its session id belongs to that daemon, so it can match yours and still be somebody else. You cannot release or take over its lease from here; it ends when its holder releases it, when it lapses, or as soon as that daemon's process exits. The record is one file, `~/.ao/sim-ownership.db`, shared whatever `AO_DATA_DIR` says - nothing else a sandbox daemon has is shared.
 - **What it does not cover:** a human driving the same simulator from Xcode. A lease excludes other AO sessions only.
 
 #### Root CAs: why HTTPS works through the proxy

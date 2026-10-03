@@ -328,7 +328,7 @@ function seedRecordings(sandbox: Sandbox, count: number): void {
 	for (let i = 0; i < count; i += 1) {
 		const stamp = `20260818-0400${String(i).padStart(2, "0")}.000Z`;
 		const body = [
-			"appId: ${APP_ID}",
+			"appId: ${MAESTRO_APP_ID}",
 			"---",
 			"# recorded by ao sim at t, device d (r)",
 			"# 3 step(s), 1 needing review",
@@ -453,7 +453,7 @@ test("recording captures a hand drag, and stop writes the flow it reports", asyn
 	const written = readdirSync(dir).filter((f) => f.endsWith(".yaml"));
 	expect(written, "stop reported a flow that is not on disk").toHaveLength(1);
 	const body = readFileSync(path.join(dir, written[0]), "utf8");
-	expect(body).toContain("appId: ${APP_ID}");
+	expect(body).toContain("appId: ${MAESTRO_APP_ID}");
 	// What the summary claims and what the file says are the same numbers.
 	const counts = body.match(/# (\d+) step\(s\), (\d+) needing review/);
 	expect(counts, `the flow states no counts:\n${body}`).not.toBeNull();

@@ -859,6 +859,35 @@ describe("SimulatorPanel lease truth", () => {
 		);
 	});
 
+	// A device held through ANOTHER AO daemon on this machine (a sandbox daemon)
+	// cannot be taken over from here - its gesture hold lives in that daemon, so
+	// a touch in flight cannot be ruled out - and its session id, even when it
+	// equals this one, is somebody else's.
+	it("offers no take-over of a device another AO daemon's session holds", async () => {
+		serveDevices(
+			devicesPayload(
+				[
+					device({
+						lease: {
+							state: "held",
+							holder: "p-1",
+							otherDaemon: { dataDir: "/tmp/ao-sandbox", pid: 4242, port: 3399 },
+						},
+					}),
+				],
+				"UDID-A",
+				"the only booted simulator",
+			),
+		);
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		const menu = await openMenu();
+		expect(within(menu).getByText(/@p-1 \(another AO daemon, port 3399\)/i)).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /take over/i })).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /claim to drive/i })).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /drive this device/i })).not.toBeInTheDocument();
+	});
+
 	// An ordinary claim on a device nobody holds must not ask to take anything
 	// over: the two refuse for different reasons and mean different things.
 	it("never offers to take over a device nobody holds", async () => {

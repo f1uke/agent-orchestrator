@@ -160,6 +160,17 @@ type Snapshot struct {
 	// can see it, so its absence from an addon read means "unknown", not
 	// "down".
 	Keyboard *KeyboardState `json:"keyboard,omitempty"`
+	// Reached answers a read that asked what a touch at one point lands on:
+	// the path of that element, or why there is none. Only the XCTest reader
+	// can answer it, because only it can ask the accessibility server what
+	// is on top - the tree's own order is not the order things are drawn in.
+	Reached *Reached `json:"reached,omitempty"`
+}
+
+// Reached is the element a touch at a point lands on.
+type Reached struct {
+	Path  string `json:"path,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // newSnapshot converts the addon's tree, computing a tap point per element.

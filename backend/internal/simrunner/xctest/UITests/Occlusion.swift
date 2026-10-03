@@ -56,7 +56,15 @@ enum Occlusion {
 
     /// The hit-test is not public API. A missing selector means no element is
     /// judged, and the caller says so rather than calling everything visible.
-    typealias HitTest = @convention(c) (NSObject, Selector, NSObject, CGPoint, UnsafeMutablePointer<NSError?>?) -> NSObject?
+    ///
+    /// The error is an Objective-C `NSError **`, which is `__autoreleasing`:
+    /// the callee stores an autoreleased error WITHOUT retaining it for us. It
+    /// must be typed AutoreleasingUnsafeMutablePointer so Swift retains what
+    /// comes back. Typed as a plain UnsafeMutablePointer, Swift released an
+    /// error it never owned, and the autorelease pool released it again later
+    /// - the runner died with EXC_BAD_ACCESS in objc_autoreleasePoolPop
+    /// whenever a hit-test failed, which happens while the screen changes.
+    typealias HitTest = @convention(c) (NSObject, Selector, NSObject, CGPoint, AutoreleasingUnsafeMutablePointer<NSError?>?) -> NSObject?
     static let hitTestSelector = NSSelectorFromString("hitTestElement:withPoint:error:")
 
     static func hitTester() -> ((NSObject, CGPoint) -> NSObject?)? {
@@ -95,24 +103,29 @@ enum Occlusion {
         return result
     }
 
-    static func judgeTree(_ roots: [XCUIElementSnapshot]) -> Result {
-        var result = Result()
-        guard let hitTest = hitTester() else {
-            result.error = "XCTest has no accessibility hit-test here (\(NSStringFromSelector(hitTestSelector)))"
-            return result
-        }
+    /// The snapshot flattened into one array, with the questions both the
+    /// occlusion judge and the point hit-test ask of it.
+    struct Tree {
         var nodes: [Node] = []
         var byElement: [NSObject: [Int]] = [:]
-        func add(_ snapshot: XCUIElementSnapshot, parent: Int, root: Int) {
+        let screen: CGRect
+        let hitTest: (NSObject, CGPoint) -> NSObject?
+
+        init?(_ roots: [XCUIElementSnapshot], hitTest: @escaping (NSObject, CGPoint) -> NSObject?) {
+            guard let screen = roots.map(\.frame).max(by: { $0.width * $0.height < $1.width * $1.height }),
+                  screen.width > 0, screen.height > 0 else { return nil }
+            self.screen = screen
+            self.hitTest = hitTest
+            for root in roots { add(root, parent: -1, root: -1) }
+        }
+
+        private mutating func add(_ snapshot: XCUIElementSnapshot, parent: Int, root: Int) {
             let index = nodes.count
-            let element = accessibilityElement(snapshot)
+            let element = Occlusion.accessibilityElement(snapshot)
             nodes.append(Node(snapshot: snapshot, parent: parent, root: parent < 0 ? index : root, element: element))
             if let element { byElement[element, default: []].append(index) }
             for child in snapshot.children { add(child, parent: index, root: parent < 0 ? index : root) }
         }
-        for root in roots { add(root, parent: -1, root: -1) }
-        guard let screen = roots.map(\.frame).max(by: { $0.width * $0.height < $1.width * $1.height }),
-              screen.width > 0, screen.height > 0 else { return result }
 
         func ancestors(_ index: Int) -> [Int] {
             var out: [Int] = []
@@ -120,9 +133,11 @@ enum Occlusion {
             while at >= 0 { out.append(at); at = nodes[at].parent }
             return out
         }
+
         func related(_ a: Int, _ b: Int) -> Bool {
             a == b || ancestors(a).contains(b) || ancestors(b).contains(a)
         }
+
         /// Whether a and b are parts of one layer of the screen, so neither
         /// is drawn over the other: they meet inside content that scrolls
         /// together, or inside a container smaller than a layer.
@@ -137,14 +152,30 @@ enum Occlusion {
             let frame = nodes[meet].snapshot.frame
             return frame.width * frame.height < layerFraction * screen.width * screen.height
         }
+
         /// What answers at a point, as indices into the tree; nil when the
-        /// hit-test gave nothing this read knows.
+        /// hit-test gave nothing this read knows. The hit-test is system-wide,
+        /// so which root it starts from does not change the answer.
         func hit(_ point: CGPoint, from index: Int) -> [Int]? {
             guard let root = nodes[nodes[index].root].element,
                   let answer = hitTest(root, point),
-                  let element = unwrap(answer) else { return nil }
+                  let element = Occlusion.unwrap(answer) else { return nil }
             return byElement[element]
         }
+    }
+
+    static func judgeTree(_ roots: [XCUIElementSnapshot]) -> Result {
+        var result = Result()
+        guard let hitTest = hitTester() else {
+            result.error = "XCTest has no accessibility hit-test here (\(NSStringFromSelector(hitTestSelector)))"
+            return result
+        }
+        guard let tree = Tree(roots, hitTest: hitTest) else { return result }
+        let nodes = tree.nodes
+        let screen = tree.screen
+        func related(_ a: Int, _ b: Int) -> Bool { tree.related(a, b) }
+        func sameLayer(_ a: Int, _ b: Int) -> Bool { tree.sameLayer(a, b) }
+        func hit(_ point: CGPoint, from index: Int) -> [Int]? { tree.hit(point, from: index) }
         /// The element a touch at the point reaches, unless it is index or
         /// part of index's own layer.
         func covering(_ hits: [Int], _ index: Int) -> Int? {
@@ -216,6 +247,54 @@ enum Occlusion {
             result.covers[ObjectIdentifier(node.snapshot as AnyObject)] = Cover(by: describe(top, layer: layer), point: point)
         }
         return result
+    }
+
+    /// The element a touch at `point` reaches - what a recorder has to name
+    /// when all it was told is a coordinate.
+    ///
+    /// The tree's order cannot answer it: the roots run frontmost first, a
+    /// page's chart can come after the buttons it does not cover, and a frame
+    /// says nothing about a keyboard or a tab bar drawn over it. The hit-test
+    /// can, but only about the LAYER: on iOS 26 it answers a neighbouring tab
+    /// for a point inside the tab bar. So it picks the layer, and the deepest
+    /// element whose frame holds the point inside that layer - the answer's
+    /// own branch, or anything in one layer with it - is what was touched.
+    ///
+    /// The SMALLEST such element, not the deepest: a web page's content runs
+    /// on under the sign-in sheet's address bar and is twenty levels deeper
+    /// than the bar's buttons, so "deepest" named the page for a tap on
+    /// Cancel. A finger on a control inside a bigger thing touched the
+    /// control, and the control is the smaller of the two.
+    static func reached(_ roots: [XCUIElementSnapshot], at point: CGPoint) -> (snapshot: XCUIElementSnapshot?, error: String?) {
+        guard let hitTest = hitTester() else {
+            return (nil, "XCTest has no accessibility hit-test here (\(NSStringFromSelector(hitTestSelector)))")
+        }
+        guard let tree = Tree(roots, hitTest: hitTest), !tree.nodes.isEmpty else { return (nil, "nothing is on the screen") }
+        guard tree.screen.contains(point) else { return (nil, "the point is off the screen") }
+        guard let hits = tree.hit(point, from: 0), !hits.isEmpty else {
+            return (nil, "the hit-test answered nothing this read holds")
+        }
+        var best: (index: Int, area: CGFloat, depth: Int)?
+        for (index, node) in tree.nodes.enumerated() where node.parent >= 0 {
+            let snapshot = node.snapshot
+            guard judged(snapshot), !isScrollIndicator(snapshot), snapshot.frame.contains(point),
+                  hits.contains(where: { tree.related($0, index) || tree.sameLayer($0, index) }) else { continue }
+            // Smallest wins; between equals the deeper, then the later one,
+            // which is drawn later.
+            let area = snapshot.frame.width * snapshot.frame.height
+            let depth = tree.ancestors(index).count
+            if let current = best, area > current.area || (area == current.area && depth < current.depth) { continue }
+            best = (index, area, depth)
+        }
+        guard let best else { return (nil, "nothing reported holds the point in the layer the hit-test answered") }
+        return (tree.nodes[best.index].snapshot, nil)
+    }
+
+    /// A scroll view's indicator ("Vertical scroll bar, 2 pages"). It is laid
+    /// over the content's edge, but a finger there reaches the content, and
+    /// its label changes with the content's length.
+    static func isScrollIndicator(_ snapshot: XCUIElementSnapshot) -> Bool {
+        snapshot.elementType == .other && snapshot.label.contains("scroll bar")
     }
 
     /// Whether the Go converter will report this element, which is the only

@@ -2622,6 +2622,8 @@ export interface components {
         ControllersSimDevicePowerView: {
             /** @description boot or shutdown. */
             op: string;
+            /** @description Set when the boot is running in another AO daemon on this machine. */
+            otherDaemon?: components["schemas"]["SimDaemon"];
             /** @description booting or slimming, while a boot is in flight. Empty for a shutdown, which has only one part. */
             phase?: string;
             /** @description skipped or failed - the two outcomes that mean the device is stock. A profile that applied leaves no power entry at all, so nothing else reaches the wire. */
@@ -3674,6 +3676,14 @@ export interface components {
             /** @description Only rows under these '## ' headings. Empty means every section. */
             sections?: string[];
         };
+        SimDaemon: {
+            /** @description The other daemon's AO_DATA_DIR - its identity on this machine. */
+            dataDir: string;
+            /** @description The other daemon's process id. Its leases end when that process does. */
+            pid: number;
+            /** @description The port the other daemon serves on (its AO_PORT). */
+            port?: number;
+        };
         SimDeviceLeaseView: {
             /** Format: date-time */
             acquiredAt?: null | string;
@@ -3681,6 +3691,8 @@ export interface components {
             expiresAt?: null | string;
             /** @description Session that holds the lease, when the state is held. */
             holder?: string;
+            /** @description Set when the lease was taken through another AO daemon on this machine; holder is then that daemon's session. */
+            otherDaemon?: components["schemas"]["SimDaemon"];
             /** @description Why the state is unknown. */
             reason?: string;
             /** @description held when an AO session holds a live lease; unknown otherwise. Never free - AO cannot see a human driving the device from Xcode. */
@@ -3758,6 +3770,7 @@ export interface components {
             acquiredAt: string;
             /** Format: date-time */
             expiresAt: string;
+            otherDaemon?: components["schemas"]["SimDaemon"];
             sessionId: string;
             udid: string;
         };
@@ -3790,6 +3803,7 @@ export interface components {
             kind: string;
             offScreen?: boolean;
             screenChange?: boolean;
+            secure?: boolean;
             selector?: string;
             selectorAnchor?: string;
             selectorAnchorRel?: string;
@@ -3941,6 +3955,7 @@ export interface components {
         };
         SimXCTestHierarchy: {
             apps: components["schemas"]["SimXCTestApp"][];
+            at?: components["schemas"]["SimbridgeXCTestAt"];
             elapsedMs: number;
             errors?: string[];
             foregroundSource?: string;
@@ -3957,9 +3972,18 @@ export interface components {
             id?: string;
             label?: string;
             placeholder?: string;
+            reached?: boolean;
             selected?: boolean;
             type: string;
             value?: string;
+        };
+        SimbridgeXCTestAt: {
+            error?: string;
+            found: boolean;
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
         };
         SimbridgeXCTestCover: {
             by: components["schemas"]["SimbridgeXCTestCoverer"];

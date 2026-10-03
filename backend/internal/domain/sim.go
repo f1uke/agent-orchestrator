@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -43,16 +44,58 @@ const (
 // (ending a session releases the device) and drives a device across many
 // commands - a gesture, or a whole interaction sequence, is expressible as one
 // hold with a caller-chosen TTL.
+//
+// A device is one machine-wide resource, so a lease is too: every AO daemon on
+// the machine - the human's own and any sandbox daemon a worker runs from its
+// branch with its own AO_DATA_DIR - sees and honours every other daemon's
+// leases (internal/simowner). OtherDaemon is set on a lease that was taken
+// through a daemon other than the one being asked.
 type SimLease struct {
 	UDID       string    `json:"udid"`
 	SessionID  SessionID `json:"sessionId"`
 	AcquiredAt time.Time `json:"acquiredAt"`
 	ExpiresAt  time.Time `json:"expiresAt"`
+	// OtherDaemon names the AO daemon the lease was taken through when that is
+	// not this one. Its SessionID belongs to THAT daemon's sessions, so it can
+	// share an id with a session here and still be somebody else.
+	OtherDaemon *SimDaemon `json:"otherDaemon,omitempty"`
 }
 
 // Live reports whether the lease still holds the device at now. Expiry is
 // evaluated on read - there is no sweeper and no background watcher.
 func (l SimLease) Live(now time.Time) bool { return l.ExpiresAt.After(now) }
+
+// HeldElsewhere reports whether the lease belongs to another AO daemon.
+func (l SimLease) HeldElsewhere() bool { return l.OtherDaemon != nil }
+
+// SimDaemon is one AO daemon on this machine, as another daemon sees it: the
+// data dir is its identity (one daemon per data dir), the pid is how its
+// liveness is checked and the port is how a person reaches it.
+type SimDaemon struct {
+	DataDir string `json:"dataDir" description:"The other daemon's AO_DATA_DIR - its identity on this machine."`
+	PID     int    `json:"pid" description:"The other daemon's process id. Its leases end when that process does."`
+	Port    int    `json:"port,omitempty" description:"The port the other daemon serves on (its AO_PORT)."`
+}
+
+// Describe names the daemon the way a refusal or a listing says it.
+func (d SimDaemon) Describe() string {
+	if d.Port > 0 {
+		return fmt.Sprintf("the AO daemon on port %d (data dir %s, pid %d)", d.Port, d.DataDir, d.PID)
+	}
+	return fmt.Sprintf("the AO daemon with data dir %s (pid %d)", d.DataDir, d.PID)
+}
+
+// SimBoot is a simulator boot another AO daemon on this machine has in flight.
+// It is what lets the boot cap count across daemons: simctl already reports
+// every Booted device machine-wide, but a boot that is still coming up - and a
+// slimming boot spends tens of seconds rebooting, not Booted while its memory
+// is very much allocated - is known only to the daemon running it.
+type SimBoot struct {
+	UDID      string
+	Phase     string
+	StartedAt time.Time
+	Daemon    SimDaemon
+}
 
 // SimHold is the finger: one caller's exclusive right to inject HID events on
 // one device for the length of a single gesture. It is strictly narrower than a
@@ -158,8 +201,13 @@ type SimRecordingStep struct {
 	ToX        float64 `json:"toX"`
 	ToY        float64 `json:"toY"`
 	DurationMS int64   `json:"durationMs,omitempty"`
-	// Text is what was typed, for kind "type".
+	// Text is what was typed, for kind "type" - except into a secure field,
+	// whose text is never kept (Secure).
 	Text string `json:"text,omitempty"`
+	// Secure: a "type" step that went into a secure field. Its Text is empty
+	// on purpose and its Selector names the field, which the flow
+	// long-presses to paste instead of typing.
+	Secure bool `json:"secure,omitempty"`
 	// Detail is free-form context for steps a selector cannot describe.
 	Detail string `json:"detail,omitempty"`
 }
