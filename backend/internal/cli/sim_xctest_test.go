@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
 // A runner read of a web sign-in sheet over an app, with the Paste callout
@@ -60,7 +62,7 @@ func TestSimAX_ReadsThroughTheRunnerWhenOneIsUp(t *testing.T) {
 		t.Fatalf("never asked the daemon for the runner's read: %s", daemon.callLog())
 	}
 	// `ao sim ax` is the one read that waits for a runner that is starting.
-	if daemon.hierarchyQuery != "waitMs=15000" {
+	if daemon.hierarchyQuery != "hitTest=true&waitMs=15000" {
 		t.Fatalf("query = %q, want the ax wait", daemon.hierarchyQuery)
 	}
 }
@@ -160,5 +162,122 @@ func TestSimTap_ByLabelReachesTheRunnersTree(t *testing.T) {
 	// Under the hold, a read never waits for a starting runner.
 	if strings.Contains(daemon.callLog(), "waitMs") {
 		t.Fatalf("a tap waited for the runner: %s", daemon.callLog())
+	}
+}
+
+// runnerCoveredScreen is a hit-tested read: a button wholly under the
+// keyboard's bar, a row half under the tab bar, and the bar's own Done.
+const runnerCoveredScreen = `{"runner":{"state":"ready"},"hierarchy":{"version":"3","screen":{"width":400,"height":800},
+"hitTest":{"checked":4,"covered":2,"elapsedMs":3},
+"apps":[{"bundleId":"com.example.app","pid":42,"tree":{"type":"Application","label":"Example","enabled":true,
+ "frame":{"x":0,"y":0,"width":400,"height":800},"children":[
+  {"type":"Button","label":"Next","enabled":true,"frame":{"x":20,"y":420,"width":360,"height":48},
+   "covered":{"by":{"type":"Toolbar","label":"Toolbar"}}},
+  {"type":"StaticText","label":"Top story","enabled":true,"frame":{"x":20,"y":700,"width":360,"height":60},
+   "covered":{"by":{"type":"TabBar","label":"Tab Bar"},"point":{"x":200,"y":712}}},
+  {"type":"Button","label":"Done","enabled":true,"frame":{"x":340,"y":400,"width":44,"height":44}}]}}]}}`
+
+func TestSimAX_SaysWhatIsCoveredAndWhereItCanStillBeTouched(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, daemon := touchDeps(t, driver)
+	daemon.hierarchy = runnerCoveredScreen
+
+	out, _, err := executeCLI(t, deps, "sim", "ax")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"4 elements (4 on screen (2 of them covered), 0 off screen)",
+		`Button "Next"  covered by Toolbar "Toolbar", no part of it left to touch  box`,
+		`StaticText "Top story"  tap 0.500 0.890 (the part still showing - its centre is under TabBar "Tab Bar")`,
+		`Button "Done"  tap 0.905 0.527`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "did not hit-test") {
+		t.Errorf("a hit-tested read says it was not:\n%s", out)
+	}
+
+	out, _, err = executeCLI(t, deps, "sim", "ax", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		HitTested    bool
+		CoveredCount int
+		Elements     []simbridge.Element
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	kids := got.Elements[0].Children
+	if !got.HitTested || got.CoveredCount != 2 || kids[0].Tap != nil || kids[0].Covered == nil ||
+		kids[0].Covered.VisiblePart || kids[1].Covered == nil || !kids[1].Covered.VisiblePart || kids[1].Tap == nil {
+		t.Fatalf("json: %s", out)
+	}
+}
+
+func TestSimAX_AnXCTestReadThatCouldNotHitTestSaysSo(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, daemon := touchDeps(t, driver)
+	daemon.hierarchy = strings.Replace(runnerCoveredScreen, `"hitTest":{"checked":4,"covered":2,"elapsedMs":3}`,
+		`"hitTest":{"checked":0,"covered":0,"elapsedMs":0,"error":"no hit-test"}`, 1)
+
+	out, _, err := executeCLI(t, deps, "sim", "ax")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Note: this read did not hit-test") {
+		t.Fatalf("an unchecked read looks checked:\n%s", out)
+	}
+}
+
+func TestSimTap_ByLabelRefusesACoveredElementAndTapsNothing(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, daemon := touchDeps(t, driver)
+	daemon.hierarchy = runnerCoveredScreen
+
+	_, _, err := executeCLI(t, deps, "sim", "tap", "--label", "Next")
+	if err == nil {
+		t.Fatal("tapped an element the keyboard's bar covers")
+	}
+	for _, want := range []string{`Button "Next" is on the screen but covered by Toolbar "Toolbar"`, "Nothing was tapped", "ao sim drag", "keyboard"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal lacks %q: %v", want, err)
+		}
+	}
+	if calls := driver.calls(); len(calls) != 0 {
+		t.Fatalf("sent %d gestures for a refused tap", len(calls))
+	}
+	if !strings.Contains(daemon.hierarchyQuery, "hitTest=true") {
+		t.Fatalf("a tap by name read without hit-testing: %q", daemon.hierarchyQuery)
+	}
+}
+
+func TestSimTap_ByLabelTapsThePartOfACoveredRowThatShows(t *testing.T) {
+	driver := &fakeSimDriver{snapshot: fixtureSnapshot()}
+	deps, daemon := touchDeps(t, driver)
+	daemon.hierarchy = runnerCoveredScreen
+
+	out, _, err := executeCLI(t, deps, "sim", "tap", "--label", "Top story")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := driver.calls()
+	if len(calls) != 1 || calls[0][0].X != 0.5 || calls[0][0].Y != 712.0/800 {
+		t.Fatalf("tapped %+v, want the visible part (0.5, 0.89)", calls)
+	}
+	if !strings.Contains(out, `Its centre is under TabBar "Tab Bar", so the tap went to the part of it still showing.`) {
+		t.Fatalf("the output does not say the tap moved off the centre:\n%s", out)
+	}
+
+	out, _, err = executeCLI(t, deps, "sim", "tap", "--label", "Top story", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"coveredBy": "TabBar \"Tab Bar\""`) {
+		t.Fatalf("json does not carry what covers it:\n%s", out)
 	}
 }

@@ -113,14 +113,19 @@ func (f *fakeLauncher) Start(spec StartSpec) (Process, error) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": WireVersion, "udid": udid, "pid": p.pid})
 	})
-	mux.HandleFunc("/hierarchy", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
+	mux.HandleFunc("/hierarchy", func(w http.ResponseWriter, r *http.Request) {
+		answer := map[string]any{
 			"version": WireVersion,
 			"screen":  map[string]any{"width": 400, "height": 874},
 			"apps": []any{map[string]any{"bundleId": "app.for." + spec.UDID, "tree": map[string]any{
 				"type": "Application", "enabled": true, "frame": map[string]any{"x": 0, "y": 0, "width": 400, "height": 874},
 			}}},
-		})
+		}
+		// The real runner hit-tests only when asked, and says so.
+		if r.URL.Query().Get("hitTest") == "1" {
+			answer["hitTest"] = map[string]any{"checked": 1, "covered": 0, "elapsedMs": 1}
+		}
+		_ = json.NewEncoder(w).Encode(answer)
 	})
 	mux.HandleFunc("/focus", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": WireVersion, "app": "app.for." + spec.UDID,
@@ -279,7 +284,7 @@ func TestManager_ARunnerLivesExactlyAsLongAsTheLease(t *testing.T) {
 	f, w := &fakeLauncher{}, &world{}
 	m := newTestManager(t, f, w)
 
-	if _, st, err := m.Read(context.Background(), udidA, 0); !errors.Is(err, ErrNotReady) || st.State != StateOff {
+	if _, st, err := m.Read(context.Background(), udidA, ReadOptions{}); !errors.Is(err, ErrNotReady) || st.State != StateOff {
 		t.Fatalf("unheld device: state %q err %v, want off", st.State, err)
 	}
 	if f.startCount() != 0 {
@@ -288,12 +293,19 @@ func TestManager_ARunnerLivesExactlyAsLongAsTheLease(t *testing.T) {
 
 	w.hold(udidA)
 	// No tick has happened: the read itself reconciles, then waits for ready.
-	h, st, err := m.Read(context.Background(), udidA, 3*time.Second)
+	h, st, err := m.Read(context.Background(), udidA, ReadOptions{Wait: 3 * time.Second})
 	if err != nil || st.State != StateReady {
 		t.Fatalf("held device: state %+v err %v, want a ready read", st, err)
 	}
 	if len(h.Apps) != 1 || h.Apps[0].BundleID != "app.for."+udidA {
 		t.Fatalf("read the wrong runner: %+v", h.Apps)
+	}
+	if h.HitTest != nil {
+		t.Fatalf("a plain read asked the runner to hit-test: %+v", h.HitTest)
+	}
+	// Only a read that hands out tap points pays for the hit-test.
+	if tested, _, err := m.Read(context.Background(), udidA, ReadOptions{HitTest: true}); err != nil || tested.HitTest == nil {
+		t.Fatalf("a hit-test read was not hit-tested: %+v, %v", tested.HitTest, err)
 	}
 	p := f.proc(0)
 	if p.spec.Idle != DefaultIdle || p.spec.UDID != udidA {
@@ -323,7 +335,7 @@ func TestManager_EscalatesToSignalsWhenTheRunnerIgnoresStop(t *testing.T) {
 	f, w := &fakeLauncher{ignoreStop: true}, &world{}
 	m := newTestManager(t, f, w)
 	w.hold(udidA)
-	if _, _, err := m.Read(context.Background(), udidA, 3*time.Second); err != nil {
+	if _, _, err := m.Read(context.Background(), udidA, ReadOptions{Wait: 3 * time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	p := f.proc(0)
@@ -341,7 +353,7 @@ func TestManager_NeverLaunchesOnADeviceThatIsNotBooted(t *testing.T) {
 	f, w := &fakeLauncher{}, &world{booted: map[string]bool{}}
 	m := newTestManager(t, f, w)
 	w.hold(udidA)
-	_, st, err := m.Read(context.Background(), udidA, time.Second)
+	_, st, err := m.Read(context.Background(), udidA, ReadOptions{Wait: time.Second})
 	if !errors.Is(err, ErrNotReady) || st.State != StateFailed || st.Reason != "the simulator is not booted" {
 		t.Fatalf("state %+v err %v, want failed: not booted", st, err)
 	}
@@ -354,7 +366,7 @@ func TestManager_RetriesAFailedRunnerWithBackoff(t *testing.T) {
 	f, w := &fakeLauncher{}, &world{}
 	m := newTestManager(t, f, w)
 	w.hold(udidA)
-	if _, _, err := m.Read(context.Background(), udidA, 3*time.Second); err != nil {
+	if _, _, err := m.Read(context.Background(), udidA, ReadOptions{Wait: 3 * time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	p := f.proc(0)
@@ -389,7 +401,7 @@ func TestManager_RestartsARunnerThatStopsAnswering(t *testing.T) {
 	f, w := &fakeLauncher{}, &world{}
 	m := newTestManager(t, f, w)
 	w.hold(udidA)
-	if _, _, err := m.Read(context.Background(), udidA, 3*time.Second); err != nil {
+	if _, _, err := m.Read(context.Background(), udidA, ReadOptions{Wait: 3 * time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	p := f.proc(0)
@@ -406,8 +418,8 @@ func TestManager_TwoDevicesRunSideBySide(t *testing.T) {
 	f, w := &fakeLauncher{}, &world{}
 	m := newTestManager(t, f, w)
 	w.hold(udidA, udidB)
-	ha, _, errA := m.Read(context.Background(), udidA, 3*time.Second)
-	hb, _, errB := m.Read(context.Background(), udidB, 3*time.Second)
+	ha, _, errA := m.Read(context.Background(), udidA, ReadOptions{Wait: 3 * time.Second})
+	hb, _, errB := m.Read(context.Background(), udidB, ReadOptions{Wait: 3 * time.Second})
 	if errA != nil || errB != nil {
 		t.Fatal(errA, errB)
 	}
@@ -438,7 +450,7 @@ func TestManager_AnUnreadableLeaseTableStopsNothing(t *testing.T) {
 	f, w := &fakeLauncher{}, &world{}
 	m := newTestManager(t, f, w)
 	w.hold(udidA)
-	if _, _, err := m.Read(context.Background(), udidA, 3*time.Second); err != nil {
+	if _, _, err := m.Read(context.Background(), udidA, ReadOptions{Wait: 3 * time.Second}); err != nil {
 		t.Fatal(err)
 	}
 	w.mu.Lock()
@@ -456,7 +468,7 @@ func TestManager_ShutdownStopsEveryRunner(t *testing.T) {
 	m := newTestManager(t, f, w)
 	w.hold(udidA, udidB)
 	for _, u := range []string{udidA, udidB} {
-		if _, _, err := m.Read(context.Background(), u, 3*time.Second); err != nil {
+		if _, _, err := m.Read(context.Background(), u, ReadOptions{Wait: 3 * time.Second}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -472,7 +484,7 @@ func TestManager_ABuildFailureIsReportedAndRetried(t *testing.T) {
 	f, w := &fakeLauncher{buildErr: fmt.Errorf("%w", ErrUnavailable)}, &world{}
 	m := newTestManager(t, f, w)
 	w.hold(udidA)
-	_, st, err := m.Read(context.Background(), udidA, time.Second)
+	_, st, err := m.Read(context.Background(), udidA, ReadOptions{Wait: time.Second})
 	if !errors.Is(err, ErrNotReady) || st.State != StateFailed || st.Reason != ErrUnavailable.Error() {
 		t.Fatalf("state %+v err %v", st, err)
 	}

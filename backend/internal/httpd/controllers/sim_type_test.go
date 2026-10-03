@@ -31,7 +31,7 @@ type typingRunner struct {
 	waited   time.Duration
 }
 
-func (r *typingRunner) Read(context.Context, string, time.Duration) (simbridge.XCTestHierarchy, simrunner.Status, error) {
+func (r *typingRunner) Read(context.Context, string, simrunner.ReadOptions) (simbridge.XCTestHierarchy, simrunner.Status, error) {
 	if r.typed {
 		return r.after, simrunner.Status{State: simrunner.StateReady}, nil
 	}

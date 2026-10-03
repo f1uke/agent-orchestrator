@@ -18,14 +18,14 @@ const hierarchyUDID = "087DF306-1FC9-4E5A-B9ED-AD36D6A1A0F1"
 
 type fakeSimRunner struct {
 	udid   string
-	wait   time.Duration
+	opts   simrunner.ReadOptions
 	tree   simbridge.XCTestHierarchy
 	status simrunner.Status
 	err    error
 }
 
-func (f *fakeSimRunner) Read(_ context.Context, udid string, wait time.Duration) (simbridge.XCTestHierarchy, simrunner.Status, error) {
-	f.udid, f.wait = udid, wait
+func (f *fakeSimRunner) Read(_ context.Context, udid string, opts simrunner.ReadOptions) (simbridge.XCTestHierarchy, simrunner.Status, error) {
+	f.udid, f.opts = udid, opts
 	return f.tree, f.status, f.err
 }
 
@@ -76,8 +76,8 @@ func TestSimHierarchy_AReadyRunnerAnswersWithTheTree(t *testing.T) {
 	if code != http.StatusOK || out.Runner.State != "ready" || out.Hierarchy == nil || out.Hierarchy.Apps[0].BundleID != "com.example.app" {
 		t.Fatalf("code %d, %+v", code, out)
 	}
-	if runner.udid != hierarchyUDID || runner.wait != 1500*time.Millisecond {
-		t.Fatalf("asked for %q waiting %s", runner.udid, runner.wait)
+	if runner.udid != hierarchyUDID || runner.opts.Wait != 1500*time.Millisecond {
+		t.Fatalf("asked for %q waiting %s", runner.udid, runner.opts.Wait)
 	}
 }
 
@@ -92,8 +92,8 @@ func TestSimHierarchy_NotReadyCarriesTheReason(t *testing.T) {
 	if code != http.StatusOK || out.Runner.State != "off" || out.Runner.Reason != "nobody holds it" || out.Hierarchy != nil {
 		t.Fatalf("code %d, %+v", code, out)
 	}
-	if runner.wait != 0 {
-		t.Fatalf("waited %s without being asked to", runner.wait)
+	if runner.opts.Wait != 0 {
+		t.Fatalf("waited %s without being asked to", runner.opts.Wait)
 	}
 }
 
@@ -112,7 +112,22 @@ func TestSimHierarchy_TheWaitIsValidatedAndCapped(t *testing.T) {
 			t.Errorf("waitMs=%s answered %d, want 400", bad, code)
 		}
 	}
-	if _, code := getHierarchy(t, srv.URL+"/sim/devices/"+hierarchyUDID+"/hierarchy?waitMs=999999"); code != http.StatusOK || runner.wait != maxHierarchyWait {
-		t.Fatalf("code %d, waited %s, want the cap", code, runner.wait)
+	if _, code := getHierarchy(t, srv.URL+"/sim/devices/"+hierarchyUDID+"/hierarchy?waitMs=999999"); code != http.StatusOK || runner.opts.Wait != maxHierarchyWait {
+		t.Fatalf("code %d, waited %s, want the cap", code, runner.opts.Wait)
+	}
+}
+
+func TestSimHierarchy_HitTestsOnlyWhenAsked(t *testing.T) {
+	runner := &fakeSimRunner{status: simrunner.Status{State: simrunner.StateReady}}
+	srv := hierarchyServer(t, runner)
+	base := srv.URL + "/sim/devices/" + hierarchyUDID + "/hierarchy"
+	if _, code := getHierarchy(t, base); code != http.StatusOK || runner.opts.HitTest {
+		t.Fatalf("code %d, hitTest %v: a plain read must not pay for the hit-test", code, runner.opts.HitTest)
+	}
+	if _, code := getHierarchy(t, base+"?hitTest=true"); code != http.StatusOK || !runner.opts.HitTest {
+		t.Fatalf("code %d, hitTest %v: asked for and not passed on", code, runner.opts.HitTest)
+	}
+	if _, code := getHierarchy(t, base+"?hitTest=maybe"); code != http.StatusBadRequest {
+		t.Fatalf("hitTest=maybe answered %d, want 400", code)
 	}
 }

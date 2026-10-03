@@ -44,13 +44,13 @@ type simHierarchyResponse struct {
 // under the lease and the gesture hold, exactly as before.
 type xctestReadingDriver struct {
 	simbridge.Driver
-	read func(ctx context.Context, udid string, wait time.Duration) (simHierarchyResponse, error)
-	wait time.Duration
+	read func(ctx context.Context, udid string, opts simReadOptions) (simHierarchyResponse, error)
+	opts simReadOptions
 }
 
 func (d xctestReadingDriver) AX(ctx context.Context, udid string) (simbridge.Snapshot, error) {
 	var note string
-	resp, err := d.read(ctx, udid, d.wait)
+	resp, err := d.read(ctx, udid, d.opts)
 	switch {
 	case err != nil:
 		note = "the daemon could not be asked for the XCTest reader"
@@ -92,10 +92,17 @@ func simRunnerNote(state, reason string) string {
 }
 
 // readSimHierarchy asks the daemon for the runner's read of a device.
-func (c *commandContext) readSimHierarchy(ctx context.Context, udid string, wait time.Duration) (simHierarchyResponse, error) {
+func (c *commandContext) readSimHierarchy(ctx context.Context, udid string, opts simReadOptions) (simHierarchyResponse, error) {
+	query := url.Values{}
+	if opts.wait > 0 {
+		query.Set("waitMs", strconv.FormatInt(opts.wait.Milliseconds(), 10))
+	}
+	if opts.hitTest {
+		query.Set("hitTest", "true")
+	}
 	path := "sim/devices/" + url.PathEscape(udid) + "/hierarchy"
-	if wait > 0 {
-		path += "?waitMs=" + strconv.FormatInt(wait.Milliseconds(), 10)
+	if len(query) > 0 {
+		path += "?" + query.Encode()
 	}
 	var resp simHierarchyResponse
 	if err := c.getJSON(ctx, path, &resp); err != nil {

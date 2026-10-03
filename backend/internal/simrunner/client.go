@@ -17,7 +17,7 @@ import (
 
 // WireVersion is the runner protocol this AO speaks. A runner answering any
 // other version is a different build left on the port, and is not trusted.
-const WireVersion = "2"
+const WireVersion = "3"
 
 // runnerStatus is GET /status.
 type runnerStatus struct {
@@ -100,9 +100,13 @@ func (c client) status(ctx context.Context, udid string) error {
 	return nil
 }
 
-func (c client) hierarchy(ctx context.Context) (simbridge.XCTestHierarchy, error) {
+func (c client) hierarchy(ctx context.Context, hitTest bool) (simbridge.XCTestHierarchy, error) {
+	path := "/hierarchy"
+	if hitTest {
+		path += "?hitTest=1"
+	}
 	var h simbridge.XCTestHierarchy
-	if err := c.get(ctx, "/hierarchy", &h); err != nil {
+	if err := c.get(ctx, path, &h); err != nil {
 		return simbridge.XCTestHierarchy{}, err
 	}
 	if h.Version != WireVersion {

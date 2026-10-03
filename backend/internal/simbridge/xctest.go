@@ -44,6 +44,40 @@ type XCTestHierarchy struct {
 	ElapsedMs int `json:"elapsedMs"`
 	// ForegroundSource is which XCTest route named the foreground app.
 	ForegroundSource string `json:"foregroundSource,omitempty"`
+	// HitTest is present when the read was asked to hit-test (see
+	// XCTestNode.Covered).
+	HitTest *XCTestHitTest `json:"hitTest,omitempty"`
+}
+
+// XCTestHitTest summarizes a read's hit-test: how many elements were asked
+// about, how many answered with something else on top, and why none were
+// asked when the runner could not hit-test at all.
+type XCTestHitTest struct {
+	Checked   int    `json:"checked"`
+	Covered   int    `json:"covered"`
+	ElapsedMs int    `json:"elapsedMs"`
+	Error     string `json:"error,omitempty"`
+}
+
+// XCTestCover is what a touch at an element's centre lands on instead of the
+// element, and - when part of the element is still showing - a point in that
+// part, in screen points, which the hit-test confirmed reaches the element.
+type XCTestCover struct {
+	By    XCTestCoverer `json:"by"`
+	Point *XCTestPoint  `json:"point,omitempty"`
+}
+
+// XCTestCoverer names the element on top.
+type XCTestCoverer struct {
+	Type  string `json:"type"`
+	Label string `json:"label,omitempty"`
+	ID    string `json:"id,omitempty"`
+}
+
+// XCTestPoint is a point on the screen, in device points.
+type XCTestPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // XCTestApp is one application's tree. RemoteView marks a process that draws
@@ -59,16 +93,19 @@ type XCTestApp struct {
 // XCTestNode is one element as XCTest snapshots it. Type is the
 // XCUIElement.ElementType's name ("Button", "SecureTextField", "MenuItem").
 type XCTestNode struct {
-	Type        string       `json:"type"`
-	ID          string       `json:"id,omitempty"`
-	Label       string       `json:"label,omitempty"`
-	Value       string       `json:"value,omitempty"`
-	Placeholder string       `json:"placeholder,omitempty"`
-	Frame       Rect         `json:"frame"`
-	Enabled     bool         `json:"enabled"`
-	Selected    bool         `json:"selected,omitempty"`
-	Focused     bool         `json:"focused,omitempty"`
-	Children    []XCTestNode `json:"children,omitempty"`
+	Type        string `json:"type"`
+	ID          string `json:"id,omitempty"`
+	Label       string `json:"label,omitempty"`
+	Value       string `json:"value,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Frame       Rect   `json:"frame"`
+	Enabled     bool   `json:"enabled"`
+	Selected    bool   `json:"selected,omitempty"`
+	Focused     bool   `json:"focused,omitempty"`
+	// Covered is set when the read hit-tested and a touch at this element's
+	// centre lands on something drawn over it.
+	Covered  *XCTestCover `json:"covered,omitempty"`
+	Children []XCTestNode `json:"children,omitempty"`
 }
 
 // SnapshotFromXCTest converts the runner's tree.
@@ -113,6 +150,10 @@ func SnapshotFromXCTest(h XCTestHierarchy) Snapshot {
 	}
 	snap.NodeCount, snap.TotalNodeCount = c.count, c.count
 	snap.OnScreenCount, snap.OffScreenCount = reach(snap.Elements)
+	if h.HitTest != nil && h.HitTest.Error == "" {
+		snap.HitTested = true
+		snap.CoveredCount = covered(snap.Elements)
+	}
 	snap.OnlyStatusBar = onlyStatusBar(snap.Elements, snap.Screen)
 	snap.Keyboard = keyboardOf(snap.Elements)
 	return snap
@@ -151,6 +192,19 @@ func (c *xctestConverter) element(node XCTestNode, path string) Element {
 		value = ""
 	}
 	tap := tapPoint(node.Frame, c.screen)
+	offScreen := tap == nil
+	var cover *Cover
+	if node.Covered != nil && !offScreen {
+		// The centre is under something else, so it is not a place to touch.
+		// A point in the part still showing replaces it; with none, there is
+		// nowhere to touch from here.
+		cover = &Cover{By: node.Covered.By.name()}
+		tap = nil
+		if p := node.Covered.Point; p != nil {
+			tap = tapPoint(Rect{X: p.X, Y: p.Y}, c.screen)
+			cover.VisiblePart = tap != nil
+		}
+	}
 	el := Element{
 		Path:        path,
 		ID:          node.ID,
@@ -164,14 +218,39 @@ func (c *xctestConverter) element(node XCTestNode, path string) Element {
 		Frame:       node.Frame,
 		Tap:         tap,
 		Box:         box(node.Frame, c.screen),
-		OffScreen:   tap == nil,
+		OffScreen:   offScreen,
+		Covered:     cover,
 	}
 	c.children(node.Children, path, &el.Children)
 	return el
 }
 
+// name is the covering element as `ao sim ax` prints one: `TabBar "Tab Bar"`.
+func (c XCTestCoverer) name() string {
+	switch {
+	case c.Label != "":
+		return fmt.Sprintf("%s %q", c.Type, c.Label)
+	case c.ID != "":
+		return fmt.Sprintf("%s (id %s)", c.Type, c.ID)
+	default:
+		return c.Type
+	}
+}
+
+// covered counts the elements something else is drawn over.
+func covered(elements []Element) int {
+	n := 0
+	walk(elements, func(e Element) {
+		if e.Covered != nil {
+			n++
+		}
+	})
+	return n
+}
+
 // isLayoutContainer is an element that says nothing about the screen: no
-// name, no value, no identifier, and a type that only groups things.
+// name, no value, no identifier, and a type that only groups things. The
+// runner mirrors this rule (Occlusion.judged) to hit-test only what is kept.
 func isLayoutContainer(node XCTestNode) bool {
 	if node.Label != "" || node.Value != "" || node.ID != "" || node.Focused {
 		return false

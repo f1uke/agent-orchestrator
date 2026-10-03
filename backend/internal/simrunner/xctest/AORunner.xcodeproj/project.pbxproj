@@ -10,6 +10,7 @@
 		479B2DCDD1C7CBAEF2FD47F1 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F98182ED556614357E76068 /* RunnerTests.swift */; };
 		54A71CDE298FDB7134F67114 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48270CC58DEE74C2539CB664 /* App.swift */; };
 		56143367BBC65BE3DB05EF4F /* Typist.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89D21D99038E8F974C31C0B9 /* Typist.swift */; };
+		B795D4804751302EE2FCE27A /* Occlusion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2E633FC92F96F7B83031141 /* Occlusion.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -27,6 +28,7 @@
 		4E2CA8A23E64EC251C2AB1D3 /* AORunnerHost.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AORunnerHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4F98182ED556614357E76068 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		89D21D99038E8F974C31C0B9 /* Typist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typist.swift; sourceTree = "<group>"; };
+		B2E633FC92F96F7B83031141 /* Occlusion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Occlusion.swift; sourceTree = "<group>"; };
 		C616916E72C69ED552FD0537 /* AORunnerUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AORunnerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -43,6 +45,7 @@
 		59FA15F6F4315D1F88636C46 /* UITests */ = {
 			isa = PBXGroup;
 			children = (
+				B2E633FC92F96F7B83031141 /* Occlusion.swift */,
 				4F98182ED556614357E76068 /* RunnerTests.swift */,
 				89D21D99038E8F974C31C0B9 /* Typist.swift */,
 			);
@@ -149,6 +152,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B795D4804751302EE2FCE27A /* Occlusion.swift in Sources */,
 				479B2DCDD1C7CBAEF2FD47F1 /* RunnerTests.swift in Sources */,
 				56143367BBC65BE3DB05EF4F /* Typist.swift in Sources */,
 			);
