@@ -689,7 +689,7 @@ func learningOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/learning/protected-rules", id: "protectLearningRule", tag: "learning",
-			summary: "Pin a rule as protected, with patterns a learned skill must never contain",
+			summary: "Pin a rule as protected, with patterns a proposed change must never contain",
 			reqBody: controllers.ProtectLearningRuleRequest{},
 			resps: []respUnit{
 				{http.StatusCreated, controllers.LearningProtectedRuleDTO{}},

@@ -355,7 +355,7 @@ export interface paths {
         /** List the rules the human pinned as protected */
         get: operations["listLearningProtectedRules"];
         put?: never;
-        /** Pin a rule as protected, with patterns a learned skill must never contain */
+        /** Pin a rule as protected, with patterns a proposed change must never contain */
         post: operations["protectLearningRule"];
         delete?: never;
         options?: never;
@@ -2835,7 +2835,7 @@ export interface components {
         };
         ControllersLearningProposalDTO: {
             /** @enum {string} */
-            action: "create_skill" | "update_skill" | "edit_rule_file" | "conflict";
+            action: "create_memory" | "update_memory" | "update_skill" | "edit_rule_file" | "conflict";
             /** @description The target's hash when the diff was computed; empty for a new file. */
             baseSha256?: string;
             /** Format: double */
@@ -2848,6 +2848,8 @@ export interface components {
             evidenceIds: number[];
             /** Format: int64 */
             id: number;
+            /** @description For a new memory file: the line it adds to MEMORY.md, written with it. */
+            indexLine?: string;
             newContent: string;
             /** @enum {string} */
             outcome: "merged" | "abandoned" | "unknown" | "ongoing" | "day";
@@ -2875,7 +2877,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             note?: string;
-            /** @description RE2 patterns, matched case-insensitively, that a learned skill must never contain. */
+            /** @description RE2 patterns, matched case-insensitively, that a proposed change must never contain. */
             patterns: string[];
             /** @description Empty means every project. */
             projectId?: string;
@@ -2899,7 +2901,7 @@ export interface components {
             score?: number;
             sourceKey: string;
             /** @enum {string} */
-            sourceKind: "claude_md" | "agents_md" | "skill" | "ao_prompt" | "knowledge_index";
+            sourceKind: "claude_md" | "agents_md" | "skill" | "ao_prompt" | "knowledge_index" | "memory";
             sourceLabel: string;
             tags: string[];
             text: string;
@@ -2910,7 +2912,7 @@ export interface components {
             error?: string;
             key: string;
             /** @enum {string} */
-            kind: "claude_md" | "agents_md" | "skill" | "ao_prompt" | "knowledge_index";
+            kind: "claude_md" | "agents_md" | "skill" | "ao_prompt" | "knowledge_index" | "memory";
             label: string;
             projectId?: string;
             /** Format: date-time */

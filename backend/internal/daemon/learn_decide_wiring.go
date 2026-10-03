@@ -41,7 +41,8 @@ func startLearnDecide(ctx context.Context, store *sqlite.Store, dataDir string, 
 	})
 	dirs := learndecide.Dirs{
 		Home: home, DataDir: dataDir,
-		Learned: filepath.Join(home, ".ao", "learned"),
+		// A project's lessons go to its repo's Claude Code memory (decision 11).
+		MemoryDir: claudecode.MemoryDir,
 		// Where the standing prompts tell agents the knowledge store is.
 		KnowledgeDir: filepath.Join(home, ".ao", "knowledge"),
 	}

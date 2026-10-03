@@ -16,9 +16,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
-const skillMD = "---\nname: verify-on-device\ndescription: Check a UI change on the simulator. Use when verifying a screen.\n---\n\n1. Run the Maestro script for the screen.\n"
-
-// fakeRunner answers decide with one create_skill citing every draft id in the
+// fakeRunner answers decide with one create_memory citing every draft id in the
 // input, and the verifier with grounded unless ungrounded is set.
 type fakeRunner struct {
 	mu         sync.Mutex
@@ -46,9 +44,9 @@ func (f *fakeRunner) Run(_ context.Context, req llm.Request) (llm.Result, error)
 		ev = append(ev, d.ID)
 	}
 	b, _ := json.Marshal(map[string]any{"proposals": []map[string]any{{
-		"action": "create_skill", "skill_name": "verify-on-device", "target": "", "under_heading": "", "scope": "project",
-		"title": "Verify on device", "rationale": "The person said so.", "evidence": ev, "rule_verdicts": []any{},
-		"content": skillMD, "confidence": 0.9,
+		"action": "create_memory", "memory_type": "feedback", "name": "verify on device", "description": "Verify a UI change through its script",
+		"target": "", "under_heading": "", "scope": "project", "title": "Verify on device", "rationale": "The person said so.",
+		"evidence": ev, "rule_verdicts": []any{}, "content": "Run the Maestro script for the screen.", "confidence": 0.9,
 	}}})
 	return llm.Result{Output: b, CostUSD: 0.2}, nil
 }
@@ -85,7 +83,8 @@ func newRig(t *testing.T) *rig {
 		s := learnsettings.Default()
 		s.DailyBudgetUSD = r.budget
 		return s
-	}, learndecide.Dirs{Home: home, DataDir: t.TempDir(), Learned: home + "/.ao/learned", KnowledgeDir: home + "/.ao/knowledge"},
+	}, learndecide.Dirs{Home: home, DataDir: t.TempDir(), KnowledgeDir: home + "/.ao/knowledge",
+		MemoryDir: func(string) (string, error) { return home + "/.claude/projects/-repo/memory", nil }},
 		learndecide.Config{Clock: func() time.Time { return r.now }})
 	return r
 }
@@ -185,7 +184,7 @@ func TestPoll_DecidesAFinishedTaskOnce(t *testing.T) {
 	}
 	ps := r.proposals()
 	if len(ps) != 1 || ps[0].Status != domain.LearnProposalPending || ps[0].Outcome != domain.LearnOutcomeMerged ||
-		!strings.HasPrefix(ps[0].Diff, "--- /dev/null") || len(ps[0].EvidenceIDs) != 1 || ps[0].Scope != "project:nter" {
+		!strings.HasPrefix(ps[0].Diff, "--- /dev/null") || ps[0].Action != domain.LearnProposeCreateMemory || ps[0].IndexLine == "" || len(ps[0].EvidenceIDs) != 1 || ps[0].Scope != "project:nter" {
 		t.Fatalf("proposals = %+v", ps)
 	}
 	if st := r.statuses(); st[domain.LearnDraftConsumed] != 1 || st[domain.LearnDraftOpen] != 1 {

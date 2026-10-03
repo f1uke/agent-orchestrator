@@ -51,6 +51,8 @@ type Source struct {
 	Text      string
 	// Deterministic splits the text with rules.Blocks instead of a model.
 	Deterministic bool
+	// Memory is a Claude Code memory file: one chunk, one rule, no model.
+	Memory bool
 }
 
 // Lister returns every source the corpus should hold now.
@@ -247,18 +249,26 @@ func (o *Observer) pass(ctx context.Context, manual bool, budget float64) {
 		if p, ok := prev[src.Key]; ok && p.ContentHash == ch && p.Error == "" && allCached(p.Chunks, cached) && p.Label == src.Label {
 			continue
 		}
-		version := rules.Version
-		if src.Deterministic {
-			version = rules.BlocksVersion
+		var chunks []rules.Chunk
+		switch {
+		case src.Memory:
+			chunks = []rules.Chunk{rules.Whole(src.Text, rules.MemoryVersion)}
+		case src.Deterministic:
+			chunks = rules.Chunks(src.Text, rules.BlocksVersion)
+		default:
+			chunks = rules.Chunks(src.Text, rules.Version)
 		}
-		chunks := rules.Chunks(src.Text, version)
 		split[src.Key] = chunks
 		for _, c := range chunks {
 			if cached[c.Hash] || queued[c.Hash] {
 				continue
 			}
-			if src.Deterministic {
-				if err := o.store.InsertLearnRuleChunk(ctx, domain.LearnRuleChunk{Hash: c.Hash, Atoms: toDomain(rules.Blocks(c.Text())), CreatedAt: o.clock().UTC()}); err != nil {
+			if src.Deterministic || src.Memory {
+				atoms := rules.Blocks(c.Text())
+				if src.Memory {
+					atoms = rules.MemoryAtoms(c.Text())
+				}
+				if err := o.store.InsertLearnRuleChunk(ctx, domain.LearnRuleChunk{Hash: c.Hash, Atoms: toDomain(atoms), CreatedAt: o.clock().UTC()}); err != nil {
 					o.logger.Warn("learn-rules: cache split chunk failed", "source", src.Key, "err", err)
 					continue
 				}
