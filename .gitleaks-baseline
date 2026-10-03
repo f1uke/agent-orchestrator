@@ -1,0 +1,6 @@
+063a744c377466c2b1a9d9443cfa00fe6d8303e5
+# The secret-scan baseline: the last commit of main-fluke before scanning was
+# enforced. Commits up to and including it are history - already public, and
+# not scanned; every commit after it must scan clean. Read by
+# scripts/secret-scan.sh (`all`, and CI when a push has no usable "before").
+# Never move it forward to make a finding go away: fix or allowlist the finding.

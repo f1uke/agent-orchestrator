@@ -1,22 +1,67 @@
 name: gitleaks
 
+# Secret scan of every commit a pull request or a push adds - never the history
+# before .gitleaks-baseline, which is already public and stays as it is.
+# Unfiltered on purpose so it can be a required check (a path-filtered workflow
+# reports nothing at all, which leaves a required check pending forever).
+# Rules: .gitleaks.toml. What to do when it fires: AGENTS.md, "Secret scanning".
+
 on:
   push:
-    branches: [main]
+    branches: [main-fluke]
   pull_request:
 
 permissions:
   contents: read
 
+env:
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+
 jobs:
-  scan:
+  secret-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
+          # gitleaks walks `git log -p` over the range, which needs both ends.
           fetch-depth: 0
 
-      # gitleaks-action v1 scans for committed secrets and needs no license
-      # key (v2 requires GITLEAKS_LICENSE for organization repos).
-      - name: Scan for secrets
-        uses: zricethezav/gitleaks-action@v1.6.0
+      - name: Install gitleaks
+        run: |
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLo "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum --check --strict
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}" gitleaks
+          echo "${RUNNER_TEMP}" >> "${GITHUB_PATH}"
+
+      - name: Rule self-test
+        run: scripts/secret-scan-selftest.sh
+
+      - name: Scan new commits
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+          # Optional rules that must not be published (exact values known to
+          # be in use). Unset on forks, where secrets are not passed.
+          GITLEAKS_EXTRA_CONFIG_TOML: ${{ secrets.GITLEAKS_EXTRA_CONFIG_TOML }}
+        run: |
+          if [[ "${EVENT}" == "pull_request" ]]; then
+            range="${PR_BASE}..${PR_HEAD}"
+          elif [[ -n "${PUSH_BEFORE}" && ! "${PUSH_BEFORE}" =~ ^0+$ ]] && git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            range="${PUSH_BEFORE}..${PUSH_AFTER}"
+          else
+            # A new branch, or a force push whose old tip is gone.
+            range="$(grep -Eo '^[0-9a-f]{40}' .gitleaks-baseline)..${PUSH_AFTER}"
+          fi
+          echo "Scanning $(git rev-list --count "${range}") commit(s): ${range}"
+          if [[ -n "${GITLEAKS_EXTRA_CONFIG_TOML}" ]]; then
+            export GITLEAKS_EXTRA_CONFIG="${RUNNER_TEMP}/gitleaks-extra.toml"
+            printf '%s\n' "${GITLEAKS_EXTRA_CONFIG_TOML}" > "${GITLEAKS_EXTRA_CONFIG}"
+          fi
+          scripts/secret-scan.sh range "${range}"

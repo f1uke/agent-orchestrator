@@ -20,6 +20,7 @@ npm run frontend:typecheck           # frontend TypeScript check
 npm run sqlc                         # regenerate backend/internal/storage/sqlite/gen from queries/schema
 npm run api                          # regenerate OpenAPI spec + frontend TS types (see API contract changes below)
 npx @redwoodjs/agent-ci run --all    # local workflow validation; requires Docker socket
+npm run secret-scan                  # gitleaks over this branch's commits (see Secret scanning)
 ```
 
 Backend-specific checks:
@@ -117,10 +118,35 @@ For code entry points:
 - SQLite change events come from DB triggers into `change_log`; do not add parallel manual CDC emission from store methods unless the architecture changes explicitly.
 - Keep generated OpenAPI/API DTO drift in mind: controller response shapes live in `backend/internal/httpd/controllers/dto.go` and tests may assert CLI/HTTP wire compatibility.
 - Do not add network calls to tests unless the package already has an integration/e2e pattern for them. Prefer `httptest`, fakes, and injected dependencies.
-- Do not commit local run state, daemon data, temporary worktrees, build outputs, or credentials. Never build a binary into the working tree: use `go run ./cmd/ao ...`, or `go build -o /tmp/<name> ./cmd/ao`. `.gitignore` catches the usual landing spot, but a stray binary is invisible in `git diff --stat`, so `git add -A` will happily commit one.
+- Do not commit local run state, daemon data, temporary worktrees, build outputs, or credentials - test-account emails and passwords included (see Secret scanning). Never build a binary into the working tree: use `go run ./cmd/ao ...`, or `go build -o /tmp/<name> ./cmd/ao`. `.gitignore` catches the usual landing spot, but a stray binary is invisible in `git diff --stat`, so `git add -A` will happily commit one.
 - Every AO session runs on its own tmux server, on a socket under the data dir (`<dataDir>/tmux/<session-name>`; see `backend/internal/adapters/runtime/tmux/socket.go`). Every tmux command the runtime runs names that socket with `-S`; never fall back to tmux's default server.
 - Anything that drives a real tmux - tests, scripts, sandbox/e2e harnesses, manual teardown - must name its server with an explicit `-S <socket>` (and drop `TMUX`/`TMUX_PANE` from the client env). Never isolate with `TMUX_TMPDIR` or `-L` alone, and never run a bare `tmux kill-server`: inside an AO pane `$TMUX` names the server hosting that pane, tmux follows it over `TMUX_TMPDIR`, and on 2026-10-01 a sandbox teardown run that way killed every live AO session. Check with `tmux -S <socket> ls` that you are addressing the throwaway server before any kill.
 - All app state lives under `~/.ao` only. The daemon's data dir, `running.json`, worktrees, and the Electron supervisor's `userData` (Chromium cache, cookies, local/session storage, crash dumps) must resolve under `~/.ao` (overridable via `AO_DATA_DIR`/`AO_RUN_FILE`). Never write to or read from `~/Library/Application Support` or any other OS default app-data location. `main.ts` pins Electron's `userData` to `~/.ao/electron`; do not remove that override or rely on Electron's default path.
+
+## Secret scanning
+
+This repo is public. gitleaks scans every commit with the rules in `.gitleaks.toml`: its built-in rules plus project rules for what has actually leaked here - emails on Finnomena domains, literals assigned to password-like names, and the Thai text a Latin password turns into when typed on a Thai keyboard layout (it decodes straight back to the password).
+
+- **Pre-commit hook** (`.githooks/pre-commit`): scans what the commit adds. `scripts/install-git-hooks.sh` sets `core.hooksPath=.githooks` in the clone's shared config, so every worktree of the clone, AO session worktrees included, runs its own checkout's hooks. The nix dev shell and `npm install` at the root run it for you. It uses `gitleaks` from PATH (`brew install gitleaks`), else builds the pinned version with `go run`.
+- **CI** (`gitleaks / secret-scan`): scans the commits a pull request or a push to `main-fluke` adds. History up to `.gitleaks-baseline` is already public and is not scanned; never move the baseline to silence a finding.
+- `scripts/secret-scan.sh staged | range A..B | all` runs the same scan by hand; `scripts/secret-scan-selftest.sh` checks the rules against synthetic samples - run it after editing `.gitleaks.toml`.
+
+Findings print redacted (rule, file, line, commit, fingerprint), never the value. When one fires:
+
+1. **A real credential, account email or password** (test accounts included): remove it from the commit, not with a follow-up commit - rewrite the branch (`git commit --amend`, `git rebase -i`) so no pushed commit carries it. If it was ever pushed, treat it as leaked and rotate it. Read real values from the environment or a git-ignored file.
+2. **Synthetic or a false positive**: make the value obviously fake (`example.com` addresses, values containing `example`/`placeholder`/`fake`), or add it to an allowlist in `.gitleaks.toml` with a comment saying why it is not a credential, or end the line with `gitleaks:allow`.
+3. **A finding in a commit you did not write** (e.g. an upstream sync): add its fingerprint to `.gitleaksignore`, one per line, once you have confirmed it is not a live credential.
+
+Never paste a real secret into a test, fixture, doc, PR text or this config to "check the scanner"; build synthetic ones as `scripts/secret-scan-selftest.sh` does. Do not bypass the hook with `--no-verify`; CI scans the same commits.
+
+Rules that must never be published - exact values of accounts known to be in use - go in an untracked gitleaks config, scanned as a second pass: `$(git rev-parse --git-common-dir)/info/gitleaks-extra.toml` locally (or `GITLEAKS_EXTRA_CONFIG=<path>`), and the `GITLEAKS_EXTRA_CONFIG_TOML` repository secret in CI. It is a plain gitleaks config, e.g.:
+
+```toml
+[[rules]]
+id = "known-test-account"
+description = "A value of a test account in use"
+regex = '''(?:qa-bot-1@example\.com|Zq8kw2m9)'''
+```
 
 ## API contract changes
 
