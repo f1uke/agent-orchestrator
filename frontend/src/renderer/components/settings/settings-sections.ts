@@ -1,5 +1,16 @@
 import type { LucideIcon } from "lucide-react";
-import { Bot, CodeXml, FolderGit2, GitBranch, Inbox, Laptop, MessagesSquare, Trash2, Users } from "lucide-react";
+import {
+	Bot,
+	CodeXml,
+	FolderGit2,
+	GitBranch,
+	Inbox,
+	Laptop,
+	MessagesSquare,
+	Smartphone,
+	Trash2,
+	Users,
+} from "lucide-react";
 
 // The two settings scopes share one two-pane shell; each scope shows only its own
 // section set. Under variant B (chosen 2026-09-08) the sections are cut by WHAT A
@@ -44,7 +55,8 @@ export const PROJECT_SECTIONS: SectionMeta[] = [
 		Icon: Bot,
 		hint: "language, extra prompts, and what this project has",
 		keywords:
-			"response language thai english japanese german localization override inherit additional system prompt append orchestrator worker reviewer web ui browser preview ao preview ios simulator xcode device mobile android emulator maestro scripts only script store product flow",
+			"response language thai english japanese german localization override inherit additional system prompt append orchestrator worker reviewer web ui browser preview ao preview ios simulator xcode device mobile android emulator maestro scripts only script store product flow " +
+			"proxy proxyman certificate ca root trust https ssl tls charles mitmproxy",
 	},
 	{
 		key: "flow",
@@ -89,6 +101,16 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		keywords:
 			"predictive code completion inline ghost text suggestion prediction tab accept autocomplete model llama llama.cpp llama-server local ai download next edit nes sweep jump rename " +
 			"format formatter formatting indent indentation re-indent reindent xcode spaces shortcut keyboard keybinding ctrl control gofmt gopls swift-format sourcekit prettier format on save paste typing return enter brace editorconfig",
+	},
+	{
+		// Neither "the app itself" nor an agent: what AO does to a device before an
+		// agent or a script uses it.
+		key: "devices",
+		label: "Simulators",
+		Icon: Smartphone,
+		hint: "what AO sets up on a simulator it boots or claims",
+		keywords:
+			"proxy proxyman certificate ca root trust https simulator ssl tls charles mitmproxy ios xcode device boot claim keychain",
 	},
 	{
 		key: "mac",

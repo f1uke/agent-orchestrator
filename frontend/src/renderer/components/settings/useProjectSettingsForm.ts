@@ -4,6 +4,12 @@ import type { components } from "../../../api/schema";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../../hooks/useAgentsQuery";
 import { useWorkspaceQuery } from "../../hooks/useWorkspaceQuery";
 import { apiClient, apiErrorMessage } from "../../lib/api-client";
+import {
+	fetchSimTrustSettings,
+	formatCaFileLines,
+	parseCaFileLines,
+	simTrustSettingsQueryKey,
+} from "../../lib/sim-trust";
 import { responseLanguageQueryKey } from "./useGlobalSettingsForm";
 import { captureRendererEvent } from "../../lib/telemetry";
 import { spawnOrchestrator } from "../../lib/spawn-orchestrator";
@@ -23,6 +29,12 @@ type TrackerIntakeConfig = components["schemas"]["TrackerIntakeConfig"];
 type GitConventionConfig = components["schemas"]["GitConventionConfig"];
 type ApprovalRule = components["schemas"]["ApprovalRule"];
 type MobileScriptsConfig = components["schemas"]["DomainMobileScriptsConfig"];
+type SimTrustConfig = components["schemas"]["DomainSimTrustConfig"];
+
+// The three answers a project can give about which root CAs its simulators
+// trust. "inherit" is an absent simTrust; "none" is a present one with no files,
+// which is a real request (trust nothing here), not the same as inheriting.
+export type SimTrustMode = "inherit" | "none" | "files";
 
 // The flat, string/boolean-backed shape the settings sections edit. Kept flat so
 // dirty tracking is a shallow compare and each field maps 1:1 to a control.
@@ -43,6 +55,9 @@ export type ProjectSettingsFormState = {
 	mobileScriptsPlatform: string;
 	mobileScriptsProduct: string;
 	mobileScriptsStore: string;
+	simTrustMode: SimTrustMode;
+	// One root-CA path per line; only read when simTrustMode is "files".
+	simTrustCaFiles: string;
 	disableAutoCrew: boolean;
 	pauseBeforeImplementing: boolean;
 	intakeEnabled: boolean;
@@ -80,6 +95,8 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		mobileScriptsPlatform: config.mobileScripts?.platform ?? "",
 		mobileScriptsProduct: config.mobileScripts?.product ?? "",
 		mobileScriptsStore: config.mobileScripts?.store ?? "",
+		simTrustMode: !config.simTrust ? "inherit" : (config.simTrust.caFiles ?? []).length === 0 ? "none" : "files",
+		simTrustCaFiles: formatCaFileLines(config.simTrust?.caFiles ?? []),
 		disableAutoCrew: config.disableAutoCrew ?? false,
 		pauseBeforeImplementing: config.pauseBeforeImplementing ?? false,
 		intakeEnabled: intake.enabled ?? false,
@@ -121,6 +138,20 @@ function buildMobileScripts(platform: string, product: string, store: string): M
 	if (platform !== "ios" && platform !== "android") return undefined;
 	const trimmedStore = store.trim();
 	return { platform, product: product.trim(), ...(trimmedStore ? { store: trimmedStore } : {}) };
+}
+
+// buildSimTrust turns the three-way choice into the pointer-shaped setting:
+// omitted inherits the global list, an empty list trusts nothing, and a list
+// replaces the global one for this project.
+function buildSimTrust(mode: SimTrustMode, lines: string): SimTrustConfig | undefined {
+	switch (mode) {
+		case "none":
+			return { caFiles: [] };
+		case "files":
+			return { caFiles: parseCaFileLines(lines) };
+		default:
+			return undefined;
+	}
 }
 
 // Drop an object whose every value is undefined so we send `undefined` (omit)
@@ -179,6 +210,10 @@ export function useProjectSettingsForm({
 		},
 	});
 	const globalResponseLanguage = globalResponseLanguageQuery.data?.language || "English";
+	// The global root-CA list this project's override replaces, stated at the
+	// field for the same reason as the response language above.
+	const globalSimTrustQuery = useQuery({ queryKey: simTrustSettingsQueryKey, queryFn: fetchSimTrustSettings });
+	const globalSimTrustCaFiles = globalSimTrustQuery.data?.caFiles;
 	const agentCatalog = agentsQuery.data;
 	const refreshAgentsMutation = useMutation({
 		mutationFn: refreshAgents,
@@ -215,6 +250,7 @@ export function useProjectSettingsForm({
 	const intakeIncomplete = intakeNeedsRule(intakeForm);
 	const gitConventionIncomplete = form.gitWorkflow === "custom" && form.branchPrefix.trim() === "";
 	const mobileScriptsIncomplete = form.mobileScriptsPlatform !== "" && form.mobileScriptsProduct.trim() === "";
+	const simTrustIncomplete = form.simTrustMode === "files" && parseCaFileLines(form.simTrustCaFiles).length === 0;
 
 	const mutation = useMutation({
 		mutationFn: async () => {
@@ -252,6 +288,7 @@ export function useProjectSettingsForm({
 					form.mobileScriptsProduct,
 					form.mobileScriptsStore,
 				),
+				simTrust: buildSimTrust(form.simTrustMode, form.simTrustCaFiles),
 				// Automatic crew IS the default, so "on" is the absence of the field,
 				// same as the two above.
 				disableAutoCrew: form.disableAutoCrew || undefined,
@@ -324,6 +361,10 @@ export function useProjectSettingsForm({
 			setValidationError("Script-only driving requires the product's folder in the scripts store.");
 			return;
 		}
+		if (simTrustIncomplete) {
+			setValidationError("Name at least one root-CA file, or choose to trust nothing on this project.");
+			return;
+		}
 		setValidationError(null);
 		mutation.mutate();
 	};
@@ -347,6 +388,7 @@ export function useProjectSettingsForm({
 		refreshAgentsMutation,
 		missingRequiredAgent,
 		globalResponseLanguage,
+		globalSimTrustCaFiles,
 		intakeForm,
 		patchIntake,
 		effectiveIntakeRepo,

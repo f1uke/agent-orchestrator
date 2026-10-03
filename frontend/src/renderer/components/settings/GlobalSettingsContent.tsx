@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { Check, Minus } from "lucide-react";
 import type { UpdateChannel } from "../../../main/update-settings";
 import { apiClient, apiErrorMessage } from "../../lib/api-client";
 import { Button } from "../ui/button";
@@ -20,6 +21,7 @@ import { ShortcutField } from "./ShortcutField";
 import { DEFAULT_EDITOR_SETTINGS } from "../../../shared/editor-settings";
 import { shortcutLabel } from "../../../shared/editor-shortcuts";
 import { isMacPlatform } from "../../lib/platform";
+import { caFilesCount, formatCaFileLines, parseCaFileLines, sameCaFiles } from "../../lib/sim-trust";
 import { GLOBAL_SECTIONS } from "./settings-sections";
 import type { PromptKind } from "./useGlobalSettingsForm";
 import type { useGlobalSettingsForm } from "./useGlobalSettingsForm";
@@ -82,6 +84,8 @@ export function GlobalSettingsContent({ form, activeSection }: { form: GlobalFor
 			return <CleaningUpSection form={form} />;
 		case "editor":
 			return <CodeEditorSection form={form} />;
+		case "devices":
+			return <SimulatorsSection form={form} />;
 		case "mac":
 			return <ThisMacSection form={form} />;
 		default:
@@ -508,6 +512,94 @@ function CodeEditorSection({ form }: { form: GlobalForm }) {
 				</SettingRow>
 			</SettingRows>
 		</>
+	);
+}
+
+// What AO does to a simulator before anyone uses it. Today that is one thing:
+// making it trust the root CA of the debugging proxy on this Mac.
+function SimulatorsSection({ form }: { form: GlobalForm }) {
+	const { draft, setField, isFieldDirty, simTrust } = form;
+	const files = parseCaFileLines(draft.simTrustCaFiles);
+	const defaults = simTrust?.defaultCaFiles ?? [];
+	const atDefault = simTrust !== undefined && sameCaFiles(files, defaults);
+	return (
+		<>
+			<SectionHeading title="Simulators" hint={hint("devices")} />
+			<SettingRows>
+				<SettingRow
+					name="Simulator root CAs"
+					summary="Root certificates every iOS simulator AO boots or claims is made to trust, so HTTPS through a debugging proxy such as Proxyman works inside the app."
+					detail={
+						<>
+							A simulator does not share this Mac's trust store: without the proxy's root CA every HTTPS call fails and
+							the app can hang on its splash screen. One PEM or DER file per line, as an absolute path or one starting
+							with <code>~/</code>. A file that is not on this Mac is skipped silently, so listing a proxy you do not
+							use is harmless; an empty list trusts nothing. A simulator picks up a change the next time AO boots or
+							claims it, and a project can name its own files instead.
+						</>
+					}
+					ownership={{ kind: "global-overridable" }}
+					timing="live"
+					value={atDefault ? "Default" : caFilesCount(files)}
+					modified={isFieldDirty("simTrustCaFiles")}
+					controlId="simTrustCaFiles"
+				>
+					<div className="flex flex-col gap-2.5">
+						<Textarea
+							id="simTrustCaFiles"
+							className="min-h-20 max-w-[620px] resize-y font-mono text-[12.5px] leading-relaxed"
+							wrap="off"
+							placeholder={defaults[0] ?? "~/path/to/root-ca.pem"}
+							spellCheck={false}
+							value={draft.simTrustCaFiles}
+							onChange={(e) => setField("simTrustCaFiles", e.target.value)}
+						/>
+						{simTrust && <SavedCaFiles caFiles={simTrust.caFiles} found={simTrust.found} />}
+						<div className="flex items-center gap-2.5">
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								disabled={simTrust === undefined || atDefault}
+								onClick={() => setField("simTrustCaFiles", formatCaFileLines(defaults))}
+							>
+								Restore default
+							</Button>
+						</div>
+					</div>
+				</SettingRow>
+			</SettingRows>
+		</>
+	);
+}
+
+// Whether each SAVED file is on this Mac right now. It describes the saved list,
+// not the draft above it, because only a saved list is what a simulator gets.
+function SavedCaFiles({ caFiles, found }: { caFiles: string[]; found: boolean[] }) {
+	if (caFiles.length === 0) {
+		return <p className="text-[11.5px] text-passive">Saved: no files, so simulators trust nothing extra.</p>;
+	}
+	return (
+		<ul aria-label="Saved root CAs on this Mac" className="flex max-w-[620px] flex-col gap-1">
+			{caFiles.map((file, i) => {
+				const present = found[i] === true;
+				return (
+					<li key={`${i}-${file}`} className="flex min-w-0 items-center gap-2 text-[11.5px]">
+						{present ? (
+							<Check className="h-3 w-3 shrink-0 text-success" aria-hidden="true" />
+						) : (
+							<Minus className="h-3 w-3 shrink-0 text-passive" aria-hidden="true" />
+						)}
+						<span className="min-w-0 truncate font-mono text-muted-foreground" title={file}>
+							{file}
+						</span>
+						<span className={present ? "shrink-0 text-success" : "shrink-0 text-passive"}>
+							{present ? "Found" : "Not on this Mac, skipped"}
+						</span>
+					</li>
+				);
+			})}
+		</ul>
 	);
 }
 

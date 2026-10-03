@@ -10,6 +10,14 @@ import { refLinkSettingsQueryKey, type RefLinkSettingsResponse } from "../../hoo
 import { formatAliasLines, parseAliasLines } from "../../lib/ref-links";
 import { DEFAULT_EDITOR_SETTINGS } from "../../../shared/editor-settings";
 import { editorSettingsQueryKey } from "../../hooks/useEditorSettings";
+import {
+	fetchSimTrustSettings,
+	formatCaFileLines,
+	normalizeSimTrustSettings,
+	parseCaFileLines,
+	simTrustSettingsQueryKey,
+	type SimTrustSettings,
+} from "../../lib/sim-trust";
 
 export type PromptKind = "orchestrator" | "worker" | "qa" | "reviewer";
 export type PromptItem = { kind: PromptKind; default: string; override: string | null };
@@ -49,6 +57,9 @@ export type GlobalDraft = {
 	refGitlabBaseUrl: string;
 	refGitlabDefaultRepo: string;
 	refGitlabAliases: string;
+	// The root-CA files every simulator AO boots or claims is made to trust,
+	// edited one path per line and parsed back on save.
+	simTrustCaFiles: string;
 	reclaimEnabled: boolean;
 	reclaimGrace: number;
 	reclaimArtifacts: boolean;
@@ -72,6 +83,7 @@ export type GlobalScalarField =
 	| "refGitlabBaseUrl"
 	| "refGitlabDefaultRepo"
 	| "refGitlabAliases"
+	| "simTrustCaFiles"
 	| "reclaimEnabled"
 	| "reclaimGrace"
 	| "reclaimArtifacts"
@@ -95,6 +107,7 @@ const EMPTY_DRAFT: GlobalDraft = {
 	refGitlabBaseUrl: "",
 	refGitlabDefaultRepo: "",
 	refGitlabAliases: "",
+	simTrustCaFiles: "",
 	reclaimEnabled: true,
 	reclaimGrace: 24 * 60,
 	reclaimArtifacts: true,
@@ -183,6 +196,10 @@ export function useGlobalSettingsForm() {
 			return data as RefLinkSettingsResponse;
 		},
 	});
+	// The plain key, not a form copy: the Project scope reads the same list to
+	// state what its override overrides, and a save writes the daemon's answer
+	// (with each file's found-on-this-Mac flag) straight into it.
+	const simTrustQuery = useQuery({ queryKey: simTrustSettingsQueryKey, queryFn: fetchSimTrustSettings });
 	const reclaimQuery = useQuery({
 		queryKey: reclaimSettingsQueryKey,
 		queryFn: async () => {
@@ -283,6 +300,14 @@ export function useGlobalSettingsForm() {
 	}, [refLinksQuery.data]);
 
 	useEffect(() => {
+		if (!simTrustQuery.data || seeded.current.has("simTrust")) return;
+		seeded.current.add("simTrust");
+		const v = formatCaFileLines(simTrustQuery.data.caFiles);
+		setDraft((d) => ({ ...d, simTrustCaFiles: v }));
+		setBaseline((b) => ({ ...b, simTrustCaFiles: v }));
+	}, [simTrustQuery.data]);
+
+	useEffect(() => {
 		if (!reclaimQuery.data || seeded.current.has("reclaim")) return;
 		seeded.current.add("reclaim");
 		const { enabled, graceMinutes } = reclaimQuery.data;
@@ -351,6 +376,7 @@ export function useGlobalSettingsForm() {
 		draft.responseLanguage !== baseline.responseLanguage ||
 		draft.wikiVaultPath !== baseline.wikiVaultPath ||
 		refLinksDirty(draft, baseline) ||
+		draft.simTrustCaFiles !== baseline.simTrustCaFiles ||
 		draft.reclaimEnabled !== baseline.reclaimEnabled ||
 		draft.reclaimGrace !== baseline.reclaimGrace ||
 		draft.reclaimArtifacts !== baseline.reclaimArtifacts ||
@@ -379,7 +405,7 @@ export function useGlobalSettingsForm() {
 			const ops: Promise<void>[] = [];
 			// What the daemon stored, where it normalizes (a trailing `/` trimmed,
 			// say), so the form shows the value that is actually in effect.
-			const saved: { refLinks?: RefLinkSettingsResponse } = {};
+			const saved: { refLinks?: RefLinkSettingsResponse; simTrust?: SimTrustSettings } = {};
 			const putPrompt = async (kind: string, base: string) => {
 				const { error } = await apiClient.PUT("/api/v1/settings/prompts/{kind}", {
 					params: { path: { kind: kind as PromptKind } },
@@ -481,6 +507,17 @@ export function useGlobalSettingsForm() {
 					})(),
 				);
 			}
+			if (draft.simTrustCaFiles !== baseline.simTrustCaFiles) {
+				ops.push(
+					(async () => {
+						const { data, error } = await apiClient.PUT("/api/v1/settings/sim-trust", {
+							body: { caFiles: parseCaFileLines(draft.simTrustCaFiles) },
+						});
+						if (error) throw new Error(apiErrorMessage(error));
+						saved.simTrust = normalizeSimTrustSettings(data);
+					})(),
+				);
+			}
 			if (
 				draft.reclaimEnabled !== baseline.reclaimEnabled ||
 				draft.reclaimGrace !== baseline.reclaimGrace ||
@@ -539,15 +576,22 @@ export function useGlobalSettingsForm() {
 		},
 		onSuccess: (saved) => {
 			setSavedAt(Date.now());
-			const next = saved.refLinks
-				? {
-						...draft,
-						refJiraBaseUrl: saved.refLinks.jiraBaseUrl,
-						refGitlabBaseUrl: saved.refLinks.gitlabBaseUrl,
-						refGitlabDefaultRepo: saved.refLinks.gitlabDefaultRepo,
-						refGitlabAliases: formatAliasLines(saved.refLinks.gitlabRepoAliases ?? {}),
-					}
-				: draft;
+			let next = draft;
+			if (saved.refLinks) {
+				next = {
+					...next,
+					refJiraBaseUrl: saved.refLinks.jiraBaseUrl,
+					refGitlabBaseUrl: saved.refLinks.gitlabBaseUrl,
+					refGitlabDefaultRepo: saved.refLinks.gitlabDefaultRepo,
+					refGitlabAliases: formatAliasLines(saved.refLinks.gitlabRepoAliases ?? {}),
+				};
+			}
+			if (saved.simTrust) {
+				// The list as stored (blank lines dropped, each line trimmed), and
+				// the found flags for exactly that list.
+				next = { ...next, simTrustCaFiles: formatCaFileLines(saved.simTrust.caFiles) };
+				queryClient.setQueryData(simTrustSettingsQueryKey, saved.simTrust);
+			}
 			setDraft(next);
 			setBaseline(next);
 			// The Tasks tab's copy (and the form's own, by prefix).
@@ -580,6 +624,9 @@ export function useGlobalSettingsForm() {
 	return {
 		prompts,
 		templates,
+		// The saved global list, its found-on-this-Mac flags, and the shipped
+		// default the row can restore.
+		simTrust: simTrustQuery.data,
 		draft,
 		promptDefault,
 		templateDefault,
