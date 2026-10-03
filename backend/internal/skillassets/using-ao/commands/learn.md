@@ -8,7 +8,7 @@ A project with `learnFromSessions` on (`ao project set-config <id> --learn-from-
 
 **Rules** is the corpus a lesson is checked against: what agents are already told (the human's CLAUDE.md and skills, each learning project's repo CLAUDE.md, AGENTS.md and skills, AO's standing prompt, the knowledge INDEX), split into statements and refreshed hourly. Repo files are only read. **Protected rules** are the ones the human pins; their forbidden patterns block any learned skill that matches.
 
-**Decide** turns a finished task's drafts into **proposals** - create or update a skill, add a rule to `~/.claude/CLAUDE.md` or the knowledge INDEX, or a conflict card when the human's words contradict a standing rule - each with the diff AO computed. A second, adversarial model call and code gates refuse what is not grounded in the human's own words, breaks a rule, or carries sensitive data. Nothing is applied: the human approves every proposal.
+**Decide** turns a finished task's drafts into **proposals** - create or update a skill (a rule of one project goes in a learned skill of that project), add a rule for every project to `~/.claude/CLAUDE.md`, or a conflict card when the human's words contradict a standing rule - each with the diff AO computed. A second, adversarial model call and code gates refuse what is not grounded in the human's own words, breaks a rule, or carries sensitive data. Nothing is applied: the human approves every proposal.
 
 ## Subcommands
 

@@ -116,6 +116,8 @@ type proposalIn struct {
 	Target       string `json:"target"`
 	Title        string `json:"title"`
 	RejectReason string `json:"reject_reason,omitempty"`
+	// Content is a pending proposal's new content, so an amendment keeps it.
+	Content string `json:"content,omitempty"`
 }
 
 type input struct {
@@ -306,8 +308,12 @@ func proposalsFor(c Context) []proposalIn {
 		if p.ProjectID != c.ProjectID && p.Scope != "global" {
 			continue
 		}
-		out = append(out, proposalIn{ID: "p" + strconv.FormatInt(p.ID, 10), Status: string(p.Status), Action: string(p.Action),
-			Target: p.TargetPath, Title: p.Title, RejectReason: p.DropReason})
+		in := proposalIn{ID: "p" + strconv.FormatInt(p.ID, 10), Status: string(p.Status), Action: string(p.Action),
+			Target: p.TargetPath, Title: p.Title, RejectReason: p.DropReason}
+		if p.Status == domain.LearnProposalPending {
+			in.Content = clip(p.NewContent, skillBodyBytes)
+		}
+		out = append(out, in)
 		if len(out) == 30 {
 			break
 		}

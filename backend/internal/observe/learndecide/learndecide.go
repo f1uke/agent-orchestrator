@@ -469,7 +469,7 @@ func (o *Observer) decideTask(ctx context.Context, sh shared, t task) (result, e
 	corpus := rules.Corpus(sh.sources, sh.chunks, pid)
 	shaped, err := decide.Build(decide.Context{
 		TaskKey: t.key, ProjectID: pid, Outcome: t.outcome, PRs: t.prs, Plans: t.plans, Drafts: t.drafts,
-		Others: others, Corpus: corpus, Protected: sh.protected, Skills: sh.skills, RuleFiles: o.ruleFiles(pid),
+		Others: others, Corpus: corpus, Protected: sh.protected, Skills: sh.skills, RuleFiles: o.ruleFiles(),
 		Proposals: proposals,
 	})
 	if err != nil {
@@ -579,11 +579,12 @@ func (o *Observer) call(ctx context.Context, t task, kind domain.LearnJobKind, s
 }
 
 // ruleFiles are the files a lesson may be added to, with their headings.
-func (o *Observer) ruleFiles(project domain.ProjectID) []decide.RuleFile {
+func (o *Observer) ruleFiles() []decide.RuleFile {
 	var out []decide.RuleFile
+	// Project rules are learned skills of the project (the person's decision,
+	// 2026-10-04), so the only rule file is the global CLAUDE.md.
 	for _, f := range []struct{ path, scope string }{
 		{filepath.Join(o.dirs.Home, ".claude", "CLAUDE.md"), "global"},
-		{filepath.Join(o.dirs.KnowledgeDir, string(project), "INDEX.md"), "project:" + string(project)},
 	} {
 		text, ok, err := readFile(f.path)
 		if err != nil || !ok {

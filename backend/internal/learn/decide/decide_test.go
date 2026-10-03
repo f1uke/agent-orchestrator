@@ -238,19 +238,77 @@ func TestReviewsAndFinalize(t *testing.T) {
 }
 
 func TestPrepare_MergesOneTasksEditsOfTheSameFile(t *testing.T) {
-	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice), draft(2, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
-	env.ProjectID = "nter"
+	a, b := draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice), draft(2, "solo:s1", 0.9, domain.LearnAboutAgentPractice)
+	a.Quote, b.Quote = "always squash", "always paste passwords"
+	env := rig(t, a, b)
 	edit := func(ev, heading, text string) Proposed {
-		return Proposed{Action: "edit_rule_file", Target: "~/.ao/knowledge/nter/INDEX.md", UnderHeading: heading, Content: text,
-			Scope: "project", Title: text, Evidence: []string{ev}, Confidence: 0.8}
+		return Proposed{Action: "edit_rule_file", Target: "~/.claude/CLAUDE.md", UnderHeading: heading, Content: text,
+			Scope: "global", Title: text, Evidence: []string{ev}, Confidence: 0.8}
 	}
-	got, _ := Prepare(env, []Proposed{edit("d1", "Git", "- one"), edit("d2", "Builds", "- two")})
+	got, _ := Prepare(env, []Proposed{edit("d1", "Git", "- one"), edit("d2", "Secrets", "- two")})
 	if len(got) != 1 || got[0].Drop != "" {
 		t.Fatalf("candidates = %+v", got)
 	}
 	p := got[0].Proposal
-	if len(p.EvidenceIDs) != 2 || !strings.Contains(p.NewContent, "## Git\n\n- one\n") || !strings.Contains(p.NewContent, "## Builds\n\n- two\n") ||
-		!strings.HasPrefix(p.Diff, "--- /dev/null") || !strings.Contains(p.Diff, "+- two") {
+	if len(p.EvidenceIDs) != 2 || !strings.Contains(p.NewContent, "- Squash.\n- one\n") || !strings.Contains(p.NewContent, "## Secrets\n\n- two\n") ||
+		!strings.Contains(p.Diff, "+- one") || !strings.Contains(p.Diff, "+- two") {
 		t.Errorf("merged = %+v", p)
+	}
+}
+
+func TestPrepare_ProjectRulesNeverGoToTheKnowledgeStore(t *testing.T) {
+	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
+	got, _ := Prepare(env, []Proposed{{Action: "edit_rule_file", Target: filepath.Join(env.KnowledgeDir, "nter", "INDEX.md"),
+		Content: "- rule", Scope: "project", Evidence: []string{"d1"}, Confidence: 0.8}})
+	if !strings.Contains(got[0].Drop, "learned skill of the project") {
+		t.Errorf("drop = %q", got[0].Drop)
+	}
+}
+
+func TestAddProjectRule_BuildsTheWorkingRulesSkillAndNeverLosesLines(t *testing.T) {
+	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice), draft(2, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
+	rule := func(ev, text string) Proposed {
+		return Proposed{Action: "add_project_rule", Content: text, Scope: "project", Title: text, Evidence: []string{ev}, Confidence: 0.8}
+	}
+	got, _ := Prepare(env, []Proposed{rule("d1", "- Open finished diagrams in Chrome."), rule("d2", "- Hand finished work to QA.")})
+	if len(got) != 1 || got[0].Drop != "" {
+		t.Fatalf("one task's project rules are one proposal: %+v", got)
+	}
+	first := got[0].Proposal
+	path := filepath.Join(env.Learned, "projects", "nter", "skills", "nter-working-rules", "SKILL.md")
+	if first.TargetPath != path || first.Action != domain.LearnProposeCreateSkill || first.Scope != "project:nter" {
+		t.Fatalf("first = %+v", first)
+	}
+	if _, err := skills.Check(first.NewContent); err != nil || !strings.Contains(first.NewContent, "# nter working rules\n\n- Open finished diagrams in Chrome.\n- Hand finished work to QA.\n") {
+		t.Fatalf("skill =\n%s\n%v", first.NewContent, err)
+	}
+
+	// Another task adds a rule while the first proposal is pending; a third,
+	// decided in parallel, sees the pending one only at commit time.
+	pending := first
+	pending.ID, pending.Status = 7, domain.LearnProposalPending
+	env.TaskKey = "solo:s2"
+	d3 := draft(3, "solo:s2", 0.9, domain.LearnAboutAgentPractice)
+	env.Shaped.Drafts[3] = d3
+	stale, _ := Prepare(env, []Proposed{rule("d3", "- Never run ao session cleanup.")})
+	env.Proposals = []domain.LearnProposal{pending}
+	Finalize(env, stale)
+	got3 := stale[0].Proposal
+	if got3.ID != 7 || !strings.Contains(got3.NewContent, "- Open finished diagrams in Chrome.\n- Hand finished work to QA.\n- Never run ao session cleanup.\n") ||
+		!strings.HasPrefix(got3.Diff, "--- /dev/null") {
+		t.Errorf("amend must keep the pending lines and add its own:\n%s", got3.NewContent)
+	}
+
+	// A full-file skill update that would drop a pending proposal's lines is refused.
+	full := Proposed{Action: "update_skill", Target: env.Skills[0].Path, Scope: "global", Evidence: []string{"d3"}, Confidence: 0.9,
+		Content: "---\nname: release\ndescription: Cut a release. Use when releasing.\n---\n\n1. Bump the version.\n2. Tag it.\n"}
+	d3.Quote = "always tag releases"
+	env.Shaped.Drafts[3] = d3
+	upd, _ := Prepare(env, []Proposed{full})
+	env.Proposals = []domain.LearnProposal{{ID: 8, TargetPath: env.Skills[0].Path, Status: domain.LearnProposalPending,
+		NewContent: "---\nname: release\ndescription: Cut a release. Use when releasing.\n---\n\n1. Bump the version.\n2. Write the changelog.\n"}}
+	Finalize(env, upd)
+	if !strings.Contains(upd[0].Drop, "would drop lines open proposal #8 adds") {
+		t.Errorf("drop = %q", upd[0].Drop)
 	}
 }

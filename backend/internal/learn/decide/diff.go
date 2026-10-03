@@ -198,6 +198,10 @@ func InsertUnder(content, heading, text string) string {
 	if at > 0 && !strings.HasSuffix(lines[at-1], "\n") {
 		lines[at-1] += "\n"
 	}
+	if at == found+1 {
+		// The section is empty: keep a blank line under the heading.
+		text = "\n" + text
+	}
 	out := append([]string{}, lines[:at]...)
 	out = append(out, text)
 	out = append(out, lines[at:]...)

@@ -54,6 +54,27 @@ type Candidate struct {
 	Drop     string
 	// base is the target's content the diff is computed against.
 	base string
+	// start and inserts make a proposal AO renders itself (a rule-file edit,
+	// a project rule): its lines are inserted into start, which is the open
+	// proposal's content when one targets the same file, so amending never
+	// loses lines an earlier task proposed.
+	start   string
+	inserts []insert
+}
+
+type insert struct{ heading, lines string }
+
+// render rebuilds the new content and diff from start and the inserts.
+func (c *Candidate) render() {
+	content := c.start
+	added := make([]string, 0, len(c.inserts))
+	for _, in := range c.inserts {
+		content = InsertUnder(content, in.heading, in.lines)
+		added = append(added, in.lines)
+	}
+	c.Proposal.NewContent = content
+	c.Proposal.Diff = Diff(c.Proposal.TargetPath, c.base, content)
+	c.Added = strings.Join(added, "\n")
 }
 
 // Prepare turns decide's answer into candidates: it resolves each target,
@@ -76,11 +97,11 @@ func Prepare(env Env, answer []Proposed) (out []Candidate, noAction int) {
 			c.Proposal.RuleVerdicts = append(c.Proposal.RuleVerdicts, domain.LearnRuleVerdict{RuleID: v.Rule, Verdict: v.Verdict, Note: v.Note})
 		}
 		c.Drop = env.prepare(&c, p)
-		if c.Drop == "" && c.Proposal.Action == domain.LearnProposeEditRuleFile {
+		if c.Drop == "" && len(c.inserts) > 0 {
 			if j, ok := ruleEdit[c.Proposal.TargetPath]; ok {
 				// Lines one task adds to one file are one proposal: the
 				// person approves the file's change as a whole.
-				mergeRuleEdit(&out[j], c, p.UnderHeading)
+				mergeInserts(&out[j], c)
 				continue
 			}
 			ruleEdit[c.Proposal.TargetPath] = len(out)
@@ -90,14 +111,12 @@ func Prepare(env Env, answer []Proposed) (out []Candidate, noAction int) {
 	return out, noAction
 }
 
-// mergeRuleEdit folds a second edit of the same rule file into the first:
-// its lines are inserted into the first's new content, the diff recomputed
-// against the same base, and evidence, titles and rationales joined.
-func mergeRuleEdit(into *Candidate, c Candidate, underHeading string) {
+// mergeInserts folds a second set of lines for the same file into the first
+// proposal: rendered together, evidence, titles and rationales joined.
+func mergeInserts(into *Candidate, c Candidate) {
 	p := &into.Proposal
-	p.NewContent = InsertUnder(p.NewContent, underHeading, c.Added)
-	p.Diff = Diff(p.TargetPath, into.base, p.NewContent)
-	into.Added += "\n" + c.Added
+	into.inserts = append(into.inserts, c.inserts...)
+	into.render()
 	p.EvidenceIDs = union(p.EvidenceIDs, c.Proposal.EvidenceIDs)
 	p.Title += "; " + c.Proposal.Title
 	p.Rationale += " " + c.Proposal.Rationale
@@ -120,6 +139,8 @@ func (env Env) prepare(c *Candidate, p Proposed) string {
 		return env.updateSkill(c, p)
 	case domain.LearnProposeEditRuleFile:
 		return env.editRuleFile(c, p)
+	case addProjectRule:
+		return env.addProjectRule(c, p)
 	case domain.LearnProposeConflict:
 		return env.conflict(c, p.Target, p.Content)
 	default:
@@ -209,9 +230,18 @@ func (env Env) createSkill(c *Candidate, p Proposed) string {
 		}
 		return fmt.Sprintf("a skill named %q already exists (%s, %s); a new one must not shadow it", name, s.Source, s.Path)
 	}
+	if why := env.learnedCap(c.Proposal.Scope, path); why != "" {
+		return why
+	}
+	return env.skillContent(c, name, "", p.Content)
+}
+
+// learnedCap refuses a new learned skill in a scope already at its cap
+// (design §3.8), counting pending creations too.
+func (env Env) learnedCap(scope, path string) string {
 	learned := 0
 	for _, s := range env.Skills {
-		if s.Source == skills.SourceLearned && s.Scope == c.Proposal.Scope {
+		if s.Source == skills.SourceLearned && s.Scope == scope {
 			learned++
 		}
 	}
@@ -222,13 +252,13 @@ func (env Env) createSkill(c *Candidate, p Proposed) string {
 		}
 	}
 	limit := skills.MaxProjectLearned
-	if c.Proposal.Scope == "global" {
+	if scope == "global" {
 		limit = skills.MaxGlobalLearned
 	}
 	if learned >= limit {
-		return fmt.Sprintf("%s already has %d learned skills, the cap; only updates are allowed", c.Proposal.Scope, learned)
+		return fmt.Sprintf("%s already has %d learned skills, the cap; only updates are allowed", scope, learned)
 	}
-	return env.skillContent(c, name, "", p.Content)
+	return ""
 }
 
 func (env Env) updateSkill(c *Candidate, p Proposed) string {
@@ -273,6 +303,7 @@ func (env Env) skillContent(c *Candidate, name, old, content string) string {
 		return fmt.Sprintf("the frontmatter name %q does not match the skill %q", fm.Name, name)
 	}
 	c.Proposal.NewContent = content
+	c.base = old
 	c.Proposal.BaseSHA256 = sha(old)
 	c.Proposal.Diff = Diff(c.Proposal.TargetPath, old, content)
 	c.Added = added(old, content)
@@ -286,23 +317,24 @@ func (env Env) editRuleFile(c *Candidate, p Proposed) string {
 	target := env.expand(p.Target)
 	c.Proposal.TargetPath = target
 	claudeMD := filepath.Join(env.Home, ".claude", "CLAUDE.md")
-	index := filepath.Join(env.KnowledgeDir, string(env.ProjectID), "INDEX.md")
-	switch target {
-	case claudeMD:
+	switch {
+	case target == claudeMD:
 		if IsOrchestrator(env.TaskKey) {
 			// Decision 5: an orchestrator's day may not edit what every
 			// session is told; the person decides it as a conflict card.
 			return env.conflict(c, "file:"+claudeMD, p.Content)
 		}
 		if c.Proposal.Scope != "global" {
-			return "a lesson from one project cannot change the global CLAUDE.md"
+			return "a lesson from one project cannot change the global CLAUDE.md; it belongs in a learned skill of the project"
 		}
-	case index:
-		c.Proposal.Scope = "project:" + string(env.ProjectID)
+	case strings.HasPrefix(target, env.KnowledgeDir+string(filepath.Separator)):
+		// The person's decision (2026-10-04): the knowledge INDEX is the
+		// orchestrator's map of documents; project rules are a skill agents load.
+		return "project rules live in a learned skill of the project, not in the knowledge store"
 	default:
-		return "a rule file edit may target only ~/.claude/CLAUDE.md or this project's knowledge INDEX.md"
+		return "a rule file edit may target only ~/.claude/CLAUDE.md; project rules go in a learned skill of the project"
 	}
-	if why := env.confined(target, filepath.Dir(claudeMD), env.KnowledgeDir); why != "" {
+	if why := env.confined(target, filepath.Dir(claudeMD)); why != "" {
 		return why
 	}
 	old, _, err := env.Read(target)
@@ -313,12 +345,82 @@ func (env Env) editRuleFile(c *Candidate, p Proposed) string {
 	if text == "" {
 		return "it adds nothing"
 	}
-	c.Proposal.NewContent = InsertUnder(old, p.UnderHeading, text)
-	c.base = old
+	c.base, c.start = old, env.pendingContent(target, old)
 	c.Proposal.BaseSHA256 = sha(old)
-	c.Proposal.Diff = Diff(target, old, c.Proposal.NewContent)
-	c.Added = text
+	c.inserts = []insert{{p.UnderHeading, text}}
+	c.render()
 	return env.contentGates(c)
+}
+
+// addProjectRule is a rule of one project (the person's decision,
+// 2026-10-04): AO adds its lines to the project's learned working-rules skill,
+// creating the skill when it does not exist yet.
+func (env Env) addProjectRule(c *Candidate, p Proposed) string {
+	name := WorkingRulesSkill(env.ProjectID)
+	path := filepath.Join(env.Learned, "projects", string(env.ProjectID), "skills", name, "SKILL.md")
+	// Stored as a skill change: add_project_rule is only how the model asks.
+	c.Proposal.Action = domain.LearnProposeUpdateSkill
+	c.Proposal.TargetPath = path
+	c.Proposal.Scope = "project:" + string(env.ProjectID)
+	for _, s := range env.Skills {
+		if s.Name == name && s.Path != path {
+			return fmt.Sprintf("a skill named %q already exists (%s, %s)", name, s.Source, s.Path)
+		}
+	}
+	if why := env.confined(path, env.Learned); why != "" {
+		return why
+	}
+	old, exists, err := env.Read(path)
+	if err != nil {
+		return "the working-rules skill cannot be read"
+	}
+	text := noEmDash(strings.TrimSpace(p.Content))
+	if text == "" {
+		return "it adds nothing"
+	}
+	start := env.pendingContent(path, old)
+	if start == "" {
+		start = workingRulesSkeleton(name, env.ProjectID)
+	}
+	if !exists {
+		c.Proposal.Action = domain.LearnProposeCreateSkill
+		if why := env.learnedCap(c.Proposal.Scope, path); why != "" && env.pendingContent(path, "") == "" {
+			return why
+		}
+	}
+	c.base, c.start = old, start
+	c.Proposal.BaseSHA256 = sha(old)
+	c.inserts = []insert{{workingRulesHeading(env.ProjectID), text}}
+	c.render()
+	if _, err := skills.Check(c.Proposal.NewContent); err != nil {
+		return "skill file: " + err.Error()
+	}
+	return env.contentGates(c)
+}
+
+// WorkingRulesSkill is the name of a project's learned working-rules skill.
+func WorkingRulesSkill(project domain.ProjectID) string {
+	return strings.ToLower(string(project)) + "-working-rules"
+}
+
+func workingRulesHeading(project domain.ProjectID) string {
+	return string(project) + " working rules"
+}
+
+func workingRulesSkeleton(name string, project domain.ProjectID) string {
+	return "---\nname: " + name + "\ndescription: Use when working in " + string(project) +
+		", for the standing rules the person set for this project.\n---\n\n# " + workingRulesHeading(project) + "\n"
+}
+
+// pendingContent is the new content of the open proposal on target, or
+// fallback when there is none.
+func (env Env) pendingContent(target, fallback string) string {
+	for _, p := range env.Proposals {
+		if p.Status == domain.LearnProposalPending && p.TargetPath == target {
+			return p.NewContent
+		}
+	}
+	return fallback
 }
 
 // conflict makes the candidate a conflict card about rule (a rule id, a
@@ -483,6 +585,14 @@ func Finalize(env Env, cands []Candidate) {
 			case domain.LearnProposalPending:
 				c.Proposal.ID = p.ID
 				c.Proposal.EvidenceIDs = union(p.EvidenceIDs, c.Proposal.EvidenceIDs)
+				if len(c.inserts) > 0 {
+					// Rendered again on the open proposal as it is now: a
+					// task decided in parallel may have just added to it.
+					c.start = p.NewContent
+					c.render()
+				} else if missing := missingLines(c.base, p.NewContent, c.Proposal.NewContent); missing != "" {
+					c.Drop = fmt.Sprintf("it would drop lines open proposal #%d adds (%q); propose them together", p.ID, missing)
+				}
 			}
 		}
 		if c.Drop != "" {
@@ -490,6 +600,20 @@ func Finalize(env Env, cands []Candidate) {
 			c.Proposal.Status, c.Proposal.DropReason = domain.LearnProposalDropped, c.Drop
 		}
 	}
+}
+
+// missingLines returns the first line pending adds to base that next lacks.
+func missingLines(base, pending, next string) string {
+	have := map[string]bool{}
+	for _, l := range splitLines(next) {
+		have[l] = true
+	}
+	for _, o := range lcsOps(splitLines(base), splitLines(pending)) {
+		if o.kind == '+' && strings.TrimSpace(o.text) != "" && !have[o.text] {
+			return strings.TrimSpace(o.text)
+		}
+	}
+	return ""
 }
 
 func subset(a, b []int64) bool {
