@@ -384,3 +384,40 @@ func TestSimFlowRun_StreamsOutputAsItArrives(t *testing.T) {
 		t.Fatalf("args = %v, must still pin --device", rec[0].args)
 	}
 }
+
+// Several flows go to ONE maestro launch, in the order given: that launch is
+// the ~20 s every extra flow would otherwise pay again.
+func TestSimFlowRun_SeveralFlowsRunInOneMaestroLaunch(t *testing.T) {
+	var rec []recordedCommand
+	deps, daemon := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec)
+	grantSimLease(daemon, simUDIDProMax, "mer-9")
+	first, second := writeFlowFile(t), writeFlowFile(t)
+
+	if _, _, err := executeCLI(t, deps, "sim", "flow", "run", first, second, "--udid", simUDIDProMax); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(rec) != 1 {
+		t.Fatalf("maestro ran %d times, want once for both flows: %v", len(rec), rec)
+	}
+	want := []string{"test", "--device", simUDIDProMax, first, second}
+	if got := rec[0].args; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+}
+
+// A missing file anywhere in the list stops the run before maestro starts:
+// finding out after the first flow has already relaunched the app is too late.
+func TestSimFlowRun_AnyMissingFlowIsRefusedBeforeRunningAnything(t *testing.T) {
+	var rec []recordedCommand
+	deps, daemon := flowRunDeps(t, true, []byte("Flow passed\n"), nil, &rec)
+	grantSimLease(daemon, simUDIDProMax, "mer-9")
+	missing := filepath.Join(t.TempDir(), "nope.yaml")
+
+	_, _, err := executeCLI(t, deps, "sim", "flow", "run", writeFlowFile(t), missing, "--udid", simUDIDProMax)
+	if err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("err = %v, want it to name %s", err, missing)
+	}
+	if len(rec) != 0 {
+		t.Errorf("must not run maestro when a flow is missing, ran %v", rec)
+	}
+}

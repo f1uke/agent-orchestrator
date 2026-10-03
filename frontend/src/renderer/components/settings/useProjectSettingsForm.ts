@@ -22,6 +22,7 @@ type ProjectConfig = components["schemas"]["ProjectConfig"];
 type TrackerIntakeConfig = components["schemas"]["TrackerIntakeConfig"];
 type GitConventionConfig = components["schemas"]["GitConventionConfig"];
 type ApprovalRule = components["schemas"]["ApprovalRule"];
+type MobileScriptsConfig = components["schemas"]["DomainMobileScriptsConfig"];
 
 // The flat, string/boolean-backed shape the settings sections edit. Kept flat so
 // dirty tracking is a shallow compare and each field maps 1:1 to a control.
@@ -38,6 +39,10 @@ export type ProjectSettingsFormState = {
 	reviewerHarness: string;
 	hasWebUI: boolean;
 	hasIOSSimulator: boolean;
+	// "" is off; "ios" / "android" turns script-only driving on for that app.
+	mobileScriptsPlatform: string;
+	mobileScriptsProduct: string;
+	mobileScriptsStore: string;
 	disableAutoCrew: boolean;
 	pauseBeforeImplementing: boolean;
 	intakeEnabled: boolean;
@@ -72,6 +77,9 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		reviewerHarness: config.reviewers?.[0]?.harness ?? "",
 		hasWebUI: config.hasWebUI ?? false,
 		hasIOSSimulator: config.hasIOSSimulator ?? false,
+		mobileScriptsPlatform: config.mobileScripts?.platform ?? "",
+		mobileScriptsProduct: config.mobileScripts?.product ?? "",
+		mobileScriptsStore: config.mobileScripts?.store ?? "",
 		disableAutoCrew: config.disableAutoCrew ?? false,
 		pauseBeforeImplementing: config.pauseBeforeImplementing ?? false,
 		intakeEnabled: intake.enabled ?? false,
@@ -104,6 +112,15 @@ function buildApprovalRule(enabled: boolean, threshold: string): ApprovalRule | 
 	if (!enabled) return undefined;
 	const trimmed = threshold.trim();
 	return trimmed === "" ? { enabled: true } : { enabled: true, threshold: Number(trimmed) };
+}
+
+// buildMobileScripts turns the platform select + its two fields into the typed
+// setting, or undefined when off so the field is omitted (a project that never
+// had it and one that turned it off store the same thing).
+function buildMobileScripts(platform: string, product: string, store: string): MobileScriptsConfig | undefined {
+	if (platform !== "ios" && platform !== "android") return undefined;
+	const trimmedStore = store.trim();
+	return { platform, product: product.trim(), ...(trimmedStore ? { store: trimmedStore } : {}) };
 }
 
 // Drop an object whose every value is undefined so we send `undefined` (omit)
@@ -197,6 +214,7 @@ export function useProjectSettingsForm({
 	const intakeRepoURL = intakeRepoOverride ? undefined : deriveRepoWebURL(project.repo);
 	const intakeIncomplete = intakeNeedsRule(intakeForm);
 	const gitConventionIncomplete = form.gitWorkflow === "custom" && form.branchPrefix.trim() === "";
+	const mobileScriptsIncomplete = form.mobileScriptsPlatform !== "" && form.mobileScriptsProduct.trim() === "";
 
 	const mutation = useMutation({
 		mutationFn: async () => {
@@ -229,6 +247,11 @@ export function useProjectSettingsForm({
 				// otherwise-unset config still persists as unset.
 				hasWebUI: form.hasWebUI || undefined,
 				hasIOSSimulator: form.hasIOSSimulator || undefined,
+				mobileScripts: buildMobileScripts(
+					form.mobileScriptsPlatform,
+					form.mobileScriptsProduct,
+					form.mobileScriptsStore,
+				),
 				// Automatic crew IS the default, so "on" is the absence of the field,
 				// same as the two above.
 				disableAutoCrew: form.disableAutoCrew || undefined,
@@ -295,6 +318,10 @@ export function useProjectSettingsForm({
 		}
 		if (gitConventionIncomplete) {
 			setValidationError("A custom git workflow requires a branch prefix.");
+			return;
+		}
+		if (mobileScriptsIncomplete) {
+			setValidationError("Script-only driving requires the product's folder in the scripts store.");
 			return;
 		}
 		setValidationError(null);

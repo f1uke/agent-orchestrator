@@ -39,7 +39,7 @@ func newSimFlowCommand(ctx *commandContext) *cobra.Command {
 		Long: "Work with Maestro flow files.\n\n" +
 			"`record` captures what this session drives on a claimed device and writes it " +
 			"out as a flow. `check` parses a flow and needs no device at all. `run` " +
-			"executes one, and requires a claim on the target simulator: a flow relaunches " +
+			"executes one or several, and requires a claim on the target simulator: a flow relaunches " +
 			"the app under test and resets its permissions, which is fine on a device set " +
 			"aside for testing and destructive on one somebody is using.\n\n" +
 			"AO never installs `maestro`. To record the SCREEN as a video rather than the " +
@@ -66,7 +66,7 @@ func newSimFlowCheckCommand(ctx *commandContext) *cobra.Command {
 		Example: `  ao sim flow check flow.yaml`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			out, err := ctx.runMaestro(cmd.Context(), "check-syntax", args[0])
+			out, err := ctx.runMaestro(cmd.Context(), args, "check-syntax")
 			if err != nil {
 				return err
 			}
@@ -79,9 +79,13 @@ func newSimFlowCheckCommand(ctx *commandContext) *cobra.Command {
 func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
 	var udid string
 	cmd := &cobra.Command{
-		Use:   "run <file>",
-		Short: "Run a Maestro flow against a simulator this session holds",
-		Long: "Run a Maestro flow on a booted simulator.\n\n" +
+		Use:   "run <file>...",
+		Short: "Run one or more Maestro flows against a simulator this session holds",
+		Long: "Run Maestro flows on a booted simulator.\n\n" +
+			"Several files run in ONE Maestro launch, one after another, which saves its " +
+			"start-up (about 20 seconds) for every flow after the first. Each flow still " +
+			"starts however it says it starts; the run fails if any of them fails, and " +
+			"Maestro's summary names which.\n\n" +
 			"The device is always pinned explicitly, so Maestro can never fall back to " +
 			"picking one - left to choose, it takes the only connected simulator, which " +
 			"is whichever one a human is using.\n\n" +
@@ -89,8 +93,9 @@ func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
 			"privacy permissions; that is what a regression test wants on a device set " +
 			"aside for it, and damage anywhere else. " + simPowerNote,
 		Example: `  ao sim claim --udid <test-device>
-  ao sim flow run flow.yaml --udid <test-device>`,
-		Args: cobra.ExactArgs(1),
+  ao sim flow run flow.yaml --udid <test-device>
+  ao sim flow run reach/port.yaml reach/fund_detail.yaml --udid <test-device>`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			device, err := ctx.resolveBootedSimDevice(cmd.Context(), udid)
 			if err != nil {
@@ -99,7 +104,7 @@ func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
 			if err := ctx.requireSimLeaseForFlow(cmd.Context(), device); err != nil {
 				return err
 			}
-			return ctx.runMaestroStream(cmd.Context(), cmd.OutOrStdout(), "test", "--device", device.UDID, args[0])
+			return ctx.runMaestroStream(cmd.Context(), cmd.OutOrStdout(), args, "test", "--device", device.UDID)
 		},
 	}
 	cmd.Flags().StringVar(&udid, "udid", "", "Run against this simulator instead of the booted one")
@@ -139,19 +144,19 @@ func (c *commandContext) maestroBinary() (string, error) {
 	return bin, nil
 }
 
-// maestroPreflight checks the flow file exists, then resolves the binary. The
-// file is checked here rather than left to maestro because a missing path
-// should not cost a JVM start, and because maestro's own message for it is
-// worse.
+// maestroPreflight checks every flow file exists, then resolves the binary. The
+// files are checked here rather than left to maestro because a missing path
+// should not cost a JVM start - with several flows in one run, not even after
+// the earlier ones have already relaunched the app - and because maestro's own
+// message for it is worse.
 //
-// The flow file must be the last argument: that is what gets stat-ed before a
-// JVM is started. Every caller in this package satisfies that by construction
-// (`check-syntax <file>`, `test --device <udid> <file>`); a caller that puts
-// something else last will have the wrong path checked.
-func (c *commandContext) maestroPreflight(args []string) (string, error) {
-	file := args[len(args)-1]
-	if _, err := os.Stat(file); err != nil {
-		return "", fmt.Errorf("no flow file at %s", file)
+// The files are passed apart from the other arguments and appended last by the
+// callers below, so the paths checked are exactly the paths maestro runs.
+func (c *commandContext) maestroPreflight(files []string) (string, error) {
+	for _, file := range files {
+		if _, err := os.Stat(file); err != nil {
+			return "", fmt.Errorf("no flow file at %s", file)
+		}
 	}
 	return c.maestroBinary()
 }
@@ -159,11 +164,12 @@ func (c *commandContext) maestroPreflight(args []string) (string, error) {
 // runMaestro runs maestro and collects all of its output before returning.
 // This is `check`'s command: a syntax check with no device is a fast parse,
 // over almost as soon as it starts, so there is nothing worth watching arrive.
-func (c *commandContext) runMaestro(ctx context.Context, args ...string) (string, error) {
-	bin, err := c.maestroPreflight(args)
+func (c *commandContext) runMaestro(ctx context.Context, files []string, args ...string) (string, error) {
+	bin, err := c.maestroPreflight(files)
 	if err != nil {
 		return "", err
 	}
+	args = append(args, files...)
 	out, runErr := c.deps.CommandOutputWithEnv(ctx, []string{maestroEnvNoAnalytics}, bin, args...)
 	text := string(out)
 	if runErr != nil {
@@ -176,11 +182,12 @@ func (c *commandContext) runMaestro(ctx context.Context, args ...string) (string
 // runMaestroStream runs maestro and prints its output as it arrives. This is
 // `run`'s command: a flow takes tens of seconds to minutes, and a worker
 // watching it needs to see progress rather than silence until it ends.
-func (c *commandContext) runMaestroStream(ctx context.Context, out io.Writer, args ...string) error {
-	bin, err := c.maestroPreflight(args)
+func (c *commandContext) runMaestroStream(ctx context.Context, out io.Writer, files []string, args ...string) error {
+	bin, err := c.maestroPreflight(files)
 	if err != nil {
 		return err
 	}
+	args = append(args, files...)
 	stream, err := c.deps.StartStreamWithEnv(ctx, []string{maestroEnvNoAnalytics}, bin, args...)
 	if err != nil {
 		return fmt.Errorf("could not start maestro %s: %w", args[0], err)

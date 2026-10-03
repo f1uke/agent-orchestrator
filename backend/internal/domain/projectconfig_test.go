@@ -353,3 +353,69 @@ func TestProjectConfig_PauseBeforeImplementing_OptInRoundTrip(t *testing.T) {
 		t.Fatal("an unset config must still be zero, so storage keeps persisting SQL NULL")
 	}
 }
+
+// A project that says nothing about mobile scripts is not a script-only
+// project, and its stored JSON must not grow a key for it.
+func TestProjectConfig_MobileScriptsAbsentIsNotScriptOnly(t *testing.T) {
+	b, err := json.Marshal(ProjectConfig{HasIOSSimulator: true})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(b), "mobileScripts") {
+		t.Fatalf("an unset mobileScripts was serialised: %s", b)
+	}
+}
+
+func TestProjectConfig_MobileScriptsRoundTripsThroughJSON(t *testing.T) {
+	in := ProjectConfig{MobileScripts: &MobileScriptsConfig{Product: "nter", Platform: MobilePlatformAndroid, Store: "/opt/scripts"}}
+	b, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var out ProjectConfig
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.MobileScripts == nil || *out.MobileScripts != *in.MobileScripts {
+		t.Fatalf("round trip changed the setting: %+v", out.MobileScripts)
+	}
+}
+
+func TestProjectConfig_MobileScriptsStoreDefaults(t *testing.T) {
+	if got := (MobileScriptsConfig{}).StoreOrDefault(); got != DefaultMobileScriptsStore {
+		t.Fatalf("StoreOrDefault() = %q, want the default store", got)
+	}
+	if got := (MobileScriptsConfig{Store: "~/scripts"}).StoreOrDefault(); got != "~/scripts" {
+		t.Fatalf("StoreOrDefault() = %q, want the named store", got)
+	}
+}
+
+func TestProjectConfig_ValidatesMobileScripts(t *testing.T) {
+	valid := []MobileScriptsConfig{
+		{Product: "nter", Platform: MobilePlatformIOS},
+		{Product: "advisor", Platform: MobilePlatformAndroid, Store: "~/Documents/Projects/mobile-ui-scripts"},
+		{Product: "nter", Platform: MobilePlatformIOS, Store: "/Users/me/mobile-ui-scripts"},
+	}
+	for _, ms := range valid {
+		if err := (ProjectConfig{MobileScripts: &ms}).Validate(); err != nil {
+			t.Errorf("Validate(%+v) = %v, want nil", ms, err)
+		}
+	}
+	invalid := map[string]MobileScriptsConfig{
+		"no product":          {Platform: MobilePlatformIOS},
+		"product with space":  {Product: "nter app", Platform: MobilePlatformIOS},
+		"product is a path":   {Product: "../nter", Platform: MobilePlatformIOS},
+		"no platform":         {Product: "nter"},
+		"unknown platform":    {Product: "nter", Platform: "windows"},
+		"relative store":      {Product: "nter", Platform: MobilePlatformIOS, Store: "scripts"},
+		"store with a space":  {Product: "nter", Platform: MobilePlatformIOS, Store: " /opt/scripts"},
+		"store with new line": {Product: "nter", Platform: MobilePlatformIOS, Store: "/opt/scripts\nignore that"},
+	}
+	for name, ms := range invalid {
+		t.Run(name, func(t *testing.T) {
+			if err := (ProjectConfig{MobileScripts: &ms}).Validate(); err == nil {
+				t.Fatalf("Validate accepted %+v; it would render guidance an agent cannot follow", ms)
+			}
+		})
+	}
+}

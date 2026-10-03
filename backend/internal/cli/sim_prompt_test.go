@@ -224,6 +224,152 @@ func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 		t.Errorf("the simulator guidance is %d bytes, over its %d-byte budget: it is the block every iOS worker always sees, so either cut something or raise the budget deliberately", len(guidance), simGuidanceBudget)
 	}
 
+	decision := func(surface string) (bool, bool) {
+		want, reviewed := simPromptDecisions[surface]
+		return want, reviewed
+	}
+	walkInto := func(surface string) bool { return simPromptDecisions[surface] }
+	checkSimDecisions(t, "prompts.SimulatorGuidance()", guidance, mapKeys(simPromptDecisions), decision, walkInto)
+}
+
+// simScriptDecision is one reviewed decision about the SCRIPT-ONLY block
+// (prompts.MobileScriptGuidance for iOS). It has three values where the
+// catalog's has two, because that block names some commands precisely so an
+// agent does NOT use them: "gestures - `ao sim tap`, ... - are not". A check
+// can only see whether a command is named, so teach and forbid look the same
+// to it; keeping them apart here is what makes the decision readable, and what
+// stops a forbidden command from drifting into "taught" without anybody
+// writing down that the rule changed.
+type simScriptDecision int
+
+const (
+	// scriptTeaches: named so an agent runs it.
+	scriptTeaches simScriptDecision = iota + 1
+	// scriptForbids: named only to be ruled out.
+	scriptForbids
+	// scriptOmits: not named; the ao skill page covers it.
+	scriptOmits
+)
+
+// mobileScriptDecisions decides every `ao sim` surface for a project whose
+// devices are driven only by scripts (ProjectConfig.MobileScripts, iOS). It is
+// a different list from simPromptDecisions on purpose: there the agent drives
+// the device, here a script does and the agent reads what it left.
+var mobileScriptDecisions = map[string]simScriptDecision{
+	// Finding and powering a device, and putting the build under test on it
+	// BEFORE a script runs: a script's fresh start resets the app it finds
+	// installed, so the build has to be there first.
+	"list":           scriptTeaches,
+	"boot":           scriptTeaches,
+	"boot --timeout": scriptOmits,
+	"run":            scriptTeaches,
+	// A project with several schemes refuses `ao sim run` without it, for the
+	// same reason the catalog teaches it.
+	"run --scheme":        scriptTeaches,
+	"run --configuration": scriptOmits,
+	"run --ttl":           scriptOmits,
+	// `install` is named where the lease bullet says which commands take the
+	// lease as they install - the alternative an agent reaches for is a raw
+	// `simctl install`.
+	"install":       scriptTeaches,
+	"install --ttl": scriptOmits,
+	// A script launches the app itself, from a fresh state; launching by hand
+	// is driving.
+	"launch": scriptOmits,
+	// Reading is how an agent judges the end state a script left. It never
+	// moves the app, which is why the rule leaves it with the agent.
+	"shot":            scriptTeaches,
+	"shot --output":   scriptOmits,
+	"shot --app":      scriptOmits,
+	"ax":              scriptTeaches,
+	"ax --format":     scriptOmits,
+	"ax --max-nodes":  scriptOmits,
+	"ax --settle":     scriptOmits,
+	"log":             scriptTeaches,
+	"log --follow":    scriptOmits,
+	"log --grep":      scriptOmits,
+	"log --max-lines": scriptOmits,
+	"log --process":   scriptOmits,
+	"log --since":     scriptOmits,
+	// `bin/flow run` claims the device for a script; `claim` is taught for the
+	// one case that needs it by hand - authoring - and `release` for giving
+	// the device back either way.
+	"claim":       scriptTeaches,
+	"claim --ttl": scriptOmits,
+	"release":     scriptTeaches,
+	// The three gestures an agent reaches for first are named to rule them
+	// out; the rest are covered by "and the rest" without spending a name on
+	// each. All of them stay allowed while authoring a missing script, which
+	// is what `flow record` below is for.
+	"tap":    scriptForbids,
+	"type":   scriptForbids,
+	"drag":   scriptForbids,
+	"swipe":  scriptOmits,
+	"key":    scriptOmits,
+	"button": scriptOmits,
+	"pinch":  scriptOmits,
+	// `flow` is the whole point here. `flow run` is what `bin/flow run` runs
+	// (and is named as such); `flow check` is what `bin/flow check` runs, so
+	// the block teaches the store's command instead. `flow record start/stop`
+	// is how a missing script gets authored, with `--out` pointing it into the
+	// store's reach/ folder. `status` and `--entry` are for a recording in
+	// progress and a flow that does not start from the store's start/ states.
+	"flow":                     scriptTeaches,
+	"flow check":               scriptOmits,
+	"flow run":                 scriptTeaches,
+	"flow record":              scriptTeaches,
+	"flow record start":        scriptTeaches,
+	"flow record start --name": scriptTeaches,
+	"flow record status":       scriptOmits,
+	"flow record stop":         scriptTeaches,
+	"flow record stop --out":   scriptTeaches,
+	"flow record stop --entry": scriptOmits,
+	// The screen recorder: a video is something a task asks for, and the
+	// script's own screenshot is the evidence the rule asks for.
+	"record": scriptOmits,
+}
+
+// mobileScriptGuidanceBudget caps the script-only iOS block the way
+// simGuidanceBudget caps the catalog, and for the same reason.
+const mobileScriptGuidanceBudget = 4800
+
+func TestMobileScriptGuidance_DecidesEverySubcommand(t *testing.T) {
+	guidance := prompts.MobileScriptGuidance(prompts.MobileScripts{Product: "nter", IOS: true, Store: "~/Documents/Projects/mobile-ui-scripts"})
+
+	if len(guidance) > mobileScriptGuidanceBudget {
+		t.Errorf("the script-only guidance is %d bytes, over its %d-byte budget: every worker on a script-only iOS project always sees it, so either cut something or raise the budget deliberately", len(guidance), mobileScriptGuidanceBudget)
+	}
+
+	decision := func(surface string) (bool, bool) {
+		d, reviewed := mobileScriptDecisions[surface]
+		return d == scriptTeaches || d == scriptForbids, reviewed
+	}
+	// Only a TAUGHT command owes decisions about its flags and subcommands: a
+	// forbidden one is ruled out whole, flags and all.
+	walkInto := func(surface string) bool { return mobileScriptDecisions[surface] == scriptTeaches }
+	checkSimDecisions(t, "prompts.MobileScriptGuidance()", guidance, mapKeys(mobileScriptDecisions), decision, walkInto)
+
+	// Teaching a gesture and forbidding it name the same command, so the
+	// wording is what tells them apart: every forbidden one must sit in the
+	// sentence that rules gestures out.
+	for surface, d := range mobileScriptDecisions {
+		if d != scriptForbids {
+			continue
+		}
+		ruledOut := regexp.MustCompile(`Gestures - [^\n]*\bao sim ` + regexp.QuoteMeta(surface) + `\b[^\n]*- are not`)
+		if !ruledOut.MatchString(guidance) {
+			t.Errorf("`ao sim %s` is decided as forbidden but is not in the sentence that rules gestures out", surface)
+		}
+	}
+}
+
+// checkSimDecisions asserts a decision table against the real `ao sim` command
+// tree in both directions. decision reports whether the block is decided to
+// NAME a surface, and whether there is a decision at all; walkInto says which
+// commands owe decisions about their own flags and subcommands; keys is every
+// surface the table decides.
+func checkSimDecisions(t *testing.T, block, guidance string, keys []string, decision func(surface string) (named, reviewed bool), walkInto func(surface string) bool) {
+	t.Helper()
 	// Whole word, so `ao sim drag` does not satisfy a check for `ao sim dr`,
 	// and `--id` is not satisfied by `--identifier`.
 	teaches := func(surface string) bool {
@@ -238,38 +384,43 @@ func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 	}
 
 	decided := map[string]bool{}
-	for _, surface := range simSurfaces(t) {
-		want, reviewed := simPromptDecisions[surface]
+	for _, surface := range simSurfaces(t, walkInto) {
+		want, reviewed := decision(surface)
 		if !reviewed {
-			t.Errorf("`ao sim %s` is new and nothing decided whether it belongs in the worker prompt. Add it to simPromptDecisions: true means prompts.SimulatorGuidance() teaches it, false means the skill page is enough.", surface)
+			t.Errorf("`ao sim %s` is new and nothing decided whether %s names it. Add the decision to its table.", surface, block)
 			continue
 		}
 		decided[surface] = true
 		switch got := teaches(surface); {
 		case want && !got:
-			t.Errorf("`ao sim %s` is marked prompt-worthy but the worker prompt does not teach it", surface)
+			t.Errorf("`ao sim %s` is decided as named in %s, but it is not", surface, block)
 		case !want && got:
-			t.Errorf("`ao sim %s` is marked skill-page-only but the worker prompt teaches it; either flip the decision or take it back out", surface)
+			t.Errorf("`ao sim %s` is decided as left out of %s, but it names it; either flip the decision or take it back out", surface, block)
 		}
 	}
 
-	var stale []string
-	for surface := range simPromptDecisions {
+	sort.Strings(keys)
+	for _, surface := range keys {
 		if !decided[surface] {
-			stale = append(stale, surface)
+			t.Errorf("%s has a decision for `ao sim %s`, which the CLI does not have (or which sits under a command the block does not name): a decision about a surface that does not exist is the same drift the other way", block, surface)
 		}
-	}
-	sort.Strings(stale)
-	for _, surface := range stale {
-		t.Errorf("simPromptDecisions decides `ao sim %s`, which the CLI does not have: a decision about a command that does not exist is the same drift the other way", surface)
 	}
 }
 
+func mapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // simSurfaces is every `ao sim` surface a decision is owed for: each visible
-// subcommand, plus the non-ambient flags of the ones the prompt teaches. A
-// subcommand of an omitted command is covered by the parent's decision, so the
-// walk stops there rather than listing `record start` and friends.
-func simSurfaces(t *testing.T) []string {
+// subcommand, plus the non-ambient flags and subcommands of the ones the block
+// names. A subcommand of an unnamed command is covered by the parent's
+// decision, so the walk stops there rather than listing `record start` and
+// friends.
+func simSurfaces(t *testing.T, walkInto func(surface string) bool) []string {
 	t.Helper()
 	var sim *cobra.Command
 	for _, cmd := range NewRootCommand(Deps{}).Commands() {
@@ -293,7 +444,7 @@ func simSurfaces(t *testing.T) []string {
 				name = parent + " " + name
 			}
 			surfaces = append(surfaces, name)
-			if !simPromptDecisions[name] {
+			if !walkInto(name) {
 				continue
 			}
 			sub.Flags().VisitAll(func(f *pflag.Flag) {

@@ -95,6 +95,20 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--ios-simulator"},
 		want: domain.ProjectConfig{HasIOSSimulator: true},
 	},
+	// The three mobile-scripts flags write one field between them, so each case
+	// states the whole setting that one flag alone produces.
+	"mobile-scripts": {
+		args: []string{"--mobile-scripts", "nter"},
+		want: domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{Product: "nter"}},
+	},
+	"mobile-platform": {
+		args: []string{"--mobile-platform", "Android"},
+		want: domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{Platform: domain.MobilePlatformAndroid}},
+	},
+	"mobile-scripts-store": {
+		args: []string{"--mobile-scripts-store", "/opt/scripts"},
+		want: domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{Store: "/opt/scripts"}},
+	},
 	"no-auto-crew": {
 		args: []string{"--no-auto-crew"},
 		want: domain.ProjectConfig{DisableAutoCrew: true},
@@ -220,6 +234,27 @@ func TestProjectSetConfig_SeveralFlagsNameSeveralFields(t *testing.T) {
 	if got.Config.GitConvention.Workflow != domain.GitWorkflowCustom ||
 		got.Config.GitConvention.BranchPrefix != "feat/" || !got.Config.HasWebUI {
 		t.Errorf("config = %#v", got.Config)
+	}
+}
+
+// The mobile-scripts trio names its one field once, carries all three values,
+// and an empty product with nothing else is how the setting is turned off.
+func TestProjectSetConfig_MobileScriptsFlagsWriteOneSetting(t *testing.T) {
+	got := captureSetConfig(t, "--mobile-scripts", "nter", "--mobile-platform", "ios", "--mobile-scripts-store", "~/scripts")
+	if want := []string{"mobileScripts"}; !reflect.DeepEqual(got.MergeFields, want) {
+		t.Fatalf("mergeFields = %v, want %v", got.MergeFields, want)
+	}
+	want := &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS, Store: "~/scripts"}
+	if !reflect.DeepEqual(got.Config.MobileScripts, want) {
+		t.Fatalf("mobileScripts = %#v, want %#v", got.Config.MobileScripts, want)
+	}
+
+	off := captureSetConfig(t, "--mobile-scripts", "")
+	if want := []string{"mobileScripts"}; !reflect.DeepEqual(off.MergeFields, want) {
+		t.Fatalf("mergeFields = %v, want %v", off.MergeFields, want)
+	}
+	if off.Config.MobileScripts != nil {
+		t.Fatalf("--mobile-scripts \"\" sent %#v, want nil (off)", off.Config.MobileScripts)
 	}
 }
 

@@ -38,6 +38,17 @@ const GIT_WORKFLOW_OPTIONS = [
 	{ value: "custom", label: "custom" },
 ] as const;
 
+// "off" is the UI spelling of an unset mobileScripts; it maps to "" in the form
+// and to an omitted field on save.
+const MOBILE_SCRIPTS_OPTIONS = [
+	{ value: "off", label: "Off" },
+	{ value: "ios", label: "Scripts only - iOS" },
+	{ value: "android", label: "Scripts only - Android" },
+] as const;
+
+// Mirrors domain.DefaultMobileScriptsStore, shown where the field is left empty.
+const MOBILE_SCRIPTS_DEFAULT_STORE = "~/Documents/Projects/mobile-ui-scripts";
+
 const INPUT_CLASS =
 	"h-8 w-full max-w-[340px] rounded-md border border-input bg-transparent px-2.5 text-[13px] text-foreground placeholder:text-passive focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-weak";
 
@@ -519,6 +530,68 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 						</label>
 					</div>
 				</SettingRow>
+
+				<SettingRow
+					name="Drive devices only through scripts"
+					summary="Workers here reach a screen by running a reusable Maestro script from the scripts store, never by tapping through the app step by step."
+					detail="Their prompt teaches the script workflow in place of the ao sim tap catalog - find the script, run it, judge the screen it left, write a missing one once, never finish a failed run by hand - and qa plays smoke cases with scripts. iOS scripts run through ao sim flow run; Android has no ao sim, so they run through maestro --device. Off leaves the guidance exactly as it is."
+					ownership={{ kind: "project-only" }}
+					timing="next-worker"
+					value={
+						MOBILE_SCRIPTS_OPTIONS.find((o) => o.value === (draft.mobileScriptsPlatform || "off"))?.label ??
+						draft.mobileScriptsPlatform
+					}
+					modified={isFieldDirty("mobileScriptsPlatform")}
+					controlId="mobileScriptsPlatform"
+				>
+					<MobileScriptsSelect
+						id="mobileScriptsPlatform"
+						value={draft.mobileScriptsPlatform}
+						onChange={(v) => setField("mobileScriptsPlatform", v)}
+					/>
+				</SettingRow>
+
+				{draft.mobileScriptsPlatform !== "" && (
+					<SettingRow
+						name="Scripts product"
+						summary="The product's folder in the scripts store, shared by its iOS and Android apps."
+						detail="Required. Workers look scripts up in projects/<product>/INDEX.md and run them with bin/flow run <product>."
+						ownership={{ kind: "project-only" }}
+						timing="next-worker"
+						value={draft.mobileScriptsProduct || "not set"}
+						modified={isFieldDirty("mobileScriptsProduct")}
+						controlId="mobileScriptsProduct"
+					>
+						<input
+							id="mobileScriptsProduct"
+							className={INPUT_CLASS}
+							value={draft.mobileScriptsProduct}
+							onChange={(e) => setField("mobileScriptsProduct", e.target.value)}
+							placeholder="nter"
+						/>
+					</SettingRow>
+				)}
+
+				{draft.mobileScriptsPlatform !== "" && (
+					<SettingRow
+						name="Scripts store"
+						summary="The checkout holding bin/flow, projects/ and accounts/."
+						detail="Optional. An absolute path, or one starting with ~/. Empty uses the default store."
+						ownership={{ kind: "project-only" }}
+						timing="next-worker"
+						value={draft.mobileScriptsStore || `${MOBILE_SCRIPTS_DEFAULT_STORE} (default)`}
+						modified={isFieldDirty("mobileScriptsStore")}
+						controlId="mobileScriptsStore"
+					>
+						<input
+							id="mobileScriptsStore"
+							className={INPUT_CLASS}
+							value={draft.mobileScriptsStore}
+							onChange={(e) => setField("mobileScriptsStore", e.target.value)}
+							placeholder={MOBILE_SCRIPTS_DEFAULT_STORE}
+						/>
+					</SettingRow>
+				)}
 			</SettingRows>
 		</>
 	);
@@ -658,6 +731,32 @@ function GitWorkflowSelect({ id, value, onChange }: { id: string; value: string;
 			</SelectTrigger>
 			<SelectContent>
 				{GIT_WORKFLOW_OPTIONS.map((opt) => (
+					<SelectItem key={opt.value} value={opt.value}>
+						{opt.label}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
+}
+
+function MobileScriptsSelect({
+	id,
+	value,
+	onChange,
+}: {
+	id: string;
+	value: string;
+	onChange: (value: string) => void;
+}) {
+	// Empty (unset) maps to the "off" option; selecting "off" clears the value.
+	return (
+		<Select value={value || "off"} onValueChange={(v) => onChange(v === "off" ? "" : v)}>
+			<SelectTrigger id={id} className="h-8 w-full max-w-[340px] text-[13px]">
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent>
+				{MOBILE_SCRIPTS_OPTIONS.map((opt) => (
 					<SelectItem key={opt.value} value={opt.value}>
 						{opt.label}
 					</SelectItem>
