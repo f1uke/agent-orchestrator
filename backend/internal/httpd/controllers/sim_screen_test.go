@@ -29,6 +29,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 )
 
 const otherSimUDID = "C4764B41-8F74-49C6-8766-A20EA46125BF"
@@ -60,6 +61,10 @@ type fakeScreen struct {
 	powerOps    []powerCall
 	powerStatus map[string]simpower.Status
 	cleared     []string
+
+	// truster is the root-CA installer boots and claims share. nil, the
+	// default, trusts nothing - what every test not about trust wants.
+	truster *simtrust.Truster
 }
 
 // powerCall is one boot or shutdown the route asked for, with the callback it
@@ -68,19 +73,28 @@ type fakeScreen struct {
 type powerCall struct {
 	UDID string
 	Op   simpower.Op
-	Req  *simslim.Request
-	Done func()
+	// Req is the setup's slimming half, pulled out because most power tests
+	// are about that half alone.
+	Req   *simslim.Request
+	Setup *simpower.Setup
+	Done  func()
 }
 
-func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error {
+func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, setup *simpower.Setup, done func()) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.powerErr != nil {
 		return f.powerErr
 	}
-	f.powerOps = append(f.powerOps, powerCall{UDID: udid, Op: op, Req: req, Done: done})
+	call := powerCall{UDID: udid, Op: op, Setup: setup, Done: done}
+	if setup != nil {
+		call.Req = setup.Profile
+	}
+	f.powerOps = append(f.powerOps, call)
 	return nil
 }
+
+func (f *fakeScreen) Truster() *simtrust.Truster { return f.truster }
 
 func (f *fakeScreen) PowerStatus() map[string]simpower.Status {
 	f.mu.Lock()

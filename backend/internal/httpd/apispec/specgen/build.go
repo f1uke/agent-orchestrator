@@ -293,6 +293,8 @@ var schemaNames = map[string]string{
 	"ControllersSimDeviceParam":                "SimDeviceParam",
 	"ControllersSimSessionDeviceParam":         "SimSessionDeviceParam",
 	"ControllersSimDeviceView":                 "SimDeviceView",
+	"ControllersSimTrustView":                  "SimTrustView",
+	"ControllersSimTrustFailureView":           "SimTrustFailureView",
 	"ControllersSimDeviceLeaseView":            "SimDeviceLeaseView",
 	"ControllersListSimDevicesResponse":        "ListSimDevicesResponse",
 	"ControllersSimGestureInput":               "SimGestureInput",
@@ -364,6 +366,8 @@ var schemaNames = map[string]string{
 	"ControllersSetWikiSettingsRequest":              "SetWikiSettingsRequest",
 	"ControllersRefLinksSettingsResponse":            "RefLinksSettingsResponse",
 	"ControllersSetRefLinksSettingsRequest":          "SetRefLinksSettingsRequest",
+	"ControllersSimTrustSettingsResponse":            "SimTrustSettingsResponse",
+	"ControllersSetSimTrustSettingsRequest":          "SetSimTrustSettingsRequest",
 	"ControllersWikiStatusResponse":                  "WikiStatusResponse",
 	"ControllersStartWikiAgentRequest":               "StartWikiAgentRequest",
 	"ControllersWikiFilesResponse":                   "WikiFilesResponse",
@@ -2069,6 +2073,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetWikiSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.WikiSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/sim-trust", id: "getSimTrustSettings", tag: "settings",
+			summary: "Fetch the root-CA files AO makes every simulator trust when it boots or claims one",
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimTrustSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/sim-trust", id: "setSimTrustSettings", tag: "settings",
+			summary: "Replace the root-CA files AO makes every simulator trust (an empty list trusts nothing)",
+			reqBody: controllers.SetSimTrustSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimTrustSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

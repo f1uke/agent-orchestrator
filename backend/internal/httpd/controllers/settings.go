@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reflinks"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
 )
@@ -74,6 +75,13 @@ type EvidenceRetentionService interface {
 	Set(evidenceretention.Settings) error
 }
 
+// SimTrustSettingsService is the sim-trust settings store surface the controller
+// needs. *simtrust.Store satisfies this directly.
+type SimTrustSettingsService interface {
+	Get() simtrust.Settings
+	Set(simtrust.Settings) error
+}
+
 // EvidenceSweeper runs the age-based evidence retention sweep on demand (the
 // manual trigger), reading the current TTL and purging expired blobs + rows. It
 // returns how many items were removed and how many bytes that freed. The daemon
@@ -109,6 +117,7 @@ type SettingsController struct {
 	ResponseLanguage  ResponseLanguageService
 	Wiki              WikiSettingsService
 	RefLinks          RefLinksService
+	SimTrust          SimTrustSettingsService
 	EvidenceRetention EvidenceRetentionService
 	EvidenceSweeper   EvidenceSweeper
 	SystemPrompts     SystemPromptsService
@@ -129,6 +138,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/wiki", c.setWiki)
 	r.Get("/settings/wiki/tasks", c.getWikiTasks)
 	r.Put("/settings/wiki/tasks", c.setWikiTasks)
+	r.Get("/settings/sim-trust", c.getSimTrust)
+	r.Put("/settings/sim-trust", c.setSimTrust)
 	r.Get("/settings/ref-links", c.getRefLinks)
 	r.Put("/settings/ref-links", c.setRefLinks)
 	r.Get("/settings/evidence-retention", c.getEvidenceRetention)
@@ -409,6 +420,41 @@ func (c *SettingsController) setRefLinks(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, refLinksSettingsResponse(c.RefLinks.Get()))
+}
+
+func (c *SettingsController) getSimTrust(w http.ResponseWriter, r *http.Request) {
+	if c.SimTrust == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/sim-trust")
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, simTrustSettingsResponse(c.SimTrust.Get()))
+}
+
+// setSimTrust replaces the global root-CA list. An empty list is legitimate:
+// it is how this Mac stops making simulators trust anything.
+func (c *SettingsController) setSimTrust(w http.ResponseWriter, r *http.Request) {
+	if c.SimTrust == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/sim-trust")
+		return
+	}
+	var in SetSimTrustSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if err := c.SimTrust.Set(simtrust.Settings{CAFiles: in.CAFiles}); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, simTrustSettingsResponse(c.SimTrust.Get()))
+}
+
+func simTrustSettingsResponse(s simtrust.Settings) SimTrustSettingsResponse {
+	files := s.CAFiles
+	if files == nil {
+		files = []string{}
+	}
+	return SimTrustSettingsResponse{CAFiles: files, DefaultCAFiles: simtrust.Default().CAFiles, Found: simtrust.Present(files)}
 }
 
 func refLinksSettingsResponse(s reflinks.Settings) RefLinksSettingsResponse {

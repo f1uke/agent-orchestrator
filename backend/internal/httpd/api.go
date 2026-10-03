@@ -26,8 +26,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
-	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 )
 
 // APIDeps bundles every service the API layer's controllers depend on.
@@ -72,7 +72,14 @@ type APIDeps struct {
 	// SimProfiles resolves a boot's slimming profile. Left nil, the router
 	// builds one over Sessions and Projects; a test sets it to control the
 	// answer without standing up either service.
-	SimProfiles        controllers.SimProfileResolver
+	SimProfiles controllers.SimProfileResolver
+	// SimTrust is the global list of root CAs AO makes a simulator trust on
+	// boot and claim. nil trusts nothing and leaves the settings route
+	// answering 501.
+	SimTrust *simtrust.Store
+	// SimTrustFiles resolves a session's root CAs. Left nil, the router builds
+	// one over Sessions, Projects and SimTrust.
+	SimTrustFiles      controllers.SimTrustResolver
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
@@ -136,6 +143,10 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 	if simProfileResolver == nil && deps.Sessions != nil && deps.Projects != nil {
 		simProfileResolver = simProfiles{sessions: deps.Sessions, projects: deps.Projects}
 	}
+	simTrustResolver := deps.SimTrustFiles
+	if simTrustResolver == nil && deps.SimTrust != nil && deps.Sessions != nil && deps.Projects != nil {
+		simTrustResolver = simTrustFiles{sessions: deps.Sessions, projects: deps.Projects, global: deps.SimTrust}
+	}
 	return &API{
 		cfg: cfg,
 		agents: &controllers.AgentsController{
@@ -155,16 +166,16 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
 		iosRun:        &controllers.IOSRunController{Svc: deps.IOSRun},
 		crewRuns:      &controllers.CrewRunsController{Svc: deps.CrewRuns},
-		sim:           &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen)},
+		sim:           &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
 		simFlows:      &controllers.SimFlowsController{DataDir: cfg.DataDir},
 		simVideo:      &controllers.SimVideoController{Svc: deps.SimVideo},
-		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver},
+		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver},
 		simHierarchy:  &controllers.SimHierarchyController{Runner: deps.SimRunner},
 		simType:       &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim},
 		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:       &controllers.ImportController{Svc: deps.Import},
-		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, SimTrust: simTrustSettings(deps.SimTrust), EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:          &controllers.WikiController{Svc: deps.Wiki},
 		daemon:        &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
@@ -278,15 +289,26 @@ type SimScreen interface {
 	Driver(ctx context.Context) (simbridge.Driver, error)
 	Keyboard(ctx context.Context, udid string) (simkeyboard.Mode, error)
 	Pasteboard() simpaste.Pasteboard
-	StartPower(ctx context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error
+	StartPower(ctx context.Context, udid string, op simpower.Op, setup *simpower.Setup, done func()) error
 	PowerStatus() map[string]simpower.Status
 	ClearPower(udid string)
+	Truster() *simtrust.Truster
 }
 
 // screenProvider converts a nil interface value to a nil controller dependency.
 // A typed nil hiding inside a non-nil interface would make the 501 checks pass
 // and then panic, which is the opposite of degrading honestly.
 func screenProvider(s SimScreen) controllers.SimScreenProvider {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
+// simTrustSettings converts a nil store to a nil controller dependency, for the
+// reason screenProvider does: a typed nil inside an interface passes the 501
+// check and then panics.
+func simTrustSettings(s *simtrust.Store) controllers.SimTrustSettingsService {
 	if s == nil {
 		return nil
 	}

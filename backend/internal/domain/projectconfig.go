@@ -97,6 +97,13 @@ type ProjectConfig struct {
 	// existed.
 	SimProfile *SimProfileConfig `json:"simProfile,omitempty"`
 
+	// SimTrust replaces, for this project's sessions, the global list of
+	// root-CA files AO makes a simulator trust when it boots or claims one (see
+	// internal/simtrust). It is a POINTER for the reason SimProfile is: nil
+	// inherits the global list, and an empty CAFiles is a real request - trust
+	// nothing on this project's devices.
+	SimTrust *SimTrustConfig `json:"simTrust,omitempty"`
+
 	// MobileScripts makes this a mobile project whose simulators and emulators
 	// are driven ONLY by running reusable Maestro scripts from a shared store,
 	// never by an agent tapping through the app one gesture at a time.
@@ -280,6 +287,11 @@ func (c ProjectConfig) Validate() error {
 			return err
 		}
 	}
+	if c.SimTrust != nil {
+		if err := c.SimTrust.Validate(); err != nil {
+			return err
+		}
+	}
 	if c.MobileScripts != nil {
 		if err := c.MobileScripts.Validate(); err != nil {
 			return err
@@ -366,6 +378,32 @@ func (c SimProfileConfig) Validate() error {
 		}
 		if !strings.HasPrefix(label, "com.apple.") {
 			return fmt.Errorf("simProfile.keep[%d]: %q is not a com.apple.* daemon label", i, label)
+		}
+	}
+	return nil
+}
+
+// SimTrustConfig is which root-CA files a project's simulators trust.
+type SimTrustConfig struct {
+	// CAFiles are PEM or DER root certificates on this Mac, absolute or
+	// `~/`-relative. Empty trusts nothing. A file that does not exist is
+	// skipped silently when a device is set up, so naming a proxy's CA on a
+	// machine without that proxy is harmless.
+	CAFiles []string `json:"caFiles"`
+}
+
+// Validate rejects a path that cannot name a file on this Mac. A relative path
+// would resolve against whatever directory the daemon happens to run in, which
+// is a CA that is quietly never found.
+func (c SimTrustConfig) Validate() error {
+	for i, path := range c.CAFiles {
+		switch {
+		case path == "":
+			return fmt.Errorf("simTrust.caFiles[%d]: empty path", i)
+		case strings.TrimSpace(path) != path:
+			return fmt.Errorf("simTrust.caFiles[%d]: %q has surrounding whitespace", i, path)
+		case !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "~/"):
+			return fmt.Errorf("simTrust.caFiles[%d]: %q must be absolute or start with ~/", i, path)
 		}
 	}
 	return nil

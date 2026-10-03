@@ -23,6 +23,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 )
 
 // The routes behind the desktop app's Simulator tab: which simulators this
@@ -56,12 +57,15 @@ type SimScreenProvider interface {
 	// boot takes tens of seconds and the request cannot be held open for it.
 	// See internal/simpower for why this is reachable from the desktop app and
 	// from no `ao` subcommand.
-	StartPower(ctx context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error
+	StartPower(ctx context.Context, udid string, op simpower.Op, setup *simpower.Setup, done func()) error
 	// PowerStatus is what is in flight, keyed by normalized udid, so the
 	// listing the pane already polls carries the progress too.
 	PowerStatus() map[string]simpower.Status
 	// ClearPower drops a remembered failure the machine has since made moot.
 	ClearPower(udid string)
+	// Truster makes a device trust root CAs and remembers each device's last
+	// pass. The same one runs inside a boot and on a claim. nil trusts nothing.
+	Truster() *simtrust.Truster
 }
 
 // SimProfileResolver answers which daemon profile a session's project wants its
@@ -134,6 +138,10 @@ type SimDeviceView struct {
 	// running, or has failed and not yet been superseded. Absent is the normal
 	// case, and means the State field above is the whole story.
 	Power *SimDevicePowerView `json:"power,omitempty"`
+	// Trust is the last time AO made this device trust root CAs (on a boot or
+	// a claim) since the daemon started, and what came of it. Absent when that
+	// has not happened, or when every configured CA file was missing.
+	Trust *SimTrustView `json:"trust,omitempty"`
 }
 
 // ListSimDevicesResponse is the body of GET /sim/devices.
@@ -250,6 +258,9 @@ type SimScreenController struct {
 	// Profiles resolves the slimming profile for a boot. nil means this daemon
 	// slims nothing, which is what every deployment did before it existed.
 	Profiles SimProfileResolver
+	// Trust resolves the root CAs a boot makes the device trust. nil trusts
+	// nothing.
+	Trust SimTrustResolver
 }
 
 // Register mounts the routes. The live frame stream is not here: it is a
@@ -360,6 +371,7 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 	}
 
 	power := c.Screen.PowerStatus()
+	truster := c.Screen.Truster()
 
 	out := make([]SimDeviceView, 0, len(devices))
 	for _, d := range devices {
@@ -381,6 +393,11 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 			}
 		}
 		view.Power = c.powerView(d, power[domain.NormalizeSimUDID(d.UDID)], len(power) > 0)
+		if truster != nil {
+			if last, ok := truster.Last(d.UDID); ok {
+				view.Trust = simTrustView(last)
+			}
+		}
 		out = append(out, view)
 	}
 	return out
@@ -960,7 +977,7 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 		done = release
 	}
 
-	if err := c.Screen.StartPower(r.Context(), device.UDID, op, c.profileFor(r.Context(), op, sessionID), done); err != nil {
+	if err := c.Screen.StartPower(r.Context(), device.UDID, op, c.setupFor(r.Context(), op, sessionID), done); err != nil {
 		done()
 		writePowerStartError(w, r, err)
 		return
@@ -969,6 +986,15 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 		UDID: device.UDID, State: in.State,
 		Detail: fmt.Sprintf("%s %s", op, device.Label()),
 	})
+}
+
+// setupFor works out what this boot does to the device once it is up: slim
+// it, and make it trust the root CAs. A shutdown does neither.
+func (c *SimScreenController) setupFor(ctx context.Context, op simpower.Op, id domain.SessionID) *simpower.Setup {
+	if op != simpower.Boot {
+		return nil
+	}
+	return &simpower.Setup{Profile: c.profileFor(ctx, op, id), Trust: trustRequest(ctx, c.Trust, id)}
 }
 
 // profileFor works out what this boot should do about slimming.

@@ -2019,6 +2019,26 @@ type RefLinksSettingsResponse struct {
 	GitLabRepoAliases map[string]string `json:"gitlabRepoAliases"`
 }
 
+// SimTrustSettingsResponse is the body of GET/PUT /api/v1/settings/sim-trust:
+// the root-CA files AO makes every simulator trust when it boots or claims one,
+// unless the session's project names its own (project config simTrust).
+type SimTrustSettingsResponse struct {
+	CAFiles []string `json:"caFiles" description:"PEM or DER root certificates on this Mac, absolute or ~/-relative. A file that does not exist is skipped silently; an empty list trusts nothing."`
+	// DefaultCAFiles is what the setting was before anybody changed it, so a
+	// surface can offer to put it back.
+	DefaultCAFiles []string `json:"defaultCaFiles" description:"The shipped list: where known debugging proxies keep their root CA."`
+	// Found says, per entry of caFiles, whether that file exists on this Mac
+	// right now - the difference between a CA that will be trusted and one
+	// that will be skipped.
+	Found []bool `json:"found" description:"Per caFiles entry, whether the file exists on this Mac right now."`
+}
+
+// SetSimTrustSettingsRequest is the body of PUT /api/v1/settings/sim-trust. It
+// replaces the whole list.
+type SetSimTrustSettingsRequest struct {
+	CAFiles []string `json:"caFiles"`
+}
+
 // SetRefLinksSettingsRequest is the body of PUT /api/v1/settings/ref-links. It
 // replaces every field; send an empty string (or an empty map) to clear one.
 type SetRefLinksSettingsRequest struct {

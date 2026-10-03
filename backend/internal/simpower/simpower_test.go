@@ -454,7 +454,7 @@ func TestBoot_SlimsOnlyAfterTheDeviceIsUp(t *testing.T) {
 	p := newTestPower(t, rec)
 	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
 
-	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, &Setup{Profile: req}, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -479,7 +479,7 @@ func TestBoot_KeepsAWarningWhenTheDeviceIsStock(t *testing.T) {
 	t.Cleanup(p.wait)
 	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
 
-	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, &Setup{Profile: req}, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -501,7 +501,7 @@ func TestBoot_ClearsTheEntryWhenTheProfileLanded(t *testing.T) {
 	p := newTestPower(t, rec)
 	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
 
-	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, &Setup{Profile: req}, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -517,7 +517,7 @@ func TestBoot_ReportsAProfileItCouldNotResolve(t *testing.T) {
 	p := newTestPower(t, rec)
 	req := &simslim.Request{Err: errors.New("project 7 is degraded")}
 
-	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, &Setup{Profile: req}, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -545,7 +545,7 @@ func TestShutdown_NeverSlims(t *testing.T) {
 	p := newTestPower(t, rec)
 	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
 
-	if err := p.Start(context.Background(), testUDID, Shutdown, req, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Shutdown, &Setup{Profile: req}, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	p.wait()
@@ -599,7 +599,7 @@ func TestBoot_ReportsTheSlimmingPhaseWhileItRuns(t *testing.T) {
 	p := newTestPower(t, rec)
 	req := &simslim.Request{Profile: &simslim.Profile{Keep: []string{"com.apple.apsd"}}}
 
-	if err := p.Start(context.Background(), testUDID, Boot, req, nil); err != nil {
+	if err := p.Start(context.Background(), testUDID, Boot, &Setup{Profile: req}, nil); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
