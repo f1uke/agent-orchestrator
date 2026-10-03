@@ -56,7 +56,15 @@ enum Occlusion {
 
     /// The hit-test is not public API. A missing selector means no element is
     /// judged, and the caller says so rather than calling everything visible.
-    typealias HitTest = @convention(c) (NSObject, Selector, NSObject, CGPoint, UnsafeMutablePointer<NSError?>?) -> NSObject?
+    ///
+    /// The error is an Objective-C `NSError **`, which is `__autoreleasing`:
+    /// the callee stores an autoreleased error WITHOUT retaining it for us. It
+    /// must be typed AutoreleasingUnsafeMutablePointer so Swift retains what
+    /// comes back. Typed as a plain UnsafeMutablePointer, Swift released an
+    /// error it never owned, and the autorelease pool released it again later
+    /// - the runner died with EXC_BAD_ACCESS in objc_autoreleasePoolPop
+    /// whenever a hit-test failed, which happens while the screen changes.
+    typealias HitTest = @convention(c) (NSObject, Selector, NSObject, CGPoint, AutoreleasingUnsafeMutablePointer<NSError?>?) -> NSObject?
     static let hitTestSelector = NSSelectorFromString("hitTestElement:withPoint:error:")
 
     static func hitTester() -> ((NSObject, CGPoint) -> NSObject?)? {
