@@ -7954,6 +7954,21 @@ components:
       - state
       - lastActivityAt
       type: object
+    DomainMobileScriptsConfig:
+      properties:
+        platform:
+          enum:
+          - ios
+          - android
+          type: string
+        product:
+          type: string
+        store:
+          type: string
+      required:
+      - product
+      - platform
+      type: object
     DomainReviewerConfig:
       properties:
         harness:
@@ -8947,6 +8962,8 @@ components:
           type: boolean
         hasWebUI:
           type: boolean
+        mobileScripts:
+          $ref: '#/components/schemas/DomainMobileScriptsConfig'
         orchestrator:
           $ref: '#/components/schemas/RoleOverride'
         pauseBeforeImplementing:

@@ -398,3 +398,104 @@ func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
 		t.Fatalf("a qa on a non-iOS project lost the checklist timing it owns:\n%s", plain)
 	}
 }
+
+// scriptOnlyPrompt builds a worker prompt on a project with the given config.
+func scriptOnlyPrompt(t *testing.T, cfg domain.ProjectConfig, role domain.CrewRole) string {
+	t.Helper()
+	st := crewPromptStore(t)
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: cfg}
+	got, err := layeredManager(st, nil).buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: role})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+var allWorkerRoles = []domain.CrewRole{"", domain.CrewRoleDev, domain.CrewRoleQA}
+
+// On a script-only iOS project every worker is taught the script workflow in
+// place of the step-by-step catalog: the catalog teaches `ao sim tap`, the one
+// thing the project rules out. qa plays its cases with scripts instead of
+// recording flows into the repository.
+func TestBuildSystemPrompt_ScriptOnlyIOSReplacesTheTapCatalog(t *testing.T) {
+	cfg := domain.ProjectConfig{HasIOSSimulator: true, MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS}}
+	for _, role := range allWorkerRoles {
+		got := scriptOnlyPrompt(t, cfg, role)
+		for _, want := range []string{
+			"## Driving the iOS Simulator: scripts only (AO)",
+			domain.DefaultMobileScriptsStore + "/bin/flow run nter reach/<script>",
+			"never finish the run by hand",
+			"ao sim shot",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("role %q on a script-only iOS project is missing %q:\n%s", role, want, got)
+			}
+		}
+		for _, gone := range []string{
+			"## Driving the iOS Simulator (AO)",
+			"ao sim tap --label",
+			"## Turning a played scenario into a test (AO)",
+		} {
+			if strings.Contains(got, gone) {
+				t.Fatalf("role %q on a script-only iOS project was still taught %q:\n%s", role, gone, got)
+			}
+		}
+		play := strings.Contains(got, "## Playing smoke cases with scripts (AO)")
+		if play != (role == domain.CrewRoleQA) {
+			t.Fatalf("role %q: script play block present = %v, want it for qa only", role, play)
+		}
+		handover := strings.Contains(got, "Drive it while you work, then hand the verification over")
+		if handover != (role == domain.CrewRoleDev) {
+			t.Fatalf("role %q: handover note present = %v, want it for dev only", role, handover)
+		}
+	}
+	if qa := scriptOnlyPrompt(t, cfg, domain.CrewRoleQA); !strings.Contains(qa, "`ao sim flow record` runs") {
+		t.Fatalf("iOS qa was not told a human's one play can become the script:\n%s", qa)
+	}
+}
+
+// Android has no `ao sim`, so its workers are taught `maestro --device` through
+// the same runner and are never handed an `ao sim` command they cannot run - or
+// the iOS-only lease note.
+func TestBuildSystemPrompt_ScriptOnlyAndroidHasNoAOSim(t *testing.T) {
+	cfg := domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformAndroid, Store: "/opt/scripts"}}
+	for _, role := range allWorkerRoles {
+		got := scriptOnlyPrompt(t, cfg, role)
+		for _, want := range []string{
+			"## Driving the Android emulator: scripts only (AO)",
+			"/opt/scripts/bin/flow run nter reach/<script> --platform android --device <serial>",
+			"maestro --device <serial> hierarchy",
+			"Nothing leases an emulator",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("role %q on a script-only Android project is missing %q:\n%s", role, want, got)
+			}
+		}
+		for _, gone := range []string{"ao sim claim", "ao sim tap", "ao sim shot", "## Driving the iOS Simulator", "Drive it while you work"} {
+			if strings.Contains(got, gone) {
+				t.Fatalf("role %q on an Android project was handed %q:\n%s", role, gone, got)
+			}
+		}
+		if play := strings.Contains(got, "## Playing smoke cases with scripts (AO)"); play != (role == domain.CrewRoleQA) {
+			t.Fatalf("role %q: script play block present = %v, want it for qa only", role, play)
+		}
+	}
+}
+
+// The rule must not leak: a project that has not opted in - a plain one, or an
+// iOS one without the setting - renders no script guidance at all.
+func TestBuildSystemPrompt_NoMobileScriptsMeansNoScriptRule(t *testing.T) {
+	for name, cfg := range map[string]domain.ProjectConfig{
+		"plain": {},
+		"ios":   {HasIOSSimulator: true},
+	} {
+		for _, role := range allWorkerRoles {
+			got := scriptOnlyPrompt(t, cfg, role)
+			for _, gone := range []string{"scripts only (AO)", "bin/flow", "## Playing smoke cases with scripts (AO)"} {
+				if strings.Contains(got, gone) {
+					t.Fatalf("%s project, role %q, was handed the script rule (%q):\n%s", name, role, gone, got)
+				}
+			}
+		}
+	}
+}

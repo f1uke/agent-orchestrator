@@ -99,6 +99,9 @@ type projectSetConfigOptions struct {
 	branchPrefix      string
 	hasWebUI          bool
 	hasIOSSimulator   bool
+	mobileScripts     string
+	mobilePlatform    string
+	mobileStore       string
 	noAutoCrew        bool
 	pauseBeforeImpl   bool
 	configJSON        string
@@ -299,6 +302,9 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.trackerIntake, "tracker-intake", false, "Enable issue-tracker intake for matching issues (see --tracker-provider)")
 	f.BoolVar(&opts.hasWebUI, "web-ui", false, "This project has a web UI, so sessions get the Browser tab")
 	f.BoolVar(&opts.hasIOSSimulator, "ios-simulator", false, "This project targets iOS, so sessions get the Device tab")
+	f.StringVar(&opts.mobileScripts, "mobile-scripts", "", "Drive this project's simulators/emulators ONLY through the scripts of this product (its folder in the scripts store, e.g. nter); needs --mobile-platform. \"\" turns it off")
+	f.StringVar(&opts.mobilePlatform, "mobile-platform", "", "With --mobile-scripts: the app this repo builds, ios (scripts run through `ao sim flow run`) or android (through `maestro --device`)")
+	f.StringVar(&opts.mobileStore, "mobile-scripts-store", "", "With --mobile-scripts: the scripts store checkout (default "+domain.DefaultMobileScriptsStore+")")
 	f.BoolVar(&opts.noAutoCrew, "no-auto-crew", false, "Never form a crew automatically on this project; a PERSON can still add a qa by hand (`ao crew add`, or `+ qa` in the app), an AO session cannot")
 	f.BoolVar(&opts.pauseBeforeImpl, "pause-before-implementing", false, "A standard/deep worker here stops once it understands the task and hands back to you before it implements anything; mechanical tasks never stop")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
@@ -346,6 +352,12 @@ var setConfigFieldFlags = []struct {
 	{flag: "branch-prefix", path: "gitConvention.branchPrefix"},
 	{flag: "web-ui", path: "hasWebUI"},
 	{flag: "ios-simulator", path: "hasIOSSimulator"},
+	// The three mobile-scripts flags write ONE pointer field whole: merging is
+	// never walked into a pointer (see domain.MergeConfigFields), so naming any
+	// of them states the whole setting and leaving the product out turns it off.
+	{flag: "mobile-scripts", path: "mobileScripts"},
+	{flag: "mobile-platform", path: "mobileScripts"},
+	{flag: "mobile-scripts-store", path: "mobileScripts"},
 	{flag: "no-auto-crew", path: "disableAutoCrew"},
 	{flag: "pause-before-implementing", path: "pauseBeforeImplementing"},
 }
@@ -378,8 +390,12 @@ func resolveSetConfigWrite(flags *pflag.FlagSet, opts projectSetConfigOptions) (
 // write instead of being read as silence.
 func changedConfigFields(flags *pflag.FlagSet) []string {
 	var fields []string
+	seen := map[string]bool{}
 	for _, f := range setConfigFieldFlags {
-		if flags.Changed(f.flag) {
+		// Several flags can write one field (the mobile-scripts trio); it is
+		// named once however many of them were given.
+		if flags.Changed(f.flag) && !seen[f.path] {
+			seen[f.path] = true
 			fields = append(fields, f.path)
 		}
 	}
@@ -428,6 +444,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 		},
 		HasWebUI:                opts.hasWebUI,
 		HasIOSSimulator:         opts.hasIOSSimulator,
+		MobileScripts:           buildMobileScripts(opts),
 		DisableAutoCrew:         opts.noAutoCrew,
 		PauseBeforeImplementing: opts.pauseBeforeImpl,
 	}
@@ -441,6 +458,20 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 	// legitimate is the mask, not the values. resolveSetConfigWrite refuses the
 	// genuinely empty command line - the one that named no field at all.
 	return cfg, nil
+}
+
+// buildMobileScripts turns the three mobile-scripts flags into the setting. All
+// three empty is the spelling of "off" (`--mobile-scripts ""`), which is nil -
+// the same value a project that never had the setting carries. Anything else is
+// sent as given and the daemon's validation names what is missing.
+func buildMobileScripts(opts projectSetConfigOptions) *domain.MobileScriptsConfig {
+	product := strings.TrimSpace(opts.mobileScripts)
+	platform := strings.ToLower(strings.TrimSpace(opts.mobilePlatform))
+	store := strings.TrimSpace(opts.mobileStore)
+	if product == "" && platform == "" && store == "" {
+		return nil
+	}
+	return &domain.MobileScriptsConfig{Product: product, Platform: domain.MobilePlatform(platform), Store: store}
 }
 
 // decodeConfigJSON decodes --config-json strictly: a key that is not part of

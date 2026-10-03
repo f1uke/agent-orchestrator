@@ -524,6 +524,106 @@ describe("ProjectSettingsForm", () => {
 		expect(body.config.hasWebUI).toBeUndefined();
 	});
 
+	it("turns script-only driving on for an Android app and saves product, platform and store", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				env: { TOKEN: "secret" },
+			},
+		});
+
+		renderSettings();
+		await goToSection("What agents are told");
+
+		// Off for a project that never configured it, and the two fields that only
+		// mean something when it is on are not offered.
+		const mode = await screen.findByRole("combobox", { name: "Drive devices only through scripts" });
+		expect(mode).toHaveTextContent("Off");
+		expect(screen.queryByLabelText("Scripts product")).not.toBeInTheDocument();
+
+		await chooseOption(mode, "Scripts only - Android");
+		await openRows();
+		await userEvent.type(screen.getByLabelText("Scripts product"), "nter");
+		await userEvent.type(screen.getByLabelText("Scripts store"), "/opt/scripts");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.mobileScripts).toEqual({ platform: "android", product: "nter", store: "/opt/scripts" });
+		expect(body.config.env).toEqual({ TOKEN: "secret" });
+	});
+
+	it("loads script-only driving and turns it off by omitting the setting", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				mobileScripts: { platform: "ios", product: "nter" },
+			},
+		});
+
+		renderSettings();
+		await goToSection("What agents are told");
+
+		const mode = await screen.findByRole("combobox", { name: "Drive devices only through scripts" });
+		expect(mode).toHaveTextContent("Scripts only - iOS");
+		expect(screen.getByLabelText("Scripts product")).toHaveValue("nter");
+		// An unset store shows where the default store is rather than a blank.
+		expect(screen.getByLabelText("Scripts store")).toHaveAttribute(
+			"placeholder",
+			"~/Documents/Projects/mobile-ui-scripts",
+		);
+
+		await chooseOption(mode, "Off");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.mobileScripts).toBeUndefined();
+	});
+
+	it("blocks save when script-only driving has no product", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+			},
+		});
+
+		renderSettings();
+		await goToSection("What agents are told");
+
+		await chooseOption(
+			await screen.findByRole("combobox", { name: "Drive devices only through scripts" }),
+			"Scripts only - iOS",
+		);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		expect(
+			await screen.findByText("Script-only driving requires the product's folder in the scripts store."),
+		).toBeInTheDocument();
+		expect(putMock).not.toHaveBeenCalled();
+	});
+
 	it("turns automatic crew formation off for the project, and back on", async () => {
 		// The human chose "settable from both the app and the CLI" for one stated
 		// reason: a flag you cannot see is a flag you forget. This surface is the

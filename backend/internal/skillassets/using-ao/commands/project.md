@@ -126,7 +126,7 @@ ao project rm agent-orchestrator -y
 
 ### ao project set-config
 
-Replace a project's per-project config (branch, session prefix, env, symlinks, post-create, agent model/permissions, role overrides). The config is resolved when a session spawns. Set fields via flags, pass the whole object with `--config-json`, or `--clear` to remove all config.
+Set a project's per-project config (branch, session prefix, env, symlinks, post-create, agent model/permissions, role overrides, tracker intake, branch convention, device settings). The config is resolved when a session spawns. Field flags write ONLY the fields they name and leave the rest of the stored config alone; pass the whole object with `--config-json`, or `--clear` to remove all config.
 
 `--config-json` **replaces** the stored config rather than patching it, so it must carry every field you want to keep - read the current one with `ao project get <id> --json`, edit that object, and pass it back whole. A key that is not part of the config is refused with a usage error instead of being dropped.
 
@@ -141,15 +141,28 @@ ao project set-config <id> [flags]
 |---|---|---|
 | `--clear` | Clear all config | - |
 | `--config-json string` | Full config as a JSON object (overrides field flags) | - |
+| `--branch-prefix string` | Branch prefix for auto-named branches (required for `custom`; default `feature/` for `gitflow`) | - |
 | `--default-branch string` | Base branch new session worktrees are created from | - |
 | `--env stringArray` | Env var `KEY=VALUE` forwarded into sessions (repeatable) | - |
+| `--git-workflow string` | Branch convention: `none`, `gitflow` or `custom` | `none` |
+| `--ios-simulator` | This project targets iOS, so sessions get the Device tab and the `ao sim` guidance | off |
 | `--json` | Output the updated project as JSON | - |
+| `--mobile-platform string` | With `--mobile-scripts`: the app this repo builds, `ios` (scripts run through `ao sim flow run`) or `android` (through `maestro --device`) | required with `--mobile-scripts` |
+| `--mobile-scripts string` | Drive this project's simulators/emulators ONLY through the scripts of this product (its folder in the scripts store, e.g. `nter`); `""` turns it off | off |
+| `--mobile-scripts-store string` | With `--mobile-scripts`: the scripts store checkout | `~/Documents/Projects/mobile-ui-scripts` |
 | `--model string` | Agent model override (e.g. `claude-opus-4-5`) | - |
+| `--no-auto-crew` | Never form a crew automatically; a person can still add a qa by hand | off |
 | `--orchestrator-agent string` | Harness override for orchestrator sessions | - |
+| `--pause-before-implementing` | A standard/deep worker stops once it understands the task and hands back before implementing | off |
 | `--permission string` | Permission mode: `default`, `accept-edits`, `auto`, `bypass-permissions` | - |
 | `--post-create stringArray` | Command to run after workspace creation (repeatable) | - |
 | `--session-prefix string` | Displayed session-id prefix | - |
 | `--symlink stringArray` | Repo-relative path to symlink into workspaces (repeatable) | - |
+| `--tracker-assignee string` | Issue assignee required for intake eligibility | - |
+| `--tracker-intake` | Enable issue-tracker intake for matching issues | off |
+| `--tracker-provider string` | Issue-tracker provider: `github` or `gitlab` | `github` |
+| `--tracker-repo string` | Issue-tracker repo (GitHub owner/repo or GitLab group/project) | from git origin |
+| `--web-ui` | This project has a web UI, so sessions get the Browser tab | off |
 | `--worker-agent string` | Harness override for worker sessions | - |
 
 **Examples:**
@@ -163,3 +176,14 @@ ao project set-config agent-orchestrator --default-branch main --model claude-op
 # Set an env var and a post-create command
 ao project set-config agent-orchestrator --env "NODE_ENV=development" --post-create "npm install"
 ```
+
+```bash
+# A mobile project whose devices are driven only by scripts: the iOS and the
+# Android repo of one product share its scripts (projects/nter in the store).
+# The three --mobile-* flags write one setting together, so pass them together.
+ao project set-config nter-ios-app --mobile-scripts nter --mobile-platform ios
+ao project set-config nter-android-app --mobile-scripts nter --mobile-platform android
+ao project set-config nter-ios-app --mobile-scripts ""     # turn it off
+```
+
+The setting reaches the NEXT worker spawned (or restored) in that project: its prompt then teaches the script workflow in place of step-by-step `ao sim` driving, and its qa plays smoke cases with scripts. A project that does not set it is unchanged.

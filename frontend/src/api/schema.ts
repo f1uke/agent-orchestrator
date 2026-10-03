@@ -2643,6 +2643,12 @@ export interface components {
             lastActivityAt: string;
             state: string;
         };
+        DomainMobileScriptsConfig: {
+            /** @enum {string} */
+            platform: "ios" | "android";
+            product: string;
+            store?: string;
+        };
         DomainReviewerConfig: {
             harness: string;
         };
@@ -3056,6 +3062,7 @@ export interface components {
             gitConvention?: components["schemas"]["GitConventionConfig"];
             hasIOSSimulator?: boolean;
             hasWebUI?: boolean;
+            mobileScripts?: components["schemas"]["DomainMobileScriptsConfig"];
             orchestrator?: components["schemas"]["RoleOverride"];
             pauseBeforeImplementing?: boolean;
             postCreate?: string[];

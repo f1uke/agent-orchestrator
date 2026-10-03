@@ -3333,7 +3333,24 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// dev keeps the whole catalog - it is alone until it claims, and CLAIMING
 		// IS WHAT CREATES ITS QA, so telling it not to would leave an iOS task
 		// with no qa for ever - plus the short note on what changes when it does.
-		if cfg.HasIOSSimulator {
+		// A script-only mobile project replaces the step-by-step catalog with
+		// the script workflow, on either platform: its devices are moved only
+		// by reusable scripts, so teaching `ao sim tap` there would teach the
+		// one thing the project rules out. iOS dev keeps the handover note,
+		// which is about the lease and holds unchanged; qa plays its cases with
+		// scripts instead of recording flows into the repository.
+		if ms := cfg.MobileScripts; ms != nil {
+			scripts := prompts.MobileScripts{Product: ms.Product, IOS: ms.Platform == domain.MobilePlatformIOS, Store: ms.StoreOrDefault()}
+			base += prompts.MobileScriptGuidance(scripts)
+			switch crewRole {
+			case domain.CrewRoleDev:
+				if scripts.IOS {
+					base += prompts.SimulatorHandoverToQA()
+				}
+			case domain.CrewRoleQA:
+				base += prompts.MobileScriptPlay(scripts)
+			}
+		} else if cfg.HasIOSSimulator {
 			base += prompts.SimulatorGuidance()
 			switch crewRole {
 			case domain.CrewRoleDev:
