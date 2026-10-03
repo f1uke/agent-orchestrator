@@ -482,6 +482,9 @@ func (env Env) conflict(c *Candidate, rule, content string) string {
 	c.Proposal.TargetPath = "rule:" + rule
 	c.Proposal.NewContent = noEmDash(strings.TrimSpace(content))
 	c.Proposal.Diff, c.Proposal.BaseSHA256 = "", ""
+	// A conflict card writes nothing until the person decides, so a memory
+	// it came from leaves no MEMORY.md line behind.
+	c.Proposal.IndexLine, c.indexDiff, c.inserts = "", "", nil
 	c.Added = c.Proposal.NewContent
 	if c.Added == "" {
 		return "the conflict states no new rule"
