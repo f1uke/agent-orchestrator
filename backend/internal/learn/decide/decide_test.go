@@ -312,3 +312,11 @@ func TestAddProjectRule_BuildsTheWorkingRulesSkillAndNeverLosesLines(t *testing.
 		t.Errorf("drop = %q", upd[0].Drop)
 	}
 }
+
+func TestAddProjectRule_RefusedEarlyIsStillAStorableAction(t *testing.T) {
+	env := rig(t, draft(1, "solo:s1", 0.5, domain.LearnAboutAgentPractice))
+	got, _ := Prepare(env, []Proposed{{Action: "add_project_rule", Content: "- x", Evidence: []string{"d1"}, Confidence: 0.9}})
+	if got[0].Drop == "" || got[0].Proposal.Action != domain.LearnProposeUpdateSkill {
+		t.Errorf("a refused project rule must keep a storable action: %+v", got[0].Proposal)
+	}
+}

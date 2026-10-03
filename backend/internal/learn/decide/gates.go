@@ -89,7 +89,7 @@ func Prepare(env Env, answer []Proposed) (out []Candidate, noAction int) {
 			continue
 		}
 		c := Candidate{Ref: "p" + strconv.Itoa(i+1), Proposal: domain.LearnProposal{
-			ProjectID: env.ProjectID, TaskKey: env.TaskKey, Action: domain.LearnProposalAction(p.Action),
+			ProjectID: env.ProjectID, TaskKey: env.TaskKey, Action: storedAction(p.Action),
 			Title: strings.TrimSpace(p.Title), Rationale: strings.TrimSpace(p.Rationale), Outcome: env.Outcome,
 			Confidence: clamp01(p.Confidence) * env.Outcome.Weight(), Status: domain.LearnProposalPending,
 		}}
@@ -109,6 +109,15 @@ func Prepare(env Env, answer []Proposed) (out []Candidate, noAction int) {
 		out = append(out, c)
 	}
 	return out, noAction
+}
+
+// storedAction is the action a proposal is stored under, even when a gate
+// refuses it before its target is resolved: add_project_rule is a skill change.
+func storedAction(model string) domain.LearnProposalAction {
+	if domain.LearnProposalAction(model) == addProjectRule {
+		return domain.LearnProposeUpdateSkill
+	}
+	return domain.LearnProposalAction(model)
 }
 
 // mergeInserts folds a second set of lines for the same file into the first
@@ -132,7 +141,7 @@ func (env Env) prepare(c *Candidate, p Proposed) string {
 		return why
 	}
 	c.Proposal.Scope = scope
-	switch c.Proposal.Action {
+	switch domain.LearnProposalAction(p.Action) {
 	case domain.LearnProposeCreateSkill:
 		return env.createSkill(c, p)
 	case domain.LearnProposeUpdateSkill:
