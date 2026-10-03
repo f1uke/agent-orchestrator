@@ -1276,6 +1276,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/sim-devices/{udid}/paste": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Paste text into the focused field through its edit menu, via the device's XCTest runner - no key press - and prove it arrived */
+        post: operations["pasteSimText"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/sim-devices/{udid}/power": {
         parameters: {
             query?: never;
@@ -4153,6 +4170,33 @@ export interface components {
         SimLeaseResponse: {
             lease: components["schemas"]["SimLease"];
             trust?: components["schemas"]["SimTrustView"];
+        };
+        SimPasteInput: {
+            /** @description The text to put on the device's pasteboard and paste into the focused field. */
+            text: string;
+            /** @description How long to wait for a runner that is still starting, in milliseconds, before taking the gesture hold. Capped at 15000. */
+            waitMs?: number;
+        };
+        SimPasteResponse: {
+            /** @description Bundle id of the application holding the field. */
+            app?: string;
+            /** @description Where the text went, in the words the CLI prints. */
+            detail: string;
+            landed: components["schemas"]["SimTypeLanding"];
+            /** @description The edit menu item tapped, in the device's language. */
+            menuItem?: string;
+            /** @description Why it could not be, when it could not: the text is still on the device's pasteboard. */
+            pasteboardError?: string;
+            /** @description The device's pasteboard was put back to what it held before. */
+            pasteboardRestored: boolean;
+            udid: string;
+            /**
+             * @description How the paste was performed: edit-menu is the field held and Paste tapped in its edit menu - touches, no key press.
+             * @enum {string}
+             */
+            via: "edit-menu";
+            /** @description What the runner said while pasting, when it complained about text the screen shows did arrive. */
+            warning?: string;
         };
         SimRecording: {
             name: string;
@@ -9500,6 +9544,98 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    pasteSimText: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. The gesture is arbitrated as this session. */
+                sessionId: string;
+                /** @description Simulator udid (matched case-insensitively). */
+                udid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimPasteInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimPasteResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

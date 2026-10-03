@@ -4,11 +4,16 @@
 // It exists because the keyboard cannot be trusted to deliver characters. The
 // HID path sends US key usages and the guest turns them into whatever its own
 // input mode says they mean, so on a guest set to Thai "lf86428" arrives as
-// "สดคุภ/ค" (see internal/simkeyboard). The pasteboard sidesteps that entirely:
-// the text is transferred as text, and Command-V is the one keystroke the guest
-// matches WITHOUT running it through the input mode - verified on a real device
-// set to Thai, including into a secure field, which nothing else here can fill
-// correctly.
+// "สดคุภ/ค" (see internal/simkeyboard), and XCTest types into a secure field
+// only what the keyboard on screen can type. The pasteboard sidesteps that
+// entirely: the text is transferred as text, including into a secure field.
+//
+// The paste itself is a gesture, and there are two (Paster). The default holds
+// the field and taps Paste in its edit menu (MenuPaster): touches only.
+// Command-V (KeyPaster) is the fallback, because it is a hardware key press,
+// and a hardware key press minimizes the software keyboard for every field
+// tapped after it (see simbridge.ShowKeyboard) - so that route shows the
+// keyboard again afterwards, and says so.
 //
 // Two properties are not negotiable, and both come from the bug this whole
 // change is about.
@@ -35,6 +40,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -42,6 +49,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrunner"
 )
 
 // ErrNotDelivered is a paste that changed nothing on screen. It is separated
@@ -76,6 +84,13 @@ type Result struct {
 	// caller is expected to REPORT it: "pasted" that does not say where the
 	// text went is how a command ends up believed about work it never did.
 	Landing Landing
+	// Pasted is how the paste was performed, which a caller reports too: a
+	// Command-V pressed a hardware key, and the keyboard it minimized is part
+	// of what the command did to the device.
+	Pasted Pasted
+	// Warning is what the gesture complained about while the screen shows
+	// the text did land.
+	Warning string
 }
 
 // Simctl is a Pasteboard over `xcrun simctl pbcopy` / `pbpaste`.
@@ -118,6 +133,85 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// Reader reads the whole screen: the before and after reads that prove a
+// paste. simbridge.Driver is one.
+type Reader interface {
+	AX(ctx context.Context, udid string) (simbridge.Snapshot, error)
+}
+
+// Paster performs the gesture that pastes, once the text is on the
+// pasteboard. There are two, and the difference between them is the bug that
+// made them two: MenuPaster presses no key, KeyPaster presses Command-V - a
+// hardware key press, which leaves the software keyboard minimized for every
+// field after it (see simbridge.ShowKeyboard).
+type Paster interface {
+	// Paste pastes into whatever has keyboard focus. before is the screen as
+	// it was read just now. A Paster that changes the screen before it pastes
+	// returns the read the proof has to start from in Pasted.Before.
+	//
+	// An error wrapping ErrNotPasted means nothing was pasted and the screen
+	// was not proven - another Paster may be tried. Any other error is a
+	// paste that may have landed, and the screen decides.
+	Paste(ctx context.Context, udid string, before simbridge.Snapshot) (Pasted, error)
+	// Hold is how long the gesture may take, for the hold that covers it.
+	Hold() time.Duration
+}
+
+// Pasted is how a paste was performed.
+type Pasted struct {
+	Via Via
+	// MenuItem is the edit menu item tapped, in the device's language.
+	MenuItem string
+	// App is the bundle id of the application holding the field, when known.
+	App string
+	// Before, when set, is the read the proof starts from instead of the one
+	// handed to Paste.
+	Before *simbridge.Snapshot
+	// Keyboard is what was done about the software keyboard after a paste
+	// that pressed keys.
+	Keyboard *simgesture.Keyboard
+}
+
+// Via is how a paste was performed.
+type Via string
+
+const (
+	// ViaEditMenu is the field held and Paste tapped in its edit menu,
+	// through the XCTest runner. Touches only.
+	ViaEditMenu Via = "edit-menu"
+	// ViaCommandV is Command-V, as hardware key presses.
+	ViaCommandV Via = "command-v"
+)
+
+// ErrNotPasted is a Paster that pasted nothing: it was not available, no
+// field had focus, or the field offered no Paste. Nothing arrived, so another
+// route may be taken.
+var ErrNotPasted = errors.New("simpaste: nothing was pasted")
+
+// NotPastedError is ErrNotPasted with why, for the caller to report.
+type NotPastedError struct {
+	// Code is the reason, one of the NotPasted* codes.
+	Code   string
+	Reason string
+	// Menu is what the edit menu offered, for NotPastedNoItem.
+	Menu []string
+}
+
+func (e *NotPastedError) Error() string { return e.Reason }
+
+func (e *NotPastedError) Unwrap() error { return ErrNotPasted }
+
+// The NotPastedError codes.
+const (
+	// NotPastedUnavailable: the route could not run at all.
+	NotPastedUnavailable = "unavailable"
+	// NotPastedNoFocus: no element has keyboard focus. No other route does
+	// better - the field has to be tapped.
+	NotPastedNoFocus = "no_focus"
+	// NotPastedNoItem: the field was held and its edit menu had no Paste.
+	NotPastedNoItem = "no_paste_item"
+)
+
 // Run delivers text through the pasteboard and proves it arrived.
 //
 // The order matters on every line. The hold is taken first, so a device that is
@@ -127,7 +221,8 @@ func shellQuote(s string) string {
 func Run(
 	ctx context.Context,
 	holder simgesture.Holder,
-	driver simbridge.Driver,
+	reader Reader,
+	paster Paster,
 	pb Pasteboard,
 	udid, text string,
 ) (result Result, err error) {
@@ -138,22 +233,20 @@ func Run(
 	// that is about to be refused, and this is also the value we owe back.
 	saved, readErr := pb.Read(ctx, udid)
 
-	events := simbridge.Paste()
 	// This takes the hold itself rather than delegating to simgesture.Run,
-	// because a paste's hold has to cover MORE than the keystroke: the
+	// because a paste's hold has to cover MORE than the gesture: the
 	// pasteboard write before it and the two screen reads that prove it. A hold
-	// that only spanned the Command-V would let another command take the device
+	// that only spanned the gesture would let another command take the device
 	// between the write and the proof, and then the proof would be about
-	// somebody else's screen. simgesture.Run's own job - the recovery lift - has
-	// nothing to do here anyway, since a paste never puts a finger down.
-	token, err := holder.Acquire(ctx, udid, pasteHoldFor(events))
+	// somebody else's screen.
+	token, err := holder.Acquire(ctx, udid, paster.Hold()+2*screenReads+simgesture.HoldSlack)
 	if err != nil {
 		return result, err
 	}
 	// err is a named return, so by the time this runs it holds whatever the
 	// function is actually about to return - nil only when the paste was
 	// written, sent and verified on screen. That is what "performed" means
-	// here: a write that failed, a keystroke that failed, or a paste that could
+	// here: a write that failed, a gesture that failed, or a paste that could
 	// not be verified must not be recorded as one that happened.
 	defer func() { holder.Release(ctx, udid, token, simgesture.Outcome{Performed: err == nil}) }()
 
@@ -174,54 +267,311 @@ func Run(
 		result.Restored = true
 	}()
 
-	before, err := driver.AX(ctx, udid)
+	before, err := reader.AX(ctx, udid)
 	if err != nil {
 		return result, fmt.Errorf("could not read the screen before pasting, so the paste could not be "+
 			"proven and was not attempted: %w", err)
 	}
-	if before.Keyboard != nil {
-		// The software keyboard is up, and the first key event would be spent
-		// hiding it (see simbridge.WakeKeyboard) - the Command-V would be lost.
-		// Spend a bare Command on it instead, and read the screen it leaves.
-		if _, err := driver.Perform(ctx, udid, simbridge.WakeKeyboard()); err != nil {
-			return result, &simgesture.FailedError{Action: "paste", Cause: err}
-		}
-		select {
-		case <-time.After(keyboardSettle):
-		case <-ctx.Done():
-			return result, ctx.Err()
-		}
-		if before, err = driver.AX(ctx, udid); err != nil {
-			return result, fmt.Errorf("could not read the screen before pasting, so the paste could not be "+
-				"proven and was not attempted: %w", err)
-		}
+	pasted, pasteErr := paster.Paste(ctx, udid, before)
+	result.Pasted = pasted
+	if errors.Is(pasteErr, ErrNotPasted) {
+		return result, pasteErr
 	}
-	if _, err := driver.Perform(ctx, udid, events); err != nil {
-		return result, &simgesture.FailedError{Action: "paste", Cause: err}
+	if pasted.Before != nil {
+		before = *pasted.Before
 	}
-	after, err := driver.AX(ctx, udid)
+	after, err := reader.AX(ctx, udid)
 	if err != nil {
 		return result, fmt.Errorf("the paste was sent but the screen could not be read back, so it could not "+
 			"be proven - check the field with `ao sim ax`: %w", err)
 	}
-	landing, err := Verify(before, after, text)
+	landing, verifyErr := Verify(before, after, text)
 	result.Landing = landing
-	return result, err
+	switch {
+	case verifyErr == nil:
+		if pasteErr != nil {
+			result.Warning = pasteErr.Error()
+		}
+		return result, nil
+	case pasteErr != nil && errors.Is(verifyErr, ErrNotDelivered):
+		// The gesture failed and nothing changed: nothing arrived, and the
+		// gesture's own complaint is the better reason.
+		return result, fmt.Errorf("%w: %w", ErrNotDelivered, pasteErr)
+	case pasteErr != nil:
+		return result, fmt.Errorf("%w (the paste gesture also reported: %w)", verifyErr, pasteErr)
+	}
+	return result, verifyErr
 }
 
-// screenReads is the allowance the hold needs on top of the keystroke, for the
-// two accessibility reads that prove the paste. The first read on a device can
-// take a second or two while the translator attaches, and a hold that lapsed
-// halfway through would hand the device away mid-proof.
+// screenReads is the allowance the hold needs for each accessibility read
+// that proves the paste. The first read on a device can take a second or two
+// while the translator attaches, and a hold that lapsed halfway through would
+// hand the device away mid-proof.
 const screenReads = 10 * time.Second
 
 // keyboardSettle is how long the software keyboard is given to go away after
 // the waking key press, before the screen is read again.
 const keyboardSettle = 500 * time.Millisecond
 
-func pasteHoldFor(events []simbridge.Event) time.Duration {
-	// A third read and the settle, for a paste that has to wake the keyboard.
-	return simbridge.Duration(events) + screenReads + screenReads/2 + keyboardSettle + simgesture.HoldSlack
+// MenuFocus is the XCTest runner's look at what has keyboard focus, which
+// also says how the edit menu spells Paste in the device's language
+// (internal/simrunner).
+type MenuFocus interface {
+	Focus(ctx context.Context, udid string) (simrunner.TypeAnswer, error)
+}
+
+// MenuPaster pastes the way a person does: it holds the focused field and
+// taps Paste in the edit menu that comes up.
+//
+// It presses no key. Command-V is a hardware key press, and a hardware key
+// press tells iOS a hardware keyboard is attached: the software keyboard is
+// minimized, and every field tapped afterwards comes up without one - the
+// next tap, the next recording and the next script on the device all met a
+// keyboard that was not there. The edit menu is also the paste that lands in
+// a web sign-in sheet, where Command-V did not.
+//
+// The touches are the bridge's, as `ao sim tap`'s are; the XCTest runner only
+// reads - which field has focus, how the menu spells Paste, where the item
+// came up. XCTest's own touches wait for the app to go idle first, and a web
+// sign-in sheet was seen never to: each touch then held the runner for a
+// minute, and every read behind it timed out.
+type MenuPaster struct {
+	Runner MenuFocus
+	// Reader reads the screen through the runner, which is what sees the
+	// focused field and the edit menu.
+	Reader Reader
+	Driver simbridge.Driver
+}
+
+// pressHold is how long the field is held. iOS opens the edit menu on
+// release after a press of about half a second.
+const pressHold = 800 * time.Millisecond
+
+// menuWait is how long the edit menu is given to come up after the release,
+// and menuPoll how often the screen is read meanwhile.
+const (
+	menuWait = 2500 * time.Millisecond
+	menuPoll = 250 * time.Millisecond
+)
+
+// Hold covers the focus look, the press, the wait for the menu and the tap.
+func (m MenuPaster) Hold() time.Duration {
+	return screenReads/2 + pressHold + menuWait + screenReads/2 + time.Second
+}
+
+// Paste holds the focused field and taps Paste in its edit menu.
+func (m MenuPaster) Paste(ctx context.Context, udid string, before simbridge.Snapshot) (Pasted, error) {
+	pasted := Pasted{Via: ViaEditMenu}
+	focus, err := m.Runner.Focus(ctx, udid)
+	pasted.App = focus.App
+	switch {
+	case errors.Is(err, simrunner.ErrNotReady):
+		return pasted, &NotPastedError{Code: NotPastedUnavailable,
+			Reason: "the XCTest runner is not ready to find the field: " + err.Error()}
+	case err != nil:
+		return pasted, &NotPastedError{Code: NotPastedUnavailable,
+			Reason: "could not ask the XCTest runner what has focus: " + err.Error()}
+	case focus.Error != nil && focus.Error.Code == simrunner.TypeNoFocus:
+		return pasted, &NotPastedError{Code: NotPastedNoFocus, Reason: focus.Error.Message}
+	case focus.Error != nil:
+		return pasted, &NotPastedError{Code: NotPastedUnavailable,
+			Reason: "the XCTest runner could not find the field: " + focus.Error.Message}
+	}
+	field, ok := onlyFocused(flatten(before))
+	if !ok {
+		return pasted, &NotPastedError{Code: NotPastedNoFocus,
+			Reason: "no single element on screen shows keyboard focus, so there is no field to hold"}
+	}
+	press, err := simbridge.Press(PressPoint(field, before.Screen), pressHold)
+	if err != nil {
+		return pasted, &NotPastedError{Code: NotPastedUnavailable, Reason: err.Error()}
+	}
+	if _, err := m.Driver.Perform(ctx, udid, press); err != nil {
+		// Held, at most: a long press selects or moves the cursor, it puts
+		// no text anywhere.
+		return pasted, &NotPastedError{Code: NotPastedUnavailable, Reason: "could not hold the field: " + err.Error()}
+	}
+	labels := focus.PasteLabels
+	if len(labels) == 0 {
+		labels = []string{"Paste"}
+	}
+	item, menu, err := m.menuItem(ctx, udid, labels)
+	if err != nil {
+		return pasted, &NotPastedError{Code: NotPastedUnavailable, Reason: err.Error()}
+	}
+	if item == nil {
+		shown := "no edit menu came up"
+		if len(menu) > 0 {
+			shown = "the edit menu offered " + quoteAll(menu, ", ")
+		}
+		// The menu is left as it is: closing it is another touch, and the
+		// caller's next touch closes it anyway.
+		return pasted, &NotPastedError{Code: NotPastedNoItem, Menu: menu,
+			Reason: shown + " and no " + quoteAll(labels, " or ") + " - the field may refuse paste, or draw a menu of its own"}
+	}
+	pasted.MenuItem = item.Label
+	tap, err := simbridge.Tap(*item.Tap)
+	if err != nil {
+		return pasted, &NotPastedError{Code: NotPastedUnavailable, Reason: err.Error()}
+	}
+	if _, err := m.Driver.Perform(ctx, udid, tap); err != nil {
+		// The tap may or may not have reached the item: the screen decides.
+		return pasted, fmt.Errorf("could not tap %q: %w", item.Label, err)
+	}
+	return pasted, nil
+}
+
+// menuItem waits for the edit menu's Paste item, and for it to stop moving:
+// the menu animates in, and a tap sent at the first point it was read at
+// landed while it was still on its way and pasted nothing (nter web sign-in,
+// iOS 26.3). So the item is tapped once two reads in a row put it at the same
+// point. It answers nil with what the menu offered instead when no Paste came
+// up in time.
+func (m MenuPaster) menuItem(ctx context.Context, udid string, labels []string) (*simbridge.Element, []string, error) {
+	deadline := time.Now().Add(menuWait)
+	var menu []string
+	var seen *simbridge.Point
+	for {
+		snap, err := m.Reader.AX(ctx, udid)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not read the screen for the edit menu: %w", err)
+		}
+		menu = menu[:0]
+		var found *simbridge.Element
+		for _, e := range flatten(snap) {
+			if e.Type != "MenuItem" || e.OffScreen || e.Tap == nil {
+				continue
+			}
+			if found == nil && slices.Contains(labels, e.Label) {
+				found = &e
+				continue
+			}
+			if e.Label != "" {
+				menu = append(menu, e.Label)
+			}
+		}
+		if found != nil {
+			if seen != nil && math.Abs(seen.X-found.Tap.X) < 0.002 && math.Abs(seen.Y-found.Tap.Y) < 0.002 {
+				return found, nil, nil
+			}
+			seen = found.Tap
+		}
+		if time.Now().After(deadline) {
+			if found != nil {
+				// Up, but still moving when time ran out: tap where it was
+				// last seen rather than call a menu with Paste in it one
+				// without.
+				return found, nil, nil
+			}
+			return nil, menu, nil
+		}
+		select {
+		case <-time.After(menuPoll):
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
+	}
+}
+
+// PressPoint is where to hold a field so the paste goes at the END of what
+// it holds, as Command-V after a tap would: the press moves the cursor to
+// where it lands, and the end of a field's text is towards its right edge (a
+// single line) or its bottom-right corner (a text view). A button inside the
+// field - a clear button, a show-password eye - is kept clear of, because a
+// press that ends on a button is a tap on it.
+func PressPoint(field simbridge.Element, screen simbridge.Size) simbridge.Point {
+	const inset = 12.0
+	left, top := field.Frame.X, field.Frame.Y
+	right, bottom := left+field.Frame.Width, top+field.Frame.Height
+	if screen.Width > 0 && screen.Height > 0 {
+		left, top = max(left, 0), max(top, 0)
+		right, bottom = min(right, screen.Width), min(bottom, screen.Height)
+	}
+	midX := (left + right) / 2
+	edge := right
+	var walk func([]simbridge.Element)
+	walk = func(elements []simbridge.Element) {
+		for _, e := range elements {
+			centre := e.Frame.X + e.Frame.Width/2
+			if e.Type == "Button" && centre > midX && e.Frame.X < edge && e.Frame.X > left {
+				edge = e.Frame.X
+			}
+			walk(e.Children)
+		}
+	}
+	walk(field.Children)
+	x := max(left+min(inset, (right-left)/2), edge-inset)
+	y := (top + bottom) / 2
+	if field.Type == "TextView" && bottom-top > 3*inset {
+		y = bottom - inset
+	}
+	if screen.Width <= 0 || screen.Height <= 0 {
+		return simbridge.Point{X: x, Y: y}
+	}
+	return simbridge.Point{X: x / screen.Width, Y: y / screen.Height}
+}
+
+func quoteAll(items []string, sep string) string {
+	quoted := make([]string, len(items))
+	for i, item := range items {
+		quoted[i] = fmt.Sprintf("%q", item)
+	}
+	return strings.Join(quoted, sep)
+}
+
+// KeyPaster pastes with Command-V, as hardware key presses through the
+// accessibility bridge. It is the route when the XCTest runner cannot paste,
+// and the Device tab's, whose person is typing on a hardware keyboard anyway.
+type KeyPaster struct {
+	Driver simbridge.Driver
+	// ShowKeyboard brings the software keyboard back after the Command-V,
+	// which minimizes it for every field after (see simbridge.ShowKeyboard).
+	ShowKeyboard bool
+}
+
+// Hold covers the wake, Command-V and, when asked, the keyboard check.
+func (k KeyPaster) Hold() time.Duration {
+	// The read after waking the keyboard is allowed less than a proof read:
+	// the hold has a one-minute ceiling, and the two proof reads come first.
+	hold := simbridge.Duration(simbridge.WakeKeyboard()) + simbridge.Duration(simbridge.Paste()) +
+		screenReads/2 + keyboardSettle
+	if k.ShowKeyboard {
+		hold += simgesture.KeyboardCheck
+	}
+	return hold
+}
+
+// Paste presses Command-V, waking a software keyboard first, and shows the
+// keyboard again afterwards when asked.
+func (k KeyPaster) Paste(ctx context.Context, udid string, before simbridge.Snapshot) (Pasted, error) {
+	pasted := Pasted{Via: ViaCommandV}
+	if before.Keyboard != nil {
+		// The software keyboard is up, and the first key event would be spent
+		// hiding it (see simbridge.WakeKeyboard) - the Command-V would be lost.
+		// Spend a bare Command on it instead, and read the screen it leaves.
+		if _, err := k.Driver.Perform(ctx, udid, simbridge.WakeKeyboard()); err != nil {
+			return pasted, &simgesture.FailedError{Action: "paste", Cause: err}
+		}
+		select {
+		case <-time.After(keyboardSettle):
+		case <-ctx.Done():
+			return pasted, &NotPastedError{Code: NotPastedUnavailable, Reason: ctx.Err().Error()}
+		}
+		read, err := k.Driver.AX(ctx, udid)
+		if err != nil {
+			return pasted, &NotPastedError{Code: NotPastedUnavailable, Reason: "could not read the screen before " +
+				"pasting, so the paste could not be proven and was not attempted: " + err.Error()}
+		}
+		pasted.Before = &read
+	}
+	events := simbridge.Paste()
+	if _, err := k.Driver.Perform(ctx, udid, events); err != nil {
+		return pasted, &simgesture.FailedError{Action: "paste", Cause: err}
+	}
+	if k.ShowKeyboard {
+		pasted.Keyboard = simgesture.ShowKeyboardAfter(ctx, k.Driver, udid, events)
+	}
+	return pasted, nil
 }
 
 // Verify proves a paste landed by finding the text on screen afterwards.

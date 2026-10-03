@@ -152,6 +152,9 @@ type simTypeFallbackRoute struct {
 	// picks - XCTest looked at the field and said key-by-key entry loses
 	// characters there.
 	Paste bool
+	// RunnerDown: the runner itself could not be reached, so a paste goes
+	// straight to Command-V rather than asking it to use the edit menu.
+	RunnerDown bool
 }
 
 // simTypeFallback is the route to take after the runner typed nothing, or a
@@ -169,7 +172,8 @@ func simTypeFallback(err error) simTypeFallbackRoute {
 	case "SIM_RUNNER_NOT_READY":
 		state, _ := apiErr.ErrorBody.Details["state"].(string)
 		reason, _ := apiErr.ErrorBody.Details["reason"].(string)
-		return simTypeFallbackRoute{Reason: "XCTest typing was not available (" + simRunnerNote(state, reason) + ")"}
+		return simTypeFallbackRoute{Reason: "XCTest typing was not available (" + simRunnerNote(state, reason) + ")",
+			RunnerDown: true}
 	case "SIM_TYPE_REFUSED":
 		return simTypeFallbackRoute{
 			Reason: "XCTest could not type and nothing arrived (" + firstLine(apiErr.ErrorBody.Message) + ")"}
@@ -177,7 +181,8 @@ func simTypeFallback(err error) simTypeFallbackRoute {
 		return simTypeFallbackRoute{Reason: apiErr.ErrorBody.Message, Paste: true}
 	case "ROUTE_NOT_FOUND":
 		return simTypeFallbackRoute{
-			Reason: "the running daemon predates XCTest typing; restart it (`ao stop && ao start`) to get it"}
+			Reason:     "the running daemon predates XCTest typing; restart it (`ao stop && ao start`) to get it",
+			RunnerDown: true}
 	}
 	return simTypeFallbackRoute{}
 }
@@ -265,6 +270,10 @@ func newSimKeyCommand(ctx *commandContext) *cobra.Command {
 			"keyboard is set to - which is why they are separate from `ao sim type`, whose text goes " +
 			"through XCTest as characters. `--times` repeats the key, e.g. to clear a field with " +
 			"`backspace`. Nothing checks what the key did: read the screen with `ao sim ax`.\n\n" +
+			"A hardware key press makes iOS treat a hardware keyboard as attached, and it MINIMIZES the " +
+			"on-screen keyboard - for every field tapped afterwards, not just this one. So the command " +
+			"shows the on-screen keyboard again after the key, and says on a `Keyboard:` line whether it " +
+			"saw it come back (it can only look while a field has focus).\n\n" +
 			"The device must be claimed by this session (`ao sim claim`) first.",
 		Example: `  ao sim key enter
   ao sim key backspace --times 20`,
@@ -285,7 +294,8 @@ func newSimKeyCommand(ctx *commandContext) *cobra.Command {
 			if times > 1 {
 				detail += " x" + strconv.Itoa(times)
 			}
-			return ctx.runSimGesture(cmd, opts, simGesture{action: "key", detail: detail, events: events, name: args[0]})
+			return ctx.runSimGesture(cmd, opts, simGesture{action: "key", detail: detail, events: events, name: args[0],
+				showKeyboard: true})
 		},
 	}
 	cmd.Flags().IntVar(&times, "times", 1, "Press the key this many times")

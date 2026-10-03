@@ -18,7 +18,7 @@ import (
 
 // WireVersion is the runner protocol this AO speaks. A runner answering any
 // other version is a different build left on the port, and is not trusted.
-const WireVersion = "4"
+const WireVersion = "5"
 
 // runnerStatus is GET /status.
 type runnerStatus struct {
@@ -144,6 +144,9 @@ type TypeAnswer struct {
 	// KeyboardSwitchedTo is the layout the globe key switched to before
 	// typing, when a layout was asked for and the keyboard was another;
 	// KeyboardRestored says it was switched back afterwards.
+	// PasteLabels is "Paste" as the edit menu says it, in the device's
+	// language first: what a paste looks for after holding the field.
+	PasteLabels        []string   `json:"pasteLabels,omitempty"`
 	KeyboardSwitchedTo string     `json:"keyboardSwitchedTo,omitempty"`
 	KeyboardRestored   bool       `json:"keyboardRestored,omitempty"`
 	TypingMs           int        `json:"typingMs,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simrunner"
 )
 
 // --- the verification, which is what stops this becoming the same bug ------
@@ -334,6 +336,13 @@ func (h *fakeHolder) Release(_ context.Context, _, _ string, outcome simgesture.
 	h.lastPerformed = outcome.Performed
 }
 
+// keyRun is Run with the Command-V paster, the Device tab's - which is the
+// route these tests were written against, and the one that touches the
+// bridge.
+func keyRun(holder simgesture.Holder, driver *fakeDriver, pb simpaste.Pasteboard, udid, text string) (simpaste.Result, error) {
+	return simpaste.Run(context.Background(), holder, driver, simpaste.KeyPaster{Driver: driver}, pb, udid, text)
+}
+
 func pasted(from, to string) *fakeDriver {
 	return &fakeDriver{snapshots: []simbridge.Snapshot{
 		snapshot(map[string]string{"0.1": from}),
@@ -346,7 +355,7 @@ func TestRun_PutsTheTextOnThePasteboardAndTakesItBackOff(t *testing.T) {
 	driver := pasted("", "hunter2")
 	holder := &fakeHolder{}
 
-	result, err := simpaste.Run(context.Background(), holder, driver, pb, "UDID-1", "hunter2")
+	result, err := keyRun(holder, driver, pb, "UDID-1", "hunter2")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -374,7 +383,7 @@ func TestRun_RestoresThePasteboardEvenWhenThePasteFailed(t *testing.T) {
 	driver := pasted("", "")
 	driver.performErr = errors.New("bridge exploded")
 
-	if _, err := simpaste.Run(context.Background(), &fakeHolder{}, driver, pb, "UDID-1", "hunter2"); err == nil {
+	if _, err := keyRun(&fakeHolder{}, driver, pb, "UDID-1", "hunter2"); err == nil {
 		t.Fatal("a failed paste must be reported")
 	}
 	if pb.content != "original" {
@@ -386,7 +395,7 @@ func TestRun_FailsLoudlyWhenNothingWasPasted(t *testing.T) {
 	pb := &fakePasteboard{content: "original"}
 	driver := pasted("", "") // the field never changed
 
-	_, err := simpaste.Run(context.Background(), &fakeHolder{}, driver, pb, "UDID-1", "hunter2")
+	_, err := keyRun(&fakeHolder{}, driver, pb, "UDID-1", "hunter2")
 	if !errors.Is(err, simpaste.ErrNotDelivered) {
 		t.Fatalf("err = %v, want ErrNotDelivered - a paste that did nothing must never report success", err)
 	}
@@ -400,7 +409,7 @@ func TestRun_SaysSoWhenThePasteboardCouldNotBePutBack(t *testing.T) {
 	// the guest's pasteboard where any app on it can read it.
 	pb := &fakePasteboard{content: "original"}
 	driver := pasted("", "hunter2")
-	result, err := simpaste.Run(context.Background(), &fakeHolder{}, driver, pb, "UDID-1", "hunter2")
+	result, err := keyRun(&fakeHolder{}, driver, pb, "UDID-1", "hunter2")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -409,7 +418,7 @@ func TestRun_SaysSoWhenThePasteboardCouldNotBePutBack(t *testing.T) {
 	}
 
 	pb2 := &restoreFails{fakePasteboard{content: "original"}}
-	result, err = simpaste.Run(context.Background(), &fakeHolder{}, pasted("", "hunter2"), pb2, "UDID-1", "hunter2")
+	result, err = keyRun(&fakeHolder{}, pasted("", "hunter2"), pb2, "UDID-1", "hunter2")
 	if err != nil {
 		t.Fatalf("a pasteboard that could not be put back must not fail a paste that worked: %v", err)
 	}
@@ -441,7 +450,7 @@ func TestRun_RefusesWhenTheHoldIsNotGranted(t *testing.T) {
 	pb := &fakePasteboard{content: "original"}
 	holder := &fakeHolder{err: errors.New("device is mid-gesture")}
 
-	if _, err := simpaste.Run(context.Background(), holder, pasted("", ""), pb, "UDID-1", "hunter2"); err == nil {
+	if _, err := keyRun(holder, pasted("", ""), pb, "UDID-1", "hunter2"); err == nil {
 		t.Fatal("a refused hold must refuse the paste")
 	}
 	if pb.content != "original" || len(pb.writes) != 0 {
@@ -482,6 +491,17 @@ func TestSimctlWrite_PinsAUTF8LocaleForThePayload(t *testing.T) {
 // keyboard focus, and an empty field reports its placeholder AS its value
 // until it holds text.
 func focusedScreen(kind, value, placeholder string, keyboardUp bool) simbridge.Snapshot {
+	return focusedScreenAt(kind, value, placeholder, keyboardUp, 580)
+}
+
+// minimizedScreen is focusedScreen with the software keyboard minimized: still
+// in the tree, below the bottom of the screen, which is how the XCTest reader
+// reports it after a hardware key press.
+func minimizedScreen(kind, value, placeholder string) simbridge.Snapshot {
+	return focusedScreenAt(kind, value, placeholder, true, 950)
+}
+
+func focusedScreenAt(kind, value, placeholder string, keyboardUp bool, keyboardY float64) simbridge.Snapshot {
 	children := []simbridge.XCTestNode{
 		{Type: "StaticText", Label: "name", Value: "name", Enabled: true, Frame: simbridge.Rect{X: 20, Y: 100, Width: 80, Height: 20}},
 		{Type: kind, Label: "name", Value: value, Placeholder: placeholder, Enabled: true, Focused: true,
@@ -489,8 +509,8 @@ func focusedScreen(kind, value, placeholder string, keyboardUp bool) simbridge.S
 	}
 	if keyboardUp {
 		children = append(children, simbridge.XCTestNode{Type: "Keyboard", Enabled: true,
-			Frame:    simbridge.Rect{Y: 580, Width: 402, Height: 290},
-			Children: []simbridge.XCTestNode{{Type: "Key", Label: "q", Enabled: true, Frame: simbridge.Rect{X: 10, Y: 600, Width: 30, Height: 40}}}})
+			Frame:    simbridge.Rect{Y: keyboardY, Width: 402, Height: 290},
+			Children: []simbridge.XCTestNode{{Type: "Key", Label: "q", Enabled: true, Frame: simbridge.Rect{X: 10, Y: keyboardY + 20, Width: 30, Height: 40}}}})
 	}
 	return simbridge.SnapshotFromXCTest(simbridge.XCTestHierarchy{
 		Screen: simbridge.Size{Width: 402, Height: 874},
@@ -556,7 +576,7 @@ func TestRun_WakesTheKeyboardBeforeCommandV(t *testing.T) {
 		focusedScreen("TextField", "your name", "", false), // the keyboard went away
 		focusedScreen("TextField", "hello", "your name", false),
 	}}
-	if _, err := simpaste.Run(context.Background(), &fakeHolder{}, driver, &fakePasteboard{}, "udid", "hello"); err != nil {
+	if _, err := keyRun(&fakeHolder{}, driver, &fakePasteboard{}, "udid", "hello"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(driver.events) != 2 {
@@ -575,10 +595,216 @@ func TestRun_DoesNotWakeAKeyboardThatIsNotUp(t *testing.T) {
 		focusedScreen("TextField", "your name", "", false),
 		focusedScreen("TextField", "hello", "your name", false),
 	}}
-	if _, err := simpaste.Run(context.Background(), &fakeHolder{}, driver, &fakePasteboard{}, "udid", "hello"); err != nil {
+	if _, err := keyRun(&fakeHolder{}, driver, &fakePasteboard{}, "udid", "hello"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(driver.events) != 1 {
 		t.Fatalf("performed %d gestures, want only the paste", len(driver.events))
+	}
+}
+
+// --- the edit menu, which presses no key -----------------------------------
+
+type fakeFocus struct {
+	answer simrunner.TypeAnswer
+	err    error
+}
+
+func (f *fakeFocus) Focus(context.Context, string) (simrunner.TypeAnswer, error) {
+	return f.answer, f.err
+}
+
+func focusedOn(labels ...string) *fakeFocus {
+	return &fakeFocus{answer: simrunner.TypeAnswer{App: "com.example.app", PasteLabels: labels,
+		Field: &simrunner.TypeField{Type: "SecureTextField", Label: "name"}}}
+}
+
+// withMenu is a screen with the edit menu up, offering these items.
+func withMenu(snap simbridge.Snapshot, items ...string) simbridge.Snapshot {
+	for i, label := range items {
+		snap.Elements = append(snap.Elements, simbridge.Element{Path: "9." + strconv.Itoa(i), Type: "MenuItem",
+			Label: label, Tap: &simbridge.Point{X: 0.3 + 0.1*float64(i), Y: 0.2}})
+	}
+	return snap
+}
+
+func menuRun(focus *fakeFocus, driver *fakeDriver, pb simpaste.Pasteboard, text string) (simpaste.Result, error) {
+	paster := simpaste.MenuPaster{Runner: focus, Reader: driver, Driver: driver}
+	return simpaste.Run(context.Background(), &fakeHolder{}, driver, paster, pb, "udid", text)
+}
+
+func TestRun_MenuPasteHoldsTheFieldTapsPasteAndPressesNoKey(t *testing.T) {
+	driver := &fakeDriver{snapshots: []simbridge.Snapshot{
+		focusedScreen("SecureTextField", "password", "", true),                              // before
+		withMenu(focusedScreen("SecureTextField", "password", "", true), "AutoFill", "วาง"), // the menu, coming up
+		withMenu(focusedScreen("SecureTextField", "password", "", true), "AutoFill", "วาง"), // ... and settled
+		focusedScreen("SecureTextField", "•••••", "password", true),                         // the proof
+	}}
+	pb := &fakePasteboard{content: "original"}
+
+	result, err := menuRun(focusedOn("วาง", "Paste"), driver, pb, "รหัส1")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(driver.events) != 2 {
+		t.Fatalf("performed %+v, want the press and the tap", driver.events)
+	}
+	press, tap := driver.events[0], driver.events[1]
+	if press[0].Type != "begin" || press[1].Kind != "sleep" || press[1].MS < 500 || press[2].Type != "end" {
+		t.Fatalf("press = %+v, want the field held long enough for its edit menu", press)
+	}
+	if tap[0].X != 0.4 || tap[0].Y != 0.2 {
+		t.Fatalf("tap = %+v, want the วาง item's own point", tap)
+	}
+	for _, events := range driver.events {
+		for _, e := range events {
+			if e.Kind == "key" {
+				t.Fatalf("pressed a key %+v - a hardware key press minimizes the software keyboard for every "+
+					"field after it", e)
+			}
+		}
+	}
+	if result.Pasted.Via != simpaste.ViaEditMenu || result.Pasted.MenuItem != "วาง" || result.Pasted.App != "com.example.app" {
+		t.Fatalf("pasted = %+v, want the edit menu route, its item and its app reported", result.Pasted)
+	}
+	if result.Pasted.Keyboard != nil || result.Landing.How != simpaste.EvidenceMasked || pb.content != "original" {
+		t.Fatalf("result = %+v, pasteboard %q", result, pb.content)
+	}
+}
+
+func TestRun_MenuPasteThatPastedNothingSaysWhy(t *testing.T) {
+	before := focusedScreen("TextField", "x", "", true)
+	for _, tc := range []struct {
+		name     string
+		focus    *fakeFocus
+		screens  []simbridge.Snapshot
+		code     string
+		touches  int
+		wantMenu []string
+	}{
+		{"runner not ready", &fakeFocus{err: simrunner.ErrNotReady}, []simbridge.Snapshot{before},
+			simpaste.NotPastedUnavailable, 0, nil},
+		{"no focus", &fakeFocus{answer: simrunner.TypeAnswer{Error: &simrunner.TypeError{
+			Code: simrunner.TypeNoFocus, Message: "nothing has focus"}}}, []simbridge.Snapshot{before},
+			simpaste.NotPastedNoFocus, 0, nil},
+		{"no paste item", focusedOn("Paste"), []simbridge.Snapshot{before, withMenu(before, "AutoFill")},
+			simpaste.NotPastedNoItem, 1, []string{"AutoFill"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			driver := &fakeDriver{snapshots: tc.screens}
+			pb := &fakePasteboard{content: "original"}
+			_, err := menuRun(tc.focus, driver, pb, "hello")
+			var notPasted *simpaste.NotPastedError
+			if !errors.As(err, &notPasted) || !errors.Is(err, simpaste.ErrNotPasted) || notPasted.Code != tc.code {
+				t.Fatalf("err = %v, want NotPastedError %q - the caller may take another route only when nothing "+
+					"was pasted", err, tc.code)
+			}
+			if len(driver.events) != tc.touches || pb.content != "original" {
+				t.Fatalf("touches %+v, pasteboard %q", driver.events, pb.content)
+			}
+			if !reflect.DeepEqual(notPasted.Menu, tc.wantMenu) {
+				t.Fatalf("menu = %q, want %q", notPasted.Menu, tc.wantMenu)
+			}
+		})
+	}
+}
+
+func TestPressPoint_HoldsTheEndOfTheTextAndKeepsOffTheFieldsButtons(t *testing.T) {
+	screen := simbridge.Size{Width: 400, Height: 800}
+	field := simbridge.Element{Type: "TextField", Frame: simbridge.Rect{X: 20, Y: 100, Width: 360, Height: 40}}
+	if got := simpaste.PressPoint(field, screen); got.X != (380-12)/400.0 || got.Y != 120/800.0 {
+		t.Fatalf("plain field: %+v, want the right end, mid-height", got)
+	}
+	// A clear button inside the field: a press that ends on it is a tap on it.
+	field.Children = []simbridge.Element{{Type: "Button", Label: "Clear text", Frame: simbridge.Rect{X: 340, Y: 105, Width: 30, Height: 30}}}
+	if got := simpaste.PressPoint(field, screen); got.X != (340-12)/400.0 {
+		t.Fatalf("with a clear button: x = %v, want left of the button", got.X*400)
+	}
+	view := simbridge.Element{Type: "TextView", Frame: simbridge.Rect{X: 20, Y: 100, Width: 360, Height: 200}}
+	if got := simpaste.PressPoint(view, screen); got.Y != (300-12)/800.0 {
+		t.Fatalf("text view: y = %v, want near the bottom, where its text ends", got.Y*800)
+	}
+}
+
+// --- Command-V, and the keyboard it minimizes ------------------------------
+
+func TestRun_CommandVShowsTheKeyboardItMinimized(t *testing.T) {
+	driver := &fakeDriver{snapshots: []simbridge.Snapshot{
+		focusedScreen("TextField", "your name", "", false),
+		minimizedScreen("TextField", "hello", "your name"),     // after Command-V
+		focusedScreen("TextField", "hello", "your name", true), // after the toggle
+		focusedScreen("TextField", "hello", "your name", true), // the proof
+	}}
+	result, err := simpaste.Run(context.Background(), &fakeHolder{}, driver,
+		simpaste.KeyPaster{Driver: driver, ShowKeyboard: true}, &fakePasteboard{}, "udid", "hello")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(driver.events) != 2 || !reflect.DeepEqual(driver.events[1], simbridge.ShowKeyboard()) {
+		t.Fatalf("events = %+v, want Command-V and then, apart from it, the keyboard toggle", driver.events)
+	}
+	if result.Pasted.Via != simpaste.ViaCommandV || result.Pasted.Keyboard == nil ||
+		!result.Pasted.Keyboard.Shown || !result.Pasted.Keyboard.Seen {
+		t.Fatalf("pasted = %+v, want Command-V reported with the keyboard shown and seen", result.Pasted)
+	}
+}
+
+func TestRun_TheDeviceTabsCommandVLeavesTheKeyboardAlone(t *testing.T) {
+	driver := pasted("", "hunter2")
+	result, err := keyRun(&fakeHolder{}, driver, &fakePasteboard{}, "udid", "hunter2")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(driver.events) != 1 || result.Pasted.Keyboard != nil {
+		t.Fatalf("events = %+v: a person typing on the Mac's keyboard is a hardware keyboard, and the "+
+			"keyboard it minimizes is theirs to have minimized", driver.events)
+	}
+}
+
+func TestPasters_FitTheGestureHoldsCeiling(t *testing.T) {
+	// The lease service refuses a hold over a minute, and Run asks for the
+	// paster's own time plus the two proof reads and the slack. Command-V
+	// that shows the keyboard again is the longest.
+	const ceiling = time.Minute
+	for name, paster := range map[string]simpaste.Paster{
+		"edit menu":              simpaste.MenuPaster{},
+		"command-v":              simpaste.KeyPaster{},
+		"command-v and keyboard": simpaste.KeyPaster{ShowKeyboard: true},
+	} {
+		var asked time.Duration
+		holder := &ttlHolder{ttl: &asked}
+		_, _ = simpaste.Run(context.Background(), holder, &fakeDriver{}, paster, &fakePasteboard{}, "udid", "x")
+		if asked <= 0 || asked > ceiling {
+			t.Errorf("%s asks for a %s hold; the ceiling is %s", name, asked, ceiling)
+		}
+	}
+}
+
+type ttlHolder struct{ ttl *time.Duration }
+
+func (h *ttlHolder) Acquire(_ context.Context, _ string, ttl time.Duration) (string, error) {
+	*h.ttl = ttl
+	return "", errors.New("measured")
+}
+
+func (h *ttlHolder) Release(context.Context, string, string, simgesture.Outcome) {}
+
+func TestRun_MenuPasteWaitsForTheItemToStopMoving(t *testing.T) {
+	// The menu animates in: a tap at the first point the item is read at
+	// lands while it is still moving, and pastes nothing.
+	moving := withMenu(focusedScreen("TextField", "your name", "", true), "Paste")
+	moving.Elements[len(moving.Elements)-1].Tap = &simbridge.Point{X: 0.3, Y: 0.25}
+	driver := &fakeDriver{snapshots: []simbridge.Snapshot{
+		focusedScreen("TextField", "your name", "", true),
+		moving,
+		withMenu(focusedScreen("TextField", "your name", "", true), "Paste"),
+		withMenu(focusedScreen("TextField", "your name", "", true), "Paste"),
+		focusedScreen("TextField", "hello", "your name", true),
+	}}
+	if _, err := menuRun(focusedOn("Paste"), driver, &fakePasteboard{}, "hello"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if tap := driver.events[1][0]; tap.Y != 0.2 {
+		t.Fatalf("tapped %+v, want where the item settled", tap)
 	}
 }

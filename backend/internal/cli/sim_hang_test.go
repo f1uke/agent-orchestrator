@@ -208,12 +208,11 @@ func TestSimType_PasteThatChangedNothingNamesTheBlockedMainThread(t *testing.T) 
 	// the paste route reads the screen before and after and compares. An app
 	// that cannot answer looks exactly like a field that never had focus, and
 	// sending an agent to check the field would be the same wrong path again.
-	driver := &fakeSimDriver{snapshot: simbridge.Snapshot{
-		Frontmost: simbridge.Frontmost{BundleID: "com.example.nimbus", PID: 4242},
-	}}
+	driver := &fakeSimDriver{}
 	deps, _, _ := pasteDeps(t, driver, simKeyboardUS, "hunter2")
 	// A screen that never changes, however many times it is read.
 	driver.snapshotQueue = nil
+	driver.snapshot = simbridge.Snapshot{Frontmost: simbridge.Frontmost{BundleID: "com.example.nimbus", PID: 4242}}
 	deps, probes := withSampler(deps, blockedSampleReport, nil)
 
 	_, _, err := executeCLI(t, deps, "sim", "type", "hunter2", "--paste")

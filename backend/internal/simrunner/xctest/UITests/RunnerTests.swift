@@ -12,9 +12,11 @@ import XCTest
 // which the in-app accessibility bridge cannot.
 //
 // It READS, and it TYPES when asked (see Typist.swift). Every other touch goes
-// through `ao sim tap` and friends. The daemon asks it to type only while the
-// caller holds the device's lease and gesture hold, so the lease stays the
-// only way anything drives the device.
+// through `ao sim tap` and friends - a paste included: the runner names the
+// focused field and the edit menu's Paste in the device's language, and the
+// daemon holds the field and taps the item with the bridge's touches. The
+// daemon asks it to type only while the caller holds the device's lease and
+// gesture hold, so the lease stays the only way anything drives the device.
 //
 // It is started and stopped by the AO daemon, one per device, and it does not
 // trust the daemon to be there to stop it: when nobody has asked it anything
@@ -23,7 +25,7 @@ import XCTest
 
 /// Bumped whenever the wire format changes. The daemon refuses a runner that
 /// reports a different one, because it may be a stale build left on a port.
-let runnerVersion = "4"
+let runnerVersion = "5"
 
 @_silgen_name("proc_pidpath")
 private func proc_pidpath(_ pid: Int32, _ buffer: UnsafeMutableRawPointer, _ size: UInt32) -> Int32

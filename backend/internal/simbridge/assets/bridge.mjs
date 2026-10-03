@@ -207,6 +207,11 @@ async function perform(addon, udid, boot, events, keepDown = false) {
         case "button":
           await hid.button(event.name);
           break;
+        case "software-keyboard":
+          // Simulator.app's Toggle Software Keyboard: undoes the minimizing a
+          // hardware key press does (see simbridge.ShowKeyboard).
+          await hid.softwareKeyboard();
+          break;
         case "sleep":
           await sleep(event.ms);
           break;

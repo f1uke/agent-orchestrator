@@ -34,6 +34,13 @@ type simDaemon struct {
 	typeBody     string
 	typeRequests []string
 
+	// pasteStatus/pasteBody answer POST .../sim-devices/{udid}/paste, the
+	// edit-menu paste, the same way: unset is the runner being off, so the
+	// Command-V route is reached as a real fallback reaches it.
+	pasteStatus   int
+	pasteBody     string
+	pasteRequests []string
+
 	// holdStatus/holdBody override the gesture-hold response, so a test can
 	// make the daemon refuse a touch the way contention does.
 	holdStatus int
@@ -153,6 +160,21 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 			d.mu.Lock()
 			d.typeRequests = append(d.typeRequests, string(body))
 			status, answer := d.typeStatus, d.typeBody
+			d.mu.Unlock()
+			if status == 0 && answer == "" {
+				status = http.StatusServiceUnavailable
+				answer = `{"error":"unavailable","code":"SIM_RUNNER_NOT_READY","message":"the XCTest runner is off",` +
+					`"details":{"state":"off","reason":"no AO session holds this simulator"}}`
+			}
+			if status != 0 {
+				w.WriteHeader(status)
+			}
+			_, _ = io.WriteString(w, answer)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/sim-devices/") &&
+			strings.HasSuffix(r.URL.Path, "/paste"):
+			d.mu.Lock()
+			d.pasteRequests = append(d.pasteRequests, string(body))
+			status, answer := d.pasteStatus, d.pasteBody
 			d.mu.Unlock()
 			if status == 0 && answer == "" {
 				status = http.StatusServiceUnavailable

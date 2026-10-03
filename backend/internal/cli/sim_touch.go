@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -83,7 +84,37 @@ type simGestureResult struct {
 	// to for a secure field, and KeyboardRestored that it switched it back.
 	KeyboardSwitchedTo string `json:"keyboardSwitchedTo,omitempty"`
 	KeyboardRestored   bool   `json:"keyboardRestored,omitempty"`
-	Note               string `json:"note"`
+	// Paste is how a paste was performed: "edit-menu" (the field held and
+	// Paste tapped in its edit menu - no key press) or "command-v" (hardware
+	// key presses). MenuItem is the item
+	// tapped, in the device's language.
+	Paste    string `json:"paste,omitempty"`
+	MenuItem string `json:"menuItem,omitempty"`
+	// SoftwareKeyboard is what was done about the on-screen keyboard after
+	// hardware key presses, which minimize it for every field after them.
+	// Absent when no key was pressed.
+	SoftwareKeyboard *simSoftwareKeyboard `json:"softwareKeyboard,omitempty"`
+	Note             string               `json:"note"`
+}
+
+// simSoftwareKeyboard is simgesture.Keyboard in the `--json` payload.
+type simSoftwareKeyboard struct {
+	// Shown: it was shown again after the key presses.
+	Shown bool `json:"shown"`
+	// Seen: a field had focus afterwards and the keyboard was on screen.
+	Seen bool `json:"seen"`
+	// Unseen is why it could not be looked at.
+	Unseen string `json:"unseen,omitempty"`
+	// Problem is a keyboard still minimized: the next field tapped will
+	// have none.
+	Problem string `json:"problem,omitempty"`
+}
+
+func newSimSoftwareKeyboard(k *simgesture.Keyboard) *simSoftwareKeyboard {
+	if k == nil {
+		return nil
+	}
+	return &simSoftwareKeyboard{Shown: k.Shown, Seen: k.Seen, Unseen: k.Unseen, Problem: k.Problem}
 }
 
 // simPasteLanding is where a paste landed, in the `--json` payload. The same
@@ -422,6 +453,12 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 			"more. Key presses are NOT checked that way: what a key produces is the simulator's " +
 			"to decide, so that route says what it sent and leaves the reading to you.\n\n" +
 			"Non-ASCII text also goes by pasteboard, because no US keyboard key can send it.\n\n" +
+			"A PASTE holds the field and taps Paste in its edit menu, found through the XCTest " +
+			"runner: touches, no key press. Only when that cannot be used - no runner, or a field whose menu " +
+			"has no Paste - does it press Command-V, and the `Route:` line says which it was. Key " +
+			"presses and Command-V are HARDWARE key presses to iOS, and they minimize the on-screen " +
+			"keyboard for every field tapped after them, so those routes show it again afterwards " +
+			"and say so on a `Keyboard:` line.\n\n" +
 			"`--paste` always uses the pasteboard and `--raw-keys` always sends key presses, skipping " +
 			"XCTest. `--raw-keys` " +
 			"promises only key presses.\n\n" +
@@ -468,7 +505,7 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 				}
 			}
 			if route.Paste {
-				return ctx.runSimPaste(cmd, opts, device, text, route, fallback.Reason)
+				return ctx.runSimPaste(cmd, opts, device, text, route, fallback)
 			}
 			runes := strconv.Itoa(len([]rune(text)))
 			detail := runes + " characters"
@@ -476,12 +513,13 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 				detail = runes + " key presses (--raw-keys: the simulator decides what they produce)"
 			}
 			return ctx.runSimGestureOn(cmd, opts, device, simGesture{
-				action:   "type",
-				detail:   detail,
-				events:   route.Events,
-				keyboard: route.Keyboard.Identifier,
-				text:     text,
-				fallback: fallback.Reason,
+				action:       "type",
+				detail:       detail,
+				events:       route.Events,
+				keyboard:     route.Keyboard.Identifier,
+				text:         text,
+				fallback:     fallback.Reason,
+				showKeyboard: true,
 			})
 		},
 	}
@@ -518,29 +556,44 @@ func (c *commandContext) planSimType(ctx context.Context, device simDevice, text
 
 // runSimPaste delivers the text through the guest pasteboard, under the same
 // gesture hold every other way of touching this device takes.
+//
+// The paste itself goes through the daemon first: it holds the field and taps
+// Paste in the edit menu, which presses no key. Command-V
+// from here is the fallback - when the runner cannot paste, or the field's
+// menu has no Paste - and a hardware key press, so it shows the software
+// keyboard again afterwards (see simbridge.ShowKeyboard). Either way the
+// result says which it was.
 func (c *commandContext) runSimPaste(
 	cmd *cobra.Command, opts simTouchOptions, device simDevice, text string, route simbridge.TextRoute,
-	fallback string,
+	fallback simTypeFallbackRoute,
 ) error {
 	ctx := cmd.Context()
 	sessionID, err := simSessionID("`ao sim type`")
 	if err != nil {
 		return err
 	}
+	menuSkipped := "the XCTest runner was not available to paste through the edit menu"
+	if !fallback.RunnerDown {
+		done, skipped, err := c.runSimMenuPaste(cmd, opts, device, sessionID, text, route, fallback.Reason)
+		if done || err != nil {
+			return err
+		}
+		menuSkipped = skipped
+	}
+
 	driver, err := c.simDriver(device)
 	if err != nil {
 		return err
 	}
-
 	// Recorded as a "type" step regardless of route: a recording captures what
 	// the app saw (text arriving in a field), not the mechanism that delivered
 	// it, and Emit has one translation for both - inputText.
 	holder := &cliSimHolder{ctx: c, sessionID: sessionID, device: device,
 		intent: acquireSimHoldRequest{Kind: "type", Text: text}}
-	result, err := simpaste.Run(ctx, holder, driver,
+	result, err := simpaste.Run(ctx, holder, driver, simpaste.KeyPaster{Driver: driver, ShowKeyboard: true},
 		simpaste.Simctl{Run: c.deps.CommandOutput}, device.UDID, text)
 	if err != nil {
-		return withSimTypeFallback(c.explainSimPasteFailure(ctx, device, route, err), fallback)
+		return withSimTypeFallback(c.explainSimPasteFailure(ctx, device, route, err), fallback.Reason)
 	}
 
 	out := simGestureResult{
@@ -556,9 +609,11 @@ func (c *commandContext) runSimPaste(
 			Field: result.Landing.Field, Path: result.Landing.Path,
 			Shown: result.Landing.Shown, Evidence: string(result.Landing.How),
 		},
-		Via:      "pasteboard",
-		Fallback: fallback,
-		Note:     simSharedDeviceNote,
+		Via:              "pasteboard",
+		Paste:            string(result.Pasted.Via),
+		Fallback:         fallback.Reason,
+		SoftwareKeyboard: newSimSoftwareKeyboard(result.Pasted.Keyboard),
+		Note:             simSharedDeviceNote,
 	}
 	if !result.Restored {
 		out.PasteboardLeftBehind = true
@@ -566,7 +621,102 @@ func (c *commandContext) runSimPaste(
 	if opts.json {
 		return writeJSON(cmd.OutOrStdout(), out)
 	}
-	return writeSimPaste(cmd.OutOrStdout(), out, result.Landing, result.RestoreErr)
+	return writeSimPaste(cmd.OutOrStdout(), out, result.Landing, result.RestoreErr, menuSkipped)
+}
+
+// simPasteInput mirrors controllers.SimPasteInput.
+type simPasteInput struct {
+	Text   string `json:"text"`
+	WaitMs int    `json:"waitMs,omitempty"`
+}
+
+// simPasteResponse mirrors controllers.SimPasteResponse.
+type simPasteResponse struct {
+	UDID               string          `json:"udid"`
+	App                string          `json:"app,omitempty"`
+	Landed             simPasteLanding `json:"landed"`
+	Detail             string          `json:"detail"`
+	Via                string          `json:"via"`
+	MenuItem           string          `json:"menuItem,omitempty"`
+	Warning            string          `json:"warning,omitempty"`
+	PasteboardRestored bool            `json:"pasteboardRestored"`
+	PasteboardError    string          `json:"pasteboardError,omitempty"`
+}
+
+// runSimMenuPaste pastes through the daemon: the field held, Paste tapped in
+// its edit menu, found through the XCTest runner's reads. done says it finished, for better or worse
+// (err); otherwise nothing was pasted and skipped says why, for the Command-V
+// fallback to report.
+func (c *commandContext) runSimMenuPaste(
+	cmd *cobra.Command, opts simTouchOptions, device simDevice, sessionID, text string, route simbridge.TextRoute,
+	fallback string,
+) (done bool, skipped string, err error) {
+	path := "sessions/" + url.PathEscape(sessionID) + "/sim-devices/" + url.PathEscape(device.UDID) + "/paste"
+	var resp simPasteResponse
+	err = c.postJSON(cmd.Context(), path, simPasteInput{Text: text, WaitMs: int(simTypeRunnerWait.Milliseconds())}, &resp)
+	if err != nil {
+		var apiErr apiResponseError
+		if !errors.As(err, &apiErr) {
+			return true, "", withSimTypeFallback(fmt.Errorf("`ao sim type` failed on %s: %w", device.Label(), err),
+				fallback)
+		}
+		switch apiErr.ErrorBody.Code {
+		case "SIM_RUNNER_NOT_READY":
+			state, _ := apiErr.ErrorBody.Details["state"].(string)
+			reason, _ := apiErr.ErrorBody.Details["reason"].(string)
+			return false, "the XCTest runner could not paste through the edit menu (" +
+				simRunnerNote(state, reason) + ")", nil
+		case "SIM_PASTE_NO_ITEM":
+			return false, firstLine(apiErr.ErrorBody.Message), nil
+		case "SIM_DRIVER_UNAVAILABLE":
+			return false, "the daemon could not touch the device to use the edit menu (" +
+				firstLine(apiErr.ErrorBody.Message) + ")", nil
+		case "":
+			if apiErr.StatusCode == http.StatusNotFound {
+				return false, "the running daemon predates pasting through the edit menu; restart it " +
+					"(`ao stop && ao start`) to get it", nil
+			}
+		}
+		return true, "", withSimTypeFallback(c.explainSimTypeFailure(device, err), fallback)
+	}
+
+	out := simGestureResult{
+		UDID:              device.UDID,
+		Name:              device.Name,
+		Runtime:           device.Runtime,
+		RuntimeIdentifier: device.RuntimeIdentifier,
+		Action:            "paste",
+		Detail:            strconv.Itoa(len([]rune(text))) + " characters",
+		Keyboard:          route.Keyboard.Identifier,
+		Route:             route.Why,
+		Landed:            &resp.Landed,
+		Via:               "pasteboard",
+		Paste:             resp.Via,
+		MenuItem:          resp.MenuItem,
+		App:               resp.App,
+		Fallback:          fallback,
+		Note:              simSharedDeviceNote,
+	}
+	if !resp.PasteboardRestored {
+		out.PasteboardLeftBehind = true
+	}
+	if opts.json {
+		return true, "", writeJSON(cmd.OutOrStdout(), out)
+	}
+	var restoreErr error
+	if resp.PasteboardError != "" {
+		restoreErr = errors.New(resp.PasteboardError)
+	}
+	landing := simpaste.Landing{Field: resp.Landed.Field, Path: resp.Landed.Path, Shown: resp.Landed.Shown,
+		How: simpaste.Evidence(resp.Landed.Evidence)}
+	if err := writeSimPaste(cmd.OutOrStdout(), out, landing, restoreErr, ""); err != nil {
+		return true, "", err
+	}
+	if resp.Warning != "" {
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "XCTest complained while pasting, though the text is there: %s\n",
+			resp.Warning)
+	}
+	return true, "", err
 }
 
 // explainSimPasteFailure says what went wrong AND what state the field is in,
@@ -660,6 +810,10 @@ type simGesture struct {
 	name       string
 	// fallback is why a `type` went by key presses rather than XCTest.
 	fallback string
+	// showKeyboard brings the on-screen keyboard back after the hardware key
+	// presses in events, which minimize it for every field after them (see
+	// simbridge.ShowKeyboard).
+	showKeyboard bool
 }
 
 // intent is what this gesture asks the daemon's recorder to capture, in the
@@ -712,7 +866,8 @@ func (c *commandContext) runSimGestureOn(
 
 	holder := &cliSimHolder{ctx: c, sessionID: sessionID, device: device, intent: gesture.intent()}
 	result, err := simgesture.Run(ctx, holder, driver, device.UDID,
-		simgesture.Gesture{Action: gesture.action, Detail: gesture.detail, Events: gesture.events, Last: gesture.last})
+		simgesture.Gesture{Action: gesture.action, Detail: gesture.detail, Events: gesture.events, Last: gesture.last,
+			ShowKeyboard: gesture.showKeyboard})
 	if err != nil {
 		return withSimTypeFallback(c.explainSimGestureFailure(device, err), gesture.fallback)
 	}
@@ -727,6 +882,7 @@ func (c *commandContext) runSimGestureOn(
 		Rescued:           result.Lifted,
 		Keyboard:          gesture.keyboard,
 		Fallback:          gesture.fallback,
+		SoftwareKeyboard:  newSimSoftwareKeyboard(result.Keyboard),
 		Note:              simSharedDeviceNote,
 	}
 	if gesture.action == "type" {
@@ -883,8 +1039,12 @@ func parseSimSpan(what, raw string) (float64, error) {
 // writeSimPaste reports a paste. It says PASTED rather than typed, and says why
 // that route was taken: an app that reacts to each keystroke behaves differently
 // when it receives one paste instead, and a caller who is debugging that needs
-// to know which of the two happened without having to guess.
-func writeSimPaste(out io.Writer, result simGestureResult, landing simpaste.Landing, restoreErr error) error {
+// to know which of the two happened without having to guess. It also says HOW
+// the paste was made, because a Command-V is a hardware key press and leaves
+// the device's keyboard changed - menuSkipped is why the edit menu was not used.
+func writeSimPaste(out io.Writer, result simGestureResult, landing simpaste.Landing, restoreErr error,
+	menuSkipped string,
+) error {
 	if err := writeSimTypeFallback(out, result.Fallback); err != nil {
 		return err
 	}
@@ -902,6 +1062,9 @@ func writeSimPaste(out io.Writer, result simGestureResult, landing simpaste.Land
 			return err
 		}
 	}
+	if err := writeSimPasteRoute(out, result, menuSkipped); err != nil {
+		return err
+	}
 	if result.PasteboardLeftBehind {
 		if _, err := fmt.Fprintf(out, "WARNING: the simulator's pasteboard could NOT be put back (%v), so the "+
 			"text is still on it and any app on that device can read it. Clear it before moving on.\n",
@@ -911,6 +1074,47 @@ func writeSimPaste(out io.Writer, result simGestureResult, landing simpaste.Land
 	}
 	_, err := fmt.Fprintln(out,
 		"An app that reacts to each keystroke sees one paste instead - use `--raw-keys` if it needs real key presses.")
+	return err
+}
+
+// writeSimPasteRoute says how the paste was made, and what that did to the
+// keyboard.
+func writeSimPasteRoute(out io.Writer, result simGestureResult, menuSkipped string) error {
+	if result.Paste == string(simpaste.ViaEditMenu) {
+		item := "Paste"
+		if result.MenuItem != "" {
+			item = result.MenuItem
+		}
+		_, err := fmt.Fprintf(out, "Route: the field's edit menu - held, then %q tapped. Touches only, no key "+
+			"press, so the on-screen keyboard is as it was.\n", item)
+		return err
+	}
+	line := "Route: Command-V, as hardware key presses"
+	if menuSkipped != "" {
+		line += " - " + menuSkipped
+	}
+	if _, err := fmt.Fprintln(out, line+"."); err != nil {
+		return err
+	}
+	return writeSimSoftwareKeyboard(out, result.SoftwareKeyboard)
+}
+
+// writeSimSoftwareKeyboard says what hardware key presses did to the
+// on-screen keyboard and what was done about it. A keyboard left minimized is
+// the device's next command's problem, so it is never left unsaid.
+func writeSimSoftwareKeyboard(out io.Writer, keyboard *simSoftwareKeyboard) error {
+	if keyboard == nil {
+		return nil
+	}
+	line := simgesture.Keyboard{Shown: keyboard.Shown, Seen: keyboard.Seen, Unseen: keyboard.Unseen,
+		Problem: keyboard.Problem}.String()
+	if line == "" {
+		return nil
+	}
+	if keyboard.Problem == "" {
+		line = "Keyboard: " + line
+	}
+	_, err := fmt.Fprintln(out, line+".")
 	return err
 }
 
@@ -939,6 +1143,9 @@ func writeSimGesture(out io.Writer, result simGestureResult) error {
 			"Note: the bridge released a touch this gesture left down. The device is fine, but the gesture did not end cleanly."); err != nil {
 			return err
 		}
+	}
+	if err := writeSimSoftwareKeyboard(out, result.SoftwareKeyboard); err != nil {
+		return err
 	}
 	tail := "Read the result with `ao sim ax` - never assume a touch changed what you expected."
 	if result.Action == "type" {

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 
 // Typing, the one thing this runner does to the screen.
@@ -168,7 +169,7 @@ enum Typist {
     /// Finds the focused element across every application on screen. Returns
     /// the bundle id holding it, or nil with a no_focus error in the answer.
     static func lookup() -> (String?, [String: Any]) {
-        var out: [String: Any] = ["version": runnerVersion]
+        var out: [String: Any] = ["version": runnerVersion, "pasteLabels": pasteLabels]
         let candidates = Hierarchy.onScreen()
         var keyboard = false
         var found: (bundleID: String, field: XCUIElementSnapshot)?
@@ -219,6 +220,30 @@ enum Typist {
         guard object.responds(to: NSSelectorFromString("hasKeyboardFocus")) else { return nil }
         return (object.value(forKey: "hasKeyboardFocus") as? NSNumber)?.boolValue
     }
+
+    /// "Paste" as the edit menu says it: in the device's language, then in
+    /// English. The daemon pastes by holding the focused field and tapping
+    /// this item with the bridge's touches - not XCTest's, which wait for the
+    /// app to idle first, and a web sign-in sheet was seen never to, holding
+    /// the runner for a minute a touch. The menu is drawn by UIKit in the
+    /// device's language while this runner's own bundle is English-only, so
+    /// asking UIKit's bundle the ordinary way would answer in the runner's
+    /// language; the device's is looked up in UIKit's table directly.
+    static let pasteLabels: [String] = {
+        var labels: [String] = []
+        let uikit = Bundle(for: UIView.self)
+        let languages = Bundle.preferredLocalizations(from: uikit.localizations, forPreferences: Locale.preferredLanguages)
+        for language in languages {
+            if let path = uikit.path(forResource: "Localizable", ofType: "strings", inDirectory: nil,
+                                     forLocalization: language),
+               let table = NSDictionary(contentsOfFile: path),
+               let paste = table["Paste"] as? String, !paste.isEmpty, !labels.contains(paste) {
+                labels.append(paste)
+            }
+        }
+        if !labels.contains("Paste") { labels.append("Paste") }
+        return labels
+    }()
 
     /// The first line of what XCTest said. Its failure carries the whole
     /// event-dispatch snapshot after it, hundreds of lines nobody acts on.

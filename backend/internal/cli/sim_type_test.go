@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -85,8 +86,8 @@ func TestSimType_ARunnerThatIsNotReadyFallsBackAndSaysSo(t *testing.T) {
 	if !strings.Contains(out, "Fallback: XCTest typing was not available") || !strings.Contains(out, "claim it") {
 		t.Fatalf("a fallback must say it happened and why:\n%s", out)
 	}
-	if len(driver.calls()) != 1 {
-		t.Fatal("the fallback must still type")
+	if calls := driver.calls(); len(calls) != 2 || !reflect.DeepEqual(calls[1], simbridge.ShowKeyboard()) {
+		t.Fatalf("the fallback must still type, and show the keyboard its key presses minimized: %+v", calls)
 	}
 }
 
@@ -228,5 +229,144 @@ func TestSimKey_RefusesAnUnknownKeyAndABadCount(t *testing.T) {
 		if _, _, err := executeCLI(t, deps, args...); err == nil || ExitCode(err) != 2 {
 			t.Fatalf("%v: err = %v, want exit 2", args, err)
 		}
+	}
+}
+
+// What the daemon answers when the runner pasted through the edit menu and
+// the screen proved it.
+const simMenuPastedBody = `{"udid":"087DF306-1FC9-4E5A-B9ED-AD36D6A1A0F1","app":"com.apple.SafariViewService",` +
+	`"landed":{"field":"รหัสผ่าน","path":"0.1.2","shown":"••••","evidence":"masked"},` +
+	`"detail":"the secure field \"รหัสผ่าน\" [0.1.2] shows 4 dots","via":"edit-menu","menuItem":"วาง",` +
+	`"pasteboardRestored":true}`
+
+func TestSimType_APasteGoesThroughTheEditMenuAndPressesNoKey(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, daemon, pasteboard := pasteDeps(t, driver, simKeyboardUS, "รหัส")
+	daemon.typeStatus = http.StatusUnprocessableEntity
+	daemon.typeBody = typeError("SIM_TYPE_UNSUITABLE",
+		"the focused field is a secure field, which takes only what the keyboard on screen can type", nil)
+	daemon.pasteStatus, daemon.pasteBody = http.StatusOK, simMenuPastedBody
+
+	out, _, err := executeCLI(t, deps, "sim", "type", "รหัส")
+	if err != nil {
+		t.Fatalf("sim type: %v", err)
+	}
+	for _, want := range []string{
+		"Fallback: the focused field is a secure field",
+		"Pasted 4 characters",
+		`the secure field "รหัสผ่าน" [0.1.2] shows 4 dots`,
+		`Route: the field's edit menu - held, then "วาง" tapped. Touches only, no key press`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if len(driver.calls()) != 0 || len(*pasteboard) != 0 {
+		t.Fatalf("gestures %+v, pasteboard writes %q: the daemon's route pastes, the CLI sends nothing",
+			driver.calls(), *pasteboard)
+	}
+	if len(daemon.pasteRequests) != 1 || !strings.Contains(daemon.pasteRequests[0], `"text":"รหัส"`) {
+		t.Fatalf("paste requests = %q", daemon.pasteRequests)
+	}
+}
+
+func TestSimType_JSONSaysHowItPasted(t *testing.T) {
+	deps, daemon, _ := pasteDeps(t, &fakeSimDriver{}, simKeyboardUS, "x")
+	daemon.pasteStatus, daemon.pasteBody = http.StatusOK, simMenuPastedBody
+
+	out, _, err := executeCLI(t, deps, "sim", "type", "รหัส", "--paste", "--json")
+	if err != nil {
+		t.Fatalf("sim type --json: %v", err)
+	}
+	var got simGestureResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if got.Via != "pasteboard" || got.Paste != "edit-menu" || got.MenuItem != "วาง" || got.SoftwareKeyboard != nil ||
+		got.Landed == nil || got.Landed.Evidence != "masked" {
+		t.Fatalf("json = %+v", got)
+	}
+}
+
+func TestSimType_AFieldWithNoPasteInItsMenuFallsBackToCommandVAndShowsTheKeyboard(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, daemon, pasteboard := pasteDeps(t, driver, simKeyboardUS, "hunter2")
+	daemon.pasteStatus = http.StatusUnprocessableEntity
+	daemon.pasteBody = typeError("SIM_PASTE_NO_ITEM",
+		`the edit menu offered "AutoFill" and no "Paste" - the field may refuse paste, or draw a menu of its own`,
+		map[string]any{"menu": []string{"AutoFill"}})
+
+	out, _, err := executeCLI(t, deps, "sim", "type", "hunter2", "--paste")
+	if err != nil {
+		t.Fatalf("sim type: %v", err)
+	}
+	for _, want := range []string{
+		`Route: Command-V, as hardware key presses - the edit menu offered "AutoFill" and no "Paste"`,
+		"Keyboard: the key presses minimized the on-screen keyboard (a hardware key press does), and it was shown again",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
+	}
+	calls := driver.calls()
+	if len(calls) != 2 || !reflect.DeepEqual(calls[0], simbridge.Paste()) ||
+		!reflect.DeepEqual(calls[1], simbridge.ShowKeyboard()) {
+		t.Fatalf("gestures %+v, want Command-V and then the keyboard toggle", calls)
+	}
+	if len(*pasteboard) != 2 || (*pasteboard)[0] != "hunter2" {
+		t.Fatalf("pasteboard writes %q", *pasteboard)
+	}
+}
+
+func TestSimType_ARunnerAlreadyKnownDownIsNotAskedToPaste(t *testing.T) {
+	// The type already waited for the runner and it was not there; asking it
+	// to paste would wait again for nothing.
+	driver := &fakeSimDriver{}
+	deps, daemon, _ := pasteDeps(t, driver, simKeyboardThai, "lf86428")
+
+	out, _, err := executeCLI(t, deps, "sim", "type", "lf86428")
+	if err != nil {
+		t.Fatalf("sim type: %v", err)
+	}
+	if len(daemon.typeRequests) != 1 || len(daemon.pasteRequests) != 0 {
+		t.Fatalf("type requests %d, paste requests %d", len(daemon.typeRequests), len(daemon.pasteRequests))
+	}
+	if !strings.Contains(out, "Route: Command-V, as hardware key presses - the XCTest runner was not available") {
+		t.Fatalf("output:\n%s", out)
+	}
+}
+
+func TestSimType_APasteThatMayHaveLandedIsNeverPastedAgain(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, daemon, pasteboard := pasteDeps(t, driver, simKeyboardUS, "x")
+	daemon.pasteStatus = http.StatusUnprocessableEntity
+	daemon.pasteBody = typeError("SIM_TYPE_NOT_PROVEN", "it was sent, but nothing on screen can be shown to hold it", nil)
+
+	_, _, err := executeCLI(t, deps, "sim", "type", "hello", "--paste")
+	if err == nil || !strings.Contains(err.Error(), "may be in the field") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(driver.calls()) != 0 || len(*pasteboard) != 0 {
+		t.Fatal("a paste that may have landed must not be sent a second way")
+	}
+}
+
+func TestSimKey_ShowsTheKeyboardItsKeyMinimizes(t *testing.T) {
+	driver := &fakeSimDriver{}
+	deps, _ := touchDeps(t, driver)
+
+	out, _, err := executeCLI(t, deps, "sim", "key", "backspace", "--json")
+	if err != nil {
+		t.Fatalf("sim key: %v", err)
+	}
+	var got simGestureResult
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if got.SoftwareKeyboard == nil || !got.SoftwareKeyboard.Shown || got.SoftwareKeyboard.Unseen == "" {
+		t.Fatalf("softwareKeyboard = %+v, want shown, and why it could not be seen", got.SoftwareKeyboard)
+	}
+	if calls := driver.calls(); len(calls) != 2 || !reflect.DeepEqual(calls[1], simbridge.ShowKeyboard()) {
+		t.Fatalf("gestures %+v", calls)
 	}
 }
