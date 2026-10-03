@@ -34,6 +34,7 @@ func fullProjectConfig() ProjectConfig {
 		HasWebUI:                true,
 		HasIOSSimulator:         true,
 		SimProfile:              &SimProfileConfig{Keep: []string{"com.apple.backboardd"}},
+		MobileScripts:           &MobileScriptsConfig{Product: "nter", Platform: MobilePlatformIOS},
 		DisableAutoCrew:         true,
 		PauseBeforeImplementing: true,
 		ApprovalRule:            ApprovalRule{Enabled: true, Threshold: 3},
@@ -93,6 +94,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		{"responseLanguage", func(c ProjectConfig) any { return c.ResponseLanguage }},
 		{"reviewers", func(c ProjectConfig) any { return c.Reviewers }},
 		{"simProfile", func(c ProjectConfig) any { return c.SimProfile }},
+		{"mobileScripts", func(c ProjectConfig) any { return c.MobileScripts }},
 		{"approvalRule", func(c ProjectConfig) any { return c.ApprovalRule }},
 		{"systemPromptAdditions", func(c ProjectConfig) any { return c.SystemPromptAdditions }},
 	}

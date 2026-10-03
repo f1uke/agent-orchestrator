@@ -97,6 +97,26 @@ type ProjectConfig struct {
 	// existed.
 	SimProfile *SimProfileConfig `json:"simProfile,omitempty"`
 
+	// MobileScripts makes this a mobile project whose simulators and emulators
+	// are driven ONLY by running reusable Maestro scripts from a shared store,
+	// never by an agent tapping through the app one gesture at a time.
+	//
+	// It is the single fact behind the device guidance a worker here is given:
+	// set, the step-by-step `ao sim tap` catalog is replaced by the script
+	// workflow (find the script, run it, judge the end state it left, author a
+	// missing one, never finish a failed run by hand), and qa plays its smoke
+	// cases with scripts. The rule came out of a measured study: on a known
+	// route a script was as reliable as an agent driving the app and many times
+	// faster, and it stays reliable only because every script starts from a
+	// fresh app state.
+	//
+	// It is a per-project setting rather than a list of project names so a new
+	// mobile project needs only this, and it carries the PLATFORM because an
+	// Android project has no `ao sim` at all - its scripts run through
+	// `maestro --device`. Nil leaves a project exactly as it was: an iOS project
+	// without it keeps the full `ao sim` catalog.
+	MobileScripts *MobileScriptsConfig `json:"mobileScripts,omitempty"`
+
 	// DisableAutoCrew turns off AUTOMATIC crew formation for this project, and
 	// nothing else.
 	//
@@ -260,6 +280,11 @@ func (c ProjectConfig) Validate() error {
 			return err
 		}
 	}
+	if c.MobileScripts != nil {
+		if err := c.MobileScripts.Validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -341,6 +366,73 @@ func (c SimProfileConfig) Validate() error {
 		}
 		if !strings.HasPrefix(label, "com.apple.") {
 			return fmt.Errorf("simProfile.keep[%d]: %q is not a com.apple.* daemon label", i, label)
+		}
+	}
+	return nil
+}
+
+// MobilePlatform is which app a mobile project's repository builds.
+type MobilePlatform string
+
+const (
+	// MobilePlatformIOS runs scripts on a simulator through `ao sim flow run`,
+	// under the AO simulator lease.
+	MobilePlatformIOS MobilePlatform = "ios"
+	// MobilePlatformAndroid runs scripts on an emulator through
+	// `maestro --device`; there is no `ao sim` for Android.
+	MobilePlatformAndroid MobilePlatform = "android"
+)
+
+// DefaultMobileScriptsStore is where the scripts store lives when a project
+// names none. It is spelled with `~` on purpose: it is rendered into an agent's
+// prompt and expanded by the agent's own shell.
+const DefaultMobileScriptsStore = "~/Documents/Projects/mobile-ui-scripts"
+
+// MobileScriptsConfig says which scripts drive this project's devices.
+type MobileScriptsConfig struct {
+	// Product is the product's folder in the store (projects/<product>). A
+	// product's iOS and Android repositories share it, so it is "nter" for both
+	// nter-ios-app and nter-android-app.
+	Product string `json:"product"`
+	// Platform is the app this repository builds.
+	Platform MobilePlatform `json:"platform" enum:"ios,android"`
+	// Store is the checkout holding bin/flow, projects/ and accounts/. Empty
+	// means DefaultMobileScriptsStore.
+	Store string `json:"store,omitempty"`
+}
+
+// StoreOrDefault is the store a prompt names.
+func (c MobileScriptsConfig) StoreOrDefault() string {
+	if c.Store == "" {
+		return DefaultMobileScriptsStore
+	}
+	return c.Store
+}
+
+// Validate refuses a setting that would render guidance an agent cannot
+// follow: no product means no INDEX.md to look scripts up in, and an unknown
+// platform means no way to run them.
+func (c MobileScriptsConfig) Validate() error {
+	if strings.TrimSpace(c.Product) == "" {
+		return fmt.Errorf("mobileScripts.product: required (the product's folder in the scripts store, e.g. nter)")
+	}
+	if strings.TrimSpace(c.Product) != c.Product || strings.ContainsAny(c.Product, " \t\n") {
+		return fmt.Errorf("mobileScripts.product: %q must not contain whitespace", c.Product)
+	}
+	if err := validateNameComponent("mobileScripts.product", c.Product); err != nil {
+		return err
+	}
+	switch c.Platform {
+	case MobilePlatformIOS, MobilePlatformAndroid:
+	default:
+		return fmt.Errorf("mobileScripts.platform: %q must be %q or %q", c.Platform, MobilePlatformIOS, MobilePlatformAndroid)
+	}
+	if c.Store != "" {
+		if strings.TrimSpace(c.Store) != c.Store || strings.ContainsAny(c.Store, "\n\r") {
+			return fmt.Errorf("mobileScripts.store: %q has surrounding whitespace or a line break", c.Store)
+		}
+		if !filepath.IsAbs(c.Store) && c.Store != "~" && !strings.HasPrefix(c.Store, "~/") {
+			return fmt.Errorf("mobileScripts.store: %q must be an absolute path or start with ~/", c.Store)
 		}
 	}
 	return nil

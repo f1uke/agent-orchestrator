@@ -14,6 +14,8 @@ Simulators are shared: another AO session, or a human working in Xcode, may be d
 
 **Read the screen, then act on what you read - never on what you expect.** `ao sim ax` gives every element that is actually on the screen a `tap` point in the same 0..1 coordinates `ao sim tap` takes, so acting on a screen is copy-the-number, not estimate-from-a-picture. An element that has scrolled out of view is still listed, marked `off screen`, and carries **no** tap point - scroll it into view with `ao sim drag` and read again. After any interaction, read again: a tap that reports success has not necessarily changed anything.
 
+**On a script-only project, a script moves the app and you read what it left.** A project can turn on `mobileScripts` (`ao project set-config <id> --mobile-scripts <product> --mobile-platform ios|android`), and its workers' prompts then carry the rule in full: to see a screen, verify a change, reproduce a bug or take evidence, run the reusable Maestro script that reaches it from the scripts store (`<store>/bin/flow run <product> reach/<script>`, which claims your device and runs it through `ao sim flow run`), then judge the end state with `ao sim shot`, `ao sim ax` and `ao sim log`. The gesture commands below (`ao sim tap`, `ao sim type`, `ao sim drag` and the rest) are for authoring a script nobody has written yet - with `ao sim flow record` - and for nothing else there. A script that fails is read (Maestro prints its debug folder), fixed or reported, and re-run - never finished by hand.
+
 Requires macOS with the Xcode command line tools (`xcrun` on PATH). The interaction commands additionally need Node.js 20+ on PATH; `ao sim list` and `ao sim shot` do not.
 
 ## Syntax
@@ -37,7 +39,7 @@ ao sim type   <text>           [flags]
 ao sim key    <name>           [flags]
 ao sim button <name>           [flags]
 ao sim flow check <file>       [flags]
-ao sim flow run   <file>       [flags]
+ao sim flow run   <file>...    [flags]
 ao sim flow record start       [flags]
 ao sim flow record status      [flags]
 ao sim flow record stop        [flags]
@@ -805,6 +807,7 @@ Work with Maestro flow files.
 ao sim flow check flow.yaml            # parses it - no device involved
 ao sim claim --udid <test-device>
 ao sim flow run flow.yaml --udid <test-device>
+ao sim flow run a.yaml b.yaml --udid <test-device>   # several flows, ONE Maestro start-up
 ao sim release --udid <test-device>
 ```
 
@@ -813,7 +816,12 @@ structure. It does NOT check that a selector matches anything, and it does not
 check values - an out-of-range `point:` passes the parse and fails at run time.
 
 `ao sim flow run` requires a claim on the target device and always pins
-`--device` for you. Both refuse loudly if `maestro` is not installed; AO never
+`--device` for you. Give it several files and they run one after another in a
+single Maestro launch, saving its start-up (about 20 seconds) for every flow
+after the first; each flow still starts however it says it starts, the run fails
+if any flow fails, and Maestro's summary names which. Every file is checked
+before Maestro starts, so a typo in the last path costs nothing. Values reach a
+flow as `MAESTRO_<KEY>` environment variables, which pass straight through. Both refuse loudly if `maestro` is not installed; AO never
 installs it - everything else in `ao sim`, including `ao sim ax --format
 maestro`, is unaffected.
 
