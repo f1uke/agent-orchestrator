@@ -210,7 +210,12 @@ var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 // points - the e2e notes taught "Paste is roughly x 0.16, one row up" - because
 // `ao sim ax` could not see them. On a held device it now can, and the one
 // thing an agent would not guess is that it may tap them by name.
-const simGuidanceBudget = 4200
+// Raised 4200 -> 4400 for covered elements. The XCTest reader handed out tap
+// points for rows under the tab bar and a button under the keyboard's bar, and
+// an agent tapping them hit the tab bar instead - six times in twelve runs of
+// the nter study. `ao sim ax` now marks them, and an agent that meets
+// "covered by" needs the one move that clears it.
+const simGuidanceBudget = 4400
 
 func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 	guidance := prompts.SimulatorGuidance()

@@ -6254,6 +6254,16 @@ paths:
           description: How long to wait for a runner that is still starting, in milliseconds.
             0 answers at once. Capped at 30000.
           type: integer
+      - description: Also hit-test every element's tap point, so an element drawn
+          under something else (a row under the tab bar, a button under the keyboard)
+          comes back with covered. Costs about a millisecond per element.
+        in: query
+        name: hitTest
+        schema:
+          description: Also hit-test every element's tap point, so an element drawn
+            under something else (a row under the tab bar, a button under the keyboard)
+            comes back with covered. Costs about a millisecond per element.
+          type: boolean
       responses:
         "200":
           content:
@@ -10587,6 +10597,8 @@ components:
           type: array
         foregroundSource:
           type: string
+        hitTest:
+          $ref: '#/components/schemas/SimbridgeXCTestHitTest'
         screen:
           $ref: '#/components/schemas/SimSize'
         version:
@@ -10603,6 +10615,8 @@ components:
           items:
             $ref: '#/components/schemas/SimXCTestNode'
           type: array
+        covered:
+          $ref: '#/components/schemas/SimbridgeXCTestCover'
         enabled:
           type: boolean
         focused:
@@ -10625,6 +10639,53 @@ components:
       - type
       - frame
       - enabled
+      type: object
+    SimbridgeXCTestCover:
+      properties:
+        by:
+          $ref: '#/components/schemas/SimbridgeXCTestCoverer'
+        point:
+          $ref: '#/components/schemas/SimbridgeXCTestPoint'
+      required:
+      - by
+      type: object
+    SimbridgeXCTestCoverer:
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+      required:
+      - type
+      type: object
+    SimbridgeXCTestHitTest:
+      properties:
+        checked:
+          type: integer
+        covered:
+          type: integer
+        elapsedMs:
+          type: integer
+        error:
+          type: string
+      required:
+      - checked
+      - covered
+      - elapsedMs
+      type: object
+    SimbridgeXCTestPoint:
+      properties:
+        x:
+          format: double
+          type: number
+        "y":
+          format: double
+          type: number
+      required:
+      - x
+      - "y"
       type: object
     SmokeAuthoredCaseInput:
       properties:

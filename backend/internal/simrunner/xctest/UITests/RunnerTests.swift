@@ -23,7 +23,7 @@ import XCTest
 
 /// Bumped whenever the wire format changes. The daemon refuses a runner that
 /// reports a different one, because it may be a stale build left on a port.
-let runnerVersion = "2"
+let runnerVersion = "3"
 
 @_silgen_name("proc_pidpath")
 private func proc_pidpath(_ pid: Int32, _ buffer: UnsafeMutableRawPointer, _ size: UInt32) -> Int32
@@ -138,7 +138,9 @@ final class Server {
         touch()
         switch (method, path) {
         case ("GET", "/hierarchy"):
-            return (200, Hierarchy.read(bundleIDs: query["app"].map { $0.split(separator: ",").map(String.init) } ?? []))
+            return (200, Hierarchy.read(
+                bundleIDs: query["app"].map { $0.split(separator: ",").map(String.init) } ?? [],
+                hitTest: query["hitTest"] == "1"))
         case ("GET", "/focus"):
             let (status, out) = Typist.focus()
             return (status, out)
@@ -268,7 +270,11 @@ enum Hierarchy {
     /// signs in on the web lives there, and the app's own tree holds none of it.
     static let remoteViewHosts = ["com.apple.SafariViewService"]
 
-    static func read(bundleIDs explicit: [String]) -> [String: Any] {
+    /// With hitTest, every element a caller could tap is also hit-tested, and
+    /// one drawn under something else carries `covered` (see Occlusion). It
+    /// costs about a millisecond per element, so only callers that hand out
+    /// tap points ask for it.
+    static func read(bundleIDs explicit: [String], hitTest: Bool = false) -> [String: Any] {
         let started = Date()
         var errors: [String] = []
         var targets: [(bundleID: String, pid: Int32)] = []
@@ -282,7 +288,7 @@ enum Hierarchy {
             targets = explicit.map { ($0, pid(of: XCUIApplication(bundleIdentifier: $0))) }
         }
 
-        var apps: [[String: Any]] = []
+        var snapshots: [(target: (bundleID: String, pid: Int32), snapshot: XCUIElementSnapshot)] = []
         var screen: CGSize = .zero
         for target in targets {
             let app = XCUIApplication(bundleIdentifier: target.bundleID)
@@ -291,13 +297,23 @@ enum Hierarchy {
                 if snapshot.frame.width * snapshot.frame.height > screen.width * screen.height {
                     screen = snapshot.frame.size
                 }
-                var entry: [String: Any] = ["bundleId": target.bundleID, "tree": node(snapshot)]
-                if target.pid > 0 { entry["pid"] = Int(target.pid) }
-                if remoteViewHosts.contains(target.bundleID) { entry["remoteView"] = true }
-                apps.append(entry)
+                snapshots.append((target, snapshot))
             } catch {
                 errors.append("\(target.bundleID): \(error.localizedDescription)")
             }
+        }
+        // Judged across every application at once: what covers an element is
+        // as often another process (the keyboard, a web sheet) as its own app.
+        var occlusion: Occlusion.Result?
+        if hitTest {
+            occlusion = Occlusion.judge(snapshots.map(\.snapshot))
+        }
+        var apps: [[String: Any]] = []
+        for (target, snapshot) in snapshots {
+            var entry: [String: Any] = ["bundleId": target.bundleID, "tree": node(snapshot, covers: occlusion?.covers ?? [:])]
+            if target.pid > 0 { entry["pid"] = Int(target.pid) }
+            if remoteViewHosts.contains(target.bundleID) { entry["remoteView"] = true }
+            apps.append(entry)
         }
         var out: [String: Any] = [
             "version": runnerVersion,
@@ -306,6 +322,13 @@ enum Hierarchy {
             "foregroundSource": source,
             "elapsedMs": Int(Date().timeIntervalSince(started) * 1000),
         ]
+        if let occlusion {
+            var summary: [String: Any] = [
+                "checked": occlusion.checked, "covered": occlusion.covers.count, "elapsedMs": occlusion.elapsedMs,
+            ]
+            if let error = occlusion.error { summary["error"] = error }
+            out["hitTest"] = summary
+        }
         if !errors.isEmpty { out["errors"] = errors }
         return out
     }
@@ -384,7 +407,7 @@ enum Hierarchy {
         return nil
     }
 
-    static func node(_ snapshot: XCUIElementSnapshot) -> [String: Any] {
+    static func node(_ snapshot: XCUIElementSnapshot, covers: [ObjectIdentifier: Occlusion.Cover] = [:]) -> [String: Any] {
         let frame = snapshot.frame
         var out: [String: Any] = [
             "type": typeName(snapshot.elementType),
@@ -402,7 +425,12 @@ enum Hierarchy {
         // Keyboard focus where XCTest reports it: inside a web view every
         // element answers hasFocus, so "focused" would mark the whole page.
         if Typist.hasKeyboardFocus(snapshot) ?? snapshot.hasFocus { out["focused"] = true }
-        let children = snapshot.children.map(node)
+        if let cover = covers[ObjectIdentifier(snapshot as AnyObject)] {
+            var covered: [String: Any] = ["by": cover.by]
+            if let point = cover.point { covered["point"] = ["x": finite(point.x), "y": finite(point.y)] }
+            out["covered"] = covered
+        }
+        let children = snapshot.children.map { node($0, covers: covers) }
         if !children.isEmpty { out["children"] = children }
         return out
     }

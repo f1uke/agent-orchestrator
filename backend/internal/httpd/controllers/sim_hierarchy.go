@@ -16,7 +16,7 @@ import (
 // SimRunner is the daemon's XCTest runner (internal/simrunner): it reads the
 // screen, and types for `ao sim type` (SimTypeController).
 type SimRunner interface {
-	Read(ctx context.Context, udid string, wait time.Duration) (simbridge.XCTestHierarchy, simrunner.Status, error)
+	Read(ctx context.Context, udid string, opts simrunner.ReadOptions) (simbridge.XCTestHierarchy, simrunner.Status, error)
 	Await(ctx context.Context, udid string, wait time.Duration) (simrunner.Status, error)
 	Focus(ctx context.Context, udid string) (simrunner.TypeAnswer, error)
 	Type(ctx context.Context, udid, text string, opts simrunner.TypeOptions) (simrunner.TypeAnswer, error)
@@ -39,7 +39,8 @@ func (c *SimHierarchyController) Register(r chi.Router) {
 
 // SimHierarchyQuery is the query of GET /sim/devices/{udid}/hierarchy.
 type SimHierarchyQuery struct {
-	WaitMs int `query:"waitMs,omitempty" description:"How long to wait for a runner that is still starting, in milliseconds. 0 answers at once. Capped at 30000."`
+	WaitMs  int  `query:"waitMs,omitempty" description:"How long to wait for a runner that is still starting, in milliseconds. 0 answers at once. Capped at 30000."`
+	HitTest bool `query:"hitTest,omitempty" description:"Also hit-test every element's tap point, so an element drawn under something else (a row under the tab bar, a button under the keyboard) comes back with covered. Costs about a millisecond per element."`
 }
 
 // SimRunnerView is a device's XCTest runner as the caller needs to report it.
@@ -75,7 +76,17 @@ func (c *SimHierarchyController) hierarchy(w http.ResponseWriter, r *http.Reques
 		}
 		wait = min(time.Duration(ms)*time.Millisecond, maxHierarchyWait)
 	}
-	h, status, err := c.Runner.Read(r.Context(), chi.URLParam(r, "udid"), wait)
+	hitTest := false
+	if raw := r.URL.Query().Get("hitTest"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_HIT_TEST",
+				"hitTest must be true or false", nil)
+			return
+		}
+		hitTest = parsed
+	}
+	h, status, err := c.Runner.Read(r.Context(), chi.URLParam(r, "udid"), simrunner.ReadOptions{Wait: wait, HitTest: hitTest})
 	resp := SimHierarchyResponse{Runner: SimRunnerView{State: string(status.State), Reason: status.Reason}}
 	if err == nil {
 		resp.Hierarchy = &h

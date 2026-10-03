@@ -170,7 +170,7 @@ func aoBinaryPath() string {
 // runner that is starting - these reads sit inside a gesture.
 func simRunnerAXReader(runner *simrunner.Manager) simstream.AXReader {
 	return func(ctx context.Context, udid string) (simbridge.Snapshot, bool) {
-		h, _, err := runner.Read(ctx, udid, 0)
+		h, _, err := runner.Read(ctx, udid, simrunner.ReadOptions{})
 		if err != nil {
 			return simbridge.Snapshot{}, false
 		}

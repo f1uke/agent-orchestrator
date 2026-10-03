@@ -12,7 +12,7 @@ Simulators are shared: another AO session, or a human working in Xcode, may be d
 
 **Never attach a pipe to an app's stdout.** `xcrun simctl launch --console-pipe` looks like the way to read an app's output. It is a trap: as soon as anything stops draining that pipe the 64 KB buffer fills and the app blocks in `write()` **on its main thread**. The app is then wedged - `ao sim ax` returns nothing, `ao sim tap` reports success and changes nothing, the screen looks frozen - and none of those symptoms points back at your capture. Use `ao sim log`, which reads the unified log and cannot block the app.
 
-**Read the screen, then act on what you read - never on what you expect.** `ao sim ax` gives every element that is actually on the screen a `tap` point in the same 0..1 coordinates `ao sim tap` takes, so acting on a screen is copy-the-number, not estimate-from-a-picture. An element that has scrolled out of view is still listed, marked `off screen`, and carries **no** tap point - scroll it into view with `ao sim drag` and read again. After any interaction, read again: a tap that reports success has not necessarily changed anything.
+**Read the screen, then act on what you read - never on what you expect.** `ao sim ax` gives every element that is actually on the screen a `tap` point in the same 0..1 coordinates `ao sim tap` takes, so acting on a screen is copy-the-number, not estimate-from-a-picture. An element that has scrolled out of view is still listed, marked `off screen`, and carries **no** tap point - scroll it into view with `ao sim drag` and read again. An element that is on the screen but drawn under something else - a row under the tab bar, a button under the keyboard's `^ v Done` bar - is marked `covered by ...`: it has no tap point when no part of it left to touch, and a point in the part still showing when something does. After any interaction, read again: a tap that reports success has not necessarily changed anything.
 
 **On a script-only project, a script moves the app and you read what it left.** A project can turn on `mobileScripts` (`ao project set-config <id> --mobile-scripts <product> --mobile-platform ios|android`), and its workers' prompts then carry the rule in full: to see a screen, verify a change, reproduce a bug or take evidence, run the reusable Maestro script that reaches it from the scripts store (`<store>/bin/flow run <product> reach/<script>`, which claims your device and runs it through `ao sim flow run`), then judge the end state with `ao sim shot`, `ao sim ax` and `ao sim log`. The gesture commands below (`ao sim tap`, `ao sim type`, `ao sim drag` and the rest) are for authoring a script nobody has written yet - with `ao sim flow record` - and for nothing else there. A script that fails is read (Maestro prints its debug folder), fixed or reported, and re-run - never finished by hand.
 
@@ -272,7 +272,7 @@ Keyboard: up, 49 keys, NOT Latin letters (a non-English input mode); the globe k
 Text output is one line per element, indented by nesting:
 
 ```
-iPhone 17 Pro Max - 440x956 points, 24 elements (18 on screen, 6 off screen)
+iPhone 17 Pro Max - 440x956 points, 24 elements (18 on screen (2 of them covered), 6 off screen)
 Foreground app: com.example.app (pid 42)
 Device: 00000000-0000-0000-0000-000000000000
 Lease: You hold this device until 2026-08-13T07:51:02Z. ...
@@ -282,7 +282,11 @@ Application "Example" id "com.example.app"  tap 0.500 0.500  box 0.000,0.000->1.
   TextField "Search"  tap 0.500 0.126  box 0.045,0.105->0.955,0.146  [0.0]
   Button "Continue" (disabled)  tap 0.500 0.863  box 0.045,0.837->0.955,0.889  [0.1]
   Button "See all"  off screen  box 0.802,1.010->0.964,1.040  [0.2]
+  Button "Next"  covered by Toolbar "Toolbar", no part of it left to touch  box 0.184,0.567->0.816,0.627  [0.3]
+  StaticText "Top story"  tap 0.695 0.898 (the part still showing - its centre is under TabBar "Tab Bar")  box 0.430,0.891->0.960,0.940  [0.4]
 ```
+
+**Covered elements.** A frame says where an element is, not what is drawn over it. So on an XCTest read, `ao sim ax` asks the accessibility server what a touch at each element's centre would land on - a real hit-test across every process on screen, not a guess from bar heights - and an element whose centre answers with something else, in another layer of the screen, is `covered by` that: the tab bar over a row scrolled beneath it, the keyboard or its `^ v Done` bar over a form button, a sheet over the page. When part of it still shows, that part is hit-tested too and its point replaces the centre (the line says so); when none does, there is no tap point. Scroll it clear (`ao sim drag`) or close the keyboard (its Done / checkmark key, or `ao sim key enter` to submit the field), read again, then tap. The hit-test costs about a millisecond per element, and only `ao sim ax` and `ao sim tap --label` pay it.
 
 The header splits the count: how much of the screen you can touch now, and how much is only reachable after scrolling. On a real app screen most of the tree is often the second kind.
 
@@ -312,6 +316,8 @@ JSON shape (`--json`):
 	"truncated": false,
 	"onScreenCount": 18,
 	"offScreenCount": 6,
+	"hitTested": true,
+	"coveredCount": 2,
 	"reader": { "source": "xctest" },
 	"udid": "00000000-0000-0000-0000-000000000000",
 	"name": "iPhone 17 Pro Max",
@@ -321,6 +327,7 @@ JSON shape (`--json`):
 
 - **`tap` is the whole point.** Feed `tap.x` and `tap.y` straight into `ao sim tap`. Never estimate a coordinate from a screenshot.
 - **No `tap` means there is nowhere to touch it.** The element is on the page but off the screen (`"offScreen": true`). It used to report the nearest edge instead, which put a finger on whatever really is at that edge - most often the tab bar. Scroll to it and read again.
+- **`covered` is something drawn over it** (`{ "by": "Toolbar \"Toolbar\"", "visiblePart": false }`). With `visiblePart: true` the `tap` is a point in the part still showing, checked by hit-testing it; with `false` there is no `tap`. `hitTested: true` on the read means every on-screen element was checked, so one without `covered` really is reachable at its `tap`, and `coveredCount` counts the covered ones. A read through the accessibility bridge, or one whose hit-test could not run (the text output then says `this read did not hit-test`), knows nothing about what covers what.
 - **`box` is the element's four edges** (left, top, right, bottom) in the same 0..1 units, and is **not clipped to the screen**: a `y1` of 1.36 means "a third of a screen further down", which is how far to scroll. It also tells you the size and shape of a target - whether a row is a whole card or the chevron at the end of one.
 - **`path`** (`0.1.2`) is the index path in this tree. It always exists; `id` (the app's own accessibility identifier) often does not.
 - **`enabled: false`** means tapping it does nothing. Check it before blaming a tap that "did not work".
@@ -603,6 +610,8 @@ ao sim ax                              # confirm what actually happened
   | The name matches a control and the text drawn inside it | One target, not an ambiguity - the outer control is tapped                                                                                                         |
   | Nothing answers to it                                   | **Fails, exit 1**, listing what CAN be tapped right now, so you can fix the name in one round                                                                      |
   | It is below the fold                                    | **Fails, exit 1**, with how far down it is - scroll with `ao sim drag`, read again, then tap                                                                       |
+  | It is covered - under the tab bar, the keyboard's bar, a sheet - and no part of it left to touch | **Fails, exit 1**, naming what covers it - scroll it clear or close the keyboard, read again, then tap. Nothing is touched. |
+  | It is partly covered                                    | Tapped in the part still showing (hit-tested first), and the output says so: `Its centre is under TabBar "Tab Bar", so the tap went to the part of it still showing.`; `--json` adds `coveredBy` |
   | It is disabled                                          | **Fails, exit 1** - tapping it would report success and change nothing. The message gives you the coordinate to override with if the app is wrong about the state. |
   | The app cannot answer at all                            | **Fails, exit 1**, saying its main thread is blocked - the same diagnosis `ao sim ax` gives                                                                        |
 

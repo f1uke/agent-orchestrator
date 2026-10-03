@@ -206,7 +206,7 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 	if err != nil {
 		return simAXResult{}, err
 	}
-	driver, err := c.simDriverWaiting(device, simAXRunnerWait)
+	driver, err := c.simDriverReading(device, simReadOptions{wait: simAXRunnerWait, hitTest: true})
 	if err != nil {
 		return simAXResult{}, err
 	}
@@ -373,14 +373,24 @@ func (c *commandContext) resolveBootedSimDevice(ctx context.Context, udid string
 // Its reads go through the daemon's XCTest runner when one is up for the
 // device (see sim_xctest.go), and through the bridge otherwise; its touches
 // always go through the bridge. A read here never waits for a runner that is
-// still starting - simDriverWaiting is for the one command whose job is to read.
+// still starting and does not hit-test - simDriverReading is for the commands
+// that hand out or act on tap points.
 func (c *commandContext) simDriver(device simDevice) (simbridge.Driver, error) {
-	return c.simDriverWaiting(device, 0)
+	return c.simDriverReading(device, simReadOptions{})
 }
 
-// simDriverWaiting is simDriver whose reads wait up to wait for a starting
-// runner.
-func (c *commandContext) simDriverWaiting(device simDevice, wait time.Duration) (simbridge.Driver, error) {
+// simReadOptions shapes the runner reads of a driver.
+type simReadOptions struct {
+	// wait is how long a read waits for a runner that is still starting.
+	wait time.Duration
+	// hitTest asks the runner what a touch at each tap point reaches, so an
+	// element under the tab bar or the keyboard is marked covered rather than
+	// handed out as a place to touch.
+	hitTest bool
+}
+
+// simDriverReading is simDriver with its runner reads shaped by opts.
+func (c *commandContext) simDriverReading(device simDevice, opts simReadOptions) (simbridge.Driver, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -395,15 +405,14 @@ func (c *commandContext) simDriverWaiting(device simDevice, wait time.Duration) 
 	if err != nil {
 		return nil, err
 	}
-	return xctestReadingDriver{Driver: bridge, read: c.readSimHierarchy, wait: wait}, nil
+	return xctestReadingDriver{Driver: bridge, read: c.readSimHierarchy, opts: opts}, nil
 }
 
 func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {
 	// The split, not just the total: on a scrolling screen most of the tree is
 	// usually below the fold, and nothing else on this page says so.
-	if _, err := fmt.Fprintf(out, "%s - %.0fx%.0f points, %d elements (%d on screen, %d off screen)\n",
-		result.Name, result.Screen.Width, result.Screen.Height, result.NodeCount,
-		result.OnScreenCount, result.OffScreenCount); err != nil {
+	if _, err := fmt.Fprintf(out, "%s - %.0fx%.0f points, %d elements (%s)\n",
+		result.Name, result.Screen.Width, result.Screen.Height, result.NodeCount, simAXReach(result.Snapshot)); err != nil {
 		return err
 	}
 	if result.Frontmost.BundleID != "" {
@@ -439,6 +448,11 @@ func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {
 			return err
 		}
 	}
+	if note := simAXHitTestNote(result.Snapshot); note != "" {
+		if _, err := fmt.Fprintln(out, note); err != nil {
+			return err
+		}
+	}
 	if result.OnlyStatusBar {
 		// Said as a possibility, because a genuinely blank screen looks the same
 		// from here - and read twice already, so the caller knows it is not a
@@ -462,6 +476,25 @@ func writeSimAX(out io.Writer, result simAXResult, sessionID string) error {
 	}
 	_, err := fmt.Fprintf(out, "\nTap an element with its own point: `ao sim tap <x> <y>` (claim the device first with `ao sim claim`).\n")
 	return err
+}
+
+// simAXReach is the header's split of the tree: what can be touched now, what
+// of that is drawn under something else, and what needs scrolling to first.
+func simAXReach(s simbridge.Snapshot) string {
+	onScreen := fmt.Sprintf("%d on screen", s.OnScreenCount)
+	if s.CoveredCount > 0 {
+		onScreen += fmt.Sprintf(" (%d of them covered)", s.CoveredCount)
+	}
+	return fmt.Sprintf("%s, %d off screen", onScreen, s.OffScreenCount)
+}
+
+// simAXHitTestNote says when an XCTest read could not tell what is drawn over
+// what: without it, a tap point under the keyboard looks like any other.
+func simAXHitTestNote(s simbridge.Snapshot) string {
+	if s.Reader == nil || s.Reader.Source != simbridge.SourceXCTest || s.HitTested {
+		return ""
+	}
+	return "Note: this read did not hit-test, so an element under the tab bar or the keyboard is not marked covered - its tap point may land on what is on top."
 }
 
 // writeSimAXElements prints the tree with the tap point on every line, so the
@@ -492,6 +525,10 @@ func writeSimAXElements(out io.Writer, elements []simbridge.Element, depth int) 
 		// Where to touch it, or that there is nowhere to - never a coordinate
 		// that reaches something else.
 		switch {
+		case e.Covered != nil && e.Tap != nil:
+			line += fmt.Sprintf("  tap %.3f %.3f (the part still showing - its centre is under %s)", e.Tap.X, e.Tap.Y, e.Covered.By)
+		case e.Covered != nil:
+			line += "  covered by " + e.Covered.By + ", no part of it left to touch"
 		case e.Tap != nil:
 			line += fmt.Sprintf("  tap %.3f %.3f", e.Tap.X, e.Tap.Y)
 		case e.OffScreen:

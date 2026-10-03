@@ -42,6 +42,9 @@ type simTapMatch struct {
 	Type      string  `json:"type,omitempty"`
 	X         float64 `json:"x"`
 	Y         float64 `json:"y"`
+	// CoveredBy is set when the element's centre is under something else and
+	// the tap went to the part of it still showing.
+	CoveredBy string `json:"coveredBy,omitempty"`
 }
 
 // simUnreadableScreenError is the screen coming back with nothing while the
@@ -66,7 +69,9 @@ func (c *commandContext) runSimTapByName(cmd *cobra.Command, opts simTouchOption
 	if err != nil {
 		return err
 	}
-	driver, err := c.simDriver(device)
+	// Hit-tested: a tap by name acts on the point it reads, and a point under
+	// the tab bar or the keyboard is a tap on the tab bar or the keyboard.
+	driver, err := c.simDriverReading(device, simReadOptions{hitTest: true})
 	if err != nil {
 		return err
 	}
@@ -122,8 +127,7 @@ func (c *commandContext) runSimTapByName(cmd *cobra.Command, opts simTouchOption
 				// The point as well as the name: a caller checking that the
 				// tool agreed with them needs the coordinate it acted on, and
 				// it is the one to re-run by hand if it did not.
-				Detail: fmt.Sprintf("%s at (%.3f, %.3f)",
-					simTapTargetLabel(found.Element), found.Element.Tap.X, found.Element.Tap.Y),
+				Detail: simTapDetail(found.Element),
 				Events: events,
 				Last:   *found.Element.Tap,
 			}, nil
@@ -159,16 +163,35 @@ func (c *commandContext) runSimTapByName(cmd *cobra.Command, opts simTouchOption
 			Y:         tap.Y,
 		},
 	}
+	if matched.Element.Covered != nil {
+		out.Target.CoveredBy = matched.Element.Covered.By
+	}
 	if opts.json {
 		return writeJSON(cmd.OutOrStdout(), out)
 	}
 	return writeSimGesture(cmd.OutOrStdout(), out)
 }
 
-// simTapReachable refuses the two elements that exist but must not be tapped.
-// Both would otherwise report success and change nothing, which is the failure
-// this whole command set is built to avoid.
+// simTapDetail is what a by-name tap reports it did: the element and the
+// point. A partly covered element's point is in the part still showing, which
+// writeSimTapMatch says on a line of its own.
+func simTapDetail(e simbridge.Element) string {
+	return fmt.Sprintf("%s at (%.3f, %.3f)", simTapTargetLabel(e), e.Tap.X, e.Tap.Y)
+}
+
+// simTapReachable refuses the elements that exist but must not be tapped:
+// covered by something else, off screen, disabled. Each would otherwise report
+// success and change nothing - or change something nobody asked for - which is
+// the failure this whole command set is built to avoid.
 func simTapReachable(e simbridge.Element) error {
+	if e.Covered != nil && e.Tap == nil {
+		// On the screen, so the off-screen advice would be wrong: the element
+		// is in the right place and something is drawn over it.
+		return fmt.Errorf("%s is on the screen but covered by %s, so a tap at it would land on that instead. Nothing was tapped.\n"+
+			"Move it clear and read again: scroll it into the open with `ao sim drag 0.5 0.6 0.5 0.3`, or - when the keyboard covers it - "+
+			"close the keyboard first (its Done / checkmark key, or submit the field with `ao sim key enter`). Then read again and tap: `ao sim ax`",
+			simTapTargetLabel(e), e.Covered.By)
+	}
 	if e.Tap == nil {
 		var b strings.Builder
 		fmt.Fprintf(&b, "%s is off screen, so there is nowhere to touch it.", simTapTargetLabel(e))
@@ -208,7 +231,11 @@ func explainSimSelect(device simDevice, selector simbridge.Selector, err error) 
 			selector, len(ambiguous.Matches), device.Label())
 		for _, e := range ambiguous.Matches {
 			if e.Tap == nil {
-				fmt.Fprintf(&b, "\n  (off screen)              # %s  [%s]", simTapTargetLabel(e), e.Path)
+				where := "(off screen)"
+				if e.Covered != nil {
+					where = "(covered)   "
+				}
+				fmt.Fprintf(&b, "\n  %s              # %s  [%s]", where, simTapTargetLabel(e), e.Path)
 				continue
 			}
 			fmt.Fprintf(&b, "\n  ao sim tap %.3f %.3f   # %s  [%s]", e.Tap.X, e.Tap.Y, simTapTargetLabel(e), e.Path)

@@ -1,8 +1,11 @@
 package simrunner
 
 import (
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,5 +44,28 @@ func TestSourceHash_IsStable(t *testing.T) {
 	b, _ := sourceHash()
 	if a == "" || a != b {
 		t.Fatalf("hash %q then %q", a, b)
+	}
+}
+
+// A Swift file in the sources that the generated project does not list is
+// never compiled, and the runner fails on the user's machine with a missing
+// symbol. project.yml is the source of truth: run `xcodegen generate` in
+// xctest/ after adding a file, and commit the project too.
+func TestProject_CompilesEverySwiftSource(t *testing.T) {
+	project, err := sources.ReadFile(path.Join(sourceRoot, projectName, "project.pbxproj"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = fs.WalkDir(sources, sourceRoot, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".swift" {
+			return err
+		}
+		if !strings.Contains(string(project), path.Base(p)+" in Sources") {
+			t.Errorf("%s is not in %s - run `xcodegen generate` in xctest/", p, projectName)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

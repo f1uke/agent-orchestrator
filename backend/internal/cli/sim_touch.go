@@ -955,12 +955,19 @@ func writeSimTapMatch(out io.Writer, target *simTapMatch) error {
 	if target == nil {
 		return nil
 	}
+	var err error
 	if target.MatchedBy == string(simbridge.MatchExact) {
-		_, err := fmt.Fprintf(out, "Matched the %s %q exactly  [%s]\n", target.Kind, target.Selector, target.Path)
+		_, err = fmt.Fprintf(out, "Matched the %s %q exactly  [%s]\n", target.Kind, target.Selector, target.Path)
+	} else {
+		_, err = fmt.Fprintf(out, "No element has the %s %q exactly; this was the only one containing it  [%s]\n",
+			target.Kind, target.Selector, target.Path)
+	}
+	if err != nil || target.CoveredBy == "" {
 		return err
 	}
-	_, err := fmt.Fprintf(out, "No element has the %s %q exactly; this was the only one containing it  [%s]\n",
-		target.Kind, target.Selector, target.Path)
+	// The point is not the element's centre, and a caller comparing it with
+	// the centre they computed from the box must not think the tool missed.
+	_, err = fmt.Fprintf(out, "Its centre is under %s, so the tap went to the part of it still showing.\n", target.CoveredBy)
 	return err
 }
 

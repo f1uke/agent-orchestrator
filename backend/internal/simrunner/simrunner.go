@@ -581,17 +581,29 @@ func (m *Manager) terminate(r *runner) {
 	}
 }
 
+// ReadOptions shapes one read of a device's screen.
+type ReadOptions struct {
+	// Wait is how long to wait for a runner that is still starting.
+	Wait time.Duration
+	// HitTest asks the runner what a touch at each element's tap point would
+	// land on, so an element drawn under something else - a row under the tab
+	// bar, a button under the keyboard - comes back marked covered. It costs
+	// about a millisecond per element, so only a read that hands out tap
+	// points asks for it.
+	HitTest bool
+}
+
 // Read returns the device's screen through its runner. When the runner is
-// still starting it waits up to wait for it. Any other answer than a tree is
-// ErrNotReady with a Status saying why, for the caller's fallback to report.
-func (m *Manager) Read(ctx context.Context, udid string, wait time.Duration) (simbridge.XCTestHierarchy, Status, error) {
-	port, status, err := m.await(ctx, udid, wait)
+// still starting it waits up to opts.Wait for it. Any other answer than a tree
+// is ErrNotReady with a Status saying why, for the caller's fallback to report.
+func (m *Manager) Read(ctx context.Context, udid string, opts ReadOptions) (simbridge.XCTestHierarchy, Status, error) {
+	port, status, err := m.await(ctx, udid, opts.Wait)
 	if err != nil {
 		return simbridge.XCTestHierarchy{}, status, err
 	}
 	readCtx, cancel := context.WithTimeout(ctx, readTimeout)
 	defer cancel()
-	h, err := m.client(port).hierarchy(readCtx)
+	h, err := m.client(port).hierarchy(readCtx, opts.HitTest)
 	if err != nil {
 		return simbridge.XCTestHierarchy{}, Status{State: StateReady, Reason: "the read failed: " + err.Error()},
 			fmt.Errorf("%w: %w", ErrNotReady, err)

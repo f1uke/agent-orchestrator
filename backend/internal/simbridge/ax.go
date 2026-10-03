@@ -96,7 +96,8 @@ type Element struct {
 	// Tap is where to touch this element, and is absent when there is nowhere
 	// to touch: an element scrolled off the screen has no point that reaches it.
 	// It used to be clamped onto the screen's edge instead, which is how a tap
-	// meant for a row below the fold landed on the tab bar.
+	// meant for a row below the fold landed on the tab bar. For a Covered
+	// element it is a point in the part still showing, or absent.
 	Tap *Point `json:"tap,omitempty"`
 	// Box is the element's edges, normalized like Tap. It is present even when
 	// Tap is not: where an element is remains useful once it is known that it
@@ -105,8 +106,25 @@ type Element struct {
 	// OffScreen says the element is on the page but not on the screen. It is
 	// reported rather than dropped: knowing a control exists further down is
 	// what tells an agent to scroll rather than to give up.
-	OffScreen bool      `json:"offScreen,omitempty"`
-	Children  []Element `json:"children,omitempty"`
+	OffScreen bool `json:"offScreen,omitempty"`
+	// Covered says the element is on the screen but something else is drawn
+	// over its centre - the tab bar over a row scrolled beneath it, the
+	// keyboard's bar over a button - so a touch there lands on that instead.
+	// Tap is then a point in the part still showing (VisiblePart), confirmed
+	// by hit-testing it, or absent when nothing of the element shows. Only an
+	// XCTest read that hit-tested (Snapshot.HitTested) can say this.
+	Covered  *Cover    `json:"covered,omitempty"`
+	Children []Element `json:"children,omitempty"`
+}
+
+// Cover is what an element is under.
+type Cover struct {
+	// By names what a touch at the element's centre lands on, as `ao sim ax`
+	// prints an element: `TabBar "Tab Bar"`, `Toolbar "Toolbar"`, `Keyboard`.
+	By string `json:"by"`
+	// VisiblePart says Tap is a point in the part of the element still
+	// showing rather than its centre. False means Tap is absent.
+	VisiblePart bool `json:"visiblePart"`
 }
 
 // Snapshot is one read of a screen.
@@ -124,6 +142,12 @@ type Snapshot struct {
 	// tree is often the second kind, and nothing else says so.
 	OnScreenCount  int `json:"onScreenCount"`
 	OffScreenCount int `json:"offScreenCount"`
+	// HitTested says every element on the screen was hit-tested, so an
+	// element without Covered is really reachable at its tap point. Without
+	// it, nothing is known about what is drawn over what.
+	HitTested bool `json:"hitTested,omitempty"`
+	// CoveredCount is how many of the on-screen elements are covered.
+	CoveredCount int `json:"coveredCount,omitempty"`
 	// OnlyStatusBar is a tree that is the clock, the battery and nothing else.
 	// It happens for a second after an app comes to the front, before it
 	// publishes its screen - and read as an ordinary result it says the app is

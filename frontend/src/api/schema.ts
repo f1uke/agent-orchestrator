@@ -3747,11 +3747,13 @@ export interface components {
             elapsedMs: number;
             errors?: string[];
             foregroundSource?: string;
+            hitTest?: components["schemas"]["SimbridgeXCTestHitTest"];
             screen: components["schemas"]["SimSize"];
             version: string;
         };
         SimXCTestNode: {
             children?: components["schemas"]["SimXCTestNode"][];
+            covered?: components["schemas"]["SimbridgeXCTestCover"];
             enabled: boolean;
             focused?: boolean;
             frame: components["schemas"]["SimRect"];
@@ -3761,6 +3763,27 @@ export interface components {
             selected?: boolean;
             type: string;
             value?: string;
+        };
+        SimbridgeXCTestCover: {
+            by: components["schemas"]["SimbridgeXCTestCoverer"];
+            point?: components["schemas"]["SimbridgeXCTestPoint"];
+        };
+        SimbridgeXCTestCoverer: {
+            id?: string;
+            label?: string;
+            type: string;
+        };
+        SimbridgeXCTestHitTest: {
+            checked: number;
+            covered: number;
+            elapsedMs: number;
+            error?: string;
+        };
+        SimbridgeXCTestPoint: {
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
         };
         SmokeAuthoredCaseInput: {
             /** @description Expected result. */
@@ -11633,6 +11656,8 @@ export interface operations {
             query?: {
                 /** @description How long to wait for a runner that is still starting, in milliseconds. 0 answers at once. Capped at 30000. */
                 waitMs?: number;
+                /** @description Also hit-test every element's tap point, so an element drawn under something else (a row under the tab bar, a button under the keyboard) comes back with covered. Costs about a millisecond per element. */
+                hitTest?: boolean;
             };
             header?: never;
             path: {

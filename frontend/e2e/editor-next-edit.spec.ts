@@ -127,6 +127,32 @@ test("an edit further away: the first Tab jumps to it, the second applies it", a
 	await expect.poll(() => lineContaining(page, "|| age > deadline")).toContain("guard forced ||");
 });
 
+test("a suggestion made for text that has since changed is taken down, not applied", async ({ page }) => {
+	// A model slow enough that typing outruns it, as the real one is on a busy
+	// machine: the answer to "f" is on screen while "orced" is typed.
+	await page.goto(`${GALLERY}&predictDelay=600`);
+	await selectWord(page, "func refreshIfNeeded(force: Bool)", "force");
+	await page.keyboard.type("f");
+	// The answer to "f": rename force to f on the guard line below.
+	await expect(inlineEdit(page)).toBeVisible();
+
+	await page.keyboard.type("orced");
+	// Monaco would keep that edit through typing that does not touch its range,
+	// and Tab would then rename the guard to "f" (CI did, once). It is gone
+	// with the first letter typed after it.
+	await expect(inlineEdit(page)).toHaveCount(0, { timeout: 300 });
+	expect(await lineContaining(page, "|| age > deadline")).toContain("guard force ||");
+
+	// The answer to "forced" arrives and is the one Tab takes.
+	await expect(inlineEdit(page)).toBeVisible();
+	expect((await edits(page)).at(-1)?.current).toContain("refreshIfNeeded(forced: Bool)");
+	const guard = await lineNumberOf(page, "guard force || age");
+	await page.keyboard.press("Tab");
+	await expect.poll(async () => (await caret(page)).lineNumber).toBe(guard);
+	await page.keyboard.press("Tab");
+	await expect.poll(() => lineContaining(page, "|| age > deadline")).toContain("guard forced ||");
+});
+
 test("Esc dismisses the suggestion and leaves the buffer as typed", async ({ page }) => {
 	await page.goto(GALLERY);
 	await selectWord(page, "didSelect(offer", "index");

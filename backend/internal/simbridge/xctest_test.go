@@ -206,3 +206,106 @@ func TestSnapshotFromXCTest_FrontmostFallsBackToTheOnlyApp(t *testing.T) {
 		t.Fatalf("Select(Continue) = %+v, %v", match, err)
 	}
 }
+
+// Real hit-tested reads of nter (iOS 26.3): Home scrolled so a Top Stories row
+// is half under the floating tab bar, and the web sign-in with the keyboard up
+// and ต่อไป drawn under its ^ v Done bar - the two places an agent's taps
+// were eaten, six times in twelve runs.
+func TestSnapshotFromXCTest_ARowUnderTheTabBarIsTappedWhereItShows(t *testing.T) {
+	snap := SnapshotFromXCTest(loadXCTest(t, "xctest-nter-home-tab-bar.json"))
+	if !snap.HitTested || snap.CoveredCount != 5 {
+		t.Fatalf("hitTested %v, covered %d, want a hit-tested read with 5 covered", snap.HitTested, snap.CoveredCount)
+	}
+	rows := findAll(snap.Elements, func(e Element) bool { return e.Label == "[PROMO-FINNO] ADSV2 NO SLA - 02" })
+	if len(rows) != 1 {
+		t.Fatalf("found %d rows", len(rows))
+	}
+	row := rows[0]
+	if row.Covered == nil || row.Covered.By != `TabBar "Tab Bar"` || !row.Covered.VisiblePart {
+		t.Fatalf("covered = %+v, want the tab bar with a visible part", row.Covered)
+	}
+	if row.OffScreen {
+		t.Fatal("a row on the screen under the tab bar is not off screen")
+	}
+	// Its centre (y 0.915) is under the tab bar (0.905 down); the point is in
+	// the strip above it, inside the row.
+	if row.Tap == nil || row.Tap.Y >= 791.0/874 || row.Tap.Y <= row.Box.Y1 {
+		t.Fatalf("tap %+v, box %+v: want a point between the row's top and the tab bar", row.Tap, row.Box)
+	}
+	// The row's date line is wholly under the bar (an earlier row has the
+	// same date, out in the open).
+	date := findAll(snap.Elements, func(e Element) bool { return e.Label == "28 พ.ค. 69" && e.Frame.Y > 791 })
+	if len(date) != 1 || date[0].Covered == nil || date[0].Tap != nil || date[0].OffScreen {
+		t.Fatalf("the date line wholly under the tab bar: %+v", date)
+	}
+	// The tab bar's own buttons answer the hit-test with their neighbours on
+	// iOS 26; they are one bar, not covering each other.
+	for _, name := range []string{"Home", "Port", "Fund", "Markets", "Chats"} {
+		tab := findAll(snap.Elements, func(e Element) bool { return e.Type == "Button" && e.Label == name })
+		if len(tab) != 1 || tab[0].Covered != nil || tab[0].Tap == nil {
+			t.Fatalf("tab %s: %+v", name, tab)
+		}
+	}
+}
+
+func TestSnapshotFromXCTest_AButtonUnderTheKeyboardBarHasNoTapPoint(t *testing.T) {
+	snap := SnapshotFromXCTest(loadXCTest(t, "xctest-nter-login-keyboard-bar.json"))
+	next := findAll(snap.Elements, func(e Element) bool { return e.Type == "Button" && e.Label == "ต่อไป" })
+	if len(next) != 1 {
+		t.Fatalf("found %d ต่อไป buttons", len(next))
+	}
+	if c := next[0].Covered; c == nil || c.By != `Toolbar "Toolbar"` || c.VisiblePart || next[0].Tap != nil {
+		t.Fatalf("ต่อไป: covered %+v, tap %+v - want the keyboard's toolbar and no point", c, next[0].Tap)
+	}
+	// What is on top stays tappable: the field being typed in, and the bar's
+	// own Done.
+	for _, e := range findAll(snap.Elements, func(e Element) bool {
+		return (e.Type == "TextField" && e.Focused) || (e.Type == "Button" && e.Label == "Done")
+	}) {
+		if e.Covered != nil || e.Tap == nil {
+			t.Fatalf("%s %q is in the open: %+v", e.Type, e.Label, e.Covered)
+		}
+	}
+	// The browser's own bottom bar is under the keyboard.
+	if back := findAll(snap.Elements, func(e Element) bool { return e.Type == "Button" && e.Label == "Back" }); len(back) != 1 ||
+		back[0].Covered == nil || back[0].Covered.By != "Keyboard" {
+		t.Fatalf("Back: %+v", back)
+	}
+}
+
+func TestSnapshotFromXCTest_CoverOnlyCountsWhenTheReadHitTested(t *testing.T) {
+	h := XCTestHierarchy{
+		Screen: Size{Width: 400, Height: 800},
+		Apps: []XCTestApp{{BundleID: "a", Tree: XCTestNode{
+			Type: "Application", Frame: Rect{Width: 400, Height: 800}, Enabled: true,
+			Children: []XCTestNode{
+				{Type: "Button", Label: "Under", Enabled: true, Frame: Rect{X: 0, Y: 700, Width: 400, Height: 80},
+					Covered: &XCTestCover{By: XCTestCoverer{Type: "TabBar", Label: "Tab Bar"}, Point: &XCTestPoint{X: 200, Y: 705}}},
+				// Below the fold already: no point to move, and off screen says it.
+				{Type: "Button", Label: "Gone", Enabled: true, Frame: Rect{X: 0, Y: 900, Width: 400, Height: 80},
+					Covered: &XCTestCover{By: XCTestCoverer{Type: "TabBar"}}},
+			},
+		}}},
+	}
+	plain := SnapshotFromXCTest(h)
+	if plain.HitTested || plain.CoveredCount != 0 {
+		t.Fatalf("a read with no hit-test summary claims to know: %+v", plain)
+	}
+	h.HitTest = &XCTestHitTest{Checked: 1, Covered: 1}
+	snap := SnapshotFromXCTest(h)
+	under := findAll(snap.Elements, func(e Element) bool { return e.Label == "Under" })[0]
+	if under.Tap == nil || under.Tap.X != 0.5 || under.Tap.Y != 705.0/800 || !under.Covered.VisiblePart {
+		t.Fatalf("under: tap %+v covered %+v", under.Tap, under.Covered)
+	}
+	gone := findAll(snap.Elements, func(e Element) bool { return e.Label == "Gone" })[0]
+	if !gone.OffScreen || gone.Covered != nil {
+		t.Fatalf("gone: %+v", gone)
+	}
+	if !snap.HitTested || snap.CoveredCount != 1 {
+		t.Fatalf("hitTested %v covered %d", snap.HitTested, snap.CoveredCount)
+	}
+	h.HitTest = &XCTestHitTest{Error: "XCTest has no accessibility hit-test here"}
+	if failed := SnapshotFromXCTest(h); failed.HitTested {
+		t.Fatal("a hit-test that could not run is not a hit-tested read")
+	}
+}

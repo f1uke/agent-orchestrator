@@ -190,7 +190,7 @@ func writeSimTypeError(w http.ResponseWriter, r *http.Request, err error) {
 type runnerReader struct{ runner SimRunner }
 
 func (r runnerReader) AX(ctx context.Context, udid string) (simbridge.Snapshot, error) {
-	h, _, err := r.runner.Read(ctx, udid, 0)
+	h, _, err := r.runner.Read(ctx, udid, simrunner.ReadOptions{})
 	if err != nil {
 		return simbridge.Snapshot{}, err
 	}
