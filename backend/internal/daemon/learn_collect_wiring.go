@@ -16,6 +16,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/learnsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learncollect"
+	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learndecide"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learnrules"
 	learningsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/learning"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -49,10 +50,13 @@ func startLearnCollect(ctx context.Context, store *sqlite.Store, dataDir string,
 // the rules corpus when they are running. A nil loop must not reach the
 // service as a typed nil in a non-nil interface, so each is only attached when
 // present.
-func learningService(ctx context.Context, store *sqlite.Store, collector *learncollect.Observer, settings *learnsettings.Store, rules *learnrules.Observer) *learningsvc.Service {
+func learningService(ctx context.Context, store *sqlite.Store, collector *learncollect.Observer, settings *learnsettings.Store, rules *learnrules.Observer, decider *learndecide.Observer) *learningsvc.Service {
 	svc := learningsvc.New(store, claudecode.IsTranscriptPath)
 	if rules != nil {
 		svc = svc.WithRules(ctx, store, rules)
+	}
+	if decider != nil {
+		svc = svc.WithDecide(ctx, store, decider)
 	}
 	if collector == nil || settings == nil {
 		return svc

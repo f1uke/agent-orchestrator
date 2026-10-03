@@ -285,9 +285,13 @@ const (
 
 // LearnJob is one model run over one batch of a session's captured turns.
 type LearnJob struct {
-	ID           int64
-	ProjectID    ProjectID
-	SessionID    SessionID
+	ID        int64
+	ProjectID ProjectID
+	SessionID SessionID
+	// Kind is collect, decide or verify; empty means collect.
+	Kind LearnJobKind
+	// TaskKey is the task a decide or verify run decided.
+	TaskKey      string
 	State        LearnJobState
 	Model        string
 	Turns        int
@@ -413,4 +417,135 @@ type LearnProtectedRule struct {
 	Note      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// LearnJobKind is which stage a model run belongs to.
+type LearnJobKind string
+
+const (
+	// LearnJobCollect turns captured turns into drafts.
+	LearnJobCollect LearnJobKind = "collect"
+	// LearnJobDecide turns a finished task's drafts into proposals.
+	LearnJobDecide LearnJobKind = "decide"
+	// LearnJobVerify checks decide's proposals adversarially.
+	LearnJobVerify LearnJobKind = "verify"
+)
+
+// LearnOutcome is how the task a proposal came from ended.
+type LearnOutcome string
+
+const (
+	// LearnOutcomeMerged is a task whose work merged.
+	LearnOutcomeMerged LearnOutcome = "merged"
+	// LearnOutcomeAbandoned is a task killed, discarded or closed unmerged.
+	LearnOutcomeAbandoned LearnOutcome = "abandoned"
+	// LearnOutcomeUnknown is a task that ended without saying how.
+	LearnOutcomeUnknown LearnOutcome = "unknown"
+	// LearnOutcomeOngoing is a session that never ends, decided by daily cut.
+	LearnOutcomeOngoing LearnOutcome = "ongoing"
+	// LearnOutcomeDay is an orchestrator's day; it has no outcome of its own.
+	LearnOutcomeDay LearnOutcome = "day"
+)
+
+// Weight is how much a proposal from a task with this outcome is trusted.
+func (o LearnOutcome) Weight() float64 {
+	switch o {
+	case LearnOutcomeMerged, LearnOutcomeDay:
+		return 1
+	case LearnOutcomeAbandoned:
+		return 0.5
+	default:
+		return 0.7
+	}
+}
+
+// LearnProposalAction is what a proposal would do.
+type LearnProposalAction string
+
+const (
+	// LearnProposeCreateSkill writes a new AO-learned skill.
+	LearnProposeCreateSkill LearnProposalAction = "create_skill"
+	// LearnProposeUpdateSkill changes an existing skill.
+	LearnProposeUpdateSkill LearnProposalAction = "update_skill"
+	// LearnProposeEditRuleFile changes the human's CLAUDE.md or a knowledge INDEX.
+	LearnProposeEditRuleFile LearnProposalAction = "edit_rule_file"
+	// LearnProposeConflict shows the human that their new words contradict a
+	// standing rule; it writes nothing until the human decides.
+	LearnProposeConflict LearnProposalAction = "conflict"
+)
+
+// LearnProposalStatus is where a proposal is in its life.
+type LearnProposalStatus string
+
+// Proposal statuses.
+const (
+	LearnProposalPending    LearnProposalStatus = "pending"
+	LearnProposalRejected   LearnProposalStatus = "rejected"
+	LearnProposalApplied    LearnProposalStatus = "applied"
+	LearnProposalStale      LearnProposalStatus = "stale"
+	LearnProposalSuperseded LearnProposalStatus = "superseded"
+	// LearnProposalDropped is a proposal the verifier or a gate refused; it is
+	// kept with DropReason so the refusals can be reviewed.
+	LearnProposalDropped LearnProposalStatus = "dropped"
+)
+
+// LearnRuleVerdict is how a proposal relates to one standing rule.
+type LearnRuleVerdict struct {
+	RuleID  string `json:"ruleId"`
+	Verdict string `json:"verdict"`
+	Note    string `json:"note,omitempty"`
+}
+
+// LearnVerifierResult is the adversarial check of one proposal.
+type LearnVerifierResult struct {
+	ContradictsRule bool   `json:"contradictsRule"`
+	Grounded        bool   `json:"grounded"`
+	SensitiveData   bool   `json:"sensitiveData"`
+	Notes           string `json:"notes,omitempty"`
+}
+
+// LearnProposal is a change learning would make, for the human to decide.
+type LearnProposal struct {
+	ID           int64
+	ProjectID    ProjectID
+	TaskKey      string
+	Action       LearnProposalAction
+	TargetPath   string
+	Scope        string
+	Title        string
+	Rationale    string
+	BaseSHA256   string
+	NewContent   string
+	Diff         string
+	Confidence   float64
+	Outcome      LearnOutcome
+	RuleVerdicts []LearnRuleVerdict
+	Verifier     LearnVerifierResult
+	Status       LearnProposalStatus
+	DropReason   string
+	EvidenceIDs  []int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// LearnDecidedTask is a task decide has run on.
+type LearnDecidedTask struct {
+	TaskKey   string
+	ProjectID ProjectID
+	Outcome   LearnOutcome
+	Proposals int
+	DecidedAt time.Time
+}
+
+// LearnDecideResult is everything one decided task changes, written at once.
+type LearnDecideResult struct {
+	TaskKey   string
+	ProjectID ProjectID
+	Outcome   LearnOutcome
+	// Proposals are new rows (ID 0) or amendments of a pending one (ID set).
+	Proposals []LearnProposal
+	// Consumed are drafts a kept proposal rests on; Dropped are the task's
+	// other open drafts.
+	Consumed []int64
+	Dropped  []int64
 }

@@ -25,8 +25,12 @@ const (
 	// DefaultRulesModel atomizes the standing-rules corpus: rewriting a file
 	// into statements takes no judgment about what is a lesson, so it stays on
 	// the cheapest model (decision 7).
-	DefaultRulesModel  = "claude-haiku-4-5-20251001"
-	DefaultDailyBudget = 2.0
+	DefaultRulesModel = "claude-haiku-4-5-20251001"
+	// DefaultDecideModel writes the proposals and verifies them (decision 2):
+	// few calls whose output every future agent follows.
+	DefaultDecideModel  = "claude-opus-5-5"
+	DefaultDecideEffort = "medium"
+	DefaultDailyBudget  = 2.0
 	// MaxDailyBudget caps a typo.
 	MaxDailyBudget = 100.0
 )
@@ -37,6 +41,10 @@ type Settings struct {
 	CollectEffort string `json:"collectEffort"`
 	// RulesModel splits the rules agents are already told into statements.
 	RulesModel string `json:"rulesModel"`
+	// DecideModel and DecideEffort draw proposals from a finished task's
+	// drafts and verify them.
+	DecideModel  string `json:"decideModel"`
+	DecideEffort string `json:"decideEffort"`
 	// DailyBudgetUSD stops the background model runs (collect and rules) for
 	// the rest of the local day once the day's runs have cost this much. Zero
 	// pauses them.
@@ -45,7 +53,8 @@ type Settings struct {
 
 // Default returns the out-of-the-box settings.
 func Default() Settings {
-	return Settings{CollectModel: DefaultCollectModel, CollectEffort: DefaultCollectEffort, RulesModel: DefaultRulesModel, DailyBudgetUSD: DefaultDailyBudget}
+	return Settings{CollectModel: DefaultCollectModel, CollectEffort: DefaultCollectEffort, RulesModel: DefaultRulesModel,
+		DecideModel: DefaultDecideModel, DecideEffort: DefaultDecideEffort, DailyBudgetUSD: DefaultDailyBudget}
 }
 
 var validEffort = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
@@ -57,6 +66,12 @@ func (s Settings) Validate() error {
 	}
 	if s.RulesModel == "" {
 		return errors.New("learnsettings: rulesModel is required")
+	}
+	if s.DecideModel == "" {
+		return errors.New("learnsettings: decideModel is required")
+	}
+	if !validEffort[s.DecideEffort] {
+		return fmt.Errorf("learnsettings: decideEffort must be low, medium, high, xhigh or max, got %q", s.DecideEffort)
 	}
 	if !validEffort[s.CollectEffort] {
 		return fmt.Errorf("learnsettings: collectEffort must be low, medium, high, xhigh or max, got %q", s.CollectEffort)

@@ -111,36 +111,39 @@ type APIDeps struct {
 	// LearningRules is the standing-rules corpus learning checks lessons
 	// against, and the rules the human pinned.
 	LearningRules controllers.LearningRulesService
+	// LearningDecide draws proposals from finished tasks and lists them.
+	LearningDecide controllers.LearningDecideService
 }
 
 // API owns one controller per resource and is the single Register call the
 // router invokes to mount the /api/v1 surface.
 type API struct {
-	cfg           config.Config
-	agents        *controllers.AgentsController
-	projects      *controllers.ProjectsController
-	sessions      *controllers.SessionsController
-	jira          *controllers.JiraController
-	prs           *controllers.PRsController
-	reviews       *controllers.ReviewsController
-	smoke         *controllers.SmokeController
-	iosRun        *controllers.IOSRunController
-	crewRuns      *controllers.CrewRunsController
-	sim           *controllers.SimController
-	simFlows      *controllers.SimFlowsController
-	simVideo      *controllers.SimVideoController
-	simScreen     *controllers.SimScreenController
-	simHierarchy  *controllers.SimHierarchyController
-	simType       *controllers.SimTypeController
-	notifications *controllers.NotificationsController
-	activity      *controllers.ActivityController
-	imports       *controllers.ImportController
-	settings      *controllers.SettingsController
-	wiki          *controllers.WikiController
-	daemon        *controllers.DaemonController
-	learning      *controllers.LearningController
-	learningRules *controllers.LearningRulesController
-	events        *EventsController
+	cfg            config.Config
+	agents         *controllers.AgentsController
+	projects       *controllers.ProjectsController
+	sessions       *controllers.SessionsController
+	jira           *controllers.JiraController
+	prs            *controllers.PRsController
+	reviews        *controllers.ReviewsController
+	smoke          *controllers.SmokeController
+	iosRun         *controllers.IOSRunController
+	crewRuns       *controllers.CrewRunsController
+	sim            *controllers.SimController
+	simFlows       *controllers.SimFlowsController
+	simVideo       *controllers.SimVideoController
+	simScreen      *controllers.SimScreenController
+	simHierarchy   *controllers.SimHierarchyController
+	simType        *controllers.SimTypeController
+	notifications  *controllers.NotificationsController
+	activity       *controllers.ActivityController
+	imports        *controllers.ImportController
+	settings       *controllers.SettingsController
+	wiki           *controllers.WikiController
+	daemon         *controllers.DaemonController
+	learning       *controllers.LearningController
+	learningRules  *controllers.LearningRulesController
+	learningDecide *controllers.LearningDecideController
+	events         *EventsController
 }
 
 // NewAPI constructs the API surface from its dependencies. cfg carries the
@@ -168,27 +171,28 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 			Activity: deps.Activity,
 			Feed:     deps.ActivityFeed,
 		},
-		jira:          &controllers.JiraController{Svc: deps.Jira},
-		prs:           &controllers.PRsController{Svc: deps.PRs},
-		reviews:       &controllers.ReviewsController{Svc: deps.Reviews},
-		smoke:         &controllers.SmokeController{Svc: deps.Smoke},
-		iosRun:        &controllers.IOSRunController{Svc: deps.IOSRun},
-		crewRuns:      &controllers.CrewRunsController{Svc: deps.CrewRuns},
-		sim:           &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
-		simFlows:      &controllers.SimFlowsController{DataDir: cfg.DataDir},
-		simVideo:      &controllers.SimVideoController{Svc: deps.SimVideo},
-		simScreen:     &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver},
-		simHierarchy:  &controllers.SimHierarchyController{Runner: deps.SimRunner},
-		simType:       &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim, Screen: screenProvider(deps.SimScreen)},
-		notifications: &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
-		activity:      &controllers.ActivityController{Stream: deps.ActivityStream},
-		imports:       &controllers.ImportController{Svc: deps.Import},
-		settings:      &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, SimTrust: simTrustSettings(deps.SimTrust), EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
-		wiki:          &controllers.WikiController{Svc: deps.Wiki},
-		daemon:        &controllers.DaemonController{Loops: deps.LoopTelemetry},
-		learning:      &controllers.LearningController{Svc: deps.Learning},
-		learningRules: &controllers.LearningRulesController{Svc: deps.LearningRules},
-		events:        &EventsController{Source: deps.CDC, Live: deps.Events},
+		jira:           &controllers.JiraController{Svc: deps.Jira},
+		prs:            &controllers.PRsController{Svc: deps.PRs},
+		reviews:        &controllers.ReviewsController{Svc: deps.Reviews},
+		smoke:          &controllers.SmokeController{Svc: deps.Smoke},
+		iosRun:         &controllers.IOSRunController{Svc: deps.IOSRun},
+		crewRuns:       &controllers.CrewRunsController{Svc: deps.CrewRuns},
+		sim:            &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
+		simFlows:       &controllers.SimFlowsController{DataDir: cfg.DataDir},
+		simVideo:       &controllers.SimVideoController{Svc: deps.SimVideo},
+		simScreen:      &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver},
+		simHierarchy:   &controllers.SimHierarchyController{Runner: deps.SimRunner},
+		simType:        &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim, Screen: screenProvider(deps.SimScreen)},
+		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
+		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
+		imports:        &controllers.ImportController{Svc: deps.Import},
+		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, SimTrust: simTrustSettings(deps.SimTrust), EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		wiki:           &controllers.WikiController{Svc: deps.Wiki},
+		daemon:         &controllers.DaemonController{Loops: deps.LoopTelemetry},
+		learning:       &controllers.LearningController{Svc: deps.Learning},
+		learningRules:  &controllers.LearningRulesController{Svc: deps.LearningRules},
+		learningDecide: &controllers.LearningDecideController{Svc: deps.LearningDecide},
+		events:         &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }
 
@@ -247,6 +251,7 @@ func (a *API) Register(root chi.Router) {
 			// reported it, never to its crewmate.
 			a.learning.Register(r)
 			a.learningRules.Register(r)
+			a.learningDecide.Register(r)
 			// Sibling REST controllers plug in here.
 
 			// THE TASK-SCOPED SURFACES, and the only place that list lives.

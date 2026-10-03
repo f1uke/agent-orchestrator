@@ -200,6 +200,8 @@ type LearningSettingsDTO struct {
 	CollectModel   string  `json:"collectModel"`
 	CollectEffort  string  `json:"collectEffort" enum:"low,medium,high,xhigh,max"`
 	RulesModel     string  `json:"rulesModel,omitempty" description:"Model that splits the standing rules into statements. Empty on a write keeps the current one."`
+	DecideModel    string  `json:"decideModel,omitempty" description:"Model that draws proposals from a finished task and verifies them. Empty on a write keeps the current one."`
+	DecideEffort   string  `json:"decideEffort,omitempty" enum:"low,medium,high,xhigh,max" description:"Empty on a write keeps the current one."`
 	DailyBudgetUSD float64 `json:"dailyBudgetUsd" description:"The background model runs (collect and rules) stop for the rest of the local day at this spend; 0 pauses them."`
 }
 
@@ -272,20 +274,24 @@ func (c *LearningController) drafts(w http.ResponseWriter, r *http.Request) {
 	}
 	out := ListLearningDraftsResponse{Drafts: make([]LearningDraftDTO, 0, len(rows))}
 	for _, d := range rows {
-		dto := LearningDraftDTO{
-			ID: d.ID, ProjectID: string(d.ProjectID), SessionID: string(d.SessionID), TaskKey: d.TaskKey,
-			Kind: string(d.Kind), Statement: d.Statement, AppliesWhen: d.AppliesWhen, ScopeHint: d.ScopeHint,
-			Confidence: d.Confidence, About: string(d.About), Quote: d.Quote, AnchorExcerptID: d.AnchorExcerptID,
-			AnchorSourceClass: string(d.AnchorSourceClass), AgentBefore: d.AgentBefore, Weak: d.Weak,
-			SupersedesID: d.SupersedesID, Status: string(d.Status), CreatedAt: d.CreatedAt,
-		}
-		if !d.AnchorTurnAt.IsZero() {
-			t := d.AnchorTurnAt
-			dto.AnchorTurnAt = &t
-		}
-		out.Drafts = append(out.Drafts, dto)
+		out.Drafts = append(out.Drafts, draftDTO(d))
 	}
 	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+func draftDTO(d domain.LearnDraft) LearningDraftDTO {
+	dto := LearningDraftDTO{
+		ID: d.ID, ProjectID: string(d.ProjectID), SessionID: string(d.SessionID), TaskKey: d.TaskKey,
+		Kind: string(d.Kind), Statement: d.Statement, AppliesWhen: d.AppliesWhen, ScopeHint: d.ScopeHint,
+		Confidence: d.Confidence, About: string(d.About), Quote: d.Quote, AnchorExcerptID: d.AnchorExcerptID,
+		AnchorSourceClass: string(d.AnchorSourceClass), AgentBefore: d.AgentBefore, Weak: d.Weak,
+		SupersedesID: d.SupersedesID, Status: string(d.Status), CreatedAt: d.CreatedAt,
+	}
+	if !d.AnchorTurnAt.IsZero() {
+		t := d.AnchorTurnAt
+		dto.AnchorTurnAt = &t
+	}
+	return dto
 }
 
 func (c *LearningController) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -302,7 +308,8 @@ func (c *LearningController) getSettings(w http.ResponseWriter, r *http.Request)
 		envelope.WriteError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, LearningSettingsDTO{CollectModel: s.CollectModel, CollectEffort: s.CollectEffort, RulesModel: s.RulesModel, DailyBudgetUSD: s.DailyBudgetUSD})
+	envelope.WriteJSON(w, http.StatusOK, LearningSettingsDTO{CollectModel: s.CollectModel, CollectEffort: s.CollectEffort, RulesModel: s.RulesModel,
+		DecideModel: s.DecideModel, DecideEffort: s.DecideEffort, DailyBudgetUSD: s.DailyBudgetUSD})
 }
 
 func (c *LearningController) putSettings(w http.ResponseWriter, r *http.Request) {
@@ -315,14 +322,19 @@ func (c *LearningController) putSettings(w http.ResponseWriter, r *http.Request)
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
-	next := learnsettings.Settings{CollectModel: in.CollectModel, CollectEffort: in.CollectEffort, RulesModel: in.RulesModel, DailyBudgetUSD: in.DailyBudgetUSD}
-	if next.RulesModel == "" {
-		// A client from before rulesModel existed keeps the current one.
-		if cur, err := c.Svc.Settings(); err == nil {
-			next.RulesModel = cur.RulesModel
+	next := learnsettings.Settings{CollectModel: in.CollectModel, CollectEffort: in.CollectEffort, RulesModel: in.RulesModel,
+		DecideModel: in.DecideModel, DecideEffort: in.DecideEffort, DailyBudgetUSD: in.DailyBudgetUSD}
+	// A client from before a field existed keeps its current value.
+	if cur, err := c.Svc.Settings(); err == nil {
+		for _, f := range []struct{ next, cur *string }{
+			{&next.RulesModel, &cur.RulesModel}, {&next.DecideModel, &cur.DecideModel}, {&next.DecideEffort, &cur.DecideEffort},
+		} {
+			if *f.next == "" {
+				*f.next = *f.cur
+			}
 		}
-		in.RulesModel = next.RulesModel
 	}
+	in.RulesModel, in.DecideModel, in.DecideEffort = next.RulesModel, next.DecideModel, next.DecideEffort
 	err := c.Svc.SetSettings(next)
 	switch {
 	case errors.Is(err, learning.ErrCollectUnavailable):

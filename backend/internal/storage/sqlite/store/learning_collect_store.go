@@ -82,9 +82,15 @@ func (s *Store) ListUncollectedExcerpts(ctx context.Context, projectID domain.Pr
 func (s *Store) StartLearnJob(ctx context.Context, job domain.LearnJob) (int64, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	kind := job.Kind
+	if kind == "" {
+		kind = domain.LearnJobCollect
+	}
 	id, err := s.qw.InsertLearnJob(ctx, gen.InsertLearnJobParams{
 		ProjectID: string(job.ProjectID),
 		SessionID: string(job.SessionID),
+		Kind:      string(kind),
+		TaskKey:   job.TaskKey,
 		Model:     job.Model,
 		Turns:     int64(job.Turns),
 		StartedAt: job.StartedAt,
@@ -102,6 +108,18 @@ func (s *Store) FailLearnJob(ctx context.Context, job domain.LearnJob) error {
 	job.State = domain.LearnJobFailed
 	if err := s.qw.FinishLearnJob(ctx, finishParams(job)); err != nil {
 		return fmt.Errorf("fail learn job %d: %w", job.ID, err)
+	}
+	return nil
+}
+
+// FinishLearnJob closes a run that succeeded without collecting turns: a
+// decide or verify run, whose results CommitDecide writes.
+func (s *Store) FinishLearnJob(ctx context.Context, job domain.LearnJob) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	job.State = domain.LearnJobDone
+	if err := s.qw.FinishLearnJob(ctx, finishParams(job)); err != nil {
+		return fmt.Errorf("finish learn job %d: %w", job.ID, err)
 	}
 	return nil
 }
