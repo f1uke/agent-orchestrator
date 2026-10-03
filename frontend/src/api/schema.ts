@@ -243,6 +243,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/learning/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide ready tasks now (or one task), under its own budget */
+        post: operations["startLearningDecide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/learning/drafts": {
         parameters: {
             query?: never;
@@ -289,6 +306,40 @@ export interface paths {
         post?: never;
         /** Delete everything learning capture kept for a project that no longer learns from sessions */
         delete: operations["forgetProjectLearning"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the changes learning proposes, newest first, and the last decide run */
+        get: operations["listLearningProposals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/proposals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One proposal with the drafts it rests on */
+        get: operations["getLearningProposal"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2662,6 +2713,24 @@ export interface components {
              */
             todaySpendUsd: number;
         };
+        ControllersLearningDecideRunDTO: {
+            /** Format: double */
+            budgetUsd: number;
+            /** Format: double */
+            costUsd: number;
+            dropped: number;
+            failed: number;
+            /** Format: date-time */
+            finishedAt?: null | string;
+            lastError?: string;
+            manual: boolean;
+            proposals: number;
+            running: boolean;
+            /** Format: date-time */
+            startedAt?: null | string;
+            stopReason?: string;
+            tasks: number;
+        };
         ControllersLearningDraftDTO: {
             /**
              * @description What the lesson concerns, as the collect model tagged it. Only agent_practice is about how agents work.
@@ -2764,6 +2833,42 @@ export interface components {
             /** @description Prompts the hooks saw more than 30 minutes ago that capture never found in a transcript. Non-zero means the transcript format may have changed. */
             unmatchedPrompts: number;
         };
+        ControllersLearningProposalDTO: {
+            /** @enum {string} */
+            action: "create_skill" | "update_skill" | "edit_rule_file" | "conflict";
+            /** @description The target's hash when the diff was computed; empty for a new file. */
+            baseSha256?: string;
+            /** Format: double */
+            confidence: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Unified diff AO computed from the target as it was. */
+            diff: string;
+            dropReason?: string;
+            evidenceIds: number[];
+            /** Format: int64 */
+            id: number;
+            newContent: string;
+            /** @enum {string} */
+            outcome: "merged" | "abandoned" | "unknown" | "ongoing" | "day";
+            projectId: string;
+            rationale: string;
+            ruleVerdicts: components["schemas"]["ControllersLearningRuleVerdictDTO"][];
+            scope: string;
+            /** @enum {string} */
+            status: "pending" | "rejected" | "applied" | "stale" | "superseded" | "dropped";
+            /** @description The file it would change, or rule:<id> for a conflict card. */
+            targetPath: string;
+            taskKey: string;
+            title: string;
+            /** Format: date-time */
+            updatedAt: string;
+            verifier: components["schemas"]["ControllersLearningVerifierDTO"];
+        };
+        ControllersLearningProposalResponse: {
+            evidence: components["schemas"]["ControllersLearningDraftDTO"][];
+            proposal: components["schemas"]["ControllersLearningProposalDTO"];
+        };
         ControllersLearningProtectedRuleDTO: {
             /** Format: date-time */
             createdAt: string;
@@ -2814,6 +2919,12 @@ export interface components {
             /** @enum {string} */
             scope: "global" | "project";
         };
+        ControllersLearningRuleVerdictDTO: {
+            note?: string;
+            ruleId: string;
+            /** @enum {string} */
+            verdict: "consistent" | "refines" | "contradicts";
+        };
         ControllersLearningRulesRefreshDTO: {
             atomized: number;
             /** Format: double */
@@ -2840,12 +2951,25 @@ export interface components {
              * @description The background model runs (collect and rules) stop for the rest of the local day at this spend; 0 pauses them.
              */
             dailyBudgetUsd: number;
+            /**
+             * @description Empty on a write keeps the current one.
+             * @enum {string}
+             */
+            decideEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+            /** @description Model that draws proposals from a finished task and verifies them. Empty on a write keeps the current one. */
+            decideModel?: string;
             /** @description Model that splits the standing rules into statements. Empty on a write keeps the current one. */
             rulesModel?: string;
         };
         ControllersLearningStatusResponse: {
             collect: components["schemas"]["ControllersLearningCollectStatusDTO"];
             projects: components["schemas"]["ControllersLearningProjectStatusDTO"][];
+        };
+        ControllersLearningVerifierDTO: {
+            contradictsRule: boolean;
+            grounded: boolean;
+            notes?: string;
+            sensitiveData: boolean;
         };
         ControllersLearningWindowDTO: {
             /** @description What the agent did, as tool plus one whitelisted target, and markers for messages other than the human's. */
@@ -2861,6 +2985,10 @@ export interface components {
         };
         ControllersListLearningExcerptsResponse: {
             excerpts: components["schemas"]["ControllersLearningExcerptDTO"][];
+        };
+        ControllersListLearningProposalsResponse: {
+            proposals: components["schemas"]["ControllersLearningProposalDTO"][];
+            run: components["schemas"]["ControllersLearningDecideRunDTO"];
         };
         ControllersListLearningProtectedRulesResponse: {
             rules: components["schemas"]["ControllersLearningProtectedRuleDTO"][];
@@ -3082,6 +3210,20 @@ export interface components {
             project?: string;
         };
         ControllersStartLearningCollectResponse: {
+            started: boolean;
+        };
+        ControllersStartLearningDecideRequest: {
+            /**
+             * Format: double
+             * @description Most this run may spend, at API prices. At most 50.
+             */
+            budgetUsd: number;
+            /** @description Project whose ready tasks to decide; empty decides every learning project. */
+            project?: string;
+            /** @description Decide this one task now (e.g. solo:<session>), ready or not. */
+            task?: string;
+        };
+        ControllersStartLearningDecideResponse: {
             started: boolean;
         };
         ControllersTranscriptRefRequest: {
@@ -5520,6 +5662,75 @@ export interface operations {
             };
         };
     };
+    startLearningDecide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersStartLearningDecideRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersStartLearningDecideResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     listLearningDrafts: {
         parameters: {
             query?: {
@@ -5674,6 +5885,117 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listLearningProposals: {
+        parameters: {
+            query?: {
+                /** @description Project id; empty lists every project's. */
+                project?: string;
+                /** @description Include rejected, dropped, applied, stale and superseded proposals, not only pending ones. */
+                all?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListLearningProposalsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getLearningProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Proposal id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProposalResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

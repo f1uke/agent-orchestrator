@@ -570,6 +570,55 @@ paths:
         own budget
       tags:
       - learning
+  /api/v1/learning/decide:
+    post:
+      operationId: startLearningDecide
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersStartLearningDecideRequest'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersStartLearningDecideResponse'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Decide ready tasks now (or one task), under its own budget
+      tags:
+      - learning
   /api/v1/learning/drafts:
     get:
       operationId: listLearningDrafts
@@ -714,6 +763,99 @@ paths:
           description: Not Implemented
       summary: Delete everything learning capture kept for a project that no longer
         learns from sessions
+      tags:
+      - learning
+  /api/v1/learning/proposals:
+    get:
+      operationId: listLearningProposals
+      parameters:
+      - description: Project id; empty lists every project's.
+        in: query
+        name: project
+        schema:
+          description: Project id; empty lists every project's.
+          type: string
+      - description: Include rejected, dropped, applied, stale and superseded proposals,
+          not only pending ones.
+        in: query
+        name: all
+        schema:
+          description: Include rejected, dropped, applied, stale and superseded proposals,
+            not only pending ones.
+          type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListLearningProposalsResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the changes learning proposes, newest first, and the last decide
+        run
+      tags:
+      - learning
+  /api/v1/learning/proposals/{id}:
+    get:
+      operationId: getLearningProposal
+      parameters:
+      - description: Proposal id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Proposal id.
+          format: int64
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProposalResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: One proposal with the drafts it rests on
       tags:
       - learning
   /api/v1/learning/protected-rules:
@@ -8162,6 +8304,50 @@ components:
       - effort
       - run
       type: object
+    ControllersLearningDecideRunDTO:
+      properties:
+        budgetUsd:
+          format: double
+          type: number
+        costUsd:
+          format: double
+          type: number
+        dropped:
+          type: integer
+        failed:
+          type: integer
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        lastError:
+          type: string
+        manual:
+          type: boolean
+        proposals:
+          type: integer
+        running:
+          type: boolean
+        startedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        stopReason:
+          type: string
+        tasks:
+          type: integer
+      required:
+      - running
+      - manual
+      - tasks
+      - failed
+      - proposals
+      - dropped
+      - costUsd
+      - budgetUsd
+      type: object
     ControllersLearningDraftDTO:
       properties:
         about:
@@ -8403,6 +8589,111 @@ components:
       - uncollected
       - drafts
       type: object
+    ControllersLearningProposalDTO:
+      properties:
+        action:
+          enum:
+          - create_skill
+          - update_skill
+          - edit_rule_file
+          - conflict
+          type: string
+        baseSha256:
+          description: The target's hash when the diff was computed; empty for a new
+            file.
+          type: string
+        confidence:
+          format: double
+          type: number
+        createdAt:
+          format: date-time
+          type: string
+        diff:
+          description: Unified diff AO computed from the target as it was.
+          type: string
+        dropReason:
+          type: string
+        evidenceIds:
+          items:
+            format: int64
+            type: integer
+          type: array
+        id:
+          format: int64
+          type: integer
+        newContent:
+          type: string
+        outcome:
+          enum:
+          - merged
+          - abandoned
+          - unknown
+          - ongoing
+          - day
+          type: string
+        projectId:
+          type: string
+        rationale:
+          type: string
+        ruleVerdicts:
+          items:
+            $ref: '#/components/schemas/ControllersLearningRuleVerdictDTO'
+          type: array
+        scope:
+          type: string
+        status:
+          enum:
+          - pending
+          - rejected
+          - applied
+          - stale
+          - superseded
+          - dropped
+          type: string
+        targetPath:
+          description: The file it would change, or rule:<id> for a conflict card.
+          type: string
+        taskKey:
+          type: string
+        title:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        verifier:
+          $ref: '#/components/schemas/ControllersLearningVerifierDTO'
+      required:
+      - id
+      - projectId
+      - taskKey
+      - action
+      - targetPath
+      - scope
+      - title
+      - rationale
+      - newContent
+      - diff
+      - confidence
+      - outcome
+      - ruleVerdicts
+      - verifier
+      - status
+      - evidenceIds
+      - createdAt
+      - updatedAt
+      type: object
+    ControllersLearningProposalResponse:
+      properties:
+        evidence:
+          items:
+            $ref: '#/components/schemas/ControllersLearningDraftDTO'
+          type: array
+        proposal:
+          $ref: '#/components/schemas/ControllersLearningProposalDTO'
+      required:
+      - proposal
+      - evidence
+      type: object
     ControllersLearningProtectedRuleDTO:
       properties:
         createdAt:
@@ -8525,6 +8816,22 @@ components:
       - rules
       - refreshedAt
       type: object
+    ControllersLearningRuleVerdictDTO:
+      properties:
+        note:
+          type: string
+        ruleId:
+          type: string
+        verdict:
+          enum:
+          - consistent
+          - refines
+          - contradicts
+          type: string
+      required:
+      - ruleId
+      - verdict
+      type: object
     ControllersLearningRulesRefreshDTO:
       properties:
         atomized:
@@ -8583,6 +8890,19 @@ components:
             rest of the local day at this spend; 0 pauses them.
           format: double
           type: number
+        decideEffort:
+          description: Empty on a write keeps the current one.
+          enum:
+          - low
+          - medium
+          - high
+          - xhigh
+          - max
+          type: string
+        decideModel:
+          description: Model that draws proposals from a finished task and verifies
+            them. Empty on a write keeps the current one.
+          type: string
         rulesModel:
           description: Model that splits the standing rules into statements. Empty
             on a write keeps the current one.
@@ -8603,6 +8923,21 @@ components:
       required:
       - projects
       - collect
+      type: object
+    ControllersLearningVerifierDTO:
+      properties:
+        contradictsRule:
+          type: boolean
+        grounded:
+          type: boolean
+        notes:
+          type: string
+        sensitiveData:
+          type: boolean
+      required:
+      - contradictsRule
+      - grounded
+      - sensitiveData
       type: object
     ControllersLearningWindowDTO:
       properties:
@@ -8644,6 +8979,18 @@ components:
           type: array
       required:
       - excerpts
+      type: object
+    ControllersListLearningProposalsResponse:
+      properties:
+        proposals:
+          items:
+            $ref: '#/components/schemas/ControllersLearningProposalDTO'
+          type: array
+        run:
+          $ref: '#/components/schemas/ControllersLearningDecideRunDTO'
+      required:
+      - proposals
+      - run
       type: object
     ControllersListLearningProtectedRulesResponse:
       properties:
@@ -9140,6 +9487,29 @@ components:
       - budgetUsd
       type: object
     ControllersStartLearningCollectResponse:
+      properties:
+        started:
+          type: boolean
+      required:
+      - started
+      type: object
+    ControllersStartLearningDecideRequest:
+      properties:
+        budgetUsd:
+          description: Most this run may spend, at API prices. At most 50.
+          format: double
+          type: number
+        project:
+          description: Project whose ready tasks to decide; empty decides every learning
+            project.
+          type: string
+        task:
+          description: Decide this one task now (e.g. solo:<session>), ready or not.
+          type: string
+      required:
+      - budgetUsd
+      type: object
+    ControllersStartLearningDecideResponse:
       properties:
         started:
           type: boolean
