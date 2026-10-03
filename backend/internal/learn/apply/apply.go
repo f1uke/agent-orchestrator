@@ -37,6 +37,9 @@ func Apply(r Roots, p domain.LearnProposal, content string, now time.Time) (stri
 	if content == "" {
 		content = p.NewContent
 	}
+	if strings.TrimSpace(content) == "" {
+		return "", errors.New("refusing to write an empty file")
+	}
 	if err := r.allowed(p.TargetPath); err != nil {
 		return "", err
 	}

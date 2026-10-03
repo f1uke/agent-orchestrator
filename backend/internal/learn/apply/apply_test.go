@@ -151,3 +151,14 @@ func TestCreateMemory_LongPathsBackUpAndAFailedIndexLeavesNothing(t *testing.T) 
 		t.Errorf("the memory file must be taken back when its index line cannot be written: %v", err)
 	}
 }
+
+func TestApply_RefusesAnEmptyFile(t *testing.T) {
+	r, mem := setup(t)
+	p := domain.LearnProposal{Action: domain.LearnProposeCreateMemory, TargetPath: filepath.Join(mem, "feedback_empty.md"), IndexLine: "- [E](feedback_empty.md) - e"}
+	if _, err := Apply(r, p, "", now); err == nil {
+		t.Fatal("an empty memory file must never be written")
+	}
+	if _, err := os.Stat(p.TargetPath); !errors.Is(err, os.ErrNotExist) {
+		t.Error("nothing may be left behind")
+	}
+}
