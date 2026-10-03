@@ -128,9 +128,20 @@ const agentCatalogResponse = {
 	error: undefined,
 };
 
+// The global root-CA list a project's simulators inherit unless it overrides it.
+const globalSimTrustResponse = {
+	data: {
+		caFiles: ["~/Library/Application Support/com.proxyman.NSProxy/app-data/proxyman-ca.pem"],
+		defaultCaFiles: ["~/Library/Application Support/com.proxyman.NSProxy/app-data/proxyman-ca.pem"],
+		found: [true],
+	},
+	error: undefined,
+};
+
 function mockProject(project: Record<string, unknown>) {
 	getMock.mockImplementation(async (path: string) => {
 		if (path === "/api/v1/agents") return agentCatalogResponse;
+		if (path === "/api/v1/settings/sim-trust") return globalSimTrustResponse;
 		return {
 			data: {
 				status: "ok",
@@ -620,6 +631,101 @@ describe("ProjectSettingsForm", () => {
 
 		expect(
 			await screen.findByText("Script-only driving requires the product's folder in the scripts store."),
+		).toBeInTheDocument();
+		expect(putMock).not.toHaveBeenCalled();
+	});
+
+	// Config the simulator root-CA override must never disturb when it is saved.
+	const otherMobileConfig = {
+		worker: { agent: "codex" },
+		orchestrator: { agent: "claude-code" },
+		env: { TOKEN: "secret" },
+		hasIOSSimulator: true,
+		mobileScripts: { platform: "ios", product: "nter" },
+		simProfile: { keep: ["com.example.app"] },
+	};
+	function mockSimTrustProject(simTrust?: { caFiles: string[] }) {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: { ...otherMobileConfig, ...(simTrust ? { simTrust } : {}) },
+		});
+	}
+	async function savedConfig() {
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const config = putMock.mock.calls[0]?.[1]?.body.config;
+		expect(config.env).toEqual({ TOKEN: "secret" });
+		expect(config.hasIOSSimulator).toBe(true);
+		expect(config.mobileScripts).toEqual({ platform: "ios", product: "nter" });
+		expect(config.simProfile).toEqual({ keep: ["com.example.app"] });
+		return config;
+	}
+
+	it("inherits the global simulator root CAs, then names this project's own files", async () => {
+		mockSimTrustProject();
+		renderSettings();
+		await goToSection("What agents are told");
+
+		const mode = await screen.findByRole("combobox", { name: "Simulator root CAs" });
+		expect(mode).toHaveTextContent("Use the global list");
+		// The list being inherited is stated at the field.
+		expect(await screen.findByText("proxyman-ca.pem")).toBeInTheDocument();
+		expect(screen.queryByLabelText("Root-CA files for this project")).not.toBeInTheDocument();
+
+		await chooseOption(mode, "Use these files");
+		await userEvent.type(
+			screen.getByLabelText("Root-CA files for this project"),
+			" /certs/a.pem {Enter}{Enter}~/b.pem",
+		);
+		const config = await savedConfig();
+		expect(config.simTrust).toEqual({ caFiles: ["/certs/a.pem", "~/b.pem"] });
+	});
+
+	it("loads this project's own simulator root CAs and switches to trusting nothing", async () => {
+		mockSimTrustProject({ caFiles: ["/certs/a.pem", "~/b.pem"] });
+		renderSettings();
+		await goToSection("What agents are told");
+
+		const mode = await screen.findByRole("combobox", { name: "Simulator root CAs" });
+		expect(mode).toHaveTextContent("Use these files");
+		expect(screen.getByLabelText("Root-CA files for this project")).toHaveValue("/certs/a.pem\n~/b.pem");
+
+		await chooseOption(mode, "Trust nothing on this project");
+		const config = await savedConfig();
+		// An empty list, not an absent one: absent would inherit the global list.
+		expect(config.simTrust).toEqual({ caFiles: [] });
+	});
+
+	it("loads a trust-nothing project and goes back to the global list by omitting the setting", async () => {
+		mockSimTrustProject({ caFiles: [] });
+		renderSettings();
+		await goToSection("What agents are told");
+
+		const mode = await screen.findByRole("combobox", { name: "Simulator root CAs" });
+		expect(mode).toHaveTextContent("Trust nothing on this project");
+
+		await userEvent.click(screen.getByRole("button", { name: "Use global default" }));
+		expect(mode).toHaveTextContent("Use the global list");
+		const config = await savedConfig();
+		// Undefined is dropped from the JSON body, so the daemon stores no override.
+		expect(config.simTrust).toBeUndefined();
+	});
+
+	it("blocks save when this project's own simulator root-CA list is empty", async () => {
+		mockSimTrustProject();
+		renderSettings();
+		await goToSection("What agents are told");
+
+		await chooseOption(await screen.findByRole("combobox", { name: "Simulator root CAs" }), "Use these files");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		expect(
+			await screen.findByText("Name at least one root-CA file, or choose to trust nothing on this project."),
 		).toBeInTheDocument();
 		expect(putMock).not.toHaveBeenCalled();
 	});

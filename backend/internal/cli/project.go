@@ -102,6 +102,7 @@ type projectSetConfigOptions struct {
 	mobileScripts     string
 	mobilePlatform    string
 	mobileStore       string
+	simTrustCAs       []string
 	noAutoCrew        bool
 	pauseBeforeImpl   bool
 	configJSON        string
@@ -305,6 +306,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.mobileScripts, "mobile-scripts", "", "Drive this project's simulators/emulators ONLY through the scripts of this product (its folder in the scripts store, e.g. nter); needs --mobile-platform. \"\" turns it off")
 	f.StringVar(&opts.mobilePlatform, "mobile-platform", "", "With --mobile-scripts: the app this repo builds, ios (scripts run through `ao sim flow run`) or android (through `maestro --device`)")
 	f.StringVar(&opts.mobileStore, "mobile-scripts-store", "", "With --mobile-scripts: the scripts store checkout (default "+domain.DefaultMobileScriptsStore+")")
+	f.StringArrayVar(&opts.simTrustCAs, "sim-trust-ca", nil, "Root-CA file (absolute or ~/) this project's simulators trust on boot and claim, instead of the global list (repeatable). \"none\" trusts nothing here; \"\" goes back to the global list")
 	f.BoolVar(&opts.noAutoCrew, "no-auto-crew", false, "Never form a crew automatically on this project; a PERSON can still add a qa by hand (`ao crew add`, or `+ qa` in the app), an AO session cannot")
 	f.BoolVar(&opts.pauseBeforeImpl, "pause-before-implementing", false, "A standard/deep worker here stops once it understands the task and hands back to you before it implements anything; mechanical tasks never stop")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
@@ -358,6 +360,7 @@ var setConfigFieldFlags = []struct {
 	{flag: "mobile-scripts", path: "mobileScripts"},
 	{flag: "mobile-platform", path: "mobileScripts"},
 	{flag: "mobile-scripts-store", path: "mobileScripts"},
+	{flag: "sim-trust-ca", path: "simTrust"},
 	{flag: "no-auto-crew", path: "disableAutoCrew"},
 	{flag: "pause-before-implementing", path: "pauseBeforeImplementing"},
 }
@@ -445,6 +448,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 		HasWebUI:                opts.hasWebUI,
 		HasIOSSimulator:         opts.hasIOSSimulator,
 		MobileScripts:           buildMobileScripts(opts),
+		SimTrust:                buildSimTrust(opts.simTrustCAs),
 		DisableAutoCrew:         opts.noAutoCrew,
 		PauseBeforeImplementing: opts.pauseBeforeImpl,
 	}
@@ -472,6 +476,32 @@ func buildMobileScripts(opts projectSetConfigOptions) *domain.MobileScriptsConfi
 		return nil
 	}
 	return &domain.MobileScriptsConfig{Product: product, Platform: domain.MobilePlatform(platform), Store: store}
+}
+
+// simTrustNone is the --sim-trust-ca spelling of "trust nothing on this
+// project", which is a different instruction from inheriting the global list.
+const simTrustNone = "none"
+
+// buildSimTrust turns the --sim-trust-ca values into the setting. Only blanks
+// is nil, which inherits the global list (`--sim-trust-ca ""`); "none" is an
+// empty list, which trusts nothing; anything else is sent as given and the
+// daemon's validation names a path it cannot use.
+func buildSimTrust(values []string) *domain.SimTrustConfig {
+	files := []string{}
+	none := false
+	for _, v := range values {
+		switch trimmed := strings.TrimSpace(v); trimmed {
+		case "":
+		case simTrustNone:
+			none = true
+		default:
+			files = append(files, trimmed)
+		}
+	}
+	if len(files) == 0 && !none {
+		return nil
+	}
+	return &domain.SimTrustConfig{CAFiles: files}
 }
 
 // decodeConfigJSON decodes --config-json strictly: a key that is not part of

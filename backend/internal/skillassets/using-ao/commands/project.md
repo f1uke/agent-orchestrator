@@ -151,6 +151,7 @@ ao project set-config <id> [flags]
 | `--mobile-scripts string` | Drive this project's simulators/emulators ONLY through the scripts of this product (its folder in the scripts store, e.g. `nter`); `""` turns it off | off |
 | `--mobile-scripts-store string` | With `--mobile-scripts`: the scripts store checkout | `~/Documents/Projects/mobile-ui-scripts` |
 | `--model string` | Agent model override (e.g. `claude-opus-4-5`) | - |
+| `--sim-trust-ca string` | Root-CA file (absolute or `~/`) this project's simulators trust on boot and claim, instead of the global list (repeatable). `none` trusts nothing here; `""` goes back to the global list | the global list (Proxyman's CA when present) |
 | `--no-auto-crew` | Never form a crew automatically; a person can still add a qa by hand | off |
 | `--orchestrator-agent string` | Harness override for orchestrator sessions | - |
 | `--pause-before-implementing` | A standard/deep worker stops once it understands the task and hands back before implementing | off |

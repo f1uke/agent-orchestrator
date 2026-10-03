@@ -33,6 +33,10 @@ type AcquireSimLeaseInput struct {
 // SimLeaseResponse is the { lease } body returned by acquire.
 type SimLeaseResponse struct {
 	Lease domain.SimLease `json:"lease"`
+	// Trust is what the claim did about root CAs: a claim makes a booted
+	// device trust them, because a device a human booted in Xcode never went
+	// through AO's boot. Absent when there was nothing to trust.
+	Trust *SimTrustView `json:"trust,omitempty"`
 }
 
 // ListSimLeasesResponse is the body of GET /sim/leases: every lease still live
@@ -177,6 +181,9 @@ type SimController struct {
 	// machine that cannot list simulators, leaves the udid in its place rather
 	// than failing a stop over a comment.
 	Screen SimScreenProvider
+	// Trust resolves the root CAs a claim makes the device trust. nil trusts
+	// nothing.
+	Trust SimTrustResolver
 }
 
 // Register mounts the sim-lease routes on the supplied router. Listing is
@@ -239,7 +246,44 @@ func (c *SimController) acquire(w http.ResponseWriter, r *http.Request) {
 		writeSimError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusOK, SimLeaseResponse{Lease: lease})
+	envelope.WriteJSON(w, http.StatusOK, SimLeaseResponse{Lease: lease, Trust: c.trustOnClaim(r.Context(), sessionID(r), lease.UDID)})
+}
+
+// trustOnClaim makes a freshly claimed device trust the session's root CAs.
+//
+// The claim is the one step every agent takes before it drives, which is why
+// this is here as well as in the boot: a device a human booted from Xcode
+// never passed through AO's boot, and an app on it whose traffic goes through
+// this Mac's debugging proxy fails every TLS handshake and hangs on its splash
+// screen. It runs on every claim, renewals included. The install is
+// idempotent, and its cost (about a second per CA) is paid once per boot of
+// the device: the Truster remembers which CA contents a boot already trusts.
+//
+// Nothing here can fail the claim. A device that is not booted is skipped
+// (simctl's keychain needs a running device, and the next claim after a boot
+// gets it), and a failed install is reported on the response, not raised.
+func (c *SimController) trustOnClaim(ctx context.Context, id domain.SessionID, udid string) *SimTrustView {
+	if c.Screen == nil || c.Trust == nil {
+		return nil
+	}
+	truster := c.Screen.Truster()
+	if truster == nil {
+		return nil
+	}
+	listing, err := c.Screen.Devices(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, d := range listing.Devices {
+		if domain.NormalizeSimUDID(d.UDID) != domain.NormalizeSimUDID(udid) || !d.Booted() {
+			continue
+		}
+		// The boot's name lets a renewal skip a CA this run already trusts.
+		// A device whose run has no name is still trusted, just every time.
+		boot, _ := d.Boot()
+		return simTrustView(truster.Apply(ctx, udid, boot, *trustRequest(ctx, c.Trust, id)))
+	}
+	return nil
 }
 
 func (c *SimController) release(w http.ResponseWriter, r *http.Request) {

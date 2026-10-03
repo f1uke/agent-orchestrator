@@ -49,6 +49,7 @@ import (
 	wikisvc "github.com/aoagents/agent-orchestrator/backend/internal/service/wiki"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -282,6 +283,17 @@ func Run() error {
 		}
 		return fmt.Errorf("ref-link settings: %w", err)
 	}
+	// Which root CAs AO makes a simulator trust on boot and claim. Defaults to
+	// wherever known debugging proxies keep theirs; a missing/corrupt file
+	// degrades to that default.
+	simTrustSettings, err := simtrust.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("sim-trust settings: %w", err)
+	}
 
 	// loopReg tracks each fixed-interval background loop's last-run time so the
 	// API can surface a live countdown to each loop's next run. In-memory only:
@@ -491,6 +503,7 @@ func Run() error {
 		ResponseLanguage:   responseLangSettings,
 		WikiSettings:       wikiSettings,
 		RefLinks:           refLinkSettings,
+		SimTrust:           simTrustSettings,
 		Wiki:               wikiSvc,
 		EvidenceRetention:  evidenceRetentionSettings,
 		EvidenceSweeper:    evidenceSweep,

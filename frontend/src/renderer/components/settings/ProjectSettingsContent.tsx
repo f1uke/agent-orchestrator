@@ -3,13 +3,15 @@ import { RequiredAgentField } from "../CreateProjectAgentSheet";
 import { IntakeFields } from "../IntakeFields";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
+import { caFilesCount, caFilesSummary, parseCaFileLines } from "../../lib/sim-trust";
 import { ModelField, nextModelOnAgentChange } from "./ModelField";
 import { SectionHeading, SettingRow, SettingRows } from "./SettingRow";
 import { SettingEditorControl } from "./SettingEditorControl";
 import { SettingsReadOnlyPanel, ReadonlyRow } from "./SettingsReadOnlyPanel";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
 import { PROJECT_SECTIONS } from "./settings-sections";
-import type { useProjectSettingsForm } from "./useProjectSettingsForm";
+import type { SimTrustMode, useProjectSettingsForm } from "./useProjectSettingsForm";
 
 type Project = components["schemas"]["Project"];
 type AgentInfo = components["schemas"]["AgentInfo"];
@@ -45,6 +47,14 @@ const MOBILE_SCRIPTS_OPTIONS = [
 	{ value: "ios", label: "Scripts only - iOS" },
 	{ value: "android", label: "Scripts only - Android" },
 ] as const;
+
+// Absent, empty and a list are three different answers (see SimTrustMode), so
+// each gets its own option rather than an empty textarea standing for two.
+const SIM_TRUST_OPTIONS: { value: SimTrustMode; label: string }[] = [
+	{ value: "inherit", label: "Use the global list" },
+	{ value: "none", label: "Trust nothing on this project" },
+	{ value: "files", label: "Use these files" },
+];
 
 // Mirrors domain.DefaultMobileScriptsStore, shown where the field is left empty.
 const MOBILE_SCRIPTS_DEFAULT_STORE = "~/Documents/Projects/mobile-ui-scripts";
@@ -415,7 +425,8 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 }
 
 function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
-	const { form: draft, setField, isFieldDirty, globalResponseLanguage } = form;
+	const { form: draft, setField, isFieldDirty, globalResponseLanguage, globalSimTrustCaFiles } = form;
+	const globalSimTrust = globalSimTrustCaFiles ? caFilesSummary(globalSimTrustCaFiles) : "the global list";
 	return (
 		<>
 			<SectionHeading title="What agents are told" hint={hint("told")} />
@@ -528,6 +539,48 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 						<label htmlFor="hasIOSSimulator" className="text-[12px] text-muted-foreground">
 							This project targets iOS
 						</label>
+					</div>
+				</SettingRow>
+
+				<SettingRow
+					name="Simulator root CAs"
+					summary="Which root certificates a simulator AO boots or claims for this project is made to trust, so HTTPS through a debugging proxy works inside the app."
+					detail={
+						<>
+							Use the global list unless this project's traffic goes through a different proxy. Trust nothing turns it
+							off here. Use these files replaces the global list: one PEM or DER file per line, as an absolute path or
+							one starting with <code>~/</code>. A file that is not on this Mac is skipped silently. A simulator picks
+							up a change the next time AO boots or claims it.
+						</>
+					}
+					ownership={{
+						kind: "project-override",
+						globalValue: globalSimTrust,
+						overriding: draft.simTrustMode !== "inherit",
+					}}
+					timing="live"
+					value={simTrustValue(draft.simTrustMode, draft.simTrustCaFiles)}
+					modified={isFieldDirty("simTrustMode") || isFieldDirty("simTrustCaFiles")}
+					controlId="simTrustMode"
+					onUseGlobal={() => setField("simTrustMode", "inherit")}
+				>
+					<div className="flex flex-col gap-2.5">
+						<SimTrustSelect
+							id="simTrustMode"
+							value={draft.simTrustMode}
+							onChange={(v) => setField("simTrustMode", v)}
+						/>
+						{draft.simTrustMode === "files" && (
+							<Textarea
+								aria-label="Root-CA files for this project"
+								className="min-h-20 max-w-[620px] resize-y font-mono text-[12.5px] leading-relaxed"
+								wrap="off"
+								placeholder="~/path/to/root-ca.pem"
+								spellCheck={false}
+								value={draft.simTrustCaFiles}
+								onChange={(e) => setField("simTrustCaFiles", e.target.value)}
+							/>
+						)}
 					</div>
 				</SettingRow>
 
@@ -731,6 +784,38 @@ function GitWorkflowSelect({ id, value, onChange }: { id: string; value: string;
 			</SelectTrigger>
 			<SelectContent>
 				{GIT_WORKFLOW_OPTIONS.map((opt) => (
+					<SelectItem key={opt.value} value={opt.value}>
+						{opt.label}
+					</SelectItem>
+				))}
+			</SelectContent>
+		</Select>
+	);
+}
+
+// The row's at-rest value: what this project's simulators actually trust.
+function simTrustValue(mode: SimTrustMode, lines: string): string {
+	if (mode === "inherit") return "Global list (inherited)";
+	if (mode === "none") return "None";
+	return caFilesCount(parseCaFileLines(lines));
+}
+
+function SimTrustSelect({
+	id,
+	value,
+	onChange,
+}: {
+	id: string;
+	value: SimTrustMode;
+	onChange: (value: SimTrustMode) => void;
+}) {
+	return (
+		<Select value={value} onValueChange={(v) => onChange(v as SimTrustMode)}>
+			<SelectTrigger id={id} className="h-8 w-full max-w-[340px] text-[13px]">
+				<SelectValue />
+			</SelectTrigger>
+			<SelectContent>
+				{SIM_TRUST_OPTIONS.map((opt) => (
 					<SelectItem key={opt.value} value={opt.value}>
 						{opt.label}
 					</SelectItem>

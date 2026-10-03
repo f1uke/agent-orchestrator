@@ -153,6 +153,8 @@ Power a simulator on and wait until it can actually be driven. This is what you 
 
 **It needs a running daemon and an AO session** (`AO_SESSION_ID`), unlike `ao sim list` and `ao sim shot`. So does `ao sim claim`, which is what you run next.
 
+**A device it boots trusts this Mac's debugging-proxy root CA before it returns.** See [Root CAs](#root-cas-why-https-works-through-the-proxy) under `ao sim claim`; the output says `Trusted root CA: <file>` for each one.
+
 **Examples:**
 
 ```bash
@@ -408,6 +410,23 @@ The device is resolved exactly like `ao sim shot` (see the table above): with se
 - **Automatic release:** the lease lapses on its own after the TTL, and is released the moment this session ends. You can never permanently poison a device by crashing.
 - **Contention:** if another session holds it, the command **fails (exit 1)** and names the holder and the time left. It never waits and never silently proceeds. Do something else and try later, or ask that session to release it.
 - **What it does not cover:** a human driving the same simulator from Xcode. A lease excludes other AO sessions only.
+
+#### Root CAs: why HTTPS works through the proxy
+
+This Mac routes its traffic through a TLS-intercepting debugging proxy, and **a simulator does not inherit the Mac's trust store**. A device that does not trust the proxy's root CA fails every HTTPS call (`-1200` / `-9802`, `Trust evaluate failure: [root AnchorTrusted]` in `ao sim log`) and the app sits on its splash screen - which looks like an app or backend bug and is neither.
+
+So every `ao sim claim` (renewals included) and every `ao sim boot` makes the device trust the configured root-CA files, and says so:
+
+```text
+Trusted root CA: /Users/you/Library/Application Support/com.proxyman.NSProxy/app-data/proxyman-ca.pem
+```
+
+- It is idempotent: trusting a CA twice adds no second entry.
+- A configured file that is not on this Mac is skipped silently - nothing is printed.
+- A CA that cannot be installed prints a `Warning:` and **never fails the claim or boot**. If you see one, expect HTTPS through the proxy to fail on that device.
+- `ao sim claim --json` and `ao sim boot --json` carry the same thing as `trust: { trusted, failed }`.
+
+Which files: the global setting `GET/PUT /api/v1/settings/sim-trust` (default: Proxyman's CA, wherever it exists), unless the project names its own with `ao project set-config <id> --sim-trust-ca <file>` (`none` trusts nothing there; `""` goes back to the global list). You do not need to do anything for this - only know that a splash-screen hang with a trust error in the log is a device that missed it, and that claiming again fixes it.
 
 ```bash
 # Claim the booted simulator for the default 10 minutes

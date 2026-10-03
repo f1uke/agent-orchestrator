@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CompanionActivity, CompanionFeed } from "./feed";
 import { castForSession, withSpecies } from "./cast";
@@ -654,6 +654,16 @@ describe("the look a Proc wears", () => {
 describe("shaking the Orchestrator to call its project in", () => {
 	// The end of the gesture the engine cannot see: real pointer events, on a real
 	// figure, arriving in the order a hand produces them.
+	//
+	// The engine's own clock is the test's too. It ticks on a real interval and
+	// lets an idle Proc wander off on a roll of Math.random, so under a loaded
+	// full-suite run a tick could land between render and the assertions and start
+	// the outsider strolling - which "leaves every other project standing" then
+	// read as the rally having moved it. No test here waits on that clock.
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
 	const ALPHA: CompanionActivity[] = [
 		{ sessionId: "lead", status: "working", name: "coordinator", project: "alpha", kind: "orchestrator" },
 		{ sessionId: "a1", status: "pr_open", name: "one", project: "alpha" },

@@ -109,6 +109,10 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--mobile-scripts-store", "/opt/scripts"},
 		want: domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{Store: "/opt/scripts"}},
 	},
+	"sim-trust-ca": {
+		args: []string{"--sim-trust-ca", "~/proxy-ca.pem"},
+		want: domain.ProjectConfig{SimTrust: &domain.SimTrustConfig{CAFiles: []string{"~/proxy-ca.pem"}}},
+	},
 	"no-auto-crew": {
 		args: []string{"--no-auto-crew"},
 		want: domain.ProjectConfig{DisableAutoCrew: true},
@@ -255,6 +259,32 @@ func TestProjectSetConfig_MobileScriptsFlagsWriteOneSetting(t *testing.T) {
 	}
 	if off.Config.MobileScripts != nil {
 		t.Fatalf("--mobile-scripts \"\" sent %#v, want nil (off)", off.Config.MobileScripts)
+	}
+}
+
+// --sim-trust-ca has three meanings, and two of them are easy to confuse: an
+// empty value goes back to the global list (nil), while "none" trusts nothing
+// on this project (an empty list). Both name the field, so both are writes.
+func TestProjectSetConfig_SimTrustFlagSpellsAllThreeIntents(t *testing.T) {
+	both := captureSetConfig(t, "--sim-trust-ca", "~/a.pem", "--sim-trust-ca", "/b.pem")
+	if want := []string{"simTrust"}; !reflect.DeepEqual(both.MergeFields, want) {
+		t.Fatalf("mergeFields = %v, want %v", both.MergeFields, want)
+	}
+	if want := (&domain.SimTrustConfig{CAFiles: []string{"~/a.pem", "/b.pem"}}); !reflect.DeepEqual(both.Config.SimTrust, want) {
+		t.Fatalf("simTrust = %#v, want %#v", both.Config.SimTrust, want)
+	}
+
+	none := captureSetConfig(t, "--sim-trust-ca", "none")
+	if none.Config.SimTrust == nil || len(none.Config.SimTrust.CAFiles) != 0 {
+		t.Fatalf("--sim-trust-ca none sent %#v, want an empty list (trust nothing)", none.Config.SimTrust)
+	}
+
+	inherit := captureSetConfig(t, "--sim-trust-ca", "")
+	if want := []string{"simTrust"}; !reflect.DeepEqual(inherit.MergeFields, want) {
+		t.Fatalf("mergeFields = %v, want %v", inherit.MergeFields, want)
+	}
+	if inherit.Config.SimTrust != nil {
+		t.Fatalf("--sim-trust-ca \"\" sent %#v, want nil (the global list)", inherit.Config.SimTrust)
 	}
 }
 

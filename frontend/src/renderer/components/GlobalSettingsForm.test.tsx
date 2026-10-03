@@ -93,7 +93,7 @@ async function openRows() {
 // so edits survive navigation and one save bar commits the whole global config.
 // Section names follow the variant-B cut: sections are named for what a setting
 // acts on rather than for the shape of the config file.
-async function goToSection(name: "Every agent" | "While work runs" | "Cleaning up" | "This Mac") {
+async function goToSection(name: "Every agent" | "While work runs" | "Cleaning up" | "Simulators" | "This Mac") {
 	await userEvent.click(await screen.findByRole("button", { name: new RegExp(`^${name}`) }));
 	await openRows();
 }
@@ -113,6 +113,18 @@ const promptsPayload = {
 	},
 	error: undefined,
 };
+const PROXYMAN_CA = "~/Library/Application Support/com.proxyman.NSProxy/app-data/proxyman-ca.pem";
+// The saved global list: the shipped Proxyman CA (present on this Mac) plus a
+// Charles CA that is not installed here.
+const simTrustPayload = {
+	data: {
+		caFiles: [PROXYMAN_CA, "/opt/charles/charles-ca.pem"],
+		defaultCaFiles: [PROXYMAN_CA],
+		found: [true, false],
+	},
+	error: undefined,
+};
+
 const templatesPayload = {
 	data: {
 		templates: [
@@ -152,6 +164,8 @@ function mockGet(importPayload: unknown, promptOverrides: Record<string, string>
 				return { data: { enabled: true, maxAgeDays: 30 }, error: undefined };
 			case "/api/v1/settings/wiki":
 				return { data: { vaultPath: "", harness: "" }, error: undefined };
+			case "/api/v1/settings/sim-trust":
+				return simTrustPayload;
 			case "/api/v1/import":
 				return importPayload;
 			default:
@@ -357,6 +371,95 @@ describe("GlobalSettingsForm", () => {
 				expect.objectContaining({ channel: "nightly", enabled: true, nightlyAck: true }),
 			),
 		);
+	});
+
+	it("loads the simulator root CAs one per line and says which saved files are on this Mac", async () => {
+		renderForm();
+		await goToSection("Simulators");
+		const field = await screen.findByLabelText("Simulator root CAs");
+		await waitFor(() => expect(field).toHaveValue(`${PROXYMAN_CA}\n/opt/charles/charles-ca.pem`));
+		const saved = screen.getByRole("list", { name: "Saved root CAs on this Mac" });
+		const [proxyman, charles] = within(saved).getAllByRole("listitem");
+		expect(proxyman).toHaveTextContent(PROXYMAN_CA);
+		expect(proxyman).toHaveTextContent("Found");
+		expect(charles).toHaveTextContent("/opt/charles/charles-ca.pem");
+		expect(charles).toHaveTextContent("Not on this Mac, skipped");
+		// Seeding is not an edit: the bar stays idle.
+		expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+	});
+
+	it("saves edited simulator root CAs through the bar (PUT sim-trust) and shows the saved list", async () => {
+		putMock.mockImplementation(async (path: string) =>
+			path === "/api/v1/settings/sim-trust"
+				? { data: { caFiles: ["/certs/a.pem", "~/b.pem"], defaultCaFiles: [PROXYMAN_CA], found: [false, true] } }
+				: { data: {}, error: undefined },
+		);
+		renderForm();
+		await goToSection("Simulators");
+		const field = await screen.findByLabelText("Simulator root CAs");
+		await waitFor(() => expect(field).toHaveValue(`${PROXYMAN_CA}\n/opt/charles/charles-ca.pem`));
+		// Stray whitespace and blank lines never reach the daemon, which refuses them.
+		fireEvent.change(field, { target: { value: "  /certs/a.pem\n\n~/b.pem  \n" } });
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/sim-trust", {
+				body: { caFiles: ["/certs/a.pem", "~/b.pem"] },
+			}),
+		);
+		expect(await screen.findByText("Saved.")).toBeInTheDocument();
+		// The field shows the list as stored, and the found flags are the saved list's.
+		expect(field).toHaveValue("/certs/a.pem\n~/b.pem");
+		const [a, b] = within(screen.getByRole("list", { name: "Saved root CAs on this Mac" })).getAllByRole("listitem");
+		expect(a).toHaveTextContent("Not on this Mac, skipped");
+		expect(b).toHaveTextContent("Found");
+	});
+
+	it("restores the shipped default list of simulator root CAs", async () => {
+		renderForm();
+		await goToSection("Simulators");
+		const field = await screen.findByLabelText("Simulator root CAs");
+		await waitFor(() => expect(field).toHaveValue(`${PROXYMAN_CA}\n/opt/charles/charles-ca.pem`));
+		await userEvent.click(screen.getByRole("button", { name: "Restore default" }));
+		expect(field).toHaveValue(PROXYMAN_CA);
+		// Already at the default: nothing left to restore.
+		expect(screen.getByRole("button", { name: "Restore default" })).toBeDisabled();
+
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/sim-trust", { body: { caFiles: [PROXYMAN_CA] } }),
+		);
+	});
+
+	it("saves an emptied simulator root-CA list as trusting nothing", async () => {
+		renderForm();
+		await goToSection("Simulators");
+		const field = await screen.findByLabelText("Simulator root CAs");
+		await waitFor(() => expect(field).not.toHaveValue(""));
+		await userEvent.clear(field);
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledWith("/api/v1/settings/sim-trust", { body: { caFiles: [] } }));
+	});
+
+	it("shows the daemon's refusal of a simulator root-CA path and keeps the edit", async () => {
+		putMock.mockImplementation(async (path: string) =>
+			path === "/api/v1/settings/sim-trust"
+				? {
+						data: undefined,
+						error: { message: 'caFiles[0]: "certs/a.pem" must be absolute or start with ~/' },
+					}
+				: { data: {}, error: undefined },
+		);
+		renderForm();
+		await goToSection("Simulators");
+		const field = await screen.findByLabelText("Simulator root CAs");
+		await waitFor(() => expect(field).not.toHaveValue(""));
+		fireEvent.change(field, { target: { value: "certs/a.pem" } });
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
+		expect(await screen.findByText('caFiles[0]: "certs/a.pem" must be absolute or start with ~/')).toBeInTheDocument();
+		expect(field).toHaveValue("certs/a.pem");
+		expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
 	});
 
 	it("shows migration status and the available legacy root", async () => {

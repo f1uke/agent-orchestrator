@@ -1835,6 +1835,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/sim-trust": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the root-CA files AO makes every simulator trust when it boots or claims one */
+        get: operations["getSimTrustSettings"];
+        /** Replace the root-CA files AO makes every simulator trust (an empty list trusts nothing) */
+        put: operations["setSimTrustSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/spawn-confirm": {
         parameters: {
             query?: never;
@@ -2655,6 +2673,9 @@ export interface components {
         DomainSimProfileConfig: {
             keep?: string[];
         };
+        DomainSimTrustConfig: {
+            caFiles: string[];
+        };
         DomainSmokeRun: {
             checkId: string;
             /** Format: date-time */
@@ -3070,6 +3091,7 @@ export interface components {
             reviewers?: components["schemas"]["DomainReviewerConfig"][];
             sessionPrefix?: string;
             simProfile?: components["schemas"]["DomainSimProfileConfig"];
+            simTrust?: components["schemas"]["DomainSimTrustConfig"];
             symlinks?: string[];
             systemPromptAdditions?: components["schemas"]["DomainSystemPromptAdditions"];
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
@@ -3474,6 +3496,9 @@ export interface components {
         SetSessionTargetRequest: {
             targetBranch: string;
         };
+        SetSimTrustSettingsRequest: {
+            caFiles: string[];
+        };
         SetSmokeVerdictInput: {
             /** @description Optional id of the agent run the user agreed with. The run must be on this case, must have concluded, and its verdict must match; skip cannot be agreed with. */
             agreedRunId?: string;
@@ -3528,6 +3553,7 @@ export interface components {
             runtimeIdentifier: string;
             /** @description simctl's own state, e.g. Booted or Shutdown. */
             state: string;
+            trust?: components["schemas"]["SimTrustView"];
             udid: string;
         };
         SimGestureInput: {
@@ -3591,6 +3617,7 @@ export interface components {
         };
         SimLeaseResponse: {
             lease: components["schemas"]["SimLease"];
+            trust?: components["schemas"]["SimTrustView"];
         };
         SimRecording: {
             name: string;
@@ -3666,6 +3693,30 @@ export interface components {
             height: number;
             /** Format: double */
             width: number;
+        };
+        SimTrustFailureView: {
+            /** @description The CA file. Empty when the files to trust could not be worked out at all. */
+            file?: string;
+            reason: string;
+        };
+        SimTrustSettingsResponse: {
+            /** @description PEM or DER root certificates on this Mac, absolute or ~/-relative. A file that does not exist is skipped silently; an empty list trusts nothing. */
+            caFiles: string[];
+            /** @description The shipped list: where known debugging proxies keep their root CA. */
+            defaultCaFiles: string[];
+            /** @description Per caFiles entry, whether the file exists on this Mac right now. */
+            found: boolean[];
+        };
+        SimTrustView: {
+            /**
+             * Format: date-time
+             * @description When the pass ran.
+             */
+            at: string;
+            /** @description Root-CA files that exist but could not be installed. A failure never fails the boot or claim it rode on. */
+            failed?: components["schemas"]["SimTrustFailureView"][];
+            /** @description Root-CA files the device was made to trust, as absolute paths. */
+            trusted?: string[];
         };
         SimTypeField: {
             id?: string;
@@ -11360,6 +11411,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResponseLanguageSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSimTrustSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimTrustSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setSimTrustSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSimTrustSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimTrustSettingsResponse"];
                 };
             };
             /** @description Bad Request */

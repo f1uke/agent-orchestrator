@@ -36,6 +36,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 )
 
 // Op is what is being done to a device.
@@ -127,6 +128,19 @@ type Status struct {
 	Profile *simslim.Result `json:"profile,omitempty"`
 }
 
+// Setup is what a boot does to the device once it is up, beyond being up. Both
+// halves are resolved by the caller, which knows the session's project; Power
+// never does. A nil Setup, and every field of one left empty, is a plain boot.
+type Setup struct {
+	// Profile is the daemon profile to slim the device to. See simslim.Request
+	// for why a failure to resolve one travels here instead of vanishing.
+	Profile *simslim.Request
+	// Trust is the root CAs the device is made to trust (internal/simtrust),
+	// so traffic through this Mac's debugging proxy does not fail every TLS
+	// handshake. nil trusts nothing.
+	Trust *simtrust.Request
+}
+
 // Power runs the operations and remembers what is in flight.
 //
 // The remembering is why this is a type rather than two functions. A boot takes
@@ -145,6 +159,11 @@ type Power struct {
 	bootTimeout     time.Duration
 	shutdownTimeout time.Duration
 	profileTimeout  time.Duration
+
+	// trust installs root CAs after a boot. nil installs nothing, which is
+	// what a Power built without UseTruster - every test that is not about
+	// trust - should do.
+	trust *simtrust.Truster
 
 	mu        sync.Mutex
 	entries   map[string]Status
@@ -179,6 +198,11 @@ func (p *Power) OnSettled(fn func()) {
 	p.onSettled = fn
 }
 
+// UseTruster sets what installs a boot's root CAs. The daemon shares one
+// Truster between boots and claims, so the device listing reports whichever
+// pass ran last.
+func (p *Power) UseTruster(t *simtrust.Truster) { p.trust = t }
+
 // Start begins an operation and returns at once. The work is detached from the
 // caller's context on purpose: the request that asked for a boot is answered
 // immediately, and a boot that died with it would never land.
@@ -187,7 +211,7 @@ func (p *Power) OnSettled(fn func()) {
 // shutdown path uses it to give back the lease it took to arbitrate the
 // shutdown, so the device is arbitrated for exactly as long as it is being
 // powered off and not a moment longer.
-func (p *Power) Start(ctx context.Context, udid string, op Op, req *simslim.Request, done func()) error {
+func (p *Power) Start(ctx context.Context, udid string, op Op, setup *Setup, done func()) error {
 	timeout, args, err := p.plan(op, domain.NormalizeSimUDID(udid))
 	if err != nil {
 		return err
@@ -215,7 +239,7 @@ func (p *Power) Start(ctx context.Context, udid string, op Op, req *simslim.Requ
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-		p.execute(context.WithoutCancel(ctx), key, op, timeout, args, req)
+		p.execute(context.WithoutCancel(ctx), key, op, timeout, args, setup)
 		if done != nil {
 			done()
 		}
@@ -242,8 +266,8 @@ func (p *Power) plan(op Op, udid string) (time.Duration, []string, error) {
 	}
 }
 
-// execute runs the command, then - for a boot with a profile - brings the
-// device to that profile, and records what happened.
+// execute runs the command, then - for a boot with a setup - brings the device
+// to its profile and makes it trust the root CAs, and records what happened.
 //
 // The profile step runs INSIDE the operation rather than after it, and the
 // operation does not settle until it is done. That is the same decision plan()
@@ -251,14 +275,28 @@ func (p *Power) plan(op Op, udid string) (time.Duration, []string, error) {
 // one definition of "this device is ready". `simslim on` reboots the device, so
 // a boot that reported success before this step would hand `ao sim claim` a
 // device that is on its way down.
-func (p *Power) execute(ctx context.Context, key string, op Op, timeout time.Duration, args []string, req *simslim.Request) {
+//
+// Trust comes after the profile for the same reason: `simslim on` reboots the
+// device, and `simctl keychain` needs it up. It also runs inside the operation,
+// so the first claim after a boot finds a device that can already reach the
+// network through the proxy. A failed install never fails the boot - it is
+// reported on the device listing, from the Truster.
+func (p *Power) execute(ctx context.Context, key string, op Op, timeout time.Duration, args []string, setup *Setup) {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	out, err := p.run(runCtx, simctl.Binary, args...)
 	cancel()
 
 	var profile *simslim.Result
-	if err == nil && op == Boot && req != nil {
-		profile = p.applyProfile(ctx, key, *req)
+	if err == nil && op == Boot && setup != nil {
+		if setup.Profile != nil {
+			profile = p.applyProfile(ctx, key, *setup.Profile)
+		}
+		if p.trust != nil && setup.Trust != nil {
+			// No boot name here: this run has just started, so nothing can
+			// already be trusted on it, and the claim that follows learns
+			// the name from its own listing.
+			p.trust.Apply(ctx, key, "", *setup.Trust)
+		}
 	}
 
 	p.mu.Lock()

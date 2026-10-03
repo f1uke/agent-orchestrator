@@ -50,7 +50,8 @@ type acquireSimLeaseRequest struct {
 
 // simLeaseResponse mirrors controllers.SimLeaseResponse.
 type simLeaseResponse struct {
-	Lease simLeaseClient `json:"lease"`
+	Lease simLeaseClient  `json:"lease"`
+	Trust *simTrustClient `json:"trust,omitempty"`
 }
 
 // listSimLeasesResponse mirrors controllers.ListSimLeasesResponse.
@@ -78,6 +79,10 @@ type simClaimResult struct {
 	AcquiredAt        time.Time `json:"acquiredAt"`
 	ExpiresAt         time.Time `json:"expiresAt"`
 	Note              string    `json:"note"`
+	// Trust is what claiming did about root CAs: a claim makes the device
+	// trust this Mac's debugging-proxy CA, because a device booted from Xcode
+	// never went through `ao sim boot`.
+	Trust *simTrustClient `json:"trust,omitempty"`
 }
 
 // simReleaseResult is the `ao sim release --json` payload.
@@ -190,6 +195,7 @@ func (c *commandContext) claimSimDevice(ctx context.Context, udid, rawTTL string
 		AcquiredAt:        res.Lease.AcquiredAt.UTC(),
 		ExpiresAt:         res.Lease.ExpiresAt.UTC(),
 		Note:              simLeaseScopeNote,
+		Trust:             res.Trust,
 	}, nil
 }
 
@@ -389,6 +395,9 @@ func (c *commandContext) explainSimContention(device simDevice, err error) error
 func writeSimClaim(out io.Writer, result simClaimResult) error {
 	if _, err := fmt.Fprintf(out, "Claimed %s (%s, %s) for @%s until %s.\n",
 		result.Name, result.Runtime, result.UDID, result.Holder, result.ExpiresAt.Format(time.RFC3339)); err != nil {
+		return err
+	}
+	if err := writeSimTrust(out, result.Trust); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "Note: %s\n", result.Note); err != nil {

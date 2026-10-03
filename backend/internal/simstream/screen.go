@@ -15,7 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
-	"github.com/aoagents/agent-orchestrator/backend/internal/simslim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 )
 
 // Screen is the daemon's machine-local simulator surface: what simulators exist,
@@ -62,6 +62,10 @@ type Screen struct {
 	// the same object that lists devices and drives them - and because a boot
 	// has to invalidate the listing cache below the moment it lands.
 	power *simpower.Power
+	// trust installs root CAs on a device and remembers each device's last
+	// pass. One instance serves both a boot (through power) and a claim, so
+	// the listing reports whichever ran last.
+	trust *simtrust.Truster
 
 	mu       sync.Mutex
 	hub      *Hub
@@ -140,7 +144,9 @@ func NewScreen(dataDir string) *Screen {
 // booting" in the pane for a beat after it is up - which is exactly the moment
 // somebody is staring at the control waiting for it to change.
 func (s *Screen) newPower() {
+	s.trust = simtrust.NewTruster(s.run)
 	s.power = simpower.New(s.lookPath, s.run)
+	s.power.UseTruster(s.trust)
 	s.power.OnSettled(s.forgetListing)
 }
 
@@ -183,12 +189,15 @@ func (s *Screen) forgetListing() {
 // under way. See internal/simpower for why this exists in the daemon and
 // nowhere else - in particular, why there is no `ao sim boot`.
 //
-// req is passed straight through and never inspected: a Screen is a
+// setup is passed straight through and never inspected: a Screen is a
 // device-level surface with no idea what a project is, and keeping it that way
 // is what lets it be tested over a bare fake runner.
-func (s *Screen) StartPower(ctx context.Context, udid string, op simpower.Op, req *simslim.Request, done func()) error {
-	return s.power.Start(ctx, udid, op, req, done)
+func (s *Screen) StartPower(ctx context.Context, udid string, op simpower.Op, setup *simpower.Setup, done func()) error {
+	return s.power.Start(ctx, udid, op, setup, done)
 }
+
+// Truster is what makes a device trust root CAs, shared by boots and claims.
+func (s *Screen) Truster() *simtrust.Truster { return s.trust }
 
 // PowerStatus is every device with a power operation in flight or a failure to
 // report, keyed by normalized udid.

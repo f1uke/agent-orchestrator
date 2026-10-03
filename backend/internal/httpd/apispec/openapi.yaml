@@ -6050,6 +6050,57 @@ paths:
       summary: Replace the global default human-facing response language
       tags:
       - settings
+  /api/v1/settings/sim-trust:
+    get:
+      operationId: getSimTrustSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimTrustSettingsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Fetch the root-CA files AO makes every simulator trust when it boots
+        or claims one
+      tags:
+      - settings
+    put:
+      operationId: setSimTrustSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetSimTrustSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimTrustSettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Replace the root-CA files AO makes every simulator trust (an empty
+        list trusts nothing)
+      tags:
+      - settings
   /api/v1/settings/spawn-confirm:
     get:
       operationId: getSpawnConfirmSettings
@@ -7993,6 +8044,15 @@ components:
             type: string
           type: array
       type: object
+    DomainSimTrustConfig:
+      properties:
+        caFiles:
+          items:
+            type: string
+          type: array
+      required:
+      - caFiles
+      type: object
     DomainSmokeRun:
       properties:
         checkId:
@@ -8992,6 +9052,8 @@ components:
           type: string
         simProfile:
           $ref: '#/components/schemas/DomainSimProfileConfig'
+        simTrust:
+          $ref: '#/components/schemas/DomainSimTrustConfig'
         symlinks:
           items:
             type: string
@@ -10010,6 +10072,15 @@ components:
       required:
       - targetBranch
       type: object
+    SetSimTrustSettingsRequest:
+      properties:
+        caFiles:
+          items:
+            type: string
+          type: array
+      required:
+      - caFiles
+      type: object
     SetSmokeVerdictInput:
       properties:
         agreedRunId:
@@ -10123,6 +10194,8 @@ components:
         state:
           description: simctl's own state, e.g. Booted or Shutdown.
           type: string
+        trust:
+          $ref: '#/components/schemas/SimTrustView'
         udid:
           type: string
       required:
@@ -10270,6 +10343,8 @@ components:
       properties:
         lease:
           $ref: '#/components/schemas/SimLease'
+        trust:
+          $ref: '#/components/schemas/SimTrustView'
       required:
       - lease
       type: object
@@ -10431,6 +10506,62 @@ components:
       required:
       - width
       - height
+      type: object
+    SimTrustFailureView:
+      properties:
+        file:
+          description: The CA file. Empty when the files to trust could not be worked
+            out at all.
+          type: string
+        reason:
+          type: string
+      required:
+      - reason
+      type: object
+    SimTrustSettingsResponse:
+      properties:
+        caFiles:
+          description: PEM or DER root certificates on this Mac, absolute or ~/-relative.
+            A file that does not exist is skipped silently; an empty list trusts nothing.
+          items:
+            type: string
+          type: array
+        defaultCaFiles:
+          description: 'The shipped list: where known debugging proxies keep their
+            root CA.'
+          items:
+            type: string
+          type: array
+        found:
+          description: Per caFiles entry, whether the file exists on this Mac right
+            now.
+          items:
+            type: boolean
+          type: array
+      required:
+      - caFiles
+      - defaultCaFiles
+      - found
+      type: object
+    SimTrustView:
+      properties:
+        at:
+          description: When the pass ran.
+          format: date-time
+          type: string
+        failed:
+          description: Root-CA files that exist but could not be installed. A failure
+            never fails the boot or claim it rode on.
+          items:
+            $ref: '#/components/schemas/SimTrustFailureView'
+          type: array
+        trusted:
+          description: Root-CA files the device was made to trust, as absolute paths.
+          items:
+            type: string
+          type: array
+      required:
+      - at
       type: object
     SimTypeField:
       properties:

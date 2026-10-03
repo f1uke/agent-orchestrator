@@ -118,6 +118,10 @@ type simBootResult struct {
 	Profile string `json:"profile,omitempty"`
 	// ProfileReason says why the device is stock, when it is.
 	ProfileReason string `json:"profileReason,omitempty"`
+	// Trust is what the boot did about root CAs, read off the daemon's
+	// listing. Absent on a device that was already up: the claim that follows
+	// is what trusts those.
+	Trust *simTrustClient `json:"trust,omitempty"`
 }
 
 // simPowerRequest mirrors controllers.SimPowerInput. Only the state is sent:
@@ -150,6 +154,7 @@ type simDeviceListing struct {
 	State             string                 `json:"state"`
 	Available         bool                   `json:"available"`
 	Power             *simDevicePowerListing `json:"power,omitempty"`
+	Trust             *simTrustClient        `json:"trust,omitempty"`
 }
 
 // listSimDevicesResponse mirrors controllers.ListSimDevicesResponse.
@@ -516,6 +521,12 @@ func simBootedResult(device simDevice, already bool, listing *simDeviceListing) 
 		result.Profile = listing.Power.Profile
 		result.ProfileReason = listing.Power.ProfileReason
 	}
+	// Only a boot this command started reports trust: the listing remembers a
+	// device's LAST pass, and on a device that was already up that pass may be
+	// somebody else's claim, from a project that trusts something else.
+	if !already && listing != nil {
+		result.Trust = listing.Trust
+	}
 	return result
 }
 
@@ -530,6 +541,9 @@ func writeSimBoot(out io.Writer, result simBootResult) error {
 	// The next command in the chain, spelled out: a booted device is not yours
 	// until you claim it, and the claim is what a shared machine needs.
 	if _, err := fmt.Fprintf(out, "Claim it before you drive it: ao sim claim --udid %s\n", result.UDID); err != nil {
+		return err
+	}
+	if err := writeSimTrust(out, result.Trust); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "Note: %s\n", result.Note); err != nil {
