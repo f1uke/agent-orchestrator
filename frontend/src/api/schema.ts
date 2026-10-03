@@ -226,6 +226,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/learning/excerpts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a project's captured human turns, newest first */
+        get: operations["listLearningExcerpts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/projects/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete everything learning capture kept for a project that no longer learns from sessions */
+        delete: operations["forgetProjectLearning"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Report what learning capture stored per project, and whether it is healthy */
+        get: operations["getLearningStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -1504,6 +1555,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/transcript-ref": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report the conversation file a session is writing, and a submitted prompt's fingerprint */
+        post: operations["reportSessionTranscriptRef"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/wake": {
         parameters: {
             query?: never;
@@ -2365,6 +2433,10 @@ export interface components {
             /** @description Why it matters. Omit to leave unchanged. */
             why?: null | string;
         };
+        ControllersForgetLearningResponse: {
+            /** @description Captured turns deleted. */
+            deletedTurns: number;
+        };
         ControllersHandbackCompletenessView: {
             cases: number;
             notDriven: string[];
@@ -2379,8 +2451,68 @@ export interface components {
             /** @description Destroy the uncommitted work in the session's worktree (captured to refs/ao/preserved/<session-id> first). Without it, a session holding undelivered work refuses the kill with 409 SESSION_HAS_UNDELIVERED_WORK. */
             discardUncommitted?: boolean;
         };
+        ControllersLearningExcerptDTO: {
+            after: components["schemas"]["ControllersLearningWindowDTO"];
+            before: components["schemas"]["ControllersLearningWindowDTO"];
+            gitBranch?: string;
+            /** @description What the human typed, redacted. */
+            humanText: string;
+            /** Format: int64 */
+            id: number;
+            projectId: string;
+            /** @description How many values of each kind redaction replaced in this turn. */
+            redactions: {
+                [key: string]: number;
+            } | null;
+            sessionId: string;
+            /** @enum {string} */
+            sourceClass: "typed" | "queued" | "suggestion_accepted" | "app_send" | "smoke_report";
+            /** Format: date-time */
+            turnAt: string;
+        };
+        ControllersLearningFailingFileDTO: {
+            error: string;
+            path: string;
+        };
+        ControllersLearningProjectStatusDTO: {
+            /** @description Transcripts with unread turns whose last write is 25 days old or more; Claude Code deletes them at 30. */
+            atRiskTranscripts: number;
+            bySourceClass: {
+                [key: string]: number;
+            } | null;
+            /** @description Whether the project learns from sessions now. A project that was switched off is listed while it still holds captured turns. */
+            enabled: boolean;
+            /** @description Human turns stored. */
+            excerpts: number;
+            failingFiles: components["schemas"]["ControllersLearningFailingFileDTO"][];
+            /** @description Human turns read across all tracked transcripts. */
+            humanTurns: number;
+            /** Format: date-time */
+            lastCaptureAt?: null | string;
+            /** @description Turns read that were not the human's: AO notices, other sessions' messages, briefs. */
+            machineTurns: number;
+            projectId: string;
+            /** @description Prompts the agent hooks saw since tracking began. */
+            prompts: number;
+            /** @description Transcript files capture is tracking. */
+            transcripts: number;
+            /** @description Prompts the hooks saw more than 30 minutes ago that capture never found in a transcript. Non-zero means the transcript format may have changed. */
+            unmatchedPrompts: number;
+        };
+        ControllersLearningStatusResponse: {
+            projects: components["schemas"]["ControllersLearningProjectStatusDTO"][];
+        };
+        ControllersLearningWindowDTO: {
+            /** @description What the agent did, as tool plus one whitelisted target, and markers for messages other than the human's. */
+            actions: string[];
+            /** @description The agent's nearest words, redacted and clipped in bytes. */
+            agentText?: string;
+        };
         ControllersListDaemonLoopsResponse: {
             loops: components["schemas"]["ControllersDaemonLoop"][];
+        };
+        ControllersListLearningExcerptsResponse: {
+            excerpts: components["schemas"]["ControllersLearningExcerptDTO"][];
         };
         ControllersListSimFlowsResponse: {
             flows: components["schemas"]["ControllersSimFlowView"][];
@@ -2561,6 +2693,19 @@ export interface components {
         };
         ControllersStartIOSRunResponse: {
             run: components["schemas"]["IosrunRun"];
+        };
+        ControllersTranscriptRefRequest: {
+            /** @description The harness's own conversation id. */
+            claudeSessionId?: string;
+            /** @description On a prompt submit: the collapsed prompt's length in bytes. */
+            promptBytes?: number;
+            /** @description On a prompt submit: hex sha256 of the prompt with whitespace collapsed. Recorded only for projects that learn from sessions. */
+            promptSha256?: string;
+            /** @description Absolute path of the conversation file the session is writing. Must be a .jsonl directly inside one of Claude Code's project directories. */
+            transcriptPath: string;
+        };
+        ControllersTranscriptRefResponse: {
+            ok: boolean;
         };
         ControllersUncommittedFileDTO: {
             path: string;
@@ -3085,6 +3230,7 @@ export interface components {
             gitConvention?: components["schemas"]["GitConventionConfig"];
             hasIOSSimulator?: boolean;
             hasWebUI?: boolean;
+            learnFromSessions?: boolean;
             mobileScripts?: components["schemas"]["DomainMobileScriptsConfig"];
             orchestrator?: components["schemas"]["RoleOverride"];
             pauseBeforeImplementing?: boolean;
@@ -4863,6 +5009,164 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listLearningExcerpts: {
+        parameters: {
+            query?: {
+                /** @description Project id. */
+                project?: string;
+                /** @description Most turns to return, newest first. Default 50, at most 500. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListLearningExcerptsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    forgetProjectLearning: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Project identifier (registry key). */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersForgetLearningResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getLearningStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningStatusResponse"];
                 };
             };
             /** @description Internal Server Error */
@@ -10272,6 +10576,69 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    reportSessionTranscriptRef: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersTranscriptRefRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersTranscriptRefResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

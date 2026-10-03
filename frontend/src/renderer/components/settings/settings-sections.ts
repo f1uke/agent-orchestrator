@@ -64,7 +64,8 @@ export const PROJECT_SECTIONS: SectionMeta[] = [
 		Icon: Inbox,
 		hint: "issues in, reviews and merges out",
 		keywords:
-			"tracker intake issue assignee github gitlab jira reviewer agent code review approval rule required approvals ready to merge threshold",
+			"tracker intake issue assignee github gitlab jira reviewer agent code review approval rule required approvals ready to merge threshold " +
+			"learn from sessions learning skills transcript capture excerpts what you taught redact privacy",
 	},
 ];
 

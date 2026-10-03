@@ -85,6 +85,28 @@ func DeriveDetail(agent, event string, payload []byte) (domain.ActivityDetail, b
 	return derive(event, payload)
 }
 
+// TranscriptRefFunc reads, from a native hook payload, which conversation file
+// the session is writing and - on a prompt submit - the prompt's fingerprint.
+// The prompt text never leaves the hook process. ok=false means the event
+// reports no transcript.
+type TranscriptRefFunc func(event string, payload []byte) (domain.HookTranscriptRef, bool)
+
+// TranscriptRefDerivers maps the agent token to its transcript-ref reader. Only
+// harnesses whose transcripts learning capture can read appear.
+var TranscriptRefDerivers = map[string]TranscriptRefFunc{
+	"claude-code": claudecode.TranscriptRef,
+}
+
+// DeriveTranscriptRef looks up the transcript-ref reader for an agent token and
+// applies it.
+func DeriveTranscriptRef(agent, event string, payload []byte) (domain.HookTranscriptRef, bool) {
+	derive, found := TranscriptRefDerivers[agent]
+	if !found {
+		return domain.HookTranscriptRef{}, false
+	}
+	return derive(event, payload)
+}
+
 // EndReasonFunc maps a native agent hook event and its raw stdin payload onto
 // the harness's own reason for ENDING the session. ok=false means the event is
 // not an ending.

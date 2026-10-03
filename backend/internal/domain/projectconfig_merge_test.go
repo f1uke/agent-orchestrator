@@ -38,6 +38,7 @@ func fullProjectConfig() ProjectConfig {
 		MobileScripts:           &MobileScriptsConfig{Product: "nter", Platform: MobilePlatformIOS},
 		DisableAutoCrew:         true,
 		PauseBeforeImplementing: true,
+		LearnFromSessions:       true,
 		ApprovalRule:            ApprovalRule{Enabled: true, Threshold: 3},
 	}
 }
@@ -92,6 +93,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		{"hasIOSSimulator", func(c ProjectConfig) any { return c.HasIOSSimulator }},
 		{"disableAutoCrew", func(c ProjectConfig) any { return c.DisableAutoCrew }},
 		{"pauseBeforeImplementing", func(c ProjectConfig) any { return c.PauseBeforeImplementing }},
+		{"learnFromSessions", func(c ProjectConfig) any { return c.LearnFromSessions }},
 		{"responseLanguage", func(c ProjectConfig) any { return c.ResponseLanguage }},
 		{"reviewers", func(c ProjectConfig) any { return c.Reviewers }},
 		{"simProfile", func(c ProjectConfig) any { return c.SimProfile }},

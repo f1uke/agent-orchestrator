@@ -744,6 +744,27 @@ function IncomingOutgoingSection({ form }: { form: ProjectForm }) {
 						)}
 					</div>
 				</SettingRow>
+
+				<SettingRow
+					name="Learn from sessions"
+					summary="AO keeps redacted excerpts of what you type to this project's sessions, so it can later propose skills from what you taught."
+					detail="Off means nothing here is read: no transcript is opened and nothing is stored. On, AO reads this project's Claude Code transcripts and keeps only your own turns, with a short window of what the agent did around each - secrets, test-account values and pasted payloads are taken out first. Nothing is sent anywhere. Turning it off stops capture; ao learn forget then deletes what was kept."
+					ownership={{ kind: "project-only" }}
+					timing="on-save"
+					value={draft.learnFromSessions ? "On" : "Off"}
+					modified={isFieldDirty("learnFromSessions")}
+				>
+					<div className="flex items-center gap-3">
+						<Switch
+							id="learnFromSessions"
+							checked={draft.learnFromSessions}
+							onCheckedChange={(v) => setField("learnFromSessions", v)}
+						/>
+						<label htmlFor="learnFromSessions" className="text-[12px] text-muted-foreground">
+							Learn from sessions
+						</label>
+					</div>
+				</SettingRow>
 			</SettingRows>
 		</>
 	);

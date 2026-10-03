@@ -56,6 +56,49 @@ type CrewRun struct {
 	UpdatedAt      time.Time
 }
 
+type DeliveredFingerprint struct {
+	ID          int64
+	SessionID   string
+	ProjectID   string
+	Sha256      string
+	Bytes       int64
+	Trigger     string
+	Author      string
+	DeliveredAt time.Time
+}
+
+type LearnCursor struct {
+	TranscriptPath string
+	ProjectID      string
+	SessionID      string
+	Attribution    string
+	ByteOffset     int64
+	FileSize       int64
+	FileMtime      sql.NullTime
+	PendingCarry   string
+	HumanTurns     int64
+	MachineTurns   int64
+	LastError      string
+	UpdatedAt      time.Time
+}
+
+type LearnExcerpt struct {
+	ID             int64
+	ProjectID      string
+	SessionID      string
+	TranscriptPath string
+	TurnUuid       string
+	TurnAt         time.Time
+	SourceClass    string
+	Cwd            string
+	GitBranch      string
+	BeforeJson     string
+	HumanText      string
+	AfterJson      string
+	RedactionsJson string
+	CreatedAt      time.Time
+}
+
 type Notification struct {
 	ID        string
 	SessionID domain.SessionID
@@ -172,6 +215,17 @@ type Project struct {
 	Kind          string
 }
 
+type PromptFingerprint struct {
+	ID              int64
+	SessionID       string
+	ProjectID       string
+	ClaudeSessionID string
+	Sha256          string
+	Bytes           int64
+	SubmittedAt     time.Time
+	MatchedAt       sql.NullTime
+}
+
 type Review struct {
 	ID               string
 	SessionID        domain.SessionID
@@ -262,6 +316,14 @@ type SessionMessageQueue struct {
 	QueuedAt  time.Time
 	ExpiresAt time.Time
 	UpdatedAt time.Time
+}
+
+type SessionTranscript struct {
+	SessionID       string
+	TranscriptPath  string
+	ClaudeSessionID string
+	FirstSeenAt     time.Time
+	LastSeenAt      time.Time
 }
 
 type SessionWorktree struct {

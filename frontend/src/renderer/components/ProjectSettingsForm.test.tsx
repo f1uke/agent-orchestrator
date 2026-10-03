@@ -1355,4 +1355,56 @@ describe("ProjectSettingsForm", () => {
 		// Not pausing IS the default, so "off" is the absence of the field.
 		expect(body.config.pauseBeforeImplementing).toBeUndefined();
 	});
+
+	it("turns learning from sessions on and saves it, leaving config the form does not expose alone", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, env: { TOKEN: "secret" } },
+		});
+
+		renderSettings();
+		await goToSection("Incoming & outgoing");
+
+		// Opt-in: a project that never configured it is never read.
+		const toggle = await screen.findByLabelText("Learn from sessions");
+		expect(toggle).not.toBeChecked();
+
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.learnFromSessions).toBe(true);
+		expect(body.config.env).toEqual({ TOKEN: "secret" });
+	});
+
+	it("loads a learning project and can turn learning back off", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, learnFromSessions: true },
+		});
+
+		renderSettings();
+		await goToSection("Incoming & outgoing");
+		const toggle = await screen.findByLabelText("Learn from sessions");
+		expect(toggle).toBeChecked();
+
+		await userEvent.click(toggle);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		// Learning is opt-in, so "off" is the absence of the field.
+		expect(body.config.learnFromSessions).toBeUndefined();
+	});
 });

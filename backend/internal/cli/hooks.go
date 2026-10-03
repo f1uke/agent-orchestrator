@@ -125,6 +125,11 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 		}
 	}
 
+	// Learning capture's transcript bookkeeping, reported on its own route so
+	// the activity signal below keeps its promise of never carrying a native id
+	// or a path. The prompt, when there is one, is already a fingerprint here.
+	defer c.reportTranscriptRef(ctx, agent, event, sessionID, payload)
+
 	state, ok := activitydispatch.Derive(agent, event, payload)
 	if !ok {
 		// Unknown agent, or an event that carries no activity signal: report nothing.
@@ -154,6 +159,20 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 		c.reportHookFailure(agent, event, sessionID, err)
 	}
 	return nil
+}
+
+// reportTranscriptRef tells the daemon which conversation file the session is
+// writing and, for a submitted prompt, its fingerprint. Best-effort like every
+// hook report: a failure is logged and never reaches the agent.
+func (c *commandContext) reportTranscriptRef(ctx context.Context, agent, event, sessionID string, payload []byte) {
+	ref, ok := activitydispatch.DeriveTranscriptRef(agent, event, payload)
+	if !ok {
+		return
+	}
+	path := "sessions/" + url.PathEscape(sessionID) + "/transcript-ref"
+	if err := c.postJSON(ctx, path, ref, nil); err != nil {
+		c.reportHookFailure(agent, event, sessionID, err)
+	}
 }
 
 // reportHookFailure surfaces a hook delivery failure without breaking the

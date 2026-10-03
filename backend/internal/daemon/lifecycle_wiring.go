@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/activitydispatch"
@@ -16,6 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/gitworktree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learn"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
@@ -342,6 +344,7 @@ type runtimeMessenger struct {
 	store   *sqlite.Store
 	runtime runtimeMessageSender
 	queue   messageHolder
+	logger  *slog.Logger
 }
 
 func (m runtimeMessenger) Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error) {
@@ -366,6 +369,9 @@ func (m runtimeMessenger) Send(ctx context.Context, id domain.SessionID, message
 		// the reader to guess whether any state followed it.
 		return ports.SendOutcome{}, sessionmanager.TerminatedError{Remedy: terminatedSendRemedy(rec)}
 	}
+	// Recorded before the hold-or-deliver decision, so a held message is filed
+	// under the trigger it was sent with, not the queue's drain.
+	m.learnDelivery(ctx, rec, message)
 	if !rec.CanReceiveMessage() && m.queue != nil {
 		// The session cannot take the message right now, for one of two reasons:
 		//
@@ -408,6 +414,24 @@ func (m runtimeMessenger) Send(ctx context.Context, id domain.SessionID, message
 	return ports.SendOutcome{Delivery: delivered}, nil
 }
 
+// learnDelivery records who wrote a message AO is putting into a session of a
+// project that learns from sessions (see observe/learncapture). Text AO types
+// into the pane reaches the transcript looking exactly like the human typed it,
+// and this record - a fingerprint and an author, never the body - is how
+// capture tells the two apart later. A project with the switch off records
+// nothing, and a failure here never fails the send.
+func (m runtimeMessenger) learnDelivery(ctx context.Context, rec domain.SessionRecord, message string) {
+	proj, ok, err := m.store.GetProject(ctx, string(rec.ProjectID))
+	if err != nil || !ok || !proj.Config.LearnFromSessions {
+		return
+	}
+	trigger := deliveryOrigin(ctx, rec.ID).Trigger
+	fp := learn.DeliveredFingerprintFor(rec, trigger, message, time.Now().UTC())
+	if err := m.store.RecordDeliveredFingerprint(ctx, fp); err != nil && m.logger != nil {
+		m.logger.Warn("learn: record delivered fingerprint failed", "sessionID", rec.ID, "err", err)
+	}
+}
+
 // deliveryOrigin completes the origin a caller started: the session id is this
 // layer's to fill in (callers address a session, the transport sees a runtime
 // handle), the trigger is the caller's, and an unset trigger is an ordinary
@@ -424,8 +448,8 @@ func deliveryOrigin(ctx context.Context, id domain.SessionID) msgdelivery.Origin
 // newSessionMessenger assembles the per-daemon agent messenger: submit the
 // message to the live runtime pane, or hand it to queue when the session is
 // suspended so it is delivered once the session's agent is listening again.
-func newSessionMessenger(store *sqlite.Store, runtime runtimeMessageSender, queue messageHolder, _ *slog.Logger) ports.AgentMessenger {
-	return runtimeMessenger{store: store, runtime: runtime, queue: queue}
+func newSessionMessenger(store *sqlite.Store, runtime runtimeMessageSender, queue messageHolder, logger *slog.Logger) ports.AgentMessenger {
+	return runtimeMessenger{store: store, runtime: runtime, queue: queue, logger: logger}
 }
 
 // buildAgentRegistry returns a registry populated with the agent adapters the

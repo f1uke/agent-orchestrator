@@ -520,6 +520,128 @@ paths:
         via REST
       tags:
       - jira
+  /api/v1/learning/excerpts:
+    get:
+      operationId: listLearningExcerpts
+      parameters:
+      - description: Project id.
+        in: query
+        name: project
+        schema:
+          description: Project id.
+          type: string
+      - description: Most turns to return, newest first. Default 50, at most 500.
+        in: query
+        name: limit
+        schema:
+          description: Most turns to return, newest first. Default 50, at most 500.
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListLearningExcerptsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List a project's captured human turns, newest first
+      tags:
+      - learning
+  /api/v1/learning/projects/{id}:
+    delete:
+      operationId: forgetProjectLearning
+      parameters:
+      - description: Project identifier (registry key).
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Project identifier (registry key).
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersForgetLearningResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Delete everything learning capture kept for a project that no longer
+        learns from sessions
+      tags:
+      - learning
+  /api/v1/learning/status:
+    get:
+      operationId: getLearningStatus
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningStatusResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Report what learning capture stored per project, and whether it is
+        healthy
+      tags:
+      - learning
   /api/v1/notifications:
     get:
       operationId: listNotifications
@@ -5036,6 +5158,58 @@ paths:
       summary: Set the branch this session's work merges into (retargets an open PR/MR)
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/transcript-ref:
+    post:
+      operationId: reportSessionTranscriptRef
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersTranscriptRefRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersTranscriptRefResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Report the conversation file a session is writing, and a submitted
+        prompt's fingerprint
+      tags:
+      - learning
   /api/v1/sessions/{sessionId}/wake:
     post:
       operationId: wakeSession
@@ -7310,6 +7484,14 @@ components:
           - "null"
           - string
       type: object
+    ControllersForgetLearningResponse:
+      properties:
+        deletedTurns:
+          description: Captured turns deleted.
+          type: integer
+      required:
+      - deletedTurns
+      type: object
     ControllersHandbackCompletenessView:
       properties:
         cases:
@@ -7343,6 +7525,147 @@ components:
             undelivered work refuses the kill with 409 SESSION_HAS_UNDELIVERED_WORK.
           type: boolean
       type: object
+    ControllersLearningExcerptDTO:
+      properties:
+        after:
+          $ref: '#/components/schemas/ControllersLearningWindowDTO'
+        before:
+          $ref: '#/components/schemas/ControllersLearningWindowDTO'
+        gitBranch:
+          type: string
+        humanText:
+          description: What the human typed, redacted.
+          type: string
+        id:
+          format: int64
+          type: integer
+        projectId:
+          type: string
+        redactions:
+          additionalProperties:
+            type: integer
+          description: How many values of each kind redaction replaced in this turn.
+          type:
+          - object
+          - "null"
+        sessionId:
+          type: string
+        sourceClass:
+          enum:
+          - typed
+          - queued
+          - suggestion_accepted
+          - app_send
+          - smoke_report
+          type: string
+        turnAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - projectId
+      - sessionId
+      - turnAt
+      - sourceClass
+      - before
+      - humanText
+      - after
+      - redactions
+      type: object
+    ControllersLearningFailingFileDTO:
+      properties:
+        error:
+          type: string
+        path:
+          type: string
+      required:
+      - path
+      - error
+      type: object
+    ControllersLearningProjectStatusDTO:
+      properties:
+        atRiskTranscripts:
+          description: Transcripts with unread turns whose last write is 25 days old
+            or more; Claude Code deletes them at 30.
+          type: integer
+        bySourceClass:
+          additionalProperties:
+            type: integer
+          type:
+          - object
+          - "null"
+        enabled:
+          description: Whether the project learns from sessions now. A project that
+            was switched off is listed while it still holds captured turns.
+          type: boolean
+        excerpts:
+          description: Human turns stored.
+          type: integer
+        failingFiles:
+          items:
+            $ref: '#/components/schemas/ControllersLearningFailingFileDTO'
+          type: array
+        humanTurns:
+          description: Human turns read across all tracked transcripts.
+          type: integer
+        lastCaptureAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        machineTurns:
+          description: 'Turns read that were not the human''s: AO notices, other sessions''
+            messages, briefs.'
+          type: integer
+        projectId:
+          type: string
+        prompts:
+          description: Prompts the agent hooks saw since tracking began.
+          type: integer
+        transcripts:
+          description: Transcript files capture is tracking.
+          type: integer
+        unmatchedPrompts:
+          description: Prompts the hooks saw more than 30 minutes ago that capture
+            never found in a transcript. Non-zero means the transcript format may
+            have changed.
+          type: integer
+      required:
+      - projectId
+      - enabled
+      - transcripts
+      - excerpts
+      - bySourceClass
+      - humanTurns
+      - machineTurns
+      - prompts
+      - unmatchedPrompts
+      - failingFiles
+      - atRiskTranscripts
+      type: object
+    ControllersLearningStatusResponse:
+      properties:
+        projects:
+          items:
+            $ref: '#/components/schemas/ControllersLearningProjectStatusDTO'
+          type: array
+      required:
+      - projects
+      type: object
+    ControllersLearningWindowDTO:
+      properties:
+        actions:
+          description: What the agent did, as tool plus one whitelisted target, and
+            markers for messages other than the human's.
+          items:
+            type: string
+          type: array
+        agentText:
+          description: The agent's nearest words, redacted and clipped in bytes.
+          type: string
+      required:
+      - actions
+      type: object
     ControllersListDaemonLoopsResponse:
       properties:
         loops:
@@ -7351,6 +7674,15 @@ components:
           type: array
       required:
       - loops
+      type: object
+    ControllersListLearningExcerptsResponse:
+      properties:
+        excerpts:
+          items:
+            $ref: '#/components/schemas/ControllersLearningExcerptDTO'
+          type: array
+      required:
+      - excerpts
       type: object
     ControllersListSimFlowsResponse:
       properties:
@@ -7767,6 +8099,32 @@ components:
           $ref: '#/components/schemas/IosrunRun'
       required:
       - run
+      type: object
+    ControllersTranscriptRefRequest:
+      properties:
+        claudeSessionId:
+          description: The harness's own conversation id.
+          type: string
+        promptBytes:
+          description: 'On a prompt submit: the collapsed prompt''s length in bytes.'
+          type: integer
+        promptSha256:
+          description: 'On a prompt submit: hex sha256 of the prompt with whitespace
+            collapsed. Recorded only for projects that learn from sessions.'
+          type: string
+        transcriptPath:
+          description: Absolute path of the conversation file the session is writing.
+            Must be a .jsonl directly inside one of Claude Code's project directories.
+          type: string
+      required:
+      - transcriptPath
+      type: object
+    ControllersTranscriptRefResponse:
+      properties:
+        ok:
+          type: boolean
+      required:
+      - ok
       type: object
     ControllersUncommittedFileDTO:
       properties:
@@ -9034,6 +9392,8 @@ components:
         hasIOSSimulator:
           type: boolean
         hasWebUI:
+          type: boolean
+        learnFromSessions:
           type: boolean
         mobileScripts:
           $ref: '#/components/schemas/DomainMobileScriptsConfig'

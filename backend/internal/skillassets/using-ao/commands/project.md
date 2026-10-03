@@ -155,6 +155,7 @@ ao project set-config <id> [flags]
 | `--no-auto-crew` | Never form a crew automatically; a person can still add a qa by hand | off |
 | `--orchestrator-agent string` | Harness override for orchestrator sessions | - |
 | `--pause-before-implementing` | A standard/deep worker stops once it understands the task and hands back before implementing | off |
+| `--learn-from-sessions` | AO keeps redacted excerpts of what the human types to this project's sessions, so it can later propose skills from them; off means nothing here is read (see `ao learn`) | off |
 | `--permission string` | Permission mode: `default`, `accept-edits`, `auto`, `bypass-permissions` | - |
 | `--post-create stringArray` | Command to run after workspace creation (repeatable) | - |
 | `--session-prefix string` | Displayed session-id prefix | - |
