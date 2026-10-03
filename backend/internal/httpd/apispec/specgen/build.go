@@ -607,6 +607,42 @@ func learningOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/learning/decide", id: "startLearningDecide", tag: "learning",
+			summary: "Decide ready tasks now (or one task), under its own budget",
+			reqBody: controllers.StartLearningDecideRequest{},
+			resps: []respUnit{
+				{http.StatusAccepted, controllers.StartLearningDecideResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/proposals", id: "listLearningProposals", tag: "learning",
+			summary:    "List the changes learning proposes, newest first, and the last decide run",
+			pathParams: []any{controllers.LearningProposalsQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListLearningProposalsResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/learning/proposals/{id}", id: "getLearningProposal", tag: "learning",
+			summary:    "One proposal with the drafts it rests on",
+			pathParams: []any{controllers.LearningProposalIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.LearningProposalResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/learning/rules", id: "listLearningRules", tag: "learning",
 			summary:    "List or search the standing rules agents are already told, for a project",
 			pathParams: []any{controllers.LearningRulesQuery{}},

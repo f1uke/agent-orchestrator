@@ -82,9 +82,15 @@ func (s *Store) ListUncollectedExcerpts(ctx context.Context, projectID domain.Pr
 func (s *Store) StartLearnJob(ctx context.Context, job domain.LearnJob) (int64, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	kind := job.Kind
+	if kind == "" {
+		kind = domain.LearnJobCollect
+	}
 	id, err := s.qw.InsertLearnJob(ctx, gen.InsertLearnJobParams{
 		ProjectID: string(job.ProjectID),
 		SessionID: string(job.SessionID),
+		Kind:      string(kind),
+		TaskKey:   job.TaskKey,
 		Model:     job.Model,
 		Turns:     int64(job.Turns),
 		StartedAt: job.StartedAt,
@@ -102,6 +108,18 @@ func (s *Store) FailLearnJob(ctx context.Context, job domain.LearnJob) error {
 	job.State = domain.LearnJobFailed
 	if err := s.qw.FinishLearnJob(ctx, finishParams(job)); err != nil {
 		return fmt.Errorf("fail learn job %d: %w", job.ID, err)
+	}
+	return nil
+}
+
+// FinishLearnJob closes a run that succeeded without collecting turns: a
+// decide or verify run, whose results CommitDecide writes.
+func (s *Store) FinishLearnJob(ctx context.Context, job domain.LearnJob) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	job.State = domain.LearnJobDone
+	if err := s.qw.FinishLearnJob(ctx, finishParams(job)); err != nil {
+		return fmt.Errorf("finish learn job %d: %w", job.ID, err)
 	}
 	return nil
 }
@@ -295,19 +313,7 @@ func (s *Store) ListLearnDrafts(ctx context.Context, projectID domain.ProjectID,
 	}
 	out := make([]domain.LearnDraft, 0, len(rows))
 	for _, r := range rows {
-		d := domain.LearnDraft{
-			ID: r.ID, ProjectID: domain.ProjectID(r.ProjectID), SessionID: domain.SessionID(r.SessionID),
-			TaskKey: r.TaskKey, JobID: r.JobID, Kind: domain.LearnDraftKind(r.Kind), Statement: r.Statement,
-			AppliesWhen: r.AppliesWhen, ScopeHint: r.ScopeHint, Confidence: r.Confidence, About: domain.LearnDraftAbout(r.About), Quote: r.Quote,
-			AnchorExcerptID: r.AnchorExcerptID, AgentBefore: r.AgentBefore, Weak: r.Weak != 0,
-			SupersedesID: r.SupersedesID, Status: domain.LearnDraftStatus(r.Status), CreatedAt: r.CreatedAt,
-			AnchorSourceClass: domain.LearnSourceClass(r.AnchorSourceClass.String),
-		}
-		if r.AnchorTurnAt.Valid {
-			d.AnchorTurnAt = r.AnchorTurnAt.Time
-		}
-		_ = json.Unmarshal([]byte(r.EvidenceJson), &d.EvidenceExcerptIDs)
-		out = append(out, d)
+		out = append(out, draftFromRow(r))
 	}
 	return out, nil
 }
@@ -329,4 +335,22 @@ func (s *Store) LearnCollectCounts(ctx context.Context, projectID domain.Project
 		out.Drafts[domain.LearnDraftStatus(r.Status)] = int(r.Drafts)
 	}
 	return out, nil
+}
+
+// draftFromRow maps a draft row (the by-project and all-projects queries
+// return the same columns).
+func draftFromRow(r gen.ListLearnDraftsByProjectRow) domain.LearnDraft {
+	d := domain.LearnDraft{
+		ID: r.ID, ProjectID: domain.ProjectID(r.ProjectID), SessionID: domain.SessionID(r.SessionID),
+		TaskKey: r.TaskKey, JobID: r.JobID, Kind: domain.LearnDraftKind(r.Kind), Statement: r.Statement,
+		AppliesWhen: r.AppliesWhen, ScopeHint: r.ScopeHint, Confidence: r.Confidence, About: domain.LearnDraftAbout(r.About), Quote: r.Quote,
+		AnchorExcerptID: r.AnchorExcerptID, AgentBefore: r.AgentBefore, Weak: r.Weak != 0,
+		SupersedesID: r.SupersedesID, Status: domain.LearnDraftStatus(r.Status), CreatedAt: r.CreatedAt,
+		AnchorSourceClass: domain.LearnSourceClass(r.AnchorSourceClass.String),
+	}
+	if r.AnchorTurnAt.Valid {
+		d.AnchorTurnAt = r.AnchorTurnAt.Time
+	}
+	_ = json.Unmarshal([]byte(r.EvidenceJson), &d.EvidenceExcerptIDs)
+	return d
 }

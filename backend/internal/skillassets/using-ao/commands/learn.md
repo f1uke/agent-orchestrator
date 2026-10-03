@@ -8,6 +8,8 @@ A project with `learnFromSessions` on (`ao project set-config <id> --learn-from-
 
 **Rules** is the corpus a lesson is checked against: what agents are already told (the human's CLAUDE.md and skills, each learning project's repo CLAUDE.md, AGENTS.md and skills, AO's standing prompt, the knowledge INDEX), split into statements and refreshed hourly. Repo files are only read. **Protected rules** are the ones the human pins; their forbidden patterns block any learned skill that matches.
 
+**Decide** turns a finished task's drafts into **proposals** - create or update a skill (a rule of one project goes in a learned skill of that project), add a rule for every project to `~/.claude/CLAUDE.md`, or a conflict card when the human's words contradict a standing rule - each with the diff AO computed. A second, adversarial model call and code gates refuse what is not grounded in the human's own words, breaks a rule, or carries sensitive data. Nothing is applied: the human approves every proposal.
+
 ## Subcommands
 
 ### `ao learn status`
@@ -75,15 +77,38 @@ Subcommands:
 - `ao learn rules unprotect <id>` - unpin.
 - `ao learn rules check (--text "..." | --file path) [--project id]` - report every forbidden pattern a text matches; exits 1 when one does.
 
+### `ao learn decide`
+
+Decides now every ready task (sessions ended, an orchestrator's day over, or a long-lived session's draft a day old), for one project or all, spending at most `--budget`. The background loop does it every 30 minutes within the daily budget.
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--project id` | Project to decide | every project that learns from sessions |
+| `--task key` | Decide this one task now, ready or not (`solo:<session>`, `crew:<id>`, `orch:<project>:<day>`) | - |
+| `--budget dollars` | Most this run may spend, at API prices (at most 50) | `2` |
+| `--wait` | Wait for the run to finish, printing progress | off |
+
+### `ao learn proposals`
+
+The proposals, newest first: status, action, scope, confidence, the task's outcome, title and target. `--all` adds the dropped ones with the reason a gate or the verifier gave. `ao learn proposals show <id>` prints the rationale, the verifier's notes, the rule verdicts, the evidence (the human's own words) and the diff.
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--project id` | Project | every project |
+| `--all` | Include dropped, rejected and settled proposals | pending only |
+| `--json` | Output as JSON | - |
+
 ### `ao learn settings`
 
-Shows the collect model, effort, rules model and daily budget, or changes them.
+Shows the collect model and effort, the rules model, the decide model and effort, and the daily budget, or changes them.
 
 | Flag | Meaning | Default / Required |
 |---|---|---|
 | `--model id` | Collect model | `claude-sonnet-5-5` |
 | `--effort level` | `low`, `medium`, `high`, `xhigh` or `max` | `low` |
 | `--rules-model id` | Model that splits the standing rules into statements | `claude-haiku-4-5-20251001` |
+| `--decide-model id` | Model that draws proposals from finished tasks and verifies them | `claude-opus-5-5` |
+| `--decide-effort level` | `low`, `medium`, `high`, `xhigh` or `max` | `medium` |
 | `--daily-budget dollars` | Background model runs (collect and rules) stop for the day at this spend; `0` pauses them | `2` |
 
 ### `ao learn forget`

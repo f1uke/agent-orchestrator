@@ -338,7 +338,7 @@ func (s *Store) LearnCounts(ctx context.Context, projectID domain.ProjectID, unm
 }
 
 // ForgetLearning deletes everything learning kept for a project - excerpts,
-// drafts, model runs, cursors and both kinds of fingerprint - in one transaction, and returns how
+// drafts, proposals, model runs, cursors and both kinds of fingerprint - in one transaction, and returns how
 // many turns were deleted. The transcript refs stay: they are paths, not
 // content, and the session's own bookkeeping uses them.
 func (s *Store) ForgetLearning(ctx context.Context, projectID domain.ProjectID) (int, error) {
@@ -351,6 +351,12 @@ func (s *Store) ForgetLearning(ctx context.Context, projectID domain.ProjectID) 
 			return err
 		}
 		turns = int(n)
+		if _, err := q.DeleteSkillProposalsByProject(ctx, string(projectID)); err != nil {
+			return fmt.Errorf("delete skill proposals: %w", err)
+		}
+		if _, err := q.DeleteDecidedTasksByProject(ctx, string(projectID)); err != nil {
+			return fmt.Errorf("delete decided tasks: %w", err)
+		}
 		if _, err := q.DeleteLearnDraftsByProject(ctx, string(projectID)); err != nil {
 			return err
 		}

@@ -28,6 +28,50 @@ func (q *Queries) AbandonRunningLearnJobs(ctx context.Context, finishedAt sql.Nu
 	return result.RowsAffected()
 }
 
+const amendSkillProposal = `-- name: AmendSkillProposal :exec
+UPDATE skill_proposal
+SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, diff = ?,
+    confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?
+WHERE id = ? AND status = 'pending'
+`
+
+type AmendSkillProposalParams struct {
+	TaskKey          string
+	Action           string
+	Scope            string
+	Title            string
+	Rationale        string
+	BaseSha256       string
+	NewContent       string
+	Diff             string
+	Confidence       float64
+	Outcome          string
+	RuleVerdictsJson string
+	VerifierJson     string
+	UpdatedAt        time.Time
+	ID               int64
+}
+
+func (q *Queries) AmendSkillProposal(ctx context.Context, arg AmendSkillProposalParams) error {
+	_, err := q.db.ExecContext(ctx, amendSkillProposal,
+		arg.TaskKey,
+		arg.Action,
+		arg.Scope,
+		arg.Title,
+		arg.Rationale,
+		arg.BaseSha256,
+		arg.NewContent,
+		arg.Diff,
+		arg.Confidence,
+		arg.Outcome,
+		arg.RuleVerdictsJson,
+		arg.VerifierJson,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
 const countLearnDraftsByStatus = `-- name: CountLearnDraftsByStatus :many
 SELECT status, COUNT(*) AS drafts FROM learn_draft WHERE project_id = ? GROUP BY status ORDER BY status
 `
@@ -149,6 +193,18 @@ func (q *Queries) CountUnmatchedPromptFingerprints(ctx context.Context, arg Coun
 	return count, err
 }
 
+const deleteDecidedTasksByProject = `-- name: DeleteDecidedTasksByProject :execrows
+DELETE FROM learn_decided_task WHERE project_id = ?
+`
+
+func (q *Queries) DeleteDecidedTasksByProject(ctx context.Context, projectID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteDecidedTasksByProject, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteDeliveredFingerprintsByProject = `-- name: DeleteDeliveredFingerprintsByProject :execrows
 DELETE FROM delivered_fingerprint WHERE project_id = ?
 `
@@ -245,6 +301,18 @@ DELETE FROM prompt_fingerprint WHERE project_id = ?
 
 func (q *Queries) DeletePromptFingerprintsByProject(ctx context.Context, projectID string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deletePromptFingerprintsByProject, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteSkillProposalsByProject = `-- name: DeleteSkillProposalsByProject :execrows
+DELETE FROM skill_proposal WHERE project_id = ?
+`
+
+func (q *Queries) DeleteSkillProposalsByProject(ctx context.Context, projectID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteSkillProposalsByProject, projectID)
 	if err != nil {
 		return 0, err
 	}
@@ -449,14 +517,16 @@ func (q *Queries) InsertLearnExcerpt(ctx context.Context, arg InsertLearnExcerpt
 }
 
 const insertLearnJob = `-- name: InsertLearnJob :one
-INSERT INTO learn_job (project_id, session_id, state, model, turns, started_at)
-VALUES (?, ?, 'running', ?, ?, ?)
+INSERT INTO learn_job (project_id, session_id, kind, task_key, state, model, turns, started_at)
+VALUES (?, ?, ?, ?, 'running', ?, ?, ?)
 RETURNING id
 `
 
 type InsertLearnJobParams struct {
 	ProjectID string
 	SessionID string
+	Kind      string
+	TaskKey   string
 	Model     string
 	Turns     int64
 	StartedAt time.Time
@@ -466,6 +536,8 @@ func (q *Queries) InsertLearnJob(ctx context.Context, arg InsertLearnJobParams) 
 	row := q.db.QueryRowContext(ctx, insertLearnJob,
 		arg.ProjectID,
 		arg.SessionID,
+		arg.Kind,
+		arg.TaskKey,
 		arg.Model,
 		arg.Turns,
 		arg.StartedAt,
@@ -565,6 +637,76 @@ func (q *Queries) InsertPromptFingerprint(ctx context.Context, arg InsertPromptF
 	return err
 }
 
+const insertSkillProposal = `-- name: InsertSkillProposal :one
+INSERT INTO skill_proposal (project_id, task_key, action, target_path, scope, title, rationale, base_sha256,
+    new_content, diff, confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason,
+    created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type InsertSkillProposalParams struct {
+	ProjectID        string
+	TaskKey          string
+	Action           string
+	TargetPath       string
+	Scope            string
+	Title            string
+	Rationale        string
+	BaseSha256       string
+	NewContent       string
+	Diff             string
+	Confidence       float64
+	Outcome          string
+	RuleVerdictsJson string
+	VerifierJson     string
+	Status           string
+	DropReason       string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+func (q *Queries) InsertSkillProposal(ctx context.Context, arg InsertSkillProposalParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertSkillProposal,
+		arg.ProjectID,
+		arg.TaskKey,
+		arg.Action,
+		arg.TargetPath,
+		arg.Scope,
+		arg.Title,
+		arg.Rationale,
+		arg.BaseSha256,
+		arg.NewContent,
+		arg.Diff,
+		arg.Confidence,
+		arg.Outcome,
+		arg.RuleVerdictsJson,
+		arg.VerifierJson,
+		arg.Status,
+		arg.DropReason,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertSkillProposalEvidence = `-- name: InsertSkillProposalEvidence :exec
+INSERT INTO skill_proposal_evidence (proposal_id, draft_id) VALUES (?, ?)
+ON CONFLICT DO NOTHING
+`
+
+type InsertSkillProposalEvidenceParams struct {
+	ProposalID int64
+	DraftID    int64
+}
+
+func (q *Queries) InsertSkillProposalEvidence(ctx context.Context, arg InsertSkillProposalEvidenceParams) error {
+	_, err := q.db.ExecContext(ctx, insertSkillProposalEvidence, arg.ProposalID, arg.DraftID)
+	return err
+}
+
 const lastFailedLearnJob = `-- name: LastFailedLearnJob :one
 SELECT id, project_id, session_id, error, stderr_tail, started_at
 FROM learn_job WHERE project_id = ? AND state = 'failed'
@@ -611,6 +753,121 @@ func (q *Queries) LastFinishedLearnJob(ctx context.Context, projectID string) (L
 	var i LastFinishedLearnJobRow
 	err := row.Scan(&i.ID, &i.State, &i.FinishedAt)
 	return i, err
+}
+
+const listAllLearnDrafts = `-- name: ListAllLearnDrafts :many
+SELECT d.id, d.project_id, d.session_id, d.task_key, d.job_id, d.kind, d.statement, d.applies_when,
+    d.scope_hint, d.confidence, d.about, d.quote, d.anchor_excerpt_id, d.evidence_json, d.agent_before, d.weak,
+    d.supersedes_id, d.status, d.created_at,
+    e.source_class AS anchor_source_class,
+    e.turn_at AS anchor_turn_at
+FROM learn_draft d
+LEFT JOIN learn_excerpt e ON e.id = d.anchor_excerpt_id
+ORDER BY d.id
+`
+
+type ListAllLearnDraftsRow struct {
+	ID                int64
+	ProjectID         string
+	SessionID         string
+	TaskKey           string
+	JobID             int64
+	Kind              string
+	Statement         string
+	AppliesWhen       string
+	ScopeHint         string
+	Confidence        float64
+	About             string
+	Quote             string
+	AnchorExcerptID   int64
+	EvidenceJson      string
+	AgentBefore       string
+	Weak              int64
+	SupersedesID      int64
+	Status            string
+	CreatedAt         time.Time
+	AnchorSourceClass sql.NullString
+	AnchorTurnAt      sql.NullTime
+}
+
+// Every draft of every project, for decide: a task's own drafts and the
+// related drafts of other tasks that may corroborate them.
+func (q *Queries) ListAllLearnDrafts(ctx context.Context) ([]ListAllLearnDraftsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listAllLearnDrafts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllLearnDraftsRow{}
+	for rows.Next() {
+		var i ListAllLearnDraftsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.SessionID,
+			&i.TaskKey,
+			&i.JobID,
+			&i.Kind,
+			&i.Statement,
+			&i.AppliesWhen,
+			&i.ScopeHint,
+			&i.Confidence,
+			&i.About,
+			&i.Quote,
+			&i.AnchorExcerptID,
+			&i.EvidenceJson,
+			&i.AgentBefore,
+			&i.Weak,
+			&i.SupersedesID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.AnchorSourceClass,
+			&i.AnchorTurnAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDecidedTasks = `-- name: ListDecidedTasks :many
+SELECT task_key, project_id, outcome, proposals, decided_at FROM learn_decided_task
+`
+
+func (q *Queries) ListDecidedTasks(ctx context.Context) ([]LearnDecidedTask, error) {
+	rows, err := q.db.QueryContext(ctx, listDecidedTasks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LearnDecidedTask{}
+	for rows.Next() {
+		var i LearnDecidedTask
+		if err := rows.Scan(
+			&i.TaskKey,
+			&i.ProjectID,
+			&i.Outcome,
+			&i.Proposals,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDeliveredFingerprintsBySession = `-- name: ListDeliveredFingerprintsBySession :many
@@ -1112,6 +1369,82 @@ func (q *Queries) ListSessionTranscriptsByProject(ctx context.Context, projectID
 	return items, nil
 }
 
+const listSkillProposalEvidence = `-- name: ListSkillProposalEvidence :many
+SELECT proposal_id, draft_id FROM skill_proposal_evidence ORDER BY proposal_id, draft_id
+`
+
+func (q *Queries) ListSkillProposalEvidence(ctx context.Context) ([]SkillProposalEvidence, error) {
+	rows, err := q.db.QueryContext(ctx, listSkillProposalEvidence)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SkillProposalEvidence{}
+	for rows.Next() {
+		var i SkillProposalEvidence
+		if err := rows.Scan(&i.ProposalID, &i.DraftID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSkillProposals = `-- name: ListSkillProposals :many
+SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, diff,
+    confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at
+FROM skill_proposal ORDER BY id
+`
+
+func (q *Queries) ListSkillProposals(ctx context.Context) ([]SkillProposal, error) {
+	rows, err := q.db.QueryContext(ctx, listSkillProposals)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SkillProposal{}
+	for rows.Next() {
+		var i SkillProposal
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.TaskKey,
+			&i.Action,
+			&i.TargetPath,
+			&i.Scope,
+			&i.Title,
+			&i.Rationale,
+			&i.BaseSha256,
+			&i.NewContent,
+			&i.Diff,
+			&i.Confidence,
+			&i.Outcome,
+			&i.RuleVerdictsJson,
+			&i.VerifierJson,
+			&i.Status,
+			&i.DropReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUncollectedExcerptsBySession = `-- name: ListUncollectedExcerptsBySession :many
 SELECT id, project_id, session_id, transcript_path, turn_uuid, turn_at, source_class, cwd, git_branch,
     before_json, human_text, after_json, redactions_json, created_at
@@ -1307,6 +1640,20 @@ func (q *Queries) SetLearnDraftStatus(ctx context.Context, arg SetLearnDraftStat
 	return err
 }
 
+const setLearnDraftStatusByID = `-- name: SetLearnDraftStatusByID :exec
+UPDATE learn_draft SET status = ? WHERE id = ? AND status = 'open'
+`
+
+type SetLearnDraftStatusByIDParams struct {
+	Status string
+	ID     int64
+}
+
+func (q *Queries) SetLearnDraftStatusByID(ctx context.Context, arg SetLearnDraftStatusByIDParams) error {
+	_, err := q.db.ExecContext(ctx, setLearnDraftStatusByID, arg.Status, arg.ID)
+	return err
+}
+
 const sumLearnJobCostSince = `-- name: SumLearnJobCostSince :one
 SELECT CAST(COALESCE(SUM(cost_usd), 0) AS REAL) FROM learn_job WHERE started_at >= ?
 `
@@ -1327,6 +1674,33 @@ func (q *Queries) SumLearnRuleChunkCostSince(ctx context.Context, createdAt time
 	var column_1 float64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const upsertDecidedTask = `-- name: UpsertDecidedTask :exec
+INSERT INTO learn_decided_task (task_key, project_id, outcome, proposals, decided_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (task_key) DO UPDATE SET
+    outcome = excluded.outcome, proposals = learn_decided_task.proposals + excluded.proposals,
+    decided_at = excluded.decided_at
+`
+
+type UpsertDecidedTaskParams struct {
+	TaskKey   string
+	ProjectID string
+	Outcome   string
+	Proposals int64
+	DecidedAt time.Time
+}
+
+func (q *Queries) UpsertDecidedTask(ctx context.Context, arg UpsertDecidedTaskParams) error {
+	_, err := q.db.ExecContext(ctx, upsertDecidedTask,
+		arg.TaskKey,
+		arg.ProjectID,
+		arg.Outcome,
+		arg.Proposals,
+		arg.DecidedAt,
+	)
+	return err
 }
 
 const upsertLearnCursor = `-- name: UpsertLearnCursor :exec

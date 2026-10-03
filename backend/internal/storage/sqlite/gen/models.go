@@ -82,6 +82,14 @@ type LearnCursor struct {
 	UpdatedAt      time.Time
 }
 
+type LearnDecidedTask struct {
+	TaskKey   string
+	ProjectID string
+	Outcome   string
+	Proposals int64
+	DecidedAt time.Time
+}
+
 type LearnDraft struct {
 	ID              int64
 	ProjectID       string
@@ -141,6 +149,8 @@ type LearnJob struct {
 	StderrTail   string
 	StartedAt    time.Time
 	FinishedAt   sql.NullTime
+	Kind         string
+	TaskKey      string
 }
 
 type LearnProtectedRule struct {
@@ -461,6 +471,33 @@ type SimRecordingStep struct {
 	SelectorAnchor    string
 	SelectorAnchorRel string
 	Secure            int64
+}
+
+type SkillProposal struct {
+	ID               int64
+	ProjectID        string
+	TaskKey          string
+	Action           string
+	TargetPath       string
+	Scope            string
+	Title            string
+	Rationale        string
+	BaseSha256       string
+	NewContent       string
+	Diff             string
+	Confidence       float64
+	Outcome          string
+	RuleVerdictsJson string
+	VerifierJson     string
+	Status           string
+	DropReason       string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type SkillProposalEvidence struct {
+	ProposalID int64
+	DraftID    int64
 }
 
 type SmokeCheck struct {

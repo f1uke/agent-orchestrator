@@ -110,6 +110,8 @@ func newLearnCommand(ctx *commandContext) *cobra.Command {
 	cmd.AddCommand(newLearnDraftsCommand(ctx))
 	cmd.AddCommand(newLearnSettingsCommand(ctx))
 	cmd.AddCommand(newLearnRulesCommand(ctx))
+	cmd.AddCommand(newLearnDecideCommand(ctx))
+	cmd.AddCommand(newLearnProposalsCommand(ctx))
 	return cmd
 }
 
@@ -481,15 +483,19 @@ type learnSettingsDTO struct {
 	CollectModel   string  `json:"collectModel"`
 	CollectEffort  string  `json:"collectEffort"`
 	RulesModel     string  `json:"rulesModel,omitempty"`
+	DecideModel    string  `json:"decideModel,omitempty"`
+	DecideEffort   string  `json:"decideEffort,omitempty"`
 	DailyBudgetUSD float64 `json:"dailyBudgetUsd"`
 }
 
 func newLearnSettingsCommand(ctx *commandContext) *cobra.Command {
 	var (
-		model      string
-		effort     string
-		rulesModel string
-		budget     float64
+		model        string
+		effort       string
+		rulesModel   string
+		decideModel  string
+		decideEffort string
+		budget       float64
 	)
 	cmd := &cobra.Command{
 		Use:   "settings",
@@ -501,7 +507,7 @@ func newLearnSettingsCommand(ctx *commandContext) *cobra.Command {
 				return err
 			}
 			flags := cmd.Flags()
-			if flags.Changed("model") || flags.Changed("effort") || flags.Changed("rules-model") || flags.Changed("daily-budget") {
+			if flags.Changed("model") || flags.Changed("effort") || flags.Changed("rules-model") || flags.Changed("decide-model") || flags.Changed("decide-effort") || flags.Changed("daily-budget") {
 				if flags.Changed("model") {
 					cur.CollectModel = model
 				}
@@ -511,6 +517,12 @@ func newLearnSettingsCommand(ctx *commandContext) *cobra.Command {
 				if flags.Changed("rules-model") {
 					cur.RulesModel = rulesModel
 				}
+				if flags.Changed("decide-model") {
+					cur.DecideModel = decideModel
+				}
+				if flags.Changed("decide-effort") {
+					cur.DecideEffort = decideEffort
+				}
 				if flags.Changed("daily-budget") {
 					cur.DailyBudgetUSD = budget
 				}
@@ -518,13 +530,15 @@ func newLearnSettingsCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "collect model   %s\ncollect effort  %s\nrules model     %s\ndaily budget    $%.2f\n", cur.CollectModel, cur.CollectEffort, cur.RulesModel, cur.DailyBudgetUSD)
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "collect model   %s\ncollect effort  %s\nrules model     %s\ndecide model    %s\ndecide effort   %s\ndaily budget    $%.2f\n", cur.CollectModel, cur.CollectEffort, cur.RulesModel, cur.DecideModel, cur.DecideEffort, cur.DailyBudgetUSD)
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&model, "model", "", "Collect model id")
 	cmd.Flags().StringVar(&effort, "effort", "", "Collect effort: low, medium, high, xhigh or max")
 	cmd.Flags().StringVar(&rulesModel, "rules-model", "", "Model that splits the standing rules into statements")
+	cmd.Flags().StringVar(&decideModel, "decide-model", "", "Model that draws proposals from finished tasks and verifies them")
+	cmd.Flags().StringVar(&decideEffort, "decide-effort", "", "Decide effort: low, medium, high, xhigh or max")
 	cmd.Flags().Float64Var(&budget, "daily-budget", 0, "Daily budget for the background model runs (collect and rules), in dollars at API prices (0 pauses them)")
 	return cmd
 }

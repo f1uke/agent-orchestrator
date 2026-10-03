@@ -179,7 +179,9 @@ func (o *Observer) Poll(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	o.pass(ctx, false, o.settings().DailyBudgetUSD-spent)
+	// Sources are still recorded on a spent day; only model runs wait, so the
+	// budget left is never shown below zero.
+	o.pass(ctx, false, max(o.settings().DailyBudgetUSD-spent, 0))
 	return nil
 }
 

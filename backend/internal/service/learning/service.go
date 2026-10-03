@@ -75,6 +75,9 @@ type Service struct {
 
 	rulesStore RulesStore
 	rules      RulesRefresher
+
+	decideStore DecideStore
+	decider     Decider
 }
 
 // WithCollect wires the collect stage in. runCtx is the daemon's context.

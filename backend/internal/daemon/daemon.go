@@ -451,6 +451,8 @@ func Run() error {
 	// Learning rules: the standing rules agents are already told, split into
 	// statements a lesson is checked against.
 	learnRules, learnRulesDone := startLearnRules(ctx, store, cfg.DataDir, learnSettings, sessMgr.StandingPrompts, loopReg, log)
+	// Learning decide: proposals from finished tasks' drafts, for the human.
+	learnDecider, learnDecideDone := startLearnDecide(ctx, store, cfg.DataDir, learnSettings, loopReg, log)
 	agentSvc := agentsvc.New()
 	go func() {
 		if _, err := agentSvc.Refresh(ctx); err != nil {
@@ -483,6 +485,7 @@ func Run() error {
 		<-learnCaptureDone
 		<-learnCollectDone
 		<-learnRulesDone
+		<-learnDecideDone
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
@@ -505,7 +508,7 @@ func Run() error {
 		log.Warn("simowner: initial sync of simulator leases failed", "err", err)
 	}
 
-	learningSvc := learningService(ctx, store, learnCollector, learnSettings, learnRules)
+	learningSvc := learningService(ctx, store, learnCollector, learnSettings, learnRules, learnDecider)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
 		Agents:             agentSvc,
@@ -544,6 +547,7 @@ func Run() error {
 		LoopTelemetry:      loopReg,
 		Learning:           learningSvc,
 		LearningRules:      learningSvc,
+		LearningDecide:     learningSvc,
 	})
 	if err != nil {
 		stop()
@@ -553,6 +557,7 @@ func Run() error {
 		<-learnCaptureDone
 		<-learnCollectDone
 		<-learnRulesDone
+		<-learnDecideDone
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
@@ -747,6 +752,7 @@ func Run() error {
 	<-learnCaptureDone
 	<-learnCollectDone
 	<-learnRulesDone
+	<-learnDecideDone
 	lcStack.Stop()
 	if err := cdcPipe.Stop(); err != nil {
 		log.Error("cdc pipeline shutdown", "err", err)

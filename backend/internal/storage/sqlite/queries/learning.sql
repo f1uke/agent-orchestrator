@@ -147,8 +147,8 @@ UPDATE learn_excerpt SET collected_at = ?, collected_job_id = ?
 WHERE id = ? AND collected_at IS NULL;
 
 -- name: InsertLearnJob :one
-INSERT INTO learn_job (project_id, session_id, state, model, turns, started_at)
-VALUES (?, ?, 'running', ?, ?, ?)
+INSERT INTO learn_job (project_id, session_id, kind, task_key, state, model, turns, started_at)
+VALUES (?, ?, ?, ?, 'running', ?, ?, ?)
 RETURNING id;
 
 -- name: FinishLearnJob :exec
@@ -264,3 +264,59 @@ FROM learn_protected_rule ORDER BY id;
 
 -- name: DeleteLearnProtectedRule :execrows
 DELETE FROM learn_protected_rule WHERE id = ?;
+
+-- name: ListAllLearnDrafts :many
+-- Every draft of every project, for decide: a task's own drafts and the
+-- related drafts of other tasks that may corroborate them.
+SELECT d.id, d.project_id, d.session_id, d.task_key, d.job_id, d.kind, d.statement, d.applies_when,
+    d.scope_hint, d.confidence, d.about, d.quote, d.anchor_excerpt_id, d.evidence_json, d.agent_before, d.weak,
+    d.supersedes_id, d.status, d.created_at,
+    e.source_class AS anchor_source_class,
+    e.turn_at AS anchor_turn_at
+FROM learn_draft d
+LEFT JOIN learn_excerpt e ON e.id = d.anchor_excerpt_id
+ORDER BY d.id;
+
+-- name: SetLearnDraftStatusByID :exec
+UPDATE learn_draft SET status = ? WHERE id = ? AND status = 'open';
+
+-- name: ListDecidedTasks :many
+SELECT task_key, project_id, outcome, proposals, decided_at FROM learn_decided_task;
+
+-- name: UpsertDecidedTask :exec
+INSERT INTO learn_decided_task (task_key, project_id, outcome, proposals, decided_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (task_key) DO UPDATE SET
+    outcome = excluded.outcome, proposals = learn_decided_task.proposals + excluded.proposals,
+    decided_at = excluded.decided_at;
+
+-- name: InsertSkillProposal :one
+INSERT INTO skill_proposal (project_id, task_key, action, target_path, scope, title, rationale, base_sha256,
+    new_content, diff, confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason,
+    created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id;
+
+-- name: AmendSkillProposal :exec
+UPDATE skill_proposal
+SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, diff = ?,
+    confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?
+WHERE id = ? AND status = 'pending';
+
+-- name: InsertSkillProposalEvidence :exec
+INSERT INTO skill_proposal_evidence (proposal_id, draft_id) VALUES (?, ?)
+ON CONFLICT DO NOTHING;
+
+-- name: ListSkillProposals :many
+SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, diff,
+    confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at
+FROM skill_proposal ORDER BY id;
+
+-- name: ListSkillProposalEvidence :many
+SELECT proposal_id, draft_id FROM skill_proposal_evidence ORDER BY proposal_id, draft_id;
+
+-- name: DeleteSkillProposalsByProject :execrows
+DELETE FROM skill_proposal WHERE project_id = ?;
+
+-- name: DeleteDecidedTasksByProject :execrows
+DELETE FROM learn_decided_task WHERE project_id = ?;
