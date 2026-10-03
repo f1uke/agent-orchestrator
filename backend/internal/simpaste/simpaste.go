@@ -3,8 +3,8 @@
 //
 // It exists because the keyboard cannot be trusted to deliver characters. The
 // HID path sends US key usages and the guest turns them into whatever its own
-// input mode says they mean, so on a guest set to Thai "fa12345" arrives as
-// "ดฟๅ/_ภถ" (see internal/simkeyboard). The pasteboard sidesteps that entirely:
+// input mode says they mean, so on a guest set to Thai "lf86428" arrives as
+// "สดคุภ/ค" (see internal/simkeyboard). The pasteboard sidesteps that entirely:
 // the text is transferred as text, and Command-V is the one keystroke the guest
 // matches WITHOUT running it through the input mode - verified on a real device
 // set to Thai, including into a secure field, which nothing else here can fill
@@ -232,7 +232,7 @@ func pasteHoldFor(events []simbridge.Event) time.Duration {
 //
 // It said FAILURE for work it had done. An empty field reports its PLACEHOLDER
 // as its accessibility value: an untouched login field reads
-// "example@email.com", and a correct paste of "r8t3@a.com" takes it from 17
+// "example@email.com", and a correct paste of "qa@test.io" takes it from 17
 // characters to 10. A replacement can only grow a field by the payload's length
 // when the field was empty AND had no placeholder, so on a real login screen
 // that rule failed every time, whether the text pasted was shorter, longer or

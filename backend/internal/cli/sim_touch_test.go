@@ -198,12 +198,12 @@ func TestSimType_RefusesLoudlyWhenNeitherRouteCanDeliver(t *testing.T) {
 	// guest would remap the keys AND its pasteboard cannot be reached, so there
 	// is no honest way to put the characters in the field - and saying so is the
 	// entire point of this change. What must never happen is "Typed 7
-	// characters" over a field holding "ดฟๅ/_ภถ".
+	// characters" over a field holding "สดคุภ/ค".
 	driver := &fakeSimDriver{}
 	deps, daemon := touchDeps(t, driver)
 	deps = withSimKeyboard(deps, simKeyboardThai, nil)
 
-	out, _, err := executeCLI(t, deps, "sim", "type", "fa12345")
+	out, _, err := executeCLI(t, deps, "sim", "type", "lf86428")
 	if err == nil {
 		t.Fatalf("with both routes unavailable this must fail; output=%s", out)
 	}
@@ -254,7 +254,7 @@ func TestSimType_RawKeysSendsAnywayAndPromisesKeysNotCharacters(t *testing.T) {
 	deps, daemon := touchDeps(t, driver)
 	deps = withSimKeyboard(deps, simKeyboardThai, nil)
 
-	out, errOut, err := executeCLI(t, deps, "sim", "type", "fa12345", "--raw-keys")
+	out, errOut, err := executeCLI(t, deps, "sim", "type", "lf86428", "--raw-keys")
 	if err != nil {
 		t.Fatalf("--raw-keys must send anyway: %v\nstderr=%s", err, errOut)
 	}
@@ -376,13 +376,13 @@ func TestSimType_FallsBackToThePasteboardWhenTheGuestWouldRemapTheKeys(t *testin
 	// The point of the whole change: the characters asked for end up in the
 	// field even on a guest whose keyboard would have mangled the key presses.
 	driver := &fakeSimDriver{}
-	deps, daemon, pasteboard := pasteDeps(t, driver, simKeyboardThai, "fa12345")
+	deps, daemon, pasteboard := pasteDeps(t, driver, simKeyboardThai, "lf86428")
 
-	out, errOut, err := executeCLI(t, deps, "sim", "type", "fa12345")
+	out, errOut, err := executeCLI(t, deps, "sim", "type", "lf86428")
 	if err != nil {
 		t.Fatalf("type must succeed by pasting: %v\nstderr=%s", err, errOut)
 	}
-	if len(*pasteboard) != 2 || (*pasteboard)[0] != "fa12345" {
+	if len(*pasteboard) != 2 || (*pasteboard)[0] != "lf86428" {
 		t.Fatalf("pasteboard writes = %q, want the payload then the restore", *pasteboard)
 	}
 	if (*pasteboard)[1] != "what the human had copied" {
@@ -406,9 +406,9 @@ func TestSimType_UsesKeysAndNoPasteboardWhenTheGuestIsSafe(t *testing.T) {
 	// events (a live validator, a character counter) must not silently start
 	// seeing one paste instead.
 	driver := &fakeSimDriver{}
-	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardUS, "fa12345")
+	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardUS, "lf86428")
 
-	out, _, err := executeCLI(t, deps, "sim", "type", "fa12345")
+	out, _, err := executeCLI(t, deps, "sim", "type", "lf86428")
 	if err != nil {
 		t.Fatalf("sim type: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestSimType_PasteThatChangedNothingFailsLoudly(t *testing.T) {
 	driver := &fakeSimDriver{}
 	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardThai, "") // the field never changes
 
-	_, _, err := executeCLI(t, deps, "sim", "type", "fa12345")
+	_, _, err := executeCLI(t, deps, "sim", "type", "lf86428")
 	if err == nil {
 		t.Fatal("a paste that changed nothing must never be reported as success")
 	}
@@ -462,9 +462,9 @@ func TestSimType_NonAsciiGoesByPasteboard(t *testing.T) {
 
 func TestSimType_PasteFlagForcesTheRouteEvenOnASafeGuest(t *testing.T) {
 	driver := &fakeSimDriver{}
-	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardUS, "fa12345")
+	deps, _, pasteboard := pasteDeps(t, driver, simKeyboardUS, "lf86428")
 
-	if _, _, err := executeCLI(t, deps, "sim", "type", "fa12345", "--paste"); err != nil {
+	if _, _, err := executeCLI(t, deps, "sim", "type", "lf86428", "--paste"); err != nil {
 		t.Fatalf("sim type --paste: %v", err)
 	}
 	if len(*pasteboard) == 0 {
@@ -474,9 +474,9 @@ func TestSimType_PasteFlagForcesTheRouteEvenOnASafeGuest(t *testing.T) {
 
 func TestSimType_PasteAndRawKeysTogetherIsAMistake(t *testing.T) {
 	driver := &fakeSimDriver{}
-	deps, _, _ := pasteDeps(t, driver, simKeyboardThai, "fa12345")
+	deps, _, _ := pasteDeps(t, driver, simKeyboardThai, "lf86428")
 
-	_, _, err := executeCLI(t, deps, "sim", "type", "fa12345", "--paste", "--raw-keys")
+	_, _, err := executeCLI(t, deps, "sim", "type", "lf86428", "--paste", "--raw-keys")
 	if err == nil {
 		t.Fatal("asking for both routes at once has no answer and must be refused")
 	}

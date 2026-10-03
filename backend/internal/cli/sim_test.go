@@ -52,7 +52,7 @@ func simDeviceFixture(udid, name, state string) map[string]any {
 
 // What `defaults read com.apple.keyboard.preferences KeyboardsCurrentAndNext`
 // prints in the guest. Both were captured from real devices: the Thai one is
-// the setup that quietly typed "ดฟๅ/_ภถ" for "fa12345".
+// the setup that quietly typed "สดคุภ/ค" for "lf86428".
 const (
 	simKeyboardUS = "(\n    \"en_US@sw=QWERTY;hw=Automatic\"\n)\n"
 	// The array's first entry is the mode in use; the rest is where a

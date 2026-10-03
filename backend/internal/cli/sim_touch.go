@@ -414,7 +414,7 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 			"then sees what a person would. But the keys sent are US-keyboard key presses and " +
 			"the SIMULATOR decides what each one produces: Simulator.app ships with I/O > " +
 			"Keyboard > \"Use the Same Keyboard Language as macOS\" ticked, so a Mac on a Thai " +
-			"input source makes `type \"fa12345\"` arrive as \"\u0e14\u0e1f\u0e45/_\u0e20\u0e16\". " +
+			"input source makes `type \"lf86428\"` arrive as \"\u0e2a\u0e14\u0e04\u0e38\u0e20/\u0e04\". " +
 			"Where that would happen the text goes through the simulator's PASTEBOARD instead, " +
 			"and is checked on screen afterwards - the command names the field it landed in and " +
 			"what that field reads now, so the characters asked for are the characters that " +
@@ -429,7 +429,7 @@ func newSimTypeCommand(ctx *commandContext) *cobra.Command {
 		Example: `  ao sim tap 0.5 0.125
   ao sim type "hello@example.com"
   ao sim type "สวัสดี ครับ"
-  ao sim type "fa12345" --raw-keys`,
+  ao sim type "lf86428" --raw-keys`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			text := strings.Join(args, " ")

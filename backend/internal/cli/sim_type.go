@@ -21,7 +21,7 @@ import (
 // `ao sim type` through the daemon's XCTest runner - the default route.
 //
 // Key presses carry key POSITIONS and the simulator decides what each one
-// becomes, so a guest on a Thai input mode turns "fa12345" into "ดฟๅ/_ภถ" and
+// becomes, so a guest on a Thai input mode turns "lf86428" into "สดคุภ/ค" and
 // Thai text has no key at all; the pasteboard carries characters, but as one
 // paste rather than keystrokes. XCTest types
 // CHARACTERS through the software keyboard, in any process on screen, and the

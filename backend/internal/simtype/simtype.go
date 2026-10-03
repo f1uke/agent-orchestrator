@@ -3,7 +3,7 @@
 //
 // Why a third route. Key presses (internal/simbridge) send US key USAGES, and
 // the guest turns each into whatever its input mode says that key means: on a
-// guest set to Thai "fa12345" arrives as "ดฟๅ/_ภถ", and Thai text has no key to
+// guest set to Thai "lf86428" arrives as "สดคุภ/ค", and Thai text has no key to
 // send at all. The pasteboard (internal/simpaste) carries characters, but an
 // app that watches each keystroke sees one paste, and the text sits on the
 // device's pasteboard meanwhile. XCTest's typeText sends CHARACTERS through the
