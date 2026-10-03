@@ -718,6 +718,10 @@ func Run() error {
 		return err
 	}, log)
 
+	// One-off, idempotent: move the planning docs the old data-dir-relative
+	// knowledge store stranded under <dataDir>/knowledge into the real store.
+	knowledgeMigrationDone := startKnowledgeMigration(ctx, cfg, store, log)
+
 	runErr := srv.Run(ctx)
 
 	// Both graceful shutdown paths (SIGTERM and POST /shutdown) funnel through
@@ -737,6 +741,7 @@ func Run() error {
 	<-simOwnerSyncDone
 	<-orchSyncDone
 	<-evidenceSweepDone
+	<-knowledgeMigrationDone
 	<-reclaimerDone
 	<-tokenUsageDone
 	<-learnCaptureDone
