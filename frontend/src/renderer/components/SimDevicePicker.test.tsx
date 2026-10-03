@@ -338,6 +338,29 @@ describe("SimDevicePicker", () => {
 		);
 	});
 
+	// ⚠ A lease taken through ANOTHER AO daemon on this machine (a sandbox daemon
+	// a worker verifies its branch with). Its session ids are another database's,
+	// so the same id as this session is still somebody else - which is exactly how
+	// one session shut down a device another was mid-run on.
+	it("never calls another daemon's lease yours, even when the id matches", async () => {
+		const otherDaemon = { dataDir: "/tmp/ao-sandbox", pid: 4242, port: 3399 };
+		open([device({ state: "Booted", lease: { state: "held", holder: "p-1", otherDaemon } as SimDevice["lease"] })], {
+			holderNames: new Map([["p-1", "this session's own board name"]]),
+		});
+		await openPicker();
+
+		const tag = screen.getByTestId("sim-lease-tag");
+		expect(tag).not.toHaveTextContent(/yours/i);
+		expect(tag).toHaveTextContent(/leased by @p-1 \(another AO daemon, port 3399\)/i);
+		expect(screen.getByRole("button", { name: /watch iPhone 17 Pro Max/i })).toHaveAttribute(
+			"title",
+			"Leased by @p-1 through the AO daemon with data dir /tmp/ao-sandbox (pid 4242)",
+		);
+		// Its lease cannot be taken from this daemon - not even to power the
+		// device off - so the row does not offer to.
+		expect(screen.queryByRole("button", { name: /^shut down$/i })).not.toBeInTheDocument();
+	});
+
 	// A device nobody holds gets no tag at all: a row per device saying "free"
 	// would make the one that is taken harder to spot, not easier.
 	it("says nothing about a lease nobody holds", async () => {

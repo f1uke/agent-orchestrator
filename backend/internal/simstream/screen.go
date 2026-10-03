@@ -66,6 +66,8 @@ type Screen struct {
 	// pass. One instance serves both a boot (through power) and a claim, so
 	// the listing reports whichever ran last.
 	trust *simtrust.Truster
+	// bootLedger is carried across newPower, which rebuilds power.
+	bootLedger simpower.BootLedger
 
 	mu       sync.Mutex
 	hub      *Hub
@@ -148,6 +150,16 @@ func (s *Screen) newPower() {
 	s.power = simpower.New(s.lookPath, s.run)
 	s.power.UseTruster(s.trust)
 	s.power.OnSettled(s.forgetListing)
+	if s.bootLedger != nil {
+		s.power.SetBootLedger(s.bootLedger)
+	}
+}
+
+// SetBootLedger shares this daemon's boots with the other AO daemons on the
+// machine and folds theirs into PowerStatus. See simpower.BootLedger.
+func (s *Screen) SetBootLedger(ledger simpower.BootLedger) {
+	s.bootLedger = ledger
+	s.power.SetBootLedger(ledger)
 }
 
 // Boot names the boot session of the device a gesture is about to touch, so

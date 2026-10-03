@@ -162,6 +162,17 @@ func Run() error {
 	// what guarantees no capture process outlives the daemon.
 	simScreen := simstream.NewScreen(cfg.DataDir)
 	defer simScreen.Shutdown()
+	// Who owns which simulator, machine-wide: every AO daemon on this machine
+	// (the human's, and any sandbox daemon a worker runs with its own
+	// AO_DATA_DIR) records its leases and its boots in one shared file under
+	// ~/.ao, so a device driven through one is refused and listed by all, and
+	// the boot cap counts every boot. nil when the file cannot be opened.
+	simOwners := openSimOwnership(cfg.DataDir, cfg.Port, log)
+	if simOwners != nil {
+		defer func() { _ = simOwners.Close() }()
+		simScreen.SetBootLedger(simOwners)
+	}
+	simOwnerLeaseOpts, simOwnerAssignOpts := simOwnershipOptions(simOwners)
 	// The touches the desktop pane currently holds down. A drag spans several
 	// requests, so it outlives any one of them - and a finger left down wedges a
 	// device's input until it is rebooted, so the daemon lifts them on the way
@@ -443,7 +454,7 @@ func Run() error {
 	// daemon's resident device listing (simScreen), which is built for the Device
 	// tab and whose cache means a spawn pays a map lookup rather than a `simctl
 	// list` subprocess.
-	simAssigner := simsvc.NewAssigner(store, simScreen, func() time.Time { return time.Now().UTC() })
+	simAssigner := simsvc.NewAssigner(store, simScreen, func() time.Time { return time.Now().UTC() }, simOwnerAssignOpts...)
 	sessMgr.SetSimDeviceAssigner(func(ctx context.Context, id domain.SessionID) (string, error) {
 		assignment, err := simAssigner.AssignDevice(ctx, id)
 		return assignment.UDID, err
@@ -474,6 +485,14 @@ func Run() error {
 	// live.
 	iosRunSvc := newIOSRunService(cfg.DataDir, store, runtimeAdapter)
 
+	simSvc := newSimService(store, simScreen, sessMgr, append(simLeaseNudge, simOwnerLeaseOpts...)...)
+	// Before anything is served: this daemon's leases go back into the
+	// machine-wide registry under this process's pid, and any another daemon
+	// took while this one was down are given up.
+	if err := simSvc.SyncOwnership(ctx); err != nil {
+		log.Warn("simowner: initial sync of simulator leases failed", "err", err)
+	}
+
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
 		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
 		Agents:             agentSvc,
@@ -482,7 +501,7 @@ func Run() error {
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
 		CrewRuns:           crewRunSvc,
-		Sim:                newSimService(store, simScreen, sessMgr, simLeaseNudge...),
+		Sim:                simSvc,
 		IOSRun:             iosRunSvc,
 		SimScreen:          simScreen,
 		SimVideo:           simVideo,
@@ -632,6 +651,24 @@ func Run() error {
 		return messageQueue.Drain(ctx)
 	}, log)
 
+	// Keep the machine-wide simulator registry following this daemon's own
+	// leases: one ended with its session (the sim_lease trigger) is dropped
+	// within a tick, so other AO daemons on the machine can claim the device.
+	// No registry, no loop: there is nothing to follow.
+	simOwnerSyncDone := startTickerSweep(ctx, "simulator ownership sync", 0, nil, log)
+	if simOwners != nil {
+		simOwnerRec := loopReg.Register(looptelemetry.Spec{
+			Name:        "sim-ownership-sync",
+			Display:     "Simulator ownership",
+			Description: "Re-records this daemon's simulator leases in the machine-wide registry other AO daemons read.",
+			Interval:    simOwnershipSyncInterval,
+		})
+		simOwnerSyncDone = startTickerSweep(ctx, "simulator ownership sync", simOwnershipSyncInterval, func(ctx context.Context) error {
+			simOwnerRec.Tick()
+			return simSvc.SyncOwnership(ctx)
+		}, log)
+	}
+
 	// Keep every live orchestrator's worktree on its project's default branch.
 	// Spawn and restore already sync at startup; this covers the drift in
 	// between, because an orchestrator session runs for days while the default
@@ -679,6 +716,7 @@ func Run() error {
 	<-previewDone
 	<-idleSweepDone
 	<-queueSweepDone
+	<-simOwnerSyncDone
 	<-orchSyncDone
 	<-evidenceSweepDone
 	<-reclaimerDone

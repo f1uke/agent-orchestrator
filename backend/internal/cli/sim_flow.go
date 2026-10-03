@@ -129,8 +129,8 @@ func (c *commandContext) requireSimLeaseForFlow(ctx context.Context, device simD
 	if view.State != domain.SimLeaseHeld {
 		return fmt.Errorf("%s is not claimed by this session; run `ao sim claim --udid %s` first", device.Label(), device.UDID)
 	}
-	if view.Holder != sessionID {
-		return fmt.Errorf("%s is held by @%s, not this session; a flow would relaunch the app under test on their device", device.Label(), view.Holder)
+	if !view.heldBy(sessionID) {
+		return fmt.Errorf("%s is held by %s, not this session; a flow would relaunch the app under test on their device", device.Label(), view.holderLabel())
 	}
 	return nil
 }

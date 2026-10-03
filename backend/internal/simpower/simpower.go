@@ -126,6 +126,9 @@ type Status struct {
 	// Profile is what happened to the device's daemon profile. Set only on a
 	// boot that had one to apply.
 	Profile *simslim.Result `json:"profile,omitempty"`
+	// OtherDaemon is set on a boot another AO daemon on this machine is
+	// running. It is reported so the boot cap counts it - see BootLedger.
+	OtherDaemon *domain.SimDaemon `json:"otherDaemon,omitempty"`
 }
 
 // Setup is what a boot does to the device once it is up, beyond being up. Both
@@ -140,6 +143,27 @@ type Setup struct {
 	// handshake. nil trusts nothing.
 	Trust *simtrust.Request
 }
+
+// BootLedger is the machine-wide record of boots in flight
+// (internal/simowner).
+//
+// The boot cap counts what is up or coming up. simctl reports every Booted
+// device on the machine, whichever daemon booted it, but a boot still in
+// flight is known only to the daemon running it - and a slimming boot spends
+// tens of seconds rebooting the device, not Booted while its several GB are
+// allocated. Without this a sandbox daemon's boot in that window was invisible
+// to every other daemon's count, which is how a machine gets to the third
+// simulator the cap exists to prevent.
+type BootLedger interface {
+	NoteBoot(ctx context.Context, udid, phase string, startedAt, deadline time.Time) error
+	ClearBoot(ctx context.Context, udid string) error
+	OtherBoots(ctx context.Context, now time.Time) ([]domain.SimBoot, error)
+}
+
+// ledgerTimeout bounds one write to or read of the ledger. It is a shared
+// file another daemon may be writing; a count that cannot be had in time is
+// left out rather than holding up a boot or a listing.
+const ledgerTimeout = 2 * time.Second
 
 // Power runs the operations and remembers what is in flight.
 //
@@ -168,6 +192,7 @@ type Power struct {
 	mu        sync.Mutex
 	entries   map[string]Status
 	onSettled func()
+	ledger    BootLedger
 
 	// wg tracks the detached operations, so a test can wait for them without
 	// sleeping. Nothing in production waits on it.
@@ -203,6 +228,31 @@ func (p *Power) OnSettled(fn func()) {
 // pass ran last.
 func (p *Power) UseTruster(t *simtrust.Truster) { p.trust = t }
 
+// SetBootLedger shares this daemon's boots with the other AO daemons on the
+// machine, and folds theirs into All.
+func (p *Power) SetBootLedger(ledger BootLedger) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.ledger = ledger
+}
+
+// noteBoot records (or re-records, with a new phase) a boot in the ledger.
+func (p *Power) noteBoot(ctx context.Context, key, phase string, startedAt time.Time) {
+	p.mu.Lock()
+	ledger := p.ledger
+	deadline := startedAt.Add(p.bootTimeout + p.profileTimeout)
+	p.mu.Unlock()
+	if ledger == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerTimeout)
+	defer cancel()
+	// Best effort: the ledger is an accounting aid for the cap, and a boot
+	// must not fail because another daemon could not be told about it. The
+	// deadline bounds a row a crashed write leaves behind.
+	_ = ledger.NoteBoot(ctx, key, phase, startedAt, deadline)
+}
+
 // Start begins an operation and returns at once. The work is detached from the
 // caller's context on purpose: the request that asked for a boot is answered
 // immediately, and a boot that died with it would never land.
@@ -233,8 +283,12 @@ func (p *Power) Start(ctx context.Context, udid string, op Op, setup *Setup, don
 	if op == Boot {
 		phase = PhaseBooting
 	}
-	p.entries[key] = Status{Op: op, State: Running, StartedAt: p.now(), Phase: phase}
+	startedAt := p.now()
+	p.entries[key] = Status{Op: op, State: Running, StartedAt: startedAt, Phase: phase}
 	p.mu.Unlock()
+	if op == Boot {
+		p.noteBoot(ctx, key, phase, startedAt)
+	}
 
 	p.wg.Add(1)
 	go func() {
@@ -322,8 +376,14 @@ func (p *Power) execute(ctx context.Context, key string, op Op, timeout time.Dur
 		delete(p.entries, key)
 	}
 	settled := p.onSettled
+	ledger := p.ledger
 	p.mu.Unlock()
 
+	if op == Boot && ledger != nil {
+		clearCtx, cancel := context.WithTimeout(ctx, ledgerTimeout)
+		_ = ledger.ClearBoot(clearCtx, key)
+		cancel()
+	}
 	if settled != nil {
 		settled()
 	}
@@ -343,11 +403,15 @@ func (p *Power) applyProfile(ctx context.Context, key string, req simslim.Reques
 	}
 
 	p.mu.Lock()
-	if st, ok := p.entries[key]; ok {
+	st, ok := p.entries[key]
+	if ok {
 		st.Phase = PhaseSlimming
 		p.entries[key] = st
 	}
 	p.mu.Unlock()
+	if ok {
+		p.noteBoot(ctx, key, PhaseSlimming, st.StartedAt)
+	}
 
 	profCtx, cancel := context.WithTimeout(ctx, p.profileTimeout)
 	defer cancel()
@@ -387,12 +451,35 @@ func (p *Power) Status(udid string) (Status, bool) {
 
 // All is every device with something in flight or a failure to report, keyed
 // by normalized udid. It is a copy: callers read it while operations finish.
+//
+// With a ledger it also carries the boots other AO daemons on this machine
+// have in flight, marked OtherDaemon, so the device listing - and the boot cap
+// that counts from it - sees every boot on the machine. This daemon's own
+// entry for a device wins over another's.
 func (p *Power) All() map[string]Status {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	out := make(map[string]Status, len(p.entries))
 	for udid, status := range p.entries {
 		out[udid] = status
+	}
+	ledger := p.ledger
+	p.mu.Unlock()
+	if ledger == nil {
+		return out
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ledgerTimeout)
+	defer cancel()
+	others, err := ledger.OtherBoots(ctx, p.now())
+	if err != nil {
+		return out
+	}
+	for _, boot := range others {
+		key := domain.NormalizeSimUDID(boot.UDID)
+		if _, mine := out[key]; mine {
+			continue
+		}
+		daemon := boot.Daemon
+		out[key] = Status{Op: Boot, State: Running, StartedAt: boot.StartedAt, Phase: boot.Phase, OtherDaemon: &daemon}
 	}
 	return out
 }

@@ -36,10 +36,11 @@ const (
 
 // simLeaseClient mirrors domain.SimLease on the wire.
 type simLeaseClient struct {
-	UDID       string    `json:"udid"`
-	SessionID  string    `json:"sessionId"`
-	AcquiredAt time.Time `json:"acquiredAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
+	UDID        string            `json:"udid"`
+	SessionID   string            `json:"sessionId"`
+	AcquiredAt  time.Time         `json:"acquiredAt"`
+	ExpiresAt   time.Time         `json:"expiresAt"`
+	OtherDaemon *domain.SimDaemon `json:"otherDaemon,omitempty"`
 }
 
 // acquireSimLeaseRequest mirrors controllers.AcquireSimLeaseInput.
@@ -67,6 +68,30 @@ type simLeaseView struct {
 	AcquiredAt *time.Time           `json:"acquiredAt,omitempty"`
 	ExpiresAt  *time.Time           `json:"expiresAt,omitempty"`
 	Reason     string               `json:"reason,omitempty"`
+	// OtherDaemon is set when the holder is a session of another AO daemon on
+	// this machine - a sandbox daemon with its own AO_DATA_DIR. Holder is then
+	// that daemon's session id, which can equal one here and still be
+	// somebody else.
+	OtherDaemon *domain.SimDaemon `json:"otherDaemon,omitempty"`
+}
+
+// heldBy reports whether this daemon's session sessionID holds the device. A
+// lease held through another daemon never counts, whatever its id says.
+func (v simLeaseView) heldBy(sessionID string) bool {
+	return v.State == domain.SimLeaseHeld && v.OtherDaemon == nil && sessionID != "" && v.Holder == sessionID
+}
+
+// holderLabel names the holder, and the daemon it holds through when that is
+// not this one - which is where it has to be released.
+func (v simLeaseView) holderLabel() string {
+	return simHolderLabel(v.Holder, v.OtherDaemon)
+}
+
+func simHolderLabel(holder string, other *domain.SimDaemon) string {
+	if other == nil {
+		return "@" + holder
+	}
+	return fmt.Sprintf("@%s through %s", holder, other.Describe())
 }
 
 // simClaimResult is the `ao sim claim --json` payload.
@@ -231,7 +256,8 @@ func (c *commandContext) sessionHeldSimUDID(ctx context.Context, sessionID strin
 	}
 	mine := []simLeaseClient{}
 	for _, lease := range leases {
-		if lease.SessionID == sessionID {
+		// Another daemon's session can share this id; it is never ours.
+		if lease.SessionID == sessionID && lease.OtherDaemon == nil {
 			mine = append(mine, lease)
 		}
 	}
@@ -277,10 +303,11 @@ func (c *commandContext) simLeaseViews(ctx context.Context) (map[string]simLease
 	for udid, lease := range leases {
 		acquired, expires := lease.AcquiredAt.UTC(), lease.ExpiresAt.UTC()
 		views[udid] = simLeaseView{
-			State:      domain.SimLeaseHeld,
-			Holder:     lease.SessionID,
-			AcquiredAt: &acquired,
-			ExpiresAt:  &expires,
+			State:       domain.SimLeaseHeld,
+			Holder:      lease.SessionID,
+			AcquiredAt:  &acquired,
+			ExpiresAt:   &expires,
+			OtherDaemon: lease.OtherDaemon,
 		}
 	}
 	return views, true
@@ -304,6 +331,13 @@ func (v simLeaseView) column(now time.Time) string {
 	if v.State != domain.SimLeaseHeld {
 		return string(domain.SimLeaseUnknown)
 	}
+	if v.OtherDaemon != nil {
+		where := fmt.Sprintf("data dir %s", v.OtherDaemon.DataDir)
+		if v.OtherDaemon.Port > 0 {
+			where = fmt.Sprintf("port %d", v.OtherDaemon.Port)
+		}
+		return fmt.Sprintf("@%s via other AO daemon, %s (%s left)", v.Holder, where, simRemaining(v.ExpiresAt, now))
+	}
 	return fmt.Sprintf("@%s (%s left)", v.Holder, simRemaining(v.ExpiresAt, now))
 }
 
@@ -314,12 +348,12 @@ func (v simLeaseView) captureLine(sessionID string) string {
 	switch {
 	case v.State != domain.SimLeaseHeld:
 		return v.Reason + ". Claim it with `ao sim claim` before driving it"
-	case sessionID != "" && v.Holder == sessionID:
+	case v.heldBy(sessionID):
 		return fmt.Sprintf("You hold this device until %s. Release it with `ao sim release` when you are done",
 			expiresLabel(v.ExpiresAt))
 	default:
-		return fmt.Sprintf("@%s holds this device until %s. Reading the device is fine; do NOT drive it",
-			v.Holder, expiresLabel(v.ExpiresAt))
+		return fmt.Sprintf("%s holds this device until %s. Reading the device is fine; do NOT drive it",
+			v.holderLabel(), expiresLabel(v.ExpiresAt))
 	}
 }
 
@@ -387,9 +421,34 @@ func (c *commandContext) explainSimContention(device simDevice, err error) error
 			left = fmt.Sprintf(" for another %s", simRemaining(&expiresAt, c.deps.Now().UTC()))
 		}
 	}
+	if other := simContentionDaemon(apiErr.ErrorBody.Details["otherDaemon"]); other != nil {
+		// Held through another daemon - a sandbox daemon a worker runs with
+		// its own AO_DATA_DIR. Its session is not one this daemon can name or
+		// reach, so say where it is and the ways its lease ends.
+		return fmt.Errorf("%s is leased by %s%s, so nothing was claimed.\n"+
+			"`ao sim shot` is read-only and still works. The lease ends when @%s runs `ao sim release` in that daemon, "+
+			"when it lapses, or as soon as that daemon (pid %d) exits",
+			device.Label(), simHolderLabel(holder, other), left, holder, other.PID)
+	}
 	return fmt.Errorf("%s is leased by @%s%s, so nothing was claimed.\n"+
 		"`ao sim shot` is read-only and still works. Wait for the lease to lapse, or ask @%s to run `ao sim release`",
 		device.Label(), holder, left, holder)
+}
+
+// simContentionDaemon reads the 409's otherDaemon detail, or nil when the
+// holder is a session of this daemon.
+func simContentionDaemon(raw any) *domain.SimDaemon {
+	fields, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	dataDir, _ := fields["dataDir"].(string)
+	if dataDir == "" {
+		return nil
+	}
+	pid, _ := fields["pid"].(float64)
+	port, _ := fields["port"].(float64)
+	return &domain.SimDaemon{DataDir: dataDir, PID: int(pid), Port: int(port)}
 }
 
 func writeSimClaim(out io.Writer, result simClaimResult) error {

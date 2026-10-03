@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, Loader2, Lock, Power } from "lucide-react";
 import type { SimDevice } from "../hooks/useSimDevices";
-import { crewHolderLabel, type SessionNames, type Task } from "../lib/crew";
+import { type SessionNames, simLeaseHolderLabel, type Task } from "../lib/crew";
 import type { SimPowerRequest } from "../hooks/useSimPower";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
@@ -236,12 +236,16 @@ function DeviceRow({
 	const power = device.power ?? null;
 	const running = power?.state === "running";
 	const holder = device.lease?.state === "held" ? (device.lease.holder ?? "") : "";
-	const heldByOther = Boolean(holder) && holder !== sessionId;
-	const heldByMe = Boolean(holder) && holder === sessionId;
+	// Held through another AO daemon on this machine (a sandbox daemon): its
+	// session ids are another database's, so one equal to ours is still not us,
+	// and its lease cannot be taken from here - not even to power the device off.
+	const otherDaemon = holder ? device.lease?.otherDaemon : undefined;
+	const heldByOther = Boolean(holder) && (holder !== sessionId || Boolean(otherDaemon));
+	const heldByMe = Boolean(holder) && holder === sessionId && !otherDaemon;
 	// The holder in the words a person recognises: this task's other member by
 	// its ROLE, anybody else by their BOARD NAME, and an `@id` only for a session
 	// nothing can name. The raw id stays on the tooltip either way.
-	const holderLabel = heldByOther ? crewHolderLabel(task, holder, holderNames) : "";
+	const holderLabel = heldByOther ? simLeaseHolderLabel(device.lease, task, holderNames) : "";
 	// What a screen reader hears, because the button carries an aria-label and an
 	// aria-label REPLACES the text inside it - the tag below would be silent.
 	const spokenLease = heldByOther ? `, leased by ${holderLabel}` : heldByMe ? ", leased by this session" : "";
@@ -270,7 +274,13 @@ function DeviceRow({
 					className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
 					disabled={!booted}
 					onClick={onChoose}
-					title={holder ? `Leased by @${holder}` : undefined}
+					title={
+						holder
+							? otherDaemon
+								? `Leased by @${holder} through the AO daemon with data dir ${otherDaemon.dataDir} (pid ${otherDaemon.pid})`
+								: `Leased by @${holder}`
+							: undefined
+					}
 					type="button"
 				>
 					<span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", booted ? "bg-success" : "bg-passive")} />
@@ -285,7 +295,7 @@ function DeviceRow({
 
 				{running ? (
 					<InFlight power={power} />
-				) : confirming ? null : (
+				) : confirming || (booted && otherDaemon) ? null : (
 					<button
 						className={cn(
 							"shrink-0 rounded-full border border-border px-2.5 py-1 text-[11px] font-medium transition-colors",

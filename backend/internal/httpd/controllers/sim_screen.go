@@ -88,6 +88,10 @@ type SimDeviceLeaseView struct {
 	AcquiredAt *time.Time           `json:"acquiredAt,omitempty"`
 	ExpiresAt  *time.Time           `json:"expiresAt,omitempty"`
 	Reason     string               `json:"reason,omitempty" description:"Why the state is unknown."`
+	// OtherDaemon is set when the holder is a session of another AO daemon on
+	// this machine. Holder is then THAT daemon's session id, which may equal a
+	// session id here and still be somebody else.
+	OtherDaemon *domain.SimDaemon `json:"otherDaemon,omitempty" description:"Set when the lease was taken through another AO daemon on this machine; holder is then that daemon's session."`
 }
 
 // SimDeviceFrameView is what a device's body looks like around its screen, in
@@ -121,6 +125,10 @@ type SimDevicePowerView struct {
 	// never reach a reader here.
 	Profile       string `json:"profile,omitempty" description:"skipped or failed - the two outcomes that mean the device is stock. A profile that applied leaves no power entry at all, so nothing else reaches the wire."`
 	ProfileReason string `json:"profileReason,omitempty" description:"Why the device is stock, in the tool's own words."`
+	// OtherDaemon marks a boot another AO daemon on this machine is running
+	// (a sandbox daemon with its own AO_DATA_DIR). It is listed so the boot cap
+	// counts every boot on the machine; this daemon cannot act on it.
+	OtherDaemon *domain.SimDaemon `json:"otherDaemon,omitempty" description:"Set when the boot is running in another AO daemon on this machine."`
 }
 
 // SimDeviceView is one simulator plus its lease state.
@@ -386,10 +394,11 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 		if lease, ok := held[domain.NormalizeSimUDID(d.UDID)]; ok {
 			acquired, expires := lease.AcquiredAt.UTC(), lease.ExpiresAt.UTC()
 			view.Lease = SimDeviceLeaseView{
-				State:      domain.SimLeaseHeld,
-				Holder:     string(lease.SessionID),
-				AcquiredAt: &acquired,
-				ExpiresAt:  &expires,
+				State:       domain.SimLeaseHeld,
+				Holder:      string(lease.SessionID),
+				AcquiredAt:  &acquired,
+				ExpiresAt:   &expires,
+				OtherDaemon: lease.OtherDaemon,
 			}
 		}
 		view.Power = c.powerView(d, power[domain.NormalizeSimUDID(d.UDID)], len(power) > 0)
@@ -421,7 +430,7 @@ func (c *SimScreenController) powerView(d simctl.Device, status simpower.Status,
 	}
 	v := &SimDevicePowerView{
 		Op: status.Op, State: status.State, StartedAt: status.StartedAt.UTC(), Reason: status.Reason,
-		Phase: status.Phase,
+		Phase: status.Phase, OtherDaemon: status.OtherDaemon,
 	}
 	if status.Profile != nil {
 		v.Profile = string(status.Profile.Outcome)
@@ -1041,6 +1050,10 @@ func (c *SimScreenController) profileFor(ctx context.Context, op simpower.Op, id
 //     whole control exists for.
 //   - our own lease, or none at all, needs no naming - the confirmation for
 //     those lives in the UI, where the human is the only party being asked.
+//   - a lease held through ANOTHER AO daemon on this machine (a sandbox
+//     daemon) is never taken, named or not: its gesture hold lives in that
+//     daemon's database, so a touch in flight cannot be ruled out from here.
+//     TakeOver refuses it and so does this.
 //
 // The lease is held for the length of the shutdown and given back when it
 // settles, so the device is arbitrated for exactly as long as it is being

@@ -52,17 +52,33 @@ type Assigner struct {
 	store   AssignmentStore
 	devices DeviceLister
 	clock   func() time.Time
+	// owners, when set, adds the devices other AO daemons on this machine
+	// hold to what a new session may not be given.
+	owners Ownership
+}
+
+// AssignerOption customizes an Assigner.
+type AssignerOption func(*Assigner)
+
+// WithAssignerOwnership makes a device leased through another AO daemon on
+// this machine spoken for, exactly like one leased here.
+func WithAssignerOwnership(owners Ownership) AssignerOption {
+	return func(a *Assigner) { a.owners = owners }
 }
 
 // NewAssigner builds an Assigner. devices may be nil, which is the ordinary
 // configuration everywhere there are no simulators to hand out (Linux, tests):
 // every session then gets no device and behaves exactly as it did before
 // assignments existed.
-func NewAssigner(store AssignmentStore, devices DeviceLister, clock func() time.Time) *Assigner {
+func NewAssigner(store AssignmentStore, devices DeviceLister, clock func() time.Time, opts ...AssignerOption) *Assigner {
 	if clock == nil {
 		clock = func() time.Time { return time.Now().UTC() }
 	}
-	return &Assigner{store: store, devices: devices, clock: clock}
+	a := &Assigner{store: store, devices: devices, clock: clock}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // AssignDevice returns the device this session owns, giving it one if it has
@@ -157,6 +173,17 @@ func (a *Assigner) spokenFor(ctx context.Context, sessionID domain.SessionID) (m
 	}
 	for _, lease := range leases {
 		if lease.SessionID != sessionID {
+			spoken[domain.NormalizeSimUDID(lease.UDID)] = true
+		}
+	}
+	if a.owners != nil {
+		// Never this session's, whatever the id says: another daemon's
+		// sessions are numbered in another database.
+		others, err := a.owners.Others(ctx, a.clock().UTC())
+		if err != nil {
+			return nil, err
+		}
+		for _, lease := range others {
 			spoken[domain.NormalizeSimUDID(lease.UDID)] = true
 		}
 	}
