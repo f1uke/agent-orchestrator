@@ -169,8 +169,8 @@ func aoBinaryPath() string {
 // ready runner's read, or false so the bridge answers. It never waits for a
 // runner that is starting - these reads sit inside a gesture.
 func simRunnerAXReader(runner *simrunner.Manager) simstream.AXReader {
-	return func(ctx context.Context, udid string) (simbridge.Snapshot, bool) {
-		h, _, err := runner.Read(ctx, udid, simrunner.ReadOptions{})
+	return func(ctx context.Context, udid string, at *simbridge.Point) (simbridge.Snapshot, bool) {
+		h, _, err := runner.Read(ctx, udid, simrunner.ReadOptions{At: at})
 		if err != nil {
 			return simbridge.Snapshot{}, false
 		}

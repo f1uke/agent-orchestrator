@@ -326,9 +326,10 @@ func (s *Screen) Subscribe(ctx context.Context, udid string) (<-chan Event, erro
 }
 
 // AXReader reads a device's whole screen through something better than the
-// bridge, answering false when it cannot right now. The daemon's XCTest
-// runners (internal/simrunner) are the one implementation.
-type AXReader func(ctx context.Context, udid string) (simbridge.Snapshot, bool)
+// bridge, answering false when it cannot right now. With at set it also
+// answers what a touch at that point reaches (Snapshot.Reached). The daemon's
+// XCTest runners (internal/simrunner) are the one implementation.
+type AXReader func(ctx context.Context, udid string, at *simbridge.Point) (simbridge.Snapshot, bool)
 
 // SetAXReader makes every screen read through this surface - the gesture
 // recorder's, the paste proof's - try reader first. It is a setter rather
@@ -376,7 +377,7 @@ type readingDriver struct {
 
 func (d readingDriver) AX(ctx context.Context, udid string) (simbridge.Snapshot, error) {
 	if reader := d.screen.reader(); reader != nil {
-		if snap, ok := reader(ctx, udid); ok {
+		if snap, ok := reader(ctx, udid, nil); ok {
 			return snap, nil
 		}
 	}
@@ -399,6 +400,22 @@ func (s *Screen) AX(ctx context.Context, udid string) (simbridge.Snapshot, error
 		return simbridge.Snapshot{}, err
 	}
 	return driver.AX(ctx, udid)
+}
+
+// LiveAX reads a device's screen through the AXReader alone, asking what a
+// touch at `at` reaches when at is set, and answers false when no reader is
+// wired or it cannot answer right now.
+//
+// It never falls back to the bridge, which is the point of it: the gesture
+// recorder calls it IN FRONT OF a touch, where a runner read costs ~100 ms and
+// does not queue behind the bridge, and a bridge read costs 0.5-1 s and does.
+// A caller that gets false describes the gesture from what it already had.
+func (s *Screen) LiveAX(ctx context.Context, udid string, at *simbridge.Point) (simbridge.Snapshot, bool) {
+	reader := s.reader()
+	if reader == nil {
+		return simbridge.Snapshot{}, false
+	}
+	return reader(ctx, udid, at)
 }
 
 // Keyboard asks a device which input mode it will read key presses through.

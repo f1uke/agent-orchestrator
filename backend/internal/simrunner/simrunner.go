@@ -591,19 +591,27 @@ type ReadOptions struct {
 	// about a millisecond per element, so only a read that hands out tap
 	// points asks for it.
 	HitTest bool
+	// At asks which element a touch at this point (normalized 0..1, like
+	// every AO coordinate) reaches; the answer is Snapshot.Reached. It is
+	// what lets a recorder name what a coordinate tap touched. Outside 0..1
+	// it is refused rather than sent.
+	At *simbridge.Point
 }
 
 // Read returns the device's screen through its runner. When the runner is
 // still starting it waits up to opts.Wait for it. Any other answer than a tree
 // is ErrNotReady with a Status saying why, for the caller's fallback to report.
 func (m *Manager) Read(ctx context.Context, udid string, opts ReadOptions) (simbridge.XCTestHierarchy, Status, error) {
+	if at := opts.At; at != nil && !(at.X >= 0 && at.X <= 1 && at.Y >= 0 && at.Y <= 1) {
+		return simbridge.XCTestHierarchy{}, Status{}, fmt.Errorf("the point (%v, %v) is not on the screen: give it as 0..1", at.X, at.Y)
+	}
 	port, status, err := m.await(ctx, udid, opts.Wait)
 	if err != nil {
 		return simbridge.XCTestHierarchy{}, status, err
 	}
 	readCtx, cancel := context.WithTimeout(ctx, readTimeout)
 	defer cancel()
-	h, err := m.client(port).hierarchy(readCtx, opts.HitTest)
+	h, err := m.client(port).hierarchy(readCtx, opts)
 	if err != nil {
 		return simbridge.XCTestHierarchy{}, Status{State: StateReady, Reason: "the read failed: " + err.Error()},
 			fmt.Errorf("%w: %w", ErrNotReady, err)

@@ -10400,6 +10400,8 @@ components:
           type: boolean
         screenChange:
           type: boolean
+        secure:
+          type: boolean
         selector:
           type: string
         selectorAnchor:
@@ -10720,6 +10722,8 @@ components:
           items:
             $ref: '#/components/schemas/SimXCTestApp'
           type: array
+        at:
+          $ref: '#/components/schemas/SimbridgeXCTestAt'
         elapsedMs:
           type: integer
         errors:
@@ -10760,6 +10764,8 @@ components:
           type: string
         placeholder:
           type: string
+        reached:
+          type: boolean
         selected:
           type: boolean
         type:
@@ -10770,6 +10776,23 @@ components:
       - type
       - frame
       - enabled
+      type: object
+    SimbridgeXCTestAt:
+      properties:
+        error:
+          type: string
+        found:
+          type: boolean
+        x:
+          format: double
+          type: number
+        "y":
+          format: double
+          type: number
+      required:
+      - x
+      - "y"
+      - found
       type: object
     SimbridgeXCTestCover:
       properties:

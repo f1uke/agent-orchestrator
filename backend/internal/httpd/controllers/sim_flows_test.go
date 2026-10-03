@@ -108,7 +108,7 @@ func TestStopSimRecording_WritesTheFlowAndReportsIt(t *testing.T) {
 		t.Fatalf("the reported path must exist: %v", err)
 	}
 	content := string(written)
-	if !strings.Contains(content, "appId: ${APP_ID}") {
+	if !strings.Contains(content, "appId: ${MAESTRO_APP_ID}\nname: \"Login to Portfolio\"\n---\n") {
 		t.Errorf("flow missing the literal appId placeholder:\n%s", content)
 	}
 	if !strings.Contains(content, `tapOn: "Home"`) {
@@ -198,7 +198,7 @@ func TestStopSimRecording_EntryAndOutAreHonoured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", out, err)
 	}
-	if !strings.Contains(string(written), `- runFlow: "../flows/sign-in.yaml"`) {
+	if !strings.Contains(string(written), `- runFlow: ../flows/sign-in.yaml`) {
 		t.Errorf("entry point missing:\n%s", written)
 	}
 }
@@ -546,4 +546,40 @@ func readFlowFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+// --param reaches the flow: a typed value comes out as the variable bin/flow
+// sets. And a param that cannot be one is refused BEFORE the stop, so the
+// recording is still open to stop again rather than closed with no flow.
+func TestStopSimRecording_ParamsReachTheFlowAndABadOneStopsNothing(t *testing.T) {
+	dataDir := t.TempDir()
+	at := time.Date(2026, 8, 18, 4, 57, 22, 711_000_000, time.UTC)
+	svc := newFakeSimServiceWithRecording()
+	svc.stopRec = stoppedRecording("search", at)
+	svc.stopSteps = []domain.SimRecordingStep{{Seq: 1, Kind: "type", Text: "K-USA"}}
+	srv := newSimTestServerIn(t, svc, dataDir)
+
+	body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/mer-1/sim-recordings/"+testSimUDID+"?param=lower%3Dx", "")
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a lower-case name: %s", status, body)
+	}
+	if svc.gotUDID != "" {
+		t.Fatalf("the recording was stopped (udid %q) before the param was refused", svc.gotUDID)
+	}
+
+	body, status, _ = doRequest(t, srv, "DELETE", "/api/v1/sessions/mer-1/sim-recordings/"+testSimUDID+"?param=FUND_QUERY%3DK-USA", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", status, body)
+	}
+	var res stopResponse
+	if err := json.Unmarshal(body, &res); err != nil || res.Flow == nil {
+		t.Fatalf("decode: %v: %s", err, body)
+	}
+	written, err := os.ReadFile(res.Flow.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), "- inputText: ${MAESTRO_FUND_QUERY}\n") {
+		t.Fatalf("flow does not use the param:\n%s", written)
+	}
 }

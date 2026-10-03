@@ -23,7 +23,7 @@ import XCTest
 
 /// Bumped whenever the wire format changes. The daemon refuses a runner that
 /// reports a different one, because it may be a stale build left on a port.
-let runnerVersion = "3"
+let runnerVersion = "4"
 
 @_silgen_name("proc_pidpath")
 private func proc_pidpath(_ pid: Int32, _ buffer: UnsafeMutableRawPointer, _ size: UInt32) -> Int32
@@ -140,7 +140,7 @@ final class Server {
         case ("GET", "/hierarchy"):
             return (200, Hierarchy.read(
                 bundleIDs: query["app"].map { $0.split(separator: ",").map(String.init) } ?? [],
-                hitTest: query["hitTest"] == "1"))
+                hitTest: query["hitTest"] == "1", at: query["at"].flatMap(Hierarchy.point)))
         case ("GET", "/focus"):
             let (status, out) = Typist.focus()
             return (status, out)
@@ -274,7 +274,17 @@ enum Hierarchy {
     /// one drawn under something else carries `covered` (see Occlusion). It
     /// costs about a millisecond per element, so only callers that hand out
     /// tap points ask for it.
-    static func read(bundleIDs explicit: [String], hitTest: Bool = false) -> [String: Any] {
+    /// "x,y" as fractions of the screen, the way every AO coordinate is given.
+    static func point(_ text: String) -> CGPoint? {
+        let parts = text.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count == 2, parts.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { return nil }
+        return CGPoint(x: parts[0], y: parts[1])
+    }
+
+    /// With `at`, the element a touch at that point reaches carries `reached`
+    /// (see Occlusion.reached), for a recorder turning a coordinate into a
+    /// selector.
+    static func read(bundleIDs explicit: [String], hitTest: Bool = false, at: CGPoint? = nil) -> [String: Any] {
         let started = Date()
         var errors: [String] = []
         var targets: [(bundleID: String, pid: Int32)] = []
@@ -308,9 +318,21 @@ enum Hierarchy {
         if hitTest {
             occlusion = Occlusion.judge(snapshots.map(\.snapshot))
         }
+        var reached: ObjectIdentifier?
+        var atSummary: [String: Any]?
+        if let at {
+            let point = CGPoint(x: at.x * screen.width, y: at.y * screen.height)
+            let (found, error) = Occlusion.reached(snapshots.map(\.snapshot), at: point)
+            reached = found.map { ObjectIdentifier($0 as AnyObject) }
+            atSummary = ["x": finite(point.x), "y": finite(point.y), "found": found != nil]
+            if let error { atSummary?["error"] = error }
+        }
         var apps: [[String: Any]] = []
         for (target, snapshot) in snapshots {
-            var entry: [String: Any] = ["bundleId": target.bundleID, "tree": node(snapshot, covers: occlusion?.covers ?? [:])]
+            var entry: [String: Any] = [
+                "bundleId": target.bundleID,
+                "tree": node(snapshot, covers: occlusion?.covers ?? [:], reached: reached),
+            ]
             if target.pid > 0 { entry["pid"] = Int(target.pid) }
             if remoteViewHosts.contains(target.bundleID) { entry["remoteView"] = true }
             apps.append(entry)
@@ -329,6 +351,7 @@ enum Hierarchy {
             if let error = occlusion.error { summary["error"] = error }
             out["hitTest"] = summary
         }
+        if let atSummary { out["at"] = atSummary }
         if !errors.isEmpty { out["errors"] = errors }
         return out
     }
@@ -407,7 +430,8 @@ enum Hierarchy {
         return nil
     }
 
-    static func node(_ snapshot: XCUIElementSnapshot, covers: [ObjectIdentifier: Occlusion.Cover] = [:]) -> [String: Any] {
+    static func node(_ snapshot: XCUIElementSnapshot, covers: [ObjectIdentifier: Occlusion.Cover] = [:],
+                     reached: ObjectIdentifier? = nil) -> [String: Any] {
         let frame = snapshot.frame
         var out: [String: Any] = [
             "type": typeName(snapshot.elementType),
@@ -430,7 +454,8 @@ enum Hierarchy {
             if let point = cover.point { covered["point"] = ["x": finite(point.x), "y": finite(point.y)] }
             out["covered"] = covered
         }
-        let children = snapshot.children.map { node($0, covers: covers) }
+        if let reached, reached == ObjectIdentifier(snapshot as AnyObject) { out["reached"] = true }
+        let children = snapshot.children.map { node($0, covers: covers, reached: reached) }
         if !children.isEmpty { out["children"] = children }
         return out
     }

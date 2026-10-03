@@ -181,24 +181,65 @@ const metacharacters = `(){}[].+*?^$|\`
 var metacharacter = regexp.MustCompile(`[` + regexp.QuoteMeta(metacharacters) + `]`)
 
 // For picks the best selector for el, using snap only to count collisions.
+//
+// The ladder is mobile-ui-scripts' own (README rule 4): an accessibility id
+// that names this one control, then its text, then a point. An id comes first
+// because it is what a developer set for exactly this purpose and does not
+// change with copy or language - and measured on nter it is also the more
+// reliable of the two: 112/112 ids matched Maestro's resource-id, against
+// 320/328 labels matching its text.
 func For(snap simbridge.Snapshot, el simbridge.Element) Choice {
 	c := Choice{Rung: RungNone, OffScreen: el.OffScreen, ScrollDirection: scrollDirectionFor(el.Box)}
 
-	if label := strings.TrimSpace(el.Label); label != "" {
-		matches := matchingPaths(snap, label)
+	id := strings.TrimSpace(el.ID)
+	var byID []simbridge.Element
+	if id != "" {
+		byID = matchingIDs(snap, id)
+		if oneControl(deepest(byID)) {
+			c.Rung, c.ID, c.Ambiguity = RungID, id, 1
+			return c
+		}
+	}
+
+	if text, raw := textOf(el); text != "" {
+		matches := deepest(matchingElements(snap, text))
+		if !oneControl(matches) {
+			// A field whose label repeats (the web form's "Email" over the
+			// box and on it) is often still unique by its placeholder, which
+			// Maestro matches as hintText and which does not move.
+			if hint := strings.TrimSpace(el.Placeholder); hint != "" && hint != text {
+				if byHint := deepest(matchingElements(snap, hint)); oneControl(byHint) {
+					raw, matches = el.Placeholder, byHint
+				}
+			}
+		}
 		c.Ambiguity = len(matches)
-		c.Index = indexOf(matches, el.Path)
-		c.Text, c.Escaped = escape(label)
+		c.Index = indexWithin(matches, el.Path)
+		// The text as the app wrote it, not trimmed: Maestro matches the
+		// WHOLE text, so "Open an account " trimmed to "Open an account"
+		// matches nothing at all. Measured on nter: 6 of 16 selectors that
+		// found nothing in Maestro's tree were whitespace at the ends.
+		c.Text, c.Escaped = escape(raw)
 		switch {
-		case c.Ambiguity <= 1:
-			c.Rung = RungText
+		case oneControl(matches):
+			// Every match is this control - a button and the text inside it
+			// both carry its label. Any of them is the same touch.
+			c.Rung, c.Ambiguity, c.Index = RungText, 1, 0
+		case uniqueIDInside(snap, el) != "":
+			// The label repeats but something inside this control has an id
+			// nothing else has - a tab's icon. Touching it is touching the
+			// control, and an id needs no anchor and no index. (Measured on
+			// nter: the Markets tab repeats a feed row's "Markets", and the
+			// nearest unique label was a price.)
+			c = Choice{Rung: RungID, ID: uniqueIDInside(snap, el), Ambiguity: 1,
+				OffScreen: el.OffScreen, ScrollDirection: c.ScrollDirection}
 		default:
 			// An index is the last resort, not the first: it is the only part
 			// of a selector that means something different in Maestro's tree
 			// than in ours. Try to name the element by where it sits relative
 			// to a label that IS unique, which Maestro resolves entirely in
 			// its own hierarchy.
-			if anchor, rel, ok := anchorFor(snap, el, label); ok {
+			if anchor, rel, ok := anchorFor(snap, el, matches); ok {
 				c.Rung = RungTextAnchor
 				c.Anchor, c.AnchorEscaped = escape(anchor)
 				c.Relation = rel
@@ -209,8 +250,20 @@ func For(snap simbridge.Snapshot, el simbridge.Element) Choice {
 		return c
 	}
 
-	if id := strings.TrimSpace(el.ID); id != "" {
+	if id != "" {
 		c.Rung, c.ID = RungID, id
+		// An id is not unique just because it is an id: an app that names an
+		// icon names it in every row that shows it (nter's
+		// "feature-content-clock", three times on one screen). Maestro takes
+		// the first, so a repeated id is narrowed exactly like a repeated
+		// label - an anchor first, an index when nothing pins it.
+		byID = deepest(byID)
+		c.Ambiguity = len(byID)
+		c.Index = indexWithin(byID, el.Path)
+		if anchor, rel, ok := anchorFor(snap, el, byID); ok {
+			c.Anchor, c.AnchorEscaped = escape(anchor)
+			c.Relation = rel
+		}
 		return c
 	}
 
@@ -281,16 +334,17 @@ func Unescape(text string) (plain string, escaped bool) {
 // would have written it ("the price below THIS heading", not below something
 // across the screen), with the element path as a tie-break so the same screen
 // always yields the same flow.
-func anchorFor(snap simbridge.Snapshot, el simbridge.Element, label string) (string, Relation, bool) {
-	candidates := matchingElements(snap, label)
+func anchorFor(snap simbridge.Snapshot, el simbridge.Element, candidates []simbridge.Element) (string, Relation, bool) {
 	if len(candidates) < 2 {
 		return "", "", false
 	}
 	for _, anchor := range anchorsByDistance(snap, el, textCounts(snap)) {
 		for _, rel := range relations {
 			only, ok := lone(candidates, anchor.Frame, rel)
-			if ok && only.Path == el.Path {
-				return strings.TrimSpace(anchor.Label), rel, true
+			if ok && (only.Path == el.Path || strings.HasPrefix(only.Path, el.Path+".")) {
+				// Untrimmed, for the same reason as Choice.Text: Maestro
+				// matches the anchor's whole text too.
+				return anchor.Label, rel, true
 			}
 		}
 	}
@@ -318,13 +372,41 @@ func lone(candidates []simbridge.Element, anchor simbridge.Rect, rel Relation) (
 // XCUITest can see, so anchoring to a row below the fold names something that
 // is not there at replay. The measurement found 0 of 24 off-screen labels
 // present in Maestro's tree, so this is not a precaution but a rule.
+// uniqueIDInside is the id of an element inside el that no other element
+// carries, or "" when there is none.
+func uniqueIDInside(snap simbridge.Snapshot, el simbridge.Element) string {
+	var found string
+	var walk func(els []simbridge.Element) bool
+	walk = func(els []simbridge.Element) bool {
+		for _, child := range els {
+			if id := strings.TrimSpace(child.ID); id != "" && len(deepest(matchingIDs(snap, id))) == 1 {
+				found = id
+				return true
+			}
+			if walk(child.Children) {
+				return true
+			}
+		}
+		return false
+	}
+	walk(el.Children)
+	return found
+}
+
+// looksLikeData says a label is probably a value rather than a landmark: it
+// holds a digit - a price, a percentage, a date, a count. An anchor on one
+// pins today's screen and fails tomorrow, so such labels are tried last.
+func looksLikeData(label string) bool {
+	return strings.ContainsAny(label, "0123456789๐๑๒๓๔๕๖๗๘๙")
+}
+
 func anchorsByDistance(snap simbridge.Snapshot, el simbridge.Element, counts map[string]int) []simbridge.Element {
 	var out []simbridge.Element
 	var walk func(els []simbridge.Element)
 	walk = func(els []simbridge.Element) {
 		for _, cand := range els {
 			label := strings.TrimSpace(cand.Label)
-			if label != "" && !cand.OffScreen && cand.Path != el.Path && counts[label] == 1 {
+			if label != "" && !cand.OffScreen && cand.Path != el.Path && counts[label] == 1 && !IsScrollIndicator(cand) {
 				out = append(out, cand)
 			}
 			walk(cand.Children)
@@ -332,6 +414,10 @@ func anchorsByDistance(snap simbridge.Snapshot, el simbridge.Element, counts map
 	}
 	walk(snap.Elements)
 	sort.SliceStable(out, func(i, j int) bool {
+		// Landmarks before values, then nearest first.
+		if li, lj := looksLikeData(out[i].Label), looksLikeData(out[j].Label); li != lj {
+			return lj
+		}
 		di, dj := distance(el.Frame, out[i].Frame), distance(el.Frame, out[j].Frame)
 		if di != dj {
 			return di < dj
@@ -345,25 +431,37 @@ func anchorsByDistance(snap simbridge.Snapshot, el simbridge.Element, counts map
 // each string on the screen, in one walk.
 //
 // anchorsByDistance needs this for every element it looks at, and asking
-// matchingPaths per element would make choosing an anchor quadratic inside a
-// function that is itself called once per element. Same matching rule as
-// matchingPaths, so the two cannot drift: a Value that equals another
+// matchingElements per element would make choosing an anchor quadratic inside
+// a function that is itself called once per element. Same matching rule as
+// matchingElements, so the two cannot drift: a Value that equals another
 // element's Label is a real collision.
 func textCounts(snap simbridge.Snapshot) map[string]int {
 	counts := make(map[string]int)
-	var walk func(els []simbridge.Element)
-	walk = func(els []simbridge.Element) {
+	// Counted the way deepest counts a match: an element whose own subtree
+	// carries the same text again is that text's container, not a second
+	// copy of it - a button and its label are one "Buy", not two.
+	var walk func(els []simbridge.Element) map[string]struct{}
+	walk = func(els []simbridge.Element) map[string]struct{} {
+		all := make(map[string]struct{})
 		for _, el := range els {
+			below := walk(el.Children)
+			// A set, so an element whose label and value agree counts once.
 			for text := range map[string]struct{}{
-				strings.TrimSpace(el.Label): {},
-				strings.TrimSpace(el.Value): {},
+				strings.TrimSpace(el.Label): {}, strings.TrimSpace(el.Value): {}, strings.TrimSpace(el.Placeholder): {},
 			} {
-				if text != "" {
+				if text == "" {
+					continue
+				}
+				if _, dup := below[text]; !dup {
 					counts[text]++
 				}
+				all[text] = struct{}{}
 			}
-			walk(el.Children)
+			for text := range below {
+				all[text] = struct{}{}
+			}
 		}
+		return all
 	}
 	walk(snap.Elements)
 	return counts
@@ -378,16 +476,22 @@ func distance(a, b simbridge.Rect) float64 {
 	return dx*dx + dy*dy
 }
 
-// matchingElements is matchingPaths' sibling for the cases that need the
-// element and not just its path. The two share one definition of "Maestro
-// would consider this a match" via matchingPaths - see there for why Value is
-// compared as well as Label.
+// matchingElements lists, in tree order, the elements Maestro's text matcher
+// would consider for this string.
+//
+// Maestro matches the union of `text`, `hintText` and `accessibilityText`,
+// where `text` is title-or-value, `hintText` the placeholder and
+// `accessibilityText` the label. We hold all three, so all are compared: a
+// Value that equals another element's Label is a real collision and
+// pretending otherwise would emit a selector that silently picks the wrong
+// node.
 func matchingElements(snap simbridge.Snapshot, text string) []simbridge.Element {
 	var out []simbridge.Element
 	var walk func(els []simbridge.Element)
 	walk = func(els []simbridge.Element) {
 		for _, el := range els {
-			if strings.TrimSpace(el.Label) == text || strings.TrimSpace(el.Value) == text {
+			if strings.TrimSpace(el.Label) == text || strings.TrimSpace(el.Value) == text ||
+				strings.TrimSpace(el.Placeholder) == text {
 				out = append(out, el)
 			}
 			walk(el.Children)
@@ -397,32 +501,88 @@ func matchingElements(snap simbridge.Snapshot, text string) []simbridge.Element 
 	return out
 }
 
-// matchingPaths lists, in tree order, the elements Maestro's text matcher would
-// consider for this string.
-//
-// Maestro matches the union of `text`, `hintText` and `accessibilityText`,
-// where `text` is title-or-value and `accessibilityText` is the label. We hold
-// Label and Value, so both are compared: a Value that equals another element's
-// Label is a real collision and pretending otherwise would emit a selector that
-// silently picks the wrong node.
-func matchingPaths(snap simbridge.Snapshot, text string) []string {
-	var paths []string
+// textOf is the text Maestro's matcher would find this element by, trimmed
+// for comparing and raw for writing: its label, or - for a field with no
+// label, like a web form's password box - its placeholder, which Maestro
+// matches as hintText. A field's value is not used: it is whatever was typed.
+func textOf(el simbridge.Element) (trimmed, raw string) {
+	if t := strings.TrimSpace(el.Label); t != "" {
+		return t, el.Label
+	}
+	if t := strings.TrimSpace(el.Placeholder); t != "" {
+		return t, el.Placeholder
+	}
+	return "", ""
+}
+
+// oneControl says the (deepest) matches are all one control: there is one,
+// or the others are the same element reported again in the same place. A
+// selector matching any of them touches the same thing, so it is not
+// ambiguous in any way that matters.
+func oneControl(matches []simbridge.Element) bool {
+	for i := 1; i < len(matches); i++ {
+		a, b := matches[0], matches[i]
+		if a.Frame != b.Frame || a.Frame.Width <= 0 || a.Frame.Height <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// matchingIDs lists, in tree order, the elements carrying this accessibility
+// id - the elements Maestro's `id:` matcher would consider.
+func matchingIDs(snap simbridge.Snapshot, id string) []simbridge.Element {
+	var out []simbridge.Element
 	var walk func(els []simbridge.Element)
 	walk = func(els []simbridge.Element) {
 		for _, el := range els {
-			if strings.TrimSpace(el.Label) == text || strings.TrimSpace(el.Value) == text {
-				paths = append(paths, el.Path)
+			if strings.TrimSpace(el.ID) == id {
+				out = append(out, el)
 			}
 			walk(el.Children)
 		}
 	}
 	walk(snap.Elements)
-	return paths
+	return out
 }
 
-func indexOf(paths []string, path string) int {
-	for i, p := range paths {
-		if p == path {
+// IsScrollIndicator reports a scroll view's indicator ("Vertical scroll bar,
+// 2 pages"). XCTest reports one at the edge of every scrolling view, and it is
+// never what anybody meant: a finger there reaches the content under it, and
+// its label changes with the content's length, so as an anchor it names a
+// different thing as soon as a list grows. Measured on nter it was the anchor
+// picked for a sign-in button, and the element 38 coordinate taps resolved to.
+func IsScrollIndicator(el simbridge.Element) bool {
+	return el.Type == "Other" && strings.Contains(el.Label, "scroll bar")
+}
+
+// deepest keeps the matches no other match lies inside, the way Maestro's
+// own Filters.deepestMatchingElement does before it counts an index: a button
+// and the text inside it that share a label are ONE match to Maestro, the
+// text. Counting both put nter's sign-in email field at index 2 of 3 in our
+// tree and out of range in Maestro's, where it is index 1 of 2.
+func deepest(matches []simbridge.Element) []simbridge.Element {
+	out := make([]simbridge.Element, 0, len(matches))
+	for _, m := range matches {
+		holds := false
+		for _, other := range matches {
+			if strings.HasPrefix(other.Path, m.Path+".") {
+				holds = true
+				break
+			}
+		}
+		if !holds {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// indexWithin is where the element at path falls among matches - itself, or,
+// when deepest dropped it for holding a match, the match it holds.
+func indexWithin(matches []simbridge.Element, path string) int {
+	for i, m := range matches {
+		if m.Path == path || strings.HasPrefix(m.Path, path+".") {
 			return i
 		}
 	}

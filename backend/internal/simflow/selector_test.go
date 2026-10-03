@@ -1,6 +1,7 @@
 package simflow_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
@@ -505,5 +506,172 @@ func TestFor_AnchorIsRefusedWhenTheTargetIsMerelyTheLastOfSeveralMatches(t *test
 	}
 	if got.Rung != simflow.RungTextIndex {
 		t.Fatalf("rung = %v, want the honest fallback to an index", got.Rung)
+	}
+}
+
+// Maestro matches an element's whole text. A label the app wrote with a
+// trailing space (nter: "เปิดบัญชี สะดวกกับ ") trimmed to "เปิดบัญชี สะดวกกับ"
+// matched nothing in Maestro's tree, so the selector keeps the label exactly -
+// while uniqueness is still counted on the trimmed text.
+func TestFor_LabelKeepsItsWhitespaceForMaestrosWholeTextMatch(t *testing.T) {
+	el := simbridge.Element{Path: "0.0", Label: "Open an account ", Tap: at(0.5, 0.2)}
+	other := simbridge.Element{Path: "0.1", Label: "Open an account", Tap: at(0.5, 0.6)}
+
+	got := simflow.For(tree(el), el)
+	if got.Rung != simflow.RungText || got.Text != "Open an account " {
+		t.Fatalf("got %+v, want RungText with the label as written", got)
+	}
+	if amb := simflow.For(tree(el, other), el).Ambiguity; amb != 2 {
+		t.Errorf("ambiguity = %d, want 2: the two read the same to a person and collide", amb)
+	}
+	if !strings.Contains(simflow.Render(got, "Open an account "), `- tapOn: "Open an account "`) {
+		t.Errorf("render dropped the trailing space: %q", simflow.Render(got, "Open an account "))
+	}
+}
+
+// A scroll indicator's label is unique on a screen and still useless as an
+// anchor: it changes with the content's length. Measured on nter, "Vertical
+// scroll bar, 2 pages" was picked to pin a sign-in button.
+func TestFor_ScrollIndicatorIsNeverUsedAsAnAnchor(t *testing.T) {
+	first := row("0.0", "Buy", 0, 100)
+	indicator := row("0.1", "Vertical scroll bar, 2 pages", 0, 200)
+	indicator.Type = "Other"
+	heading := row("0.2", "Second Section", 0, 250)
+	second := row("0.3", "Buy", 0, 300)
+
+	got := simflow.For(tree(first, indicator, heading, second), second)
+	if got.Anchor != "Second Section" {
+		t.Fatalf("anchor = %q, want the heading - the nearer scroll indicator is not a landmark", got.Anchor)
+	}
+	if !simflow.IsScrollIndicator(indicator) || simflow.IsScrollIndicator(heading) {
+		t.Error("IsScrollIndicator must name the indicator and only it")
+	}
+}
+
+// An id is not unique because it is an id: nter names the clock icon in every
+// row "feature-content-clock". Maestro takes the first match, so a repeated id
+// is pinned by an anchor, or by an index flagged for review.
+func TestFor_RepeatedIDIsNarrowedLikeARepeatedLabel(t *testing.T) {
+	icon := func(path string, y float64) simbridge.Element {
+		return simbridge.Element{Path: path, ID: "clock", Frame: simbridge.Rect{X: 0, Y: y, Width: 20, Height: 20},
+			Tap: at(10.0/440, (y+10)/956)}
+	}
+	first, second := icon("0.0", 100), icon("0.2", 300)
+	heading := row("0.1", "Second Section", 0, 200)
+
+	got := simflow.For(tree(first, heading, second), second)
+	if got.Rung != simflow.RungID || got.Ambiguity != 2 || got.Anchor != "Second Section" || got.Relation != simflow.RelBelow {
+		t.Fatalf("got %+v, want RungID pinned below the heading", got)
+	}
+	if got.NeedsReview() {
+		t.Error("an anchored id was narrowed, not guessed")
+	}
+	rendered := simflow.Render(got, "")
+	if !strings.Contains(rendered, "    id: \"clock\"\n    below:\n      text: \"Second Section\"\n") {
+		t.Errorf("render = %q, want the id pinned below the heading", rendered)
+	}
+
+	unpinned := simflow.For(tree(first, second), second)
+	if unpinned.Index != 1 || unpinned.Anchor != "" || !unpinned.NeedsReview() {
+		t.Fatalf("got %+v, want index 1 and a review flag", unpinned)
+	}
+	if rendered := simflow.Render(unpinned, ""); !strings.Contains(rendered, "    index: 1\n") || !strings.Contains(rendered, "# REVIEW:") {
+		t.Errorf("render = %q, want the index and the review marker", rendered)
+	}
+
+	if alone := simflow.For(tree(first), first); alone.Ambiguity != 1 || alone.NeedsReview() {
+		t.Errorf("a unique id = %+v, want ambiguity 1 and no review", alone)
+	}
+}
+
+func TestRenderAction_UsesTheVerbItIsGiven(t *testing.T) {
+	got := simflow.RenderAction("longPressOn", simflow.Choice{Rung: simflow.RungText, Text: "Password", Ambiguity: 1}, "Password")
+	if got != "- longPressOn: \"Password\"\n" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// Maestro counts an index over the DEEPEST matches (Filters.
+// deepestMatchingElement): a label wrapper and the text inside it are one
+// match. nter's sign-in email field was index 2 of 3 in our tree and out of
+// range in Maestro's - the recorded flow failed there, twice.
+func TestFor_IndexIsCountedOverTheDeepestMatchesLikeMaestro(t *testing.T) {
+	wrapper := simbridge.Element{Path: "0.0", Label: "Email", Frame: simbridge.Rect{X: 74, Y: 415, Width: 34, Height: 26},
+		Children: []simbridge.Element{{Path: "0.0.0", Label: "Email", Frame: simbridge.Rect{X: 74, Y: 415, Width: 34, Height: 26}}}}
+	field := simbridge.Element{Path: "0.1", Type: "TextField", Label: "Email", Frame: simbridge.Rect{X: 74, Y: 443, Width: 254, Height: 54},
+		Tap: at(0.5, 0.55)}
+	snap := tree(wrapper, field)
+
+	got := simflow.For(snap, field)
+	if got.Ambiguity != 2 || got.Index != 1 {
+		t.Fatalf("got %+v, want ambiguity 2 and index 1 - the wrapper holds its text and counts as one", got)
+	}
+	// The wrapper itself is the match it holds.
+	if w := simflow.For(snap, wrapper); w.Index != 0 {
+		t.Errorf("wrapper index = %d, want 0 (the text inside it)", w.Index)
+	}
+}
+
+// A field whose label repeats is still unique by its placeholder, which
+// Maestro matches as hintText - better than any index.
+func TestFor_ARepeatedFieldLabelFallsBackToAUniquePlaceholder(t *testing.T) {
+	caption := row("0.0", "Email", 0, 100)
+	field := row("0.1", "Email", 0, 130)
+	field.Type, field.Placeholder = "TextField", "example@email.com"
+
+	got := simflow.For(tree(caption, field), field)
+	if got.Rung != simflow.RungText || got.Text != `example@email\.com` || !got.Escaped || got.NeedsReview() {
+		t.Fatalf("got %+v, want the unique placeholder", got)
+	}
+}
+
+// A button and the text inside it carry one label and are one control: no
+// index, no review.
+func TestFor_AButtonAndItsOwnTextAreOneMatch(t *testing.T) {
+	button := simbridge.Element{Path: "0.0", Type: "Button", Label: "Sign in", Frame: simbridge.Rect{X: 0, Y: 0, Width: 100, Height: 40},
+		Tap: at(0.1, 0.02), Children: []simbridge.Element{{Path: "0.0.0", Type: "StaticText", Label: "Sign in",
+			Frame: simbridge.Rect{X: 10, Y: 10, Width: 60, Height: 20}}}}
+	got := simflow.For(tree(button), button)
+	if got.Rung != simflow.RungText || got.Ambiguity != 1 || got.NeedsReview() {
+		t.Fatalf("got %+v, want a plain unique text selector", got)
+	}
+}
+
+// mobile-ui-scripts rule 4: an id that names one control beats its label.
+func TestFor_AUniqueIDBeatsTheLabel(t *testing.T) {
+	el := simbridge.Element{Path: "0.0", Label: "Search", ID: "search-field", Tap: at(0.5, 0.1)}
+	if got := simflow.For(tree(el), el); got.Rung != simflow.RungID || got.ID != "search-field" {
+		t.Fatalf("got %+v, want the id", got)
+	}
+}
+
+// A tab whose label repeats elsewhere is named by the icon inside it when
+// that icon's id is unique: no anchor (the nearest unique label on nter was a
+// price) and no index.
+func TestFor_ARepeatedLabelIsNamedByAUniqueIDInsideIt(t *testing.T) {
+	feed := row("0.0", "Markets", 0, 100)
+	tab := row("0.1", "Markets", 200, 800)
+	tab.Type = "Button"
+	tab.Children = []simbridge.Element{{Path: "0.1.0", Type: "Image", ID: "icon-tabBar-graph",
+		Frame: simbridge.Rect{X: 230, Y: 802, Width: 20, Height: 10}}}
+	price := row("0.2", "6.24%", 100, 790)
+
+	got := simflow.For(tree(feed, tab, price), tab)
+	if got.Rung != simflow.RungID || got.ID != "icon-tabBar-graph" || got.NeedsReview() {
+		t.Fatalf("got %+v, want the tab named by its icon's id", got)
+	}
+}
+
+// A label holding a digit is a value - a price, a date - and pins only today's
+// screen: a landmark is preferred even when the value sits nearer.
+func TestFor_AnAnchorPrefersALandmarkOverANearerValue(t *testing.T) {
+	first := row("0.0", "Buy", 0, 100)
+	heading := row("0.1", "Second Section", 0, 150)
+	price := row("0.2", "6.24%", 0, 280)
+	second := row("0.3", "Buy", 0, 300)
+
+	got := simflow.For(tree(first, heading, price, second), second)
+	if got.Anchor != "Second Section" {
+		t.Fatalf("anchor = %q, want the heading over the nearer price", got.Anchor)
 	}
 }

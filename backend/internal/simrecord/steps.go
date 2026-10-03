@@ -74,6 +74,9 @@ func toFlowStep(step domain.SimRecordingStep) simflow.Step {
 		choice.Relation = simflow.Relation(step.SelectorAnchorRel)
 	case simflow.RungID:
 		choice.ID = step.Selector
+		choice.Anchor = step.SelectorAnchor
+		_, choice.AnchorEscaped = simflow.Unescape(step.SelectorAnchor)
+		choice.Relation = simflow.Relation(step.SelectorAnchorRel)
 	case simflow.RungPoint:
 		choice.PercentX = percent(step.X)
 		choice.PercentY = percent(step.Y)
@@ -85,16 +88,35 @@ func toFlowStep(step domain.SimRecordingStep) simflow.Step {
 		// known", which is exactly this case.
 		choice.ScrollDirection = simflow.ScrollDown
 	}
+	kind := flowStepKind(step.Kind)
+	if kind == simflow.StepSwipe && heldStill(step) {
+		kind = simflow.StepLongPress
+	}
 	return simflow.Step{
 		Seq:          step.Seq,
-		Kind:         flowStepKind(step.Kind),
+		Kind:         kind,
 		Choice:       choice,
 		Plain:        plain,
 		ScreenChange: step.ScreenChange,
 		X:            step.X, Y: step.Y, ToX: step.ToX, ToY: step.ToY,
 		Text:   step.Text,
+		Secure: step.Secure,
 		Detail: step.Detail,
 	}
+}
+
+// longPressMinimum is how long a finger has to stay put to be a long press
+// rather than a tap that happened to be sent as a drag. iOS raises a text
+// field's callout after about half a second.
+const longPressMinimum = 400
+
+// heldStill says a drag or swipe never moved: a long press, which is how a
+// text field's Paste menu is raised (`ao sim drag x y x y --duration 1s`).
+// Replayed as a zero-length swipe it raises nothing.
+func heldStill(step domain.SimRecordingStep) bool {
+	const still = 0.01 // a normalized coordinate: about 4 points on a phone
+	return step.DurationMS >= longPressMinimum &&
+		math.Abs(step.ToX-step.X) <= still && math.Abs(step.ToY-step.Y) <= still
 }
 
 // flowStepKind maps a recorded step's Kind onto simflow's coarser

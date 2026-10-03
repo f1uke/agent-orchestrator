@@ -40,3 +40,40 @@ func TestSteps_ADragStillEmitsAsASwipe(t *testing.T) {
 		}
 	}
 }
+
+// A drag that never moved is a long press: the gesture that raises a text
+// field's Paste menu. Replayed as a zero-length swipe it raises nothing. A
+// quick one, or one that moved, is still a swipe.
+func TestSteps_AFingerHeldStillIsALongPress(t *testing.T) {
+	still := domain.SimRecordingStep{Seq: 1, Kind: "drag", X: 0.5, Y: 0.52, ToX: 0.5, ToY: 0.52, DurationMS: 1000,
+		Selector: "Email", SelectorRung: int64(simflow.RungText), Ambiguity: 1}
+	got := Steps([]domain.SimRecordingStep{still})
+	if got[0].Kind != simflow.StepLongPress || got[0].Choice.Text != "Email" {
+		t.Fatalf("got %+v, want a long press on Email", got[0])
+	}
+	quick := still
+	quick.DurationMS = 100
+	moved := still
+	moved.ToY = 0.8
+	for _, step := range []domain.SimRecordingStep{quick, moved} {
+		if got := Steps([]domain.SimRecordingStep{step}); got[0].Kind != simflow.StepSwipe {
+			t.Errorf("%+v mapped to %q, want swipe", step, got[0].Kind)
+		}
+	}
+}
+
+// A secure step carries the flag and the field through, and a repeated id
+// keeps the anchor that pins it.
+func TestSteps_SecureAndAnchoredIDSurvive(t *testing.T) {
+	got := Steps([]domain.SimRecordingStep{
+		{Seq: 1, Kind: "type", Secure: true, Selector: "Password", SelectorRung: int64(simflow.RungText), Ambiguity: 1},
+		{Seq: 2, Kind: "tap", Selector: "clock", SelectorRung: int64(simflow.RungID), Ambiguity: 3, SelectorIndex: 1,
+			SelectorAnchor: "Second", SelectorAnchorRel: "below"},
+	})
+	if !got[0].Secure || got[0].Choice.Text != "Password" {
+		t.Errorf("secure step = %+v", got[0])
+	}
+	if c := got[1].Choice; c.ID != "clock" || c.Anchor != "Second" || c.Relation != simflow.RelBelow || c.Index != 1 {
+		t.Errorf("id step choice = %+v, want the id pinned below Second", c)
+	}
+}

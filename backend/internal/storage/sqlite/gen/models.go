@@ -319,6 +319,7 @@ type SimRecordingStep struct {
 	SelectorIndex     int64
 	SelectorAnchor    string
 	SelectorAnchorRel string
+	Secure            int64
 }
 
 type SmokeCheck struct {
