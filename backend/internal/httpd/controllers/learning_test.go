@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learnsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learncollect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/learning"
 )
@@ -22,6 +25,39 @@ type fakeLearning struct {
 	refErr     error
 	gotLimit   int
 	forgetErr  error
+
+	collectErr     error
+	gotCollect     string
+	gotBudget      float64
+	settings       learnsettings.Settings
+	setSettingsErr error
+}
+
+func (f *fakeLearning) CollectStatus(context.Context) (learning.CollectStatus, error) {
+	return learning.CollectStatus{Enabled: true, TodaySpendUSD: 0.42, DailyBudgetUSD: 2, Model: "claude-sonnet-5-5", Effort: "low",
+		Run: learncollect.Progress{Running: true, Manual: true, Jobs: 3, Drafts: 2, CostUSD: 0.4, BudgetUSD: 5}}, nil
+}
+
+func (f *fakeLearning) StartCollect(_ context.Context, project string, budget float64) error {
+	f.gotCollect, f.gotBudget = project, budget
+	return f.collectErr
+}
+
+func (f *fakeLearning) Drafts(_ context.Context, projectID domain.ProjectID, limit int) ([]domain.LearnDraft, error) {
+	if projectID == "missing" {
+		return nil, learning.ErrUnknownProject
+	}
+	return []domain.LearnDraft{{ID: 9, ProjectID: projectID, Kind: domain.LearnDraftRule, Statement: "Use scripts.", Quote: "ใช้ script", Weak: true, Status: domain.LearnDraftOpen}}, nil
+}
+
+func (f *fakeLearning) Settings() (learnsettings.Settings, error) { return f.settings, nil }
+
+func (f *fakeLearning) SetSettings(s learnsettings.Settings) error {
+	if f.setSettingsErr != nil {
+		return f.setSettingsErr
+	}
+	f.settings = s
+	return nil
 }
 
 func (f *fakeLearning) RecordTranscriptRef(_ context.Context, id domain.SessionID, ref domain.HookTranscriptRef) error {
@@ -126,5 +162,64 @@ func TestForgetLearning(t *testing.T) {
 	}
 	if w := serveLearning(t, &fakeLearning{forgetErr: learning.ErrStillLearning}, http.MethodDelete, "/learning/projects/p", ""); w.Code != http.StatusConflict {
 		t.Errorf("still learning -> %d, want 409", w.Code)
+	}
+}
+
+func TestLearningStatus_CarriesTheCollectStage(t *testing.T) {
+	w := serveLearning(t, &fakeLearning{}, http.MethodGet, "/learning/status", "")
+	var got LearningStatusResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	c := got.Collect
+	if !c.Enabled || c.TodaySpendUSD != 0.42 || c.Model != "claude-sonnet-5-5" || !c.Run.Running || c.Run.Jobs != 3 {
+		t.Errorf("collect = %+v", c)
+	}
+}
+
+func TestStartLearningCollect(t *testing.T) {
+	f := &fakeLearning{}
+	w := serveLearning(t, f, http.MethodPost, "/learning/collect", `{"project":"p","budgetUsd":5}`)
+	if w.Code != http.StatusAccepted || f.gotCollect != "p" || f.gotBudget != 5 {
+		t.Fatalf("code=%d project=%q budget=%v", w.Code, f.gotCollect, f.gotBudget)
+	}
+	for err, code := range map[error]int{
+		learncollect.ErrBusy:       http.StatusConflict,
+		learning.ErrNotLearning:    http.StatusConflict,
+		learning.ErrUnknownProject: http.StatusNotFound,
+	} {
+		if w := serveLearning(t, &fakeLearning{collectErr: err}, http.MethodPost, "/learning/collect", `{"budgetUsd":1}`); w.Code != code {
+			t.Errorf("%v -> %d, want %d", err, w.Code, code)
+		}
+	}
+}
+
+func TestListLearningDrafts(t *testing.T) {
+	w := serveLearning(t, &fakeLearning{}, http.MethodGet, "/learning/drafts?project=p", "")
+	var got ListLearningDraftsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("code=%d err=%v", w.Code, err)
+	}
+	if len(got.Drafts) != 1 || got.Drafts[0].Statement != "Use scripts." || !got.Drafts[0].Weak || got.Drafts[0].Kind != "rule" {
+		t.Errorf("drafts = %+v", got.Drafts)
+	}
+	if w := serveLearning(t, &fakeLearning{}, http.MethodGet, "/learning/drafts?project=missing", ""); w.Code != http.StatusNotFound {
+		t.Errorf("missing project -> %d", w.Code)
+	}
+}
+
+func TestLearningSettings_RoundTrip(t *testing.T) {
+	f := &fakeLearning{settings: learnsettings.Default()}
+	w := serveLearning(t, f, http.MethodPut, "/learning/settings", `{"collectModel":"claude-sonnet-5-5","collectEffort":"medium","dailyBudgetUsd":3}`)
+	if w.Code != http.StatusOK || f.settings.CollectEffort != "medium" || f.settings.DailyBudgetUSD != 3 {
+		t.Fatalf("code=%d settings=%+v", w.Code, f.settings)
+	}
+	w = serveLearning(t, f, http.MethodGet, "/learning/settings", "")
+	if !strings.Contains(w.Body.String(), `"dailyBudgetUsd":3`) {
+		t.Errorf("get = %s", w.Body)
+	}
+	bad := &fakeLearning{setSettingsErr: errors.New("learnsettings: collectEffort must be low")}
+	if w := serveLearning(t, bad, http.MethodPut, "/learning/settings", `{"collectEffort":"turbo"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("bad settings -> %d", w.Code)
 	}
 }

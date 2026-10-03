@@ -168,3 +168,123 @@ type LearnCounts struct {
 	Prompts          int
 	UnmatchedPrompts int
 }
+
+// LearnDraftKind is what a candidate lesson is.
+type LearnDraftKind string
+
+const (
+	// LearnDraftCorrection is the human correcting a habit of the agent's.
+	LearnDraftCorrection LearnDraftKind = "correction"
+	// LearnDraftRule is a rule the human stated.
+	LearnDraftRule LearnDraftKind = "rule"
+	// LearnDraftProcedure is a reusable sequence of steps.
+	LearnDraftProcedure LearnDraftKind = "procedure"
+	// LearnDraftFact is a non-obvious fact about the environment.
+	LearnDraftFact LearnDraftKind = "fact"
+	// LearnDraftPreference is how the human wants something done.
+	LearnDraftPreference LearnDraftKind = "preference"
+)
+
+// Valid reports whether k is one of the kinds a draft may have.
+func (k LearnDraftKind) Valid() bool {
+	switch k {
+	case LearnDraftCorrection, LearnDraftRule, LearnDraftProcedure, LearnDraftFact, LearnDraftPreference:
+		return true
+	}
+	return false
+}
+
+// LearnDraftStatus is where a draft is in its life.
+type LearnDraftStatus string
+
+const (
+	// LearnDraftOpen is a draft waiting for the decide stage.
+	LearnDraftOpen LearnDraftStatus = "open"
+	// LearnDraftReversed is a draft a later turn of the same session took back.
+	LearnDraftReversed LearnDraftStatus = "reversed"
+	// LearnDraftConsumed is a draft the decide stage has used.
+	LearnDraftConsumed LearnDraftStatus = "consumed"
+	// LearnDraftDropped is a draft the decide stage judged not worth proposing.
+	LearnDraftDropped LearnDraftStatus = "dropped"
+)
+
+// LearnDraft is one candidate lesson a model extracted from captured turns,
+// grounded in the human's own words.
+type LearnDraft struct {
+	ID        int64
+	ProjectID ProjectID
+	SessionID SessionID
+	// TaskKey groups the drafts of one task for the decide stage: a crew's
+	// members share one, an orchestrator gets one per day.
+	TaskKey     string
+	JobID       int64
+	Kind        LearnDraftKind
+	Statement   string
+	AppliesWhen string
+	// ScopeHint is the model's guess at how far the lesson reaches: global,
+	// project or repo. Code clamps it when a proposal is made.
+	ScopeHint  string
+	Confidence float64
+	// Quote is the human's own words, a checked substring of the anchor turn.
+	Quote           string
+	AnchorExcerptID int64
+	// EvidenceExcerptIDs are every captured turn the draft rests on.
+	EvidenceExcerptIDs []int64
+	AgentBefore        string
+	// Weak marks a draft resting only on a suggestion the human accepted.
+	Weak         bool
+	SupersedesID int64
+	Status       LearnDraftStatus
+	CreatedAt    time.Time
+	// AnchorSourceClass and AnchorTurnAt describe the anchor turn, for display.
+	AnchorSourceClass LearnSourceClass
+	AnchorTurnAt      time.Time
+}
+
+// LearnJobState is the state of one model run.
+type LearnJobState string
+
+// The states of a model run: in flight, finished with its drafts stored,
+// failed (its turns stay uncollected), or left in flight by a daemon that went
+// away (its turns run again).
+const (
+	LearnJobRunning   LearnJobState = "running"
+	LearnJobDone      LearnJobState = "done"
+	LearnJobFailed    LearnJobState = "failed"
+	LearnJobAbandoned LearnJobState = "abandoned"
+)
+
+// LearnJob is one model run over one batch of a session's captured turns.
+type LearnJob struct {
+	ID           int64
+	ProjectID    ProjectID
+	SessionID    SessionID
+	State        LearnJobState
+	Model        string
+	Turns        int
+	Drafts       int
+	Rejected     int
+	CostUSD      float64
+	InputTokens  int64
+	OutputTokens int64
+	DurationMS   int64
+	Error        string
+	StderrTail   string
+	StartedAt    time.Time
+	FinishedAt   time.Time
+}
+
+// LearnCollectCandidate is one session with captured turns no model has seen.
+type LearnCollectCandidate struct {
+	SessionID SessionID
+	Turns     int
+	OldestAt  time.Time
+	NewestAt  time.Time
+}
+
+// LearnCollectCounts is what collect has done for one project: turns no model
+// has seen yet, and drafts by status.
+type LearnCollectCounts struct {
+	Uncollected int
+	Drafts      map[LearnDraftStatus]int
+}

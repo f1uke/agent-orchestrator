@@ -12,6 +12,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learnsettings"
+	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learncollect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/learning"
 )
@@ -22,6 +24,11 @@ type LearningService interface {
 	Status(ctx context.Context) ([]learning.ProjectStatus, error)
 	Excerpts(ctx context.Context, projectID domain.ProjectID, limit int) ([]domain.LearnExcerpt, error)
 	Forget(ctx context.Context, projectID domain.ProjectID) (int, error)
+	CollectStatus(ctx context.Context) (learning.CollectStatus, error)
+	StartCollect(ctx context.Context, project string, budgetUSD float64) error
+	Drafts(ctx context.Context, projectID domain.ProjectID, limit int) ([]domain.LearnDraft, error)
+	Settings() (learnsettings.Settings, error)
+	SetSettings(learnsettings.Settings) error
 }
 
 // LearningController owns learning capture's routes: the transcript bookkeeping
@@ -99,6 +106,11 @@ type LearningProjectStatusDTO struct {
 	LastCaptureAt     *time.Time               `json:"lastCaptureAt,omitempty"`
 	FailingFiles      []LearningFailingFileDTO `json:"failingFiles"`
 	AtRiskTranscripts int                      `json:"atRiskTranscripts" description:"Transcripts with unread turns whose last write is 25 days old or more; Claude Code deletes them at 30."`
+	Uncollected       int                      `json:"uncollected" description:"Captured turns no model has read yet."`
+	Drafts            map[string]int           `json:"drafts" description:"Candidate lessons by status: open, reversed, consumed, dropped."`
+	LastCollectAt     *time.Time               `json:"lastCollectAt,omitempty"`
+	LastCollectError  string                   `json:"lastCollectError,omitempty" description:"The error of the last model run, when it failed."`
+	LastCollectStderr string                   `json:"lastCollectStderr,omitempty" description:"The end of what the CLI wrote to stderr on that failure."`
 }
 
 // ForgetLearningResponse is the body of DELETE /api/v1/learning/projects/{id}.
@@ -109,6 +121,84 @@ type ForgetLearningResponse struct {
 // LearningStatusResponse is the body of GET /api/v1/learning/status.
 type LearningStatusResponse struct {
 	Projects []LearningProjectStatusDTO `json:"projects"`
+	Collect  LearningCollectStatusDTO   `json:"collect"`
+}
+
+// LearningCollectRunDTO is the current or last collect run.
+type LearningCollectRunDTO struct {
+	Running    bool       `json:"running"`
+	Manual     bool       `json:"manual"`
+	Project    string     `json:"project,omitempty"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	Jobs       int        `json:"jobs"`
+	Failed     int        `json:"failed"`
+	Drafts     int        `json:"drafts"`
+	CostUSD    float64    `json:"costUsd"`
+	BudgetUSD  float64    `json:"budgetUsd"`
+	StopReason string     `json:"stopReason,omitempty"`
+	LastError  string     `json:"lastError,omitempty"`
+}
+
+// LearningCollectStatusDTO is the collect stage across projects.
+type LearningCollectStatusDTO struct {
+	Enabled        bool                  `json:"enabled"`
+	TodaySpendUSD  float64               `json:"todaySpendUsd" description:"What today's model runs cost, at API prices as the CLI reports them."`
+	DailyBudgetUSD float64               `json:"dailyBudgetUsd"`
+	Model          string                `json:"model"`
+	Effort         string                `json:"effort"`
+	Run            LearningCollectRunDTO `json:"run"`
+}
+
+// StartLearningCollectRequest is the body of POST /api/v1/learning/collect.
+type StartLearningCollectRequest struct {
+	Project   string  `json:"project,omitempty" description:"Project to collect; empty collects every project that learns from sessions."`
+	BudgetUSD float64 `json:"budgetUsd" description:"Most this run may spend, at API prices. At most 50."`
+}
+
+// StartLearningCollectResponse is the body of POST /api/v1/learning/collect.
+type StartLearningCollectResponse struct {
+	Started bool `json:"started"`
+}
+
+// LearningDraftsQuery is the query of GET /api/v1/learning/drafts.
+type LearningDraftsQuery struct {
+	Project string `query:"project" description:"Project id."`
+	Limit   int    `query:"limit,omitempty" description:"Most drafts to return, newest first. Default 50, at most 500."`
+}
+
+// LearningDraftDTO is one candidate lesson.
+type LearningDraftDTO struct {
+	ID                int64      `json:"id"`
+	ProjectID         string     `json:"projectId"`
+	SessionID         string     `json:"sessionId"`
+	TaskKey           string     `json:"taskKey"`
+	Kind              string     `json:"kind" enum:"correction,rule,procedure,fact,preference"`
+	Statement         string     `json:"statement"`
+	AppliesWhen       string     `json:"appliesWhen,omitempty"`
+	ScopeHint         string     `json:"scopeHint,omitempty"`
+	Confidence        float64    `json:"confidence"`
+	Quote             string     `json:"quote" description:"The human's own words the draft rests on, a checked substring of the anchor turn."`
+	AnchorExcerptID   int64      `json:"anchorExcerptId"`
+	AnchorSourceClass string     `json:"anchorSourceClass,omitempty"`
+	AnchorTurnAt      *time.Time `json:"anchorTurnAt,omitempty"`
+	AgentBefore       string     `json:"agentBefore,omitempty"`
+	Weak              bool       `json:"weak" description:"Rests only on a suggestion the human accepted."`
+	SupersedesID      int64      `json:"supersedesId,omitempty"`
+	Status            string     `json:"status" enum:"open,reversed,consumed,dropped"`
+	CreatedAt         time.Time  `json:"createdAt"`
+}
+
+// ListLearningDraftsResponse is the body of GET /api/v1/learning/drafts.
+type ListLearningDraftsResponse struct {
+	Drafts []LearningDraftDTO `json:"drafts"`
+}
+
+// LearningSettingsDTO is learning's model knobs.
+type LearningSettingsDTO struct {
+	CollectModel   string  `json:"collectModel"`
+	CollectEffort  string  `json:"collectEffort" enum:"low,medium,high,xhigh,max"`
+	DailyBudgetUSD float64 `json:"dailyBudgetUsd" description:"The background collect stops for the rest of the local day at this spend; 0 pauses it."`
 }
 
 // Register mounts the learning routes.
@@ -117,6 +207,122 @@ func (c *LearningController) Register(r chi.Router) {
 	r.Get("/learning/status", c.status)
 	r.Get("/learning/excerpts", c.excerpts)
 	r.Delete("/learning/projects/{id}", c.forget)
+	r.Post("/learning/collect", c.startCollect)
+	r.Get("/learning/drafts", c.drafts)
+	r.Get("/learning/settings", c.getSettings)
+	r.Put("/learning/settings", c.putSettings)
+}
+
+func (c *LearningController) startCollect(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/learning/collect")
+		return
+	}
+	var in StartLearningCollectRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	err := c.Svc.StartCollect(r.Context(), in.Project, in.BudgetUSD)
+	switch {
+	case err == nil:
+		envelope.WriteJSON(w, http.StatusAccepted, StartLearningCollectResponse{Started: true})
+	case errors.Is(err, learning.ErrUnknownProject):
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "PROJECT_NOT_FOUND", "Unknown project", nil)
+	case errors.Is(err, learning.ErrNotLearning):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "NOT_LEARNING", "The project does not learn from sessions", nil)
+	case errors.Is(err, learncollect.ErrBusy):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "COLLECT_BUSY", "A collect run is already in progress", nil)
+	case errors.Is(err, learning.ErrCollectUnavailable):
+		apispec.NotImplemented(w, r, "POST", "/api/v1/learning/collect")
+	default:
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_COLLECT", err.Error(), nil)
+	}
+}
+
+func (c *LearningController) drafts(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/learning/drafts")
+		return
+	}
+	project := r.URL.Query().Get("project")
+	if project == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PROJECT_REQUIRED", "project is required", nil)
+		return
+	}
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_LIMIT", "limit must be a non-negative integer", nil)
+			return
+		}
+		limit = n
+	}
+	rows, err := c.Svc.Drafts(r.Context(), domain.ProjectID(project), limit)
+	if errors.Is(err, learning.ErrUnknownProject) {
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "PROJECT_NOT_FOUND", "Unknown project", nil)
+		return
+	}
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	out := ListLearningDraftsResponse{Drafts: make([]LearningDraftDTO, 0, len(rows))}
+	for _, d := range rows {
+		dto := LearningDraftDTO{
+			ID: d.ID, ProjectID: string(d.ProjectID), SessionID: string(d.SessionID), TaskKey: d.TaskKey,
+			Kind: string(d.Kind), Statement: d.Statement, AppliesWhen: d.AppliesWhen, ScopeHint: d.ScopeHint,
+			Confidence: d.Confidence, Quote: d.Quote, AnchorExcerptID: d.AnchorExcerptID,
+			AnchorSourceClass: string(d.AnchorSourceClass), AgentBefore: d.AgentBefore, Weak: d.Weak,
+			SupersedesID: d.SupersedesID, Status: string(d.Status), CreatedAt: d.CreatedAt,
+		}
+		if !d.AnchorTurnAt.IsZero() {
+			t := d.AnchorTurnAt
+			dto.AnchorTurnAt = &t
+		}
+		out.Drafts = append(out.Drafts, dto)
+	}
+	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+func (c *LearningController) getSettings(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/learning/settings")
+		return
+	}
+	s, err := c.Svc.Settings()
+	if errors.Is(err, learning.ErrCollectUnavailable) {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/learning/settings")
+		return
+	}
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, LearningSettingsDTO{CollectModel: s.CollectModel, CollectEffort: s.CollectEffort, DailyBudgetUSD: s.DailyBudgetUSD})
+}
+
+func (c *LearningController) putSettings(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/learning/settings")
+		return
+	}
+	var in LearningSettingsDTO
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	next := learnsettings.Settings{CollectModel: in.CollectModel, CollectEffort: in.CollectEffort, DailyBudgetUSD: in.DailyBudgetUSD}
+	err := c.Svc.SetSettings(next)
+	switch {
+	case errors.Is(err, learning.ErrCollectUnavailable):
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/learning/settings")
+	case err != nil:
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+	default:
+		envelope.WriteJSON(w, http.StatusOK, in)
+	}
 }
 
 func (c *LearningController) forget(w http.ResponseWriter, r *http.Request) {
@@ -200,7 +406,41 @@ func (c *LearningController) status(w http.ResponseWriter, r *http.Request) {
 		for _, f := range p.FailingFiles {
 			dto.FailingFiles = append(dto.FailingFiles, LearningFailingFileDTO{Path: f.Path, Error: f.Error})
 		}
+		dto.Uncollected = p.Uncollected
+		dto.Drafts = map[string]int{}
+		for k, v := range p.Drafts {
+			dto.Drafts[string(k)] = v
+		}
+		if !p.LastCollectAt.IsZero() {
+			t := p.LastCollectAt
+			dto.LastCollectAt = &t
+		}
+		if p.LastCollectFail != nil {
+			dto.LastCollectError, dto.LastCollectStderr = p.LastCollectFail.Error, p.LastCollectFail.StderrTail
+		}
 		out.Projects = append(out.Projects, dto)
+	}
+	cs, err := c.Svc.CollectStatus(r.Context())
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	out.Collect = LearningCollectStatusDTO{
+		Enabled: cs.Enabled, TodaySpendUSD: cs.TodaySpendUSD, DailyBudgetUSD: cs.DailyBudgetUSD,
+		Model: cs.Model, Effort: cs.Effort,
+		Run: LearningCollectRunDTO{
+			Running: cs.Run.Running, Manual: cs.Run.Manual, Project: cs.Run.Project, Jobs: cs.Run.Jobs,
+			Failed: cs.Run.Failed, Drafts: cs.Run.Drafts, CostUSD: cs.Run.CostUSD, BudgetUSD: cs.Run.BudgetUSD,
+			StopReason: cs.Run.StopReason, LastError: cs.Run.LastError,
+		},
+	}
+	if !cs.Run.StartedAt.IsZero() {
+		t := cs.Run.StartedAt
+		out.Collect.Run.StartedAt = &t
+	}
+	if !cs.Run.FinishedAt.IsZero() {
+		t := cs.Run.FinishedAt
+		out.Collect.Run.FinishedAt = &t
 	}
 	envelope.WriteJSON(w, http.StatusOK, out)
 }

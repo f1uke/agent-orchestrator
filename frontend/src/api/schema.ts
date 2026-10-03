@@ -226,6 +226,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/learning/collect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a collect run over every uncollected captured turn, under its own budget */
+        post: operations["startLearningCollect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a project's candidate lessons, newest first */
+        get: operations["listLearningDrafts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/learning/excerpts": {
         parameters: {
             query?: never;
@@ -255,6 +289,24 @@ export interface paths {
         post?: never;
         /** Delete everything learning capture kept for a project that no longer learns from sessions */
         delete: operations["forgetProjectLearning"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read learning's model and budget settings */
+        get: operations["getLearningSettings"];
+        /** Set learning's model and budget settings */
+        put: operations["setLearningSettings"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2451,6 +2503,67 @@ export interface components {
             /** @description Destroy the uncommitted work in the session's worktree (captured to refs/ao/preserved/<session-id> first). Without it, a session holding undelivered work refuses the kill with 409 SESSION_HAS_UNDELIVERED_WORK. */
             discardUncommitted?: boolean;
         };
+        ControllersLearningCollectRunDTO: {
+            /** Format: double */
+            budgetUsd: number;
+            /** Format: double */
+            costUsd: number;
+            drafts: number;
+            failed: number;
+            /** Format: date-time */
+            finishedAt?: null | string;
+            jobs: number;
+            lastError?: string;
+            manual: boolean;
+            project?: string;
+            running: boolean;
+            /** Format: date-time */
+            startedAt?: null | string;
+            stopReason?: string;
+        };
+        ControllersLearningCollectStatusDTO: {
+            /** Format: double */
+            dailyBudgetUsd: number;
+            effort: string;
+            enabled: boolean;
+            model: string;
+            run: components["schemas"]["ControllersLearningCollectRunDTO"];
+            /**
+             * Format: double
+             * @description What today's model runs cost, at API prices as the CLI reports them.
+             */
+            todaySpendUsd: number;
+        };
+        ControllersLearningDraftDTO: {
+            agentBefore?: string;
+            /** Format: int64 */
+            anchorExcerptId: number;
+            anchorSourceClass?: string;
+            /** Format: date-time */
+            anchorTurnAt?: null | string;
+            appliesWhen?: string;
+            /** Format: double */
+            confidence: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            kind: "correction" | "rule" | "procedure" | "fact" | "preference";
+            projectId: string;
+            /** @description The human's own words the draft rests on, a checked substring of the anchor turn. */
+            quote: string;
+            scopeHint?: string;
+            sessionId: string;
+            statement: string;
+            /** @enum {string} */
+            status: "open" | "reversed" | "consumed" | "dropped";
+            /** Format: int64 */
+            supersedesId?: number;
+            taskKey: string;
+            /** @description Rests only on a suggestion the human accepted. */
+            weak: boolean;
+        };
         ControllersLearningExcerptDTO: {
             after: components["schemas"]["ControllersLearningWindowDTO"];
             before: components["schemas"]["ControllersLearningWindowDTO"];
@@ -2480,6 +2593,10 @@ export interface components {
             bySourceClass: {
                 [key: string]: number;
             } | null;
+            /** @description Candidate lessons by status: open, reversed, consumed, dropped. */
+            drafts: {
+                [key: string]: number;
+            } | null;
             /** @description Whether the project learns from sessions now. A project that was switched off is listed while it still holds captured turns. */
             enabled: boolean;
             /** @description Human turns stored. */
@@ -2489,6 +2606,12 @@ export interface components {
             humanTurns: number;
             /** Format: date-time */
             lastCaptureAt?: null | string;
+            /** Format: date-time */
+            lastCollectAt?: null | string;
+            /** @description The error of the last model run, when it failed. */
+            lastCollectError?: string;
+            /** @description The end of what the CLI wrote to stderr on that failure. */
+            lastCollectStderr?: string;
             /** @description Turns read that were not the human's: AO notices, other sessions' messages, briefs. */
             machineTurns: number;
             projectId: string;
@@ -2496,10 +2619,23 @@ export interface components {
             prompts: number;
             /** @description Transcript files capture is tracking. */
             transcripts: number;
+            /** @description Captured turns no model has read yet. */
+            uncollected: number;
             /** @description Prompts the hooks saw more than 30 minutes ago that capture never found in a transcript. Non-zero means the transcript format may have changed. */
             unmatchedPrompts: number;
         };
+        ControllersLearningSettingsDTO: {
+            /** @enum {string} */
+            collectEffort: "low" | "medium" | "high" | "xhigh" | "max";
+            collectModel: string;
+            /**
+             * Format: double
+             * @description The background collect stops for the rest of the local day at this spend; 0 pauses it.
+             */
+            dailyBudgetUsd: number;
+        };
         ControllersLearningStatusResponse: {
+            collect: components["schemas"]["ControllersLearningCollectStatusDTO"];
             projects: components["schemas"]["ControllersLearningProjectStatusDTO"][];
         };
         ControllersLearningWindowDTO: {
@@ -2510,6 +2646,9 @@ export interface components {
         };
         ControllersListDaemonLoopsResponse: {
             loops: components["schemas"]["ControllersDaemonLoop"][];
+        };
+        ControllersListLearningDraftsResponse: {
+            drafts: components["schemas"]["ControllersLearningDraftDTO"][];
         };
         ControllersListLearningExcerptsResponse: {
             excerpts: components["schemas"]["ControllersLearningExcerptDTO"][];
@@ -2693,6 +2832,18 @@ export interface components {
         };
         ControllersStartIOSRunResponse: {
             run: components["schemas"]["IosrunRun"];
+        };
+        ControllersStartLearningCollectRequest: {
+            /**
+             * Format: double
+             * @description Most this run may spend, at API prices. At most 50.
+             */
+            budgetUsd: number;
+            /** @description Project to collect; empty collects every project that learns from sessions. */
+            project?: string;
+        };
+        ControllersStartLearningCollectResponse: {
+            started: boolean;
         };
         ControllersTranscriptRefRequest: {
             /** @description The harness's own conversation id. */
@@ -5031,6 +5182,136 @@ export interface operations {
             };
         };
     };
+    startLearningCollect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersStartLearningCollectRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersStartLearningCollectResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listLearningDrafts: {
+        parameters: {
+            query?: {
+                /** @description Project id. */
+                project?: string;
+                /** @description Most drafts to return, newest first. Default 50, at most 500. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersListLearningDraftsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     listLearningExcerpts: {
         parameters: {
             query?: {
@@ -5124,6 +5405,95 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getLearningSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningSettingsDTO"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setLearningSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersLearningSettingsDTO"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningSettingsDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

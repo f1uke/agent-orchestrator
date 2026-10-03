@@ -520,6 +520,106 @@ paths:
         via REST
       tags:
       - jira
+  /api/v1/learning/collect:
+    post:
+      operationId: startLearningCollect
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersStartLearningCollectRequest'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersStartLearningCollectResponse'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Start a collect run over every uncollected captured turn, under its
+        own budget
+      tags:
+      - learning
+  /api/v1/learning/drafts:
+    get:
+      operationId: listLearningDrafts
+      parameters:
+      - description: Project id.
+        in: query
+        name: project
+        schema:
+          description: Project id.
+          type: string
+      - description: Most drafts to return, newest first. Default 50, at most 500.
+        in: query
+        name: limit
+        schema:
+          description: Most drafts to return, newest first. Default 50, at most 500.
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersListLearningDraftsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List a project's candidate lessons, newest first
+      tags:
+      - learning
   /api/v1/learning/excerpts:
     get:
       operationId: listLearningExcerpts
@@ -614,6 +714,67 @@ paths:
           description: Not Implemented
       summary: Delete everything learning capture kept for a project that no longer
         learns from sessions
+      tags:
+      - learning
+  /api/v1/learning/settings:
+    get:
+      operationId: getLearningSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningSettingsDTO'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read learning's model and budget settings
+      tags:
+      - learning
+    put:
+      operationId: setLearningSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersLearningSettingsDTO'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningSettingsDTO'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Set learning's model and budget settings
       tags:
       - learning
   /api/v1/learning/status:
@@ -7525,6 +7686,149 @@ components:
             undelivered work refuses the kill with 409 SESSION_HAS_UNDELIVERED_WORK.
           type: boolean
       type: object
+    ControllersLearningCollectRunDTO:
+      properties:
+        budgetUsd:
+          format: double
+          type: number
+        costUsd:
+          format: double
+          type: number
+        drafts:
+          type: integer
+        failed:
+          type: integer
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        jobs:
+          type: integer
+        lastError:
+          type: string
+        manual:
+          type: boolean
+        project:
+          type: string
+        running:
+          type: boolean
+        startedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        stopReason:
+          type: string
+      required:
+      - running
+      - manual
+      - jobs
+      - failed
+      - drafts
+      - costUsd
+      - budgetUsd
+      type: object
+    ControllersLearningCollectStatusDTO:
+      properties:
+        dailyBudgetUsd:
+          format: double
+          type: number
+        effort:
+          type: string
+        enabled:
+          type: boolean
+        model:
+          type: string
+        run:
+          $ref: '#/components/schemas/ControllersLearningCollectRunDTO'
+        todaySpendUsd:
+          description: What today's model runs cost, at API prices as the CLI reports
+            them.
+          format: double
+          type: number
+      required:
+      - enabled
+      - todaySpendUsd
+      - dailyBudgetUsd
+      - model
+      - effort
+      - run
+      type: object
+    ControllersLearningDraftDTO:
+      properties:
+        agentBefore:
+          type: string
+        anchorExcerptId:
+          format: int64
+          type: integer
+        anchorSourceClass:
+          type: string
+        anchorTurnAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        appliesWhen:
+          type: string
+        confidence:
+          format: double
+          type: number
+        createdAt:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        kind:
+          enum:
+          - correction
+          - rule
+          - procedure
+          - fact
+          - preference
+          type: string
+        projectId:
+          type: string
+        quote:
+          description: The human's own words the draft rests on, a checked substring
+            of the anchor turn.
+          type: string
+        scopeHint:
+          type: string
+        sessionId:
+          type: string
+        statement:
+          type: string
+        status:
+          enum:
+          - open
+          - reversed
+          - consumed
+          - dropped
+          type: string
+        supersedesId:
+          format: int64
+          type: integer
+        taskKey:
+          type: string
+        weak:
+          description: Rests only on a suggestion the human accepted.
+          type: boolean
+      required:
+      - id
+      - projectId
+      - sessionId
+      - taskKey
+      - kind
+      - statement
+      - confidence
+      - quote
+      - anchorExcerptId
+      - weak
+      - status
+      - createdAt
+      type: object
     ControllersLearningExcerptDTO:
       properties:
         after:
@@ -7594,6 +7898,13 @@ components:
           type:
           - object
           - "null"
+        drafts:
+          additionalProperties:
+            type: integer
+          description: 'Candidate lessons by status: open, reversed, consumed, dropped.'
+          type:
+          - object
+          - "null"
         enabled:
           description: Whether the project learns from sessions now. A project that
             was switched off is listed while it still holds captured turns.
@@ -7613,6 +7924,17 @@ components:
           type:
           - "null"
           - string
+        lastCollectAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        lastCollectError:
+          description: The error of the last model run, when it failed.
+          type: string
+        lastCollectStderr:
+          description: The end of what the CLI wrote to stderr on that failure.
+          type: string
         machineTurns:
           description: 'Turns read that were not the human''s: AO notices, other sessions''
             messages, briefs.'
@@ -7624,6 +7946,9 @@ components:
           type: integer
         transcripts:
           description: Transcript files capture is tracking.
+          type: integer
+        uncollected:
+          description: Captured turns no model has read yet.
           type: integer
         unmatchedPrompts:
           description: Prompts the hooks saw more than 30 minutes ago that capture
@@ -7642,15 +7967,42 @@ components:
       - unmatchedPrompts
       - failingFiles
       - atRiskTranscripts
+      - uncollected
+      - drafts
+      type: object
+    ControllersLearningSettingsDTO:
+      properties:
+        collectEffort:
+          enum:
+          - low
+          - medium
+          - high
+          - xhigh
+          - max
+          type: string
+        collectModel:
+          type: string
+        dailyBudgetUsd:
+          description: The background collect stops for the rest of the local day
+            at this spend; 0 pauses it.
+          format: double
+          type: number
+      required:
+      - collectModel
+      - collectEffort
+      - dailyBudgetUsd
       type: object
     ControllersLearningStatusResponse:
       properties:
+        collect:
+          $ref: '#/components/schemas/ControllersLearningCollectStatusDTO'
         projects:
           items:
             $ref: '#/components/schemas/ControllersLearningProjectStatusDTO'
           type: array
       required:
       - projects
+      - collect
       type: object
     ControllersLearningWindowDTO:
       properties:
@@ -7674,6 +8026,15 @@ components:
           type: array
       required:
       - loops
+      type: object
+    ControllersListLearningDraftsResponse:
+      properties:
+        drafts:
+          items:
+            $ref: '#/components/schemas/ControllersLearningDraftDTO'
+          type: array
+      required:
+      - drafts
       type: object
     ControllersListLearningExcerptsResponse:
       properties:
@@ -8099,6 +8460,26 @@ components:
           $ref: '#/components/schemas/IosrunRun'
       required:
       - run
+      type: object
+    ControllersStartLearningCollectRequest:
+      properties:
+        budgetUsd:
+          description: Most this run may spend, at API prices. At most 50.
+          format: double
+          type: number
+        project:
+          description: Project to collect; empty collects every project that learns
+            from sessions.
+          type: string
+      required:
+      - budgetUsd
+      type: object
+    ControllersStartLearningCollectResponse:
+      properties:
+        started:
+          type: boolean
+      required:
+      - started
       type: object
     ControllersTranscriptRefRequest:
       properties:

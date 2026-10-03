@@ -61,7 +61,9 @@ surface (`npm run sqlc`, `npm run api`).
   keeps redacted excerpts of the human's own turns from Claude Code transcripts,
   telling them apart from AO-delivered text by delivery fingerprints; inspected
   and erased with `ao learn status|excerpts|forget`. See "Learning capture" in
-  `architecture.md`. No model is called yet.
+  `architecture.md`. Collect asks a model (the human's own `claude` CLI, sealed;
+  Sonnet 5.5 at low effort, within a daily budget) which redacted turns teach
+  something durable and keeps them as drafts (`ao learn collect|drafts|settings`).
 
 ### Frontend (Electron + React)
 

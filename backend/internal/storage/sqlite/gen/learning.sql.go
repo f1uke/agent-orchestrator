@@ -13,6 +13,53 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
+const abandonRunningLearnJobs = `-- name: AbandonRunningLearnJobs :execrows
+UPDATE learn_job SET state = 'abandoned', finished_at = ?
+WHERE state = 'running'
+`
+
+// A job still 'running' when the daemon starts died with the last daemon. Its
+// excerpts were never marked collected, so the next pass simply runs them again.
+func (q *Queries) AbandonRunningLearnJobs(ctx context.Context, finishedAt sql.NullTime) (int64, error) {
+	result, err := q.db.ExecContext(ctx, abandonRunningLearnJobs, finishedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const countLearnDraftsByStatus = `-- name: CountLearnDraftsByStatus :many
+SELECT status, COUNT(*) AS drafts FROM learn_draft WHERE project_id = ? GROUP BY status ORDER BY status
+`
+
+type CountLearnDraftsByStatusRow struct {
+	Status string
+	Drafts int64
+}
+
+func (q *Queries) CountLearnDraftsByStatus(ctx context.Context, projectID string) ([]CountLearnDraftsByStatusRow, error) {
+	rows, err := q.db.QueryContext(ctx, countLearnDraftsByStatus, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountLearnDraftsByStatusRow{}
+	for rows.Next() {
+		var i CountLearnDraftsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Drafts); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countLearnExcerptsByProject = `-- name: CountLearnExcerptsByProject :one
 SELECT COUNT(*) FROM learn_excerpt WHERE project_id = ?
 `
@@ -71,6 +118,17 @@ func (q *Queries) CountPromptFingerprints(ctx context.Context, projectID string)
 	return count, err
 }
 
+const countUncollectedExcerpts = `-- name: CountUncollectedExcerpts :one
+SELECT COUNT(*) FROM learn_excerpt WHERE project_id = ? AND collected_at IS NULL
+`
+
+func (q *Queries) CountUncollectedExcerpts(ctx context.Context, projectID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUncollectedExcerpts, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUnmatchedPromptFingerprints = `-- name: CountUnmatchedPromptFingerprints :one
 SELECT COUNT(*) FROM prompt_fingerprint
 WHERE project_id = ? AND matched_at IS NULL AND submitted_at < ?
@@ -115,12 +173,36 @@ func (q *Queries) DeleteLearnCursorsByProject(ctx context.Context, projectID str
 	return result.RowsAffected()
 }
 
+const deleteLearnDraftsByProject = `-- name: DeleteLearnDraftsByProject :execrows
+DELETE FROM learn_draft WHERE project_id = ?
+`
+
+func (q *Queries) DeleteLearnDraftsByProject(ctx context.Context, projectID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteLearnDraftsByProject, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteLearnExcerptsByProject = `-- name: DeleteLearnExcerptsByProject :execrows
 DELETE FROM learn_excerpt WHERE project_id = ?
 `
 
 func (q *Queries) DeleteLearnExcerptsByProject(ctx context.Context, projectID string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteLearnExcerptsByProject, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteLearnJobsByProject = `-- name: DeleteLearnJobsByProject :execrows
+DELETE FROM learn_job WHERE project_id = ?
+`
+
+func (q *Queries) DeleteLearnJobsByProject(ctx context.Context, projectID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteLearnJobsByProject, projectID)
 	if err != nil {
 		return 0, err
 	}
@@ -137,6 +219,44 @@ func (q *Queries) DeletePromptFingerprintsByProject(ctx context.Context, project
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const finishLearnJob = `-- name: FinishLearnJob :exec
+UPDATE learn_job
+SET state = ?, drafts = ?, rejected = ?, cost_usd = ?, input_tokens = ?, output_tokens = ?, duration_ms = ?,
+    error = ?, stderr_tail = ?, finished_at = ?
+WHERE id = ?
+`
+
+type FinishLearnJobParams struct {
+	State        string
+	Drafts       int64
+	Rejected     int64
+	CostUsd      float64
+	InputTokens  int64
+	OutputTokens int64
+	DurationMs   int64
+	Error        string
+	StderrTail   string
+	FinishedAt   sql.NullTime
+	ID           int64
+}
+
+func (q *Queries) FinishLearnJob(ctx context.Context, arg FinishLearnJobParams) error {
+	_, err := q.db.ExecContext(ctx, finishLearnJob,
+		arg.State,
+		arg.Drafts,
+		arg.Rejected,
+		arg.CostUsd,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.DurationMs,
+		arg.Error,
+		arg.StderrTail,
+		arg.FinishedAt,
+		arg.ID,
+	)
+	return err
 }
 
 const getLearnCursor = `-- name: GetLearnCursor :one
@@ -193,6 +313,62 @@ func (q *Queries) InsertDeliveredFingerprint(ctx context.Context, arg InsertDeli
 	return err
 }
 
+const insertLearnDraft = `-- name: InsertLearnDraft :one
+INSERT INTO learn_draft (project_id, session_id, task_key, job_id, kind, statement, statement_hash,
+    applies_when, scope_hint, confidence, quote, anchor_excerpt_id, evidence_json, agent_before,
+    weak, supersedes_id, status, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+ON CONFLICT (session_id, statement_hash) DO NOTHING
+RETURNING id
+`
+
+type InsertLearnDraftParams struct {
+	ProjectID       string
+	SessionID       string
+	TaskKey         string
+	JobID           int64
+	Kind            string
+	Statement       string
+	StatementHash   string
+	AppliesWhen     string
+	ScopeHint       string
+	Confidence      float64
+	Quote           string
+	AnchorExcerptID int64
+	EvidenceJson    string
+	AgentBefore     string
+	Weak            int64
+	SupersedesID    int64
+	CreatedAt       time.Time
+}
+
+// A statement the session already has a draft for is not stored again; the
+// returned id is 0 then.
+func (q *Queries) InsertLearnDraft(ctx context.Context, arg InsertLearnDraftParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertLearnDraft,
+		arg.ProjectID,
+		arg.SessionID,
+		arg.TaskKey,
+		arg.JobID,
+		arg.Kind,
+		arg.Statement,
+		arg.StatementHash,
+		arg.AppliesWhen,
+		arg.ScopeHint,
+		arg.Confidence,
+		arg.Quote,
+		arg.AnchorExcerptID,
+		arg.EvidenceJson,
+		arg.AgentBefore,
+		arg.Weak,
+		arg.SupersedesID,
+		arg.CreatedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertLearnExcerpt = `-- name: InsertLearnExcerpt :execrows
 INSERT INTO learn_excerpt (project_id, session_id, transcript_path, turn_uuid, turn_at, source_class,
     cwd, git_branch, before_json, human_text, after_json, redactions_json, created_at)
@@ -240,6 +416,33 @@ func (q *Queries) InsertLearnExcerpt(ctx context.Context, arg InsertLearnExcerpt
 	return result.RowsAffected()
 }
 
+const insertLearnJob = `-- name: InsertLearnJob :one
+INSERT INTO learn_job (project_id, session_id, state, model, turns, started_at)
+VALUES (?, ?, 'running', ?, ?, ?)
+RETURNING id
+`
+
+type InsertLearnJobParams struct {
+	ProjectID string
+	SessionID string
+	Model     string
+	Turns     int64
+	StartedAt time.Time
+}
+
+func (q *Queries) InsertLearnJob(ctx context.Context, arg InsertLearnJobParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertLearnJob,
+		arg.ProjectID,
+		arg.SessionID,
+		arg.Model,
+		arg.Turns,
+		arg.StartedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertPromptFingerprint = `-- name: InsertPromptFingerprint :exec
 INSERT INTO prompt_fingerprint (session_id, project_id, claude_session_id, sha256, bytes, submitted_at)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -264,6 +467,54 @@ func (q *Queries) InsertPromptFingerprint(ctx context.Context, arg InsertPromptF
 		arg.SubmittedAt,
 	)
 	return err
+}
+
+const lastFailedLearnJob = `-- name: LastFailedLearnJob :one
+SELECT id, project_id, session_id, error, stderr_tail, started_at
+FROM learn_job WHERE project_id = ? AND state = 'failed'
+ORDER BY id DESC LIMIT 1
+`
+
+type LastFailedLearnJobRow struct {
+	ID         int64
+	ProjectID  string
+	SessionID  string
+	Error      string
+	StderrTail string
+	StartedAt  time.Time
+}
+
+func (q *Queries) LastFailedLearnJob(ctx context.Context, projectID string) (LastFailedLearnJobRow, error) {
+	row := q.db.QueryRowContext(ctx, lastFailedLearnJob, projectID)
+	var i LastFailedLearnJobRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.SessionID,
+		&i.Error,
+		&i.StderrTail,
+		&i.StartedAt,
+	)
+	return i, err
+}
+
+const lastFinishedLearnJob = `-- name: LastFinishedLearnJob :one
+SELECT id, state, finished_at FROM learn_job
+WHERE project_id = ? AND state IN ('done', 'failed')
+ORDER BY id DESC LIMIT 1
+`
+
+type LastFinishedLearnJobRow struct {
+	ID         int64
+	State      string
+	FinishedAt sql.NullTime
+}
+
+func (q *Queries) LastFinishedLearnJob(ctx context.Context, projectID string) (LastFinishedLearnJobRow, error) {
+	row := q.db.QueryRowContext(ctx, lastFinishedLearnJob, projectID)
+	var i LastFinishedLearnJobRow
+	err := row.Scan(&i.ID, &i.State, &i.FinishedAt)
+	return i, err
 }
 
 const listDeliveredFingerprintsBySession = `-- name: ListDeliveredFingerprintsBySession :many
@@ -345,6 +596,91 @@ func (q *Queries) ListLearnCursorsByProject(ctx context.Context, projectID strin
 	return items, nil
 }
 
+const listLearnDraftsByProject = `-- name: ListLearnDraftsByProject :many
+SELECT d.id, d.project_id, d.session_id, d.task_key, d.job_id, d.kind, d.statement, d.applies_when,
+    d.scope_hint, d.confidence, d.quote, d.anchor_excerpt_id, d.evidence_json, d.agent_before, d.weak,
+    d.supersedes_id, d.status, d.created_at,
+    e.source_class AS anchor_source_class,
+    e.turn_at AS anchor_turn_at
+FROM learn_draft d
+LEFT JOIN learn_excerpt e ON e.id = d.anchor_excerpt_id
+WHERE d.project_id = ?
+ORDER BY d.id DESC
+LIMIT ?
+`
+
+type ListLearnDraftsByProjectParams struct {
+	ProjectID string
+	Limit     int64
+}
+
+type ListLearnDraftsByProjectRow struct {
+	ID                int64
+	ProjectID         string
+	SessionID         string
+	TaskKey           string
+	JobID             int64
+	Kind              string
+	Statement         string
+	AppliesWhen       string
+	ScopeHint         string
+	Confidence        float64
+	Quote             string
+	AnchorExcerptID   int64
+	EvidenceJson      string
+	AgentBefore       string
+	Weak              int64
+	SupersedesID      int64
+	Status            string
+	CreatedAt         time.Time
+	AnchorSourceClass sql.NullString
+	AnchorTurnAt      sql.NullTime
+}
+
+func (q *Queries) ListLearnDraftsByProject(ctx context.Context, arg ListLearnDraftsByProjectParams) ([]ListLearnDraftsByProjectRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLearnDraftsByProject, arg.ProjectID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLearnDraftsByProjectRow{}
+	for rows.Next() {
+		var i ListLearnDraftsByProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.SessionID,
+			&i.TaskKey,
+			&i.JobID,
+			&i.Kind,
+			&i.Statement,
+			&i.AppliesWhen,
+			&i.ScopeHint,
+			&i.Confidence,
+			&i.Quote,
+			&i.AnchorExcerptID,
+			&i.EvidenceJson,
+			&i.AgentBefore,
+			&i.Weak,
+			&i.SupersedesID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.AnchorSourceClass,
+			&i.AnchorTurnAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLearnExcerptsByProject = `-- name: ListLearnExcerptsByProject :many
 SELECT id, project_id, session_id, transcript_path, turn_uuid, turn_at, source_class, cwd, git_branch,
     before_json, human_text, after_json, redactions_json, created_at
@@ -359,15 +695,32 @@ type ListLearnExcerptsByProjectParams struct {
 	Limit     int64
 }
 
-func (q *Queries) ListLearnExcerptsByProject(ctx context.Context, arg ListLearnExcerptsByProjectParams) ([]LearnExcerpt, error) {
+type ListLearnExcerptsByProjectRow struct {
+	ID             int64
+	ProjectID      string
+	SessionID      string
+	TranscriptPath string
+	TurnUuid       string
+	TurnAt         time.Time
+	SourceClass    string
+	Cwd            string
+	GitBranch      string
+	BeforeJson     string
+	HumanText      string
+	AfterJson      string
+	RedactionsJson string
+	CreatedAt      time.Time
+}
+
+func (q *Queries) ListLearnExcerptsByProject(ctx context.Context, arg ListLearnExcerptsByProjectParams) ([]ListLearnExcerptsByProjectRow, error) {
 	rows, err := q.db.QueryContext(ctx, listLearnExcerptsByProject, arg.ProjectID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []LearnExcerpt{}
+	items := []ListLearnExcerptsByProjectRow{}
 	for rows.Next() {
-		var i LearnExcerpt
+		var i ListLearnExcerptsByProjectRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
@@ -383,6 +736,88 @@ func (q *Queries) ListLearnExcerptsByProject(ctx context.Context, arg ListLearnE
 			&i.AfterJson,
 			&i.RedactionsJson,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenDraftsBySession = `-- name: ListOpenDraftsBySession :many
+SELECT id, statement FROM learn_draft
+WHERE session_id = ? AND status = 'open'
+ORDER BY id
+`
+
+type ListOpenDraftsBySessionRow struct {
+	ID        int64
+	Statement string
+}
+
+func (q *Queries) ListOpenDraftsBySession(ctx context.Context, sessionID string) ([]ListOpenDraftsBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listOpenDraftsBySession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOpenDraftsBySessionRow{}
+	for rows.Next() {
+		var i ListOpenDraftsBySessionRow
+		if err := rows.Scan(&i.ID, &i.Statement); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentLearnJobsBySession = `-- name: ListRecentLearnJobsBySession :many
+SELECT id, state, started_at, finished_at, error
+FROM learn_job WHERE session_id = ?
+ORDER BY id DESC LIMIT ?
+`
+
+type ListRecentLearnJobsBySessionParams struct {
+	SessionID string
+	Limit     int64
+}
+
+type ListRecentLearnJobsBySessionRow struct {
+	ID         int64
+	State      string
+	StartedAt  time.Time
+	FinishedAt sql.NullTime
+	Error      string
+}
+
+func (q *Queries) ListRecentLearnJobsBySession(ctx context.Context, arg ListRecentLearnJobsBySessionParams) ([]ListRecentLearnJobsBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentLearnJobsBySession, arg.SessionID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentLearnJobsBySessionRow{}
+	for rows.Next() {
+		var i ListRecentLearnJobsBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.State,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Error,
 		); err != nil {
 			return nil, err
 		}
@@ -432,6 +867,130 @@ func (q *Queries) ListSessionTranscriptsByProject(ctx context.Context, projectID
 		return nil, err
 	}
 	return items, nil
+}
+
+const listUncollectedExcerptsBySession = `-- name: ListUncollectedExcerptsBySession :many
+SELECT id, project_id, session_id, transcript_path, turn_uuid, turn_at, source_class, cwd, git_branch,
+    before_json, human_text, after_json, redactions_json, created_at
+FROM learn_excerpt
+WHERE project_id = ? AND session_id = ? AND collected_at IS NULL
+ORDER BY turn_at, id
+LIMIT ?
+`
+
+type ListUncollectedExcerptsBySessionParams struct {
+	ProjectID string
+	SessionID string
+	Limit     int64
+}
+
+type ListUncollectedExcerptsBySessionRow struct {
+	ID             int64
+	ProjectID      string
+	SessionID      string
+	TranscriptPath string
+	TurnUuid       string
+	TurnAt         time.Time
+	SourceClass    string
+	Cwd            string
+	GitBranch      string
+	BeforeJson     string
+	HumanText      string
+	AfterJson      string
+	RedactionsJson string
+	CreatedAt      time.Time
+}
+
+func (q *Queries) ListUncollectedExcerptsBySession(ctx context.Context, arg ListUncollectedExcerptsBySessionParams) ([]ListUncollectedExcerptsBySessionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUncollectedExcerptsBySession, arg.ProjectID, arg.SessionID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUncollectedExcerptsBySessionRow{}
+	for rows.Next() {
+		var i ListUncollectedExcerptsBySessionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.SessionID,
+			&i.TranscriptPath,
+			&i.TurnUuid,
+			&i.TurnAt,
+			&i.SourceClass,
+			&i.Cwd,
+			&i.GitBranch,
+			&i.BeforeJson,
+			&i.HumanText,
+			&i.AfterJson,
+			&i.RedactionsJson,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUncollectedTurnTimes = `-- name: ListUncollectedTurnTimes :many
+SELECT session_id, turn_at
+FROM learn_excerpt
+WHERE project_id = ? AND collected_at IS NULL
+ORDER BY turn_at, id
+`
+
+type ListUncollectedTurnTimesRow struct {
+	SessionID string
+	TurnAt    time.Time
+}
+
+// Every captured turn no model has seen yet, as its session and time. Collect
+// groups them per session in Go: SQLite returns an aggregate of a TIMESTAMP
+// column as a bare number, which no longer scans as a time.
+func (q *Queries) ListUncollectedTurnTimes(ctx context.Context, projectID string) ([]ListUncollectedTurnTimesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUncollectedTurnTimes, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUncollectedTurnTimesRow{}
+	for rows.Next() {
+		var i ListUncollectedTurnTimesRow
+		if err := rows.Scan(&i.SessionID, &i.TurnAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markExcerptCollected = `-- name: MarkExcerptCollected :exec
+UPDATE learn_excerpt SET collected_at = ?, collected_job_id = ?
+WHERE id = ? AND collected_at IS NULL
+`
+
+type MarkExcerptCollectedParams struct {
+	CollectedAt    sql.NullTime
+	CollectedJobID int64
+	ID             int64
+}
+
+func (q *Queries) MarkExcerptCollected(ctx context.Context, arg MarkExcerptCollectedParams) error {
+	_, err := q.db.ExecContext(ctx, markExcerptCollected, arg.CollectedAt, arg.CollectedJobID, arg.ID)
+	return err
 }
 
 const markPromptFingerprintMatched = `-- name: MarkPromptFingerprintMatched :execrows
@@ -488,6 +1047,32 @@ func (q *Queries) SetLearnCursorError(ctx context.Context, arg SetLearnCursorErr
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const setLearnDraftStatus = `-- name: SetLearnDraftStatus :exec
+UPDATE learn_draft SET status = ? WHERE id = ? AND session_id = ?
+`
+
+type SetLearnDraftStatusParams struct {
+	Status    string
+	ID        int64
+	SessionID string
+}
+
+func (q *Queries) SetLearnDraftStatus(ctx context.Context, arg SetLearnDraftStatusParams) error {
+	_, err := q.db.ExecContext(ctx, setLearnDraftStatus, arg.Status, arg.ID, arg.SessionID)
+	return err
+}
+
+const sumLearnJobCostSince = `-- name: SumLearnJobCostSince :one
+SELECT CAST(COALESCE(SUM(cost_usd), 0) AS REAL) FROM learn_job WHERE started_at >= ?
+`
+
+func (q *Queries) SumLearnJobCostSince(ctx context.Context, startedAt time.Time) (float64, error) {
+	row := q.db.QueryRowContext(ctx, sumLearnJobCostSince, startedAt)
+	var column_1 float64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const upsertLearnCursor = `-- name: UpsertLearnCursor :exec

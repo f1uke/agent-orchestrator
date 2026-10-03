@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
-	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/claudecode"
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
@@ -44,7 +43,6 @@ import (
 	crewrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crewrun"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
-	learningsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/learning"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
@@ -447,6 +445,9 @@ func Run() error {
 	// Learning capture: redacted excerpts of what the human typed, for projects
 	// that opted in (learnFromSessions). Additive and off the lifecycle path.
 	learnCaptureDone := startLearnCapture(ctx, store, loopReg, log)
+	// Learning collect: candidate lessons from captured turns, via the human's
+	// own claude CLI, within the daily budget.
+	learnCollector, learnSettings, learnCollectDone := startLearnCollect(ctx, store, cfg.DataDir, loopReg, log)
 	agentSvc := agentsvc.New()
 	go func() {
 		if _, err := agentSvc.Refresh(ctx); err != nil {
@@ -477,6 +478,7 @@ func Run() error {
 		<-reclaimerDone
 		<-tokenUsageDone
 		<-learnCaptureDone
+		<-learnCollectDone
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
@@ -535,7 +537,7 @@ func Run() error {
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
 		LoopTelemetry:      loopReg,
-		Learning:           learningsvc.New(store, claudecode.IsTranscriptPath),
+		Learning:           learningService(ctx, store, learnCollector, learnSettings),
 	})
 	if err != nil {
 		stop()
@@ -543,6 +545,7 @@ func Run() error {
 		<-reclaimerDone
 		<-tokenUsageDone
 		<-learnCaptureDone
+		<-learnCollectDone
 		lcStack.Stop()
 		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
@@ -730,6 +733,7 @@ func Run() error {
 	<-reclaimerDone
 	<-tokenUsageDone
 	<-learnCaptureDone
+	<-learnCollectDone
 	lcStack.Stop()
 	if err := cdcPipe.Stop(); err != nil {
 		log.Error("cdc pipeline shutdown", "err", err)

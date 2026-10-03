@@ -273,27 +273,36 @@ func (s *Store) ListLearnExcerpts(ctx context.Context, projectID domain.ProjectI
 	}
 	out := make([]domain.LearnExcerpt, 0, len(rows))
 	for _, r := range rows {
-		e := domain.LearnExcerpt{
-			ID:             r.ID,
-			ProjectID:      domain.ProjectID(r.ProjectID),
-			SessionID:      domain.SessionID(r.SessionID),
-			TranscriptPath: r.TranscriptPath,
-			TurnUUID:       r.TurnUuid,
-			TurnAt:         r.TurnAt,
-			SourceClass:    domain.LearnSourceClass(r.SourceClass),
-			CWD:            r.Cwd,
-			GitBranch:      r.GitBranch,
-			HumanText:      r.HumanText,
-			CreatedAt:      r.CreatedAt,
-		}
-		// A stored window that no longer decodes is shown empty rather than
-		// failing the whole list: the human text is the part that matters.
-		_ = json.Unmarshal([]byte(r.BeforeJson), &e.Before)
-		_ = json.Unmarshal([]byte(r.AfterJson), &e.After)
-		_ = json.Unmarshal([]byte(r.RedactionsJson), &e.Redactions)
-		out = append(out, e)
+		out = append(out, excerptFromRow(gen.LearnExcerpt{
+			ID: r.ID, ProjectID: r.ProjectID, SessionID: r.SessionID, TranscriptPath: r.TranscriptPath,
+			TurnUuid: r.TurnUuid, TurnAt: r.TurnAt, SourceClass: r.SourceClass, Cwd: r.Cwd,
+			GitBranch: r.GitBranch, BeforeJson: r.BeforeJson, HumanText: r.HumanText,
+			AfterJson: r.AfterJson, RedactionsJson: r.RedactionsJson, CreatedAt: r.CreatedAt,
+		}))
 	}
 	return out, nil
+}
+
+func excerptFromRow(r gen.LearnExcerpt) domain.LearnExcerpt {
+	e := domain.LearnExcerpt{
+		ID:             r.ID,
+		ProjectID:      domain.ProjectID(r.ProjectID),
+		SessionID:      domain.SessionID(r.SessionID),
+		TranscriptPath: r.TranscriptPath,
+		TurnUUID:       r.TurnUuid,
+		TurnAt:         r.TurnAt,
+		SourceClass:    domain.LearnSourceClass(r.SourceClass),
+		CWD:            r.Cwd,
+		GitBranch:      r.GitBranch,
+		HumanText:      r.HumanText,
+		CreatedAt:      r.CreatedAt,
+	}
+	// A stored window that no longer decodes is shown empty rather than
+	// failing the whole list: the human text is the part that matters.
+	_ = json.Unmarshal([]byte(r.BeforeJson), &e.Before)
+	_ = json.Unmarshal([]byte(r.AfterJson), &e.After)
+	_ = json.Unmarshal([]byte(r.RedactionsJson), &e.Redactions)
+	return e
 }
 
 // LearnCounts tallies the project's captured turns, and the hook-seen prompts
@@ -328,8 +337,8 @@ func (s *Store) LearnCounts(ctx context.Context, projectID domain.ProjectID, unm
 	return out, nil
 }
 
-// ForgetLearning deletes everything capture kept for a project - excerpts,
-// cursors and both kinds of fingerprint - in one transaction, and returns how
+// ForgetLearning deletes everything learning kept for a project - excerpts,
+// drafts, model runs, cursors and both kinds of fingerprint - in one transaction, and returns how
 // many turns were deleted. The transcript refs stay: they are paths, not
 // content, and the session's own bookkeeping uses them.
 func (s *Store) ForgetLearning(ctx context.Context, projectID domain.ProjectID) (int, error) {
@@ -342,6 +351,12 @@ func (s *Store) ForgetLearning(ctx context.Context, projectID domain.ProjectID) 
 			return err
 		}
 		turns = int(n)
+		if _, err := q.DeleteLearnDraftsByProject(ctx, string(projectID)); err != nil {
+			return err
+		}
+		if _, err := q.DeleteLearnJobsByProject(ctx, string(projectID)); err != nil {
+			return err
+		}
 		if _, err := q.DeleteLearnCursorsByProject(ctx, string(projectID)); err != nil {
 			return err
 		}
