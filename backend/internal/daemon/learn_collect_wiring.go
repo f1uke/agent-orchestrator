@@ -10,9 +10,14 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/claudecode"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learn"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learn/apply"
 	"github.com/aoagents/agent-orchestrator/backend/internal/learn/llm"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learn/redact"
 	"github.com/aoagents/agent-orchestrator/backend/internal/learnsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learncollect"
@@ -50,13 +55,22 @@ func startLearnCollect(ctx context.Context, store *sqlite.Store, dataDir string,
 // the rules corpus when they are running. A nil loop must not reach the
 // service as a typed nil in a non-nil interface, so each is only attached when
 // present.
-func learningService(ctx context.Context, store *sqlite.Store, collector *learncollect.Observer, settings *learnsettings.Store, rules *learnrules.Observer, decider *learndecide.Observer) *learningsvc.Service {
+func learningService(ctx context.Context, store *sqlite.Store, dataDir string, collector *learncollect.Observer, settings *learnsettings.Store, rules *learnrules.Observer, decider *learndecide.Observer) *learningsvc.Service {
 	svc := learningsvc.New(store, claudecode.IsTranscriptPath)
 	if rules != nil {
 		svc = svc.WithRules(ctx, store, rules)
 	}
 	if decider != nil {
 		svc = svc.WithDecide(ctx, store, decider)
+		if home, err := os.UserHomeDir(); err == nil {
+			// Approved changes are written under ~/.claude (memory files,
+			// skills, CLAUDE.md); what they replace is kept under AO's data dir.
+			svc = svc.WithDecisions(store, apply.Roots{Home: home, History: filepath.Join(dataDir, "learn-history")},
+				func(ctx context.Context) []redact.Value {
+					projects, _ := store.ListProjects(ctx)
+					return learn.Dictionary(projects, os.Environ())
+				})
+		}
 	}
 	if collector == nil || settings == nil {
 		return svc

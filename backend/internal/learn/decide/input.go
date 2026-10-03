@@ -309,7 +309,7 @@ func proposalsFor(c Context) []proposalIn {
 			continue
 		}
 		in := proposalIn{ID: "p" + strconv.FormatInt(p.ID, 10), Status: string(p.Status), Action: string(p.Action),
-			Target: p.TargetPath, Title: p.Title, RejectReason: p.DropReason}
+			Target: p.TargetPath, Title: p.Title, RejectReason: p.RejectReason}
 		if p.Status == domain.LearnProposalPending {
 			in.Content = clip(p.NewContent, skillBodyBytes)
 		}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -160,6 +161,98 @@ func newLearnProposalsCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().BoolVar(&all, "all", false, "Include dropped, rejected and settled proposals")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON")
 	cmd.AddCommand(newLearnProposalShowCommand(ctx))
+	cmd.AddCommand(newLearnProposalApproveCommand(ctx))
+	cmd.AddCommand(newLearnProposalRejectCommand(ctx))
+	cmd.AddCommand(newLearnProposalSnoozeCommand(ctx))
+	return cmd
+}
+
+func proposalID(arg string) (int64, error) {
+	id, err := strconv.ParseInt(strings.TrimPrefix(arg, "#"), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, usageError{fmt.Errorf("id must be a positive number, got %q", arg)}
+	}
+	return id, nil
+}
+
+func newLearnProposalApproveCommand(ctx *commandContext) *cobra.Command {
+	var file, side, text string
+	cmd := &cobra.Command{
+		Use:   "approve <id>",
+		Short: "Approve a proposal: write it as proposed, or as edited in --file; a conflict needs --side",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := proposalID(args[0])
+			if err != nil {
+				return err
+			}
+			content := text
+			if file != "" {
+				b, err := os.ReadFile(file)
+				if err != nil {
+					return err
+				}
+				content = string(b)
+			}
+			var res learnProposalDTO
+			if err := ctx.postJSON(cmd.Context(), "learning/proposals/"+strconv.FormatInt(id, 10)+"/approve",
+				map[string]string{"content": content, "resolution": side}, &res); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "#%d %s %s\n", res.ID, res.Status, res.TargetPath)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&file, "file", "", "Write this file's content instead of the proposed content")
+	cmd.Flags().StringVar(&text, "text", "", "For a conflict: the new rule's text, or where each one applies with --side both")
+	cmd.Flags().StringVar(&side, "side", "", "For a conflict: keep_rule, words_win or both")
+	return cmd
+}
+
+func newLearnProposalRejectCommand(ctx *commandContext) *cobra.Command {
+	var reason string
+	cmd := &cobra.Command{
+		Use:   "reject <id>",
+		Short: "Reject a proposal; the reason keeps the same thing from being proposed again",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := proposalID(args[0])
+			if err != nil {
+				return err
+			}
+			var res learnProposalDTO
+			if err := ctx.postJSON(cmd.Context(), "learning/proposals/"+strconv.FormatInt(id, 10)+"/reject", map[string]string{"reason": reason}, &res); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "#%d rejected\n", res.ID)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&reason, "reason", "", "Why not")
+	return cmd
+}
+
+func newLearnProposalSnoozeCommand(ctx *commandContext) *cobra.Command {
+	var days int
+	cmd := &cobra.Command{
+		Use:   "snooze <id>",
+		Short: "Hide a pending proposal for some days",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := proposalID(args[0])
+			if err != nil {
+				return err
+			}
+			until := time.Now().Add(time.Duration(days) * 24 * time.Hour).UTC()
+			var res learnProposalDTO
+			if err := ctx.postJSON(cmd.Context(), "learning/proposals/"+strconv.FormatInt(id, 10)+"/snooze", map[string]string{"until": until.Format(time.RFC3339)}, &res); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "#%d snoozed until %s\n", res.ID, until.Local().Format("2006-01-02 15:04"))
+			return err
+		},
+	}
+	cmd.Flags().IntVar(&days, "days", 7, "Days to hide it (at most 90)")
 	return cmd
 }
 

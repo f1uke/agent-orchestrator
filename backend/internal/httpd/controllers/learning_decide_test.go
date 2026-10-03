@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -15,9 +16,26 @@ import (
 )
 
 type fakeDecide struct {
-	err     error
-	gotTask string
-	gotAll  bool
+	err        error
+	gotTask    string
+	gotAll     bool
+	gotContent string
+	gotRes     domain.LearnResolution
+	gotReason  string
+	gotUntil   time.Time
+}
+
+func (f *fakeDecide) Approve(_ context.Context, id int64, content string, r domain.LearnResolution) (domain.LearnProposal, error) {
+	f.gotContent, f.gotRes = content, r
+	return domain.LearnProposal{ID: id, Status: domain.LearnProposalApplied}, f.err
+}
+func (f *fakeDecide) Reject(_ context.Context, id int64, reason string) (domain.LearnProposal, error) {
+	f.gotReason = reason
+	return domain.LearnProposal{ID: id, Status: domain.LearnProposalRejected, RejectReason: reason}, f.err
+}
+func (f *fakeDecide) Snooze(_ context.Context, id int64, until time.Time) (domain.LearnProposal, error) {
+	f.gotUntil = until
+	return domain.LearnProposal{ID: id, Status: domain.LearnProposalPending, SnoozedUntil: until}, f.err
 }
 
 func (f *fakeDecide) StartDecide(_ context.Context, _, task string, _ float64) error {
@@ -64,6 +82,30 @@ func TestLearningDecide_Routes(t *testing.T) {
 		learning.ErrNotLearning: http.StatusConflict, learndecide.ErrBusy: http.StatusConflict, learning.ErrInvalidBudget: http.StatusBadRequest,
 	} {
 		if w := serveDecide(t, &fakeDecide{err: err}, http.MethodPost, "/learning/decide", `{"budgetUsd":1}`); w.Code != code {
+			t.Errorf("%v -> %d, want %d", err, w.Code, code)
+		}
+	}
+}
+
+func TestLearningDecide_Decisions(t *testing.T) {
+	f := &fakeDecide{}
+	if w := serveDecide(t, f, http.MethodPost, "/learning/proposals/3/approve", `{"content":"edited","resolution":"words_win"}`); w.Code != http.StatusOK ||
+		f.gotContent != "edited" || f.gotRes != domain.LearnWordsWin || !strings.Contains(w.Body.String(), `"status":"applied"`) {
+		t.Errorf("approve -> %d %s", w.Code, w.Body)
+	}
+	if w := serveDecide(t, f, http.MethodPost, "/learning/proposals/3/reject", `{"reason":"one-off"}`); w.Code != http.StatusOK || f.gotReason != "one-off" ||
+		!strings.Contains(w.Body.String(), `"rejectReason":"one-off"`) {
+		t.Errorf("reject -> %d %s", w.Code, w.Body)
+	}
+	if w := serveDecide(t, f, http.MethodPost, "/learning/proposals/3/snooze", `{"until":"2026-10-11T00:00:00Z"}`); w.Code != http.StatusOK ||
+		f.gotUntil.Day() != 11 || !strings.Contains(w.Body.String(), `"snoozedUntil":"2026-10-11T00:00:00Z"`) {
+		t.Errorf("snooze -> %d %s", w.Code, w.Body)
+	}
+	for err, code := range map[error]int{
+		learning.ErrProposalStale: http.StatusConflict, learning.ErrProposalNotPending: http.StatusConflict,
+		learning.ErrInvalidDecision: http.StatusBadRequest, learning.ErrUnknownProposal: http.StatusNotFound,
+	} {
+		if w := serveDecide(t, &fakeDecide{err: err}, http.MethodPost, "/learning/proposals/3/approve", `{}`); w.Code != code {
 			t.Errorf("%v -> %d, want %d", err, w.Code, code)
 		}
 	}

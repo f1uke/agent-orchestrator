@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -58,7 +59,14 @@ func (s *Store) ListSkillProposals(ctx context.Context) ([]domain.LearnProposal,
 			TargetPath: r.TargetPath, Scope: r.Scope, Title: r.Title, Rationale: r.Rationale, BaseSHA256: r.BaseSha256,
 			NewContent: r.NewContent, IndexLine: r.IndexLine, Diff: r.Diff, Confidence: r.Confidence, Outcome: domain.LearnOutcome(r.Outcome),
 			Status: domain.LearnProposalStatus(r.Status), DropReason: r.DropReason, EvidenceIDs: byProposal[r.ID],
-			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, RejectReason: r.RejectReason, AppliedSHA256: r.AppliedSha256,
+			Resolution: domain.LearnResolution(r.Resolution),
+		}
+		if r.SnoozedUntil.Valid {
+			p.SnoozedUntil = r.SnoozedUntil.Time
+		}
+		if r.DecidedAt.Valid {
+			p.DecidedAt = r.DecidedAt.Time
 		}
 		if err := json.Unmarshal([]byte(r.RuleVerdictsJson), &p.RuleVerdicts); err != nil {
 			return nil, fmt.Errorf("proposal %d verdicts: %w", r.ID, err)
@@ -144,4 +152,69 @@ func nonNilVerdicts(v []domain.LearnRuleVerdict) []domain.LearnRuleVerdict {
 		return []domain.LearnRuleVerdict{}
 	}
 	return v
+}
+
+// SettleLearnProposal records a decision. It reports false when the proposal
+// is not pending any more (decided elsewhere, or a second click).
+func (s *Store) SettleLearnProposal(ctx context.Context, d domain.LearnSettlement, now time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.SettleLearnProposal(ctx, gen.SettleLearnProposalParams{
+		Status: string(d.Status), RejectReason: d.RejectReason, Resolution: string(d.Resolution), AppliedSha256: d.AppliedSHA256,
+		NewContent: d.NewContent, DecidedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now, ID: d.ID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("settle proposal %d: %w", d.ID, err)
+	}
+	return n > 0, nil
+}
+
+// SnoozeLearnProposal hides a pending proposal until a time.
+func (s *Store) SnoozeLearnProposal(ctx context.Context, id int64, until, now time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.SnoozeLearnProposal(ctx, gen.SnoozeLearnProposalParams{SnoozedUntil: sql.NullTime{Time: until, Valid: true}, UpdatedAt: now, ID: id})
+	if err != nil {
+		return false, fmt.Errorf("snooze proposal %d: %w", id, err)
+	}
+	return n > 0, nil
+}
+
+// StaleLearnProposal marks a proposal whose target changed after it was made,
+// and reopens what it rested on so decide proposes again against the file as
+// it is now - all at once.
+func (s *Store) StaleLearnProposal(ctx context.Context, p domain.LearnProposal, now time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	changed := false
+	err := s.inTx(ctx, "stale proposal", func(q *gen.Queries) error {
+		n, err := q.SettleLearnProposal(ctx, gen.SettleLearnProposalParams{
+			Status: string(domain.LearnProposalStale), NewContent: p.NewContent,
+			DecidedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now, ID: p.ID,
+		})
+		if err != nil || n == 0 {
+			return err
+		}
+		changed = true
+		if err := q.ReopenDraftsOfProposal(ctx, p.ID); err != nil {
+			return err
+		}
+		return q.DeleteDecidedTask(ctx, p.TaskKey)
+	})
+	if err != nil {
+		return false, fmt.Errorf("stale proposal %d: %w", p.ID, err)
+	}
+	return changed, nil
+}
+
+// UpdateLearnProtectedRuleText replaces a pinned rule's text, keeping its
+// patterns: the person's newer words won a conflict with it.
+func (s *Store) UpdateLearnProtectedRuleText(ctx context.Context, id int64, text string, now time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	n, err := s.qw.UpdateLearnProtectedRuleText(ctx, gen.UpdateLearnProtectedRuleTextParams{Text: text, UpdatedAt: now, ID: id})
+	if err != nil {
+		return false, fmt.Errorf("update protected rule %d: %w", id, err)
+	}
+	return n > 0, nil
 }

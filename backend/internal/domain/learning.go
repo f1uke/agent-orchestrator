@@ -531,8 +531,17 @@ type LearnProposal struct {
 	Status       LearnProposalStatus
 	DropReason   string
 	EvidenceIDs  []int64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// SnoozedUntil hides a pending proposal until then.
+	SnoozedUntil time.Time
+	// RejectReason is the person's reason for rejecting it; decide reads it.
+	RejectReason string
+	// DecidedAt is when the person settled it; AppliedSHA256 is the hash of
+	// what was written; Resolution is the side a conflict card's person chose.
+	DecidedAt     time.Time
+	AppliedSHA256 string
+	Resolution    LearnResolution
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // LearnDecidedTask is a task decide has run on.
@@ -555,4 +564,32 @@ type LearnDecideResult struct {
 	// other open drafts.
 	Consumed []int64
 	Dropped  []int64
+}
+
+// LearnResolution is which side won a conflict card.
+type LearnResolution string
+
+const (
+	// LearnKeepRule keeps the standing rule and drops the lesson.
+	LearnKeepRule LearnResolution = "keep_rule"
+	// LearnWordsWin lets the person's newer words replace the rule.
+	LearnWordsWin LearnResolution = "words_win"
+	// LearnBoth keeps both, each narrowed to where it applies.
+	LearnBoth LearnResolution = "both"
+)
+
+// Valid reports whether r is a choice a person can make.
+func (r LearnResolution) Valid() bool {
+	return r == LearnKeepRule || r == LearnWordsWin || r == LearnBoth
+}
+
+// LearnSettlement is the person's decision on a pending proposal.
+type LearnSettlement struct {
+	ID            int64
+	Status        LearnProposalStatus
+	RejectReason  string
+	Resolution    LearnResolution
+	AppliedSHA256 string
+	// NewContent is what was written (the person may have edited it).
+	NewContent string
 }

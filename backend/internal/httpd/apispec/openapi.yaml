@@ -858,6 +858,180 @@ paths:
       summary: One proposal with the drafts it rests on
       tags:
       - learning
+  /api/v1/learning/proposals/{id}/approve:
+    post:
+      operationId: approveLearningProposal
+      parameters:
+      - description: Proposal id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Proposal id.
+          format: int64
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersApproveLearningProposalRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProposalDTO'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Approve a proposal: write it (or record the side that won a conflict)'
+      tags:
+      - learning
+  /api/v1/learning/proposals/{id}/reject:
+    post:
+      operationId: rejectLearningProposal
+      parameters:
+      - description: Proposal id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Proposal id.
+          format: int64
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersRejectLearningProposalRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProposalDTO'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Reject a proposal, with a reason decide reads
+      tags:
+      - learning
+  /api/v1/learning/proposals/{id}/snooze:
+    post:
+      operationId: snoozeLearningProposal
+      parameters:
+      - description: Proposal id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Proposal id.
+          format: int64
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersSnoozeLearningProposalRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProposalDTO'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Hide a pending proposal until a time
+      tags:
+      - learning
   /api/v1/learning/protected-rules:
     get:
       operationId: listLearningProtectedRules
@@ -8076,6 +8250,21 @@ components:
       required:
       - cases
       type: object
+    ControllersApproveLearningProposalRequest:
+      properties:
+        content:
+          description: The person's edit of what would be written; empty keeps the
+            proposal's content. For a conflict, the new rule's text or the scope of
+            each.
+          type: string
+        resolution:
+          description: 'Required on a conflict card: which side wins.'
+          enum:
+          - keep_rule
+          - words_win
+          - both
+          type: string
+      type: object
     ControllersCheckLearningForbiddenRequest:
       properties:
         project:
@@ -8610,6 +8799,11 @@ components:
         createdAt:
           format: date-time
           type: string
+        decidedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
         diff:
           description: Unified diff AO computed from the target as it was.
           type: string
@@ -8641,12 +8835,27 @@ components:
           type: string
         rationale:
           type: string
+        rejectReason:
+          type: string
+        resolution:
+          description: The side the person picked on a conflict card.
+          enum:
+          - keep_rule
+          - words_win
+          - both
+          type: string
         ruleVerdicts:
           items:
             $ref: '#/components/schemas/ControllersLearningRuleVerdictDTO'
           type: array
         scope:
           type: string
+        snoozedUntil:
+          description: A pending proposal hidden until then.
+          format: date-time
+          type:
+          - "null"
+          - string
         status:
           enum:
           - pending
@@ -9093,6 +9302,13 @@ components:
       required:
       - started
       type: object
+    ControllersRejectLearningProposalRequest:
+      properties:
+        reason:
+          description: Why not; decide reads it so the same thing is not proposed
+            again.
+          type: string
+      type: object
     ControllersRenameSimFlowInput:
       properties:
         name:
@@ -9444,6 +9660,15 @@ components:
       - udid
       - state
       - detail
+      type: object
+    ControllersSnoozeLearningProposalRequest:
+      properties:
+        until:
+          description: When it comes back; within the next 90 days.
+          format: date-time
+          type: string
+      required:
+      - until
       type: object
     ControllersStandDownSmokeChecklistInput:
       properties:
