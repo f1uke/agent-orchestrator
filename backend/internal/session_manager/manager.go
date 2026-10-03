@@ -263,8 +263,10 @@ type Manager struct {
 	messenger ports.AgentMessenger
 	lcm       lifecycleRecorder
 	dataDir   string
-	runFile   string
-	clock     func() time.Time
+	// knowledgeDir is the knowledge store root (Deps.KnowledgeDir).
+	knowledgeDir string
+	runFile      string
+	clock        func() time.Time
 	// idleCloseTTL is the inactivity window after which CloseIdleSessions closes
 	// a session. Zero disables the sweep.
 	idleCloseTTL time.Duration
@@ -331,6 +333,10 @@ type Deps struct {
 	// DataDir is exported to spawned agents as AO_DATA_DIR so their hook
 	// commands can open the same store.
 	DataDir string
+	// KnowledgeDir is the root of the private knowledge store
+	// (config.Config.KnowledgeDir) that worker teardown rescues stray planning
+	// docs into. Empty disables the rescue.
+	KnowledgeDir string
 	// RunFile is exported to spawned agents as AO_RUN_FILE so their hook
 	// commands resolve this daemon rather than whichever daemon owns the
 	// default run file. Empty omits the export (see EnvRunFile).
@@ -374,6 +380,7 @@ func New(d Deps) *Manager {
 		messenger:           d.Messenger,
 		lcm:                 d.Lifecycle,
 		dataDir:             d.DataDir,
+		knowledgeDir:        d.KnowledgeDir,
 		runFile:             d.RunFile,
 		clock:               d.Clock,
 		idleCloseTTL:        d.IdleCloseTTL,
@@ -491,13 +498,13 @@ func (m *Manager) assignSimDevice(ctx context.Context, id domain.SessionID) stri
 // any stray planning docs left in the worktree into the project's private
 // knowledge store so they survive the teardown. It is best-effort and must never
 // fail teardown — every error is logged and swallowed. Only workers are scanned
-// (orchestrators keep no per-branch worktree artifacts); a session with no data
-// dir or workspace path is a no-op.
+// (orchestrators keep no per-branch worktree artifacts); a manager with no
+// knowledge dir or a session with no workspace path is a no-op.
 func (m *Manager) preserveWorkerKnowledge(rec domain.SessionRecord) {
-	if rec.Kind != domain.KindWorker || m.dataDir == "" || rec.Metadata.WorkspacePath == "" {
+	if rec.Kind != domain.KindWorker || m.knowledgeDir == "" || rec.Metadata.WorkspacePath == "" {
 		return
 	}
-	dest := knowledgestore.PlansDir(m.dataDir, string(rec.ProjectID))
+	dest := knowledgestore.PlansDir(m.knowledgeDir, string(rec.ProjectID))
 	written, err := knowledgestore.PreserveStrayDocs(rec.Metadata.WorkspacePath, rec.Metadata.Branch, dest)
 	if err != nil {
 		m.logger.Warn("preserve worker knowledge: partial failure", "sessionID", rec.ID, "error", err)
