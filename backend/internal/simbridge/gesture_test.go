@@ -918,3 +918,29 @@ func TestRecover_ReleasesWhatTheGestureActuallyHeld(t *testing.T) {
 		t.Fatalf("nothing touched the screen, so nothing may be sent to recover it: %+v", got)
 	}
 }
+
+func TestMinimizesKeyboard_IsAnyKeyThatIsNotAModifier(t *testing.T) {
+	// A hardware key press minimizes the software keyboard - every key but a
+	// modifier alone, measured on iOS 26.3. That is what decides whether
+	// ShowKeyboard has anything to undo.
+	backspace, err := Key("backspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		events []Event
+		want   bool
+	}{
+		"backspace":      {backspace, true},
+		"command-v":      {Paste(), true},
+		"bare command":   {WakeKeyboard(), false},
+		"bare shift":     {[]Event{{Kind: "key", Type: "down", Usage: usageLeftShift}, {Kind: "key", Type: "up", Usage: usageLeftShift}}, false},
+		"a tap":          {[]Event{{Kind: "touch", Type: "begin"}, {Kind: "touch", Type: "end"}}, false},
+		"the toggle":     {ShowKeyboard(), false},
+		"nothing at all": {nil, false},
+	} {
+		if got := MinimizesKeyboard(tc.events); got != tc.want {
+			t.Errorf("%s: MinimizesKeyboard = %v, want %v", name, got, tc.want)
+		}
+	}
+}

@@ -42,6 +42,7 @@ class SimHID {
   async touch(type, x, y) { note((this.reaches() ? "touch " : "dropped touch ") + type + " " + x + "," + y); }
   async key(type, usage) { note((this.reaches() ? "key " : "dropped key ") + type + " " + usage); }
   async button(name) { note((this.reaches() ? "button " : "dropped button ") + name); }
+  async softwareKeyboard() { note(this.reaches() ? "softwareKeyboard" : "dropped softwareKeyboard"); }
 }
 module.exports = {
   SimHID,
@@ -228,6 +229,29 @@ describe("the gesture bridge script", () => {
 		expect(answer.ok).toBe(false);
 		expect((answer.error as { code: string }).code).toBe("bad_request");
 		expect(bridge.calls()).toEqual([]);
+	});
+
+	// A paste or a key press that fell back to hardware keys ends with the
+	// software keyboard toggle, in order, after the keys it undoes.
+	it("sends the software keyboard toggle after the keys before it", async () => {
+		const bridge = startBridge();
+
+		const answer = await bridge.send({
+			op: "perform",
+			udid: "UDID-A",
+			events: [
+				{ kind: "key", type: "down", usage: 42 },
+				{ kind: "key", type: "up", usage: 42 },
+				{ kind: "software-keyboard" },
+			],
+		});
+
+		expect(answer.ok).toBe(true);
+		expect(bridge.calls().filter((line) => !line.startsWith("new SimHID"))).toEqual([
+			"key down 42",
+			"key up 42",
+			"softwareKeyboard",
+		]);
 	});
 
 	// The reason it stays resident: the injector is built once, and everything

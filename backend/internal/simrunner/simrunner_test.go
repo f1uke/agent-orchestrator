@@ -136,7 +136,8 @@ func (f *fakeLauncher) Start(spec StartSpec) (Process, error) {
 	})
 	mux.HandleFunc("/focus", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": WireVersion, "app": "app.for." + spec.UDID,
-			"keyboard": true, "field": map[string]any{"type": "TextField", "label": "email"}})
+			"keyboard": true, "field": map[string]any{"type": "TextField", "label": "email"},
+			"pasteLabels": []string{"วาง", "Paste"}})
 	})
 	mux.HandleFunc("/type", func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]any
@@ -599,7 +600,8 @@ func TestManager_TypesThroughTheRunnerAndCarriesItsAnswer(t *testing.T) {
 		t.Fatalf("await: %+v %v", st, err)
 	}
 	focus, err := m.Focus(context.Background(), udidA)
-	if err != nil || focus.Field == nil || focus.Field.Label != "email" {
+	if err != nil || focus.Field == nil || focus.Field.Label != "email" ||
+		len(focus.PasteLabels) != 2 || focus.PasteLabels[0] != "วาง" {
 		t.Fatalf("focus = %+v, %v", focus, err)
 	}
 
