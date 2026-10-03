@@ -1,0 +1,135 @@
+# Secret-scanning rules for agent-orchestrator.
+#
+# Used by CI (.github/workflows/gitleaks.yml) on every pull request and push,
+# and by the pre-commit hook (.githooks/pre-commit) on every commit.
+# What to do when it fires: AGENTS.md, "Secret scanning".
+#
+# This file = gitleaks' built-in rules + the project rules below, which cover
+# what has actually leaked here: int/uat test-account emails and passwords
+# committed as "example" strings in comments, docs and test fixtures, and the
+# Thai text a Latin password turns into when typed on a Thai keyboard layout
+# (that text decodes straight back to the password).
+#
+# Never put a real secret in this file, a test, or a doc to "test the scanner".
+# Use obviously synthetic values; the ones the repo already uses are listed in
+# the allowlist at the bottom.
+
+title = "agent-orchestrator"
+
+[extend]
+useDefault = true
+
+# --- project rules ---------------------------------------------------------
+
+[[rules]]
+id = "company-email"
+description = "Email address on a Finnomena domain (real accounts never go in the repo; use example.com)"
+regex = '''(?i)\b[a-z0-9][a-z0-9._%+-]*@(?:[a-z0-9-]+\.)*finnomena\.[a-z]{2,6}(?:\.[a-z]{2})?\b'''
+keywords = ["finnomena"]
+tags = ["pii", "test-account"]
+
+  # An SSH remote such as git@gitlab.finnomena.com:group/repo.git is a host, not
+  # an account.
+  [[rules.allowlists]]
+  regexTarget = "match"
+  regexes = ['''(?i)^git@''']
+
+[[rules]]
+id = "password-literal"
+description = "Literal assigned to a password-like name"
+# key = "value", key: 'value', key := `value`, key => "value", "key": "value"
+regex = '''(?i)(?:password|passwd|passcode|pwd)[a-z0-9_.-]{0,24}["'`]?\s*(?::=|==?|:|=>)\s*["'`]([^"'`\s]{4,64})["'`]'''
+secretGroup = 1
+keywords = ["password", "passwd", "passcode", "pwd"]
+tags = ["password", "test-account"]
+
+[[rules]]
+id = "password-literal-arg"
+description = "Literal with a digit passed beside a password-like name"
+# Only "..." and '...' (not backticks, which in Markdown separate list items),
+# and only values holding a digit: JSON arrays and label/value pairs such as
+# "password", "Password" are names, not secrets.
+regex = '''(?i)(?:password|passwd|passcode|pwd)[a-z0-9_.-]{0,24}["']\s*,\s*["']([^"'`\s]*\d[^"'`\s]*)["']'''
+secretGroup = 1
+keywords = ["password", "passwd", "passcode", "pwd"]
+tags = ["password", "test-account"]
+
+[[rules]]
+id = "password-literal-unquoted"
+description = "Unquoted value with a digit assigned to a password-like name"
+# One assignment per line, as in .env files, shell and YAML: PASSWORD=...,
+# export APP_PASSWORD=..., password: ... The value must hold a digit, so code
+# such as `password = pw` or `Password: req.Password` stays quiet.
+regex = '''(?im)^[ \t-]*(?:export[ \t]+)?[a-z0-9_.-]*(?:password|passwd|passcode|pwd)[a-z0-9_.-]*[ \t]*[:=][ \t]*([^\s"'`$<{(\[][^\s"'`]*\d[^\s"'`]*)[ \t]*$'''
+secretGroup = 1
+keywords = ["password", "passwd", "passcode", "pwd"]
+tags = ["password", "test-account"]
+
+[[rules]]
+id = "thai-keyboard-rendering"
+description = "Thai text mixed with / or _ - a Latin password typed on a Thai keyboard layout"
+# On a Thai (Kedmanee) layout the letter keys type Thai, the digit 2 types /
+# and, on iOS, 3 types _ - so a password typed into a simulator whose keyboard
+# is Thai lands as Thai text with a / or _ in it, which decodes straight back to
+# the password. Matches it as text and as \u0e.. escapes.
+# T = a Thai character or its \u0e.. escape, P = / or _
+# A short quoted run of T and P only, holding at least one T next to one P.
+# Not -: Thai slugs join words with it (and standard Kedmanee's 3 is -, so a
+# password whose only digit there is 3 renders as plain Thai, which no regex
+# can tell from Thai text). A password without 2 or 3 is not caught either.
+regex = '''(?:["'`]|\\")((?:\p{Thai}|\\u0[eE][0-9a-fA-F]{2}|[/_]){0,16}(?:(?:\p{Thai}|\\u0[eE][0-9a-fA-F]{2})[/_]|[/_](?:\p{Thai}|\\u0[eE][0-9a-fA-F]{2}))(?:\p{Thai}|\\u0[eE][0-9a-fA-F]{2}|[/_]){0,16})(?:["'`]|\\")'''
+secretGroup = 1
+tags = ["password", "test-account"]
+
+# --- allowlist -------------------------------------------------------------
+#
+# Intentional placeholders and synthetic fixtures. Add a value here only when it
+# is provably not a credential (made up, or public by design), with a comment
+# saying which. For a one-off line, a trailing `gitleaks:allow` comment works too.
+
+[[allowlists]]
+description = "Variable references and obvious placeholders, never literal secrets"
+targetRules = ["password-literal", "password-literal-arg", "password-literal-unquoted"]
+regexTarget = "secret"
+regexes = [
+  '''^\$''',                  # $VAR, ${VAR}, $(cmd)
+  '''^<[^>]*>?$''',           # <password>, <redacted...>
+  '''^\{\{''',                # {{ template }}
+  '''^\*+$''',                # ****
+  '''^[xX.•●]+$''',           # xxxx, ...., masked dots
+  '''(?i)redacted|placeholder|example|changeme|dummy|fake|synthetic''',
+  '''(?i)^(?:pass(?:word|wd|code)?|pwd)s?$''',  # the field's own label
+]
+
+[[allowlists]]
+description = "Synthetic test fixtures already in the repo (made up for tests, never an account's value)"
+regexTarget = "secret"
+regexes = [
+  '''^lf86428$''',            # sim type / paste fixtures (backend/internal/sim*, cli/sim_*)
+  '''^qwert357$''',           # XCTest typist fixtures (backend/internal/simbridge)
+  '''^Pw-12345$''',           # accounts-file fixture (backend/internal/learn)
+  # "lf86428" typed on a Thai Kedmanee layout, as text and as \u escapes
+  '''^สดคุภ/ค$''',
+  '''^\\u0e2a\\u0e14\\u0e04\\u0e38\\u0e20/\\u0e04$''',
+]
+
+[[allowlists]]
+description = "Synthetic tokens in tests and docs (made up, shaped like the real thing on purpose)"
+regexTarget = "secret"
+regexes = [
+  '''^glpat-abc123DEF$''',                    # gitlab auth status fixture (backend/internal/adapters/scm/gitlab)
+  '''^sk-abc123$''',                          # curl example in a companion test (frontend/src/companion)
+  '''^0123456789abcdef0123456789abcdef$''',   # claudepeer frame fixture
+  '''^MOBILITY-4765$''',                      # a tracker-ticket link in the terminal e2e gallery, not a token
+]
+
+[[allowlists]]
+description = "Agent session ids are UUIDs, not credentials"
+targetRules = ["generic-api-key"]
+regexTarget = "match"
+regexes = ['''(?i)SessionID["'`]?\s*:\s*"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"$''']
+
+[[allowlists]]
+description = "Public by design: PostHog project keys are client-side write-only identifiers"
+regexTarget = "match"
+regexes = ['''(?i)posthog_project_key\s*=\s*"phc_''']

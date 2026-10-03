@@ -502,7 +502,7 @@ func (c *SimScreenController) gesture(w http.ResponseWriter, r *http.Request) {
 
 	// Typing is the one gesture whose meaning the device decides: it reads the
 	// key presses through whichever input mode it has selected, so a guest set
-	// to Thai turns "fa12345" into "ดฟๅ/_ภถ". The mode is established before
+	// to Thai turns "lf86428" into "สดคุภ/ค". The mode is established before
 	// anything is composed, and a device that cannot say is refused rather than
 	// typed at hopefully.
 	//

@@ -232,7 +232,7 @@ func TestRun_SecureFieldOnANonLatinKeyboardIsTypedOnLatinLetters(t *testing.T) {
 	typist := &fakeTypist{focus: focused("SecureTextField", "password"), answer: answer}
 
 	result, err := Run(context.Background(), &fakeHolder{}, &fakeReader{screens: []simbridge.Snapshot{before, after}},
-		typist, udid, "finno123")
+		typist, udid, "qwert357")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestRun_SecureFieldsTheKeyboardCannotServeAreLeftToThePasteboard(t *testing
 		text     string
 		want     string
 	}{
-		"no keyboard on screen": {nil, "finno123", "no software keyboard"},
+		"no keyboard on screen": {nil, "qwert357", "no software keyboard"},
 		"Thai text":             {keyboard("ก"), "รหัส", "not plain ASCII"},
 		"accented text":         {keyboard("q"), "café", "not plain ASCII"},
 	} {

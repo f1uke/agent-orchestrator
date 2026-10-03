@@ -130,7 +130,7 @@ func TestType_RefusesWhatTheKeyboardCannotSend(t *testing.T) {
 }
 
 func TestPlanText_UsesKeysOnlyWhenTheGuestCanBeTrusted(t *testing.T) {
-	route, err := PlanText("fa12345", ProbedKeyboard{Mode: usMode}, TextOptions{})
+	route, err := PlanText("lf86428", ProbedKeyboard{Mode: usMode}, TextOptions{})
 	if err != nil {
 		t.Fatalf("PlanText: %v", err)
 	}
@@ -144,8 +144,8 @@ func TestPlanText_UsesKeysOnlyWhenTheGuestCanBeTrusted(t *testing.T) {
 
 func TestPlanText_PastesRatherThanTypingCharactersTheGuestWouldRemap(t *testing.T) {
 	// The bug, and the fix in one assertion: the same call that used to put
-	// "ดฟๅ/_ภถ" in the field now routes around the keyboard entirely.
-	route, err := PlanText("fa12345", ProbedKeyboard{Mode: thaiMode}, TextOptions{})
+	// "สดคุภ/ค" in the field now routes around the keyboard entirely.
+	route, err := PlanText("lf86428", ProbedKeyboard{Mode: thaiMode}, TextOptions{})
 	if err != nil {
 		t.Fatalf("PlanText: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestPlanText_PastesRatherThanTypingCharactersTheGuestWouldRemap(t *testing.
 func TestPlanText_PastesWhenTheGuestWouldNotSayWhatItsKeyboardIs(t *testing.T) {
 	// Unknown is not US. The pasteboard does not care what the input mode is,
 	// so it is the honest way through rather than a refusal.
-	route, err := PlanText("fa12345", ProbedKeyboard{Err: errors.New("device is not booted")}, TextOptions{})
+	route, err := PlanText("lf86428", ProbedKeyboard{Err: errors.New("device is not booted")}, TextOptions{})
 	if err != nil {
 		t.Fatalf("PlanText: %v", err)
 	}
@@ -188,14 +188,14 @@ func TestPlanText_PastesCharactersNoKeyCanSend(t *testing.T) {
 }
 
 func TestPlanText_RawKeysTakesTheKeyboardWhateverTheGuestWouldMakeOfIt(t *testing.T) {
-	route, err := PlanText("fa12345", ProbedKeyboard{Mode: thaiMode}, TextOptions{RawKeys: true})
+	route, err := PlanText("lf86428", ProbedKeyboard{Mode: thaiMode}, TextOptions{RawKeys: true})
 	if err != nil {
 		t.Fatalf("PlanText: %v", err)
 	}
 	if route.Paste {
 		t.Fatal("--raw-keys asked for key presses")
 	}
-	keys, err := TypeRaw("fa12345")
+	keys, err := TypeRaw("lf86428")
 	if err != nil {
 		t.Fatalf("TypeRaw: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestPlanText_RawKeysStillCannotSendWhatHasNoKey(t *testing.T) {
 }
 
 func TestPlanText_PasteFlagForcesTheRoute(t *testing.T) {
-	route, err := PlanText("fa12345", ProbedKeyboard{Mode: usMode}, TextOptions{Paste: true})
+	route, err := PlanText("lf86428", ProbedKeyboard{Mode: usMode}, TextOptions{Paste: true})
 	if err != nil {
 		t.Fatalf("PlanText: %v", err)
 	}
@@ -748,7 +748,7 @@ func TestPlanText_WithoutKeysIsUnchanged(t *testing.T) {
 	// The agent-facing promise: a caller that did not watch a person press
 	// anything still gets the planned, proven route. Locked here so a future
 	// change to forwarding cannot quietly become the default.
-	route, err := PlanText("fa12345", ProbedKeyboard{Mode: thaiMode}, TextOptions{})
+	route, err := PlanText("lf86428", ProbedKeyboard{Mode: thaiMode}, TextOptions{})
 	if err != nil {
 		t.Fatalf("PlanText: %v", err)
 	}

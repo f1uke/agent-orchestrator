@@ -523,18 +523,18 @@ func TestSimGesture_TypePastesWhenTheGuestWouldRemapTheKeys(t *testing.T) {
 	// to "is this keyboard safe" would mean one of these surfaces silently types
 	// the wrong characters again, which is the bug being fixed.
 	svc := &fakeSimService{}
-	driver := pasteLands("fa12345")
+	driver := pasteLands("lf86428")
 	pb := &fakePasteboard{content: "what the human had copied"}
 	screen := &fakeScreen{listing: oneBooted(), driver: driver,
 		keyboard: "th_TH@sw=Thai;hw=Automatic", pasteboard: pb}
 	srv := newScreenTestServer(t, svc, screen)
 
 	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
-		map[string]any{"kind": "type", "text": "fa12345"})
+		map[string]any{"kind": "type", "text": "lf86428"})
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %v", code, out)
 	}
-	if writes := pb.written(); len(writes) != 2 || writes[0] != "fa12345" {
+	if writes := pb.written(); len(writes) != 2 || writes[0] != "lf86428" {
 		t.Fatalf("pasteboard writes = %q, want the payload then the restore", writes)
 	}
 	if pb.content != "what the human had copied" {
@@ -578,7 +578,7 @@ func TestSimGesture_TypeIs501WhenTheMachineCannotPaste(t *testing.T) {
 	srv := newScreenTestServer(t, &fakeSimService{}, screen)
 
 	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
-		map[string]any{"kind": "type", "text": "fa12345"})
+		map[string]any{"kind": "type", "text": "lf86428"})
 	if code != http.StatusNotImplemented {
 		t.Fatalf("status %d, want 501: %v", code, out)
 	}
@@ -590,7 +590,7 @@ func TestSimGesture_TypeOnAUSGuestReachesTheDevice(t *testing.T) {
 	srv := newScreenTestServer(t, &fakeSimService{}, screen)
 
 	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
-		map[string]any{"kind": "type", "text": "fa12345"})
+		map[string]any{"kind": "type", "text": "lf86428"})
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %v", code, out)
 	}
@@ -614,7 +614,7 @@ func TestSimGesture_TypeWithRawKeysSendsWithoutAskingTheDevice(t *testing.T) {
 	srv := newScreenTestServer(t, &fakeSimService{}, screen)
 
 	code, out := postJSON(t, srv.URL+"/api/v1/sessions/p-1/sim-devices/"+testSimUDID+"/gesture",
-		map[string]any{"kind": "type", "text": "fa12345", "rawKeys": true})
+		map[string]any{"kind": "type", "text": "lf86428", "rawKeys": true})
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200: %v", code, out)
 	}
@@ -1013,7 +1013,7 @@ func TestSimGesture_ADragStepForAnUnknownDeviceIsStillRefused(t *testing.T) {
 //
 // The distinction is the layout bug's own lesson turned around. A CHARACTER has
 // to be planned, because the guest remaps character keys according to its input
-// mode - which is how `ao sim type "fa12345"` once arrived as Thai gibberish.
+// mode - which is how `ao sim type "lf86428"` once arrived as Thai gibberish.
 // A key that produces no character has nothing to remap, so it goes straight
 // through, and asking the device about its keyboard for one would be paying a
 // subprocess for an answer that cannot change the outcome.

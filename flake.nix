@@ -26,6 +26,7 @@
             pkgs.nodejs_22
             pkgs.pnpm_10
             pkgs.just
+            pkgs.gitleaks
           ];
 
           shellHook = ''
@@ -34,6 +35,7 @@
             export GOBIN="$GOPATH/bin"
             export PNPM_HOME="$PWD/.pnpm"
             export PATH="$GOBIN:$PNPM_HOME:$PATH"
+            sh scripts/install-git-hooks.sh
           '';
         };
       }

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuse a commit that adds a secret. Installed by scripts/install-git-hooks.sh;
+# rules in .gitleaks.toml; what to do when it fires: AGENTS.md, "Secret scanning".
+exec "$(git rev-parse --show-toplevel)/scripts/secret-scan.sh" staged
