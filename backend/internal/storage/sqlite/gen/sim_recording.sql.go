@@ -15,7 +15,7 @@ const appendSimRecordingStep = `-- name: AppendSimRecordingStep :one
 INSERT INTO sim_recording_step (
     udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen,
     screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index,
-    selector_anchor, selector_anchor_rel
+    selector_anchor, selector_anchor_rel, secure
 )
 SELECT
     ?1,
@@ -36,12 +36,13 @@ SELECT
     ?15,
     ?16,
     ?17,
-    ?18
+    ?18,
+    ?19
 WHERE EXISTS (
     SELECT 1 FROM sim_recording
     WHERE sim_recording.udid = ?1 AND sim_recording.stopped_at IS NULL
 )
-RETURNING udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen, screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index, selector_anchor, selector_anchor_rel
+RETURNING udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen, screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index, selector_anchor, selector_anchor_rel, secure
 `
 
 type AppendSimRecordingStepParams struct {
@@ -63,6 +64,7 @@ type AppendSimRecordingStepParams struct {
 	SelectorIndex     int64
 	SelectorAnchor    string
 	SelectorAnchorRel string
+	Secure            int64
 }
 
 // The step number is assigned by the database, not the caller, and the whole
@@ -73,8 +75,9 @@ type AppendSimRecordingStepParams struct {
 // round trip, and no rows (sql.ErrNoRows) is the refusal signal - no separate
 // SELECT to explain it, because there is only one reason: no recording is
 // open on this device.
-// Column lists below put selector_index, then selector_anchor and
-// selector_anchor_rel, LAST - matching where 0039's and 0041's ALTER TABLE ADD
+// Column lists below put selector_index, then selector_anchor,
+// selector_anchor_rel and secure, LAST - matching where 0039's, 0041's and
+// 0061's ALTER TABLE ADD
 // COLUMN physically put them: that keeps every explicit column list here in
 // the table's own natural order, so sqlc maps these queries onto the plain
 // SimRecordingStep model instead of minting a second, near-identical row type
@@ -99,6 +102,7 @@ func (q *Queries) AppendSimRecordingStep(ctx context.Context, arg AppendSimRecor
 		arg.SelectorIndex,
 		arg.SelectorAnchor,
 		arg.SelectorAnchorRel,
+		arg.Secure,
 	)
 	var i SimRecordingStep
 	err := row.Scan(
@@ -121,6 +125,7 @@ func (q *Queries) AppendSimRecordingStep(ctx context.Context, arg AppendSimRecor
 		&i.SelectorIndex,
 		&i.SelectorAnchor,
 		&i.SelectorAnchorRel,
+		&i.Secure,
 	)
 	return i, err
 }
@@ -167,7 +172,7 @@ func (q *Queries) GetSimRecording(ctx context.Context, udid string) (SimRecordin
 const listSimRecordingSteps = `-- name: ListSimRecordingSteps :many
 SELECT udid, seq, at, kind, selector, selector_rung, ambiguity, off_screen,
     screen_change, x, y, to_x, to_y, duration_ms, text, detail, selector_index,
-    selector_anchor, selector_anchor_rel
+    selector_anchor, selector_anchor_rel, secure
 FROM sim_recording_step WHERE udid = ? ORDER BY seq
 `
 
@@ -201,6 +206,7 @@ func (q *Queries) ListSimRecordingSteps(ctx context.Context, udid string) ([]Sim
 			&i.SelectorIndex,
 			&i.SelectorAnchor,
 			&i.SelectorAnchorRel,
+			&i.Secure,
 		); err != nil {
 			return nil, err
 		}

@@ -487,3 +487,34 @@ func TestSimRecording_AnotherSessionEndingLeavesItOpen(t *testing.T) {
 		t.Fatalf("somebody else's session ending closed this recording: %+v", stored)
 	}
 }
+
+// A secure step keeps its flag (and the field it went into) through the store;
+// a plain one reads back not secure. Without the column a stop could not tell
+// a secure step's empty text from typing nothing.
+func TestAppendSimRecordingStep_SecureRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	s := newRecordingStore(t)
+	owner := seedSession(t, s, "mer")
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, _, err := s.AcquireSimLease(ctx, domain.SimLease{UDID: testUDID, SessionID: owner, AcquiredAt: now, ExpiresAt: now.Add(10 * time.Minute)}); err != nil {
+		t.Fatalf("acquire lease: %v", err)
+	}
+	if out, err := s.StartSimRecording(ctx, simRecording(testUDID, owner, "flow", now), now); err != nil || !out.Granted {
+		t.Fatalf("start: out=%+v err=%v", out, err)
+	}
+	for _, step := range []domain.SimRecordingStep{
+		{At: now, Kind: "type", Secure: true, Selector: "Password", SelectorRung: 1},
+		{At: now, Kind: "type", Text: "plain"},
+	} {
+		if _, ok, err := s.AppendSimRecordingStep(ctx, testUDID, step); err != nil || !ok {
+			t.Fatalf("append: ok=%v err=%v", ok, err)
+		}
+	}
+	steps, err := s.ListSimRecordingSteps(ctx, testUDID)
+	if err != nil {
+		t.Fatalf("list steps: %v", err)
+	}
+	if len(steps) != 2 || !steps[0].Secure || steps[0].Text != "" || steps[0].Selector != "Password" || steps[1].Secure {
+		t.Fatalf("steps = %+v, want the first secure with its field, the second plain", steps)
+	}
+}

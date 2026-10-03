@@ -25,7 +25,11 @@ func TestEmit_HeaderCarriesAppIDPlaceholderAndProvenance(t *testing.T) {
 	// The house style keeps appId an environment variable - never a literal
 	// bundle id. There is no EmitOptions field that could leak one in here;
 	// this line is always exactly this string.
-	if !strings.HasPrefix(got, "appId: ${APP_ID}\n---\n") {
+	//
+	// MAESTRO_APP_ID, not APP_ID: Maestro reads MAESTRO_ variables from the
+	// environment by itself, which is what bin/flow and `ao sim flow run`
+	// give it. An APP_ID would fail every recorded flow on its first line.
+	if !strings.HasPrefix(got, "appId: ${MAESTRO_APP_ID}\n---\n") {
 		t.Fatalf("missing the appId placeholder header, got:\n%s", got)
 	}
 	if want := "# recorded by ao sim at 2026-08-17T10:00:00Z, device iPhone 17 Pro Max (iOS 18.4)\n"; !strings.Contains(got, want) {
@@ -80,7 +84,9 @@ func TestEmit_EntryOptionEmitsRunFlowAsTheFirstStep(t *testing.T) {
 			break
 		}
 	}
-	if firstStepLine != `- runFlow: "../flows/login.yaml"` {
+	// Bare, the way the store's scripts write it and the way bin/flow
+	// follows a runFlow to find the account a subflow needs.
+	if firstStepLine != `- runFlow: ../flows/login.yaml` {
 		t.Fatalf("first step after the header must be runFlow, got %q from:\n%s", firstStepLine, got)
 	}
 }
@@ -506,5 +512,121 @@ func TestEmit_AnchoredStepWaitsOnItsOwnTextNotTheAnchor(t *testing.T) {
 	}
 	if !strings.Contains(got, "- extendedWaitUntil:\n    visible: \"Buy\"") {
 		t.Errorf("missing the wait on the target's own text:\n%s", got)
+	}
+}
+
+// A named recording is a named flow: mobile-ui-scripts requires `name:` on
+// every script (rule 10), and it belongs in the config section above `---`.
+func TestEmit_NameGoesIntoTheConfigSection(t *testing.T) {
+	opts := baseOpts()
+	opts.Name = "nter: sign in"
+	got, err := simflow.Emit(nil, opts)
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.HasPrefix(got, "appId: ${MAESTRO_APP_ID}\nname: \"nter: sign in\"\n---\n") {
+		t.Fatalf("want the name in the config section, got:\n%s", got)
+	}
+}
+
+// What went into a secure field is never written: it becomes the paste the
+// scripts require, long-pressing the field the recorder saw focused.
+func TestEmit_SecureTypingBecomesThePasteNeverTheText(t *testing.T) {
+	field := simflow.Choice{Rung: simflow.RungText, Text: "Password", Ambiguity: 1}
+	got, err := simflow.Emit([]simflow.Step{{Seq: 1, Kind: simflow.StepType, Secure: true, Choice: field, Plain: "Password"}}, baseOpts())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	want := "- retry:\n" +
+		"    maxRetries: 2\n" +
+		"    commands:\n" +
+		"      - eraseText: 40\n" +
+		"      - longPressOn: \"Password\"\n" +
+		"      - tapOn: \"Paste\"\n" +
+		"      - assertVisible: ${MAESTRO_ACCOUNT_PASSWORD_DOTS}\n"
+	if !strings.Contains(got, want) {
+		t.Fatalf("want the paste stanza, got:\n%s", got)
+	}
+	if strings.Contains(got, "inputText") {
+		t.Fatalf("a secure field must never be typed, got:\n%s", got)
+	}
+	if counts, _ := simflow.ParseCounts(got); counts.Review != 0 {
+		t.Errorf("a named field needs no review, counts = %+v", counts)
+	}
+
+	// A field nobody could name is said so, counted, and still never typed.
+	got, err = simflow.Emit([]simflow.Step{{Seq: 1, Kind: simflow.StepType, Secure: true}}, baseOpts())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(got, "      # REVIEW: no field to long-press") || strings.Contains(got, "longPressOn") {
+		t.Fatalf("want a review marker in place of the long press, got:\n%s", got)
+	}
+	if counts, _ := simflow.ParseCounts(got); counts.Review != 1 {
+		t.Errorf("an unnamed field is a step to check, counts = %+v", counts)
+	}
+}
+
+// A finger held still is a long press on what it was held on.
+func TestEmit_LongPressIsLongPressOn(t *testing.T) {
+	step := simflow.Step{Seq: 1, Kind: simflow.StepLongPress,
+		Choice: simflow.Choice{Rung: simflow.RungText, Text: "Email", Ambiguity: 1}, Plain: "Email"}
+	got, err := simflow.Emit([]simflow.Step{step}, baseOpts())
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if !strings.Contains(got, "- longPressOn: \"Email\"\n") {
+		t.Fatalf("got:\n%s", got)
+	}
+}
+
+// --param turns recorded data back into the variable it came from - typed
+// text bare, the way the scripts write it, and a selector quoted - and leaves
+// everything else alone.
+func TestEmit_ParamsReplaceTheValuesTheyName(t *testing.T) {
+	steps := []simflow.Step{
+		{Seq: 1, Kind: simflow.StepType, Text: "someone@example.com"},
+		{Seq: 2, Kind: simflow.StepTap, ScreenChange: true,
+			Choice: simflow.Choice{Rung: simflow.RungText, Text: `K-USA-A\(D\)`, Escaped: true, Ambiguity: 1}, Plain: "K-USA-A(D)"},
+		{Seq: 3, Kind: simflow.StepType, Text: "not a param"},
+		{Seq: 4, Kind: simflow.StepTap, Choice: simflow.Choice{Rung: simflow.RungText, Text: "Buy", Ambiguity: 2,
+			Anchor: "K-USA", Relation: simflow.RelBelow}, Plain: "Buy"},
+	}
+	steps[3].Choice.Rung = simflow.RungTextAnchor
+	opts := baseOpts()
+	opts.Params = []simflow.Param{
+		{Name: "ACCOUNT_EMAIL", Value: "someone@example.com"},
+		{Name: "FUND_CODE", Value: `K-USA-A\(D\)`},
+		{Name: "FUND_QUERY", Value: "K-USA"},
+	}
+	got, err := simflow.Emit(steps, opts)
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	for _, want := range []string{
+		"- inputText: ${MAESTRO_ACCOUNT_EMAIL}\n",
+		"    visible: \"${MAESTRO_FUND_CODE}\"\n",
+		"- tapOn: \"${MAESTRO_FUND_CODE}\"\n",
+		"- inputText: \"not a param\"\n",
+		"      text: \"${MAESTRO_FUND_QUERY}\"\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "someone@example.com") {
+		t.Fatalf("the value a param names must not survive, got:\n%s", got)
+	}
+}
+
+func TestParseParam(t *testing.T) {
+	got, err := simflow.ParseParam("FUND_CODE=K-USA-A\\(D\\)=x")
+	if err != nil || got.Name != "FUND_CODE" || got.Value != `K-USA-A\(D\)=x` {
+		t.Fatalf("got %+v, %v; want the name and everything after the first =", got, err)
+	}
+	for _, bad := range []string{"NOEQUALS", "lower=x", "1ST=x", "EMPTY="} {
+		if _, err := simflow.ParseParam(bad); err == nil {
+			t.Errorf("ParseParam(%q) accepted it", bad)
+		}
 	}
 }

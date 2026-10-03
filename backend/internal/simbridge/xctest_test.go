@@ -309,3 +309,46 @@ func TestSnapshotFromXCTest_CoverOnlyCountsWhenTheReadHitTested(t *testing.T) {
 		t.Fatal("a hit-test that could not run is not a hit-tested read")
 	}
 }
+
+// The element the runner marked as reached by a touch keeps its mark through
+// the conversion, under the path `ao sim ax` prints for it - and a mark on a
+// layout container the converter drops lands on the nearest element it keeps,
+// because that is what a touch there was inside.
+func TestSnapshotFromXCTest_ReachedSurvivesTheConversion(t *testing.T) {
+	read := func(mark func(*XCTestNode)) Snapshot {
+		// Built fresh per read: the trees share no slices, so one mark
+		// cannot leak into the next read.
+		button := XCTestNode{Type: "Button", Label: "Continue", Enabled: true,
+			Frame: Rect{X: 200, Y: 490, Width: 140, Height: 48}}
+		wrapper := XCTestNode{Type: "Other", Frame: Rect{X: 0, Y: 400, Width: 402, Height: 200},
+			Children: []XCTestNode{button}}
+		sheet := XCTestNode{Type: "Alert", Label: "Sign In", Frame: Rect{X: 40, Y: 340, Width: 320, Height: 210},
+			Children: []XCTestNode{wrapper}}
+		root := XCTestNode{Type: "Application", Label: " ", Frame: Rect{Width: 402, Height: 874},
+			Children: []XCTestNode{sheet}}
+		mark(&root)
+		return SnapshotFromXCTest(XCTestHierarchy{Screen: Size{Width: 402, Height: 874}, At: &XCTestAt{Found: true},
+			Apps: []XCTestApp{{BundleID: "com.apple.springboard", Tree: root}}})
+	}
+
+	snap := read(func(root *XCTestNode) { root.Children[0].Children[0].Children[0].Reached = true })
+	if snap.Reached == nil || snap.Reached.Path != "0.0.0" || snap.Reached.Error != "" {
+		t.Fatalf("reached = %+v, want the button at 0.0.0 (its wrapper is dropped)", snap.Reached)
+	}
+
+	snap = read(func(root *XCTestNode) { root.Children[0].Children[0].Reached = true })
+	if snap.Reached == nil || snap.Reached.Path != "0.0" {
+		t.Fatalf("reached = %+v, want the alert at 0.0, the nearest kept element holding the dropped wrapper", snap.Reached)
+	}
+
+	snap = read(func(*XCTestNode) {})
+	if snap.Reached == nil || snap.Reached.Path != "" || snap.Reached.Error == "" {
+		t.Fatalf("reached = %+v, want an answer that says nothing was marked", snap.Reached)
+	}
+
+	plain := SnapshotFromXCTest(XCTestHierarchy{Screen: Size{Width: 402, Height: 874},
+		Apps: []XCTestApp{{BundleID: "a", Tree: XCTestNode{Type: "Application", Frame: Rect{Width: 402, Height: 874}}}}})
+	if plain.Reached != nil {
+		t.Fatalf("reached = %+v on a read that never asked; want nil", plain.Reached)
+	}
+}

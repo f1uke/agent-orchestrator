@@ -337,8 +337,10 @@ func TestSimAX_FormatMaestroEmitsSelectorsPerElement(t *testing.T) {
 	if !strings.Contains(out, "com.example.app") {
 		t.Errorf("missing the foreground app header:\n%s", out)
 	}
-	if !strings.Contains(out, `- tapOn: "Search"`) {
-		t.Errorf("missing the unique-label selector:\n%s", out)
+	// The search field has both a label and an id; the id wins, as
+	// mobile-ui-scripts rule 4 orders them.
+	if !strings.Contains(out, "- tapOn:\n    id: \"search-field\"\n") {
+		t.Errorf("missing the unique-id selector:\n%s", out)
 	}
 	// "See all" is below the fold in scrolledSnapshot.
 	if !strings.Contains(out, "- scrollUntilVisible:") {
@@ -363,7 +365,7 @@ func TestSimAX_FormatMaestroSkipsContainerPointBlocks(t *testing.T) {
 	}
 	// Recursing into a skipped element's children is the whole point: the
 	// leaves underneath must still show up.
-	if !strings.Contains(out, `- tapOn: "Search"`) {
+	if !strings.Contains(out, "    id: \"search-field\"\n") {
 		t.Errorf("missing the leaf selector for a real control:\n%s", out)
 	}
 }

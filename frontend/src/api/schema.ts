@@ -3644,6 +3644,7 @@ export interface components {
             kind: string;
             offScreen?: boolean;
             screenChange?: boolean;
+            secure?: boolean;
             selector?: string;
             selectorAnchor?: string;
             selectorAnchorRel?: string;
@@ -3795,6 +3796,7 @@ export interface components {
         };
         SimXCTestHierarchy: {
             apps: components["schemas"]["SimXCTestApp"][];
+            at?: components["schemas"]["SimbridgeXCTestAt"];
             elapsedMs: number;
             errors?: string[];
             foregroundSource?: string;
@@ -3811,9 +3813,18 @@ export interface components {
             id?: string;
             label?: string;
             placeholder?: string;
+            reached?: boolean;
             selected?: boolean;
             type: string;
             value?: string;
+        };
+        SimbridgeXCTestAt: {
+            error?: string;
+            found: boolean;
+            /** Format: double */
+            x: number;
+            /** Format: double */
+            y: number;
         };
         SimbridgeXCTestCover: {
             by: components["schemas"]["SimbridgeXCTestCoverer"];

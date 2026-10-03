@@ -112,15 +112,16 @@ func TestRender_OffScreenWithAmbiguityStillWarns(t *testing.T) {
 	}
 }
 
-// scrollTarget must trim the label the same way For does when matching, or a
-// label like "  Save  " ends up tapped as "Save" but scrolled to as
-// "  Save  ".
-func TestRender_ScrollTargetIsTrimmed(t *testing.T) {
+// scrollTarget must match the same text the tap does. Maestro matches an
+// element's WHOLE text, so a label that ends in whitespace is kept as it is on
+// both - trimming it on either side matches nothing on a screen whose label
+// really is "  Save  ".
+func TestRender_ScrollTargetIsTheWholeLabel(t *testing.T) {
 	got := simflow.Render(simflow.Choice{
-		Rung: simflow.RungText, Text: "Save", Ambiguity: 1, OffScreen: true, ScrollDirection: simflow.ScrollDown,
+		Rung: simflow.RungText, Text: "  Save  ", Ambiguity: 1, OffScreen: true, ScrollDirection: simflow.ScrollDown,
 	}, "  Save  ")
-	if !strings.Contains(got, `    element: "Save"`) {
-		t.Errorf("want the trimmed label as the scroll target, got: %q", got)
+	if !strings.Contains(got, `    element: "  Save  "`) {
+		t.Errorf("want the whole label as the scroll target, got: %q", got)
 	}
 }
 
