@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// Learning capture: the records AO keeps so a later stage can propose skills
+// Learning capture: the records AO keeps so a later stage can propose memories
 // from what the human taught its agents. See internal/learn and the "Learning
 // capture" section of docs/architecture.md for the contract (what is read, what
 // is kept, where it may go).

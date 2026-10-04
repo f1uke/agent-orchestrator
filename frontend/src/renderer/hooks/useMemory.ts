@@ -1,5 +1,5 @@
 /**
- * The Skills inbox's data layer: what learning proposes, the drafts and rules a
+ * The Memory inbox's data layer: what learning proposes, the drafts and rules a
  * proposal rests on, learning's health, and the person's decisions.
  *
  * Nothing here writes on its own. A proposal reaches a file only through

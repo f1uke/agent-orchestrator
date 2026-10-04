@@ -1,7 +1,7 @@
 import { Brain, FilePen, Lock, MessageSquareQuote, ScrollText, ShieldCheck, Swords } from "lucide-react";
 import type { components } from "../../../api/schema";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import type { Proposal } from "../../hooks/useSkills";
+import type { Proposal } from "../../hooks/useMemory";
 import { ACTION_LABEL, type Action } from "./model";
 
 type Draft = components["schemas"]["ControllersLearningDraftDTO"];
@@ -153,7 +153,9 @@ export function Section({
 	return (
 		<section className="flex flex-col gap-2">
 			<div className="flex items-baseline gap-2">
-				<h3 className="text-[10.5px] font-semibold uppercase tracking-[0.09em] text-passive">{title}</h3>
+				<h3 className="shrink-0 whitespace-nowrap text-[10.5px] font-semibold uppercase tracking-[0.09em] text-passive">
+					{title}
+				</h3>
 				{aside && <span className="min-w-0 truncate text-[11px] text-passive">{aside}</span>}
 			</div>
 			{children}

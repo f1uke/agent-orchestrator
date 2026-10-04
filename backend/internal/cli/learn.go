@@ -101,7 +101,7 @@ func newLearnCommand(ctx *commandContext) *cobra.Command {
 		Short: "See what AO kept from projects that learn from sessions",
 		Long: "Learning capture keeps redacted excerpts of what you type to the sessions of projects " +
 			"with learnFromSessions on (`ao project set-config <id> --learn-from-sessions`), so AO can " +
-			"later propose skills from what you taught. `status` and `excerpts` read what was kept; `forget` deletes it.",
+			"later propose memories from what you taught. `status` and `excerpts` read what was kept; `forget` deletes it.",
 	}
 	cmd.AddCommand(newLearnStatusCommand(ctx))
 	cmd.AddCommand(newLearnExcerptsCommand(ctx))

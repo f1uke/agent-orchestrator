@@ -88,7 +88,7 @@ import aoLogo from "../assets/ao-logo.png";
 import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 import { useWikiStatus } from "../hooks/useWiki";
-import { isWaiting, useLearningStatus, useProposals } from "../hooks/useSkills";
+import { isWaiting, useLearningStatus, useProposals } from "../hooks/useMemory";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
@@ -184,13 +184,13 @@ function useSelection() {
 	return {
 		isHome: pathname === "/",
 		isWiki: pathname === "/wiki",
-		isSkills: pathname === "/skills",
+		isMemory: pathname === "/memory",
 		activeProjectId: params.projectId,
 		activeSessionId: params.sessionId,
 		goHome: () => void navigate({ to: "/" }),
 		goPrs: () => void navigate({ to: "/prs" }),
 		goWiki: () => void navigate({ to: "/wiki" }),
-		goSkills: () => void navigate({ to: "/skills" }),
+		goMemory: () => void navigate({ to: "/memory" }),
 		goGlobalSettings: () => void navigate({ to: "/settings" }),
 		goSettings: (projectId: string) => void navigate({ to: "/projects/$projectId/settings", params: { projectId } }),
 		// Search opens the settings two-pane (where the in-settings search field
@@ -1338,7 +1338,7 @@ function CopySessionIdButton({ sessionId }: { sessionId: string }) {
 
 /**
  * The destinations above the Projects section: the Wiki (once a vault is set)
- * and Skills (once any project learns from sessions, or proposals exist), with
+ * and Memory (once any project learns from sessions, or proposals exist), with
  * the hairline that makes them a section of their own rather than the first
  * entries of Projects.
  */
@@ -1347,23 +1347,23 @@ function TopDestinations({ selection }: { selection: ReturnType<typeof useSelect
 	// An older daemon answers neither route; the row then stays away.
 	const learning = useLearningStatus().data?.projects?.some((p) => p.enabled) ?? false;
 	const proposals = useProposals().data?.proposals ?? [];
-	const skills = learning || proposals.length > 0;
-	if (!wiki && !skills) return null;
+	const memory = learning || proposals.length > 0;
+	if (!wiki && !memory) return null;
 	return (
 		<>
 			{wiki && <WikiNavItem selection={selection} />}
-			{skills && <SkillsNavItem selection={selection} waiting={proposals.filter((p) => isWaiting(p)).length} />}
+			{memory && <MemoryNavItem selection={selection} waiting={proposals.filter((p) => isWaiting(p)).length} />}
 			<div className="mx-2 my-3 h-px bg-border group-data-[collapsible=icon]:mx-0 group-data-[collapsible=icon]:w-5" />
 		</>
 	);
 }
 
 /**
- * The Skills row: where learning's proposals wait for the person. The count
+ * The Memory row: where learning's proposals wait for the person. The count
  * is the proposals waiting for a decision, in the needs-you amber, and moves
  * onto the glyph in the icon rail like the Wiki's dot.
  */
-function SkillsNavItem({ selection, waiting }: { selection: ReturnType<typeof useSelection>; waiting: number }) {
+function MemoryNavItem({ selection, waiting }: { selection: ReturnType<typeof useSelection>; waiting: number }) {
 	const { state } = useSidebar();
 	return (
 		<SidebarMenu className="gap-0 pb-0">
@@ -1371,13 +1371,13 @@ function SkillsNavItem({ selection, waiting }: { selection: ReturnType<typeof us
 				<Tooltip>
 					<TooltipTrigger asChild>
 						<SidebarMenuButton
-							aria-label={waiting > 0 ? `Skills, ${waiting} waiting` : "Skills"}
-							isActive={selection.isSkills}
-							onClick={selection.goSkills}
+							aria-label={waiting > 0 ? `Memory, ${waiting} waiting` : "Memory"}
+							isActive={selection.isMemory}
+							onClick={selection.goMemory}
 							className={cn(
 								"h-8 gap-2.5 rounded-md px-2 text-[12.5px] font-semibold",
 								"group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0!",
-								selection.isSkills
+								selection.isMemory
 									? "bg-accent-weak text-accent shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]"
 									: "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
 							)}
@@ -1392,7 +1392,7 @@ function SkillsNavItem({ selection, waiting }: { selection: ReturnType<typeof us
 								)}
 							</span>
 							<span className="min-w-0 flex-1 truncate tracking-[-0.006em] group-data-[collapsible=icon]:hidden">
-								Skills
+								Memory
 							</span>
 							{waiting > 0 && (
 								<span
@@ -1405,7 +1405,7 @@ function SkillsNavItem({ selection, waiting }: { selection: ReturnType<typeof us
 						</SidebarMenuButton>
 					</TooltipTrigger>
 					<TooltipContent side="right" hidden={state !== "collapsed"}>
-						{waiting > 0 ? `Skills · ${waiting} waiting` : "Skills"}
+						{waiting > 0 ? `Memory · ${waiting} waiting` : "Memory"}
 					</TooltipContent>
 				</Tooltip>
 			</SidebarMenuItem>

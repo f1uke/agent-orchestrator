@@ -13,7 +13,7 @@ import {
 	useProposals,
 	type Decision,
 	type Proposal,
-} from "../../hooks/useSkills";
+} from "../../hooks/useMemory";
 import { ConflictDetail, ProposalDetail } from "./Detail";
 import { ActionPill, Confidence } from "./parts";
 import { fileName, queueOrder } from "./model";
@@ -27,13 +27,13 @@ function tabOf(p: Proposal, now: number): Tab | null {
 }
 
 /**
- * The Skills inbox: what learning proposes from your sessions, one decision at a
+ * The Memory inbox: what learning proposes from your sessions, one decision at a
  * time. The queue (conflicts first, then by confidence) on the left; on the
  * right everything needed to decide one proposal without leaving the page: why,
  * exactly what would be written, your own words, and how it sits with the rules
  * you already have. Nothing is written until you approve.
  */
-export function SkillsPage() {
+export function MemoryPage() {
 	const proposals = useProposals();
 	const status = useLearningStatus();
 	const decide = useDecideProposal();
@@ -84,7 +84,7 @@ export function SkillsPage() {
 		<div className="flex h-full min-h-0 flex-col">
 			<div className="flex h-[47px] shrink-0 items-center gap-[11px] border-b border-border px-[14px]">
 				<GraduationCap className="size-[15px] text-muted-foreground" aria-hidden="true" />
-				<span className="text-[13px] font-semibold">Skills</span>
+				<span className="text-[13px] font-semibold">Memory</span>
 				<span className="truncate text-[12px] text-passive">
 					Lessons from your sessions, written to your agents' memory once you say yes
 				</span>

@@ -1426,8 +1426,8 @@ describe("Sidebar — the Wiki row", () => {
 	});
 });
 
-describe("Sidebar — the Skills row", () => {
-	const skillsRow = (name: RegExp | string = /^Skills/) => screen.queryByRole("button", { name });
+describe("Sidebar — the Memory row", () => {
+	const memoryRow = (name: RegExp | string = /^Memory/) => screen.queryByRole("button", { name });
 	const routes = (learning: boolean, proposals: unknown[]) =>
 		getMock.mockImplementation((path: string) => {
 			if (path === "/api/v1/learning/status")
@@ -1446,19 +1446,28 @@ describe("Sidebar — the Skills row", () => {
 			{ id: 4, status: "applied" },
 		]);
 		renderSidebar();
-		expect(await screen.findByRole("button", { name: "Skills, 2 waiting" })).toBeInTheDocument();
+		expect(await screen.findByRole("button", { name: "Memory, 2 waiting" })).toBeInTheDocument();
 	});
 
 	it("is there with no count once a project learns", async () => {
 		routes(true, []);
 		renderSidebar();
-		expect(await screen.findByRole("button", { name: "Skills" })).toBeInTheDocument();
+		expect(await screen.findByRole("button", { name: "Memory" })).toBeInTheDocument();
+	});
+
+	it("opens the Memory inbox when the row is clicked", async () => {
+		routes(true, []);
+		renderSidebar();
+
+		await userEvent.click(await screen.findByRole("button", { name: "Memory" }));
+
+		expect(navigateMock).toHaveBeenCalledWith({ to: "/memory" });
 	});
 
 	it("stays away while no project learns and nothing was ever proposed", async () => {
 		routes(false, []);
 		renderSidebar();
 		await screen.findByText("Project One");
-		expect(skillsRow()).not.toBeInTheDocument();
+		expect(memoryRow()).not.toBeInTheDocument();
 	});
 });

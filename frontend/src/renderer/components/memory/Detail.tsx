@@ -7,7 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Skeleton } from "../ui/skeleton";
 import { Textarea } from "../ui/textarea";
 import { cn } from "../../lib/utils";
-import type { Decision, Proposal, ProposalDetail as Detail } from "../../hooks/useSkills";
+import type { Decision, Proposal, ProposalDetail as Detail } from "../../hooks/useMemory";
 import { ActionPill, Confidence, EvidenceCard, RuleChip, Section, VerifierNote } from "./parts";
 import { diffFiles, fileName, inDays, OUTCOME_LABEL, tildePath } from "./model";
 
