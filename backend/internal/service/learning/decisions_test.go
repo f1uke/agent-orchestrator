@@ -17,6 +17,8 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
+var app = domain.LearnActor{Via: domain.LearnViaApp}
+
 type decisionsRig struct {
 	st   *sqlite.Store
 	svc  *learning.Service
@@ -58,21 +60,22 @@ func (r decisionsRig) propose(t *testing.T, p domain.LearnProposal) int64 {
 func memoryProposal(mem string) domain.LearnProposal {
 	return domain.LearnProposal{Action: domain.LearnProposeCreateMemory, TargetPath: filepath.Join(mem, "feedback_dev_build.md"),
 		Title: "Dev build only", NewContent: "---\nname: feedback-dev-build\ndescription: \"Test with the Dev build\"\nmetadata:\n  type: feedback\n---\n\nTest with the Dev build.\n",
-		IndexLine: "- [Dev build only](feedback_dev_build.md) - Test with the Dev build", Diff: "--- /dev/null\n+++ b/x\n@@ -0,0 +1,1 @@\n+x\n"}
+		IndexLine: "- [Dev build only](feedback_dev_build.md) - Test with the Dev build", Diff: "--- /dev/null\n+++ b/x\n@@ -0,0 +1,1 @@\n+x\n" +
+			"--- a/m/MEMORY.md\n+++ b/m/MEMORY.md\n@@ -0,0 +1,1 @@\n+- [Dev build only](feedback_dev_build.md) - Test with the Dev build\n"}
 }
 
 func TestApprove_WritesTheMemoryAndSettles(t *testing.T) {
 	r := newDecisionsRig(t)
 	ctx := context.Background()
 	id := r.propose(t, memoryProposal(r.mem))
-	p, err := r.svc.Approve(ctx, id, "", "")
+	p, err := r.svc.Approve(ctx, id, "", "", app)
 	if err != nil || p.Status != domain.LearnProposalApplied || p.AppliedSHA256 == "" {
 		t.Fatalf("approve = %+v, %v", p, err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(r.mem, "MEMORY.md")); !strings.Contains(string(b), "- [Dev build only](feedback_dev_build.md)") {
 		t.Errorf("MEMORY.md = %q", b)
 	}
-	if _, err := r.svc.Approve(ctx, id, "", ""); !errors.Is(err, learning.ErrProposalNotPending) {
+	if _, err := r.svc.Approve(ctx, id, "", "", app); !errors.Is(err, learning.ErrProposalNotPending) {
 		t.Errorf("a second approve: %v", err)
 	}
 }
@@ -82,17 +85,20 @@ func TestApprove_EditIsGatedAndWritten(t *testing.T) {
 	ctx := context.Background()
 	id := r.propose(t, memoryProposal(r.mem))
 	bad := "---\nname: feedback-dev-build\n---\n\nLog in with uat-secret-pass.\n"
-	if _, err := r.svc.Approve(ctx, id, bad, ""); !errors.Is(err, learning.ErrInvalidDecision) || !strings.Contains(err.Error(), "sensitive") {
+	if _, err := r.svc.Approve(ctx, id, bad, "", app); !errors.Is(err, learning.ErrInvalidDecision) || !strings.Contains(err.Error(), "sensitive") {
 		t.Fatalf("a sensitive edit must be refused: %v", err)
 	}
 	edit := "---\nname: feedback-dev-build\ndescription: Dev build: always\n---\n\nTest with the Dev build — never staging.\n"
-	p, err := r.svc.Approve(ctx, id, edit, "")
+	p, err := r.svc.Approve(ctx, id, edit, "", app)
 	if err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(filepath.Join(r.mem, "feedback_dev_build.md"))
 	if string(b) != p.NewContent || !strings.Contains(string(b), `description: "Dev build: always"`) || strings.Contains(string(b), "—") {
 		t.Errorf("written = %q (the edit, with its description quoted and no em dash)", b)
+	}
+	if !strings.Contains(p.Diff, "+Test with the Dev build - never staging.") {
+		t.Errorf("an approved edit's diff must show the edit:\n%s", p.Diff)
 	}
 }
 
@@ -105,7 +111,7 @@ func TestApprove_StaleWhenTheFileChanged(t *testing.T) {
 	}
 	id := r.propose(t, domain.LearnProposal{Action: domain.LearnProposeUpdateMemory, TargetPath: target, Title: "t",
 		BaseSHA256: "0000", NewContent: "new\n"})
-	if _, err := r.svc.Approve(ctx, id, "", ""); !errors.Is(err, learning.ErrProposalStale) {
+	if _, err := r.svc.Approve(ctx, id, "", "", app); !errors.Is(err, learning.ErrProposalStale) {
 		t.Fatalf("err = %v", err)
 	}
 	if b, _ := os.ReadFile(target); string(b) != "changed by hand\n" {
@@ -127,10 +133,10 @@ func TestConflict_SidesAndProtectedRule(t *testing.T) {
 	conflict := domain.LearnProposal{Action: domain.LearnProposeConflict, TargetPath: "rule:protected-" + strconv.FormatInt(pinned.ID, 10), Title: "t",
 		NewContent: "Workers may use ao sim without asking."}
 	id := r.propose(t, conflict)
-	if _, err := r.svc.Approve(ctx, id, "", ""); !errors.Is(err, learning.ErrInvalidDecision) {
+	if _, err := r.svc.Approve(ctx, id, "", "", app); !errors.Is(err, learning.ErrInvalidDecision) {
 		t.Errorf("a conflict needs a side: %v", err)
 	}
-	p, err := r.svc.Approve(ctx, id, "", domain.LearnWordsWin)
+	p, err := r.svc.Approve(ctx, id, "", domain.LearnWordsWin, app)
 	if err != nil || p.Resolution != domain.LearnWordsWin || p.Status != domain.LearnProposalApplied {
 		t.Fatalf("words win = %+v %v", p, err)
 	}
@@ -141,7 +147,7 @@ func TestConflict_SidesAndProtectedRule(t *testing.T) {
 
 	conflict.TargetPath = "rule:abc-0"
 	keep := r.propose(t, conflict)
-	if p, err := r.svc.Approve(ctx, keep, "", domain.LearnKeepRule); err != nil || p.Status != domain.LearnProposalRejected || p.RejectReason != "kept the rule" {
+	if p, err := r.svc.Approve(ctx, keep, "", domain.LearnKeepRule, app); err != nil || p.Status != domain.LearnProposalRejected || p.RejectReason != "kept the rule" {
 		t.Errorf("keep the rule = %+v %v", p, err)
 	}
 }
@@ -150,17 +156,17 @@ func TestRejectAndSnooze(t *testing.T) {
 	r := newDecisionsRig(t)
 	ctx := context.Background()
 	id := r.propose(t, memoryProposal(r.mem))
-	if _, err := r.svc.Snooze(ctx, id, time.Now().Add(-time.Hour)); !errors.Is(err, learning.ErrInvalidDecision) {
+	if _, err := r.svc.Snooze(ctx, id, time.Now().Add(-time.Hour), app); !errors.Is(err, learning.ErrInvalidDecision) {
 		t.Errorf("snooze into the past: %v", err)
 	}
 	until := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second)
-	if p, err := r.svc.Snooze(ctx, id, until); err != nil || !p.SnoozedUntil.Equal(until) {
+	if p, err := r.svc.Snooze(ctx, id, until, app); err != nil || !p.SnoozedUntil.Equal(until) {
 		t.Errorf("snooze = %+v %v", p, err)
 	}
 	if p, _, _ := r.svc.Proposal(ctx, id); !p.SnoozedUntil.Equal(until) || p.Status != domain.LearnProposalPending {
 		t.Errorf("stored = %+v", p)
 	}
-	p, err := r.svc.Reject(ctx, id, "only that week")
+	p, err := r.svc.Reject(ctx, id, "only that week", app)
 	if err != nil || p.Status != domain.LearnProposalRejected || p.RejectReason != "only that week" {
 		t.Errorf("reject = %+v %v", p, err)
 	}
@@ -174,7 +180,7 @@ func TestSnoozedProposalComesBackWhenTaughtAgain(t *testing.T) {
 	ctx := context.Background()
 	p := memoryProposal(r.mem)
 	id := r.propose(t, p)
-	if _, err := r.svc.Snooze(ctx, id, time.Now().Add(80*24*time.Hour)); err != nil {
+	if _, err := r.svc.Snooze(ctx, id, time.Now().Add(80*24*time.Hour), app); err != nil {
 		t.Fatal(err)
 	}
 	p.ID, p.ProjectID, p.TaskKey, p.Status, p.Scope = id, "p", "solo:y", domain.LearnProposalPending, "project:p"

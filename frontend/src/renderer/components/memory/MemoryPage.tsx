@@ -16,7 +16,7 @@ import {
 } from "../../hooks/useMemory";
 import { ConflictDetail, ProposalDetail } from "./Detail";
 import { ActionPill, Confidence } from "./parts";
-import { fileName, queueOrder } from "./model";
+import { fileName, isSnoozed, queueOrder } from "./model";
 
 type Tab = "pending" | "snoozed" | "decided";
 
@@ -66,12 +66,20 @@ export function MemoryPage() {
 		return () => window.clearTimeout(t);
 	}, [toast]);
 
-	const onDecide = (p: Proposal, d: Decision) => {
+	const onDecide = (p: Proposal, d: Decision, done?: () => void) => {
 		decide.mutate(
 			{ id: p.id, decision: d },
 			{
 				onSuccess: (after) => {
 					setToast(toastFor(p, after, d));
+					done?.();
+					if (d.kind === "edit") return;
+					if (d.kind === "unsnooze" || d.kind === "reopen" || d.kind === "undo") {
+						// Back in the queue: follow it there, still open.
+						setTab("pending");
+						setSelected(p.id);
+						return;
+					}
 					const next = visible.find((x) => x.id !== p.id);
 					setSelected(next?.id ?? null);
 				},
@@ -195,7 +203,7 @@ export function MemoryPage() {
 									loading={detail.isPending}
 									busy={decide.isPending}
 									error={decide.isError && decide.variables?.id === current.id ? decide.error.message : undefined}
-									onDecide={(d) => onDecide(current, d)}
+									onDecide={(d, done) => onDecide(current, d, done)}
 								/>
 							) : (
 								<ProposalDetail
@@ -205,7 +213,7 @@ export function MemoryPage() {
 									loading={detail.isPending}
 									busy={decide.isPending}
 									error={decide.isError && decide.variables?.id === current.id ? decide.error.message : undefined}
-									onDecide={(d) => onDecide(current, d)}
+									onDecide={(d, done) => onDecide(current, d, done)}
 								/>
 							)
 						) : (
@@ -220,8 +228,9 @@ export function MemoryPage() {
 					</div>
 				</div>
 			)}
+			{/* The toast sits above the sticky decide bar, never over its buttons. */}
 			{toast && (
-				<div className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2" role="status">
+				<div className="pointer-events-none fixed bottom-24 left-1/2 z-50 -translate-x-1/2" role="status">
 					<div className="flex items-center gap-2 rounded-lg border border-border bg-raised px-3.5 py-2 text-[12.5px] shadow-lg">
 						<Check className="size-3.5" style={{ color: "var(--green)" }} aria-hidden="true" /> {toast}
 					</div>
@@ -232,7 +241,17 @@ export function MemoryPage() {
 }
 
 function toastFor(p: Proposal, after: Proposal, d: Decision): string {
+	const file = fileName(p.targetPath);
 	if (d.kind === "reject") return "Rejected. Learning will not propose this again without new evidence.";
+	if (d.kind === "unsnooze") return "Unsnoozed - it is back in To decide.";
+	if (d.kind === "reopen") return "Reopened - it is back in To decide.";
+	if (d.kind === "edit") return `Saved your edit to ${file} - new sessions read it.`;
+	if (d.kind === "undo") {
+		if (p.action === "conflict") return "Undone - the card is back in To decide.";
+		return p.action === "create_memory"
+			? `Removed ${file}${p.indexLine ? " and its MEMORY.md line" : ""} - the proposal is back in To decide.`
+			: `Put the earlier ${file} back - the proposal is back in To decide.`;
+	}
 	if (d.kind === "snooze")
 		return `Snoozed until ${new Date(d.until).toLocaleDateString()}; it comes back sooner if taught again.`;
 	if (p.action === "conflict") {
@@ -240,7 +259,7 @@ function toastFor(p: Proposal, after: Proposal, d: Decision): string {
 			? "Kept the rule. The lesson will not be proposed again."
 			: "Decided. The decision and your new rule are kept here.";
 	}
-	return `Wrote ${fileName(p.targetPath)}${p.indexLine ? " and its MEMORY.md line" : ""} - new sessions of the project read it.`;
+	return `Wrote ${file}${p.indexLine ? " and its MEMORY.md line" : ""} - new sessions of the project read it.`;
 }
 
 function openDrafts(status: ReturnType<typeof useLearningStatus>["data"]): number {
@@ -254,7 +273,7 @@ function Row({ p, active, onClick }: { p: Proposal; active: boolean; onClick: ()
 			? `Rejected - ${p.rejectReason}`
 			: p.status === "applied"
 				? `${p.action === "conflict" ? "Decided" : "Written"} ${p.decidedAt ? new Date(p.decidedAt).toLocaleDateString() : ""}`
-				: p.snoozedUntil && Date.parse(p.snoozedUntil) > Date.now()
+				: isSnoozed(p)
 					? `Snoozed until ${new Date(p.snoozedUntil).toLocaleDateString()}`
 					: `${n} ${n === 1 ? "quote" : "quotes"} of yours · ${new Date(p.createdAt).toLocaleDateString()}`;
 	return (

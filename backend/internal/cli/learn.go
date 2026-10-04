@@ -112,6 +112,13 @@ func newLearnCommand(ctx *commandContext) *cobra.Command {
 	cmd.AddCommand(newLearnRulesCommand(ctx))
 	cmd.AddCommand(newLearnDecideCommand(ctx))
 	cmd.AddCommand(newLearnProposalsCommand(ctx))
+	cmd.AddCommand(newLearnApproveCommand(ctx))
+	cmd.AddCommand(newLearnRejectCommand(ctx))
+	cmd.AddCommand(newLearnSnoozeCommand(ctx))
+	cmd.AddCommand(newLearnUnsnoozeCommand(ctx))
+	cmd.AddCommand(newLearnReopenCommand(ctx))
+	cmd.AddCommand(newLearnUndoCommand(ctx))
+	cmd.AddCommand(newLearnEditCommand(ctx))
 	return cmd
 }
 

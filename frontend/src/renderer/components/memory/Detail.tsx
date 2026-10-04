@@ -1,15 +1,14 @@
 import { useState } from "react";
-import { Check, ChevronDown, Clock, FolderGit2, Globe, Lock, Pencil, X } from "lucide-react";
+import { AlertTriangle, FolderGit2, Globe, Lock } from "lucide-react";
 import type { components } from "../../../api/schema";
 import { DiffRows } from "../DiffRows";
-import { Button } from "../ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Skeleton } from "../ui/skeleton";
 import { Textarea } from "../ui/textarea";
 import { cn } from "../../lib/utils";
-import type { Decision, Proposal, ProposalDetail as Detail } from "../../hooks/useMemory";
-import { ActionPill, Confidence, EvidenceCard, RuleChip, Section, VerifierNote } from "./parts";
-import { diffFiles, fileName, inDays, OUTCOME_LABEL, tildePath } from "./model";
+import type { Decision, Proposal, ProposalDetail as Detail, Written } from "../../hooks/useMemory";
+import { DecideBar } from "./DecideBar";
+import { ActionPill, Confidence, EvidenceCard, History, RuleChip, Section, VerifierNote } from "./parts";
+import { diffFiles, fileName, OUTCOME_LABEL, tildePath } from "./model";
 
 type RuleRef = components["schemas"]["ControllersLearningRuleRefDTO"];
 
@@ -19,7 +18,8 @@ export interface DecideProps {
 	loading: boolean;
 	busy: boolean;
 	error?: string;
-	onDecide: (d: Decision) => void;
+	/** done runs once the decision went through (an edit saved closes the editor). */
+	onDecide: (d: Decision, done?: () => void) => void;
 }
 
 function Header({ p }: { p: Proposal }) {
@@ -57,134 +57,6 @@ function Header({ p }: { p: Proposal }) {
 	);
 }
 
-function Settled({ p }: { p: Proposal }) {
-	const when = p.decidedAt ? new Date(p.decidedAt).toLocaleString() : "";
-	return (
-		<div className="sticky bottom-0 border-t border-border bg-background px-8 py-3 text-[12px] text-muted-foreground">
-			{p.status === "applied" && p.action !== "conflict" && (
-				<>Written {when}. If you edit the file yourself, learning only proposes changes to it.</>
-			)}
-			{p.status === "applied" && p.action === "conflict" && (
-				<>
-					Decided {when}: {p.resolution === "words_win" ? "your newer words win" : "both, scoped"}.
-				</>
-			)}
-			{p.status === "rejected" && (
-				<>
-					Rejected {when}: “{p.rejectReason}”. Kept so it is not proposed again without new evidence.
-				</>
-			)}
-			{p.status === "stale" && (
-				<>The file changed after this was proposed; it will be proposed again against the file as it is now.</>
-			)}
-			{p.status === "pending" && p.snoozedUntil && (
-				<>Snoozed until {new Date(p.snoozedUntil).toLocaleString()}; it comes back sooner if it is taught again.</>
-			)}
-		</div>
-	);
-}
-
-function DecideBar({
-	p,
-	busy,
-	error,
-	onDecide,
-	editing,
-	onEdit,
-	draft,
-	approveLabel = "Approve",
-	resolution,
-}: {
-	p: Proposal;
-	busy: boolean;
-	error?: string;
-	onDecide: (d: Decision) => void;
-	editing: boolean;
-	onEdit?: () => void;
-	draft?: string;
-	approveLabel?: string;
-	resolution?: "keep_rule" | "words_win" | "both";
-}) {
-	const [rejecting, setRejecting] = useState(false);
-	const [reason, setReason] = useState("");
-	const snoozed = p.snoozedUntil && Date.parse(p.snoozedUntil) > Date.now();
-	if (p.status !== "pending" || snoozed) return <Settled p={p} />;
-	return (
-		<div className="sticky bottom-0 flex flex-col gap-2 border-t border-border bg-background px-8 py-3">
-			{error && (
-				<p className="text-[12px]" style={{ color: "var(--red)" }} role="alert">
-					{error}
-				</p>
-			)}
-			{rejecting && (
-				<Textarea
-					autoFocus
-					value={reason}
-					onChange={(e) => setReason(e.target.value)}
-					rows={2}
-					placeholder="Why not? (optional - learning reads this, so it does not propose the same thing again)"
-					className="text-[12.5px]"
-				/>
-			)}
-			<div className="flex items-center gap-2">
-				{rejecting ? (
-					<>
-						<Button
-							size="sm"
-							variant="outline"
-							disabled={busy}
-							onClick={() => onDecide({ kind: "reject", reason })}
-							style={{ color: "var(--red)", borderColor: "color-mix(in srgb, var(--red) 40%, transparent)" }}
-						>
-							<X className="size-3.5" /> Reject
-						</Button>
-						<Button size="sm" variant="ghost" onClick={() => setRejecting(false)}>
-							Cancel
-						</Button>
-					</>
-				) : (
-					<>
-						<Button
-							size="sm"
-							disabled={busy}
-							onClick={() => onDecide({ kind: "approve", content: editing ? draft : undefined, resolution })}
-						>
-							<Check className="size-3.5" /> {editing && !resolution ? "Approve my edit" : approveLabel}
-						</Button>
-						{onEdit && !editing && (
-							<Button size="sm" variant="outline" disabled={busy} onClick={onEdit}>
-								<Pencil className="size-3.5" /> Edit first
-							</Button>
-						)}
-						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button size="sm" variant="ghost" disabled={busy}>
-									<Clock className="size-3.5" /> Snooze <ChevronDown className="size-3" />
-								</Button>
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="start">
-								<DropdownMenuItem onSelect={() => onDecide({ kind: "snooze", until: inDays(1) })}>
-									Until tomorrow
-								</DropdownMenuItem>
-								<DropdownMenuItem onSelect={() => onDecide({ kind: "snooze", until: inDays(7) })}>
-									For a week
-								</DropdownMenuItem>
-								<DropdownMenuItem onSelect={() => onDecide({ kind: "snooze", until: inDays(90) })}>
-									Until it is taught again (90 days at most)
-								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
-						<div className="flex-1" />
-						<Button size="sm" variant="ghost" disabled={busy} onClick={() => setRejecting(true)}>
-							<X className="size-3.5" /> Reject
-						</Button>
-					</>
-				)}
-			</div>
-		</div>
-	);
-}
-
 function EvidenceSection({ detail, loading }: { detail?: Detail; loading: boolean }) {
 	const n = detail?.evidence.length ?? 0;
 	return (
@@ -202,17 +74,73 @@ function ruleFor(detail: Detail | undefined, id: string): RuleRef {
 	return detail?.rules.find((r) => r.id === id) ?? { id, text: id, source: "" };
 }
 
+function DiffFiles({ diff, label }: { diff: string; label?: (created: boolean) => string }) {
+	return (
+		<div className="flex flex-col gap-2.5">
+			{diffFiles(diff).map((f) => (
+				<div
+					key={f.path}
+					className="overflow-hidden rounded-lg border border-border [&_*]:whitespace-pre-wrap [&_*]:break-words"
+				>
+					<div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+						<span className="text-foreground">{f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
+						<span className="text-passive">{label ? label(f.created) : f.created ? "new file" : "changed"}</span>
+					</div>
+					<DiffRows lines={f.lines} size="wide" />
+				</div>
+			))}
+		</div>
+	);
+}
+
+/**
+ * What changed since AO wrote it: by hand, by an agent, by another proposal.
+ * Shown before anything can be undone or edited over it.
+ */
+function ChangedSince({ written, what }: { written: Written; what: string }) {
+	return (
+		<div
+			className="flex flex-col gap-2.5 rounded-lg border px-3.5 py-3"
+			style={{ borderColor: "color-mix(in srgb, var(--amber) 40%, transparent)" }}
+		>
+			<div className="flex items-start gap-2 text-[12.5px] leading-[1.5]">
+				<AlertTriangle className="mt-[2px] size-3.5 shrink-0" style={{ color: "var(--amber)" }} aria-hidden="true" />
+				<span>
+					{!written.exists ? (
+						<>The file is gone since AO wrote it - deleted by hand or by an agent.</>
+					) : (
+						<>
+							{what} changed since AO wrote it - by hand, by an agent, or by another proposal. Undo or an edit goes
+							over this change only once you confirm.
+						</>
+					)}
+				</span>
+			</div>
+			{written.diff && <DiffFiles diff={written.diff} label={() => "AO wrote → now"} />}
+		</div>
+	);
+}
+
 /** A memory, skill or CLAUDE.md change: why, the exact change, your words, the rules it touches. */
 export function ProposalDetail({ p, detail, loading, busy, error, onDecide }: DecideProps) {
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState(p.newContent);
-	const files = diffFiles(p.diff);
+	const applied = p.status === "applied";
+	const written = detail?.written;
 	return (
 		<div className="flex min-h-full flex-col">
 			<div className="flex flex-1 flex-col gap-6 px-8 py-6">
 				<Header p={p} />
 				<Section
-					title={editing ? "Edit before approving" : "What would be written"}
+					title={
+						editing
+							? applied
+								? "Edit what was written"
+								: "Edit before approving"
+							: applied
+								? "What was written"
+								: "What would be written"
+					}
 					aside={
 						<span className="font-mono">{tildePath(p.targetPath.slice(0, p.targetPath.lastIndexOf("/") + 1))}</span>
 					}
@@ -226,24 +154,17 @@ export function ProposalDetail({ p, detail, loading, busy, error, onDecide }: De
 								className="font-mono text-[12px] leading-[1.6]"
 							/>
 							<span className="text-[11px] text-passive">
-								The same checks run on your edit before anything is written: the file's format, your forbidden patterns,
-								sensitive values.
+								{applied ? "You are editing the file as it is now. " : ""}The same checks run on your edit before
+								anything is written: the file's format, your forbidden patterns, sensitive values.
 							</span>
 						</div>
 					) : (
 						<div className="flex flex-col gap-2.5">
-							{files.map((f) => (
-								<div
-									key={f.path}
-									className="overflow-hidden rounded-lg border border-border [&_*]:whitespace-pre-wrap [&_*]:break-words"
-								>
-									<div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
-										<span className="text-foreground">{f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
-										<span className="text-passive">{f.created ? "new file" : "changed"}</span>
-									</div>
-									<DiffRows lines={f.lines} size="wide" />
-								</div>
-							))}
+							{applied && written?.changed && <ChangedSince written={written} what={fileName(p.targetPath)} />}
+							{applied && written && !written.changed && (
+								<span className="text-[11.5px] text-passive">Unchanged since it was written.</span>
+							)}
+							<DiffFiles diff={p.diff} />
 						</div>
 					)}
 				</Section>
@@ -263,14 +184,22 @@ export function ProposalDetail({ p, detail, loading, busy, error, onDecide }: De
 					</Section>
 				)}
 				<VerifierNote p={p} />
+				{detail && detail.history.length > 0 && <History events={detail.history} />}
 			</div>
 			<DecideBar
 				p={p}
+				written={written}
 				busy={busy}
 				error={error}
-				onDecide={onDecide}
+				onDecide={(d) => onDecide(d, d.kind === "edit" ? () => setEditing(false) : undefined)}
 				editing={editing}
-				onEdit={() => setEditing(true)}
+				onEdit={() => {
+					// An approved proposal is edited from the file as it is now, so
+					// nobody's later change is lost by the edit.
+					setDraft(applied ? (written?.content ?? p.newContent) : p.newContent);
+					setEditing(true);
+				}}
+				onCancelEdit={() => setEditing(false)}
 				draft={draft}
 			/>
 		</div>
@@ -282,6 +211,7 @@ type Side = "keep_rule" | "words_win" | "both";
 /** Two columns: the rule you have, your newer words. You pick which wins; learning never resolves it. */
 export function ConflictDetail({ p, detail, loading, busy, error, onDecide }: DecideProps) {
 	const settled = p.status !== "pending";
+	const written = detail?.written;
 	// A decided card shows the side that won, and nothing on it can change.
 	const [side, setSide] = useState<Side | null>(settled && p.resolution ? (p.resolution as Side) : null);
 	const [scope, setScope] = useState(settled && p.resolution === "both" ? p.newContent : "");
@@ -393,6 +323,11 @@ export function ConflictDetail({ p, detail, loading, busy, error, onDecide }: De
 						/>
 					)}
 				</Section>
+				{written?.changed && (
+					<Section title="Your pinned rule now">
+						<ChangedSince written={written} what="Your pinned rule" />
+					</Section>
+				)}
 				{p.ruleVerdicts.some((v) => v.ruleId !== ruleId) && (
 					<Section title="Other rules it touches">
 						<div className="flex flex-wrap gap-1.5">
@@ -410,10 +345,12 @@ export function ConflictDetail({ p, detail, loading, busy, error, onDecide }: De
 					</Section>
 				)}
 				<VerifierNote p={p} />
+				{detail && detail.history.length > 0 && <History events={detail.history} />}
 			</div>
 			{side || p.status !== "pending" ? (
 				<DecideBar
 					p={p}
+					written={written}
 					busy={busy || (side === "both" && scope.trim() === "")}
 					error={error}
 					editing={side === "both"}

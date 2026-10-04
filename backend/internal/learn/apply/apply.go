@@ -31,17 +31,27 @@ type Roots struct {
 	History string
 }
 
+// Written is what applying a proposal did, as undo needs it.
+type Written struct {
+	// SHA256 is the hash of the file written.
+	SHA256 string
+	// Before is the content the write replaced ("" for a new file).
+	Before string
+	// IndexLine is the line added to MEMORY.md ("" when none was added).
+	IndexLine string
+}
+
 // Apply writes p, with content in place of its proposed content when the
-// person edited it. It returns the hash of the file written.
-func Apply(r Roots, p domain.LearnProposal, content string, now time.Time) (string, error) {
+// person edited it.
+func Apply(r Roots, p domain.LearnProposal, content string, now time.Time) (Written, error) {
 	if content == "" {
 		content = p.NewContent
 	}
 	if strings.TrimSpace(content) == "" {
-		return "", errors.New("refusing to write an empty file")
+		return Written{}, errors.New("refusing to write an empty file")
 	}
 	if err := r.allowed(p.TargetPath); err != nil {
-		return "", err
+		return Written{}, err
 	}
 	switch p.Action {
 	case domain.LearnProposeCreateMemory:
@@ -49,42 +59,42 @@ func Apply(r Roots, p domain.LearnProposal, content string, now time.Time) (stri
 	case domain.LearnProposeUpdateMemory, domain.LearnProposeUpdateSkill, domain.LearnProposeEditRuleFile:
 		old, err := os.ReadFile(p.TargetPath)
 		if err != nil {
-			return "", fmt.Errorf("read %s: %w", p.TargetPath, err)
+			return Written{}, fmt.Errorf("read %s: %w", p.TargetPath, err)
 		}
 		if sha(old) != p.BaseSHA256 {
-			return "", ErrStale
+			return Written{}, ErrStale
 		}
 		if err := r.backup(p.TargetPath, old, now); err != nil {
-			return "", err
+			return Written{}, err
 		}
 		if err := writeAtomic(p.TargetPath, []byte(content)); err != nil {
-			return "", err
+			return Written{}, err
 		}
-		return sha([]byte(content)), nil
+		return Written{SHA256: sha([]byte(content)), Before: string(old)}, nil
 	default:
-		return "", fmt.Errorf("a %s proposal writes no file", p.Action)
+		return Written{}, fmt.Errorf("a %s proposal writes no file", p.Action)
 	}
 }
 
-func (r Roots) createMemory(p domain.LearnProposal, content string, now time.Time) (string, error) {
+func (r Roots) createMemory(p domain.LearnProposal, content string, now time.Time) (Written, error) {
 	if _, err := os.Stat(p.TargetPath); err == nil {
-		return "", ErrStale
+		return Written{}, ErrStale
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return Written{}, err
 	}
 	// Everything that can fail before a write is done first, so a failure
 	// leaves nothing behind: the index's next content and its backup.
-	index := filepath.Join(filepath.Dir(p.TargetPath), "MEMORY.md")
+	index := indexPath(p.TargetPath)
 	old, err := os.ReadFile(index)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return Written{}, err
 	}
 	writeIndex := p.IndexLine != "" && !strings.Contains(string(old), p.IndexLine)
 	next := string(old)
 	if writeIndex {
 		if len(old) > 0 {
 			if err := r.backup(index, old, now); err != nil {
-				return "", err
+				return Written{}, err
 			}
 		}
 		if next != "" && !strings.HasSuffix(next, "\n") {
@@ -93,19 +103,25 @@ func (r Roots) createMemory(p domain.LearnProposal, content string, now time.Tim
 		next += p.IndexLine + "\n"
 	}
 	if err := os.MkdirAll(filepath.Dir(p.TargetPath), 0o750); err != nil {
-		return "", err
+		return Written{}, err
 	}
 	if err := writeAtomic(p.TargetPath, []byte(content)); err != nil {
-		return "", err
+		return Written{}, err
 	}
+	w := Written{SHA256: sha([]byte(content))}
 	if writeIndex {
 		if err := writeAtomic(index, []byte(next)); err != nil {
 			// A memory without its index line is half a change: take it back.
 			_ = os.Remove(p.TargetPath)
-			return "", fmt.Errorf("write MEMORY.md: %w", err)
+			return Written{}, fmt.Errorf("write MEMORY.md: %w", err)
 		}
+		w.IndexLine = p.IndexLine
 	}
-	return sha([]byte(content)), nil
+	return w, nil
+}
+
+func indexPath(memory string) string {
+	return filepath.Join(filepath.Dir(memory), "MEMORY.md")
 }
 
 // allowed confines a target, through symlinks, to the places learning may
@@ -164,8 +180,11 @@ func (r Roots) backup(path string, content []byte, now time.Time) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, now.UTC().Format("20060102T150405.000000000Z")), content, 0o600)
+	return os.WriteFile(filepath.Join(dir, now.UTC().Format(backupStamp)), content, 0o600)
 }
+
+// backupStamp names a backup by when it was made.
+const backupStamp = "20060102T150405.000000000Z"
 
 // writeAtomic writes through a temp file in the same directory, synced, then
 // renamed over the target, keeping the target's mode when it exists.

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -60,7 +61,7 @@ func (s *Store) ListSkillProposals(ctx context.Context) ([]domain.LearnProposal,
 			NewContent: r.NewContent, IndexLine: r.IndexLine, Diff: r.Diff, Confidence: r.Confidence, Outcome: domain.LearnOutcome(r.Outcome),
 			Status: domain.LearnProposalStatus(r.Status), DropReason: r.DropReason, EvidenceIDs: byProposal[r.ID],
 			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, RejectReason: r.RejectReason, AppliedSHA256: r.AppliedSha256,
-			Resolution: domain.LearnResolution(r.Resolution),
+			Resolution: domain.LearnResolution(r.Resolution), AppliedBefore: r.AppliedBefore, AppliedIndexLine: r.AppliedIndexLine,
 		}
 		if r.SnoozedUntil.Valid {
 			p.SnoozedUntil = r.SnoozedUntil.Time
@@ -154,48 +155,128 @@ func nonNilVerdicts(v []domain.LearnRuleVerdict) []domain.LearnRuleVerdict {
 	return v
 }
 
-// SettleLearnProposal records a decision. It reports false when the proposal
-// is not pending any more (decided elsewhere, or a second click).
-func (s *Store) SettleLearnProposal(ctx context.Context, d domain.LearnSettlement, now time.Time) (bool, error) {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	n, err := s.qw.SettleLearnProposal(ctx, gen.SettleLearnProposalParams{
-		Status: string(d.Status), RejectReason: d.RejectReason, Resolution: string(d.Resolution), AppliedSha256: d.AppliedSHA256,
-		NewContent: d.NewContent, DecidedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now, ID: d.ID,
+// SettleLearnProposal records a decision and its event at once. It reports
+// false when the proposal is not pending any more (decided elsewhere, or a
+// second click).
+func (s *Store) SettleLearnProposal(ctx context.Context, d domain.LearnSettlement, ev domain.LearnProposalEvent, now time.Time) (bool, error) {
+	return s.proposalTransition(ctx, "settle", ev, now, func(q *gen.Queries) (int64, error) {
+		return q.SettleLearnProposal(ctx, gen.SettleLearnProposalParams{
+			Status: string(d.Status), RejectReason: d.RejectReason, Resolution: string(d.Resolution), AppliedSha256: d.AppliedSHA256,
+			NewContent: d.NewContent, Diff: d.Diff, AppliedBefore: d.AppliedBefore, AppliedIndexLine: d.AppliedIndexLine,
+			DecidedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now, ID: d.ID,
+		})
 	})
-	if err != nil {
-		return false, fmt.Errorf("settle proposal %d: %w", d.ID, err)
-	}
-	return n > 0, nil
 }
 
 // SnoozeLearnProposal hides a pending proposal until a time.
-func (s *Store) SnoozeLearnProposal(ctx context.Context, id int64, until, now time.Time) (bool, error) {
+func (s *Store) SnoozeLearnProposal(ctx context.Context, id int64, until time.Time, ev domain.LearnProposalEvent, now time.Time) (bool, error) {
+	return s.proposalTransition(ctx, "snooze", ev, now, func(q *gen.Queries) (int64, error) {
+		return q.SnoozeLearnProposal(ctx, gen.SnoozeLearnProposalParams{SnoozedUntil: sql.NullTime{Time: until, Valid: true}, UpdatedAt: now, ID: id})
+	})
+}
+
+// UnsnoozeLearnProposal brings a snoozed proposal back now. It reports false
+// when the proposal is not a snoozed pending one.
+func (s *Store) UnsnoozeLearnProposal(ctx context.Context, id int64, ev domain.LearnProposalEvent, now time.Time) (bool, error) {
+	return s.proposalTransition(ctx, "unsnooze", ev, now, func(q *gen.Queries) (int64, error) {
+		return q.UnsnoozeLearnProposal(ctx, gen.UnsnoozeLearnProposalParams{UpdatedAt: now, ID: id})
+	})
+}
+
+// ReopenLearnProposal makes a proposal in status from pending again: a
+// rejected one reopened, an applied one undone. It reports false when the
+// proposal is not in that status any more, and domain.ErrLearnTargetPending
+// when another pending proposal already targets the same file.
+func (s *Store) ReopenLearnProposal(ctx context.Context, id int64, from domain.LearnProposalStatus, ev domain.LearnProposalEvent, now time.Time) (bool, error) {
+	ok, err := s.proposalTransition(ctx, "reopen", ev, now, func(q *gen.Queries) (int64, error) {
+		return q.ReopenLearnProposal(ctx, gen.ReopenLearnProposalParams{UpdatedAt: now, ID: id, Status: string(from)})
+	})
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed: learn_proposal.target_path") {
+		return false, domain.ErrLearnTargetPending
+	}
+	return ok, err
+}
+
+// RewriteAppliedLearnProposal records the person's edit of what an applied
+// proposal wrote, with the diff it now makes. It reports false when the proposal is not applied any more
+// or was rewritten since prevSHA.
+func (s *Store) RewriteAppliedLearnProposal(ctx context.Context, id int64, content, diff, sha, prevSHA string, ev domain.LearnProposalEvent, now time.Time) (bool, error) {
+	return s.proposalTransition(ctx, "rewrite", ev, now, func(q *gen.Queries) (int64, error) {
+		return q.RewriteAppliedLearnProposal(ctx, gen.RewriteAppliedLearnProposalParams{
+			NewContent: content, Diff: diff, AppliedSha256: sha, UpdatedAt: now, ID: id, AppliedSha256_2: prevSHA,
+		})
+	})
+}
+
+// ListLearnProposalEvents returns a proposal's decisions, oldest first.
+func (s *Store) ListLearnProposalEvents(ctx context.Context, id int64) ([]domain.LearnProposalEvent, error) {
+	rows, err := s.qr.ListLearnProposalEvents(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list proposal %d events: %w", id, err)
+	}
+	out := make([]domain.LearnProposalEvent, 0, len(rows))
+	for _, r := range rows {
+		ev := domain.LearnProposalEvent{ID: r.ID, ProposalID: r.ProposalID, Kind: domain.LearnEventKind(r.Kind),
+			Status: domain.LearnProposalStatus(r.Status), Note: r.Note, CreatedAt: r.CreatedAt,
+			Actor: domain.LearnActor{Via: domain.LearnVia(r.Via), SessionID: r.SessionID}}
+		if r.SnoozedUntil.Valid {
+			ev.SnoozedUntil = r.SnoozedUntil.Time
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
+
+// proposalTransition runs one guarded update of a proposal and, when it
+// changed a row, records ev for it in the same transaction.
+func (s *Store) proposalTransition(ctx context.Context, what string, ev domain.LearnProposalEvent, now time.Time, update func(*gen.Queries) (int64, error)) (bool, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	n, err := s.qw.SnoozeLearnProposal(ctx, gen.SnoozeLearnProposalParams{SnoozedUntil: sql.NullTime{Time: until, Valid: true}, UpdatedAt: now, ID: id})
+	changed := false
+	err := s.inTx(ctx, what+" proposal", func(q *gen.Queries) error {
+		n, err := update(q)
+		if err != nil || n == 0 {
+			return err
+		}
+		changed = true
+		return insertProposalEvent(ctx, q, ev, now)
+	})
 	if err != nil {
-		return false, fmt.Errorf("snooze proposal %d: %w", id, err)
+		return false, fmt.Errorf("%s proposal %d: %w", what, ev.ProposalID, err)
 	}
-	return n > 0, nil
+	return changed, nil
+}
+
+func insertProposalEvent(ctx context.Context, q *gen.Queries, ev domain.LearnProposalEvent, now time.Time) error {
+	until := sql.NullTime{}
+	if !ev.SnoozedUntil.IsZero() {
+		until = sql.NullTime{Time: ev.SnoozedUntil, Valid: true}
+	}
+	return q.InsertLearnProposalEvent(ctx, gen.InsertLearnProposalEventParams{
+		ProposalID: ev.ProposalID, Kind: string(ev.Kind), Status: string(ev.Status), Note: ev.Note, SnoozedUntil: until,
+		Via: string(ev.Actor.Via), SessionID: ev.Actor.SessionID, CreatedAt: now,
+	})
 }
 
 // StaleLearnProposal marks a proposal whose target changed after it was made,
 // and reopens what it rested on so decide proposes again against the file as
 // it is now - all at once.
-func (s *Store) StaleLearnProposal(ctx context.Context, p domain.LearnProposal, now time.Time) (bool, error) {
+func (s *Store) StaleLearnProposal(ctx context.Context, p domain.LearnProposal, ev domain.LearnProposalEvent, now time.Time) (bool, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	changed := false
 	err := s.inTx(ctx, "stale proposal", func(q *gen.Queries) error {
 		n, err := q.SettleLearnProposal(ctx, gen.SettleLearnProposalParams{
-			Status: string(domain.LearnProposalStale), NewContent: p.NewContent,
+			Status: string(domain.LearnProposalStale), NewContent: p.NewContent, Diff: p.Diff,
 			DecidedAt: sql.NullTime{Time: now, Valid: true}, UpdatedAt: now, ID: p.ID,
 		})
 		if err != nil || n == 0 {
 			return err
 		}
 		changed = true
+		if err := insertProposalEvent(ctx, q, ev, now); err != nil {
+			return err
+		}
 		if err := q.ReopenDraftsOfProposal(ctx, p.ID); err != nil {
 			return err
 		}

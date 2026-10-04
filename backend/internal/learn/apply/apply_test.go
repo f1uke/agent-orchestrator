@@ -39,9 +39,9 @@ func TestCreateMemory_WritesTheFileAndItsIndexLineOnce(t *testing.T) {
 	r, mem := setup(t)
 	p := domain.LearnProposal{Action: domain.LearnProposeCreateMemory, TargetPath: filepath.Join(mem, "feedback_new.md"),
 		NewContent: "---\nname: feedback-new\n---\n\nBody.\n", IndexLine: "- [New](feedback_new.md) - new"}
-	hash, err := Apply(r, p, "", now)
-	if err != nil || hash == "" {
-		t.Fatalf("apply: %v", err)
+	w, err := Apply(r, p, "", now)
+	if err != nil || w.SHA256 == "" || w.IndexLine != p.IndexLine || w.Before != "" {
+		t.Fatalf("apply = %+v, %v", w, err)
 	}
 	if read(t, p.TargetPath) != p.NewContent {
 		t.Error("the memory file must be the proposed content")
@@ -72,8 +72,8 @@ func TestUpdate_GoesStaleWhenTheFileChangedAndBacksUpOtherwise(t *testing.T) {
 		t.Fatalf("a changed file must not be overwritten: %v", err)
 	}
 	p.BaseSHA256 = sha([]byte("v1\n"))
-	if _, err := Apply(r, p, "v2 edited\n", now); err != nil {
-		t.Fatal(err)
+	if w, err := Apply(r, p, "v2 edited\n", now); err != nil || w.Before != "v1\n" || w.IndexLine != "" {
+		t.Fatalf("apply = %+v, %v", w, err)
 	}
 	if read(t, target) != "v2 edited\n" {
 		t.Error("the person's edit is what is written")

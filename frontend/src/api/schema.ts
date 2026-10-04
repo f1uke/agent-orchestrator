@@ -335,7 +335,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One proposal with the drafts it rests on */
+        /** One proposal with the drafts it rests on, what it wrote as it is now, and its decision history */
         get: operations["getLearningProposal"];
         put?: never;
         post?: never;
@@ -362,6 +362,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/learning/proposals/{id}/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Edit what an approved proposal wrote, under the same gates; a changed file needs its token confirmed */
+        post: operations["editLearningProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/learning/proposals/{id}/reject": {
         parameters: {
             query?: never;
@@ -379,6 +396,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/learning/proposals/{id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Put a rejected proposal back in the queue */
+        post: operations["reopenLearningProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/learning/proposals/{id}/snooze": {
         parameters: {
             query?: never;
@@ -390,6 +424,40 @@ export interface paths {
         put?: never;
         /** Hide a pending proposal until a time */
         post: operations["snoozeLearningProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/proposals/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Take back what an approved proposal wrote and put it back in the queue; a changed file needs its token confirmed */
+        post: operations["undoLearningProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/proposals/{id}/unsnooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bring a snoozed proposal back to the queue now */
+        post: operations["unsnoozeLearningProposal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2674,6 +2742,13 @@ export interface components {
              * @enum {string}
              */
             resolution?: "keep_rule" | "words_win" | "both";
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
         };
         ControllersCheckLearningForbiddenRequest: {
             /** @description Project whose rules apply besides the global ones. */
@@ -2707,6 +2782,19 @@ export interface components {
             /** Format: date-time */
             nextRunAt?: null | string;
             running: boolean;
+        };
+        ControllersEditLearningProposalRequest: {
+            /** @description The token of the file state the edit started from (written.token); needed only when the file changed since AO wrote it. */
+            confirmToken?: string;
+            /** @description The whole file as it should be; checked by the same gates as an edit before approving. */
+            content: string;
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
         };
         ControllersEditSmokeCaseInput: {
             /** @description Expected result. Omit to leave unchanged. */
@@ -2940,10 +3028,29 @@ export interface components {
             updatedAt: string;
             verifier: components["schemas"]["ControllersLearningVerifierDTO"];
         };
+        ControllersLearningProposalEventDTO: {
+            /** Format: date-time */
+            at: string;
+            /** @enum {string} */
+            kind: "approved" | "edited" | "rejected" | "snoozed" | "unsnoozed" | "reopened" | "undone" | "stale";
+            note?: string;
+            session?: string;
+            /** Format: date-time */
+            snoozedUntil?: null | string;
+            /**
+             * @description The proposal's status after it.
+             * @enum {string}
+             */
+            status: "pending" | "rejected" | "applied" | "stale" | "superseded" | "dropped";
+            /** @enum {string} */
+            via?: "app" | "cli" | "api";
+        };
         ControllersLearningProposalResponse: {
             evidence: components["schemas"]["ControllersLearningDraftDTO"][];
+            history: components["schemas"]["ControllersLearningProposalEventDTO"][];
             proposal: components["schemas"]["ControllersLearningProposalDTO"];
             rules: components["schemas"]["ControllersLearningRuleRefDTO"][];
+            written?: components["schemas"]["ControllersLearningWrittenDTO"];
         };
         ControllersLearningProtectedRuleDTO: {
             /** Format: date-time */
@@ -2958,6 +3065,15 @@ export interface components {
             text: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        ControllersLearningRedecideRequest: {
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
         };
         ControllersLearningRuleDTO: {
             heading?: string;
@@ -3060,6 +3176,23 @@ export interface components {
             /** @description The agent's nearest words, redacted and clipped in bytes. */
             agentText?: string;
         };
+        ControllersLearningWrittenDTO: {
+            /** @description It is not what AO wrote any more: edited by hand, by an agent or by another proposal, or removed. */
+            changed: boolean;
+            /** @description The file (or the pinned rule's text) as it is now. */
+            content: string;
+            /** @description Unified diff from what AO wrote to what is there now. */
+            diff?: string;
+            exists: boolean;
+            /** @description The line the approve added to MEMORY.md. */
+            indexLine?: string;
+            indexLinePresent: boolean;
+            indexPath?: string;
+            /** @description The file written, or rule:protected-<id> for a pinned rule a conflict changed. */
+            path: string;
+            /** @description Names this state; confirm an undo or an edit of a changed file with it. */
+            token: string;
+        };
         ControllersListDaemonLoopsResponse: {
             loops: components["schemas"]["ControllersDaemonLoop"][];
         };
@@ -3119,6 +3252,13 @@ export interface components {
         ControllersRejectLearningProposalRequest: {
             /** @description Why not; decide reads it so the same thing is not proposed again. */
             reason?: string;
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
         };
         ControllersRenameSimFlowInput: {
             /** @description What to call it. Slugified; an empty name puts it back to its timestamp alone. */
@@ -3271,11 +3411,18 @@ export interface components {
             udid: string;
         };
         ControllersSnoozeLearningProposalRequest: {
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
             /**
              * Format: date-time
              * @description When it comes back; within the next 90 days.
              */
             until: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
         };
         ControllersStandDownSmokeChecklistInput: {
             /** @description The calling session's own id, used to attribute the claim. */
@@ -3336,6 +3483,17 @@ export interface components {
         ControllersUncommittedFileDTO: {
             path: string;
             status: string;
+        };
+        ControllersUndoLearningProposalRequest: {
+            /** @description Needed only when what AO wrote changed since: the token of the state the person reviewed (written.token, or the PROPOSAL_CHANGED error's details.token). */
+            confirmToken?: string;
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
         };
         ControllersUnprotectLearningRuleResponse: {
             deleted: boolean;
@@ -6189,6 +6347,78 @@ export interface operations {
             };
         };
     };
+    editLearningProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Proposal id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersEditLearningProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProposalDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     rejectLearningProposal: {
         parameters: {
             query?: never;
@@ -6261,6 +6491,78 @@ export interface operations {
             };
         };
     };
+    reopenLearningProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Proposal id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersLearningRedecideRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProposalDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     snoozeLearningProposal: {
         parameters: {
             query?: never;
@@ -6274,6 +6576,150 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ControllersSnoozeLearningProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProposalDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    undoLearningProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Proposal id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersUndoLearningProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProposalDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    unsnoozeLearningProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Proposal id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersLearningRedecideRequest"];
             };
         };
         responses: {

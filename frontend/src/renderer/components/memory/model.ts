@@ -81,3 +81,11 @@ export function queueOrder<T extends { action: string; confidence: number; id: n
 export function inDays(days: number, now = Date.now()): string {
 	return new Date(now + days * 24 * 60 * 60 * 1000).toISOString();
 }
+
+/** A pending proposal hidden until a later time. */
+export function isSnoozed<T extends { status: string; snoozedUntil?: string | null }>(
+	p: T,
+	now = Date.now(),
+): p is T & { snoozedUntil: string } {
+	return p.status === "pending" && !!p.snoozedUntil && Date.parse(p.snoozedUntil) > now;
+}
