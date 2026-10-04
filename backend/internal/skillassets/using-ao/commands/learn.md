@@ -90,7 +90,7 @@ Decides now every ready task (sessions ended, an orchestrator's day over, or a l
 
 ### `ao learn proposals`
 
-The proposals, newest first: status, action, scope, confidence, the task's outcome, title and target. `--all` adds the dropped ones with the reason a gate or the verifier gave. `ao learn proposals show <id>` prints the rationale, the verifier's notes, the rule verdicts, the evidence (the human's own words) and the diff. The human decides in the Skills page; for scripts, `ao learn proposals approve <id> [--file edited] [--side keep_rule|words_win|both --text ...]`, `reject <id> --reason ...` and `snooze <id> --days N` do the same.
+The proposals, newest first: status, action, scope, confidence, the task's outcome, title and target. `--all` adds the dropped ones with the reason a gate or the verifier gave. `ao learn proposals show <id>` prints the rationale, the verifier's notes, the rule verdicts, the evidence (the human's own words) and the diff. The human decides in the Memory inbox (`/memory` in the app); for scripts, `ao learn proposals approve <id> [--file edited] [--side keep_rule|words_win|both --text ...]`, `reject <id> --reason ...` and `snooze <id> --days N` do the same.
 
 | Flag | Meaning | Default / Required |
 |---|---|---|

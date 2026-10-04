@@ -1,7 +1,7 @@
 import type { components } from "../../../api/schema";
-import type { Proposal } from "../../hooks/useSkills";
+import type { Proposal } from "../../hooks/useMemory";
 
-// What the Skills inbox shows of a proposal, derived from the API's shapes.
+// What the Memory inbox shows of a proposal, derived from the API's shapes.
 
 type DiffLine = components["schemas"]["DiffContextLineDTO"];
 

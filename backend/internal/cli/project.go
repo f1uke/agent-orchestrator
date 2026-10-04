@@ -310,7 +310,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringArrayVar(&opts.simTrustCAs, "sim-trust-ca", nil, "Root-CA file (absolute or ~/) this project's simulators trust on boot and claim, instead of the global list (repeatable). \"none\" trusts nothing here; \"\" goes back to the global list")
 	f.BoolVar(&opts.noAutoCrew, "no-auto-crew", false, "Never form a crew automatically on this project; a PERSON can still add a qa by hand (`ao crew add`, or `+ qa` in the app), an AO session cannot")
 	f.BoolVar(&opts.pauseBeforeImpl, "pause-before-implementing", false, "A standard/deep worker here stops once it understands the task and hands back to you before it implements anything; mechanical tasks never stop")
-	f.BoolVar(&opts.learnFromSessions, "learn-from-sessions", false, "AO keeps redacted excerpts of what you type to this project's sessions, so it can later propose skills from what you taught; off means nothing here is read")
+	f.BoolVar(&opts.learnFromSessions, "learn-from-sessions", false, "AO keeps redacted excerpts of what you type to this project's sessions, so it can later propose memories from what you taught; off means nothing here is read")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
 	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")

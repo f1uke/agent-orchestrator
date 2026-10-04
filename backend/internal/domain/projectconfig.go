@@ -189,7 +189,7 @@ type ProjectConfig struct {
 	// LearnFromSessions lets AO read this project's Claude Code transcripts and
 	// keep REDACTED excerpts of what the human typed - with a bounded window of
 	// what the agent did just before and after - so a later stage can propose
-	// skills from what the human taught (see internal/learn and the
+	// memories from what the human taught (see internal/learn and the
 	// "Learning capture" section of docs/architecture.md).
 	//
 	// It is opt-in (false) and it is a hard gate, not a filter: for a project

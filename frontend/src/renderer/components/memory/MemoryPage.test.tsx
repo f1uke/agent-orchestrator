@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "../ui/tooltip";
-import { SkillsPage } from "./SkillsPage";
+import { MemoryPage } from "./MemoryPage";
 import { diffFiles, queueOrder } from "./model";
 
 const getMock = vi.fn();
@@ -116,7 +116,7 @@ function renderPage() {
 	return render(
 		<QueryClientProvider client={client}>
 			<TooltipProvider>
-				<SkillsPage />
+				<MemoryPage />
 			</TooltipProvider>
 		</QueryClientProvider>,
 	);
@@ -130,7 +130,7 @@ beforeEach(() => {
 	routeGets();
 });
 
-describe("SkillsPage", () => {
+describe("MemoryPage", () => {
 	it("queues conflicts first and opens the first proposal", async () => {
 		renderPage();
 		const list = await screen.findByRole("list", { name: "Proposals" });
@@ -220,7 +220,7 @@ describe("SkillsPage", () => {
 	});
 });
 
-describe("skills model", () => {
+describe("memory model", () => {
 	it("splits a memory diff into its file and MEMORY.md", () => {
 		const files = diffFiles(memoryDiff);
 		expect(files.map((f) => [f.path.split("/").pop(), f.created])).toEqual([
