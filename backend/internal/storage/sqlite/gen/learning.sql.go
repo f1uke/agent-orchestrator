@@ -31,7 +31,9 @@ func (q *Queries) AbandonRunningLearnJobs(ctx context.Context, finishedAt sql.Nu
 const amendSkillProposal = `-- name: AmendSkillProposal :exec
 UPDATE learn_proposal
 SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, index_line = ?, diff = ?,
-    confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?
+    confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?,
+    -- Taught again: a snoozed proposal comes back with its new evidence.
+    snoozed_until = NULL
 WHERE id = ? AND status = 'pending'
 `
 
@@ -193,6 +195,15 @@ func (q *Queries) CountUnmatchedPromptFingerprints(ctx context.Context, arg Coun
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteDecidedTask = `-- name: DeleteDecidedTask :exec
+DELETE FROM learn_decided_task WHERE task_key = ?
+`
+
+func (q *Queries) DeleteDecidedTask(ctx context.Context, taskKey string) error {
+	_, err := q.db.ExecContext(ctx, deleteDecidedTask, taskKey)
+	return err
 }
 
 const deleteDecidedTasksByProject = `-- name: DeleteDecidedTasksByProject :execrows
@@ -1402,7 +1413,8 @@ func (q *Queries) ListSkillProposalEvidence(ctx context.Context) ([]LearnProposa
 
 const listSkillProposals = `-- name: ListSkillProposals :many
 SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, index_line, diff,
-    confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at
+    confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at,
+    snoozed_until, reject_reason, decided_at, applied_sha256, resolution
 FROM learn_proposal ORDER BY id
 `
 
@@ -1436,6 +1448,11 @@ func (q *Queries) ListSkillProposals(ctx context.Context) ([]LearnProposal, erro
 			&i.DropReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SnoozedUntil,
+			&i.RejectReason,
+			&i.DecidedAt,
+			&i.AppliedSha256,
+			&i.Resolution,
 		); err != nil {
 			return nil, err
 		}
@@ -1599,6 +1616,17 @@ func (q *Queries) MarkPromptFingerprintMatched(ctx context.Context, arg MarkProm
 	return result.RowsAffected()
 }
 
+const reopenDraftsOfProposal = `-- name: ReopenDraftsOfProposal :exec
+UPDATE learn_draft SET status = 'open'
+WHERE status IN ('consumed', 'dropped')
+  AND id IN (SELECT draft_id FROM learn_proposal_evidence WHERE proposal_id = ?)
+`
+
+func (q *Queries) ReopenDraftsOfProposal(ctx context.Context, proposalID int64) error {
+	_, err := q.db.ExecContext(ctx, reopenDraftsOfProposal, proposalID)
+	return err
+}
+
 const setLearnCursorError = `-- name: SetLearnCursorError :exec
 INSERT INTO learn_cursor (transcript_path, project_id, session_id, attribution, last_error, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -1659,6 +1687,58 @@ func (q *Queries) SetLearnDraftStatusByID(ctx context.Context, arg SetLearnDraft
 	return err
 }
 
+const settleLearnProposal = `-- name: SettleLearnProposal :execrows
+UPDATE learn_proposal
+SET status = ?, reject_reason = ?, resolution = ?, applied_sha256 = ?, new_content = ?, decided_at = ?, updated_at = ?
+WHERE id = ? AND status = 'pending'
+`
+
+type SettleLearnProposalParams struct {
+	Status        string
+	RejectReason  string
+	Resolution    string
+	AppliedSha256 string
+	NewContent    string
+	DecidedAt     sql.NullTime
+	UpdatedAt     time.Time
+	ID            int64
+}
+
+func (q *Queries) SettleLearnProposal(ctx context.Context, arg SettleLearnProposalParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, settleLearnProposal,
+		arg.Status,
+		arg.RejectReason,
+		arg.Resolution,
+		arg.AppliedSha256,
+		arg.NewContent,
+		arg.DecidedAt,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const snoozeLearnProposal = `-- name: SnoozeLearnProposal :execrows
+UPDATE learn_proposal SET snoozed_until = ?, updated_at = ? WHERE id = ? AND status = 'pending'
+`
+
+type SnoozeLearnProposalParams struct {
+	SnoozedUntil sql.NullTime
+	UpdatedAt    time.Time
+	ID           int64
+}
+
+func (q *Queries) SnoozeLearnProposal(ctx context.Context, arg SnoozeLearnProposalParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, snoozeLearnProposal, arg.SnoozedUntil, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const sumLearnJobCostSince = `-- name: SumLearnJobCostSince :one
 SELECT CAST(COALESCE(SUM(cost_usd), 0) AS REAL) FROM learn_job WHERE started_at >= ?
 `
@@ -1679,6 +1759,24 @@ func (q *Queries) SumLearnRuleChunkCostSince(ctx context.Context, createdAt time
 	var column_1 float64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const updateLearnProtectedRuleText = `-- name: UpdateLearnProtectedRuleText :execrows
+UPDATE learn_protected_rule SET text = ?, updated_at = ? WHERE id = ?
+`
+
+type UpdateLearnProtectedRuleTextParams struct {
+	Text      string
+	UpdatedAt time.Time
+	ID        int64
+}
+
+func (q *Queries) UpdateLearnProtectedRuleText(ctx context.Context, arg UpdateLearnProtectedRuleTextParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateLearnProtectedRuleText, arg.Text, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const upsertDecidedTask = `-- name: UpsertDecidedTask :exec

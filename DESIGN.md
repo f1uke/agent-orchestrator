@@ -114,6 +114,19 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   agent-orchestrator analogue and are **user-approved** (settings-redesign proposal
   §9, decisions 2026-07-12); everything else is stock `components/ui/*`. QA/review:
   treat these three as **sanctioned, not drift**; still flag any _further_ divergence.
+- **Derived (2026-10-04), the reference has no learning:** the **Skills inbox**
+  (`/skills`, `components/skills/`), approved by the user from a clickable
+  prototype. A top-level destination row under Wiki (same row shape, a
+  needs-you amber count of proposals waiting); the page uses the Wiki topbar
+  chrome; a 340px queue (To decide / Snoozed / Decided, conflicts first) and a
+  detail pane: action pill + scope + outcome, the file it writes, "What would
+  be written" as the app's own `DiffRows` per file (wrapped, since memory files
+  are prose), the person's own words as quote cards, the standing rules it
+  touches as chips (fits green / refines accent / contradicts red, lock when
+  pinned, text on hover), the verifier's note, and a sticky decide bar
+  (Approve / Edit first / Snooze / Reject with a reason). A conflict card is two
+  columns - the rule you have, your newer words (amber) - with a three-way
+  "Which wins?" that states each side's consequence before you commit.
 - **Approved deviation (2026-08-14) — no coloured edge bars anywhere.** The user
   called the board's left/top accent stripes "very dated" and asked for them to be
   removed **app-wide** and redesigned. This **narrows the 2026-07-10 lane-colour

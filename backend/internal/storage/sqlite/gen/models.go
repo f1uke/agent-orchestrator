@@ -174,6 +174,11 @@ type LearnProposal struct {
 	DropReason       string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	SnoozedUntil     sql.NullTime
+	RejectReason     string
+	DecidedAt        sql.NullTime
+	AppliedSha256    string
+	Resolution       string
 }
 
 type LearnProposalEvidence struct {

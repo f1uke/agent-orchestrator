@@ -478,6 +478,11 @@ func (env Env) conflict(c *Candidate, rule, content string) string {
 			return "the conflict names a rule it was not given"
 		}
 	}
+	if c.Proposal.IndexLine != "" {
+		// A memory's lesson is its body; the MEMORY.md line it would add is
+		// not part of the person's new rule.
+		content = strings.Replace(content, c.Proposal.IndexLine, "", 1)
+	}
 	c.Proposal.Action = domain.LearnProposeConflict
 	c.Proposal.TargetPath = "rule:" + rule
 	c.Proposal.NewContent = noEmDash(strings.TrimSpace(content))
@@ -599,6 +604,7 @@ func Finalize(env Env, cands []Candidate) {
 	claimed := map[string]int{}
 	for i := range cands {
 		c := &cands[i]
+		env.snapshotRules(c)
 		if c.Drop != "" {
 			c.Proposal.Status = domain.LearnProposalDropped
 			c.Proposal.DropReason = c.Drop
@@ -670,6 +676,36 @@ func appendBody(pending, next string) string {
 		}
 	}
 	return out
+}
+
+// snapshotRules records the text and source of every rule a proposal names
+// - and, for a conflict card, the rule it contradicts - as they were when it
+// was made.
+func (env Env) snapshotRules(c *Candidate) {
+	if id, ok := strings.CutPrefix(c.Proposal.TargetPath, "rule:"); ok && c.Proposal.Action == domain.LearnProposeConflict {
+		named := false
+		for _, v := range c.Proposal.RuleVerdicts {
+			named = named || v.RuleID == id
+		}
+		if !named {
+			c.Proposal.RuleVerdicts = append(c.Proposal.RuleVerdicts, domain.LearnRuleVerdict{RuleID: id, Verdict: "contradicts"})
+		}
+	}
+	for i := range c.Proposal.RuleVerdicts {
+		v := &c.Proposal.RuleVerdicts[i]
+		if v.RuleText != "" {
+			continue
+		}
+		if r, ok := env.Shaped.Rules[v.RuleID]; ok {
+			v.RuleText, v.RuleSource = r.Text, r.SourceLabel
+			continue
+		}
+		for _, p := range env.Protected {
+			if "protected-"+strconv.FormatInt(p.ID, 10) == v.RuleID {
+				v.RuleText, v.RuleSource = p.Text, "protected rule"
+			}
+		}
+	}
 }
 
 // missingLines returns the first line pending adds to base that next lacks.

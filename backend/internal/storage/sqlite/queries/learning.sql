@@ -300,7 +300,9 @@ RETURNING id;
 -- name: AmendSkillProposal :exec
 UPDATE learn_proposal
 SET task_key = ?, action = ?, scope = ?, title = ?, rationale = ?, base_sha256 = ?, new_content = ?, index_line = ?, diff = ?,
-    confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?
+    confidence = ?, outcome = ?, rule_verdicts_json = ?, verifier_json = ?, updated_at = ?,
+    -- Taught again: a snoozed proposal comes back with its new evidence.
+    snoozed_until = NULL
 WHERE id = ? AND status = 'pending';
 
 -- name: InsertSkillProposalEvidence :exec
@@ -309,7 +311,8 @@ ON CONFLICT DO NOTHING;
 
 -- name: ListSkillProposals :many
 SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, index_line, diff,
-    confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at
+    confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at,
+    snoozed_until, reject_reason, decided_at, applied_sha256, resolution
 FROM learn_proposal ORDER BY id;
 
 -- name: ListSkillProposalEvidence :many
@@ -320,3 +323,22 @@ DELETE FROM learn_proposal WHERE project_id = ?;
 
 -- name: DeleteDecidedTasksByProject :execrows
 DELETE FROM learn_decided_task WHERE project_id = ?;
+
+-- name: SettleLearnProposal :execrows
+UPDATE learn_proposal
+SET status = ?, reject_reason = ?, resolution = ?, applied_sha256 = ?, new_content = ?, decided_at = ?, updated_at = ?
+WHERE id = ? AND status = 'pending';
+
+-- name: SnoozeLearnProposal :execrows
+UPDATE learn_proposal SET snoozed_until = ?, updated_at = ? WHERE id = ? AND status = 'pending';
+
+-- name: ReopenDraftsOfProposal :exec
+UPDATE learn_draft SET status = 'open'
+WHERE status IN ('consumed', 'dropped')
+  AND id IN (SELECT draft_id FROM learn_proposal_evidence WHERE proposal_id = ?);
+
+-- name: DeleteDecidedTask :exec
+DELETE FROM learn_decided_task WHERE task_key = ?;
+
+-- name: UpdateLearnProtectedRuleText :execrows
+UPDATE learn_protected_rule SET text = ?, updated_at = ? WHERE id = ?;

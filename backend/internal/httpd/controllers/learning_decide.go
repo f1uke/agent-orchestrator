@@ -22,6 +22,10 @@ type LearningDecideService interface {
 	DecideProgress() (learndecide.Progress, error)
 	Proposals(ctx context.Context, project domain.ProjectID, all bool) ([]domain.LearnProposal, error)
 	Proposal(ctx context.Context, id int64) (domain.LearnProposal, []domain.LearnDraft, error)
+	ProposalRules(ctx context.Context, p domain.LearnProposal) ([]learning.RuleRef, error)
+	Approve(ctx context.Context, id int64, content string, resolution domain.LearnResolution) (domain.LearnProposal, error)
+	Reject(ctx context.Context, id int64, reason string) (domain.LearnProposal, error)
+	Snooze(ctx context.Context, id int64, until time.Time) (domain.LearnProposal, error)
 }
 
 // LearningDecideController owns the decide and proposal routes.
@@ -101,6 +105,26 @@ type LearningProposalDTO struct {
 	EvidenceIDs  []int64                  `json:"evidenceIds"`
 	CreatedAt    time.Time                `json:"createdAt"`
 	UpdatedAt    time.Time                `json:"updatedAt"`
+	SnoozedUntil *time.Time               `json:"snoozedUntil,omitempty" description:"A pending proposal hidden until then."`
+	RejectReason string                   `json:"rejectReason,omitempty"`
+	DecidedAt    *time.Time               `json:"decidedAt,omitempty"`
+	Resolution   string                   `json:"resolution,omitempty" enum:"keep_rule,words_win,both" description:"The side the person picked on a conflict card."`
+}
+
+// ApproveLearningProposalRequest is the body of POST /api/v1/learning/proposals/{id}/approve.
+type ApproveLearningProposalRequest struct {
+	Content    string `json:"content,omitempty" description:"The person's edit of what would be written; empty keeps the proposal's content. For a conflict, the new rule's text or the scope of each."`
+	Resolution string `json:"resolution,omitempty" enum:"keep_rule,words_win,both" description:"Required on a conflict card: which side wins."`
+}
+
+// RejectLearningProposalRequest is the body of POST /api/v1/learning/proposals/{id}/reject.
+type RejectLearningProposalRequest struct {
+	Reason string `json:"reason,omitempty" description:"Why not; decide reads it so the same thing is not proposed again."`
+}
+
+// SnoozeLearningProposalRequest is the body of POST /api/v1/learning/proposals/{id}/snooze.
+type SnoozeLearningProposalRequest struct {
+	Until time.Time `json:"until" description:"When it comes back; within the next 90 days."`
 }
 
 // ListLearningProposalsResponse is the body of GET /api/v1/learning/proposals.
@@ -118,6 +142,17 @@ type LearningProposalIDParam struct {
 type LearningProposalResponse struct {
 	Proposal LearningProposalDTO `json:"proposal"`
 	Evidence []LearningDraftDTO  `json:"evidence"`
+	// Rules are the standing rules the proposal names, resolved to text.
+	Rules []LearningRuleRefDTO `json:"rules"`
+}
+
+// LearningRuleRefDTO is a standing rule a proposal names.
+type LearningRuleRefDTO struct {
+	ID        string `json:"id"`
+	Text      string `json:"text"`
+	Source    string `json:"source"`
+	Heading   string `json:"heading,omitempty"`
+	Protected bool   `json:"protected,omitempty"`
 }
 
 // Register mounts the decide routes.
@@ -125,6 +160,9 @@ func (c *LearningDecideController) Register(r chi.Router) {
 	r.Post("/learning/decide", c.start)
 	r.Get("/learning/proposals", c.list)
 	r.Get("/learning/proposals/{id}", c.get)
+	r.Post("/learning/proposals/{id}/approve", c.approve)
+	r.Post("/learning/proposals/{id}/reject", c.reject)
+	r.Post("/learning/proposals/{id}/snooze", c.snooze)
 }
 
 func writeDecideError(w http.ResponseWriter, r *http.Request, method, path string, err error) bool {
@@ -141,6 +179,12 @@ func writeDecideError(w http.ResponseWriter, r *http.Request, method, path strin
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "NOT_LEARNING", "The project does not learn from sessions", nil)
 	case errors.Is(err, learning.ErrInvalidBudget):
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BUDGET", err.Error(), nil)
+	case errors.Is(err, learning.ErrProposalStale):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "PROPOSAL_STALE", err.Error(), nil)
+	case errors.Is(err, learning.ErrProposalNotPending):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "PROPOSAL_NOT_PENDING", err.Error(), nil)
+	case errors.Is(err, learning.ErrInvalidDecision):
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_DECISION", err.Error(), nil)
 	case errors.Is(err, learndecide.ErrBusy):
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "DECIDE_BUSY", "A decide run is already in progress", nil)
 	default:
@@ -208,11 +252,62 @@ func (c *LearningDecideController) get(w http.ResponseWriter, r *http.Request) {
 	if writeDecideError(w, r, "GET", path, err) {
 		return
 	}
-	out := LearningProposalResponse{Proposal: proposalDTO(p), Evidence: make([]LearningDraftDTO, 0, len(ev))}
+	refs, err := c.Svc.ProposalRules(r.Context(), p)
+	if writeDecideError(w, r, "GET", path, err) {
+		return
+	}
+	out := LearningProposalResponse{Proposal: proposalDTO(p), Evidence: make([]LearningDraftDTO, 0, len(ev)), Rules: make([]LearningRuleRefDTO, 0, len(refs))}
 	for _, d := range ev {
 		out.Evidence = append(out.Evidence, draftDTO(d))
 	}
+	for _, ref := range refs {
+		out.Rules = append(out.Rules, LearningRuleRefDTO{ID: ref.ID, Text: ref.Text, Source: ref.Source, Heading: ref.Heading, Protected: ref.Protected})
+	}
 	envelope.WriteJSON(w, http.StatusOK, out)
+}
+
+// decision runs one decision on the proposal in the path and answers the
+// proposal as it is after it.
+func (c *LearningDecideController) decision(w http.ResponseWriter, r *http.Request, path string, body any, run func(id int64) (domain.LearnProposal, error)) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", path)
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_ID", "id must be a positive integer", nil)
+		return
+	}
+	if err := decodeJSON(r, body); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	p, err := run(id)
+	if writeDecideError(w, r, "POST", path, err) {
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, proposalDTO(p))
+}
+
+func (c *LearningDecideController) approve(w http.ResponseWriter, r *http.Request) {
+	var in ApproveLearningProposalRequest
+	c.decision(w, r, "/api/v1/learning/proposals/{id}/approve", &in, func(id int64) (domain.LearnProposal, error) {
+		return c.Svc.Approve(r.Context(), id, in.Content, domain.LearnResolution(in.Resolution))
+	})
+}
+
+func (c *LearningDecideController) reject(w http.ResponseWriter, r *http.Request) {
+	var in RejectLearningProposalRequest
+	c.decision(w, r, "/api/v1/learning/proposals/{id}/reject", &in, func(id int64) (domain.LearnProposal, error) {
+		return c.Svc.Reject(r.Context(), id, in.Reason)
+	})
+}
+
+func (c *LearningDecideController) snooze(w http.ResponseWriter, r *http.Request) {
+	var in SnoozeLearningProposalRequest
+	c.decision(w, r, "/api/v1/learning/proposals/{id}/snooze", &in, func(id int64) (domain.LearnProposal, error) {
+		return c.Svc.Snooze(r.Context(), id, in.Until)
+	})
 }
 
 func proposalDTO(p domain.LearnProposal) LearningProposalDTO {
@@ -228,6 +323,8 @@ func proposalDTO(p domain.LearnProposal) LearningProposalDTO {
 	if out.EvidenceIDs == nil {
 		out.EvidenceIDs = []int64{}
 	}
+	out.SnoozedUntil, out.DecidedAt = timePtr(p.SnoozedUntil), timePtr(p.DecidedAt)
+	out.RejectReason, out.Resolution = p.RejectReason, string(p.Resolution)
 	for _, v := range p.RuleVerdicts {
 		out.RuleVerdicts = append(out.RuleVerdicts, LearningRuleVerdictDTO{RuleID: v.RuleID, Verdict: v.Verdict, Note: v.Note})
 	}

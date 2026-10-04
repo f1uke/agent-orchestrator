@@ -345,6 +345,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/learning/proposals/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve a proposal: write it (or record the side that won a conflict) */
+        post: operations["approveLearningProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/proposals/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject a proposal, with a reason decide reads */
+        post: operations["rejectLearningProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/learning/proposals/{id}/snooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hide a pending proposal until a time */
+        post: operations["snoozeLearningProposal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/learning/protected-rules": {
         parameters: {
             query?: never;
@@ -2615,6 +2666,15 @@ export interface components {
             /** @description The calling session's own id, used to attribute the write. */
             from?: string;
         };
+        ControllersApproveLearningProposalRequest: {
+            /** @description The person's edit of what would be written; empty keeps the proposal's content. For a conflict, the new rule's text or the scope of each. */
+            content?: string;
+            /**
+             * @description Required on a conflict card: which side wins.
+             * @enum {string}
+             */
+            resolution?: "keep_rule" | "words_win" | "both";
+        };
         ControllersCheckLearningForbiddenRequest: {
             /** @description Project whose rules apply besides the global ones. */
             project?: string;
@@ -2842,6 +2902,8 @@ export interface components {
             confidence: number;
             /** Format: date-time */
             createdAt: string;
+            /** Format: date-time */
+            decidedAt?: null | string;
             /** @description Unified diff AO computed from the target as it was. */
             diff: string;
             dropReason?: string;
@@ -2855,8 +2917,19 @@ export interface components {
             outcome: "merged" | "abandoned" | "unknown" | "ongoing" | "day";
             projectId: string;
             rationale: string;
+            rejectReason?: string;
+            /**
+             * @description The side the person picked on a conflict card.
+             * @enum {string}
+             */
+            resolution?: "keep_rule" | "words_win" | "both";
             ruleVerdicts: components["schemas"]["ControllersLearningRuleVerdictDTO"][];
             scope: string;
+            /**
+             * Format: date-time
+             * @description A pending proposal hidden until then.
+             */
+            snoozedUntil?: null | string;
             /** @enum {string} */
             status: "pending" | "rejected" | "applied" | "stale" | "superseded" | "dropped";
             /** @description The file it would change, or rule:<id> for a conflict card. */
@@ -2870,6 +2943,7 @@ export interface components {
         ControllersLearningProposalResponse: {
             evidence: components["schemas"]["ControllersLearningDraftDTO"][];
             proposal: components["schemas"]["ControllersLearningProposalDTO"];
+            rules: components["schemas"]["ControllersLearningRuleRefDTO"][];
         };
         ControllersLearningProtectedRuleDTO: {
             /** Format: date-time */
@@ -2904,6 +2978,13 @@ export interface components {
             sourceKind: "claude_md" | "agents_md" | "skill" | "ao_prompt" | "knowledge_index" | "memory";
             sourceLabel: string;
             tags: string[];
+            text: string;
+        };
+        ControllersLearningRuleRefDTO: {
+            heading?: string;
+            id: string;
+            protected?: boolean;
+            source: string;
             text: string;
         };
         ControllersLearningRuleSourceDTO: {
@@ -3034,6 +3115,10 @@ export interface components {
         };
         ControllersRefreshLearningRulesResponse: {
             started: boolean;
+        };
+        ControllersRejectLearningProposalRequest: {
+            /** @description Why not; decide reads it so the same thing is not proposed again. */
+            reason?: string;
         };
         ControllersRenameSimFlowInput: {
             /** @description What to call it. Slugified; an empty name puts it back to its timestamp alone. */
@@ -3184,6 +3269,13 @@ export interface components {
             /** @description The state the device is being taken to. */
             state: string;
             udid: string;
+        };
+        ControllersSnoozeLearningProposalRequest: {
+            /**
+             * Format: date-time
+             * @description When it comes back; within the next 90 days.
+             */
+            until: string;
         };
         ControllersStandDownSmokeChecklistInput: {
             /** @description The calling session's own id, used to attribute the claim. */
@@ -5998,6 +6090,222 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    approveLearningProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Proposal id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersApproveLearningProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProposalDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    rejectLearningProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Proposal id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersRejectLearningProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProposalDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    snoozeLearningProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Proposal id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControllersSnoozeLearningProposalRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersLearningProposalDTO"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

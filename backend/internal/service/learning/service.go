@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learn/apply"
+	"github.com/aoagents/agent-orchestrator/backend/internal/learn/redact"
 	"github.com/aoagents/agent-orchestrator/backend/internal/learnsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe/learncollect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
@@ -78,6 +80,10 @@ type Service struct {
 
 	decideStore DecideStore
 	decider     Decider
+
+	decisions  DecisionStore
+	applyRoots apply.Roots
+	dictionary func(context.Context) []redact.Value
 }
 
 // WithCollect wires the collect stage in. runCtx is the daemon's context.
