@@ -251,3 +251,48 @@ func isTopLevelItem(line string) bool {
 	}
 	return i > 0 && strings.HasPrefix(line[i:], ". ")
 }
+
+// MemoryVersion is folded into a memory file's chunk hash.
+const MemoryVersion = "memory-v1"
+
+// maxMemoryAtom bounds the text one memory file contributes to the corpus.
+const maxMemoryAtom = 1500
+
+// Whole is a document as a single chunk: a Claude Code memory file is one fact,
+// so it is never cut at its headings.
+func Whole(text, version string) Chunk {
+	return newChunk([]Section{{Text: text}}, version)
+}
+
+// MemoryAtoms is a memory file as one rule: its description, then its body,
+// under its name. A file that does not parse still counts, as its text.
+func MemoryAtoms(text string) []Atom {
+	name, desc, body := "", "", text
+	if rest, ok := strings.CutPrefix(text, "---\n"); ok {
+		if head, b, ok := strings.Cut(rest, "\n---"); ok {
+			body = strings.TrimPrefix(b, "\n")
+			for _, l := range strings.Split(head, "\n") {
+				k, v, _ := strings.Cut(l, ":")
+				v = strings.Trim(strings.TrimSpace(v), `"`)
+				switch strings.TrimSpace(k) {
+				case "name":
+					name = v
+				case "description":
+					desc = v
+				}
+			}
+		}
+	}
+	all := strings.Join(strings.Fields(desc+"\n"+body), " ")
+	if all == "" {
+		return nil
+	}
+	if r := []rune(all); len(r) > maxMemoryAtom {
+		all = string(r[:maxMemoryAtom]) + "..."
+	}
+	quote := desc
+	if quote == "" {
+		quote = all
+	}
+	return []Atom{{Text: all, Quote: quote, Heading: name}}
+}

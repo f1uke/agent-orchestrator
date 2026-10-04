@@ -34,7 +34,7 @@ func VerifierInput(env Env, corpus []domain.LearnRule, cands []Candidate) (strin
 		}
 		vp := verifyProposal{ID: c.Ref, Action: string(c.Proposal.Action), Target: c.Proposal.TargetPath,
 			Title: c.Proposal.Title, Rationale: c.Proposal.Rationale, Content: c.Added}
-		if c.Proposal.Action == domain.LearnProposeCreateSkill {
+		if c.Proposal.Action == domain.LearnProposeCreateMemory {
 			vp.Content = c.Proposal.NewContent
 		}
 		for _, id := range c.Proposal.EvidenceIDs {

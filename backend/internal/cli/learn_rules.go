@@ -270,8 +270,8 @@ func newLearnRulesProtectCommand(ctx *commandContext) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "protect",
-		Short: "Pin a rule as protected, optionally with patterns a learned skill must never contain",
-		Long: "A protected rule is always checked against every proposal, and a learned skill that matches one of its\n" +
+		Short: "Pin a rule as protected, optionally with patterns a proposed change must never contain",
+		Long: "A protected rule is always checked against every proposal, and a proposed change that matches one of its\n" +
 			"patterns (RE2, case-insensitive) is blocked. Without --project it applies in every project.",
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

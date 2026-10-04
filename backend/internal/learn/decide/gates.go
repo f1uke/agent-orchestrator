@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/learn/redact"
@@ -28,16 +29,20 @@ type Env struct {
 	ProjectID domain.ProjectID
 	TaskKey   string
 	Outcome   domain.LearnOutcome
-	// Home, Learned (~/.ao/learned) and KnowledgeDir (~/.ao/knowledge) are
-	// the roots targets resolve against.
+	// Home and KnowledgeDir (~/.ao/knowledge, which proposals never target)
+	// are the roots targets resolve against.
 	Home         string
-	Learned      string
 	KnowledgeDir string
-	Skills       []skills.Skill
-	Shaped       Shaped
-	Protected    []domain.LearnProtectedRule
-	Proposals    []domain.LearnProposal
-	Redactor     *redact.Redactor
+	// MemoryDir is Claude Code's memory directory of the project's repo,
+	// where a project lesson is written (decision 11); "" when unknown.
+	MemoryDir string
+	// Now stamps a new memory file's modified time.
+	Now       func() time.Time
+	Skills    []skills.Skill
+	Shaped    Shaped
+	Protected []domain.LearnProtectedRule
+	Proposals []domain.LearnProposal
+	Redactor  *redact.Redactor
 	// Read returns a file's content, and false when it does not exist.
 	Read func(path string) (string, bool, error)
 	// Resolve follows symlinks (filepath.EvalSymlinks in production).
@@ -60,6 +65,8 @@ type Candidate struct {
 	// loses lines an earlier task proposed.
 	start   string
 	inserts []insert
+	// indexDiff is the MEMORY.md half of a new memory file's diff.
+	indexDiff string
 }
 
 type insert struct{ heading, lines string }
@@ -89,7 +96,7 @@ func Prepare(env Env, answer []Proposed) (out []Candidate, noAction int) {
 			continue
 		}
 		c := Candidate{Ref: "p" + strconv.Itoa(i+1), Proposal: domain.LearnProposal{
-			ProjectID: env.ProjectID, TaskKey: env.TaskKey, Action: storedAction(p.Action),
+			ProjectID: env.ProjectID, TaskKey: env.TaskKey, Action: domain.LearnProposalAction(p.Action),
 			Title: strings.TrimSpace(p.Title), Rationale: strings.TrimSpace(p.Rationale), Outcome: env.Outcome,
 			Confidence: clamp01(p.Confidence) * env.Outcome.Weight(), Status: domain.LearnProposalPending,
 		}}
@@ -109,15 +116,6 @@ func Prepare(env Env, answer []Proposed) (out []Candidate, noAction int) {
 		out = append(out, c)
 	}
 	return out, noAction
-}
-
-// storedAction is the action a proposal is stored under, even when a gate
-// refuses it before its target is resolved: add_project_rule is a skill change.
-func storedAction(model string) domain.LearnProposalAction {
-	if domain.LearnProposalAction(model) == addProjectRule {
-		return domain.LearnProposeUpdateSkill
-	}
-	return domain.LearnProposalAction(model)
 }
 
 // mergeInserts folds a second set of lines for the same file into the first
@@ -142,14 +140,14 @@ func (env Env) prepare(c *Candidate, p Proposed) string {
 	}
 	c.Proposal.Scope = scope
 	switch domain.LearnProposalAction(p.Action) {
-	case domain.LearnProposeCreateSkill:
-		return env.createSkill(c, p)
+	case domain.LearnProposeCreateMemory:
+		return env.createMemory(c, p)
+	case domain.LearnProposeUpdateMemory:
+		return env.updateMemory(c, p)
 	case domain.LearnProposeUpdateSkill:
 		return env.updateSkill(c, p)
 	case domain.LearnProposeEditRuleFile:
 		return env.editRuleFile(c, p)
-	case addProjectRule:
-		return env.addProjectRule(c, p)
 	case domain.LearnProposeConflict:
 		return env.conflict(c, p.Target, p.Content)
 	default:
@@ -218,58 +216,6 @@ func (env Env) evidence(c *Candidate, p Proposed) (string, string) {
 	return "project:" + string(env.ProjectID), ""
 }
 
-func (env Env) learnedSkillPath(scope, name string) string {
-	if scope == "global" {
-		return filepath.Join(env.Learned, "global", "skills", name, "SKILL.md")
-	}
-	return filepath.Join(env.Learned, "projects", string(env.ProjectID), "skills", name, "SKILL.md")
-}
-
-func (env Env) createSkill(c *Candidate, p Proposed) string {
-	name := strings.TrimSpace(p.SkillName)
-	path := env.learnedSkillPath(c.Proposal.Scope, name)
-	c.Proposal.TargetPath = path
-	for _, s := range env.Skills {
-		if s.Name != name {
-			continue
-		}
-		if s.Path == path {
-			c.Proposal.Action = domain.LearnProposeUpdateSkill
-			return env.updateSkill(c, Proposed{Target: path, Content: p.Content})
-		}
-		return fmt.Sprintf("a skill named %q already exists (%s, %s); a new one must not shadow it", name, s.Source, s.Path)
-	}
-	if why := env.learnedCap(c.Proposal.Scope, path); why != "" {
-		return why
-	}
-	return env.skillContent(c, name, "", p.Content)
-}
-
-// learnedCap refuses a new learned skill in a scope already at its cap
-// (design §3.8), counting pending creations too.
-func (env Env) learnedCap(scope, path string) string {
-	learned := 0
-	for _, s := range env.Skills {
-		if s.Source == skills.SourceLearned && s.Scope == scope {
-			learned++
-		}
-	}
-	prefix := filepath.Dir(filepath.Dir(path))
-	for _, pr := range env.Proposals {
-		if pr.Status == domain.LearnProposalPending && pr.Action == domain.LearnProposeCreateSkill && strings.HasPrefix(pr.TargetPath, prefix+string(filepath.Separator)) && pr.TargetPath != path {
-			learned++
-		}
-	}
-	limit := skills.MaxProjectLearned
-	if scope == "global" {
-		limit = skills.MaxGlobalLearned
-	}
-	if learned >= limit {
-		return fmt.Sprintf("%s already has %d learned skills, the cap; only updates are allowed", scope, learned)
-	}
-	return ""
-}
-
 func (env Env) updateSkill(c *Candidate, p Proposed) string {
 	target := env.expand(p.Target)
 	c.Proposal.TargetPath = target
@@ -283,15 +229,15 @@ func (env Env) updateSkill(c *Candidate, p Proposed) string {
 	switch {
 	case skill == nil:
 		return "the target is not a known skill file"
-	case skill.Source != skills.SourceUser && skill.Source != skills.SourceLearned:
-		return fmt.Sprintf("a %s skill is not the person's to change; only user and learned skills are", skill.Source)
+	case skill.Source != skills.SourceUser:
+		return fmt.Sprintf("a %s skill is not the person's to change; only their own skills are", skill.Source)
 	case skill.Scope == "global" && c.Proposal.Scope != "global":
 		return "a lesson from one project cannot change a skill every project loads"
 	case skill.Scope != "global" && skill.Scope != "project:"+string(env.ProjectID):
 		return "the skill belongs to another project"
 	}
 	c.Proposal.Scope = skill.Scope
-	if why := env.confined(target, filepath.Join(env.Home, ".claude", "skills"), env.Learned); why != "" {
+	if why := env.confined(target, filepath.Join(env.Home, ".claude", "skills")); why != "" {
 		return why
 	}
 	old, ok, err := env.Read(target)
@@ -334,14 +280,14 @@ func (env Env) editRuleFile(c *Candidate, p Proposed) string {
 			return env.conflict(c, "file:"+claudeMD, p.Content)
 		}
 		if c.Proposal.Scope != "global" {
-			return "a lesson from one project cannot change the global CLAUDE.md; it belongs in a learned skill of the project"
+			return "a lesson from one project cannot change the global CLAUDE.md; it belongs in the project's memory"
 		}
 	case strings.HasPrefix(target, env.KnowledgeDir+string(filepath.Separator)):
-		// The person's decision (2026-10-04): the knowledge INDEX is the
-		// orchestrator's map of documents; project rules are a skill agents load.
-		return "project rules live in a learned skill of the project, not in the knowledge store"
+		// The knowledge INDEX is the orchestrator's map of documents; a
+		// project's lessons live in its Claude Code memory (decision 11).
+		return "a project's lessons live in its memory, not in the knowledge store"
 	default:
-		return "a rule file edit may target only ~/.claude/CLAUDE.md; project rules go in a learned skill of the project"
+		return "a rule file edit may target only ~/.claude/CLAUDE.md; a project's lessons go in its memory"
 	}
 	if why := env.confined(target, filepath.Dir(claudeMD)); why != "" {
 		return why
@@ -361,77 +307,143 @@ func (env Env) editRuleFile(c *Candidate, p Proposed) string {
 	return env.contentGates(c)
 }
 
-// addProjectRule is a rule of one project (the person's decision,
-// 2026-10-04): AO adds its lines to the project's learned working-rules skill,
-// creating the skill when it does not exist yet.
-func (env Env) addProjectRule(c *Candidate, p Proposed) string {
-	name := WorkingRulesSkill(env.ProjectID)
-	path := filepath.Join(env.Learned, "projects", string(env.ProjectID), "skills", name, "SKILL.md")
-	// Stored as a skill change: add_project_rule is only how the model asks.
-	c.Proposal.Action = domain.LearnProposeUpdateSkill
+// Memory types a lesson may be stored as (Claude Code's own vocabulary).
+var memoryTypes = map[string]bool{"feedback": true, "project": true, "reference": true, "user": true}
+
+var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
+
+// createMemory writes a project lesson as a new Claude Code memory file
+// (decision 11) and adds its one-line pointer to MEMORY.md. AO renders the file
+// in Claude Code's format from what the model gives: the type, a name, a
+// one-line description and the body.
+func (env Env) createMemory(c *Candidate, p Proposed) string {
+	if env.MemoryDir == "" {
+		return "the project has no Claude Code memory directory"
+	}
+	kind := strings.TrimSpace(p.MemoryType)
+	if !memoryTypes[kind] {
+		kind = "feedback"
+	}
+	slug := strings.Trim(nonSlug.ReplaceAllString(strings.ToLower(p.Name), "-"), "-")
+	if len(slug) > 60 {
+		slug = strings.Trim(slug[:60], "-")
+	}
+	if slug == "" {
+		return "the memory needs a name"
+	}
+	name := kind + "-" + slug
+	file := kind + "_" + strings.ReplaceAll(slug, "-", "_") + ".md"
+	path := filepath.Join(env.MemoryDir, file)
 	c.Proposal.TargetPath = path
 	c.Proposal.Scope = "project:" + string(env.ProjectID)
-	for _, s := range env.Skills {
-		if s.Name == name && s.Path != path {
-			return fmt.Sprintf("a skill named %q already exists (%s, %s)", name, s.Source, s.Path)
-		}
-	}
-	if why := env.confined(path, env.Learned); why != "" {
+	if why := env.confined(path, env.MemoryDir); why != "" {
 		return why
 	}
-	old, exists, err := env.Read(path)
+	if _, exists, err := env.Read(path); err != nil || exists {
+		return "a memory file with this name exists; the lesson should update it instead"
+	}
+	desc := noEmDash(strings.Join(strings.Fields(p.Description), " "))
+	body := noEmDash(strings.TrimSpace(p.Content))
+	title := noEmDash(strings.TrimSpace(p.Title))
+	switch {
+	case desc == "":
+		return "the memory needs a one-line description"
+	case len(desc) > skills.MaxDescriptionBytes:
+		return fmt.Sprintf("the description is %d bytes, at most %d", len(desc), skills.MaxDescriptionBytes)
+	case body == "":
+		return "the memory has no body"
+	case len(body) > skills.MaxBodyBytes:
+		return fmt.Sprintf("the body is %d bytes, at most %d", len(body), skills.MaxBodyBytes)
+	}
+	now := time.Now
+	if env.Now != nil {
+		now = env.Now
+	}
+	content := "---\nname: " + name + "\ndescription: " + strconv.Quote(desc) +
+		"\nmetadata:\n  node_type: memory\n  type: " + kind + "\n  modified: " + now().UTC().Format(time.RFC3339) +
+		"\n---\n\n" + body + "\n"
+	if _, _, err := skills.Parse(content); err != nil {
+		return "memory file: " + err.Error()
+	}
+	index := filepath.Join(env.MemoryDir, "MEMORY.md")
+	oldIndex, _, err := env.Read(index)
 	if err != nil {
-		return "the working-rules skill cannot be read"
+		return "MEMORY.md cannot be read"
 	}
-	text := noEmDash(strings.TrimSpace(p.Content))
-	if text == "" {
-		return "it adds nothing"
+	c.Proposal.NewContent = content
+	c.Proposal.IndexLine = "- [" + title + "](" + file + ") - " + desc
+	newIndex := oldIndex
+	if newIndex != "" && !strings.HasSuffix(newIndex, "\n") {
+		newIndex += "\n"
 	}
-	start := env.pendingContent(path, old)
-	if start == "" {
-		start = workingRulesSkeleton(name, env.ProjectID)
+	newIndex += c.Proposal.IndexLine + "\n"
+	c.indexDiff = Diff(index, oldIndex, newIndex)
+	c.Proposal.Diff = Diff(path, "", content) + c.indexDiff
+	c.Added = body + "\n" + c.Proposal.IndexLine
+	return env.contentGates(c)
+}
+
+// updateMemory changes an existing memory file of the project.
+func (env Env) updateMemory(c *Candidate, p Proposed) string {
+	target := env.expand(p.Target)
+	c.Proposal.TargetPath = target
+	c.Proposal.Scope = "project:" + string(env.ProjectID)
+	switch {
+	case env.MemoryDir == "":
+		return "the project has no Claude Code memory directory"
+	case filepath.Dir(target) != filepath.Clean(env.MemoryDir) || filepath.Ext(target) != ".md":
+		return "the target is not a memory file of this project"
+	case filepath.Base(target) == "MEMORY.md":
+		return "MEMORY.md is the index; update the memory file it points at"
 	}
-	if !exists {
-		c.Proposal.Action = domain.LearnProposeCreateSkill
-		if why := env.learnedCap(c.Proposal.Scope, path); why != "" && env.pendingContent(path, "") == "" {
-			return why
-		}
+	if why := env.confined(target, env.MemoryDir); why != "" {
+		return why
 	}
-	c.base, c.start = old, start
+	old, ok, err := env.Read(target)
+	if err != nil || !ok {
+		return "the memory file cannot be read"
+	}
+	content := quoteDescription(noEmDash(strings.TrimSpace(p.Content)) + "\n")
+	before, _, berr := skills.Parse(old)
+	after, body, aerr := skills.Parse(content)
+	switch {
+	case aerr != nil:
+		return "memory file: " + aerr.Error()
+	case berr == nil && before.Name != after.Name:
+		return fmt.Sprintf("the memory's name must stay %q", before.Name)
+	case len(body) > skills.MaxBodyBytes:
+		return fmt.Sprintf("the body is %d bytes, at most %d", len(body), skills.MaxBodyBytes)
+	}
+	c.Proposal.NewContent = content
+	c.base = old
 	c.Proposal.BaseSHA256 = sha(old)
-	c.inserts = []insert{{workingRulesHeading(env.ProjectID), bullets(text)}}
-	c.render()
-	if _, err := skills.Check(c.Proposal.NewContent); err != nil {
-		return "skill file: " + err.Error()
+	c.Proposal.Diff = Diff(target, old, content)
+	c.Added = added(old, content)
+	if c.Proposal.Diff == "" {
+		return "it changes nothing"
 	}
 	return env.contentGates(c)
 }
 
-// bullets makes every non-empty line a list item, so a working-rules skill
-// stays one rule per line whoever wrote it.
-func bullets(text string) string {
-	lines := strings.Split(text, "\n")
+// quoteDescription quotes a frontmatter description written bare: a model
+// copying a memory file writes "description: a: b", which is not YAML, and the
+// lesson is not worth losing over punctuation.
+func quoteDescription(content string) string {
+	if _, _, err := skills.Parse(content); err == nil {
+		return content
+	}
+	lines := strings.Split(content, "\n")
 	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if t != "" && !strings.HasPrefix(t, "- ") && !strings.HasPrefix(t, "* ") {
-			lines[i] = "- " + t
+		if i > 0 && strings.TrimSpace(l) == "---" {
+			break
+		}
+		v, ok := strings.CutPrefix(l, "description:")
+		v = strings.TrimSpace(v)
+		if ok && v != "" && !strings.HasPrefix(v, `"`) && !strings.HasPrefix(v, "'") {
+			lines[i] = "description: " + strconv.Quote(v)
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-// WorkingRulesSkill is the name of a project's learned working-rules skill.
-func WorkingRulesSkill(project domain.ProjectID) string {
-	return strings.ToLower(string(project)) + "-working-rules"
-}
-
-func workingRulesHeading(project domain.ProjectID) string {
-	return string(project) + " working rules"
-}
-
-func workingRulesSkeleton(name string, project domain.ProjectID) string {
-	return "---\nname: " + name + "\ndescription: Use when working in " + string(project) +
-		", for the standing rules the person set for this project.\n---\n\n# " + workingRulesHeading(project) + "\n"
 }
 
 // pendingContent is the new content of the open proposal on target, or
@@ -470,6 +482,9 @@ func (env Env) conflict(c *Candidate, rule, content string) string {
 	c.Proposal.TargetPath = "rule:" + rule
 	c.Proposal.NewContent = noEmDash(strings.TrimSpace(content))
 	c.Proposal.Diff, c.Proposal.BaseSHA256 = "", ""
+	// A conflict card writes nothing until the person decides, so a memory
+	// it came from leaves no MEMORY.md line behind.
+	c.Proposal.IndexLine, c.indexDiff, c.inserts = "", "", nil
 	c.Added = c.Proposal.NewContent
 	if c.Added == "" {
 		return "the conflict states no new rule"
@@ -607,13 +622,22 @@ func Finalize(env Env, cands []Candidate) {
 			case domain.LearnProposalPending:
 				c.Proposal.ID = p.ID
 				c.Proposal.EvidenceIDs = union(p.EvidenceIDs, c.Proposal.EvidenceIDs)
-				if len(c.inserts) > 0 {
+				switch {
+				case len(c.inserts) > 0:
 					// Rendered again on the open proposal as it is now: a
 					// task decided in parallel may have just added to it.
 					c.start = p.NewContent
 					c.render()
-				} else if missing := missingLines(c.base, p.NewContent, c.Proposal.NewContent); missing != "" {
-					c.Drop = fmt.Sprintf("it would drop lines open proposal #%d adds (%q); propose them together", p.ID, missing)
+				case c.Proposal.Action == domain.LearnProposeCreateMemory:
+					// The same new memory taught again: its body lines join
+					// the open proposal's file, which keeps its index line.
+					c.Proposal.NewContent = appendBody(p.NewContent, c.Proposal.NewContent)
+					c.Proposal.IndexLine = p.IndexLine
+					c.Proposal.Diff = Diff(c.Proposal.TargetPath, "", c.Proposal.NewContent) + c.indexDiff
+				default:
+					if missing := missingLines(c.base, p.NewContent, c.Proposal.NewContent); missing != "" {
+						c.Drop = fmt.Sprintf("it would drop lines open proposal #%d adds (%q); propose them together", p.ID, missing)
+					}
 				}
 			}
 		}
@@ -622,6 +646,30 @@ func Finalize(env Env, cands []Candidate) {
 			c.Proposal.Status, c.Proposal.DropReason = domain.LearnProposalDropped, c.Drop
 		}
 	}
+}
+
+// appendBody adds to a memory file the body lines of next it does not hold yet.
+func appendBody(pending, next string) string {
+	_, body, err := skills.Parse(next)
+	if err != nil {
+		return pending
+	}
+	have := map[string]bool{}
+	for _, l := range splitLines(pending) {
+		have[strings.TrimSpace(l)] = true
+	}
+	out := strings.TrimRight(pending, "\n") + "\n"
+	added := false
+	for _, l := range strings.Split(strings.TrimSpace(body), "\n") {
+		if t := strings.TrimSpace(l); t != "" && !have[t] {
+			if !added {
+				out += "\n"
+				added = true
+			}
+			out += l + "\n"
+		}
+	}
+	return out
 }
 
 // missingLines returns the first line pending adds to base that next lacks.

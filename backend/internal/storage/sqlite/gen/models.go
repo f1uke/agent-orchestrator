@@ -153,6 +153,34 @@ type LearnJob struct {
 	TaskKey      string
 }
 
+type LearnProposal struct {
+	ID               int64
+	ProjectID        string
+	TaskKey          string
+	Action           string
+	TargetPath       string
+	Scope            string
+	Title            string
+	Rationale        string
+	BaseSha256       string
+	NewContent       string
+	IndexLine        string
+	Diff             string
+	Confidence       float64
+	Outcome          string
+	RuleVerdictsJson string
+	VerifierJson     string
+	Status           string
+	DropReason       string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type LearnProposalEvidence struct {
+	ProposalID int64
+	DraftID    int64
+}
+
 type LearnProtectedRule struct {
 	ID           int64
 	ProjectID    sql.NullString
@@ -471,33 +499,6 @@ type SimRecordingStep struct {
 	SelectorAnchor    string
 	SelectorAnchorRel string
 	Secure            int64
-}
-
-type SkillProposal struct {
-	ID               int64
-	ProjectID        string
-	TaskKey          string
-	Action           string
-	TargetPath       string
-	Scope            string
-	Title            string
-	Rationale        string
-	BaseSha256       string
-	NewContent       string
-	Diff             string
-	Confidence       float64
-	Outcome          string
-	RuleVerdictsJson string
-	VerifierJson     string
-	Status           string
-	DropReason       string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-}
-
-type SkillProposalEvidence struct {
-	ProposalID int64
-	DraftID    int64
 }
 
 type SmokeCheck struct {

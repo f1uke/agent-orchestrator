@@ -50,7 +50,7 @@ type LearningRuleDTO struct {
 	Heading     string   `json:"heading,omitempty"`
 	SourceKey   string   `json:"sourceKey"`
 	SourceLabel string   `json:"sourceLabel"`
-	SourceKind  string   `json:"sourceKind" enum:"claude_md,agents_md,skill,ao_prompt,knowledge_index"`
+	SourceKind  string   `json:"sourceKind" enum:"claude_md,agents_md,skill,ao_prompt,knowledge_index,memory"`
 	Scope       string   `json:"scope" enum:"global,project"`
 	ProjectID   string   `json:"projectId,omitempty"`
 	Score       float64  `json:"score,omitempty" description:"Search score; set only when the request had a query."`
@@ -71,7 +71,7 @@ type LearningRuleSourceDTO struct {
 	Key         string    `json:"key"`
 	Scope       string    `json:"scope" enum:"global,project"`
 	ProjectID   string    `json:"projectId,omitempty"`
-	Kind        string    `json:"kind" enum:"claude_md,agents_md,skill,ao_prompt,knowledge_index"`
+	Kind        string    `json:"kind" enum:"claude_md,agents_md,skill,ao_prompt,knowledge_index,memory"`
 	Label       string    `json:"label"`
 	Chunks      int       `json:"chunks"`
 	Rules       int       `json:"rules"`
@@ -120,7 +120,7 @@ type LearningProtectedRuleDTO struct {
 	ID        int64     `json:"id"`
 	ProjectID string    `json:"projectId,omitempty" description:"Empty means every project."`
 	Text      string    `json:"text"`
-	Patterns  []string  `json:"patterns" description:"RE2 patterns, matched case-insensitively, that a learned skill must never contain."`
+	Patterns  []string  `json:"patterns" description:"RE2 patterns, matched case-insensitively, that a proposed change must never contain."`
 	Note      string    `json:"note,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`

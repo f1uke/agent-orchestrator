@@ -1,7 +1,7 @@
 // Package skills reads and checks skill files for learning's decide stage:
 // an index of every skill an agent may already have (so a lesson updates the
 // skill it belongs to instead of duplicating it), and the frontmatter and size
-// rules a learned skill must meet before it is ever proposed.
+// rules a skill file must meet before a change to it is ever proposed.
 package skills
 
 import (
@@ -30,8 +30,6 @@ const (
 	SourceAO Source = "ao"
 	// SourceRepo is a repo's team-shared .claude/skills (read only).
 	SourceRepo Source = "repo"
-	// SourceLearned is a skill learning wrote under ~/.ao/learned.
-	SourceLearned Source = "learned"
 )
 
 // Skill is one skill file.
@@ -45,12 +43,10 @@ type Skill struct {
 	Body  string
 }
 
-// Limits a learned skill must meet (design §3.8).
+// Limits a skill or memory file learning writes must meet (design §3.8).
 const (
 	MaxDescriptionBytes = 300
 	MaxBodyBytes        = 8 << 10
-	MaxGlobalLearned    = 20
-	MaxProjectLearned   = 30
 )
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -79,7 +75,7 @@ func Parse(content string) (Frontmatter, string, error) {
 	return fm, body, nil
 }
 
-// Check applies the rules a learned skill file must meet: frontmatter that
+// Check applies the rules a skill file must meet: frontmatter that
 // parses, a name the harness accepts, a short description that says when to
 // use it, and a bounded body.
 func Check(content string) (Frontmatter, error) {
@@ -108,8 +104,6 @@ func Check(content string) (Frontmatter, error) {
 type Dirs struct {
 	Home    string
 	DataDir string
-	// Learned is ~/.ao/learned.
-	Learned string
 	// Repos maps a project id to its repo path.
 	Repos map[string]string
 }
@@ -142,14 +136,12 @@ func Index(d Dirs) []Skill {
 		add(SourcePlugin, "global", dir)
 	}
 	add(SourceAO, "global", filepath.Join(d.DataDir, "skills"))
-	add(SourceLearned, "global", filepath.Join(d.Learned, "global", "skills"))
 	projects := make([]string, 0, len(d.Repos))
 	for id := range d.Repos {
 		projects = append(projects, id)
 	}
 	sort.Strings(projects)
 	for _, id := range projects {
-		add(SourceLearned, "project:"+id, filepath.Join(d.Learned, "projects", id, "skills"))
 		if d.Repos[id] != "" {
 			add(SourceRepo, "project:"+id, filepath.Join(d.Repos[id], ".claude", "skills"))
 		}

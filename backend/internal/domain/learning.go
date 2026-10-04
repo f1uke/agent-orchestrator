@@ -346,6 +346,8 @@ const (
 	LearnRuleSourceAOPrompt LearnRuleSourceKind = "ao_prompt"
 	// LearnRuleSourceKnowledgeIndex is a project's knowledge INDEX.md.
 	LearnRuleSourceKnowledgeIndex LearnRuleSourceKind = "knowledge_index"
+	// LearnRuleSourceMemory is a Claude Code memory file of the project's repo.
+	LearnRuleSourceMemory LearnRuleSourceKind = "memory"
 )
 
 // LearnRuleChunkRef is one chunk of a source, in source order.
@@ -463,9 +465,12 @@ func (o LearnOutcome) Weight() float64 {
 type LearnProposalAction string
 
 const (
-	// LearnProposeCreateSkill writes a new AO-learned skill.
-	LearnProposeCreateSkill LearnProposalAction = "create_skill"
-	// LearnProposeUpdateSkill changes an existing skill.
+	// LearnProposeCreateMemory writes a new Claude Code memory file of the
+	// project and its one-line pointer in MEMORY.md.
+	LearnProposeCreateMemory LearnProposalAction = "create_memory"
+	// LearnProposeUpdateMemory changes an existing memory file.
+	LearnProposeUpdateMemory LearnProposalAction = "update_memory"
+	// LearnProposeUpdateSkill changes an existing skill of the person's.
 	LearnProposeUpdateSkill LearnProposalAction = "update_skill"
 	// LearnProposeEditRuleFile changes the human's CLAUDE.md or a knowledge INDEX.
 	LearnProposeEditRuleFile LearnProposalAction = "edit_rule_file"
@@ -506,16 +511,18 @@ type LearnVerifierResult struct {
 
 // LearnProposal is a change learning would make, for the human to decide.
 type LearnProposal struct {
-	ID           int64
-	ProjectID    ProjectID
-	TaskKey      string
-	Action       LearnProposalAction
-	TargetPath   string
-	Scope        string
-	Title        string
-	Rationale    string
-	BaseSHA256   string
-	NewContent   string
+	ID         int64
+	ProjectID  ProjectID
+	TaskKey    string
+	Action     LearnProposalAction
+	TargetPath string
+	Scope      string
+	Title      string
+	Rationale  string
+	BaseSHA256 string
+	NewContent string
+	// IndexLine is the pointer a new memory file adds to its MEMORY.md.
+	IndexLine    string
 	Diff         string
 	Confidence   float64
 	Outcome      LearnOutcome

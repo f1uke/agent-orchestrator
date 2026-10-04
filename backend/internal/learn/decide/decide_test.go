@@ -70,8 +70,8 @@ func TestDiffAndInsertUnder(t *testing.T) {
 	}
 }
 
-// rig builds an Env over a temporary home with one user skill, one learned
-// skill and a CLAUDE.md.
+// rig builds an Env over a temporary home with a user skill, a CLAUDE.md and
+// a project memory directory holding one memory file.
 func rig(t *testing.T, drafts ...domain.LearnDraft) Env {
 	t.Helper()
 	home := t.TempDir()
@@ -87,10 +87,13 @@ func rig(t *testing.T, drafts ...domain.LearnDraft) Env {
 	userSkill := filepath.Join(home, ".claude", "skills", "release", "SKILL.md")
 	write(userSkill, "---\nname: release\ndescription: Cut a release. Use when releasing.\n---\n\n1. Bump the version.\n")
 	write(filepath.Join(home, ".claude", "CLAUDE.md"), "# Global\n\n## Git\n\n- Squash.\n")
-	learned := filepath.Join(home, ".ao", "learned")
+	memDir := filepath.Join(home, ".claude", "projects", "-repo-nter", "memory")
+	write(filepath.Join(memDir, "MEMORY.md"), "- [QA handoff](feedback_qa.md) - hand finished work to qa\n")
+	write(filepath.Join(memDir, "feedback_qa.md"), "---\nname: feedback-qa\ndescription: \"Hand finished work to qa\"\nmetadata:\n  type: feedback\n---\n\nHand finished work to qa.\n")
 	env := Env{
-		ProjectID: "nter", TaskKey: "solo:s1", Outcome: domain.LearnOutcomeMerged, Home: home, Learned: learned,
-		KnowledgeDir: filepath.Join(home, ".ao", "knowledge"),
+		ProjectID: "nter", TaskKey: "solo:s1", Outcome: domain.LearnOutcomeMerged, Home: home,
+		KnowledgeDir: filepath.Join(home, ".ao", "knowledge"), MemoryDir: memDir,
+		Now: func() time.Time { return now },
 		Skills: []skills.Skill{
 			{Name: "release", Description: "Cut a release. Use when releasing.", Source: skills.SourceUser, Scope: "global", Path: userSkill},
 			{Name: "pdf", Source: skills.SourcePlugin, Scope: "global", Path: "/plugins/pdf/SKILL.md"},
@@ -117,7 +120,11 @@ func draft(id int64, task string, conf float64, about domain.LearnDraftAbout) do
 		AnchorSourceClass: domain.LearnSourceTyped, Statement: "s", Quote: "q"}
 }
 
-const goodSkill = "---\nname: verify-on-device\ndescription: Check a change on the simulator. Use when verifying a UI change.\n---\n\n1. Run the Maestro script for the screen.\n"
+func memory(ev ...string) Proposed {
+	return Proposed{Action: "create_memory", MemoryType: "feedback", Name: "Verify on device", Title: "Verify on device",
+		Description: "Check a UI change on the simulator through its script", Content: "Run the Maestro script for the screen.\n\n**Why:** the person said so.",
+		Scope: "project", Evidence: ev, Confidence: 0.8}
+}
 
 func TestPrepare_EvidenceGates(t *testing.T) {
 	weak := draft(5, "solo:s1", 0.9, domain.LearnAboutAgentPractice)
@@ -130,20 +137,17 @@ func TestPrepare_EvidenceGates(t *testing.T) {
 		weak,
 		draft(6, "solo:other", 0.9, domain.LearnAboutAgentPractice),
 	)
-	create := func(ev ...string) Proposed {
-		return Proposed{Action: "create_skill", SkillName: "verify-on-device", Scope: "project", Title: "t", Evidence: ev, Content: goodSkill, Confidence: 0.8}
-	}
 	cases := map[string]struct {
 		p    Proposed
 		drop string
 	}{
-		"strong own draft":           {create("d1"), ""},
-		"low confidence alone":       {create("d2"), "no draft reaches confidence"},
-		"corroborated by other task": {create("d2", "d3"), ""},
-		"product decision only":      {create("d4"), "product decisions"},
-		"accepted suggestion only":   {create("d5"), "typed"},
-		"other task only":            {create("d6"), "no draft of this task"},
-		"invented id":                {create("d99"), "cites no draft"},
+		"strong own draft":           {memory("d1"), ""},
+		"low confidence alone":       {memory("d2"), "no draft reaches confidence"},
+		"corroborated by other task": {memory("d2", "d3"), ""},
+		"product decision only":      {memory("d4"), "product decisions"},
+		"accepted suggestion only":   {memory("d5"), "typed"},
+		"other task only":            {memory("d6"), "no draft of this task"},
+		"invented id":                {memory("d99"), "cites no draft"},
 	}
 	for name, c := range cases {
 		got, _ := Prepare(env, []Proposed{c.p})
@@ -151,16 +155,73 @@ func TestPrepare_EvidenceGates(t *testing.T) {
 			t.Errorf("%s: drop = %q, want %q", name, got[0].Drop, c.drop)
 		}
 	}
-	got, noAction := Prepare(env, []Proposed{create("d1"), {Action: "no_action"}})
+	got, noAction := Prepare(env, []Proposed{memory("d1"), {Action: "no_action"}})
 	if noAction != 1 || len(got) != 1 {
 		t.Fatalf("no_action is counted, not returned: %d %d", noAction, len(got))
 	}
-	p := got[0].Proposal
-	if p.TargetPath != filepath.Join(env.Learned, "projects", "nter", "skills", "verify-on-device", "SKILL.md") || p.Scope != "project:nter" {
-		t.Errorf("target %s scope %s", p.TargetPath, p.Scope)
+}
+
+func TestCreateMemory_WritesClaudeCodesFormatAndTheIndexLine(t *testing.T) {
+	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
+	got, _ := Prepare(env, []Proposed{memory("d1")})
+	c := got[0]
+	if c.Drop != "" {
+		t.Fatal(c.Drop)
 	}
-	if !strings.HasPrefix(p.Diff, "--- /dev/null") || p.Confidence != 0.8 {
-		t.Errorf("diff %q confidence %v", p.Diff, p.Confidence)
+	p := c.Proposal
+	if p.Action != domain.LearnProposeCreateMemory || p.TargetPath != filepath.Join(env.MemoryDir, "feedback_verify_on_device.md") || p.Scope != "project:nter" {
+		t.Errorf("proposal = %+v", p)
+	}
+	want := "---\nname: feedback-verify-on-device\ndescription: \"Check a UI change on the simulator through its script\"\nmetadata:\n  node_type: memory\n  type: feedback\n  modified: 2026-10-04T12:00:00Z\n---\n\nRun the Maestro script for the screen.\n\n**Why:** the person said so.\n"
+	if p.NewContent != want {
+		t.Errorf("file =\n%s\nwant\n%s", p.NewContent, want)
+	}
+	if p.IndexLine != "- [Verify on device](feedback_verify_on_device.md) - Check a UI change on the simulator through its script" {
+		t.Errorf("index line = %q", p.IndexLine)
+	}
+	if !strings.Contains(p.Diff, "+++ b/"+strings.TrimPrefix(filepath.Join(env.MemoryDir, "MEMORY.md"), "/")) || !strings.Contains(p.Diff, "+"+p.IndexLine) {
+		t.Errorf("the diff must show the memory file and its MEMORY.md line:\n%s", p.Diff)
+	}
+
+	dup := memory("d1")
+	dup.Name = "qa"
+	if got, _ := Prepare(env, []Proposed{dup}); !strings.Contains(got[0].Drop, "update it instead") {
+		t.Errorf("an existing memory file is updated, not created again: %q", got[0].Drop)
+	}
+	noDesc := memory("d1")
+	noDesc.Description = ""
+	if got, _ := Prepare(env, []Proposed{noDesc}); !strings.Contains(got[0].Drop, "description") {
+		t.Errorf("drop = %q", got[0].Drop)
+	}
+	env.MemoryDir = ""
+	if got, _ := Prepare(env, []Proposed{memory("d1")}); !strings.Contains(got[0].Drop, "no Claude Code memory") {
+		t.Errorf("drop = %q", got[0].Drop)
+	}
+}
+
+func TestUpdateMemory_OnlyThisProjectsMemoryAndKeepsItsName(t *testing.T) {
+	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
+	file := filepath.Join(env.MemoryDir, "feedback_qa.md")
+	upd := func(target, content string) Candidate {
+		got, _ := Prepare(env, []Proposed{{Action: "update_memory", Target: target, Content: content, Scope: "project", Evidence: []string{"d1"}, Confidence: 0.9}})
+		return got[0]
+	}
+	ok := upd(file, "---\nname: feedback-qa\ndescription: \"Hand finished work to qa\"\nmetadata:\n  type: feedback\n---\n\nHand finished work to qa right away, without being asked.\n")
+	if ok.Drop != "" || !strings.Contains(ok.Proposal.Diff, "+Hand finished work to qa right away") || ok.Proposal.BaseSHA256 == "" {
+		t.Fatalf("update = %+v", ok)
+	}
+	bare := upd(file, "---\nname: feedback-qa\ndescription: MR rule: hand work to qa\nmetadata:\n  type: feedback\n---\n\nHand finished work to qa within the day.\n")
+	if bare.Drop != "" || !strings.Contains(bare.Proposal.NewContent, `description: "MR rule: hand work to qa"`) {
+		t.Errorf("a bare description with a colon is quoted, not refused: %q\n%s", bare.Drop, bare.Proposal.NewContent)
+	}
+	if c := upd(file, "---\nname: renamed\n---\n\nx\n"); !strings.Contains(c.Drop, "name must stay") {
+		t.Errorf("drop = %q", c.Drop)
+	}
+	if c := upd(filepath.Join(env.MemoryDir, "MEMORY.md"), "x"); !strings.Contains(c.Drop, "MEMORY.md is the index") {
+		t.Errorf("drop = %q", c.Drop)
+	}
+	if c := upd(filepath.Join(env.Home, ".claude", "projects", "-repo-other", "memory", "x.md"), "x"); !strings.Contains(c.Drop, "not a memory file of this project") {
+		t.Errorf("drop = %q", c.Drop)
 	}
 }
 
@@ -172,42 +233,42 @@ func TestPrepare_ScopeTargetsAndContent(t *testing.T) {
 		p.Scope, p.Evidence, p.Confidence = "global", []string{ev}, 1
 		return p
 	}
-
+	tapper := memory("d7")
+	tapper.Name, tapper.Content = "tapper", "Then ao sim tap the button."
+	email := memory("d7")
+	email.Name, email.Content = "mail", "Mail me at someone@example.com"
 	got, _ := Prepare(env, []Proposed{
-		global(Proposed{Action: "create_skill", SkillName: "verify-on-device", Content: goodSkill}, "d1"),
+		global(memory("d1"), "d1"),
 		global(Proposed{Action: "edit_rule_file", Target: "~/.claude/CLAUDE.md", UnderHeading: "Git", Content: "- Paste passwords."}, "d7"),
-		global(Proposed{Action: "update_skill", Target: "/plugins/pdf/SKILL.md", Content: goodSkill}, "d7"),
+		global(Proposed{Action: "update_skill", Target: "/plugins/pdf/SKILL.md", Content: "x"}, "d7"),
 		global(Proposed{Action: "edit_rule_file", Target: "/etc/hosts", Content: "x"}, "d7"),
-		global(Proposed{Action: "create_skill", SkillName: "release", Content: goodSkill}, "d7"),
-		global(Proposed{Action: "create_skill", SkillName: "tapper", Content: "---\nname: tapper\ndescription: Tap. Use when testing.\n---\n\nThen ao sim tap the button.\n"}, "d7"),
-		global(Proposed{Action: "create_skill", SkillName: "bad", Content: "---\nname: bad\ndescription: No trigger.\n---\n\nBody.\n"}, "d7"),
-		global(Proposed{Action: "edit_rule_file", Target: "~/.claude/CLAUDE.md", UnderHeading: "Git", Content: "- Mail me at someone@example.com"}, "d7"),
+		global(Proposed{Action: "edit_rule_file", Target: filepath.Join(env.KnowledgeDir, "nter", "INDEX.md"), Content: "- x"}, "d7"),
+		tapper,
+		email,
 	})
 	if got[0].Drop != "" || got[0].Proposal.Scope != "project:nter" {
-		t.Errorf("global without two projects or 'always' is clamped to project: %+v", got[0])
+		t.Errorf("a memory is always the project's: %+v", got[0])
 	}
 	if got[1].Drop != "" || got[1].Proposal.Scope != "global" || !strings.Contains(got[1].Proposal.NewContent, "- Squash.\n- Paste passwords.\n") {
-		t.Errorf("'always' allows global; the rule is inserted under its heading: %q %q", got[1].Drop, got[1].Proposal.NewContent)
+		t.Errorf("'always' allows a global rule, inserted under its heading: %q %q", got[1].Drop, got[1].Proposal.NewContent)
 	}
-	wants := []string{"", "", "plugin skill", "only ~/.claude/CLAUDE.md", "already exists", "", "use the skill", "sensitive (email)"}
-	for i := 2; i < len(wants); i++ {
-		if wants[i] == "" {
-			continue
-		}
-		if !strings.Contains(got[i].Drop, wants[i]) {
-			t.Errorf("proposal %d: drop = %q, want %q", i, got[i].Drop, wants[i])
+	for i, want := range map[int]string{2: "plugin skill", 3: "only ~/.claude/CLAUDE.md", 4: "live in its memory", 6: "sensitive (email)"} {
+		if !strings.Contains(got[i].Drop, want) {
+			t.Errorf("proposal %d: drop = %q, want %q", i, got[i].Drop, want)
 		}
 	}
-	if got[5].Drop != "" || got[5].Proposal.Action != domain.LearnProposeConflict || got[5].Proposal.TargetPath != "rule:protected-1" {
-		t.Errorf("a forbidden pattern makes a conflict card, never a skill: %+v", got[5])
+	if got[5].Drop != "" || got[5].Proposal.Action != domain.LearnProposeConflict || got[5].Proposal.TargetPath != "rule:protected-1" || got[5].Proposal.IndexLine != "" {
+		t.Errorf("a forbidden pattern makes a conflict card, never a memory: %+v", got[5])
 	}
 }
 
 func TestReviewsAndFinalize(t *testing.T) {
 	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice), draft(2, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
-	target := filepath.Join(env.Learned, "projects", "nter", "skills", "verify-on-device", "SKILL.md")
-	env.Proposals = []domain.LearnProposal{{ID: 40, TargetPath: target, Status: domain.LearnProposalPending, EvidenceIDs: []int64{9}}}
-	p := Proposed{Action: "create_skill", SkillName: "verify-on-device", Scope: "project", Evidence: []string{"d1"}, Content: goodSkill, Confidence: 1}
+	target := filepath.Join(env.MemoryDir, "feedback_verify_on_device.md")
+	first, _ := Prepare(env, []Proposed{memory("d1")})
+	pendingContent := first[0].Proposal.NewContent
+	env.Proposals = []domain.LearnProposal{{ID: 40, TargetPath: target, Status: domain.LearnProposalPending, EvidenceIDs: []int64{9}, NewContent: pendingContent}}
+	p := memory("d1")
 	cands, _ := Prepare(env, []Proposed{p, p, p, p})
 	ApplyReviews(env, cands, map[string]Review{
 		"p1": {Grounded: true},
@@ -220,9 +281,13 @@ func TestReviewsAndFinalize(t *testing.T) {
 	if cands[2].Proposal.Action != domain.LearnProposeConflict || cands[2].Proposal.TargetPath != "rule:abc-0" {
 		t.Errorf("a contradiction becomes a conflict card: %+v", cands[2].Proposal)
 	}
+	cands[0].Proposal.NewContent = strings.Replace(cands[0].Proposal.NewContent, "Run the Maestro script for the screen.", "Run the Maestro script for the screen.\nKeep the run's screenshot.", 1)
 	Finalize(env, cands)
 	if cands[0].Proposal.ID != 40 || len(cands[0].Proposal.EvidenceIDs) != 2 {
 		t.Errorf("a pending proposal on the same target is amended with merged evidence: %+v", cands[0].Proposal)
+	}
+	if got := cands[0].Proposal.NewContent; !strings.HasPrefix(got, pendingContent) || !strings.HasSuffix(got, "\nKeep the run's screenshot.\n") {
+		t.Errorf("the same memory taught again keeps the open file and adds only its new lines:\n%s", got)
 	}
 	if cands[1].Proposal.Status != domain.LearnProposalDropped || cands[1].Proposal.DropReason == "" {
 		t.Errorf("dropped candidates keep their reason: %+v", cands[1].Proposal)
@@ -234,6 +299,19 @@ func TestReviewsAndFinalize(t *testing.T) {
 	Finalize(env, again)
 	if !strings.Contains(again[0].Drop, "rejected") {
 		t.Errorf("a rejection is not re-proposed on the same evidence: %q", again[0].Drop)
+	}
+
+	// A full-file update that would drop a line an open proposal adds is refused.
+	env.Proposals = []domain.LearnProposal{{ID: 8, TargetPath: env.Skills[0].Path, Status: domain.LearnProposalPending,
+		NewContent: "---\nname: release\ndescription: Cut a release. Use when releasing.\n---\n\n1. Bump the version.\n2. Write the changelog.\n"}}
+	d3 := draft(3, "solo:s1", 0.9, domain.LearnAboutAgentPractice)
+	d3.Quote = "always tag releases"
+	env.Shaped.Drafts[3] = d3
+	upd, _ := Prepare(env, []Proposed{{Action: "update_skill", Target: env.Skills[0].Path, Scope: "global", Evidence: []string{"d3"}, Confidence: 0.9,
+		Content: "---\nname: release\ndescription: Cut a release. Use when releasing.\n---\n\n1. Bump the version.\n2. Tag it.\n"}})
+	Finalize(env, upd)
+	if !strings.Contains(upd[0].Drop, "would drop lines open proposal #8 adds") {
+		t.Errorf("drop = %q", upd[0].Drop)
 	}
 }
 
@@ -253,70 +331,5 @@ func TestPrepare_MergesOneTasksEditsOfTheSameFile(t *testing.T) {
 	if len(p.EvidenceIDs) != 2 || !strings.Contains(p.NewContent, "- Squash.\n- one\n") || !strings.Contains(p.NewContent, "## Secrets\n\n- two\n") ||
 		!strings.Contains(p.Diff, "+- one") || !strings.Contains(p.Diff, "+- two") {
 		t.Errorf("merged = %+v", p)
-	}
-}
-
-func TestPrepare_ProjectRulesNeverGoToTheKnowledgeStore(t *testing.T) {
-	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
-	got, _ := Prepare(env, []Proposed{{Action: "edit_rule_file", Target: filepath.Join(env.KnowledgeDir, "nter", "INDEX.md"),
-		Content: "- rule", Scope: "project", Evidence: []string{"d1"}, Confidence: 0.8}})
-	if !strings.Contains(got[0].Drop, "learned skill of the project") {
-		t.Errorf("drop = %q", got[0].Drop)
-	}
-}
-
-func TestAddProjectRule_BuildsTheWorkingRulesSkillAndNeverLosesLines(t *testing.T) {
-	env := rig(t, draft(1, "solo:s1", 0.9, domain.LearnAboutAgentPractice), draft(2, "solo:s1", 0.9, domain.LearnAboutAgentPractice))
-	rule := func(ev, text string) Proposed {
-		return Proposed{Action: "add_project_rule", Content: text, Scope: "project", Title: text, Evidence: []string{ev}, Confidence: 0.8}
-	}
-	got, _ := Prepare(env, []Proposed{rule("d1", "- Open finished diagrams in Chrome."), rule("d2", "Hand finished work to QA.")})
-	if len(got) != 1 || got[0].Drop != "" {
-		t.Fatalf("one task's project rules are one proposal: %+v", got)
-	}
-	first := got[0].Proposal
-	path := filepath.Join(env.Learned, "projects", "nter", "skills", "nter-working-rules", "SKILL.md")
-	if first.TargetPath != path || first.Action != domain.LearnProposeCreateSkill || first.Scope != "project:nter" {
-		t.Fatalf("first = %+v", first)
-	}
-	if _, err := skills.Check(first.NewContent); err != nil || !strings.Contains(first.NewContent, "# nter working rules\n\n- Open finished diagrams in Chrome.\n- Hand finished work to QA.\n") {
-		t.Fatalf("skill =\n%s\n%v", first.NewContent, err)
-	}
-
-	// Another task adds a rule while the first proposal is pending; a third,
-	// decided in parallel, sees the pending one only at commit time.
-	pending := first
-	pending.ID, pending.Status = 7, domain.LearnProposalPending
-	env.TaskKey = "solo:s2"
-	d3 := draft(3, "solo:s2", 0.9, domain.LearnAboutAgentPractice)
-	env.Shaped.Drafts[3] = d3
-	stale, _ := Prepare(env, []Proposed{rule("d3", "- Never run ao session cleanup.")})
-	env.Proposals = []domain.LearnProposal{pending}
-	Finalize(env, stale)
-	got3 := stale[0].Proposal
-	if got3.ID != 7 || !strings.Contains(got3.NewContent, "- Open finished diagrams in Chrome.\n- Hand finished work to QA.\n- Never run ao session cleanup.\n") ||
-		!strings.HasPrefix(got3.Diff, "--- /dev/null") {
-		t.Errorf("amend must keep the pending lines and add its own:\n%s", got3.NewContent)
-	}
-
-	// A full-file skill update that would drop a pending proposal's lines is refused.
-	full := Proposed{Action: "update_skill", Target: env.Skills[0].Path, Scope: "global", Evidence: []string{"d3"}, Confidence: 0.9,
-		Content: "---\nname: release\ndescription: Cut a release. Use when releasing.\n---\n\n1. Bump the version.\n2. Tag it.\n"}
-	d3.Quote = "always tag releases"
-	env.Shaped.Drafts[3] = d3
-	upd, _ := Prepare(env, []Proposed{full})
-	env.Proposals = []domain.LearnProposal{{ID: 8, TargetPath: env.Skills[0].Path, Status: domain.LearnProposalPending,
-		NewContent: "---\nname: release\ndescription: Cut a release. Use when releasing.\n---\n\n1. Bump the version.\n2. Write the changelog.\n"}}
-	Finalize(env, upd)
-	if !strings.Contains(upd[0].Drop, "would drop lines open proposal #8 adds") {
-		t.Errorf("drop = %q", upd[0].Drop)
-	}
-}
-
-func TestAddProjectRule_RefusedEarlyIsStillAStorableAction(t *testing.T) {
-	env := rig(t, draft(1, "solo:s1", 0.5, domain.LearnAboutAgentPractice))
-	got, _ := Prepare(env, []Proposed{{Action: "add_project_rule", Content: "- x", Evidence: []string{"d1"}, Confidence: 0.9}})
-	if got[0].Drop == "" || got[0].Proposal.Action != domain.LearnProposeUpdateSkill {
-		t.Errorf("a refused project rule must keep a storable action: %+v", got[0].Proposal)
 	}
 }

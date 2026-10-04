@@ -931,7 +931,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: Pin a rule as protected, with patterns a learned skill must never contain
+      summary: Pin a rule as protected, with patterns a proposed change must never
+        contain
       tags:
       - learning
   /api/v1/learning/protected-rules/{id}:
@@ -8593,7 +8594,8 @@ components:
       properties:
         action:
           enum:
-          - create_skill
+          - create_memory
+          - update_memory
           - update_skill
           - edit_rule_file
           - conflict
@@ -8621,6 +8623,10 @@ components:
         id:
           format: int64
           type: integer
+        indexLine:
+          description: 'For a new memory file: the line it adds to MEMORY.md, written
+            with it.'
+          type: string
         newContent:
           type: string
         outcome:
@@ -8705,7 +8711,7 @@ components:
         note:
           type: string
         patterns:
-          description: RE2 patterns, matched case-insensitively, that a learned skill
+          description: RE2 patterns, matched case-insensitively, that a proposed change
             must never contain.
           items:
             type: string
@@ -8756,6 +8762,7 @@ components:
           - skill
           - ao_prompt
           - knowledge_index
+          - memory
           type: string
         sourceLabel:
           type: string
@@ -8792,6 +8799,7 @@ components:
           - skill
           - ao_prompt
           - knowledge_index
+          - memory
           type: string
         label:
           type: string

@@ -5,22 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 // Version names this prompt and schema in the job record, so proposals made
 // by different instructions can be told apart.
-const Version = "decide-v4"
+const Version = "decide-v5"
 
 // SystemPrompt is the decide instruction.
-const SystemPrompt = `You decide what AI coding agents should durably learn from one finished task, run by Agent Orchestrator (AO) on one person's machine. Agents read skills and rule files; your proposals change those files, and the person approves or rejects every one.
+const SystemPrompt = `You decide what AI coding agents should durably learn from one finished task, run by Agent Orchestrator (AO) on one person's machine. Agents read the project's memory (Claude Code memory files), skills and rule files; your proposals change those files, and the person approves or rejects every one.
 
 The input is JSON:
 - task: its key, whether it was a worker task or an orchestrator's day, the project, and how it ended;
 - drafts: candidate lessons a cheaper model found in what the person typed during this task. human_words are the person's own words (redacted); agent_before is what the agent had just done; about is the cheaper model's tag (agent_practice = how agents should work; product_decision, one_off and question are usually not lessons); how_sent says whether the person typed it or accepted a suggestion;
 - related_drafts: similar drafts from other tasks and projects - a lesson taught again elsewhere;
-- standing_rules: what agents are already told (protected ones were pinned by the person, with patterns a skill must never contain);
+- standing_rules: what agents are already told, including the project's existing memory files (source ending in memory/<file>.md); protected ones were pinned by the person, with patterns nothing may contain;
 - rule_files: the global rule file a lesson for every project may be added to, with its headings;
 - skills: every skill agents already have (name, description, where it lives), and skill_bodies: the full text of the ones most related;
 - proposals: open and rejected proposals; plans: the task's own planning notes.
@@ -30,14 +28,14 @@ Propose only what changes how agents should work from now on and holds beyond th
 Write only what the person's words in the evidence say. Do not add steps, examples, precautions, tools or reasons they did not state, however sensible: a reviewer refuses any proposal with a single line the person's words do not support, and the whole lesson is lost. A one-line rule in their words is better than a fuller one in yours. A decision about the product being built, a one-off direction, a question, or a preference the person decides case by case is not a lesson. Prefer no proposal over a weak one; most tasks teach nothing durable.
 
 For each proposal choose an action:
-- update_skill: the lesson belongs in an existing skill about its topic (not a project's working rules: use add_project_rule). target is that skill's path from skills (only user or learned skills); content is the whole new SKILL.md, keeping everything else as it is.
-- create_skill: a procedure or topic no existing skill covers (not a single rule of one project: use add_project_rule). skill_name is lowercase-with-dashes; content is the whole SKILL.md: frontmatter with name and a description of at most 300 bytes that says "Use when ...", then a short body of concrete steps written for an agent, in English. Keep it under 8 KB.
-- edit_rule_file: the lesson is a standing rule for every project that belongs in the person's ~/.claude/CLAUDE.md (the only entry in rule_files). target is its path, under_heading the heading it goes under (prefer an existing one), content the lines to add, in the format of the lines already there.
-- add_project_rule: a standing rule that holds in this project only. content is the line or lines to add, in the person's words; AO adds them to the project's working-rules skill, so leave target, skill_name and under_heading empty. This is where a rule of one project always goes - never a rule-file edit.
-- conflict: the person's words contradict a standing rule (not refine it - contradict it). target is the rule's id; content states the person's new rule. The person decides which wins; never resolve it yourself.
+- create_memory: a lesson of this project that no existing memory holds - this is where a project's lesson goes. memory_type is feedback (how to work: a correction or a confirmed approach), project (a fact about the work or its environment) or reference (where something lives); name is a few lowercase words; description is one line of at most 300 bytes that says what the memory is, so a reader can tell when it applies; title is a few words for the index; content is the body: the rule in the person's words, then a "**Why:**" line and a "**How to apply:**" line when their words give them. AO writes the file in Claude Code's memory format and its line in MEMORY.md. Leave target and under_heading empty.
+- update_memory: an existing memory file (a standing rule whose source ends in memory/<file>.md) should change - it holds the lesson already but the person refined it. target is that file's path; content is the whole new file, frontmatter included, keeping its name and everything still true. If a memory already says the same thing, propose nothing.
+- update_skill: the lesson belongs in an existing skill of the person's about its topic. target is that skill's path from skills (only source user); content is the whole new SKILL.md, keeping everything else as it is.
+- edit_rule_file: a standing rule for every project, for the person's ~/.claude/CLAUDE.md (the only entry in rule_files). target is its path, under_heading the heading it goes under (prefer an existing one), content the lines to add, in the format of the lines already there.
+- conflict: the person's words contradict a standing rule or an existing memory (not refine it - contradict it). target is the rule's id; content states the person's new rule. The person decides which wins; never resolve it yourself.
 - no_action: the drafts teach nothing durable; say why in rationale.
 
-If an open proposal already targets the same file, it will be amended, not duplicated: for update_skill and create_skill your content must keep every line of the open proposal's content (given in proposals) and add yours. Do not re-propose a rejected one unless the drafts add new evidence.
+If an open proposal already targets the same file, it will be amended, not duplicated: for update_memory, update_skill and create_memory your content must keep every line of the open proposal's content (given in proposals) and add yours. Do not re-propose a rejected one unless the drafts add new evidence.
 
 For every proposal:
 - scope: "project" unless the lesson clearly holds in every project (the person said so, or it was taught in two projects); then "global";
@@ -46,26 +44,24 @@ For every proposal:
 - rule_verdicts: for each standing rule it touches, its id and whether the proposal is consistent with it, refines it, or contradicts it;
 - confidence: 0 to 1 that the person will approve it as written.
 
-Never contradict or work around a standing rule outside a conflict. Never copy a secret, email, account name or customer data into any field; write placeholders. Never write the em dash character. Skill bodies are in English; do not instruct agents to reply to the person in English.`
+Never contradict or work around a standing rule outside a conflict. Never copy a secret, email, account name or customer data into any field; write placeholders. Never write the em dash character. Memory and skill text is in English (quote the person's Thai words where they matter); do not instruct agents to reply to the person in English.`
 
 // Schema is the JSON Schema decide's answer must satisfy.
 const Schema = `{"type":"object","additionalProperties":false,"required":["proposals"],"properties":{"proposals":{"type":"array","items":{"type":"object","additionalProperties":false,
-"required":["action","skill_name","target","under_heading","scope","title","rationale","evidence","rule_verdicts","content","confidence"],
-"properties":{"action":{"enum":["create_skill","update_skill","add_project_rule","edit_rule_file","conflict","no_action"]},
-"skill_name":{"type":"string"},"target":{"type":"string"},"under_heading":{"type":"string"},"scope":{"enum":["global","project"]},
+"required":["action","memory_type","name","description","target","under_heading","scope","title","rationale","evidence","rule_verdicts","content","confidence"],
+"properties":{"action":{"enum":["create_memory","update_memory","update_skill","edit_rule_file","conflict","no_action"]},
+"memory_type":{"enum":["feedback","project","reference","user",""]},"name":{"type":"string"},"description":{"type":"string"},"target":{"type":"string"},"under_heading":{"type":"string"},"scope":{"enum":["global","project"]},
 "title":{"type":"string"},"rationale":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}},
 "rule_verdicts":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["rule","verdict","note"],
 "properties":{"rule":{"type":"string"},"verdict":{"enum":["consistent","refines","contradicts"]},"note":{"type":"string"}}}},
 "content":{"type":"string"},"confidence":{"type":"number"}}}}}}`
 
-// addProjectRule is the model's way to add a rule of one project; AO stores
-// it as a change to the project's working-rules skill.
-const addProjectRule domain.LearnProposalAction = "add_project_rule"
-
 // Proposed is one proposal as decide returned it.
 type Proposed struct {
 	Action       string    `json:"action"`
-	SkillName    string    `json:"skill_name"`
+	MemoryType   string    `json:"memory_type"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description"`
 	Target       string    `json:"target"`
 	UnderHeading string    `json:"under_heading"`
 	Scope        string    `json:"scope"`

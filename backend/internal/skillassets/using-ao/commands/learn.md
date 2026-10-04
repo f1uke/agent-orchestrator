@@ -6,9 +6,9 @@ A project with `learnFromSessions` on (`ao project set-config <id> --learn-from-
 
 **Collect** then asks a model, through the human's own `claude` login, which of those redacted turns teach something durable, and keeps them as drafts. Only redacted turns are sent; the call runs sealed (no tools, no settings, no transcript of its own) and stops at the daily budget.
 
-**Rules** is the corpus a lesson is checked against: what agents are already told (the human's CLAUDE.md and skills, each learning project's repo CLAUDE.md, AGENTS.md and skills, AO's standing prompt, the knowledge INDEX), split into statements and refreshed hourly. Repo files are only read. **Protected rules** are the ones the human pins; their forbidden patterns block any learned skill that matches.
+**Rules** is the corpus a lesson is checked against: what agents are already told (the human's CLAUDE.md and skills, each learning project's repo CLAUDE.md, AGENTS.md and skills, AO's standing prompt, the knowledge INDEX, the project's Claude Code memory), split into statements and refreshed hourly. Repo files are only read. **Protected rules** are the ones the human pins; their forbidden patterns block any proposed change that matches.
 
-**Decide** turns a finished task's drafts into **proposals** - create or update a skill (a rule of one project goes in a learned skill of that project), add a rule for every project to `~/.claude/CLAUDE.md`, or a conflict card when the human's words contradict a standing rule - each with the diff AO computed. A second, adversarial model call and code gates refuse what is not grounded in the human's own words, breaks a rule, or carries sensitive data. Nothing is applied: the human approves every proposal.
+**Decide** turns a finished task's drafts into **proposals** - a new or changed Claude Code memory file of the project (with its line in `MEMORY.md`), a rule for every project added to `~/.claude/CLAUDE.md`, a change to one of the human's own skills, or a conflict card when the human's words contradict a standing rule - each with the diff AO computed. A second, adversarial model call and code gates refuse what is not grounded in the human's own words, breaks a rule, or carries sensitive data. Nothing is applied: the human approves every proposal.
 
 ## Subcommands
 
