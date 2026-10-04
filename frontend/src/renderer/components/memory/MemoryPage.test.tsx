@@ -294,7 +294,19 @@ describe("a snoozed proposal", () => {
 
 	it("can still be approved, edited or rejected, or brought back now", async () => {
 		proposals = [snoozed];
-		extra = { 1: { history: [{ kind: "snoozed", status: "pending", snoozedUntil: "2099-01-02T00:00:00Z", via: "app", at: "2026-10-04T02:00:00Z" }] } };
+		extra = {
+			1: {
+				history: [
+					{
+						kind: "snoozed",
+						status: "pending",
+						snoozedUntil: "2099-01-02T00:00:00Z",
+						via: "app",
+						at: "2026-10-04T02:00:00Z",
+					},
+				],
+			},
+		};
 		renderPage();
 		await userEvent.click(await screen.findByRole("tab", { name: /Snoozed/ }));
 		expect(await screen.findByText(/Decide it now, or bring it back to To decide/)).toBeTruthy();
@@ -311,7 +323,10 @@ describe("a snoozed proposal", () => {
 			}),
 		);
 		expect(await screen.findByRole("tab", { name: /To decide/, selected: true })).toBeTruthy();
-		expect(await screen.findByRole("status")).toHaveProperty("textContent", expect.stringContaining("back in To decide"));
+		expect(await screen.findByRole("status")).toHaveProperty(
+			"textContent",
+			expect.stringContaining("back in To decide"),
+		);
 	});
 
 	it("rejects straight from the snooze", async () => {
@@ -388,7 +403,9 @@ describe("an approved proposal", () => {
 		};
 		renderPage();
 		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
-		expect(await screen.findByText(/changed since AO wrote it - by hand, by an agent, or by another proposal/)).toBeTruthy();
+		expect(
+			await screen.findByText(/changed since AO wrote it - by hand, by an agent, or by another proposal/),
+		).toBeTruthy();
 		expect(document.body.textContent).toContain("edited by hand"); // the diff's added line
 		await userEvent.click(screen.getByRole("button", { name: /^Undo$/ }));
 		postMock.mockResolvedValue({ data: proposal() });

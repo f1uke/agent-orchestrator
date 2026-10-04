@@ -110,8 +110,8 @@ function ChangedSince({ written, what }: { written: Written; what: string }) {
 						<>The file is gone since AO wrote it - deleted by hand or by an agent.</>
 					) : (
 						<>
-							{what} changed since AO wrote it - by hand, by an agent, or by another proposal. Undo or an edit goes
-							over this change only once you confirm.
+							{what} changed since AO wrote it - by hand, by an agent, or by another proposal. Undo or an edit goes over
+							this change only once you confirm.
 						</>
 					)}
 				</span>

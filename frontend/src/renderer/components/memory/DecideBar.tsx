@@ -62,7 +62,17 @@ export function DecideBar(props: DecideBarProps) {
 	);
 }
 
-function PendingBar({ p, busy, error, onDecide, editing, onEdit, draft, approveLabel = "Approve", resolution }: DecideBarProps) {
+function PendingBar({
+	p,
+	busy,
+	error,
+	onDecide,
+	editing,
+	onEdit,
+	draft,
+	approveLabel = "Approve",
+	resolution,
+}: DecideBarProps) {
 	const [rejecting, setRejecting] = useState(false);
 	const [reason, setReason] = useState("");
 	const snoozed = isSnoozed(p);
@@ -71,8 +81,7 @@ function PendingBar({ p, busy, error, onDecide, editing, onEdit, draft, approveL
 			<ErrorLine error={error} />
 			{snoozed && !rejecting && (
 				<p className="text-[12px] text-muted-foreground">
-					Snoozed until {new Date(p.snoozedUntil ?? 0).toLocaleString()}. Decide it now, or bring it back to To
-					decide.
+					Snoozed until {new Date(p.snoozedUntil ?? 0).toLocaleString()}. Decide it now, or bring it back to To decide.
 				</p>
 			)}
 			{rejecting && (
@@ -228,7 +237,8 @@ function DecidedBar({ p, written, busy, error, onDecide, editing, onEdit, onCanc
 					<p className="min-w-0 flex-1 text-[12px] text-muted-foreground">{decidedLine(p)}</p>
 					{onEdit && !conflict && (
 						<Button size="sm" variant="outline" disabled={busy || !written} onClick={onEdit}>
-							<Pencil className="size-3.5" /> Edit {p.action === "update_skill" ? "skill" : p.action === "edit_rule_file" ? "file" : "memory"}
+							<Pencil className="size-3.5" /> Edit{" "}
+							{p.action === "update_skill" ? "skill" : p.action === "edit_rule_file" ? "file" : "memory"}
 						</Button>
 					)}
 					<Button size="sm" variant="ghost" disabled={busy} onClick={() => setUndoing(true)}>
@@ -243,7 +253,11 @@ function DecidedBar({ p, written, busy, error, onDecide, editing, onEdit, onCanc
 function decidedLine(p: Proposal): string {
 	if (p.action !== "conflict") return `Written ${when(p.decidedAt)}.`;
 	const side =
-		p.resolution === "keep_rule" ? "kept the rule" : p.resolution === "words_win" ? "your newer words win" : "both, scoped";
+		p.resolution === "keep_rule"
+			? "kept the rule"
+			: p.resolution === "words_win"
+				? "your newer words win"
+				: "both, scoped";
 	return `Decided ${when(p.decidedAt)}: ${side}.`;
 }
 
