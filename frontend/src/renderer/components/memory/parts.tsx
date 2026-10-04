@@ -1,7 +1,7 @@
 import { Brain, FilePen, Lock, MessageSquareQuote, ScrollText, ShieldCheck, Swords } from "lucide-react";
 import type { components } from "../../../api/schema";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
-import type { Proposal } from "../../hooks/useMemory";
+import type { Proposal, ProposalEvent } from "../../hooks/useMemory";
 import { ACTION_LABEL, type Action } from "./model";
 
 type Draft = components["schemas"]["ControllersLearningDraftDTO"];
@@ -160,5 +160,58 @@ export function Section({
 			</div>
 			{children}
 		</section>
+	);
+}
+
+const EVENT_LABEL: Record<ProposalEvent["kind"], string> = {
+	approved: "Approved",
+	edited: "Edited what was written",
+	rejected: "Rejected",
+	snoozed: "Snoozed",
+	unsnoozed: "Unsnoozed",
+	reopened: "Reopened",
+	undone: "Undone",
+	stale: "Went stale",
+};
+
+const SIDE_LABEL: Record<string, string> = {
+	keep_rule: "kept the rule",
+	words_win: "your newer words win",
+	both: "both, scoped",
+};
+
+function eventText(e: ProposalEvent): string {
+	if (e.kind === "snoozed" && e.snoozedUntil) return `Snoozed until ${new Date(e.snoozedUntil).toLocaleDateString()}`;
+	const side = SIDE_LABEL[e.note ?? ""];
+	if (side) return `${EVENT_LABEL[e.kind]}: ${side}`;
+	if (e.kind === "rejected" && e.note) return `Rejected: “${e.note}”`;
+	if (e.note) return `${EVENT_LABEL[e.kind]}: ${e.note}`;
+	return EVENT_LABEL[e.kind];
+}
+
+function eventBy(e: ProposalEvent): string {
+	if (e.via === "app") return "in the app";
+	if (e.via === "cli") return e.session ? `from the CLI by @${e.session}` : "from the CLI";
+	if (e.via === "api") return "through the API";
+	return "";
+}
+
+/** Every decision on a proposal, oldest first: what, when, and from where. */
+export function History({ events }: { events: ProposalEvent[] }) {
+	return (
+		<Section title="History">
+			<ol className="flex flex-col gap-1.5" aria-label="History">
+				{events.map((e, i) => (
+					<li key={`${e.at}-${i}`} className="flex items-baseline gap-2.5 text-[12px] leading-[1.5]">
+						<span className="mt-[5px] size-1.5 shrink-0 self-start rounded-full bg-passive" aria-hidden="true" />
+						<span className="min-w-0 flex-1 text-foreground">{eventText(e)}</span>
+						<span className="shrink-0 font-mono text-[10.5px] text-passive">
+							{new Date(e.at).toLocaleString()}
+							{eventBy(e) ? ` · ${eventBy(e)}` : ""}
+						</span>
+					</li>
+				))}
+			</ol>
+		</Section>
 	);
 }

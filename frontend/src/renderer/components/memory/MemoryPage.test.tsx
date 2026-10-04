@@ -62,6 +62,8 @@ const conflict = proposal({
 
 let proposals: unknown[] = [];
 let learning = true;
+/** Per proposal id: the detail's written state and history. */
+let extra: Record<number, Record<string, unknown>> = {};
 
 function routeGets() {
 	getMock.mockImplementation((path: string, init?: { params?: { path?: { id?: number } } }) => {
@@ -104,6 +106,8 @@ function routeGets() {
 						},
 					],
 					rules: [{ id: "protected-7", text: "PR text is fully English.", source: "protected rule", protected: true }],
+					history: [],
+					...(extra[id ?? 0] ?? {}),
 				},
 			});
 		}
@@ -127,6 +131,7 @@ beforeEach(() => {
 	postMock.mockReset();
 	proposals = [proposal(), conflict];
 	learning = true;
+	extra = {};
 	routeGets();
 });
 
@@ -152,7 +157,7 @@ describe("MemoryPage", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/approve", {
 				params: { path: { id: 1 } },
-				body: { content: undefined, resolution: undefined },
+				body: { content: undefined, resolution: undefined, via: "app" },
 			}),
 		);
 		expect(await screen.findByRole("status")).toHaveProperty(
@@ -172,7 +177,7 @@ describe("MemoryPage", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/reject", {
 				params: { path: { id: 1 } },
-				body: { reason: "only that week" },
+				body: { reason: "only that week", via: "app" },
 			}),
 		);
 	});
@@ -187,7 +192,7 @@ describe("MemoryPage", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/approve", {
 				params: { path: { id: 2 } },
-				body: { content: undefined, resolution: "words_win" },
+				body: { content: undefined, resolution: "words_win", via: "app" },
 			}),
 		);
 	});
@@ -251,5 +256,187 @@ describe("a decided conflict card", () => {
 		expect(won.getAttribute("aria-checked")).toBe("true");
 		expect((screen.getByRole("radio", { name: /Keep the rule/ }) as HTMLButtonElement).disabled).toBe(true);
 		expect(screen.queryByRole("button", { name: /Use my newer words/ })).toBeNull();
+	});
+
+	it("can be undone, putting the pinned rule's text back", async () => {
+		proposals = [{ ...conflict, status: "applied", resolution: "words_win", decidedAt: "2026-10-04T01:00:00Z" }];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		await userEvent.click(await screen.findByRole("button", { name: /^Undo$/ }));
+		expect(screen.getByText(/Puts your pinned rule's earlier text back/)).toBeTruthy();
+		postMock.mockResolvedValue({ data: { ...conflict, status: "pending" } });
+		await userEvent.click(screen.getByRole("button", { name: /^Undo$/ }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/undo", {
+				params: { path: { id: 2 } },
+				body: { confirmToken: undefined, via: "app" },
+			}),
+		);
+		expect(await screen.findByRole("tab", { name: /To decide/, selected: true })).toBeTruthy();
+	});
+});
+
+const filePath = "/home/me/.claude/projects/-repo/memory/feedback_dev.md";
+const written = (over: Record<string, unknown> = {}) => ({
+	path: filePath,
+	exists: true,
+	content: "---\nname: feedback-dev\n---\n\nTest with the Dev build.\n",
+	indexPath: "/home/me/.claude/projects/-repo/memory/MEMORY.md",
+	indexLine: "- [Dev build](feedback_dev.md) - Test with the Dev build",
+	indexLinePresent: true,
+	changed: false,
+	token: "t0",
+	...over,
+});
+
+describe("a snoozed proposal", () => {
+	const snoozed = proposal({ snoozedUntil: "2099-01-02T00:00:00Z" });
+
+	it("can still be approved, edited or rejected, or brought back now", async () => {
+		proposals = [snoozed];
+		extra = {
+			1: {
+				history: [
+					{
+						kind: "snoozed",
+						status: "pending",
+						snoozedUntil: "2099-01-02T00:00:00Z",
+						via: "app",
+						at: "2026-10-04T02:00:00Z",
+					},
+				],
+			},
+		};
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Snoozed/ }));
+		expect(await screen.findByText(/Decide it now, or bring it back to To decide/)).toBeTruthy();
+		for (const name of [/^Approve$/, /Edit first/, /Unsnooze/, /^Reject$/]) {
+			expect(screen.getByRole("button", { name })).toBeTruthy();
+		}
+		expect(within(await screen.findByRole("list", { name: "History" })).getByText(/Snoozed until/)).toBeTruthy();
+		postMock.mockResolvedValue({ data: proposal() });
+		await userEvent.click(screen.getByRole("button", { name: /Unsnooze/ }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/unsnooze", {
+				params: { path: { id: 1 } },
+				body: { via: "app" },
+			}),
+		);
+		expect(await screen.findByRole("tab", { name: /To decide/, selected: true })).toBeTruthy();
+		expect(await screen.findByRole("status")).toHaveProperty(
+			"textContent",
+			expect.stringContaining("back in To decide"),
+		);
+	});
+
+	it("rejects straight from the snooze", async () => {
+		proposals = [snoozed];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Snoozed/ }));
+		await userEvent.click(await screen.findByRole("button", { name: /^Reject$/ }));
+		await userEvent.type(screen.getByPlaceholderText(/Why not/), "do not record this");
+		postMock.mockResolvedValue({ data: proposal({ status: "rejected", rejectReason: "do not record this" }) });
+		const bar = screen.getByPlaceholderText(/Why not/).closest("div.sticky") as HTMLElement;
+		await userEvent.click(within(bar).getByRole("button", { name: /Reject/ }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/reject", {
+				params: { path: { id: 1 } },
+				body: { reason: "do not record this", via: "app" },
+			}),
+		);
+	});
+});
+
+describe("a rejected proposal", () => {
+	it("can be reopened", async () => {
+		proposals = [proposal({ status: "rejected", rejectReason: "one-off", decidedAt: "2026-10-04T01:00:00Z" })];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		postMock.mockResolvedValue({ data: proposal() });
+		await userEvent.click(await screen.findByRole("button", { name: /Reopen/ }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/reopen", {
+				params: { path: { id: 1 } },
+				body: { via: "app" },
+			}),
+		);
+		expect(await screen.findByRole("tab", { name: /To decide/, selected: true })).toBeTruthy();
+	});
+});
+
+describe("an approved proposal", () => {
+	const applied = proposal({ status: "applied", decidedAt: "2026-10-04T01:00:00Z" });
+
+	it("undoes it, saying first what goes", async () => {
+		proposals = [applied];
+		extra = { 1: { written: written() } };
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		expect(await screen.findByText("Unchanged since it was written.")).toBeTruthy();
+		await userEvent.click(screen.getByRole("button", { name: /^Undo$/ }));
+		expect(screen.getByText(/Removes feedback_dev.md and the line it added to MEMORY.md/)).toBeTruthy();
+		postMock.mockResolvedValue({ data: proposal() });
+		await userEvent.click(screen.getByRole("button", { name: /^Undo$/ }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/undo", {
+				params: { path: { id: 1 } },
+				body: { confirmToken: undefined, via: "app" },
+			}),
+		);
+		expect(await screen.findByRole("status")).toHaveProperty(
+			"textContent",
+			expect.stringContaining("Removed feedback_dev.md and its MEMORY.md line"),
+		);
+	});
+
+	it("shows a change made since and confirms it by its token before undoing", async () => {
+		proposals = [applied];
+		extra = {
+			1: {
+				written: written({
+					changed: true,
+					token: "t9",
+					content: "edited by hand\n",
+					diff: `--- a${filePath}\n+++ b${filePath}\n@@ -1,1 +1,1 @@\n-Test with the Dev build.\n+edited by hand\n`,
+				}),
+			},
+		};
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		expect(
+			await screen.findByText(/changed since AO wrote it - by hand, by an agent, or by another proposal/),
+		).toBeTruthy();
+		expect(document.body.textContent).toContain("edited by hand"); // the diff's added line
+		await userEvent.click(screen.getByRole("button", { name: /^Undo$/ }));
+		postMock.mockResolvedValue({ data: proposal() });
+		await userEvent.click(screen.getByRole("button", { name: /Undo anyway/ }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/undo", {
+				params: { path: { id: 1 } },
+				body: { confirmToken: "t9", via: "app" },
+			}),
+		);
+	});
+
+	it("edits the file as it is now", async () => {
+		proposals = [applied];
+		extra = { 1: { written: written({ content: "as it is now\n", token: "t3" }) } };
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		await userEvent.click(await screen.findByRole("button", { name: /Edit memory/ }));
+		const editor = screen.getByRole("textbox");
+		expect((editor as HTMLTextAreaElement).value).toBe("as it is now\n");
+		await userEvent.type(editor, "more");
+		postMock.mockResolvedValue({ data: { ...applied, updatedAt: "2026-10-04T02:00:00Z" } });
+		await userEvent.click(screen.getByRole("button", { name: /Save my edit/ }));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith("/api/v1/learning/proposals/{id}/edit", {
+				params: { path: { id: 1 } },
+				body: { content: "as it is now\nmore", confirmToken: "t3", via: "app" },
+			}),
+		);
+		// Saved: out of the editor, back to what was written.
+		expect(await screen.findByRole("button", { name: /Edit memory/ })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /Save my edit/ })).toBeNull();
 	});
 });

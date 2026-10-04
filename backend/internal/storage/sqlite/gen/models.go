@@ -179,6 +179,20 @@ type LearnProposal struct {
 	DecidedAt        sql.NullTime
 	AppliedSha256    string
 	Resolution       string
+	AppliedBefore    string
+	AppliedIndexLine string
+}
+
+type LearnProposalEvent struct {
+	ID           int64
+	ProposalID   int64
+	Kind         string
+	Status       string
+	Note         string
+	SnoozedUntil sql.NullTime
+	Via          string
+	SessionID    string
+	CreatedAt    time.Time
 }
 
 type LearnProposalEvidence struct {

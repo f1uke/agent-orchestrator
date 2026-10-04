@@ -560,6 +560,36 @@ func (q *Queries) InsertLearnJob(ctx context.Context, arg InsertLearnJobParams) 
 	return id, err
 }
 
+const insertLearnProposalEvent = `-- name: InsertLearnProposalEvent :exec
+INSERT INTO learn_proposal_event (proposal_id, kind, status, note, snoozed_until, via, session_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertLearnProposalEventParams struct {
+	ProposalID   int64
+	Kind         string
+	Status       string
+	Note         string
+	SnoozedUntil sql.NullTime
+	Via          string
+	SessionID    string
+	CreatedAt    time.Time
+}
+
+func (q *Queries) InsertLearnProposalEvent(ctx context.Context, arg InsertLearnProposalEventParams) error {
+	_, err := q.db.ExecContext(ctx, insertLearnProposalEvent,
+		arg.ProposalID,
+		arg.Kind,
+		arg.Status,
+		arg.Note,
+		arg.SnoozedUntil,
+		arg.Via,
+		arg.SessionID,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertLearnProtectedRule = `-- name: InsertLearnProtectedRule :one
 INSERT INTO learn_protected_rule (project_id, text, patterns_json, note, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -1120,6 +1150,44 @@ func (q *Queries) ListLearnExcerptsByProject(ctx context.Context, arg ListLearnE
 	return items, nil
 }
 
+const listLearnProposalEvents = `-- name: ListLearnProposalEvents :many
+SELECT id, proposal_id, kind, status, note, snoozed_until, via, session_id, created_at
+FROM learn_proposal_event WHERE proposal_id = ? ORDER BY id
+`
+
+func (q *Queries) ListLearnProposalEvents(ctx context.Context, proposalID int64) ([]LearnProposalEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listLearnProposalEvents, proposalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LearnProposalEvent{}
+	for rows.Next() {
+		var i LearnProposalEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProposalID,
+			&i.Kind,
+			&i.Status,
+			&i.Note,
+			&i.SnoozedUntil,
+			&i.Via,
+			&i.SessionID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLearnProtectedRules = `-- name: ListLearnProtectedRules :many
 SELECT id, project_id, text, patterns_json, note, created_at, updated_at
 FROM learn_protected_rule ORDER BY id
@@ -1414,7 +1482,7 @@ func (q *Queries) ListSkillProposalEvidence(ctx context.Context) ([]LearnProposa
 const listSkillProposals = `-- name: ListSkillProposals :many
 SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, index_line, diff,
     confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at,
-    snoozed_until, reject_reason, decided_at, applied_sha256, resolution
+    snoozed_until, reject_reason, decided_at, applied_sha256, resolution, applied_before, applied_index_line
 FROM learn_proposal ORDER BY id
 `
 
@@ -1453,6 +1521,8 @@ func (q *Queries) ListSkillProposals(ctx context.Context) ([]LearnProposal, erro
 			&i.DecidedAt,
 			&i.AppliedSha256,
 			&i.Resolution,
+			&i.AppliedBefore,
+			&i.AppliedIndexLine,
 		); err != nil {
 			return nil, err
 		}
@@ -1627,6 +1697,59 @@ func (q *Queries) ReopenDraftsOfProposal(ctx context.Context, proposalID int64) 
 	return err
 }
 
+const reopenLearnProposal = `-- name: ReopenLearnProposal :execrows
+UPDATE learn_proposal
+SET status = 'pending', reject_reason = '', resolution = '', applied_sha256 = '', applied_before = '',
+    applied_index_line = '', snoozed_until = NULL, decided_at = NULL, updated_at = ?
+WHERE id = ? AND status = ?
+`
+
+type ReopenLearnProposalParams struct {
+	UpdatedAt time.Time
+	ID        int64
+	Status    string
+}
+
+// A rejected proposal reopened, or an applied one undone: pending again, with
+// nothing of the decision left on the row (its events keep the history).
+func (q *Queries) ReopenLearnProposal(ctx context.Context, arg ReopenLearnProposalParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, reopenLearnProposal, arg.UpdatedAt, arg.ID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const rewriteAppliedLearnProposal = `-- name: RewriteAppliedLearnProposal :execrows
+UPDATE learn_proposal SET new_content = ?, diff = ?, applied_sha256 = ?, updated_at = ?
+WHERE id = ? AND status = 'applied' AND applied_sha256 = ?
+`
+
+type RewriteAppliedLearnProposalParams struct {
+	NewContent      string
+	Diff            string
+	AppliedSha256   string
+	UpdatedAt       time.Time
+	ID              int64
+	AppliedSha256_2 string
+}
+
+// The person edited what an applied proposal wrote.
+func (q *Queries) RewriteAppliedLearnProposal(ctx context.Context, arg RewriteAppliedLearnProposalParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rewriteAppliedLearnProposal,
+		arg.NewContent,
+		arg.Diff,
+		arg.AppliedSha256,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.AppliedSha256_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setLearnCursorError = `-- name: SetLearnCursorError :exec
 INSERT INTO learn_cursor (transcript_path, project_id, session_id, attribution, last_error, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
@@ -1689,19 +1812,23 @@ func (q *Queries) SetLearnDraftStatusByID(ctx context.Context, arg SetLearnDraft
 
 const settleLearnProposal = `-- name: SettleLearnProposal :execrows
 UPDATE learn_proposal
-SET status = ?, reject_reason = ?, resolution = ?, applied_sha256 = ?, new_content = ?, decided_at = ?, updated_at = ?
+SET status = ?, reject_reason = ?, resolution = ?, applied_sha256 = ?, new_content = ?, diff = ?, applied_before = ?,
+    applied_index_line = ?, decided_at = ?, updated_at = ?
 WHERE id = ? AND status = 'pending'
 `
 
 type SettleLearnProposalParams struct {
-	Status        string
-	RejectReason  string
-	Resolution    string
-	AppliedSha256 string
-	NewContent    string
-	DecidedAt     sql.NullTime
-	UpdatedAt     time.Time
-	ID            int64
+	Status           string
+	RejectReason     string
+	Resolution       string
+	AppliedSha256    string
+	NewContent       string
+	Diff             string
+	AppliedBefore    string
+	AppliedIndexLine string
+	DecidedAt        sql.NullTime
+	UpdatedAt        time.Time
+	ID               int64
 }
 
 func (q *Queries) SettleLearnProposal(ctx context.Context, arg SettleLearnProposalParams) (int64, error) {
@@ -1711,6 +1838,9 @@ func (q *Queries) SettleLearnProposal(ctx context.Context, arg SettleLearnPropos
 		arg.Resolution,
 		arg.AppliedSha256,
 		arg.NewContent,
+		arg.Diff,
+		arg.AppliedBefore,
+		arg.AppliedIndexLine,
 		arg.DecidedAt,
 		arg.UpdatedAt,
 		arg.ID,
@@ -1759,6 +1889,24 @@ func (q *Queries) SumLearnRuleChunkCostSince(ctx context.Context, createdAt time
 	var column_1 float64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const unsnoozeLearnProposal = `-- name: UnsnoozeLearnProposal :execrows
+UPDATE learn_proposal SET snoozed_until = NULL, updated_at = ?
+WHERE id = ? AND status = 'pending' AND snoozed_until IS NOT NULL
+`
+
+type UnsnoozeLearnProposalParams struct {
+	UpdatedAt time.Time
+	ID        int64
+}
+
+func (q *Queries) UnsnoozeLearnProposal(ctx context.Context, arg UnsnoozeLearnProposalParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, unsnoozeLearnProposal, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateLearnProtectedRuleText = `-- name: UpdateLearnProtectedRuleText :execrows

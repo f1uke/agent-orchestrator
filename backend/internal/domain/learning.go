@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // Learning capture: the records AO keeps so a later stage can propose memories
 // from what the human taught its agents. See internal/learn and the "Learning
@@ -545,8 +548,13 @@ type LearnProposal struct {
 	DecidedAt     time.Time
 	AppliedSHA256 string
 	Resolution    LearnResolution
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// AppliedBefore is what applying replaced, so undo can put it back: the
+	// file's earlier content, or a pinned rule's earlier text. AppliedIndexLine
+	// is the line applying added to MEMORY.md ("" when the index had it).
+	AppliedBefore    string
+	AppliedIndexLine string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // LearnDecidedTask is a task decide has run on.
@@ -595,6 +603,62 @@ type LearnSettlement struct {
 	RejectReason  string
 	Resolution    LearnResolution
 	AppliedSHA256 string
-	// NewContent is what was written (the person may have edited it).
+	// NewContent is what was written (the person may have edited it), and
+	// Diff the change it makes, computed again when the person edited it.
 	NewContent string
+	Diff       string
+	// AppliedBefore and AppliedIndexLine are what undo needs (LearnProposal).
+	AppliedBefore    string
+	AppliedIndexLine string
+}
+
+// ErrLearnTargetPending is a proposal that cannot become pending because
+// another pending proposal already targets the same file.
+var ErrLearnTargetPending = errors.New("another proposal for the same file is waiting for a decision")
+
+// LearnVia is the surface a decision was made from.
+type LearnVia string
+
+// Decision surfaces.
+const (
+	LearnViaApp LearnVia = "app"
+	LearnViaCLI LearnVia = "cli"
+	LearnViaAPI LearnVia = "api"
+)
+
+// LearnActor is who made a decision: the surface and, from the CLI inside an
+// AO session (an orchestrator acting on the person's word), that session.
+type LearnActor struct {
+	Via       LearnVia
+	SessionID string
+}
+
+// LearnEventKind is one kind of decision in a proposal's history.
+type LearnEventKind string
+
+// Decision kinds.
+const (
+	LearnEventApproved  LearnEventKind = "approved"
+	LearnEventEdited    LearnEventKind = "edited"
+	LearnEventRejected  LearnEventKind = "rejected"
+	LearnEventSnoozed   LearnEventKind = "snoozed"
+	LearnEventUnsnoozed LearnEventKind = "unsnoozed"
+	LearnEventReopened  LearnEventKind = "reopened"
+	LearnEventUndone    LearnEventKind = "undone"
+	LearnEventStale     LearnEventKind = "stale"
+)
+
+// LearnProposalEvent is one decision on a proposal, kept so the history of
+// what was decided, when and from where is never overwritten by the next one.
+type LearnProposalEvent struct {
+	ID         int64
+	ProposalID int64
+	Kind       LearnEventKind
+	// Status is the proposal's status after the event.
+	Status LearnProposalStatus
+	// Note is a rejection's reason, a conflict's side, or what an undo did.
+	Note         string
+	SnoozedUntil time.Time
+	Actor        LearnActor
+	CreatedAt    time.Time
 }

@@ -128,6 +128,13 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   (Approve / Edit first / Snooze / Reject with a reason). A conflict card is two
   columns - the rule you have, your newer words (amber) - with a three-way
   "Which wins?" that states each side's consequence before you commit.
+  No decision is final (2026-10-04): a snoozed proposal keeps the whole decide
+  bar plus Unsnooze; a rejected one has Reopen; an approved one has Edit
+  (the file as it is now, same gates) and Undo; a settled conflict has Undo.
+  Undo states its consequence inline in the bar before it runs; when what AO
+  wrote changed since, an amber callout shows the "AO wrote → now" diff above
+  and the bar's button becomes a red "Undo anyway". A History section (dot,
+  what, mono timestamp · surface) closes every detail.
 - **Approved deviation (2026-08-14) — no coloured edge bars anywhere.** The user
   called the board's left/top accent stripes "very dated" and asked for them to be
   removed **app-wide** and redesigned. This **narrows the 2026-07-10 lane-colour

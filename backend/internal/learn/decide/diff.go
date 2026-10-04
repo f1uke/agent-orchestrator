@@ -73,12 +73,14 @@ func lcsOps(a, b []string) []op {
 			ops = append(ops, op{' ', a[i], i + 1, j + 1})
 			i++
 			j++
-		case j < m && (i == n || t[i][j+1] >= t[i+1][j]):
-			ops = append(ops, op{'+', b[j], i, j + 1})
-			j++
-		default:
+		// On a tie the old line goes first, so a changed line reads as the
+		// removal then its replacement, as every diff tool shows it.
+		case i < n && (j == m || t[i+1][j] >= t[i][j+1]):
 			ops = append(ops, op{'-', a[i], i + 1, j})
 			i++
+		default:
+			ops = append(ops, op{'+', b[j], i, j + 1})
+			j++
 		}
 	}
 	return ops

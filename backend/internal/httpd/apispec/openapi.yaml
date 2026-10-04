@@ -855,7 +855,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: One proposal with the drafts it rests on
+      summary: One proposal with the drafts it rests on, what it wrote as it is now,
+        and its decision history
       tags:
       - learning
   /api/v1/learning/proposals/{id}/approve:
@@ -916,6 +917,65 @@ paths:
       summary: 'Approve a proposal: write it (or record the side that won a conflict)'
       tags:
       - learning
+  /api/v1/learning/proposals/{id}/edit:
+    post:
+      operationId: editLearningProposal
+      parameters:
+      - description: Proposal id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Proposal id.
+          format: int64
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersEditLearningProposalRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProposalDTO'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Edit what an approved proposal wrote, under the same gates; a changed
+        file needs its token confirmed
+      tags:
+      - learning
   /api/v1/learning/proposals/{id}/reject:
     post:
       operationId: rejectLearningProposal
@@ -974,6 +1034,64 @@ paths:
       summary: Reject a proposal, with a reason decide reads
       tags:
       - learning
+  /api/v1/learning/proposals/{id}/reopen:
+    post:
+      operationId: reopenLearningProposal
+      parameters:
+      - description: Proposal id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Proposal id.
+          format: int64
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersLearningRedecideRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProposalDTO'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Put a rejected proposal back in the queue
+      tags:
+      - learning
   /api/v1/learning/proposals/{id}/snooze:
     post:
       operationId: snoozeLearningProposal
@@ -1030,6 +1148,123 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
       summary: Hide a pending proposal until a time
+      tags:
+      - learning
+  /api/v1/learning/proposals/{id}/undo:
+    post:
+      operationId: undoLearningProposal
+      parameters:
+      - description: Proposal id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Proposal id.
+          format: int64
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersUndoLearningProposalRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProposalDTO'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Take back what an approved proposal wrote and put it back in the queue;
+        a changed file needs its token confirmed
+      tags:
+      - learning
+  /api/v1/learning/proposals/{id}/unsnooze:
+    post:
+      operationId: unsnoozeLearningProposal
+      parameters:
+      - description: Proposal id.
+        in: path
+        name: id
+        required: true
+        schema:
+          description: Proposal id.
+          format: int64
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersLearningRedecideRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersLearningProposalDTO'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Bring a snoozed proposal back to the queue now
       tags:
       - learning
   /api/v1/learning/protected-rules:
@@ -8264,6 +8499,18 @@ components:
           - words_win
           - both
           type: string
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
+          type: string
       type: object
     ControllersCheckLearningForbiddenRequest:
       properties:
@@ -8343,6 +8590,31 @@ components:
       - description
       - intervalMs
       - running
+      type: object
+    ControllersEditLearningProposalRequest:
+      properties:
+        confirmToken:
+          description: The token of the file state the edit started from (written.token);
+            needed only when the file changed since AO wrote it.
+          type: string
+        content:
+          description: The whole file as it should be; checked by the same gates as
+            an edit before approving.
+          type: string
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
+          type: string
+      required:
+      - content
       type: object
     ControllersEditSmokeCaseInput:
       properties:
@@ -8897,11 +9169,61 @@ components:
       - createdAt
       - updatedAt
       type: object
+    ControllersLearningProposalEventDTO:
+      properties:
+        at:
+          format: date-time
+          type: string
+        kind:
+          enum:
+          - approved
+          - edited
+          - rejected
+          - snoozed
+          - unsnoozed
+          - reopened
+          - undone
+          - stale
+          type: string
+        note:
+          type: string
+        session:
+          type: string
+        snoozedUntil:
+          format: date-time
+          type:
+          - "null"
+          - string
+        status:
+          description: The proposal's status after it.
+          enum:
+          - pending
+          - rejected
+          - applied
+          - stale
+          - superseded
+          - dropped
+          type: string
+        via:
+          enum:
+          - app
+          - cli
+          - api
+          type: string
+      required:
+      - kind
+      - status
+      - at
+      type: object
     ControllersLearningProposalResponse:
       properties:
         evidence:
           items:
             $ref: '#/components/schemas/ControllersLearningDraftDTO'
+          type: array
+        history:
+          items:
+            $ref: '#/components/schemas/ControllersLearningProposalEventDTO'
           type: array
         proposal:
           $ref: '#/components/schemas/ControllersLearningProposalDTO'
@@ -8909,10 +9231,13 @@ components:
           items:
             $ref: '#/components/schemas/ControllersLearningRuleRefDTO'
           type: array
+        written:
+          $ref: '#/components/schemas/ControllersLearningWrittenDTO'
       required:
       - proposal
       - evidence
       - rules
+      - history
       type: object
     ControllersLearningProtectedRuleDTO:
       properties:
@@ -8944,6 +9269,21 @@ components:
       - patterns
       - createdAt
       - updatedAt
+      type: object
+    ControllersLearningRedecideRequest:
+      properties:
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
+          type: string
       type: object
     ControllersLearningRuleDTO:
       properties:
@@ -9192,6 +9532,43 @@ components:
       required:
       - actions
       type: object
+    ControllersLearningWrittenDTO:
+      properties:
+        changed:
+          description: 'It is not what AO wrote any more: edited by hand, by an agent
+            or by another proposal, or removed.'
+          type: boolean
+        content:
+          description: The file (or the pinned rule's text) as it is now.
+          type: string
+        diff:
+          description: Unified diff from what AO wrote to what is there now.
+          type: string
+        exists:
+          type: boolean
+        indexLine:
+          description: The line the approve added to MEMORY.md.
+          type: string
+        indexLinePresent:
+          type: boolean
+        indexPath:
+          type: string
+        path:
+          description: The file written, or rule:protected-<id> for a pinned rule
+            a conflict changed.
+          type: string
+        token:
+          description: Names this state; confirm an undo or an edit of a changed file
+            with it.
+          type: string
+      required:
+      - path
+      - exists
+      - content
+      - indexLinePresent
+      - changed
+      - token
+      type: object
     ControllersListDaemonLoopsResponse:
       properties:
         loops:
@@ -9329,6 +9706,18 @@ components:
         reason:
           description: Why not; decide reads it so the same thing is not proposed
             again.
+          type: string
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
           type: string
       type: object
     ControllersRenameSimFlowInput:
@@ -9685,9 +10074,21 @@ components:
       type: object
     ControllersSnoozeLearningProposalRequest:
       properties:
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
         until:
           description: When it comes back; within the next 90 days.
           format: date-time
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
           type: string
       required:
       - until
@@ -9806,6 +10207,26 @@ components:
       required:
       - path
       - status
+      type: object
+    ControllersUndoLearningProposalRequest:
+      properties:
+        confirmToken:
+          description: 'Needed only when what AO wrote changed since: the token of
+            the state the person reviewed (written.token, or the PROPOSAL_CHANGED
+            error''s details.token).'
+          type: string
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
+          type: string
       type: object
     ControllersUnprotectLearningRuleResponse:
       properties:

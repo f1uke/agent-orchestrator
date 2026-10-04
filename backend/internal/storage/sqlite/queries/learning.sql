@@ -312,7 +312,7 @@ ON CONFLICT DO NOTHING;
 -- name: ListSkillProposals :many
 SELECT id, project_id, task_key, action, target_path, scope, title, rationale, base_sha256, new_content, index_line, diff,
     confidence, outcome, rule_verdicts_json, verifier_json, status, drop_reason, created_at, updated_at,
-    snoozed_until, reject_reason, decided_at, applied_sha256, resolution
+    snoozed_until, reject_reason, decided_at, applied_sha256, resolution, applied_before, applied_index_line
 FROM learn_proposal ORDER BY id;
 
 -- name: ListSkillProposalEvidence :many
@@ -326,11 +326,37 @@ DELETE FROM learn_decided_task WHERE project_id = ?;
 
 -- name: SettleLearnProposal :execrows
 UPDATE learn_proposal
-SET status = ?, reject_reason = ?, resolution = ?, applied_sha256 = ?, new_content = ?, decided_at = ?, updated_at = ?
+SET status = ?, reject_reason = ?, resolution = ?, applied_sha256 = ?, new_content = ?, diff = ?, applied_before = ?,
+    applied_index_line = ?, decided_at = ?, updated_at = ?
 WHERE id = ? AND status = 'pending';
 
 -- name: SnoozeLearnProposal :execrows
 UPDATE learn_proposal SET snoozed_until = ?, updated_at = ? WHERE id = ? AND status = 'pending';
+
+-- name: UnsnoozeLearnProposal :execrows
+UPDATE learn_proposal SET snoozed_until = NULL, updated_at = ?
+WHERE id = ? AND status = 'pending' AND snoozed_until IS NOT NULL;
+
+-- name: ReopenLearnProposal :execrows
+-- A rejected proposal reopened, or an applied one undone: pending again, with
+-- nothing of the decision left on the row (its events keep the history).
+UPDATE learn_proposal
+SET status = 'pending', reject_reason = '', resolution = '', applied_sha256 = '', applied_before = '',
+    applied_index_line = '', snoozed_until = NULL, decided_at = NULL, updated_at = ?
+WHERE id = ? AND status = ?;
+
+-- name: RewriteAppliedLearnProposal :execrows
+-- The person edited what an applied proposal wrote.
+UPDATE learn_proposal SET new_content = ?, diff = ?, applied_sha256 = ?, updated_at = ?
+WHERE id = ? AND status = 'applied' AND applied_sha256 = ?;
+
+-- name: InsertLearnProposalEvent :exec
+INSERT INTO learn_proposal_event (proposal_id, kind, status, note, snoozed_until, via, session_id, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: ListLearnProposalEvents :many
+SELECT id, proposal_id, kind, status, note, snoozed_until, via, session_id, created_at
+FROM learn_proposal_event WHERE proposal_id = ? ORDER BY id;
 
 -- name: ReopenDraftsOfProposal :exec
 UPDATE learn_draft SET status = 'open'

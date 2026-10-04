@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,9 +24,15 @@ type LearningDecideService interface {
 	Proposals(ctx context.Context, project domain.ProjectID, all bool) ([]domain.LearnProposal, error)
 	Proposal(ctx context.Context, id int64) (domain.LearnProposal, []domain.LearnDraft, error)
 	ProposalRules(ctx context.Context, p domain.LearnProposal) ([]learning.RuleRef, error)
-	Approve(ctx context.Context, id int64, content string, resolution domain.LearnResolution) (domain.LearnProposal, error)
-	Reject(ctx context.Context, id int64, reason string) (domain.LearnProposal, error)
-	Snooze(ctx context.Context, id int64, until time.Time) (domain.LearnProposal, error)
+	Approve(ctx context.Context, id int64, content string, resolution domain.LearnResolution, by domain.LearnActor) (domain.LearnProposal, error)
+	Reject(ctx context.Context, id int64, reason string, by domain.LearnActor) (domain.LearnProposal, error)
+	Snooze(ctx context.Context, id int64, until time.Time, by domain.LearnActor) (domain.LearnProposal, error)
+	Unsnooze(ctx context.Context, id int64, by domain.LearnActor) (domain.LearnProposal, error)
+	Reopen(ctx context.Context, id int64, by domain.LearnActor) (domain.LearnProposal, error)
+	Undo(ctx context.Context, id int64, confirm string, by domain.LearnActor) (domain.LearnProposal, error)
+	EditApplied(ctx context.Context, id int64, content, confirm string, by domain.LearnActor) (domain.LearnProposal, error)
+	Written(ctx context.Context, p domain.LearnProposal) (learning.Written, bool, error)
+	History(ctx context.Context, id int64) ([]domain.LearnProposalEvent, error)
 }
 
 // LearningDecideController owns the decide and proposal routes.
@@ -111,20 +118,52 @@ type LearningProposalDTO struct {
 	Resolution   string                   `json:"resolution,omitempty" enum:"keep_rule,words_win,both" description:"The side the person picked on a conflict card."`
 }
 
+// LearningDecisionBy says who made a decision; every decision body carries it
+// and the proposal's history keeps it.
+type LearningDecisionBy struct {
+	Via     string `json:"via,omitempty" enum:"app,cli,api" description:"The surface deciding: the app, the ao CLI, or a bare API call (the default)."`
+	Session string `json:"session,omitempty" description:"The AO session that ran the decision, e.g. an orchestrator acting on the person's word."`
+}
+
+func (b LearningDecisionBy) actor() domain.LearnActor {
+	return domain.LearnActor{Via: domain.LearnVia(b.Via), SessionID: b.Session}
+}
+
 // ApproveLearningProposalRequest is the body of POST /api/v1/learning/proposals/{id}/approve.
 type ApproveLearningProposalRequest struct {
+	LearningDecisionBy
 	Content    string `json:"content,omitempty" description:"The person's edit of what would be written; empty keeps the proposal's content. For a conflict, the new rule's text or the scope of each."`
 	Resolution string `json:"resolution,omitempty" enum:"keep_rule,words_win,both" description:"Required on a conflict card: which side wins."`
 }
 
 // RejectLearningProposalRequest is the body of POST /api/v1/learning/proposals/{id}/reject.
 type RejectLearningProposalRequest struct {
+	LearningDecisionBy
 	Reason string `json:"reason,omitempty" description:"Why not; decide reads it so the same thing is not proposed again."`
 }
 
 // SnoozeLearningProposalRequest is the body of POST /api/v1/learning/proposals/{id}/snooze.
 type SnoozeLearningProposalRequest struct {
+	LearningDecisionBy
 	Until time.Time `json:"until" description:"When it comes back; within the next 90 days."`
+}
+
+// LearningRedecideRequest is the body of POST .../unsnooze and .../reopen.
+type LearningRedecideRequest struct {
+	LearningDecisionBy
+}
+
+// UndoLearningProposalRequest is the body of POST /api/v1/learning/proposals/{id}/undo.
+type UndoLearningProposalRequest struct {
+	LearningDecisionBy
+	ConfirmToken string `json:"confirmToken,omitempty" description:"Needed only when what AO wrote changed since: the token of the state the person reviewed (written.token, or the PROPOSAL_CHANGED error's details.token)."`
+}
+
+// EditLearningProposalRequest is the body of POST /api/v1/learning/proposals/{id}/edit.
+type EditLearningProposalRequest struct {
+	LearningDecisionBy
+	Content      string `json:"content" description:"The whole file as it should be; checked by the same gates as an edit before approving."`
+	ConfirmToken string `json:"confirmToken,omitempty" description:"The token of the file state the edit started from (written.token); needed only when the file changed since AO wrote it."`
 }
 
 // ListLearningProposalsResponse is the body of GET /api/v1/learning/proposals.
@@ -144,6 +183,34 @@ type LearningProposalResponse struct {
 	Evidence []LearningDraftDTO  `json:"evidence"`
 	// Rules are the standing rules the proposal names, resolved to text.
 	Rules []LearningRuleRefDTO `json:"rules"`
+	// Written is what an approved proposal wrote, as it is now.
+	Written *LearningWrittenDTO `json:"written,omitempty"`
+	// History is every decision on the proposal, oldest first.
+	History []LearningProposalEventDTO `json:"history"`
+}
+
+// LearningWrittenDTO is what an approved proposal wrote, as it is now.
+type LearningWrittenDTO struct {
+	Path             string `json:"path" description:"The file written, or rule:protected-<id> for a pinned rule a conflict changed."`
+	Exists           bool   `json:"exists"`
+	Content          string `json:"content" description:"The file (or the pinned rule's text) as it is now."`
+	IndexPath        string `json:"indexPath,omitempty"`
+	IndexLine        string `json:"indexLine,omitempty" description:"The line the approve added to MEMORY.md."`
+	IndexLinePresent bool   `json:"indexLinePresent"`
+	Changed          bool   `json:"changed" description:"It is not what AO wrote any more: edited by hand, by an agent or by another proposal, or removed."`
+	Diff             string `json:"diff,omitempty" description:"Unified diff from what AO wrote to what is there now."`
+	Token            string `json:"token" description:"Names this state; confirm an undo or an edit of a changed file with it."`
+}
+
+// LearningProposalEventDTO is one decision in a proposal's history.
+type LearningProposalEventDTO struct {
+	Kind         string     `json:"kind" enum:"approved,edited,rejected,snoozed,unsnoozed,reopened,undone,stale"`
+	Status       string     `json:"status" enum:"pending,rejected,applied,stale,superseded,dropped" description:"The proposal's status after it."`
+	Note         string     `json:"note,omitempty"`
+	SnoozedUntil *time.Time `json:"snoozedUntil,omitempty"`
+	Via          string     `json:"via,omitempty" enum:"app,cli,api"`
+	Session      string     `json:"session,omitempty"`
+	At           time.Time  `json:"at"`
 }
 
 // LearningRuleRefDTO is a standing rule a proposal names.
@@ -163,12 +230,28 @@ func (c *LearningDecideController) Register(r chi.Router) {
 	r.Post("/learning/proposals/{id}/approve", c.approve)
 	r.Post("/learning/proposals/{id}/reject", c.reject)
 	r.Post("/learning/proposals/{id}/snooze", c.snooze)
+	r.Post("/learning/proposals/{id}/unsnooze", c.unsnooze)
+	r.Post("/learning/proposals/{id}/reopen", c.reopen)
+	r.Post("/learning/proposals/{id}/undo", c.undo)
+	r.Post("/learning/proposals/{id}/edit", c.edit)
 }
 
 func writeDecideError(w http.ResponseWriter, r *http.Request, method, path string, err error) bool {
+	var changed *learning.ChangedError
 	switch {
 	case err == nil:
 		return false
+	case errors.As(err, &changed):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "PROPOSAL_CHANGED", err.Error(),
+			map[string]any{"path": changed.Path, "diff": changed.Diff, "token": changed.Token})
+	case errors.Is(err, learning.ErrProposalWrongState):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "PROPOSAL_WRONG_STATE", err.Error(), nil)
+	case errors.Is(err, domain.ErrLearnTargetPending):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "TARGET_PENDING", err.Error(), nil)
+	case errors.Is(err, learning.ErrMemoryExists):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "MEMORY_EXISTS", err.Error(), nil)
+	case errors.Is(err, learning.ErrNothingToRestore):
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "NOTHING_TO_RESTORE", err.Error(), nil)
 	case errors.Is(err, learning.ErrDecideUnavailable):
 		apispec.NotImplemented(w, r, method, path)
 	case errors.Is(err, learning.ErrUnknownProject):
@@ -263,6 +346,23 @@ func (c *LearningDecideController) get(w http.ResponseWriter, r *http.Request) {
 	for _, ref := range refs {
 		out.Rules = append(out.Rules, LearningRuleRefDTO{ID: ref.ID, Text: ref.Text, Source: ref.Source, Heading: ref.Heading, Protected: ref.Protected})
 	}
+	written, ok, err := c.Svc.Written(r.Context(), p)
+	if writeDecideError(w, r, "GET", path, err) {
+		return
+	}
+	if ok {
+		out.Written = &LearningWrittenDTO{Path: written.Path, Exists: written.Exists, Content: written.Content, IndexPath: written.IndexPath,
+			IndexLine: written.IndexLine, IndexLinePresent: written.IndexLinePresent, Changed: written.Changed, Diff: written.Diff, Token: written.Token}
+	}
+	history, err := c.Svc.History(r.Context(), id)
+	if writeDecideError(w, r, "GET", path, err) {
+		return
+	}
+	out.History = make([]LearningProposalEventDTO, 0, len(history))
+	for _, ev := range history {
+		out.History = append(out.History, LearningProposalEventDTO{Kind: string(ev.Kind), Status: string(ev.Status), Note: ev.Note,
+			SnoozedUntil: timePtr(ev.SnoozedUntil), Via: string(ev.Actor.Via), Session: ev.Actor.SessionID, At: ev.CreatedAt})
+	}
 	envelope.WriteJSON(w, http.StatusOK, out)
 }
 
@@ -278,7 +378,8 @@ func (c *LearningDecideController) decision(w http.ResponseWriter, r *http.Reque
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_ID", "id must be a positive integer", nil)
 		return
 	}
-	if err := decodeJSON(r, body); err != nil {
+	// A decision with nothing to say (unsnooze, reopen) may send no body.
+	if err := decodeJSON(r, body); err != nil && !errors.Is(err, io.EOF) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
@@ -292,21 +393,49 @@ func (c *LearningDecideController) decision(w http.ResponseWriter, r *http.Reque
 func (c *LearningDecideController) approve(w http.ResponseWriter, r *http.Request) {
 	var in ApproveLearningProposalRequest
 	c.decision(w, r, "/api/v1/learning/proposals/{id}/approve", &in, func(id int64) (domain.LearnProposal, error) {
-		return c.Svc.Approve(r.Context(), id, in.Content, domain.LearnResolution(in.Resolution))
+		return c.Svc.Approve(r.Context(), id, in.Content, domain.LearnResolution(in.Resolution), in.actor())
 	})
 }
 
 func (c *LearningDecideController) reject(w http.ResponseWriter, r *http.Request) {
 	var in RejectLearningProposalRequest
 	c.decision(w, r, "/api/v1/learning/proposals/{id}/reject", &in, func(id int64) (domain.LearnProposal, error) {
-		return c.Svc.Reject(r.Context(), id, in.Reason)
+		return c.Svc.Reject(r.Context(), id, in.Reason, in.actor())
 	})
 }
 
 func (c *LearningDecideController) snooze(w http.ResponseWriter, r *http.Request) {
 	var in SnoozeLearningProposalRequest
 	c.decision(w, r, "/api/v1/learning/proposals/{id}/snooze", &in, func(id int64) (domain.LearnProposal, error) {
-		return c.Svc.Snooze(r.Context(), id, in.Until)
+		return c.Svc.Snooze(r.Context(), id, in.Until, in.actor())
+	})
+}
+
+func (c *LearningDecideController) unsnooze(w http.ResponseWriter, r *http.Request) {
+	var in LearningRedecideRequest
+	c.decision(w, r, "/api/v1/learning/proposals/{id}/unsnooze", &in, func(id int64) (domain.LearnProposal, error) {
+		return c.Svc.Unsnooze(r.Context(), id, in.actor())
+	})
+}
+
+func (c *LearningDecideController) reopen(w http.ResponseWriter, r *http.Request) {
+	var in LearningRedecideRequest
+	c.decision(w, r, "/api/v1/learning/proposals/{id}/reopen", &in, func(id int64) (domain.LearnProposal, error) {
+		return c.Svc.Reopen(r.Context(), id, in.actor())
+	})
+}
+
+func (c *LearningDecideController) undo(w http.ResponseWriter, r *http.Request) {
+	var in UndoLearningProposalRequest
+	c.decision(w, r, "/api/v1/learning/proposals/{id}/undo", &in, func(id int64) (domain.LearnProposal, error) {
+		return c.Svc.Undo(r.Context(), id, in.ConfirmToken, in.actor())
+	})
+}
+
+func (c *LearningDecideController) edit(w http.ResponseWriter, r *http.Request) {
+	var in EditLearningProposalRequest
+	c.decision(w, r, "/api/v1/learning/proposals/{id}/edit", &in, func(id int64) (domain.LearnProposal, error) {
+		return c.Svc.EditApplied(r.Context(), id, in.Content, in.ConfirmToken, in.actor())
 	})
 }
 

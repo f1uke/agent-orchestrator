@@ -90,13 +90,27 @@ Decides now every ready task (sessions ended, an orchestrator's day over, or a l
 
 ### `ao learn proposals`
 
-The proposals, newest first: status, action, scope, confidence, the task's outcome, title and target. `--all` adds the dropped ones with the reason a gate or the verifier gave. `ao learn proposals show <id>` prints the rationale, the verifier's notes, the rule verdicts, the evidence (the human's own words) and the diff. The human decides in the Memory inbox (`/memory` in the app); for scripts, `ao learn proposals approve <id> [--file edited] [--side keep_rule|words_win|both --text ...]`, `reject <id> --reason ...` and `snooze <id> --days N` do the same.
+The proposals, newest first: status (a snoozed one says `snoozed until <date>`), action, scope, confidence, the task's outcome, title and target, and for a decided one when it was written or why it was rejected. `--all` adds the dropped ones with the reason a gate or the verifier gave. `ao learn proposals show <id>` prints the rationale, the verifier's notes, the rule verdicts, the evidence (the human's own words), every decision so far (when, and from the app or the CLI with the AO session that ran it), and the diff - or, once applied, the file as it is now and whether it changed since AO wrote it.
 
 | Flag | Meaning | Default / Required |
 |---|---|---|
 | `--project id` | Project | every project |
+| `--status s` | Only `waiting` (pending, not snoozed), `snoozed`, `pending` (both), `applied`, `rejected`, `stale`, `superseded`, `dropped` or `all` | - |
 | `--all` | Include dropped, rejected and settled proposals | pending only |
 | `--json` | Output as JSON | - |
+
+### Deciding: `ao learn approve|reject|snooze|unsnooze|reopen|undo|edit <id>`
+
+The human decides in the Memory inbox (`/memory` in the app). These do the same from a shell, so an orchestrator can act on what the human said; each decision is kept in the proposal's history with `cli` and `$AO_SESSION_ID`. No decision is final.
+
+- `ao learn approve <id> [--file edited] [--side keep_rule|words_win|both --text ...]` - write it (a snoozed one too); `--file` writes an edit after the same checks; a conflict needs `--side`.
+- `ao learn reject <id> --reason "..."` - the reason is required; learning reads it so it does not propose the same thing again.
+- `ao learn snooze <id> [--days N]` (default 7, at most 90) and `ao learn unsnooze <id>` - hide it, or bring it back now.
+- `ao learn reopen <id>` - a rejected proposal back in the queue. Refused while another proposal for the same file is waiting, and for a new memory whose file exists already (it would be written twice).
+- `ao learn undo <id> [--confirm token]` - take back what an approved proposal wrote and put it back in the queue: a new memory's file and the `MEMORY.md` line it added are removed, a changed file gets its earlier version, a conflict's pinned rule its earlier text (a conflict whose rule was kept is reopened).
+- `ao learn edit <id> --file path [--confirm token]` - replace what an approved proposal wrote with the file's content, after the same checks.
+
+If what AO wrote changed since (by hand, by an agent, by another proposal), `undo` and `edit` touch nothing: they print the diff and a token, and exit 1. Re-run with `--confirm <token>` to go ahead; what is there is backed up first. Never confirm on the human's behalf without showing them the diff.
 
 ### `ao learn settings`
 
