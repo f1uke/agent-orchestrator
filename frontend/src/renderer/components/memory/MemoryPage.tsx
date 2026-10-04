@@ -15,8 +15,16 @@ import {
 	type Proposal,
 } from "../../hooks/useMemory";
 import { ConflictDetail, ProposalDetail } from "./Detail";
-import { ActionPill, Confidence } from "./parts";
-import { fileName, isSnoozed, queueOrder } from "./model";
+import { ActionPill, Confidence, OutcomeStatus } from "./parts";
+import {
+	fileName,
+	isSnoozed,
+	matchesOutcome,
+	OUTCOME_FILTER,
+	outcomeOf,
+	queueOrder,
+	type OutcomeFilter,
+} from "./model";
 
 type Tab = "pending" | "snoozed" | "decided";
 
@@ -40,15 +48,19 @@ export function MemoryPage() {
 	const decideNow = useDecideNow();
 	const [tab, setTab] = useState<Tab>("pending");
 	const [project, setProject] = useState("all");
+	const [filter, setFilter] = useState<OutcomeFilter>("all");
 	const [selected, setSelected] = useState<number | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
 	const now = Date.now();
 
 	const all = proposals.data?.proposals ?? [];
-	const visible = useMemo(
-		() => queueOrder(all.filter((p) => tabOf(p, now) === tab && (project === "all" || p.projectId === project))),
+	const inTab = useMemo(
+		() => all.filter((p) => tabOf(p, now) === tab && (project === "all" || p.projectId === project)),
 		[all, tab, project],
 	);
+	// The Decided tab narrows to what was kept or not; the other tabs show everything.
+	const shown = (p: Proposal, f: OutcomeFilter) => tab !== "decided" || matchesOutcome(outcomeOf(p), f);
+	const visible = useMemo(() => queueOrder(inTab.filter((p) => shown(p, filter))), [inTab, tab, filter]);
 	const count = (t: Tab) => all.filter((p) => tabOf(p, now) === t).length;
 	const current = all.find((p) => p.id === selected) ?? null;
 	const detail = useProposal(current?.id ?? null);
@@ -57,8 +69,8 @@ export function MemoryPage() {
 
 	// Keep a proposal open: the first in the queue, or the next after a decision.
 	useEffect(() => {
-		if (!current || tabOf(current, now) !== tab) setSelected(visible[0]?.id ?? null);
-	}, [visible, tab]);
+		if (!current || tabOf(current, now) !== tab || !shown(current, filter)) setSelected(visible[0]?.id ?? null);
+	}, [visible, tab, filter]);
 
 	useEffect(() => {
 		if (!toast) return;
@@ -175,6 +187,32 @@ export function MemoryPage() {
 								</button>
 							))}
 						</div>
+						{tab === "decided" && (
+							<div
+								className="flex shrink-0 items-center gap-1 border-b border-border px-2.5 py-1.5"
+								role="radiogroup"
+								aria-label="Filter by outcome"
+							>
+								{(Object.keys(OUTCOME_FILTER) as OutcomeFilter[]).map((f) => (
+									<button
+										key={f}
+										type="button"
+										role="radio"
+										aria-checked={filter === f}
+										onClick={() => setFilter(f)}
+										className={cn(
+											"whitespace-nowrap rounded-md px-2 py-0.5 text-[11.5px]",
+											filter === f ? "bg-raised text-foreground" : "text-muted-foreground hover:text-foreground",
+										)}
+									>
+										{OUTCOME_FILTER[f]}
+										<span className="ml-1.5 font-mono text-[10.5px] text-passive">
+											{inTab.filter((p) => shown(p, f)).length}
+										</span>
+									</button>
+								))}
+							</div>
+						)}
 						<div className="min-h-0 flex-1 overflow-y-auto p-1.5" role="list" aria-label="Proposals">
 							{visible.length === 0 ? (
 								<div className="px-3 py-10 text-center text-[12px] text-passive">
@@ -182,6 +220,10 @@ export function MemoryPage() {
 										<EmptyQueue waiting={openDrafts(status.data)} />
 									) : tab === "snoozed" ? (
 										"Nothing snoozed."
+									) : filter === "kept" ? (
+										"Nothing kept yet."
+									) : filter === "not_kept" ? (
+										"Nothing rejected yet."
 									) : (
 										"Nothing decided yet."
 									)}
@@ -268,37 +310,42 @@ function openDrafts(status: ReturnType<typeof useLearningStatus>["data"]): numbe
 
 function Row({ p, active, onClick }: { p: Proposal; active: boolean; onClick: () => void }) {
 	const n = p.evidenceIds.length;
-	const sub =
-		p.status === "rejected"
-			? `Rejected - ${p.rejectReason}`
-			: p.status === "applied"
-				? `${p.action === "conflict" ? "Decided" : "Written"} ${p.decidedAt ? new Date(p.decidedAt).toLocaleDateString() : ""}`
-				: isSnoozed(p)
-					? `Snoozed until ${new Date(p.snoozedUntil).toLocaleDateString()}`
-					: `${n} ${n === 1 ? "quote" : "quotes"} of yours · ${new Date(p.createdAt).toLocaleDateString()}`;
+	const outcome = outcomeOf(p);
+	// What was not kept recedes, so what was written stands out; hover or open brings it back.
+	const dim = outcome?.kind === "not_kept" && !active && "opacity-60 group-hover:opacity-100";
 	return (
 		<button
 			type="button"
 			onClick={onClick}
 			aria-current={active}
 			className={cn(
-				"mb-0.5 flex w-full flex-col gap-1.5 rounded-lg px-3 py-2.5 text-left",
+				"group mb-0.5 flex w-full flex-col gap-1.5 rounded-lg px-3 py-2.5 text-left",
 				active
 					? "bg-accent-weak shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]"
 					: "hover:bg-interactive-hover",
 			)}
 		>
-			<div className="flex items-center gap-2">
+			<div className={cn("flex items-center gap-2", dim)}>
 				<ActionPill action={p.action} />
 				<span className="truncate font-mono text-[10.5px] text-passive">{p.projectId}</span>
 				<span className="ml-auto">
 					<Confidence value={p.confidence} />
 				</span>
 			</div>
-			<div className="line-clamp-2 text-[12.5px] font-medium leading-[1.4] text-foreground">{p.title}</div>
-			<div className="flex items-center gap-1.5 text-[11px] text-passive">
-				{p.action === "conflict" && <Scale className="size-3" aria-hidden="true" />}
-				<span className="truncate">{sub}</span>
+			<div className={cn("line-clamp-2 text-[12.5px] font-medium leading-[1.4] text-foreground", dim)}>{p.title}</div>
+			<div className="flex min-w-0 items-center gap-1.5 text-[11px] text-passive">
+				{outcome ? (
+					<OutcomeStatus outcome={outcome} />
+				) : (
+					<>
+						{p.action === "conflict" && <Scale className="size-3" aria-hidden="true" />}
+						<span className="truncate">
+							{isSnoozed(p)
+								? `Snoozed until ${new Date(p.snoozedUntil).toLocaleDateString()}`
+								: `${n} ${n === 1 ? "quote" : "quotes"} of yours · ${new Date(p.createdAt).toLocaleDateString()}`}
+						</span>
+					</>
+				)}
 			</div>
 		</button>
 	);

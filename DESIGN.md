@@ -135,6 +135,15 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   wrote changed since, an amber callout shows the "AO wrote → now" diff above
   and the bar's button becomes a red "Undo anyway". A History section (dot,
   what, mono timestamp · surface) closes every detail.
+  The Decided tab tells outcomes apart at a glance (2026-10-04): a row's status
+  line is a green check + "Written" (or, for a conflict, "Kept your words" /
+  "Kept both, scoped") when kept, a red x + "Rejected" (with the reason after
+  it in passive text) or "Kept the rule" when not kept, and the pill and title
+  of a not-kept row sit at `opacity-60` until hovered or opened. A small
+  All / Kept / Not kept radio row under the tabs filters it. The detail header
+  repeats the outcome with its time, above the title; a proposal undone back
+  into To decide shows a passive-grey undo glyph + "Undone" there. Only the
+  existing `--green` / `--red` / `--fg-passive` tokens are used.
 - **Approved deviation (2026-08-14) — no coloured edge bars anywhere.** The user
   called the board's left/top accent stripes "very dated" and asked for them to be
   removed **app-wide** and redesigned. This **narrows the 2026-07-10 lane-colour

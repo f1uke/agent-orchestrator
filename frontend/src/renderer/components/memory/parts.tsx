@@ -1,8 +1,19 @@
-import { Brain, FilePen, Lock, MessageSquareQuote, ScrollText, ShieldCheck, Swords } from "lucide-react";
+import {
+	Brain,
+	Check,
+	FilePen,
+	Lock,
+	MessageSquareQuote,
+	ScrollText,
+	ShieldCheck,
+	Swords,
+	Undo2,
+	X,
+} from "lucide-react";
 import type { components } from "../../../api/schema";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import type { Proposal, ProposalEvent } from "../../hooks/useMemory";
-import { ACTION_LABEL, type Action } from "./model";
+import { ACTION_LABEL, type Action, type Outcome, type OutcomeKind } from "./model";
 
 type Draft = components["schemas"]["ControllersLearningDraftDTO"];
 type RuleRef = components["schemas"]["ControllersLearningRuleRefDTO"];
@@ -35,6 +46,40 @@ export function ActionPill({ action }: { action: Action }) {
 			}}
 		>
 			<Icon className="size-3" aria-hidden="true" /> {ACTION_LABEL[action]}
+		</span>
+	);
+}
+
+const OUTCOME_LOOK: Record<OutcomeKind, { color: string; Icon: typeof Check }> = {
+	kept: { color: "var(--green)", Icon: Check },
+	not_kept: { color: "var(--red)", Icon: X },
+	undone: { color: "var(--fg-passive)", Icon: Undo2 },
+};
+
+/**
+ * How a decision came out, readable at a glance: a green check for kept, a red
+ * x for not kept, grey for undone. The row shows the date, the detail the time.
+ */
+export function OutcomeStatus({ outcome, time = false }: { outcome: Outcome; time?: boolean }) {
+	const { color, Icon } = OUTCOME_LOOK[outcome.kind];
+	const when = outcome.at
+		? time
+			? new Date(outcome.at).toLocaleString()
+			: new Date(outcome.at).toLocaleDateString()
+		: "";
+	return (
+		<span
+			className="inline-flex min-w-0 items-center gap-1 font-medium"
+			style={{ color }}
+			data-outcome={outcome.kind}
+			title={outcome.reason ? `${outcome.label}: “${outcome.reason}”` : undefined}
+		>
+			<Icon className="size-3 shrink-0" strokeWidth={2.5} aria-hidden="true" />
+			<span className="shrink-0">
+				{outcome.label}
+				{when ? ` ${when}` : ""}
+			</span>
+			{outcome.reason && <span className="truncate font-normal text-passive">- {outcome.reason}</span>}
 		</span>
 	);
 }

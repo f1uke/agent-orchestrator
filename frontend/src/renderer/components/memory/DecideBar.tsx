@@ -4,7 +4,7 @@ import { Button } from "../ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Textarea } from "../ui/textarea";
 import type { Decision, Proposal, Written } from "../../hooks/useMemory";
-import { fileName, inDays, isSnoozed } from "./model";
+import { fileName, inDays, isSnoozed, outcomeOf } from "./model";
 
 type Side = "keep_rule" | "words_win" | "both";
 
@@ -250,15 +250,11 @@ function DecidedBar({ p, written, busy, error, onDecide, editing, onEdit, onCanc
 	);
 }
 
+/** The same outcome the header shows: a conflict says which side won, or that it was rejected. */
 function decidedLine(p: Proposal): string {
-	if (p.action !== "conflict") return `Written ${when(p.decidedAt)}.`;
-	const side =
-		p.resolution === "keep_rule"
-			? "kept the rule"
-			: p.resolution === "words_win"
-				? "your newer words win"
-				: "both, scoped";
-	return `Decided ${when(p.decidedAt)}: ${side}.`;
+	const o = outcomeOf(p);
+	if (!o) return "";
+	return `${o.label} ${when(o.at)}${o.reason ? `: “${o.reason}”` : ""}.`;
 }
 
 /** What undo will do, said before it is done. */

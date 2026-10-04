@@ -258,6 +258,15 @@ describe("a decided conflict card", () => {
 		expect(screen.queryByRole("button", { name: /Use my newer words/ })).toBeNull();
 	});
 
+	it("scoped both ways offers undo, not an editor", async () => {
+		proposals = [{ ...conflict, status: "applied", resolution: "both", decidedAt: "2026-10-04T01:00:00Z" }];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		expect(await screen.findByRole("button", { name: /^Undo$/ })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /Save my edit/ })).toBeNull();
+		expect((screen.getByRole("textbox") as HTMLTextAreaElement).readOnly).toBe(true);
+	});
+
 	it("can be undone, putting the pinned rule's text back", async () => {
 		proposals = [{ ...conflict, status: "applied", resolution: "words_win", decidedAt: "2026-10-04T01:00:00Z" }];
 		renderPage();
@@ -438,5 +447,121 @@ describe("an approved proposal", () => {
 		// Saved: out of the editor, back to what was written.
 		expect(await screen.findByRole("button", { name: /Edit memory/ })).toBeTruthy();
 		expect(screen.queryByRole("button", { name: /Save my edit/ })).toBeNull();
+	});
+});
+
+describe("the Decided tab", () => {
+	const decidedAt = "2026-10-04T01:00:00Z";
+	const written = proposal({ id: 11, title: "Written memory", status: "applied", decidedAt });
+	const rejected = proposal({
+		id: 12,
+		title: "Rejected memory",
+		status: "rejected",
+		rejectReason: "one-off",
+		decidedAt,
+		confidence: 0.6,
+	});
+	const wordsWon = { ...conflict, id: 13, title: "Words won", status: "applied", resolution: "words_win", decidedAt };
+	const ruleKept = {
+		...conflict,
+		id: 14,
+		title: "Rule kept",
+		status: "rejected",
+		resolution: "keep_rule",
+		rejectReason: "kept the rule",
+		decidedAt,
+	};
+	const conflictRejected = {
+		...conflict,
+		id: 15,
+		title: "Conflict rejected",
+		status: "rejected",
+		rejectReason: "not a rule",
+		decidedAt,
+	};
+
+	function row(title: string): HTMLElement {
+		return within(screen.getByRole("list", { name: "Proposals" }))
+			.getByText(title)
+			.closest("button") as HTMLElement;
+	}
+
+	function outcomeOfRow(title: string): Element | null {
+		return row(title).querySelector("[data-outcome]");
+	}
+
+	it("tells kept from not kept on every row, and says which side of a conflict won", async () => {
+		proposals = [written, rejected, wordsWon, ruleKept, conflictRejected];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		await screen.findByRole("heading", { level: 2 });
+		const day = new Date(decidedAt).toLocaleDateString();
+		expect(outcomeOfRow("Written memory")?.getAttribute("data-outcome")).toBe("kept");
+		expect(outcomeOfRow("Written memory")?.textContent).toBe(`Written ${day}`);
+		expect(outcomeOfRow("Rejected memory")?.getAttribute("data-outcome")).toBe("not_kept");
+		expect(outcomeOfRow("Rejected memory")?.textContent).toContain("one-off");
+		expect(outcomeOfRow("Words won")?.textContent).toBe(`Kept your words ${day}`);
+		expect(outcomeOfRow("Rule kept")?.textContent).toBe(`Kept the rule ${day}`);
+		expect(outcomeOfRow("Rule kept")?.getAttribute("data-outcome")).toBe("not_kept");
+		expect(outcomeOfRow("Conflict rejected")?.textContent).toContain(`Rejected ${day}`);
+		expect(screen.queryByText(/^Decided /)).toBeNull();
+	});
+
+	it("filters to what was kept or not kept", async () => {
+		proposals = [written, rejected, wordsWon, ruleKept];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		const outcome = await screen.findByRole("radiogroup", { name: "Filter by outcome" });
+		await userEvent.click(within(outcome).getByRole("radio", { name: /^Kept/ }));
+		const list = screen.getByRole("list", { name: "Proposals" });
+		expect(within(list).getByText("Written memory")).toBeTruthy();
+		expect(within(list).getByText("Words won")).toBeTruthy();
+		expect(within(list).queryByText("Rejected memory")).toBeNull();
+		expect(within(list).queryByText("Rule kept")).toBeNull();
+		await userEvent.click(within(outcome).getByRole("radio", { name: /Not kept/ }));
+		expect(within(list).getByText("Rejected memory")).toBeTruthy();
+		expect(within(list).getByText("Rule kept")).toBeTruthy();
+		expect(within(list).queryByText("Written memory")).toBeNull();
+		// The open proposal follows the filter.
+		expect(await screen.findByRole("heading", { level: 2, name: /Rule kept|Rejected memory/ })).toBeTruthy();
+	});
+
+	it("dims a row that was not kept", async () => {
+		proposals = [written, rejected];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		await screen.findByRole("heading", { level: 2, name: "Written memory" });
+		const list = screen.getByRole("list", { name: "Proposals" });
+		// The written one opens first; the rejected one recedes until hovered or opened.
+		expect(within(list).getByText("Rejected memory").className).toContain("opacity-60");
+		expect(within(list).getByText("Written memory").className).not.toContain("opacity-60");
+	});
+
+	it("puts the outcome in the detail header and the decide bar", async () => {
+		proposals = [conflictRejected];
+		renderPage();
+		await userEvent.click(await screen.findByRole("tab", { name: /Decided/ }));
+		const header = await screen.findByLabelText("Outcome");
+		expect(header.textContent).toContain("Rejected");
+		expect(header.textContent).toContain("not a rule");
+		const bar = screen.getByRole("button", { name: /^Undo$/ }).closest("div.sticky") as HTMLElement;
+		expect(bar.textContent).toContain("Rejected");
+		expect(bar.textContent).not.toContain("both, scoped");
+	});
+
+	it("says an undone proposal back in To decide was undone", async () => {
+		proposals = [proposal()];
+		extra = {
+			1: {
+				history: [
+					{ kind: "approved", status: "applied", via: "app", at: "2026-10-04T01:00:00Z" },
+					{ kind: "undone", status: "pending", via: "app", at: "2026-10-04T02:00:00Z" },
+				],
+			},
+		};
+		renderPage();
+		const header = await screen.findByLabelText("Outcome");
+		expect(header.querySelector("[data-outcome]")?.getAttribute("data-outcome")).toBe("undone");
+		expect(header.textContent).toContain("Undone");
 	});
 });

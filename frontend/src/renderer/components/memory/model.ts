@@ -89,3 +89,50 @@ export function isSnoozed<T extends { status: string; snoozedUntil?: string | nu
 ): p is T & { snoozedUntil: string } {
 	return p.status === "pending" && !!p.snoozedUntil && Date.parse(p.snoozedUntil) > now;
 }
+
+/** How a decided proposal came out, as the person sees it: kept, not kept, or undone. */
+export type OutcomeKind = "kept" | "not_kept" | "undone";
+
+export interface Outcome {
+	kind: OutcomeKind;
+	/** What happened, e.g. "Written", "Rejected", "Kept your words". */
+	label: string;
+	/** When it was decided (or undone). */
+	at?: string | null;
+	/** The person's reason, for a rejection that has one. */
+	reason?: string;
+}
+
+export const OUTCOME_FILTER = { all: "All", kept: "Kept", not_kept: "Not kept" } as const;
+export type OutcomeFilter = keyof typeof OUTCOME_FILTER;
+
+/**
+ * The outcome of a decision, or null for a proposal still waiting. A conflict
+ * whose rule was kept is settled as rejected (the lesson is dropped), one whose
+ * words won is applied. Undo puts a proposal back in the queue with nothing of
+ * the decision left on it, so only its history says it was undone.
+ */
+export function outcomeOf(
+	p: { action: string; status: string; resolution?: string; rejectReason?: string; decidedAt?: string | null },
+	history?: { kind: string; at: string }[],
+): Outcome | null {
+	const at = p.decidedAt;
+	if (p.status === "applied") {
+		if (p.action !== "conflict") return { kind: "kept", label: "Written", at };
+		return { kind: "kept", label: p.resolution === "both" ? "Kept both, scoped" : "Kept your words", at };
+	}
+	if (p.status === "rejected") {
+		if (p.action === "conflict" && p.resolution === "keep_rule")
+			return { kind: "not_kept", label: "Kept the rule", at };
+		const reason = p.rejectReason && p.rejectReason !== "no reason given" ? p.rejectReason : undefined;
+		return { kind: "not_kept", label: "Rejected", at, reason };
+	}
+	const last = history?.[history.length - 1];
+	if (p.status === "pending" && last?.kind === "undone") return { kind: "undone", label: "Undone", at: last.at };
+	return null;
+}
+
+/** Whether a decided proposal passes the Decided tab's filter. */
+export function matchesOutcome(o: Outcome | null, filter: OutcomeFilter): boolean {
+	return filter === "all" || o?.kind === filter;
+}

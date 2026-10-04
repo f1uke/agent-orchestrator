@@ -7,8 +7,8 @@ import { Textarea } from "../ui/textarea";
 import { cn } from "../../lib/utils";
 import type { Decision, Proposal, ProposalDetail as Detail, Written } from "../../hooks/useMemory";
 import { DecideBar } from "./DecideBar";
-import { ActionPill, Confidence, EvidenceCard, History, RuleChip, Section, VerifierNote } from "./parts";
-import { diffFiles, fileName, OUTCOME_LABEL, tildePath } from "./model";
+import { ActionPill, Confidence, EvidenceCard, History, OutcomeStatus, RuleChip, Section, VerifierNote } from "./parts";
+import { diffFiles, fileName, OUTCOME_LABEL, outcomeOf, tildePath } from "./model";
 
 type RuleRef = components["schemas"]["ControllersLearningRuleRefDTO"];
 
@@ -22,8 +22,9 @@ export interface DecideProps {
 	onDecide: (d: Decision, done?: () => void) => void;
 }
 
-function Header({ p }: { p: Proposal }) {
+function Header({ p, detail }: { p: Proposal; detail?: Detail }) {
 	const global = p.scope === "global";
+	const outcome = outcomeOf(p, detail?.history);
 	return (
 		<div className="flex flex-col gap-2.5">
 			<div className="flex items-center gap-2">
@@ -44,6 +45,11 @@ function Header({ p }: { p: Proposal }) {
 					confidence <Confidence value={p.confidence} />
 				</span>
 			</div>
+			{outcome && (
+				<div className="flex min-w-0 text-[12px]" role="group" aria-label="Outcome">
+					<OutcomeStatus outcome={outcome} time />
+				</div>
+			)}
 			<h2 className="text-[18px] font-semibold leading-[1.3] tracking-[-0.01em]">{p.title}</h2>
 			{p.action !== "conflict" && (
 				<div className="flex flex-wrap items-center gap-1.5 font-mono text-[11.5px] text-muted-foreground">
@@ -130,7 +136,7 @@ export function ProposalDetail({ p, detail, loading, busy, error, onDecide }: De
 	return (
 		<div className="flex min-h-full flex-col">
 			<div className="flex flex-1 flex-col gap-6 px-8 py-6">
-				<Header p={p} />
+				<Header p={p} detail={detail} />
 				<Section
 					title={
 						editing
@@ -231,7 +237,7 @@ export function ConflictDetail({ p, detail, loading, busy, error, onDecide }: De
 	return (
 		<div className="flex min-h-full flex-col">
 			<div className="flex flex-1 flex-col gap-6 px-8 py-6">
-				<Header p={p} />
+				<Header p={p} detail={detail} />
 				{loading ? (
 					<Skeleton className="h-40 w-full" />
 				) : (
@@ -353,7 +359,7 @@ export function ConflictDetail({ p, detail, loading, busy, error, onDecide }: De
 					written={written}
 					busy={busy || (side === "both" && scope.trim() === "")}
 					error={error}
-					editing={side === "both"}
+					editing={!settled && side === "both"}
 					draft={side === "both" ? scope : undefined}
 					onDecide={onDecide}
 					resolution={side ?? undefined}
