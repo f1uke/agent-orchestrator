@@ -224,7 +224,7 @@ func (f *fakeSessionService) WriteWorkspaceFile(context.Context, domain.SessionI
 	return sessionsvc.WriteWorkspaceFileResult{}, nil
 }
 
-func (f *fakeSessionService) WorkspaceChanges(context.Context, domain.SessionID) (sessionsvc.WorkspaceChangesResult, error) {
+func (f *fakeSessionService) WorkspaceChanges(context.Context, domain.SessionID, sessionsvc.WorkspaceChangesQuery) (sessionsvc.WorkspaceChangesResult, error) {
 	return sessionsvc.WorkspaceChangesResult{}, nil
 }
 

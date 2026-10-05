@@ -11,7 +11,12 @@ import {
 	TriangleAlert,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type ChangedFile, useWorkspaceChanges } from "../hooks/useWorkspaceChanges";
+import {
+	type ChangedFile,
+	isFetchingTarget,
+	useRefreshWorkspaceChanges,
+	useWorkspaceChanges,
+} from "../hooks/useWorkspaceChanges";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { apiErrorMessage } from "../lib/api-client";
 import { changesEmptyState, changesScopeNotice } from "../lib/changes-scope";
@@ -25,6 +30,7 @@ import {
 	writeGlobalMode,
 	writeGlobalView,
 } from "../lib/files-panel-state";
+import { formatTimeCompact } from "../lib/format-time";
 import { cn } from "../lib/utils";
 import { EmptyState } from "./FilesEmptyState";
 import { FileTree } from "./FileTree";
@@ -166,7 +172,10 @@ export function FilesPanel({
 	const [mode, setMode] = useState<PanelMode>(restored.mode);
 	// Which of the two REMEMBERED modes to write down, and to come back to.
 	const [lastPersistentMode, setLastPersistentMode] = useState<FilesMode>(restored.mode);
-	const query = useWorkspaceChanges(sessionId);
+	// Polled only while the list is on screen: Browse and Search have no use for
+	// a fresher target, and each read may cost the daemon a fetch.
+	const query = useWorkspaceChanges(sessionId, { autoRefresh: mode === "changes" });
+	const refreshChanges = useRefreshWorkspaceChanges(sessionId);
 	const data = query.data;
 	// The worktree index is fetched only once Browse is actually chosen: it is a
 	// `git ls-files` over the whole tree, and a rail opened on Changes must not
@@ -493,17 +502,19 @@ export function FilesPanel({
 					<>
 						<SummaryLine
 							branch={data.targetBranch}
+							comparedRef={data.targetRef}
 							inferred={data.targetSource === "project" || data.targetSource === "git_origin_head"}
 							count={files.length}
 							additions={files.reduce((n, f) => n + (f.binary ? 0 : f.additions), 0)}
 							deletions={files.reduce((n, f) => n + (f.binary ? 0 : f.deletions), 0)}
-							onRefresh={() => void query.refetch()}
+							onRefresh={() => void refreshChanges()}
 							// The spinner covers the daemon's background refresh too, not just
 							// this request: while the target branch is being fetched the numbers
 							// on screen can still move, and a still icon would claim otherwise.
-							refreshing={query.isFetching || data.targetFetch === "refreshing"}
+							refreshing={query.isFetching || isFetchingTarget(data)}
 							fetchState={data.targetFetch}
 							fetchError={data.targetFetchError}
+							fetchedAt={data.targetFetchedAt ?? undefined}
 							onReviewAll={files.length > 0 ? onReviewAll : undefined}
 						/>
 						{/* One voice: an empty list states the scope in its own detail line,
@@ -787,6 +798,7 @@ function Counts({ file, className }: { file: ChangedFile; className?: string }) 
 
 function SummaryLine({
 	branch,
+	comparedRef,
 	inferred,
 	count,
 	additions,
@@ -795,9 +807,17 @@ function SummaryLine({
 	refreshing,
 	fetchState,
 	fetchError,
+	fetchedAt,
 	onReviewAll,
 }: {
 	branch?: string;
+	/**
+	 * The ref the list was measured against, as git names it ("origin/develop",
+	 * or "develop" when only the local branch could be used). Shown instead of
+	 * the bare target so a diff against somebody's local checkout never reads
+	 * like one against the forge.
+	 */
+	comparedRef?: string;
 	inferred: boolean;
 	count: number;
 	additions: number;
@@ -806,6 +826,7 @@ function SummaryLine({
 	refreshing: boolean;
 	fetchState?: string;
 	fetchError?: string;
+	fetchedAt?: string;
 	/**
 	 * The stacked, all-files review. It lives here because a ROW now opens the
 	 * editor on that file's first hunk, and reading every file in sequence is a
@@ -814,16 +835,20 @@ function SummaryLine({
 	 */
 	onReviewAll?: () => void;
 }) {
+	const ref = comparedRef || branch;
+	const local = Boolean(comparedRef) && !fetchState;
+	const title = local
+		? `Comparing against the local ${ref}: this repository has no remote to fetch it from`
+		: inferred
+			? `Comparing against ${ref} (inferred)`
+			: `Comparing against ${ref}`;
 	return (
 		<div className="files-panel__summary">
-			<span
-				className="files-panel__vs"
-				title={inferred ? `Comparing against ${branch} (inferred)` : `Comparing against ${branch}`}
-			>
-				vs {branch}
+			<span className="files-panel__vs" title={title}>
+				vs {ref}
 				{inferred ? <span className="files-panel__inferred">*</span> : null}
 			</span>
-			<StaleMarker branch={branch} state={fetchState} error={fetchError} />
+			<FetchStatus refName={ref} state={fetchState} error={fetchError} fetchedAt={fetchedAt} />
 			<span className="files-panel__sep">·</span>
 			<span className="files-panel__count">
 				{count} {count === 1 ? "file" : "files"}
@@ -843,16 +868,58 @@ function SummaryLine({
 					</button>
 				</SimpleTooltip>
 			) : null}
-			<button
-				type="button"
-				aria-label="Refresh changes"
-				title="Refresh"
-				className="files-panel__refresh"
-				onClick={onRefresh}
-			>
-				<RefreshCw aria-hidden="true" className={cn("h-3 w-3", refreshing && "animate-spin")} />
-			</button>
+			<SimpleTooltip label={ref ? `Fetch ${ref} and refresh` : "Refresh"}>
+				<button type="button" aria-label="Refresh changes" className="files-panel__refresh" onClick={onRefresh}>
+					<RefreshCw aria-hidden="true" className={cn("h-3 w-3", refreshing && "animate-spin")} />
+				</button>
+			</SimpleTooltip>
 		</div>
+	);
+}
+
+/** Re-renders the caller every `ms`, so a relative time ("2m ago") keeps moving. */
+function useNow(ms: number): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		const id = window.setInterval(() => setNow(Date.now()), ms);
+		return () => window.clearInterval(id);
+	}, [ms]);
+	return now;
+}
+
+/**
+ * When the compared ref was last fetched: "· fetched 2m ago" while it is
+ * current, "· fetching…" before the first fetch has landed, and an amber "may
+ * be stale" when it could not be refreshed. A repository with no remote shows
+ * nothing - it has nothing to be behind.
+ */
+function FetchStatus({
+	refName,
+	state,
+	error,
+	fetchedAt,
+}: {
+	refName?: string;
+	state?: string;
+	error?: string;
+	fetchedAt?: string;
+}) {
+	useNow(30_000);
+	if (!state) return null;
+	return (
+		<>
+			<span className="files-panel__sep">·</span>
+			{state === "failed" ? (
+				<StaleMarker refName={refName} error={error} fetchedAt={fetchedAt} />
+			) : (
+				<span
+					className="files-panel__fetched"
+					title={fetchedAt ? `${refName} was fetched at ${new Date(fetchedAt).toLocaleString()}` : undefined}
+				>
+					{fetchedAt ? `fetched ${formatTimeCompact(fetchedAt)}` : "fetching…"}
+				</span>
+			)}
+		</>
 	);
 }
 
@@ -861,14 +928,11 @@ function SummaryLine({
  *
  * A diff measured against a ref nobody could refresh looks exactly like a
  * correct one, so "could not refresh" has to be visible or the panel is
- * confidently wrong. Only the degraded state is marked: a successful refresh is
- * the expectation, and a badge saying "current" on every render would be noise
- * that trains the eye to skip the badge that matters. Nothing is shown for a
- * repository with no remote either — it has nothing to be behind.
+ * confidently wrong. It says so in words, not only with an icon, and the
+ * tooltip carries git's reason and how old the ref really is.
  */
-function StaleMarker({ branch, state, error }: { branch?: string; state?: string; error?: string }) {
-	if (state !== "failed") return null;
-	const target = branch || "the target branch";
+function StaleMarker({ refName, error, fetchedAt }: { refName?: string; error?: string; fetchedAt?: string }) {
+	const target = refName || "the target branch";
 	return (
 		<SimpleTooltip
 			label={
@@ -876,13 +940,15 @@ function StaleMarker({ branch, state, error }: { branch?: string; state?: string
 				// message is one long unbroken line (a remote URL or a filesystem
 				// path), so an uncapped bubble stretches clear across the window.
 				<span className="files-panel__stale-tip">
-					Could not refresh {target} from origin, so this diff may be out of date.
+					Could not fetch {target}, so this diff may be out of date.{" "}
+					{fetchedAt ? `Last fetched ${formatTimeCompact(fetchedAt)}.` : "It has not been fetched since AO started."}
 					{error ? <span className="files-panel__stale-detail">{error}</span> : null}
 				</span>
 			}
 		>
 			<span className="files-panel__stale" role="status" aria-label={`Could not refresh ${target}`}>
 				<TriangleAlert aria-hidden="true" className="h-3 w-3" />
+				may be stale
 			</span>
 		</SimpleTooltip>
 	);

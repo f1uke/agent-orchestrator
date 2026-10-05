@@ -73,7 +73,7 @@ func TestWorkspaceChanges_DetachedHeadStillDiffsTheBranch(t *testing.T) {
 	runGitIn(t, dir, "checkout", "-q", baseSHA)
 	svc := scopeService(t, dir, "feature/x")
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestWorkspaceChanges_DetachedHeadCountsTheWorkItLeavesOut(t *testing.T) {
 	}
 	svc := scopeService(t, dir, "feature/x")
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestWorkspaceChanges_OnBranchIncludesWorktree(t *testing.T) {
 	}
 	svc := scopeService(t, dir, "feature/x")
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestWorkspaceChanges_OtherBranchCheckedOut(t *testing.T) {
 	runGitIn(t, dir, "checkout", "-qb", "spike/try", baseSHA)
 	svc := scopeService(t, dir, "feature/x")
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestWorkspaceChanges_MissingBranchRefFallsBackToHeadAndSaysSo(t *testing.T)
 	dir, _ := scopeTestRepo(t)
 	svc := scopeService(t, dir, "feature/renamed-away")
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestWorkspaceChanges_NoRecordedBranchAdoptsTheCheckout(t *testing.T) {
 	dir, _ := scopeTestRepo(t)
 	svc := scopeService(t, dir, "")
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestWorkspaceChanges_NoRecordedBranchDetachedReportsHead(t *testing.T) {
 	runGitIn(t, dir, "checkout", "-q", headSHA)
 	svc := scopeService(t, dir, "")
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

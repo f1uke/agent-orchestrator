@@ -123,7 +123,7 @@ func (s *Service) WorkspaceFileDiff(
 		// The non-blocking target refresh rides along for the same reason - opening
 		// a row must not show hunks measured against a staler target than the list
 		// that offered it. Throttling is shared, so this is normally free.
-		sc := s.resolveChangesScope(ctx, rec, workspace)
+		sc := s.resolveChangesScope(ctx, rec, workspace, false)
 		if sc.Reason != "" {
 			return DiffContextResult{Mode: "file", Path: safePath}, nil
 		}

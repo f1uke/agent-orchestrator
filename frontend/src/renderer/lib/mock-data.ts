@@ -1832,6 +1832,11 @@ export function mockWorkspaceChanges(sessionId: string): WorkspaceChangesRespons
 		available: true,
 		targetBranch: "main",
 		targetSource: "pr",
+		// Compared against the remote's copy, fetched a couple of minutes ago -
+		// the header's normal, healthy shape.
+		targetRef: "origin/main",
+		targetFetch: "current",
+		targetFetchedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
 		mergeBase: "abc1234",
 		truncated: false,
 		branch: "feature/files-panel",

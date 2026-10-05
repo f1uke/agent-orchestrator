@@ -181,6 +181,119 @@ describe("FilesPanel", () => {
 		expect(screen.queryByLabelText(/Could not refresh/)).not.toBeInTheDocument();
 	});
 
+	// The reported defect: a list measured against the human's stale local
+	// checkout read exactly like one measured against the forge. The header now
+	// names the ref it compared against and how fresh it is.
+	it("names the compared ref and when it was fetched", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "develop",
+			targetRef: "Advisor/develop",
+			truncated: false,
+			targetFetch: "current",
+			targetFetchedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+			files: [file()],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		expect(await screen.findByText(/vs Advisor\/develop/)).toBeInTheDocument();
+		expect(screen.getByText("fetched 2m ago")).toBeInTheDocument();
+	});
+
+	it("says it is fetching before the first fetch has landed", async () => {
+		respondWith({
+			available: true,
+			targetBranch: "develop",
+			targetRef: "origin/develop",
+			truncated: false,
+			targetFetch: "refreshing",
+			files: [file()],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		expect(await screen.findByText("fetching…")).toBeInTheDocument();
+	});
+
+	it("says a failed fetch may be stale, with the last fetch time", async () => {
+		const user = userEvent.setup();
+		respondWith({
+			available: true,
+			targetBranch: "develop",
+			targetRef: "origin/develop",
+			truncated: false,
+			targetFetch: "failed",
+			targetFetchError: "fatal: unable to access 'https://example.invalid/': Could not resolve host",
+			targetFetchedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+			files: [file()],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		const marker = await screen.findByLabelText("Could not refresh origin/develop");
+		expect(marker).toHaveTextContent("may be stale");
+		expect(screen.queryByText(/^fetched/)).not.toBeInTheDocument();
+		await user.hover(marker);
+		expect((await screen.findAllByText(/Last fetched 10m ago/)).length).toBeGreaterThan(0);
+	});
+
+	// No remote: the local branch is all there is, so it is named as such and
+	// carries no fetch time.
+	it("names a local-only comparison without a fetch time", async () => {
+		respondWith({ available: true, targetBranch: "main", targetRef: "main", truncated: false, files: [file()] });
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		const vs = await screen.findByText(/vs main/);
+		expect(vs).toHaveAttribute("title", expect.stringContaining("local main"));
+		expect(screen.queryByText(/fetched|fetching/)).not.toBeInTheDocument();
+	});
+
+	// The recovery path: the remote is reachable again and the human presses
+	// refresh. The answer still reads "failed" while the retry runs, so the panel
+	// must keep asking until it lands rather than wait for the next minute.
+	it("shows the recovery once a refresh after a failure lands", async () => {
+		const user = userEvent.setup();
+		const base = {
+			available: true,
+			targetBranch: "develop",
+			targetRef: "origin/develop",
+			truncated: false,
+			files: [file()],
+		};
+		const failed = { ...base, targetFetch: "failed", targetFetchError: "fatal: offline" };
+		getMock
+			.mockResolvedValueOnce({ data: failed, error: undefined })
+			.mockResolvedValueOnce({ data: { ...failed, targetFetchInFlight: true }, error: undefined })
+			.mockResolvedValue({
+				data: { ...base, targetFetch: "current", targetFetchedAt: new Date().toISOString() },
+				error: undefined,
+			});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		expect(await screen.findByText("may be stale")).toBeInTheDocument();
+
+		await user.click(screen.getByRole("button", { name: "Refresh changes" }));
+		expect(await screen.findByText("fetched just now", undefined, { timeout: 3_000 })).toBeInTheDocument();
+		expect(screen.queryByText("may be stale")).not.toBeInTheDocument();
+	});
+
+	it("asks the daemon to fetch the target when refresh is pressed", async () => {
+		const user = userEvent.setup();
+		respondWith({
+			available: true,
+			targetBranch: "main",
+			targetRef: "origin/main",
+			truncated: false,
+			targetFetch: "current",
+			targetFetchedAt: new Date().toISOString(),
+			files: [file()],
+		});
+		render(<FilesPanel sessionId="s1" />, { wrapper });
+		await screen.findByRole("treeitem", { name: /DiffRows\.tsx/ });
+		expect(getMock.mock.calls.every(([, opts]) => !opts.params.query?.refresh)).toBe(true);
+
+		await user.click(screen.getByRole("button", { name: "Refresh changes" }));
+		await waitFor(() =>
+			expect(getMock).toHaveBeenLastCalledWith(
+				"/api/v1/sessions/{sessionId}/workspace/changes",
+				expect.objectContaining({ params: { path: { sessionId: "s1" }, query: { refresh: true } } }),
+			),
+		);
+	});
+
 	it("shows a cleaned-up worktree as its own state, not an error", async () => {
 		respondWith({ available: false, reason: "no_workspace", files: [], truncated: false });
 		render(<FilesPanel sessionId="s1" />, { wrapper });

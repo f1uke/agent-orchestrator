@@ -6362,6 +6362,18 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
+      - description: Refetch the target branch from its remote now instead of waiting
+          out the throttle (the panel's refresh button). The response still answers
+          from the refs on disk with targetFetch "refreshing"; the fetched result
+          lands on a later read, and two refreshes in flight share one fetch.
+        in: query
+        name: refresh
+        schema:
+          description: Refetch the target branch from its remote now instead of waiting
+            out the throttle (the panel's refresh button). The response still answers
+            from the refs on disk with targetFetch "refreshing"; the fetched result
+            lands on a later read, and two refreshes in flight share one fetch.
+          type: boolean
       responses:
         "200":
           content:
@@ -14072,6 +14084,15 @@ components:
         targetFetch:
           type: string
         targetFetchError:
+          type: string
+        targetFetchInFlight:
+          type: boolean
+        targetFetchedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        targetRef:
           type: string
         targetSource:
           type: string

@@ -82,6 +82,7 @@ type fakeSessionService struct {
 	workspaceWriteResult  sessionsvc.WriteWorkspaceFileResult
 	workspaceWriteErr     error
 	workspaceChanges      sessionsvc.WorkspaceChangesResult
+	workspaceChangesQuery sessionsvc.WorkspaceChangesQuery
 	workspaceFiles        sessionsvc.WorkspaceFilesResult
 	workspaceSearch       sessionsvc.SearchResult
 	workspaceSearchQuery  sessionsvc.SearchQuery
@@ -545,7 +546,8 @@ func (f *fakeSessionService) WriteWorkspaceFile(_ context.Context, _ domain.Sess
 	return f.workspaceWriteResult, f.workspaceWriteErr
 }
 
-func (f *fakeSessionService) WorkspaceChanges(_ context.Context, _ domain.SessionID) (sessionsvc.WorkspaceChangesResult, error) {
+func (f *fakeSessionService) WorkspaceChanges(_ context.Context, _ domain.SessionID, q sessionsvc.WorkspaceChangesQuery) (sessionsvc.WorkspaceChangesResult, error) {
+	f.workspaceChangesQuery = q
 	return f.workspaceChanges, nil
 }
 
@@ -2141,6 +2143,44 @@ func TestSessionsAPI_WorkspaceChangesCarriesTheScope(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("body missing %s:\n%s", want, body)
 		}
+	}
+}
+
+// The header names the ref it compared against and when it was fetched, and the
+// refresh button asks the daemon to fetch now rather than after the throttle.
+func TestSessionsAPI_WorkspaceChangesCarriesTheComparedRef(t *testing.T) {
+	svc := newFakeSessionService()
+	fetchedAt := time.Date(2026, 10, 5, 13, 20, 0, 0, time.UTC)
+	svc.workspaceChanges = sessionsvc.WorkspaceChangesResult{
+		Available: true, TargetBranch: "develop", TargetRef: "Advisor/develop",
+		TargetFetch: sessionsvc.TargetFetchCurrent, TargetFetchedAt: fetchedAt,
+	}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/changes", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d: %s", status, body)
+	}
+	for _, want := range []string{`"targetRef":"Advisor/develop"`, `"targetFetchedAt":"2026-10-05T13:20:00Z"`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("body missing %s:\n%s", want, body)
+		}
+	}
+	if svc.workspaceChangesQuery.Refresh {
+		t.Error("a plain read must not force a fetch")
+	}
+
+	if _, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/changes?refresh=true", ""); status != http.StatusOK {
+		t.Fatalf("refresh status %d", status)
+	}
+	if !svc.workspaceChangesQuery.Refresh {
+		t.Error("?refresh=true must reach the service")
+	}
+
+	svc.workspaceChanges.TargetFetchedAt = time.Time{}
+	body, _, _ = doRequest(t, srv, "GET", "/api/v1/sessions/ao-1/workspace/changes", "")
+	if strings.Contains(string(body), "targetFetchedAt") {
+		t.Errorf("a never-fetched ref must omit targetFetchedAt:\n%s", body)
 	}
 }
 
