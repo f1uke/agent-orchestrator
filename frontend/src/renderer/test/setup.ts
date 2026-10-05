@@ -225,8 +225,10 @@ if (typeof window !== "undefined") {
 			send: () => undefined,
 			noteResult: () => undefined,
 			health: async () => [],
+			documentStatus: async () => ({ built: true as const }),
 			onMessage: () => () => undefined,
 			onState: () => () => undefined,
+			onSettings: () => () => undefined,
 		},
 	};
 } // end if (typeof window !== "undefined")

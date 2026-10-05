@@ -579,6 +579,40 @@ describe("WorkspaceFileView conflicts", () => {
 		expect(await screen.findByTestId("lsp-status")).toHaveTextContent(/needs setup/i);
 	});
 
+	/**
+	 * 🗝 The 2026-10-05 report, at the pill. The server is running and healthy,
+	 * but THIS file has no compile settings from a real build: its errors are
+	 * xcode-build-server's macOS guess ("No such module 'UIKit'"). The pill says
+	 * it is waiting for a build - the same words as the workspace-wide wait,
+	 * because the fix is the same - and never the healthy ⌘click line.
+	 */
+	it("a file no build has compiled waits for a build even while the server is ready", async () => {
+		renderView();
+		await waitFor(() => expect(screen.getByTestId("monaco-file-editor")).toBeInTheDocument());
+		const report = editorProps.current?.onServerState as (s: {
+			state: string;
+			detail?: string;
+			documentWaiting?: string;
+		}) => void;
+		const reason = "No Xcode build of this worktree that AO has read compiled this file yet.";
+
+		for (const state of ["indexing", "ready"]) {
+			act(() => report({ state, documentWaiting: reason }));
+			const pill = await screen.findByTestId("lsp-status");
+			expect(pill).toHaveTextContent(/waiting for a build/i);
+			expect(pill).not.toHaveTextContent(/⌘click/);
+			expect(pill.getAttribute("title")).toBe(reason);
+		}
+
+		// The build lands: the file has real settings, and the pill is the healthy one.
+		act(() => report({ state: "ready" }));
+		expect(await screen.findByTestId("lsp-status")).toHaveTextContent(/⌘click/);
+
+		// A server that failed says so; a file's wait never hides that.
+		act(() => report({ state: "failed", detail: "sourcekit-lsp crashed", documentWaiting: reason }));
+		expect(await screen.findByTestId("lsp-status")).toHaveTextContent(/no language server/i);
+	});
+
 	it("asks twice before discarding the reader's edits", async () => {
 		await conflictOnSave();
 

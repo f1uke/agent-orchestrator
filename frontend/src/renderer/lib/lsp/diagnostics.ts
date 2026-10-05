@@ -70,6 +70,25 @@ export type DiagnosticsDocument = {
 	uri: string;
 	/** The counts, for a header that shows them only when they are not zero. */
 	onCounts?: (counts: { errors: number; warnings: number }) => void;
+	/**
+	 * Start withheld: publishes are kept but not shown until `setWithheld(false)`.
+	 * See `DiagnosticsRegistration.setWithheld`.
+	 */
+	withheld?: boolean;
+};
+
+export type DiagnosticsRegistration = monaco.IDisposable & {
+	/**
+	 * 🗝 For a document whose compile settings are NOT a real build's. Measured on
+	 * the human's iOS app (2026-10-05): for a file no build had compiled,
+	 * xcode-build-server answered with `-sdk MacOSX.sdk`, and the editor painted
+	 * `import UIKit` red - "No such module 'UIKit'" - on a file that compiles. Every
+	 * diagnostic from those arguments is a guess, so none is shown. The last
+	 * publish is KEPT, not dropped: when the build lands the server may already
+	 * have published the real set, and releasing must show it rather than wait
+	 * seconds for another.
+	 */
+	setWithheld(withheld: boolean): void;
 };
 
 /**
@@ -92,6 +111,10 @@ type ClientEntry = {
 	applied: Map<string, number>;
 	/** The band's decoration ids, per document, so each publish replaces its predecessor. */
 	bands: Map<string, string[]>;
+	/** The newest publish per document, so a withheld one can be shown on release. */
+	latest: Map<string, PublishDiagnosticsParams>;
+	/** Documents whose publishes are kept but not shown. */
+	withheld: Set<string>;
 };
 
 /**
@@ -151,7 +174,13 @@ function dispatch(client: LspClient, entry: ClientEntry, params: unknown): void 
 		if (applied !== undefined && version < applied) return;
 		entry.applied.set(key, version);
 	}
+	if (payload) entry.latest.set(key, payload);
+	show(entry, key, document);
+}
 
+/** Paint the newest publish for one document - or nothing, while it is withheld. */
+function show(entry: ClientEntry, key: string, document: DiagnosticsDocument): void {
+	const payload = entry.withheld.has(key) ? undefined : entry.latest.get(key);
 	const markers = toMonacoMarkers(payload?.diagnostics, (related) => {
 		// Related information points at a REAL path; the models it has to address
 		// are this app's own `ao-file:` ones. An unaddressable one is dropped by
@@ -168,7 +197,7 @@ function dispatch(client: LspClient, entry: ClientEntry, params: unknown): void 
 	document.onCounts?.(countMarkers(markers));
 }
 
-export function registerDiagnostics(document: DiagnosticsDocument): monaco.IDisposable {
+export function registerDiagnostics(document: DiagnosticsDocument): DiagnosticsRegistration {
 	const { client, model, uri, languageId } = document;
 	const key = keyOf(uri);
 	let entry = clients.get(client);
@@ -177,6 +206,8 @@ export function registerDiagnostics(document: DiagnosticsDocument): monaco.IDisp
 			documents: new Map(),
 			applied: new Map(),
 			bands: new Map(),
+			latest: new Map(),
+			withheld: new Set(),
 			unsubscribe: () => undefined,
 		};
 		created.unsubscribe = client.onNotification("textDocument/publishDiagnostics", (params) =>
@@ -186,9 +217,18 @@ export function registerDiagnostics(document: DiagnosticsDocument): monaco.IDisp
 		entry = created;
 	}
 	entry.documents.set(key, document);
+	if (document.withheld) entry.withheld.add(key);
+	else entry.withheld.delete(key);
 
 	let released = false;
 	return {
+		setWithheld(withheld) {
+			const owner = clients.get(client);
+			if (released || !owner || owner.withheld.has(key) === withheld) return;
+			if (withheld) owner.withheld.add(key);
+			else owner.withheld.delete(key);
+			show(owner, key, document);
+		},
 		dispose() {
 			if (released) return;
 			released = true;
@@ -198,6 +238,8 @@ export function registerDiagnostics(document: DiagnosticsDocument): monaco.IDisp
 				owner.documents.delete(key);
 				owner.applied.delete(key);
 				owner.bands.delete(key);
+				owner.latest.delete(key);
+				owner.withheld.delete(key);
 				if (owner.documents.size === 0) {
 					owner.unsubscribe();
 					clients.delete(client);

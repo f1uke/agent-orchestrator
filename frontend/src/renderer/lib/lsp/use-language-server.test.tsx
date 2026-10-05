@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { useLanguageServer } from "./use-language-server";
+import { useDocumentStatus, useLanguageServer } from "./use-language-server";
 
 type StateEvent = { handleId: string; key: string; state: string; detail?: string; need?: string };
 
@@ -163,5 +163,94 @@ describe("useLanguageServer", () => {
 		const { result } = renderHook(() => useLanguageServer("/root", "go"));
 		await waitFor(() => expect(result.current.state).toBe("unavailable"));
 		expect(result.current.client).toBeNull();
+	});
+});
+
+describe("useDocumentStatus", () => {
+	type Status = { built: true } | { built: false; reason: string };
+	const WAITING: Status = {
+		built: false,
+		reason: "No Xcode build of this worktree that AO has read compiled this file yet.",
+	};
+
+	function installStatusBridge(initial: Status) {
+		let status = initial;
+		let settingsListener: (e: { handleId: string; key: string }) => void = () => {};
+		const documentStatus = vi.fn(async () => status);
+		Object.assign(harness.bridge, {
+			documentStatus,
+			onSettings: (cb: (e: { handleId: string; key: string }) => void) => {
+				settingsListener = cb;
+				return () => {
+					settingsListener = () => {};
+				};
+			},
+		});
+		return {
+			documentStatus,
+			set: (next: Status) => {
+				status = next;
+			},
+			emitSettings: (e: { handleId: string; key: string }) => act(() => settingsListener(e)),
+		};
+	}
+
+	function renderBoth(path: string) {
+		return renderHook(
+			({ p }) => {
+				const server = useLanguageServer("/root", "swift");
+				return { server, status: useDocumentStatus(server.client, p) };
+			},
+			{ initialProps: { p: path } },
+		);
+	}
+
+	test("asks main about THIS file on THIS server, and is null until the answer is in", async () => {
+		const bridge = installStatusBridge(WAITING);
+		const { result } = renderBoth("/root/Chat/ChatNotice.swift");
+		expect(result.current.status).toBeNull();
+		await waitFor(() => expect(result.current.status).toEqual(WAITING));
+		expect(bridge.documentStatus).toHaveBeenCalledWith(
+			result.current.server.client?.handleId,
+			"/root/Chat/ChatNotice.swift",
+		);
+	});
+
+	test("asks again when main says the settings moved, and the wait clears", async () => {
+		const bridge = installStatusBridge(WAITING);
+		const { result } = renderBoth("/root/Chat/ChatNotice.swift");
+		await waitFor(() => expect(result.current.status).toEqual(WAITING));
+		const handleId = result.current.server.client?.handleId ?? "";
+
+		bridge.set({ built: true });
+		// Another server's news is not this file's.
+		bridge.emitSettings({ handleId: "someone-else", key: "swift /other" });
+		await new Promise((r) => setTimeout(r, 20));
+		expect(result.current.status).toEqual(WAITING);
+
+		bridge.emitSettings({ handleId, key: "swift /root" });
+		await waitFor(() => expect(result.current.status).toEqual({ built: true }));
+	});
+
+	test("another file never inherits the last file's answer", async () => {
+		const bridge = installStatusBridge(WAITING);
+		const { result, rerender } = renderBoth("/root/A.swift");
+		await waitFor(() => expect(result.current.status).toEqual(WAITING));
+		bridge.set({ built: true });
+		rerender({ p: "/root/B.swift" });
+		expect(result.current.status).toBeNull();
+		await waitFor(() => expect(result.current.status).toEqual({ built: true }));
+	});
+
+	test("an older bridge without the question means built: it never withholds for ever", async () => {
+		const { result } = renderBoth("/root/A.swift");
+		await waitFor(() => expect(result.current.status).toEqual({ built: true }));
+	});
+
+	test("a failed question means built too, rather than a file with no diagnostics for ever", async () => {
+		const bridge = installStatusBridge(WAITING);
+		bridge.documentStatus.mockRejectedValueOnce(new Error("ipc gone"));
+		const { result } = renderBoth("/root/A.swift");
+		await waitFor(() => expect(result.current.status).toEqual({ built: true }));
 	});
 });

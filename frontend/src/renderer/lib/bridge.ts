@@ -156,8 +156,10 @@ export const aoBridge: AoBridge =
 			send: () => undefined,
 			noteResult: () => undefined,
 			health: async () => [],
+			documentStatus: async () => ({ built: true as const }),
 			onMessage: () => () => undefined,
 			onState: () => () => undefined,
+			onSettings: () => () => undefined,
 		},
 		// No main process, so no model server: the feature says why it is
 		// unavailable instead of offering a switch that can never turn on.

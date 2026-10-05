@@ -1,4 +1,10 @@
-import { type LanguageServerSpec, type SetupNeed, serverForLanguage } from "./language-servers";
+import {
+	type BuildSettings,
+	type DocumentStatus,
+	type LanguageServerSpec,
+	type SetupNeed,
+	serverForLanguage,
+} from "./language-servers";
 import type { JsonRpcMessage } from "./lsp-framing";
 import {
 	type CompletionCapability,
@@ -49,6 +55,9 @@ export type LspHealth = {
 export type LspAttachState = LspState | "unconfigured";
 
 export type LspStateEvent = { handleId: string; key: string; state: LspAttachState; detail?: string; need?: SetupNeed };
+
+/** A running server's compile settings changed: its panes should ask `documentStatus` again. */
+export type LspSettingsEvent = { handleId: string; key: string };
 
 export type LspAttachment = {
 	handleId: string;
@@ -105,7 +114,10 @@ export type LspRegistryOptions = {
 	indexTimeoutMs?: number;
 	/** How often a workspace that is not set up yet is checked again. */
 	setupPollMs?: number;
+	/** How often a running server's compile settings are brought up to date with the builds on disk. */
+	settingsPollMs?: number;
 	onState: (event: LspStateEvent) => void;
+	onSettings?: (event: LspSettingsEvent) => void;
 	onMessage: (event: { handleId: string; message: JsonRpcMessage }) => void;
 	/** Injected in tests. */
 	startProcess?: typeof startLspProcess;
@@ -116,6 +128,12 @@ export type LspRegistry = {
 	detach(handleId: string): void;
 	send(handleId: string, message: JsonRpcMessage): void;
 	noteResult(handleId: string, outcome: LspResultOutcome): void;
+	/**
+	 * Whether `filePath` (its real path) has compile settings from a real build.
+	 * Built unless the workspace's server says otherwise: only an Xcode Swift
+	 * workspace can know, and only an Xcode Swift workspace can be wrong.
+	 */
+	documentStatus(handleId: string, filePath: string): DocumentStatus;
 	health(): Promise<LspHealth[]>;
 	disposeAll(): Promise<void>;
 };
@@ -131,6 +149,8 @@ type Entry = {
 	lastUsedAt: number;
 	idleTimer: ReturnType<typeof setTimeout> | null;
 	rssTimer: ReturnType<typeof setInterval> | null;
+	settings?: BuildSettings;
+	settingsTimer: ReturnType<typeof setInterval> | null;
 	requests: number;
 	errors: number;
 	emptyWhileReady: number;
@@ -186,6 +206,10 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 	const handles = new Map<string, Entry>();
 	const pending = new Map<string, Pending>();
 	const pendingHandles = new Map<string, Pending>();
+	// A server between `prepare` and its spawn. The settings refresh in between can
+	// take seconds on a real app, and a second pane opening the same workspace in
+	// that window must join this start rather than spawn a second server.
+	const starting = new Map<string, Promise<Entry>>();
 	let handleSeq = 0;
 
 	const keyFor = (languageId: string, root: string) => `${languageId} ${root}`;
@@ -197,8 +221,10 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 	async function destroy(entry: Entry, why: string): Promise<void> {
 		if (entry.idleTimer) clearTimeout(entry.idleTimer);
 		if (entry.rssTimer) clearInterval(entry.rssTimer);
+		if (entry.settingsTimer) clearInterval(entry.settingsTimer);
 		entry.idleTimer = null;
 		entry.rssTimer = null;
+		entry.settingsTimer = null;
 		entries.delete(entry.key);
 		// Told BEFORE the await, so a renderer learns its server is going even if
 		// the shutdown handshake takes the whole kill grace. Silence here is the
@@ -251,6 +277,17 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 				documentRoot: root,
 			}
 		);
+	}
+
+	/** A refresh that failed leaves the settings as they were; it must not take the server down with it. */
+	async function refreshSettings(settings: BuildSettings | undefined): Promise<boolean> {
+		if (!settings) return false;
+		try {
+			return await settings.refresh();
+		} catch (err) {
+			console.warn(`[lsp] could not refresh compile settings: ${(err as Error).message}`);
+			return false;
+		}
 	}
 
 	function emitPending(entry: Pending, state: LspAttachState, detail?: string, need?: SetupNeed) {
@@ -315,7 +352,7 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 		key: string,
 		spec: LanguageServerSpec,
 		env: NodeJS.ProcessEnv,
-		prepared: { lspRoot: string; documentRoot: string; detail?: string; warning?: string },
+		prepared: { lspRoot: string; documentRoot: string; detail?: string; warning?: string; settings?: BuildSettings },
 	): Entry {
 		let entry: Entry | undefined;
 		const proc = startProcess({
@@ -352,6 +389,8 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 			lastUsedAt: Date.now(),
 			idleTimer: null,
 			rssTimer: null,
+			settings: prepared.settings,
+			settingsTimer: null,
 			requests: 0,
 			errors: 0,
 			emptyWhileReady: 0,
@@ -368,14 +407,43 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 		}, RSS_SAMPLE_MS);
 		// `unref` so a sampling timer never holds the app - or a test run - open.
 		sampled.rssTimer.unref?.();
+		if (prepared.settings) watchSettings(sampled, prepared.settings);
 		entries.set(key, entry);
 		return entry;
+	}
+
+	/**
+	 * Keep a running server's compile settings current with the builds on disk.
+	 *
+	 * 🗝 The server picks the new settings up by itself - the BSP reloads its
+	 * database when the file changes and tells sourcekit-lsp, which re-checks the
+	 * open documents. What it cannot do is tell a pane that a file it was
+	 * withholding diagnostics for now has real settings, so that is this event.
+	 */
+	function watchSettings(entry: Entry, settings: BuildSettings): void {
+		let refreshing = false;
+		entry.settingsTimer = setInterval(() => {
+			if (refreshing) return;
+			refreshing = true;
+			void refreshSettings(settings)
+				.then((changed) => {
+					if (!changed || !entries.has(entry.key)) return;
+					for (const handleId of entry.handles) options.onSettings?.({ handleId, key: entry.key });
+				})
+				.finally(() => {
+					refreshing = false;
+				});
+		}, options.settingsPollMs ?? SETUP_POLL_MS);
+		// `unref` so a waiting refresh never holds the app - or a test run - open.
+		entry.settingsTimer.unref?.();
 	}
 
 	return {
 		async attach({ root, languageId }) {
 			const key = keyFor(languageId, root);
 			let entry = entries.get(key);
+			const joining = entry ? undefined : starting.get(key);
+			if (joining) entry = await joining;
 			if (!entry) {
 				const env = options.env();
 				const spec = serverForLanguage(languageId, env);
@@ -412,8 +480,20 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 					emitPending(waiting, "stopped", "set up: starting the language server");
 					dropPending(waiting);
 				}
-				await enforceCap(key);
-				entry = startEntry(languageId, root, key, spec, env, prepared);
+				const start = (async () => {
+					// BEFORE the spawn, so the server's first answer for every file is
+					// already the best the builds on disk can give - rather than a round
+					// of false errors that a refresh three seconds later takes back.
+					await refreshSettings(prepared.settings);
+					await enforceCap(key);
+					return startEntry(languageId, root, key, spec, env, prepared);
+				})();
+				starting.set(key, start);
+				try {
+					entry = await start;
+				} finally {
+					starting.delete(key);
+				}
 			}
 			if (entry.idleTimer) {
 				clearTimeout(entry.idleTimer);
@@ -477,6 +557,10 @@ export function createLspRegistry(options: LspRegistryOptions): LspRegistry {
 			// indexing is expected, and lumping the two together would hide the one
 			// that matters.
 			else if (outcome === "empty" && entry.proc.state === "ready") entry.emptyWhileReady++;
+		},
+
+		documentStatus(handleId, filePath) {
+			return handles.get(handleId)?.settings?.statusOf(filePath) ?? { built: true };
 		},
 
 		async health() {

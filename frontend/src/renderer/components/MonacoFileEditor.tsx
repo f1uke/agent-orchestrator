@@ -15,7 +15,7 @@ import { formatBridge } from "../lib/editor/formatting/format-bridge";
 import { useEditorSettings } from "../hooks/useEditorSettings";
 import { registerCompletion } from "../lib/lsp/completion-provider";
 import { registerLspNavigation } from "../lib/lsp/definition";
-import { registerDiagnostics } from "../lib/lsp/diagnostics";
+import { type DiagnosticsRegistration, registerDiagnostics } from "../lib/lsp/diagnostics";
 import { type DocumentSync, openDocumentSync } from "../lib/lsp/document-sync";
 import { registerHover } from "../lib/lsp/hover-provider";
 import { peekFileReader } from "../lib/lsp/peek-file-reader";
@@ -24,7 +24,12 @@ import { registerReferences } from "../lib/lsp/references";
 import { forgetLane } from "../lib/lsp/request-lane";
 import { registerSemanticTokens } from "../lib/lsp/semantic-provider";
 import { languageIdForLsp } from "../lib/lsp/language-ids";
-import { hasLanguageServers, type LanguageServerHandle, useLanguageServer } from "../lib/lsp/use-language-server";
+import {
+	hasLanguageServers,
+	type LanguageServerHandle,
+	useDocumentStatus,
+	useLanguageServer,
+} from "../lib/lsp/use-language-server";
 import { ensureLanguage, ensureMonacoReady, languageForPath, monaco } from "../lib/monaco-setup";
 import { editorThemeName } from "../lib/monaco-theme";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
@@ -310,7 +315,13 @@ export type EditorHandle = {
 };
 
 /** What the chrome above the editor is told about its language server. */
-export type ServerStatus = Pick<LanguageServerHandle, "state" | "detail" | "need">;
+export type ServerStatus = Pick<LanguageServerHandle, "state" | "detail" | "need"> & {
+	/**
+	 * Set when the server runs but THIS file has no compile settings from a real
+	 * build yet - why, in a sentence. Its diagnostics are withheld meanwhile.
+	 */
+	documentWaiting?: string;
+};
 
 /** The server's own name, for a message that says who formatted (or refused). */
 const FORMATTER_NAMES: Record<string, string> = { go: "gopls", swift: "sourcekit-lsp" };
@@ -463,6 +474,13 @@ export default function MonacoFileEditor({
 	// nobody opens a .go file in never pays for gopls.
 	const lspLanguage = useMemo(() => languageIdForLsp(language), [language]);
 	const server = useLanguageServer(workspaceRoot, lspLanguage);
+	const documentStatus = useDocumentStatus(server.client, absolutePath);
+	// Read by the diagnostics registration, which must not re-run (and re-open the
+	// document) just because the answer arrived.
+	const documentBuiltRef = useRef(false);
+	documentBuiltRef.current = documentStatus?.built === true;
+	const diagnosticsRef = useRef<DiagnosticsRegistration | null>(null);
+	const documentWaiting = documentStatus && !documentStatus.built ? documentStatus.reason : undefined;
 
 	// Read through refs by the Monaco provider, which is registered once per
 	// LANGUAGE and must survive an idle stop and re-attach without being torn
@@ -518,8 +536,14 @@ export default function MonacoFileEditor({
 	const syncRef = useRef<DocumentSync | null>(null);
 
 	useEffect(() => {
-		onServerState?.({ state: server.state, detail: server.detail, need: server.need });
-	}, [server.state, server.detail, server.need, onServerState]);
+		onServerState?.({ state: server.state, detail: server.detail, need: server.need, documentWaiting });
+	}, [server.state, server.detail, server.need, documentWaiting, onServerState]);
+
+	// Shown only once AO has said this file's settings come from a real build. Until
+	// the answer is in, nothing is lost: publishes are kept and shown on release.
+	useEffect(() => {
+		diagnosticsRef.current?.setWithheld(documentStatus?.built !== true);
+	}, [documentStatus]);
 
 	// ⌘click. Both halves - the provider AND the opener - live in
 	// registerLspNavigation; a provider alone resolves the definition and then
@@ -611,12 +635,15 @@ export default function MonacoFileEditor({
 			model,
 			uri: sync.uri,
 			onCounts: (counts) => onDiagnosticsRef.current?.(counts),
+			withheld: !documentBuiltRef.current,
 		});
+		diagnosticsRef.current = diagnostics;
 		// The colours were computed against the text the server had a moment ago;
 		// now that it has this buffer, Monaco has to be asked again.
 		semanticRefreshRef.current?.();
 		return () => {
 			if (syncRef.current === sync) syncRef.current = null;
+			if (diagnosticsRef.current === diagnostics) diagnosticsRef.current = null;
 			diagnostics.dispose();
 			sync.dispose();
 		};

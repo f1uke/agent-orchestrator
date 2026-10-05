@@ -1191,6 +1191,7 @@ async function ensureLspRegistry(): Promise<LspRegistry> {
 		env: () => daemonEnv(),
 		onState: (event) => broadcastToRenderers("lsp:state", event),
 		onMessage: (event) => broadcastToRenderers("lsp:message", event),
+		onSettings: (event) => broadcastToRenderers("lsp:settings", event),
 	});
 	return lspRegistry;
 }
@@ -1199,6 +1200,10 @@ ipcMain.handle("lsp:attach", async (_event, input: { root: string; languageId: s
 	(await ensureLspRegistry()).attach(input),
 );
 ipcMain.handle("lsp:health", async () => (lspRegistry ? lspRegistry.health() : []));
+// No registry yet means no server, so nothing has claimed the file is unbuilt.
+ipcMain.handle("lsp:documentStatus", (_event, input: { handleId: string; path: string }) =>
+	lspRegistry ? lspRegistry.documentStatus(input.handleId, input.path) : { built: true },
+);
 // Per-message and hot, so fire-and-forget rather than invoke/await.
 ipcMain.on("lsp:detach", (_event, handleId: string) => lspRegistry?.detach(handleId));
 ipcMain.on("lsp:send", (_event, input: { handleId: string; message: Record<string, unknown> }) =>

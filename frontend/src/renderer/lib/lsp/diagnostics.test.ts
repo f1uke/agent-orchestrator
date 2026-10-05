@@ -346,3 +346,72 @@ describe("teardown", () => {
 		expect(markers).toEqual([]);
 	});
 });
+
+describe("withheld: a document whose compile settings are not a real build's", () => {
+	// 🗝 2026-10-05: for a file no build had compiled, xcode-build-server answered
+	// with `-sdk MacOSX.sdk` and `import UIKit` was underlined "No such module" in
+	// a file that compiles. Every diagnostic from those arguments is a guess.
+	const SWIFT = "file:///w/ChatNotice.swift";
+	const noSuchModule = { uri: SWIFT, diagnostics: [diagnostic(0, 1, "No such module 'UIKit'")] };
+
+	function swiftSetup(withheld: boolean) {
+		const client = fakeClient();
+		const model = fakeModel("ao-file:///s/ChatNotice.swift");
+		const counts: { errors: number; warnings: number }[] = [];
+		const registration = register({
+			languageId: "swift",
+			client,
+			model,
+			uri: SWIFT,
+			onCounts: (c) => counts.push(c),
+			withheld,
+		});
+		return { client, model, counts, registration };
+	}
+
+	test("a publish while withheld paints nothing and counts nothing", () => {
+		const { client, model, counts } = swiftSetup(true);
+		client.publish(noSuchModule);
+		expect(markers.at(-1)?.data).toEqual([]);
+		expect(model.bands()).toEqual([]);
+		expect(counts.at(-1)).toEqual({ errors: 0, warnings: 0 });
+	});
+
+	test("released, it shows the newest publish at once rather than waiting for another", () => {
+		const { client, registration, counts } = swiftSetup(true);
+		client.publish(noSuchModule);
+		// The build landed and the server already re-checked the file with real
+		// arguments - before the pane heard the file was built.
+		client.publish({ uri: SWIFT, diagnostics: [diagnostic(3, 2, "unused variable")] });
+		registration.setWithheld(false);
+		expect(markers.at(-1)?.data.map((m) => m.message)).toEqual(["unused variable"]);
+		expect(counts.at(-1)).toEqual({ errors: 0, warnings: 1 });
+	});
+
+	test("withheld again, what was shown comes off - band and count too", () => {
+		const { client, model, registration, counts } = swiftSetup(false);
+		client.publish(noSuchModule);
+		expect(model.bands()).toHaveLength(1);
+		registration.setWithheld(true);
+		expect(markers.at(-1)?.data).toEqual([]);
+		expect(model.bands()).toEqual([]);
+		expect(counts.at(-1)).toEqual({ errors: 0, warnings: 0 });
+	});
+
+	test("not withheld is the default, and setting the same state twice repaints nothing", () => {
+		const { client, registration } = swiftSetup(false);
+		client.publish(noSuchModule);
+		const painted = markers.length;
+		registration.setWithheld(false);
+		expect(markers).toHaveLength(painted);
+	});
+
+	test("after dispose, releasing paints nothing", () => {
+		const { client, registration } = swiftSetup(true);
+		client.publish(noSuchModule);
+		registration.dispose();
+		const after = markers.length;
+		registration.setWithheld(false);
+		expect(markers).toHaveLength(after);
+	});
+});

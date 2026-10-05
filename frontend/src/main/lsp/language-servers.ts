@@ -30,6 +30,30 @@ export type PreparedWorkspace = {
 	detail?: string;
 	/** Configured enough to start, but a feature will find nothing. Say which. */
 	warning?: string;
+	/**
+	 * Where this server's per-file compile settings come from, when that can be
+	 * known and can change under a running server. Swift on an Xcode project only.
+	 */
+	settings?: BuildSettings;
+};
+
+/**
+ * Whether a document's compile settings come from a real build.
+ *
+ * 🗝 Asked of AO, not of the server, because the server cannot tell. For a file
+ * no build has compiled, xcode-build-server answers with its own last-resort
+ * guess (`[file, -sdk MacOSX.sdk]`) and sourcekit-lsp reports those as `normal`
+ * settings - so `import UIKit` comes back "No such module" with nothing anywhere
+ * saying the arguments were made up.
+ */
+export type DocumentStatus = { built: true } | { built: false; reason: string };
+
+/** The compile settings of a running workspace, kept current by the registry. */
+export type BuildSettings = {
+	/** Take in whatever the builds on disk have added. Resolves true when anything changed. */
+	refresh(): Promise<boolean>;
+	/** `filePath` is the document's real path in the checkout. */
+	statusOf(filePath: string): DocumentStatus;
 };
 
 /**
@@ -172,6 +196,7 @@ const SERVERS: LanguageServerSpec[] = [
 				documentRoot: resolved.documentRoot,
 				detail: resolved.detail,
 				warning: resolved.warning,
+				settings: resolved.kind === "buildServer" ? resolved.settings : undefined,
 			};
 		},
 	},

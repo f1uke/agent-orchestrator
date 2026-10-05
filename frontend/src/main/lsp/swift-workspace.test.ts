@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { COMPILE_DATABASE, COMPILE_LEDGER } from "./swift-compile-database";
 import {
 	findBuildFromBeforeMove,
 	findBuildRoot,
@@ -299,14 +300,27 @@ describe("resolveSwiftWorkspace", () => {
 			fs.mkdirSync(path.join(buildRoot, "Index.noindex", "DataStore"), { recursive: true });
 		});
 
-		test("the shadow root is a symlink and a buildServer.json, and NOTHING else", () => {
-			const resolved = resolveSwiftWorkspace({ workspaceRoot: checkout, dataDir, env: env(), derivedDataDir });
+		test("the shadow root is a symlink, a buildServer.json and the compile database, and NOTHING else", async () => {
+			fs.mkdirSync(path.join(buildRoot, "Logs", "Build"), { recursive: true });
+			fs.writeFileSync(path.join(buildRoot, "Logs", "Build", "A.xcactivitylog"), "log");
+			const resolved = resolveSwiftWorkspace({
+				workspaceRoot: checkout,
+				dataDir,
+				env: env(),
+				derivedDataDir,
+				parseLog: async (_log, output) => fs.writeFileSync(output, "[]"),
+			});
 			if (resolved.kind !== "buildServer") throw new Error(`expected buildServer, got ${resolved.kind}`);
-			// 🗝 Two entries. The editor spike prescribed a rewritten 10 MB `.compile`
-			// and ~205 rewritten filelists as well; measured against the real iOS app,
-			// all four ⌘click targets resolve without any of it, because sourcekit-lsp
-			// resolves the symlink before asking the build server.
-			expect(fs.readdirSync(resolved.lspRoot).sort()).toEqual(["buildServer.json", SHADOW_LINK]);
+			await resolved.settings.refresh();
+			// 🗝 No filelists and no rewritten paths. The editor spike prescribed
+			// ~205 rewritten filelists beside a rewritten `.compile`; measured
+			// against the real iOS app, ⌘click resolves without rewriting anything,
+			// because sourcekit-lsp resolves the symlink before asking the build
+			// server. The `.compile` here is the BSP's own output, unrewritten, and
+			// the ledger is what keeps it from re-reading every log.
+			expect(fs.readdirSync(resolved.lspRoot).sort()).toEqual(
+				[COMPILE_DATABASE, "buildServer.json", COMPILE_LEDGER, SHADOW_LINK].sort(),
+			);
 			expect(fs.readlinkSync(path.join(resolved.lspRoot, SHADOW_LINK))).toBe(checkout);
 			expect(resolved.documentRoot).toBe(path.join(resolved.lspRoot, SHADOW_LINK));
 		});
@@ -331,14 +345,20 @@ describe("resolveSwiftWorkspace", () => {
 			expect(config.argv[2]).toBe(xbs);
 		});
 
-		test("kind is `xcode`, so the flags refresh when the user next builds", () => {
+		test("kind is `manual` over AO's accumulated database, with the index the build made", () => {
 			const resolved = resolveSwiftWorkspace({ workspaceRoot: checkout, dataDir, env: env(), derivedDataDir });
 			if (resolved.kind !== "buildServer") throw new Error("unreachable");
 			const config = JSON.parse(fs.readFileSync(path.join(resolved.lspRoot, "buildServer.json"), "utf8"));
-			// `manual` would freeze the compile args at whatever the build was when
-			// the editor first opened, which is the spike's unmeasured staleness
-			// question. `xcode` re-parses the newest .xcactivitylog on its own.
-			expect(config.kind).toBe("xcode");
+			// 🗝 NOT `xcode`. That mode parses only the newest registered log, which
+			// holds only what that one build compiled: after a Run that compiled no
+			// Swift (the human's, 2026-10-05) its database was `[]` and every file in
+			// the app got "No such module 'UIKit'". `manual` reads `<root>/.compile`,
+			// which swift-compile-database.ts builds from EVERY log, and reloads it
+			// when it changes - so flags still refresh with no restart.
+			expect(config.kind).toBe("manual");
+			// The value `xcode` mode derived from build_root, spelled out, so the
+			// index database a server already built under xbs-home is reused.
+			expect(config.indexStorePath).toBe(path.join(buildRoot, "Index.noindex", "DataStore"));
 			expect(config.workspace).toBe(path.join(checkout, "NterWorkspace.xcworkspace"));
 			expect(config.build_root).toBe(buildRoot);
 		});

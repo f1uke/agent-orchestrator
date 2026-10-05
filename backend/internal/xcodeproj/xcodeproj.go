@@ -531,8 +531,25 @@ const GenericSimulatorDestination = "generic/platform=iOS Simulator"
 // outcome and is deliberately not softened - see signingFailureHint in
 // cli/sim_run.go, which names it in the refusal. What this must never do again
 // is hand back an app that looks fine and cannot reach the Keychain.
-func BuildArgs(project Project, scheme, configuration string) []string {
-	return append(append([]string{"xcodebuild"}, project.Flag()...),
+//
+// resultBundle, when set, is where xcodebuild writes the run's result bundle.
+// 🗝 The bundle itself is not wanted - what it buys is the BUILD LOG. Without
+// `-resultBundlePath`, xcodebuild does not reliably leave an `.xcactivitylog`
+// in DerivedData: measured on a two-module fixture (2026-10-05), 0 of the 2
+// builds that compiled anything left one, and the no-op ones it did write were
+// never added to LogStoreManifest.plist. With it, 3 of 3 were written and
+// registered. That log is the ONLY place the compile arguments of each module
+// are recorded, and the in-app Swift editor reads them from there: a Run that
+// leaves none is a Run whose edits the editor never learns to compile, which is
+// how `import UIKit` came to be underlined "No such module" in a file that
+// builds. xcodebuild refuses a path that already exists, so the caller passes a
+// fresh one.
+func BuildArgs(project Project, scheme, configuration, resultBundle string) []string {
+	args := append([]string{"xcodebuild"}, project.Flag()...)
+	if resultBundle != "" {
+		args = append(args, "-resultBundlePath", resultBundle)
+	}
+	return append(args,
 		"-scheme", scheme,
 		"-configuration", configuration,
 		"-destination", GenericSimulatorDestination,

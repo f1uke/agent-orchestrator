@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { startLspProcess } from "./lsp-process";
 import { createLspRegistry, type LspRegistry, type LspRegistryOptions } from "./lsp-registry";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -297,6 +298,135 @@ describe("a Swift worktree waiting for its first Xcode build", () => {
 			timeout: 2_000,
 		});
 		expect(events.some((e) => e.state === "stopped")).toBe(false);
+	});
+});
+
+describe("a served Swift worktree's compile settings", () => {
+	// 🗝 The bug this block exists for (2026-10-05): after a Run that compiled no
+	// Swift, `import UIKit` was underlined "No such module" in a file that
+	// builds, because the build server read only the newest log. Here the server
+	// is the fake one, but the settings path is real: the registry, the compile
+	// database, and an `xcode-build-server` stand-in that does what `parse -a`
+	// does for a database it is starting - copy the log's entries in.
+	let tmp: string;
+	let worktree: string;
+	let logs: string;
+	let swiftEnv: () => NodeJS.ProcessEnv;
+	let file: string;
+	let logClock = 1_700_000_000_000;
+
+	afterEach(() => {
+		fs.rmSync(tmp, { recursive: true, force: true });
+	});
+
+	const setUp = (opts: { parseDelaySeconds?: number } = {}) => {
+		tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ao-lsp-settings-")));
+		worktree = path.join(tmp, "nter-ios-app");
+		fs.mkdirSync(path.join(worktree, "NterWorkspace.xcworkspace"), { recursive: true });
+		file = path.join(worktree, "NterApp", "Chat", "ChatNotice.swift");
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		fs.writeFileSync(file, "import UIKit\n");
+		const buildRoot = path.join(tmp, "home", "Library", "Developer", "Xcode", "DerivedData", "NterWorkspace-x");
+		fs.mkdirSync(buildRoot, { recursive: true });
+		fs.writeFileSync(
+			path.join(buildRoot, "info.plist"),
+			`<plist><dict><key>WorkspacePath</key><string>${path.join(worktree, "NterWorkspace.xcworkspace")}</string></dict></plist>`,
+		);
+		logs = path.join(buildRoot, "Logs", "Build");
+		fs.mkdirSync(logs, { recursive: true });
+		// `xcode-build-server parse -a -l <log> -o <output>`, reduced to its effect.
+		const xbs = path.join(tmp, "xcode-build-server");
+		fs.writeFileSync(xbs, `#!/bin/sh\nsleep ${opts.parseDelaySeconds ?? 0}\ncp "$4" "$6"\n`, { mode: 0o755 });
+		swiftEnv = () => ({
+			...process.env,
+			HOME: path.join(tmp, "home"),
+			AO_LSP_XCODE_BUILD_SERVER: xbs,
+			AO_LSP_COMMAND_SWIFT: process.execPath,
+			AO_LSP_ARGS_SWIFT: FAKE,
+		});
+	};
+
+	const writeLog = (name: string, files: string[]) => {
+		const log = path.join(logs, `${name}.xcactivitylog`);
+		fs.writeFileSync(log, JSON.stringify(files.length ? [{ module_name: "NterApp", command: "swiftc", files }] : []));
+		logClock += 60_000;
+		fs.utimesSync(log, new Date(logClock), new Date(logClock));
+	};
+
+	test("are read BEFORE the server starts, so its first answer for the file is already right", async () => {
+		setUp();
+		writeLog("1-full", [file]);
+		const r = make({ dataDir: path.join(tmp, "data"), env: () => swiftEnv() });
+		const attachment = await r.attach({ root: worktree, languageId: "swift" });
+		expect(r.documentStatus(attachment.handleId, file)).toEqual({ built: true });
+	});
+
+	test("a build that lands while the file is open tells the pane, and the file is built", async () => {
+		setUp();
+		// The human's state: the only log on disk is a Run that compiled nothing.
+		writeLog("1-noop", []);
+		const settings: string[] = [];
+		const r = make({
+			dataDir: path.join(tmp, "data"),
+			env: () => swiftEnv(),
+			settingsPollMs: 20,
+			onSettings: (event) => settings.push(event.handleId),
+		});
+		const attachment = await r.attach({ root: worktree, languageId: "swift" });
+		const waiting = r.documentStatus(attachment.handleId, file);
+		expect(waiting.built).toBe(false);
+		if (waiting.built) throw new Error("unreachable");
+		expect(waiting.reason).toMatch(/errors here would be wrong/);
+
+		writeLog("2-incremental", [file]);
+		await vi.waitFor(() => expect(settings).toContain(attachment.handleId), { timeout: 3_000 });
+		expect(r.documentStatus(attachment.handleId, file)).toEqual({ built: true });
+	});
+
+	test("a poll that finds no new build says nothing", async () => {
+		setUp();
+		writeLog("1-full", [file]);
+		const settings: string[] = [];
+		const r = make({
+			dataDir: path.join(tmp, "data"),
+			env: () => swiftEnv(),
+			settingsPollMs: 20,
+			onSettings: (event) => settings.push(event.handleId),
+		});
+		await r.attach({ root: worktree, languageId: "swift" });
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		expect(settings).toEqual([]);
+	});
+
+	test("two panes opening while the settings are still being read share ONE server", async () => {
+		setUp({ parseDelaySeconds: 0.3 });
+		writeLog("1-full", [file]);
+		let spawned = 0;
+		const r = make({
+			dataDir: path.join(tmp, "data"),
+			env: () => swiftEnv(),
+			// Counted at the spawn, not read off `health()`: a second server for the
+			// same key REPLACES the first in the registry's map, so the health list
+			// would still say one while the first process leaks.
+			startProcess: (input) => {
+				spawned++;
+				return startLspProcess(input);
+			},
+		});
+		const [a, b] = await Promise.all([
+			r.attach({ root: worktree, languageId: "swift" }),
+			r.attach({ root: worktree, languageId: "swift" }),
+		]);
+		expect(a.key).toBe(b.key);
+		expect(spawned).toBe(1);
+		expect(r.documentStatus(b.handleId, file)).toEqual({ built: true });
+	});
+
+	test("a language with no build settings never claims a file is unbuilt", async () => {
+		const r = make();
+		const attachment = await r.attach({ root: HERE, languageId: "go" });
+		expect(r.documentStatus(attachment.handleId, path.join(HERE, "lsp-registry.ts"))).toEqual({ built: true });
+		expect(r.documentStatus("lsp-unknown", "/nowhere.swift")).toEqual({ built: true });
 	});
 });
 
