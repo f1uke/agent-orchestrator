@@ -114,11 +114,12 @@ func TestCommandBuilders(t *testing.T) {
 		[]string{"new-session", "-d", "-s", "sess-1", "-x", "220", "-y", "50", "-c", "/tmp/ws", "/bin/sh", "/data/launch.sh"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("newSessionScriptArgs = %#v, want %#v", got, want)
 	}
-	// set-option uses pane-targeting (no = prefix).
-	if got, want := setStatusOffArgs("sess-1"), []string{"set-option", "-t", "sess-1", "status", "off"}; !reflect.DeepEqual(got, want) {
+	// Pane-targeting commands use the exact `=<id>:` form, never a bare name
+	// that tmux would resolve by prefix.
+	if got, want := setStatusOffArgs("sess-1"), []string{"set-option", "-t", "=sess-1:", "status", "off"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("setStatusOffArgs = %#v, want %#v", got, want)
 	}
-	if got, want := setMouseOnArgs("sess-1"), []string{"set-option", "-t", "sess-1", "mouse", "on"}; !reflect.DeepEqual(got, want) {
+	if got, want := setMouseOnArgs("sess-1"), []string{"set-option", "-t", "=sess-1:", "mouse", "on"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("setMouseOnArgs = %#v, want %#v", got, want)
 	}
 	// kill-session and has-session use exact-match prefix =.
@@ -128,14 +129,17 @@ func TestCommandBuilders(t *testing.T) {
 	if got, want := hasSessionArgs("sess-1"), []string{"has-session", "-t", "=sess-1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("hasSessionArgs = %#v, want %#v", got, want)
 	}
-	if got, want := sendKeysLiteralArgs("sess-1", "hello"), []string{"send-keys", "-t", "sess-1", "-l", "hello"}; !reflect.DeepEqual(got, want) {
+	if got, want := sendKeysLiteralArgs("sess-1", "hello"), []string{"send-keys", "-t", "=sess-1:", "-l", "hello"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("sendKeysLiteralArgs = %#v, want %#v", got, want)
 	}
-	if got, want := sendEnterArgs("sess-1"), []string{"send-keys", "-t", "sess-1", "Enter"}; !reflect.DeepEqual(got, want) {
+	if got, want := sendEnterArgs("sess-1"), []string{"send-keys", "-t", "=sess-1:", "Enter"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("sendEnterArgs = %#v, want %#v", got, want)
 	}
-	if got, want := capturePaneArgs("sess-1", 10), []string{"capture-pane", "-t", "sess-1", "-p", "-S", "-10"}; !reflect.DeepEqual(got, want) {
+	if got, want := capturePaneArgs("sess-1", 10), []string{"capture-pane", "-t", "=sess-1:", "-p", "-S", "-10"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("capturePaneArgs = %#v, want %#v", got, want)
+	}
+	if got, want := listPanePIDArgs("sess-1"), []string{"list-panes", "-t", "=sess-1:", "-F", "#{pane_pid}"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("listPanePIDArgs = %#v, want %#v", got, want)
 	}
 }
 

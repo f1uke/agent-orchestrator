@@ -78,11 +78,12 @@ func TestSendMessageClampsOversizedChunkToTmuxBudget(t *testing.T) {
 
 // TestSendKeysLiteralBudgetShrinksWithSessionID pins the derivation: the target
 // id is packed into the same command as the payload, so a longer id leaves less
-// room. Measured against tmux 3.6a, `send-keys -t <id> -l <chunk>` accepts
-// exactly 16346-len(id) payload bytes and rejects one more.
+// room. Measured against tmux 3.6a, `send-keys -t =<id>: -l <chunk>` accepts
+// exactly 16344-len(id) payload bytes and rejects one more (the exact-match
+// `=` and `:` cost two bytes over a plain target's 16346-len(id)).
 func TestSendKeysLiteralBudgetShrinksWithSessionID(t *testing.T) {
 	for _, id := range []string{"probe", longSessionID} {
-		if got, want := sendKeysLiteralBudget(id), 16346-len(id); got != want {
+		if got, want := sendKeysLiteralBudget(id), 16344-len(id); got != want {
 			t.Fatalf("sendKeysLiteralBudget(%q) = %d, want %d", id, got, want)
 		}
 		// The whole command, filled to the budget, must fit — and one byte more
