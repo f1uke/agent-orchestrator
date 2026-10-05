@@ -37,6 +37,10 @@ export function RestartSessionButton({ session }: { session: WorkspaceSession })
 		},
 		onError: () => {
 			void captureRendererEvent("ao.renderer.session_restart_failed", { project_id: session.workspaceId });
+			// A restart that failed part-way has usually already stopped the agent
+			// and marked the session terminated (so it stays restorable). Refetch,
+			// so the board and terminal stop showing it as live.
+			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 		},
 	});
 

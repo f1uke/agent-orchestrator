@@ -49,11 +49,9 @@ export function OrchestratorReplacementDialog({
 							<AlertTriangle className="size-4" aria-hidden="true" />
 						</div>
 						<div className="min-w-0 flex-1">
-							<Dialog.Title className="text-sm font-medium text-foreground">
-								Orchestrator replacement failed
-							</Dialog.Title>
+							<Dialog.Title className="text-sm font-medium text-foreground">Orchestrator did not start</Dialog.Title>
 							<Dialog.Description className="mt-2 text-[13px] leading-5 text-muted-foreground">
-								{error ?? "The project orchestrator could not be replaced."}
+								{error ?? "The project orchestrator could not be started."}
 							</Dialog.Description>
 						</div>
 						<Dialog.Close asChild>
