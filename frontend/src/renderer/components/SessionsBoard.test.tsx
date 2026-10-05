@@ -89,6 +89,35 @@ beforeEach(() => {
 });
 
 describe("SessionsBoard", () => {
+	// A failed restart leaves the project with no orchestrator. The banner that
+	// says so must also offer the way back, and a start that fails again must
+	// land in the error dialog (via the ui-store) rather than vanish.
+	it("offers to start a missing orchestrator and reports a failed start", async () => {
+		useUiStore.setState({ orchestratorReplacementErrors: {} });
+		workspaceQueryMock.mockReturnValue({
+			data: [{ id: "proj-1", name: "my-app", path: "/repo", sessions: [] }],
+			isError: false,
+		});
+		postMock.mockResolvedValue({
+			data: undefined,
+			error: { message: "spawn proj-1-2: session: agent terminal could not be started: can't find window" },
+			response: { status: 500 },
+		});
+		render(
+			<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+				<SessionsBoard projectId="proj-1" />
+			</QueryClientProvider>,
+		);
+
+		expect(screen.getByText("No orchestrator is running for this project.")).toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Start" }));
+
+		expect(postMock).toHaveBeenCalledWith("/api/v1/orchestrators", { body: { projectId: "proj-1", clean: true } });
+		await waitFor(() =>
+			expect(useUiStore.getState().orchestratorReplacementErrors["proj-1"]).toContain("can't find window"),
+		);
+	});
+
 	it("does not show an agent setup warning on the board", () => {
 		renderBoard();
 

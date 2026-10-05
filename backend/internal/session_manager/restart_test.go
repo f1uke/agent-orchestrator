@@ -260,3 +260,41 @@ func gitOutput(t *testing.T, git, dir string, args ...string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// TestRestart_RelaunchFailureIsTypedAndStaysRestorable: the agent is already
+// gone when the relaunch fails, so the session must end up honestly terminated
+// (not a live-looking row over a dead terminal), the error must say the agent's
+// terminal could not be started - the API turns it into AGENT_LAUNCH_FAILED
+// with the runtime's reason instead of "Internal server error" - and a later
+// restore, once the runtime can launch again, brings the same session back.
+// This is the shape of the wedged orchestrator restart (the runtime refused to
+// relaunch the name it had just destroyed).
+func TestRestart_RelaunchFailureIsTypedAndStaysRestorable(t *testing.T) {
+	m, st, rt, _ := newManager()
+	st.sessions["mer-1"] = domain.SessionRecord{
+		ID: "mer-1", ProjectID: "mer", Kind: domain.KindOrchestrator,
+		Metadata: domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "b", AgentSessionID: "agent-x", RuntimeHandleID: "h1"},
+		Activity: domain.Activity{State: domain.ActivityActive},
+	}
+	rt.createErr = errors.New("tmux runtime: create session mer-1: probe its pre-upgrade session: can't find window: mer-1")
+
+	_, err := m.Restart(ctx, "mer-1")
+	if !errors.Is(err, ErrAgentLaunchFailed) {
+		t.Fatalf("Restart err = %v, want ErrAgentLaunchFailed", err)
+	}
+	if !strings.Contains(err.Error(), "can't find window") {
+		t.Fatalf("Restart err = %q, want the runtime's reason carried through", err)
+	}
+	if rec := st.sessions["mer-1"]; !rec.IsTerminated {
+		t.Fatal("a restart whose relaunch failed must leave the session terminated, so it stays restorable")
+	}
+
+	rt.createErr = nil
+	rec, err := m.Restore(ctx, "mer-1")
+	if err != nil {
+		t.Fatalf("Restore after the runtime recovered: %v", err)
+	}
+	if rec.ID != "mer-1" || rec.IsTerminated {
+		t.Fatalf("restored = %+v, want mer-1 live again", rec)
+	}
+}

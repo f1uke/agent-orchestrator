@@ -27,6 +27,8 @@ func TestRequestLoggerRecords5xxCause(t *testing.T) {
 		absent    bool
 	}{
 		{name: "raw error on 500 is logged", err: errors.New("gitworktree: worktree remove exploded"), wantInLog: "gitworktree: worktree remove exploded"},
+		{name: "a 500 is logged at error level", err: errors.New("boom"), wantInLog: "level=ERROR"},
+		{name: "a typed 500 keeps its reason", err: apierr.Internal("AGENT_LAUNCH_FAILED", "restore x: session: agent terminal could not be started: can't find window"), wantInLog: "can't find window"},
 		{name: "typed 404 carries no error attr", err: apierr.NotFound("SESSION_NOT_FOUND", "Unknown session"), wantInLog: "error=", absent: true},
 	}
 	for _, tc := range cases {

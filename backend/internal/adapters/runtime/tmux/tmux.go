@@ -330,7 +330,16 @@ func (r *Runtime) Destroy(ctx context.Context, handle ports.RuntimeHandle) error
 	if err != nil {
 		return fmt.Errorf("tmux runtime: destroy session %s: %w", id, err)
 	}
-	return r.destroyOn(ctx, sock, id)
+	if err := r.destroyOn(ctx, sock, id); err != nil {
+		return err
+	}
+	if sock == r.legacySocket {
+		// The pre-upgrade session is gone, so the cached "it lives on the shared
+		// server" is now false. Leaving it true is what wedged a restart: the
+		// relaunch's Create went looking for the session it had just killed.
+		r.legacyOwned.Store(id, false)
+	}
+	return nil
 }
 
 // destroyOn kills session id on the server at sock; already gone is success.

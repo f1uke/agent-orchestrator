@@ -218,7 +218,17 @@ func startsScript(start, prefix string) bool {
 // stale one (its agent gone) is killed, a live one refuses the create - the same
 // rule Create applies to a duplicate on its own server. Either way the id then
 // resolves to its own socket.
-func (r *Runtime) retireLegacy(ctx context.Context, id string) error {
+//
+// A cached answer is only a shortcut, so any failure here forgets it: the next
+// Create asks the shared server afresh instead of repeating the same doomed
+// probe for the rest of the daemon's life (which made a session's name
+// unlaunchable until the daemon restarted).
+func (r *Runtime) retireLegacy(ctx context.Context, id string) (err error) {
+	defer func() {
+		if err != nil {
+			r.legacyOwned.Delete(id)
+		}
+	}()
 	legacy, err := r.legacyHosts(ctx, id)
 	if err != nil {
 		return fmt.Errorf("tmux runtime: create session %s: %w", id, err)

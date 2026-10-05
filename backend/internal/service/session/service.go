@@ -1370,6 +1370,10 @@ func toAPIError(err error) error {
 		return apierr.Invalid("AGENT_BINARY_NOT_FOUND", err.Error(), nil)
 	case errors.Is(err, ports.ErrRuntimePrerequisite):
 		return apierr.Invalid("RUNTIME_PREREQUISITE_MISSING", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrAgentLaunchFailed):
+		// Still a 500 - the daemon failed, not the request - but with the runtime's
+		// own reason, so the app and `ao session restore` can show what went wrong.
+		return apierr.Internal("AGENT_LAUNCH_FAILED", err.Error())
 	case errors.Is(err, sessionmanager.ErrInvalidCrew):
 		return apierr.Invalid("INVALID_CREW", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrCrewRoleTaken):

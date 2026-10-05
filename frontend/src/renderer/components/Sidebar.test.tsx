@@ -9,8 +9,9 @@ import { agentsQueryKey } from "../hooks/useAgentsQuery";
 import { useUiStore } from "../stores/ui-store";
 import { MAX_DISPLAY_NAME_LEN } from "../lib/display-name";
 
-const { getMock, navigateMock, mockParams, renameSessionMock, apiReady } = vi.hoisted(() => ({
+const { getMock, navigateMock, mockParams, renameSessionMock, apiReady, spawnOrchestratorMock } = vi.hoisted(() => ({
 	getMock: vi.fn(),
+	spawnOrchestratorMock: vi.fn(),
 	// The daemon's port, as the renderer learns it. Boot starts UNTRUSTED — the
 	// port arrives over IPC a moment after the window is up — and the sidebar has
 	// to survive that window, so the tests drive it explicitly rather than
@@ -35,6 +36,7 @@ const { getMock, navigateMock, mockParams, renameSessionMock, apiReady } = vi.ho
 }));
 
 vi.mock("../lib/rename-session", () => ({ renameSession: renameSessionMock }));
+vi.mock("../lib/spawn-orchestrator", () => ({ spawnOrchestrator: spawnOrchestratorMock }));
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@tanstack/react-router")>();
@@ -213,6 +215,45 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+});
+
+describe("Sidebar — starting a project's orchestrator", () => {
+	beforeEach(() => {
+		spawnOrchestratorMock.mockReset();
+		useUiStore.setState({ orchestratorReplacementErrors: {} });
+	});
+
+	// A failed start used to be a console.error and nothing else: the click did
+	// nothing visible, and the row the spawn had seeded - deleted again when it
+	// failed, with no event to say so - stayed on the board as an orchestrator
+	// stuck on "Starting session". The failure must be said, with a retry (the
+	// shell's dialog reads it from the store), and the board refetched at once.
+	it("reports a failed start with its reason and refetches the board", async () => {
+		spawnOrchestratorMock.mockRejectedValue(
+			new Error("spawn proj-1-96: session: agent terminal could not be started: can't find window"),
+		);
+		renderSidebar();
+		const invalidate = vi.spyOn(renderedQueryClient as QueryClient, "invalidateQueries");
+
+		await userEvent.click(screen.getByLabelText("Spawn Project One orchestrator"));
+
+		await waitFor(() =>
+			expect(useUiStore.getState().orchestratorReplacementErrors["proj-1"]).toContain("can't find window"),
+		);
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: ["workspaces"] });
+		expect(navigateMock).not.toHaveBeenCalled();
+	});
+
+	it("clears a previous failure when the start succeeds", async () => {
+		useUiStore.setState({ orchestratorReplacementErrors: { "proj-1": "earlier failure" } });
+		spawnOrchestratorMock.mockResolvedValue("proj-1-97");
+		renderSidebar();
+
+		await userEvent.click(screen.getByLabelText("Spawn Project One orchestrator"));
+
+		await waitFor(() => expect(navigateMock).toHaveBeenCalled());
+		expect(useUiStore.getState().orchestratorReplacementErrors["proj-1"]).toBeUndefined();
+	});
 });
 
 describe("Sidebar — the qa pip on a task's row", () => {

@@ -598,6 +598,7 @@ function ProjectItem({
 	const [isRemoving, setIsRemoving] = useState(false);
 	const [isSpawning, setIsSpawning] = useState(false);
 	const restartingProjectIds = useUiStore((state) => state.restartingProjectIds);
+	const setOrchestratorReplacementError = useUiStore((state) => state.setOrchestratorReplacementError);
 	const isProjectRestarting = restartingProjectIds.has(workspace.id);
 	// Live workers only: merged/terminated sessions leave the sidebar and stay
 	// reachable through the board's Done / Terminated bar (SessionsBoard). Sorted
@@ -661,12 +662,21 @@ function ProjectItem({
 			return;
 		}
 		setIsSpawning(true);
+		setOrchestratorReplacementError(workspace.id, null);
 		try {
 			const sessionId = await spawnOrchestrator(workspace.id, "sidebar");
 			await queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 			selection.goSession(workspace.id, sessionId);
 		} catch (err) {
-			console.error("Failed to spawn orchestrator:", err);
+			// A failed spawn has already deleted the row it seeded, and nothing
+			// announces a deletion, so refetch now: otherwise the board keeps a
+			// phantom orchestrator stuck on "Starting session". Then say what
+			// failed, with a retry, instead of a click that silently did nothing.
+			void queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
+			setOrchestratorReplacementError(
+				workspace.id,
+				err instanceof Error ? err.message : "Could not start the orchestrator",
+			);
 		} finally {
 			setIsSpawning(false);
 		}

@@ -43,10 +43,16 @@ func requestLogger(log *slog.Logger, sink ports.EventSink) func(http.Handler) ht
 					"duration", time.Since(start),
 					"remote", r.RemoteAddr,
 				}
-				if err := capturedErr(); err != nil && ww.Status() >= http.StatusInternalServerError {
-					attrs = append(attrs, "error", err)
+				if ww.Status() >= http.StatusInternalServerError {
+					// A 500 is the daemon failing, so it is logged as an error -
+					// with its cause - to be found by its request id afterwards.
+					if err := capturedErr(); err != nil {
+						attrs = append(attrs, "error", err)
+					}
+					log.Error("http request", attrs...)
+				} else {
+					log.Info("http request", attrs...)
 				}
-				log.Info("http request", attrs...)
 				if sink != nil && ww.Status() >= http.StatusInternalServerError {
 					path := telemetrymeta.RoutePattern(r)
 					payload := map[string]any{

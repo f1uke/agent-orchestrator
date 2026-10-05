@@ -121,4 +121,21 @@ describe("RestartSessionButton", () => {
 
 		expect(await screen.findByText("session not found")).toBeInTheDocument();
 	});
+
+	// The relaunch half can fail after the agent was stopped - the session is
+	// then terminated on the daemon, and the board must not keep it live.
+	it("refetches the board when the restart fails", async () => {
+		postMock.mockResolvedValue({
+			data: undefined,
+			error: { message: "restore sess-1: session: agent terminal could not be started: can't find window" },
+		});
+		const queryClient = renderButton();
+		const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+		await userEvent.click(screen.getByRole("button", { name: "Restart session" }));
+		await userEvent.click(screen.getByRole("button", { name: "Restart" }));
+
+		expect(await screen.findByText(/agent terminal could not be started/)).toBeInTheDocument();
+		expect(invalidate).toHaveBeenCalledWith({ queryKey: ["workspaces"] });
+	});
 });

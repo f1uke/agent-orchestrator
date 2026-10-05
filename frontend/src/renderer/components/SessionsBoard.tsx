@@ -199,6 +199,18 @@ export function SessionsBoard({ projectId }: SessionsBoardProps) {
 								<RotateCw className="size-3.5" aria-hidden="true" />
 								Restart
 							</button>
+						) : health.state === "missing" ? (
+							// The state a failed restart leaves behind: say so AND offer the
+							// way out here, rather than only in the sidebar's hover button.
+							<button
+								className="dashboard-app-header__primary-btn"
+								disabled={isProjectRestarting}
+								onClick={() => void restartOrchestrator()}
+								type="button"
+							>
+								<Play className="size-3.5" aria-hidden="true" />
+								Start
+							</button>
 						) : null}
 					</div>
 				) : null}
