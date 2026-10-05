@@ -1520,11 +1520,16 @@ type WorkspaceChangesResponse struct {
 	// it was resolved ("pr", "session_pr_target", "session_base", "project",
 	// "git_origin_head"), so the UI can distinguish a certain target from an
 	// inferred one. Both may be set on an available=false response.
-	TargetBranch string           `json:"targetBranch,omitempty"`
-	TargetSource string           `json:"targetSource,omitempty"`
-	MergeBase    string           `json:"mergeBase,omitempty"`
-	Files        []ChangedFileDTO `json:"files"`
-	Truncated    bool             `json:"truncated"`
+	TargetBranch string `json:"targetBranch,omitempty"`
+	TargetSource string `json:"targetSource,omitempty"`
+	// TargetRef names the ref the list was actually measured against, as a
+	// person writes it: "origin/develop" for the remote's copy of the target,
+	// "develop" when only the local branch could be used (no remote, or never
+	// fetched). Empty on an available=false response that resolved no ref.
+	TargetRef string           `json:"targetRef,omitempty"`
+	MergeBase string           `json:"mergeBase,omitempty"`
+	Files     []ChangedFileDTO `json:"files"`
+	Truncated bool             `json:"truncated"`
 	// TargetFetch reports how fresh the target branch's remote-tracking ref is:
 	// "current" (refreshed from the remote just now), "refreshing" (a refresh is
 	// in flight, so this diff may still move), or "failed" (offline, auth, or
@@ -1533,6 +1538,15 @@ type WorkspaceChangesResponse struct {
 	// remote to be behind. TargetFetchError carries the reason for "failed".
 	TargetFetch      string `json:"targetFetch,omitempty"`
 	TargetFetchError string `json:"targetFetchError,omitempty"`
+	// TargetFetchedAt is when the daemon last refreshed targetRef from its
+	// remote. Absent until the first refresh succeeds, and kept through a later
+	// failure: a failed refresh leaves the ref exactly as fresh as this says.
+	TargetFetchedAt *time.Time `json:"targetFetchedAt,omitempty"`
+	// TargetFetchInFlight reports a fetch of targetRef running right now. It is
+	// separate from targetFetch because a known failure keeps reading "failed"
+	// while a retry runs; a client polls quickly while this is true, so the
+	// retry's result shows as soon as it lands.
+	TargetFetchInFlight bool `json:"targetFetchInFlight,omitempty"`
 	// Branch is the session's OWN branch — what the board, the pull request and
 	// the human all mean by "this task's changes", and what this list is measured
 	// from. BranchMissing reports that it is named but has no ref in this
@@ -1603,23 +1617,32 @@ func workspaceChangesResponse(res sessionsvc.WorkspaceChangesResult) WorkspaceCh
 		})
 	}
 	return WorkspaceChangesResponse{
-		Available:        res.Available,
-		Reason:           res.Reason,
-		TargetBranch:     res.TargetBranch,
-		TargetSource:     res.TargetSource,
-		MergeBase:        res.MergeBase,
-		Files:            files,
-		Truncated:        res.Truncated,
-		TargetFetch:      res.TargetFetch,
-		TargetFetchError: res.TargetFetchError,
-		Branch:           res.Branch,
-		BranchMissing:    res.BranchMissing,
-		DiffSubject:      res.DiffSubject,
-		IncludesWorktree: res.IncludesWorktree,
-		PendingPaths:     res.PendingPaths,
-		HeadState:        res.HeadState,
-		HeadLabel:        res.HeadLabel,
+		Available:           res.Available,
+		Reason:              res.Reason,
+		TargetBranch:        res.TargetBranch,
+		TargetSource:        res.TargetSource,
+		TargetRef:           res.TargetRef,
+		MergeBase:           res.MergeBase,
+		Files:               files,
+		Truncated:           res.Truncated,
+		TargetFetch:         res.TargetFetch,
+		TargetFetchError:    res.TargetFetchError,
+		TargetFetchedAt:     timePtr(res.TargetFetchedAt),
+		TargetFetchInFlight: res.TargetFetchInFlight,
+		Branch:              res.Branch,
+		BranchMissing:       res.BranchMissing,
+		DiffSubject:         res.DiffSubject,
+		IncludesWorktree:    res.IncludesWorktree,
+		PendingPaths:        res.PendingPaths,
+		HeadState:           res.HeadState,
+		HeadLabel:           res.HeadLabel,
 	}
+}
+
+// WorkspaceChangesParams is the query string accepted by
+// GET /api/v1/sessions/{sessionId}/workspace/changes.
+type WorkspaceChangesParams struct {
+	Refresh bool `query:"refresh" description:"Refetch the target branch from its remote now instead of waiting out the throttle (the panel's refresh button). The response still answers from the refs on disk with targetFetch \"refreshing\"; the fetched result lands on a later read, and two refreshes in flight share one fetch."`
 }
 
 // WorkspaceFileDiffParams is the query string accepted by

@@ -142,7 +142,7 @@ type SessionService interface {
 	// WriteWorkspaceFile replaces one workspace file's content, confined to the
 	// session's workspace and preconditioned on the hash the read handed out.
 	WriteWorkspaceFile(ctx context.Context, id domain.SessionID, in sessionsvc.WriteWorkspaceFileInput) (sessionsvc.WriteWorkspaceFileResult, error)
-	WorkspaceChanges(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceChangesResult, error)
+	WorkspaceChanges(ctx context.Context, id domain.SessionID, q sessionsvc.WorkspaceChangesQuery) (sessionsvc.WorkspaceChangesResult, error)
 	ListWorkspaceFiles(ctx context.Context, id domain.SessionID) (sessionsvc.WorkspaceFilesResult, error)
 	SearchWorkspace(ctx context.Context, id domain.SessionID, q sessionsvc.SearchQuery) (sessionsvc.SearchResult, error)
 	WorkspaceFileDiff(ctx context.Context, id domain.SessionID, q sessionsvc.FileDiffQuery) (sessionsvc.DiffContextResult, error)
@@ -738,7 +738,9 @@ func (c *SessionsController) workspaceChanges(w http.ResponseWriter, r *http.Req
 		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/workspace/changes")
 		return
 	}
-	res, err := c.Svc.WorkspaceChanges(r.Context(), sessionID(r))
+	res, err := c.Svc.WorkspaceChanges(r.Context(), sessionID(r), sessionsvc.WorkspaceChangesQuery{
+		Refresh: r.URL.Query().Get("refresh") == "true",
+	})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

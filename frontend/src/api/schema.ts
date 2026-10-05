@@ -5088,6 +5088,10 @@ export interface components {
             targetBranch?: string;
             targetFetch?: string;
             targetFetchError?: string;
+            targetFetchInFlight?: boolean;
+            /** Format: date-time */
+            targetFetchedAt?: null | string;
+            targetRef?: string;
             targetSource?: string;
             truncated: boolean;
         };
@@ -12902,7 +12906,10 @@ export interface operations {
     };
     workspaceChanges: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Refetch the target branch from its remote now instead of waiting out the throttle (the panel's refresh button). The response still answers from the refs on disk with targetFetch "refreshing"; the fetched result lands on a later read, and two refreshes in flight share one fetch. */
+                refresh?: boolean;
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */

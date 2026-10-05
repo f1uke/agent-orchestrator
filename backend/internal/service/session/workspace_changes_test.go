@@ -89,7 +89,7 @@ func TestWorkspaceChanges_AllStatuses(t *testing.T) {
 	dir := changesTestRepo(t)
 	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestWorkspaceChanges_IncludesUncommittedAndUntracked(t *testing.T) {
 	dir := changesTestRepo(t)
 	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestWorkspaceChanges_TargetBranchResolutionOrder(t *testing.T) {
 		svc := newServiceWithStore(t, &multiPRFakeStore{
 			fakeStore: fake, prs: []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}},
 		})
-		res, err := svc.WorkspaceChanges(context.Background(), "s1")
+		res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +179,7 @@ func TestWorkspaceChanges_TargetBranchResolutionOrder(t *testing.T) {
 		rec.PRTarget = "main"
 		fake.sessions["s1"] = rec
 		svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
-		res, err := svc.WorkspaceChanges(context.Background(), "s1")
+		res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -199,7 +199,7 @@ func TestWorkspaceChanges_NeverAssumesMain(t *testing.T) {
 	fake.putSessionWithWorkspace("s1", dir)
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestWorkspaceChanges_UnresolvableTargetDegrades(t *testing.T) {
 	fake.sessions["s1"] = rec
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestWorkspaceChanges_MissingWorktreeDegrades(t *testing.T) {
 
 	// A merged session keeps its board row after its worktree is removed. That
 	// must render an empty state, never a 500.
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatalf("a missing worktree must degrade, not error: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestWorkspaceChanges_MissingWorktreeDegrades(t *testing.T) {
 
 func TestWorkspaceChanges_UnknownSessionErrors(t *testing.T) {
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: newFakeStore()})
-	if _, err := svc.WorkspaceChanges(context.Background(), "nope"); err == nil {
+	if _, err := svc.WorkspaceChanges(context.Background(), "nope", WorkspaceChangesQuery{}); err == nil {
 		t.Fatal("want error for unknown session")
 	}
 }
@@ -268,7 +268,7 @@ func TestWorkspaceChanges_NotAGitRepoDegrades(t *testing.T) {
 	fake.putSessionWithWorkspace("s1", t.TempDir()) // exists, but no .git
 	svc := newServiceWithStore(t, &multiPRFakeStore{fakeStore: fake})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +627,7 @@ func TestWorkspaceChanges_UntrackedDirectoryListsItsFiles(t *testing.T) {
 	dir := untrackedDirRepo(t)
 	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -674,7 +674,7 @@ func TestWorkspaceChanges_HugeUntrackedDirectoryStaysOneRow(t *testing.T) {
 	}
 	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -707,7 +707,7 @@ func TestWorkspaceChanges_IgnoredOnlyDirectoryIsNotListed(t *testing.T) {
 	}
 	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

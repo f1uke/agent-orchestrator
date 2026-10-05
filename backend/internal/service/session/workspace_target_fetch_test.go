@@ -179,7 +179,7 @@ func TestWorkspaceChanges_PrefersRemoteTrackingOverStaleLocalRef(t *testing.T) {
 	fetchDisabled(t)
 	f := newStaleTargetFixture(t)
 
-	res, err := f.service(t).WorkspaceChanges(context.Background(), "s1")
+	res, err := f.service(t).WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestWorkspaceChanges_FetchesTargetBranch(t *testing.T) {
 	fetchInline(t)
 	f := newStaleTargetFixture(t)
 
-	res, err := f.service(t).WorkspaceChanges(context.Background(), "s1")
+	res, err := f.service(t).WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestWorkspaceChanges_FetchIsReadOnly(t *testing.T) {
 	statusBefore := snapshot(f.worktree, "status", "--porcelain")
 	localBefore := snapshot(f.shared, "for-each-ref", "refs/heads/")
 
-	if _, err := f.service(t).WorkspaceChanges(context.Background(), "s1"); err != nil {
+	if _, err := f.service(t).WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -273,7 +273,7 @@ func TestWorkspaceChanges_FetchFailureIsVisible(t *testing.T) {
 		t.Fatalf("set-url: %v\n%s", err, out)
 	}
 
-	res, err := f.service(t).WorkspaceChanges(context.Background(), "s1")
+	res, err := f.service(t).WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatalf("a failed fetch must not error the endpoint: %v", err)
 	}
@@ -341,7 +341,7 @@ func TestWorkspaceChanges_FailedFetchSettlesAndStopsRetrying(t *testing.T) {
 	}
 
 	svc := f.service(t)
-	if _, err := svc.WorkspaceChanges(context.Background(), "s1"); err != nil {
+	if _, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -350,7 +350,7 @@ func TestWorkspaceChanges_FailedFetchSettlesAndStopsRetrying(t *testing.T) {
 		t.Fatal("the background fetch never finished")
 	}
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestWorkspaceChanges_TargetBranchMissingOnRemote(t *testing.T) {
 		t.Fatalf("delete remote branch: %v\n%s", err, out)
 	}
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatalf("a branch missing on the remote must not error: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestWorkspaceChanges_ReportsRefreshingWithoutBlocking(t *testing.T) {
 	}
 	f := newStaleTargetFixture(t)
 
-	res, err := f.service(t).WorkspaceChanges(context.Background(), "s1")
+	res, err := f.service(t).WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +452,7 @@ func TestWorkspaceChanges_NoRemoteReportsNoFreshness(t *testing.T) {
 	dir := changesTestRepo(t) // a plain local repo, no remotes
 	svc := changesService(t, dir, []domain.PullRequest{{URL: "pr1", TargetBranch: "main"}})
 
-	res, err := svc.WorkspaceChanges(context.Background(), "s1")
+	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestTargetFetch_DeduplicatesPerRepo(t *testing.T) {
 
 	svc := f.service(t)
 	for range 5 {
-		if _, err := svc.WorkspaceChanges(context.Background(), "s1"); err != nil {
+		if _, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{}); err != nil {
 			t.Fatal(err)
 		}
 	}

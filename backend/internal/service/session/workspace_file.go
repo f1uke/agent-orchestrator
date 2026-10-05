@@ -548,7 +548,7 @@ func (s *Service) submoduleRange(
 	if branch == "" {
 		return "", to
 	}
-	ref, ok := resolveBranchRef(ctx, workspace, branch)
+	ref, ok := resolveBranchRef(ctx, workspace, s.locateTarget(ctx, rec, workspace, branch))
 	if !ok {
 		return "", to
 	}

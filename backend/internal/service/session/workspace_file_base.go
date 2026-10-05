@@ -97,7 +97,7 @@ func (s *Service) WorkspaceFileBase(
 
 	rev := "HEAD"
 	if base == DiffBaseTarget {
-		sc := s.resolveChangesScope(ctx, rec, workspace)
+		sc := s.resolveChangesScope(ctx, rec, workspace, false)
 		if sc.Reason != "" {
 			return unavailable(BaseUnavailableNoTarget)
 		}

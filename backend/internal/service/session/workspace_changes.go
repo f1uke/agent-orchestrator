@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
@@ -175,9 +176,15 @@ type WorkspaceChangesResult struct {
 	// name the branch it failed to resolve.
 	TargetBranch string
 	TargetSource string
-	MergeBase    string
-	Files        []ChangedFile
-	Truncated    bool
+	// TargetRef names the ref the list was actually measured against, as a
+	// human reads it: "origin/develop" for a remote-tracking ref, "develop" when
+	// only the local branch could be used. TargetBranch says what the session
+	// targets; this says where that answer came from, which is the difference
+	// between a current diff and one measured against somebody's stale checkout.
+	TargetRef string
+	MergeBase string
+	Files     []ChangedFile
+	Truncated bool
 	// TargetFetch reports how fresh the target branch's remote-tracking ref is
 	// (one of the TargetFetch* constants), and TargetFetchError carries the
 	// reason when it is TargetFetchFailed. Empty means there is no remote to be
@@ -185,6 +192,11 @@ type WorkspaceChangesResult struct {
 	// exactly like a correct one.
 	TargetFetch      string
 	TargetFetchError string
+	// TargetFetchedAt is when this daemon last refreshed TargetRef from its
+	// remote; zero when it has not yet. TargetFetchInFlight reports a fetch
+	// running right now, even while TargetFetch still says the last one failed.
+	TargetFetchedAt     time.Time
+	TargetFetchInFlight bool
 	// Branch is the session's OWN branch - what the board, the pull request and
 	// the human all mean by "this task's changes". Empty only when the session
 	// records no branch AND the worktree is not standing on one.
@@ -239,9 +251,8 @@ type changesScope struct {
 	// Reason is non-empty when nothing can be diffed; the caller returns it as an
 	// Available=false payload rather than an error.
 	Reason string
-	// TargetFetch/TargetFetchError carry the freshness of the target's
-	// remote-tracking ref.
-	TargetFetch, TargetFetchError string
+	// Fresh carries the freshness of the target's remote-tracking ref.
+	Fresh targetFreshness
 }
 
 // resolveChangesScope decides what a session's changes are measured from, and
@@ -250,8 +261,11 @@ type changesScope struct {
 // It is shared by the file LIST and the per-file diff on purpose: a row that the
 // list offers must open on the same comparison the list counted, or a file listed
 // as +38 opens on "no diff to show".
+//
+// forceFetch starts a refresh of the target even inside the throttle window;
+// only the panel's explicit refresh asks for it.
 func (s *Service) resolveChangesScope(
-	ctx context.Context, rec domain.SessionRecord, workspace string,
+	ctx context.Context, rec domain.SessionRecord, workspace string, forceFetch bool,
 ) changesScope {
 	sc := changesScope{}
 	sc.Target, sc.TargetSource = s.resolveTargetBranch(ctx, rec, workspace)
@@ -264,9 +278,10 @@ func (s *Service) resolveChangesScope(
 	// the diff below is computed from whatever refs exist right now. A branch
 	// that moved on the forge lands on the next poll rather than stalling this
 	// render behind the network.
-	sc.TargetFetch, sc.TargetFetchError = s.refreshTarget(ctx, workspace, sc.Target)
+	loc := s.locateTarget(ctx, rec, workspace, sc.Target)
+	sc.Fresh = s.refreshTarget(ctx, workspace, loc, forceFetch)
 
-	ref, ok := resolveBranchRef(ctx, workspace, sc.Target)
+	ref, ok := resolveBranchRef(ctx, workspace, loc)
 	if !ok {
 		// The branch is named but does not exist in this worktree (never fetched,
 		// or renamed upstream). Naming it beats a bare "nothing to compare".
@@ -347,6 +362,14 @@ func resolveLocalBranchRef(ctx context.Context, workspace, branch string) (strin
 	return ref, true
 }
 
+// WorkspaceChangesQuery tunes one read of the Changes list.
+type WorkspaceChangesQuery struct {
+	// Refresh refetches the target branch now instead of waiting out the
+	// throttle - the panel's refresh button. The read still answers from the
+	// refs on disk; the fetched result lands on a later read.
+	Refresh bool
+}
+
 // WorkspaceChanges lists the files differing between the session's BRANCH and
 // its target branch, folding in uncommitted working-tree work while the worktree
 // is standing on that branch (see resolveChangesScope for what happens when it
@@ -356,7 +379,9 @@ func resolveLocalBranchRef(ctx context.Context, workspace, branch string) (strin
 // branch) comes back Available=false with a Reason rather than an error, so the
 // rail renders a specific empty state. Only an unknown session is an error —
 // the same contract DiffContext follows.
-func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (WorkspaceChangesResult, error) {
+func (s *Service) WorkspaceChanges(
+	ctx context.Context, id domain.SessionID, q WorkspaceChangesQuery,
+) (WorkspaceChangesResult, error) {
 	rec, ok, err := s.store.GetSession(ctx, id)
 	if err != nil {
 		return WorkspaceChangesResult{}, fmt.Errorf("get %s: %w", id, err)
@@ -375,11 +400,13 @@ func (s *Service) WorkspaceChanges(ctx context.Context, id domain.SessionID) (Wo
 		return WorkspaceChangesResult{Reason: ChangesNotARepo}, nil //nolint:nilerr // intentional: degrade, don't error
 	}
 
-	sc := s.resolveChangesScope(ctx, rec, workspace)
+	sc := s.resolveChangesScope(ctx, rec, workspace, q.Refresh)
 	res := WorkspaceChangesResult{
 		TargetBranch: sc.Target, TargetSource: sc.TargetSource, MergeBase: sc.MergeBase,
-		TargetFetch: sc.TargetFetch, TargetFetchError: sc.TargetFetchError,
-		Branch: sc.Branch, BranchMissing: sc.BranchMissing, DiffSubject: sc.Subject,
+		TargetRef:   displayRef(sc.TargetRef),
+		TargetFetch: sc.Fresh.Status, TargetFetchError: sc.Fresh.Error, TargetFetchedAt: sc.Fresh.FetchedAt,
+		TargetFetchInFlight: sc.Fresh.InFlight,
+		Branch:              sc.Branch, BranchMissing: sc.BranchMissing, DiffSubject: sc.Subject,
 		IncludesWorktree: sc.IncludesWorktree, HeadState: sc.HeadState, HeadLabel: sc.HeadLabel,
 	}
 	if sc.Reason != "" {
@@ -504,28 +531,41 @@ func (s *Service) resolveTargetBranch(ctx context.Context, rec domain.SessionRec
 	return "", ""
 }
 
-// resolveBranchRef finds a ref that actually exists for the named branch,
-// preferring the REMOTE-TRACKING ref over the local branch.
+// resolveBranchRef finds a ref that actually exists for the target, preferring
+// the REMOTE-TRACKING ref over the local branch.
 //
 // The order is the whole correctness of this view. `refs/heads/<branch>` in a
 // project repo is a human's personal checkout of the integration branch, which
 // only advances when they run `git pull`, while AO cuts every session worktree
-// from `origin/<branch>` (see gitworktree's baseRefCandidates). Measuring
+// from the remote's copy (see gitworktree's baseRefCandidates). Measuring
 // against the local ref therefore bills every commit that landed in between to
-// this session — other people's already-merged work, shown as though the worker
-// wrote it. gitworktree's syncBaseRefCandidates already resolves the base this
-// way, for this reason; this path simply did not follow it.
+// this session - other people's already-merged work, shown as though the worker
+// wrote it.
 //
 // The local branch remains the fallback so a repository with no remote (or a
 // branch that has never been fetched) still diffs. The bare name comes last so
-// a qualified target like "upstream/main" still resolves.
-func resolveBranchRef(ctx context.Context, workspace, branch string) (string, bool) {
-	for _, cand := range []string{"refs/remotes/origin/" + branch, "refs/heads/" + branch, branch} {
+// a qualified target nobody could attribute to a remote still resolves.
+func resolveBranchRef(ctx context.Context, workspace string, loc targetLocation) (string, bool) {
+	var cands []string
+	if loc.Remote != "" {
+		cands = append(cands, remoteTrackingRef(loc))
+	}
+	cands = append(cands, "refs/heads/"+loc.Branch, loc.Branch)
+	for _, cand := range cands {
 		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", cand+"^{commit}"); err == nil {
 			return cand, true
 		}
 	}
 	return "", false
+}
+
+// displayRef names a resolved ref the way a person writes it: "origin/develop"
+// for a remote-tracking ref, "develop" for a local branch.
+func displayRef(ref string) string {
+	if r, ok := strings.CutPrefix(ref, "refs/remotes/"); ok {
+		return r
+	}
+	return strings.TrimPrefix(ref, "refs/heads/")
 }
 
 // parseNameStatusZ parses `git diff --name-status -M -z` output.

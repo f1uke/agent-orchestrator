@@ -1987,7 +1987,7 @@ func sessionOperations() []operation {
 		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/workspace/changes", id: "workspaceChanges", tag: "sessions",
 			summary:    "List files differing between the session branch and its target branch",
-			pathParams: []any{controllers.SessionIDParam{}},
+			pathParams: []any{controllers.SessionIDParam{}, controllers.WorkspaceChangesParams{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.WorkspaceChangesResponse{}},
 				{http.StatusNotFound, envelope.APIError{}},

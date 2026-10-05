@@ -1285,7 +1285,17 @@ body.is-resizing-x [data-slot="sidebar-container"] {
 	display: inline-flex;
 	flex: none;
 	align-items: center;
+	gap: 3px;
 	color: var(--amber);
+	white-space: nowrap;
+}
+
+/* "fetched 2m ago": when the compared ref was last refreshed. Passive, like the
+   separators around it - it is context for the comparison, not a status. */
+.files-panel__fetched {
+	flex: none;
+	color: var(--fg-passive);
+	white-space: nowrap;
 }
 
 .files-panel__stale-tip {
