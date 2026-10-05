@@ -34,6 +34,8 @@ go vet ./...
 go run ./cmd/ao start
 ```
 
+The daemon logs to stderr and to a rotating file, `<dataDir>/logs/daemon.log` (`~/.ao/data/logs/` by default, `.1`-`.5` older; `backend/internal/daemonlog`). An app-owned daemon's stderr goes only to the Electron main process, so the file is where a 500's cause is found afterwards: grep the `requestId` from the error envelope.
+
 Frontend-specific checks:
 
 ```bash

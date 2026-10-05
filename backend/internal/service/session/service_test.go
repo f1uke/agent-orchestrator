@@ -1033,6 +1033,22 @@ func TestToAPIError_NotDelivered(t *testing.T) {
 	}
 }
 
+// A runtime that cannot start the agent's terminal is still a daemon-side 500,
+// but it must say so and why: "Internal server error" is all a wedged
+// orchestrator restart used to show, in the app and in `ao session restore`.
+func TestToAPIError_AgentLaunchFailedCarriesTheRuntimesReason(t *testing.T) {
+	err := fmt.Errorf("restore mer-1: %w: %w", sessionmanager.ErrAgentLaunchFailed,
+		errors.New("tmux runtime: create session mer-orchestrator: can't find window: mer-orchestrator"))
+	mapped := toAPIError(err)
+	var e *apierr.Error
+	if !errors.As(mapped, &e) || e.Kind != apierr.KindInternal || e.Code != "AGENT_LAUNCH_FAILED" {
+		t.Fatalf("mapped = %v, want Internal AGENT_LAUNCH_FAILED", mapped)
+	}
+	if !strings.Contains(e.Message, "can't find window") || !strings.Contains(e.Message, "mer-1") {
+		t.Fatalf("message = %q, want the session and the runtime's own reason in it", e.Message)
+	}
+}
+
 // TestToAPIError_NotResumable asserts that ErrNotResumable (promptless worker
 // with no adapter resume handle) maps to a Conflict with code SESSION_NOT_RESUMABLE.
 func TestToAPIError_NotResumable(t *testing.T) {

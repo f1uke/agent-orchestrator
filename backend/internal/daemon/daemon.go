@@ -6,6 +6,8 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"io"
+	stdlog "log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,6 +22,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
+	"github.com/aoagents/agent-orchestrator/backend/internal/daemonlog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
@@ -66,7 +69,8 @@ func Run() error {
 		return err
 	}
 
-	log := newLogger()
+	log, closeLog := newLogger(cfg.DataDir)
+	defer closeLog()
 
 	// Before anything is spawned: a daemon started from Finder has no locale, and
 	// every child - git, simctl, the tmux server and the panes behind it -
@@ -761,7 +765,25 @@ func Run() error {
 }
 
 // newLogger returns the daemon's slog logger. It writes to stderr so supervisors
-// can capture it separately from any structured stdout protocol added later.
-func newLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+// can capture it separately from any structured stdout protocol added later,
+// and to a rotating file under the data dir (<dataDir>/logs/daemon.log), because
+// an app-owned daemon's stderr lives only in the Electron main process and is
+// lost with it - leaving a request id from an error envelope with nothing to be
+// looked up in. The stdlib logger some adapters still use goes to the same
+// place. A file that cannot be opened costs the file, never the daemon.
+func newLogger(dataDir string) (*slog.Logger, func()) {
+	out := io.Writer(os.Stderr)
+	var file *daemonlog.RotatingFile
+	var openErr error
+	if file, openErr = daemonlog.Open(dataDir); openErr == nil {
+		out = daemonlog.Tee(os.Stderr, file)
+	}
+	stdlog.SetOutput(out)
+	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	if openErr != nil {
+		log.Warn("daemon log file unavailable; logging to stderr only", "err", openErr)
+		return log, func() {}
+	}
+	log.Info("daemon log file", "path", file.Path())
+	return log, func() { _ = file.Close() }
 }

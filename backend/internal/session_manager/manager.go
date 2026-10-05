@@ -54,6 +54,11 @@ var (
 	ErrNotRestorable    = errors.New("session: not restorable (not terminal)")
 	ErrTerminated       = errors.New("session: terminated")
 	ErrIncompleteHandle = errors.New("session: incomplete teardown handle")
+	// ErrAgentLaunchFailed means the runtime could not start the agent's
+	// terminal for a spawn, restore or restart. It wraps the runtime's own error,
+	// which the API passes on: "Internal server error" is what turned a wedged
+	// orchestrator restart into something nobody could diagnose from the app.
+	ErrAgentLaunchFailed = errors.New("session: agent terminal could not be started")
 	// ErrProjectNotResolvable means the spawn's project has no usable repo
 	// (unregistered, archived, or missing a path). The API maps it to a 400.
 	ErrProjectNotResolvable = errors.New("session: project repo not resolvable")
@@ -736,7 +741,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		disposeSeed()
-		return domain.SessionRecord{}, fmt.Errorf("spawn %s: runtime: %w", id, err)
+		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w: %w", id, ErrAgentLaunchFailed, err)
 	}
 
 	metadata := domain.SessionMetadata{Branch: ws.Branch, WorkspacePath: ws.Path, RuntimeHandleID: handle.ID, Prompt: prompt}
@@ -1832,7 +1837,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		ExitStatusFile: m.exitStatusFile(),
 	})
 	if err != nil {
-		return domain.SessionRecord{}, fmt.Errorf("restore %s: runtime: %w", rec.ID, err)
+		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w: %w", rec.ID, ErrAgentLaunchFailed, err)
 	}
 	metadata := domain.SessionMetadata{Branch: ws.Branch, WorkspacePath: ws.Path, RuntimeHandleID: handle.ID, AgentSessionID: rec.Metadata.AgentSessionID, Prompt: rec.Metadata.Prompt}
 	if err := m.lcm.MarkSpawned(ctx, rec.ID, metadata, by); err != nil {
