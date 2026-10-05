@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 )
@@ -131,6 +132,79 @@ func TestSimRun_BuildsInstallsAndLaunches(t *testing.T) {
 	}
 	if !strings.Contains(out, "com.example.Nter") {
 		t.Fatalf("a run must say what it launched:\n%s", out)
+	}
+}
+
+// A Run must leave a build log in DerivedData, because that log is where the
+// in-app Swift editor reads compile settings from - and plain xcodebuild leaves
+// one only when asked for a result bundle. The bundle itself is not kept: it
+// goes under the AO data dir, at a path that does not exist yet (xcodebuild
+// refuses one that does), and is gone once the build is over.
+func TestSimRun_BuildWritesAResultBundleAndDropsItAfterwards(t *testing.T) {
+	deps, _, _, builds := runDeps(t, `"Nter"`)
+	var bundle string
+	var existedAtBuild bool
+	inner := deps.StartStream
+	deps.StartStream = func(ctx context.Context, name string, args ...string) (ProcessStream, error) {
+		for i, arg := range args {
+			if arg == "-resultBundlePath" && i+1 < len(args) {
+				bundle = args[i+1]
+			}
+		}
+		_, statErr := os.Stat(bundle)
+		existedAtBuild = statErr == nil
+		if bundle != "" {
+			// What xcodebuild leaves behind, so the cleanup has something to remove.
+			if err := os.MkdirAll(bundle, 0o750); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return inner(ctx, name, args...)
+	}
+
+	if _, errOut, err := executeCLI(t, deps, "sim", "run"); err != nil {
+		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
+	}
+	if len(*builds) != 1 || bundle == "" {
+		t.Fatalf("the build asked for no result bundle, so xcodebuild may leave no log: %v", *builds)
+	}
+	if existedAtBuild {
+		t.Fatalf("xcodebuild refuses a result bundle path that exists: %s", bundle)
+	}
+	dataDir := os.Getenv("AO_DATA_DIR")
+	if rel, err := filepath.Rel(dataDir, bundle); err != nil || strings.HasPrefix(rel, "..") {
+		t.Fatalf("the result bundle must live under the AO data dir %s: %s", dataDir, bundle)
+	}
+	if _, err := os.Stat(filepath.Dir(bundle)); !os.IsNotExist(err) {
+		t.Fatalf("the result bundle outlived its build: %s (%v)", bundle, err)
+	}
+}
+
+// A Run stopped mid-build never reaches its cleanup. The next run sweeps what
+// such runs left, but never a bundle young enough to belong to a build that is
+// still going.
+func TestSweepResultBundles_RemovesOnlyStaleLeftovers(t *testing.T) {
+	parent := t.TempDir()
+	now := time.Now()
+	for name, age := range map[string]time.Duration{
+		"build-stale":   resultBundleMaxAge + time.Hour,
+		"build-running": time.Minute,
+		"not-ours":      resultBundleMaxAge + time.Hour,
+	} {
+		dir := filepath.Join(parent, name)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(dir, now.Add(-age), now.Add(-age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sweepResultBundles(parent, now)
+	for name, want := range map[string]bool{"build-stale": false, "build-running": true, "not-ours": true} {
+		_, err := os.Stat(filepath.Join(parent, name))
+		if got := err == nil; got != want {
+			t.Fatalf("%s present=%v, want %v", name, got, want)
+		}
 	}
 }
 

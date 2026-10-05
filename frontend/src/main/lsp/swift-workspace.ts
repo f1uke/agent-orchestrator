@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { SetupNeed } from "./language-servers";
+import type { BuildSettings, SetupNeed } from "./language-servers";
+import { createCompileDatabase, type ParseLog, xcodeBuildServerParser } from "./swift-compile-database";
 
 /**
  * Everything Xcode-shaped about running SourceKit-LSP, kept out of the process
@@ -27,6 +28,8 @@ export type SwiftWorkspace =
 			detail: string;
 			/** Set when there are compile args but no index: ⌘click works, symbols will not. */
 			warning?: string;
+			/** The compile database the BSP reads, which the registry keeps current. */
+			settings: BuildSettings;
 	  }
 	| { kind: "swiftpm"; lspRoot: string; documentRoot: string; detail: string; warning: string }
 	| { kind: "unconfigured"; need: SetupNeed; reason: string };
@@ -39,6 +42,8 @@ export type SwiftWorkspaceOptions = {
 	env: NodeJS.ProcessEnv;
 	/** Overridable so tests can point at a fake tree. */
 	derivedDataDir?: string;
+	/** Overridable so tests need no Python and no real build log. */
+	parseLog?: ParseLog;
 };
 
 /** The symlink inside the shadow root that points at the user's checkout. */
@@ -318,14 +323,18 @@ export function writeShadowRoot(input: {
 				// See XBS_HOME_SUBDIR: the only way to keep the BSP's 200 MB index
 				// database out of ~/Library/Caches.
 				argv: ["/usr/bin/env", `HOME=${xbsHome}`, buildServerCommand],
-				// 🗝 `xcode` rather than `manual`: the BSP finds and parses the newest
-				// .xcactivitylog itself, derives indexStorePath from build_root, and
-				// RE-PARSES when the user next builds in Xcode. `manual` would freeze
-				// the compile args at whatever the build was when the editor opened.
-				// It also means this shadow root holds no `.compile` and no filelists -
-				// the 10 MB of rewritten paths the spike prescribed turned out to be
-				// unnecessary (sourcekit-lsp resolves the link before asking the BSP).
-				kind: "xcode",
+				// 🗝 `manual`, reading the `.compile` AO accumulates in this shadow
+				// root (see swift-compile-database.ts). `xcode` mode parses only the
+				// NEWEST registered log, which holds only what that build compiled:
+				// after a Run that compiled nothing it handed every file in the app
+				// the BSP's macOS guess, and "No such module 'UIKit'" with it. The BSP
+				// still reloads `.compile` when its mtime moves, so builds keep
+				// arriving without a restart. No filelists and no rewritten paths are
+				// needed either (sourcekit-lsp resolves the link before asking).
+				kind: "manual",
+				// What `xcode` mode derived from build_root, spelled out - the same
+				// path keeps the same index database under xbs-home.
+				indexStorePath: path.join(buildRoot, "Index.noindex", "DataStore"),
 				workspace: containerPath,
 				build_root: buildRoot,
 			},
@@ -391,13 +400,14 @@ export function resolveSwiftWorkspace(options: SwiftWorkspaceOptions): SwiftWork
 
 	writeSourcekitConfig(dataDir);
 	const shadowRoot = shadowRootFor(dataDir, workspaceRoot);
+	const xbsHome = path.join(dataDir, SWIFT_SUBDIR, XBS_HOME_SUBDIR);
 	const documentRoot = writeShadowRoot({
 		shadowRoot,
 		workspaceRoot,
 		containerPath: container,
 		buildRoot,
 		buildServerCommand,
-		xbsHome: path.join(dataDir, SWIFT_SUBDIR, XBS_HOME_SUBDIR),
+		xbsHome,
 	});
 
 	// A build with no index store is a REAL and reachable half-state: ⌘click needs
@@ -410,6 +420,11 @@ export function resolveSwiftWorkspace(options: SwiftWorkspaceOptions): SwiftWork
 		lspRoot: shadowRoot,
 		documentRoot,
 		detail: `Xcode build settings from ${path.basename(buildRoot)}`,
+		settings: createCompileDatabase({
+			shadowRoot,
+			buildRoot,
+			parseLog: options.parseLog ?? xcodeBuildServerParser({ buildServerCommand, xbsHome, env }),
+		}),
 		warning: hasIndex
 			? undefined
 			: "This Xcode build produced no index, so symbol search and find all references will find nothing until the project is built again.",

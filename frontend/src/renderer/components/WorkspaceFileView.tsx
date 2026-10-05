@@ -348,6 +348,13 @@ export function WorkspaceFileView({
 		const languageId = lspLanguageForPath(path) ?? "";
 		const language = languageDisplayName(languageId);
 		const server = languageServerName(languageId);
+		// 🗝 Before the server's own state: the server is fine, THIS file is not.
+		// No real build has compiled it, so its arguments - and every error they
+		// produce - are xcode-build-server's macOS guess. Same words and colour as
+		// the workspace-wide wait, because the fix is the same: a build.
+		if (serverState?.documentWaiting && (serverState.state === "ready" || serverState.state === "indexing")) {
+			return { text: "waiting for a build", tone: P.amber, title: serverState.documentWaiting };
+		}
 		switch (serverState?.state) {
 			case "starting":
 			case "initializing":

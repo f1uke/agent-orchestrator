@@ -142,7 +142,7 @@ func TestSchemes_EmptyIsItsOwnAnswer(t *testing.T) {
 // consults no lease, so a build aimed at one simulator is the call that can
 // walk over a session driving it.
 func TestBuildArgs_NamesNoDevice(t *testing.T) {
-	args := BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterDev", "Debug")
+	args := BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterDev", "Debug", "")
 
 	line := strings.Join(args, " ")
 	if !strings.Contains(line, "-destination "+GenericSimulatorDestination) {
@@ -432,13 +432,30 @@ func TestConfigurations_EmptyIsItsOwnAnswer(t *testing.T) {
 // fails against an arm64-only xcframework, which is a doomed build dressed up as
 // a compiler error.
 func TestBuildArgs_BuildsOnlyThisMachinesArchitecture(t *testing.T) {
-	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev"), " ")
+	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", ""), " ")
 
 	// ARCHS, not ONLY_ACTIVE_ARCH: a target that sets ONLY_ACTIVE_ARCH=NO of its
 	// own - which CocoaPods writes into the Pods project - beats the flag, and
 	// the x86_64 slice comes back.
 	if !strings.Contains(line, "ARCHS=$(NATIVE_ARCH_ACTUAL)") {
 		t.Fatalf("the build must not ask for architectures this machine cannot run: %q", line)
+	}
+}
+
+// The result bundle is asked for so that xcodebuild leaves a registered build
+// log, which is where the in-app Swift editor reads compile settings from.
+// Without one, measured on a two-module fixture, the builds that compiled
+// anything left no log at all. No path, no flag: `ao sim run` always passes one.
+func TestBuildArgs_AsksForAResultBundleSoTheBuildIsLogged(t *testing.T) {
+	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", "/d/build.xcresult"), " ")
+	if !strings.Contains(line, "-resultBundlePath /d/build.xcresult") {
+		t.Fatalf("the build must write a result bundle, or xcodebuild may leave no log: %q", line)
+	}
+	if !strings.HasSuffix(line, " build") {
+		t.Fatalf("the action must stay last: %q", line)
+	}
+	if bare := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", ""), " "); strings.Contains(bare, "-resultBundlePath") {
+		t.Fatalf("no path must mean no flag: %q", bare)
 	}
 }
 
@@ -482,7 +499,7 @@ func TestPodInstallPending(t *testing.T) {
 // no certificate - and a build setting that turns signing off is the one thing
 // that must never come back. See the comment on BuildArgs for the measurements.
 func TestBuildArgs_NeverDisablesCodeSigning(t *testing.T) {
-	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev"), " ")
+	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", ""), " ")
 
 	for _, forbidden := range []string{
 		"CODE_SIGNING_ALLOWED=NO",

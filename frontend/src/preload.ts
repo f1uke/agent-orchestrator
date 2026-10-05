@@ -12,7 +12,14 @@ import type { EditorSettings } from "./main/editor-settings";
 import type { FormatRequest, FormatResult } from "./main/format/formatters";
 import type { IndentStyle } from "./main/format/project-config";
 import type { JsonRpcMessage } from "./main/lsp/lsp-framing";
-import type { LspAttachment, LspHealth, LspResultOutcome, LspStateEvent } from "./main/lsp/lsp-registry";
+import type { DocumentStatus } from "./main/lsp/language-servers";
+import type {
+	LspAttachment,
+	LspHealth,
+	LspResultOutcome,
+	LspSettingsEvent,
+	LspStateEvent,
+} from "./main/lsp/lsp-registry";
 import type { InfillRequest, InfillResult } from "./main/inline-completion/infill";
 import type { NextEditRequest, NextEditResult } from "./main/inline-completion/next-edit";
 import type { InlineCompletionStatus } from "./main/inline-completion/service";
@@ -119,6 +126,8 @@ const api = {
 		noteResult: (handleId: string, outcome: LspResultOutcome) =>
 			ipcRenderer.send("lsp:noteResult", { handleId, outcome }),
 		health: () => ipcRenderer.invoke("lsp:health") as Promise<LspHealth[]>,
+		documentStatus: (handleId: string, path: string) =>
+			ipcRenderer.invoke("lsp:documentStatus", { handleId, path }) as Promise<DocumentStatus>,
 		onMessage: (listener: (event: { handleId: string; message: JsonRpcMessage }) => void) => {
 			const wrapped = (_event: Electron.IpcRendererEvent, payload: { handleId: string; message: JsonRpcMessage }) =>
 				listener(payload);
@@ -132,6 +141,13 @@ const api = {
 			ipcRenderer.on("lsp:state", wrapped);
 			return () => {
 				ipcRenderer.off("lsp:state", wrapped);
+			};
+		},
+		onSettings: (listener: (event: LspSettingsEvent) => void) => {
+			const wrapped = (_event: Electron.IpcRendererEvent, payload: LspSettingsEvent) => listener(payload);
+			ipcRenderer.on("lsp:settings", wrapped);
+			return () => {
+				ipcRenderer.off("lsp:settings", wrapped);
 			};
 		},
 	},

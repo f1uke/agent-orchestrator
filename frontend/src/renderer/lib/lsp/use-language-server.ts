@@ -27,6 +27,14 @@ export type LspState = "starting" | "initializing" | "indexing" | "ready" | "fai
  */
 export type SetupNeed = "build" | "tool" | "project";
 
+/**
+ * Whether one document's compile settings come from a real build. Mirrors
+ * `DocumentStatus` in main, which explains why the SERVER cannot be asked: for a
+ * file no build has compiled, xcode-build-server invents macOS arguments and
+ * sourcekit-lsp calls them normal, so its errors look exactly like real ones.
+ */
+export type DocumentStatus = { built: true } | { built: false; reason: string };
+
 export type LanguageServerHandle = {
 	client: LspClient | null;
 	state: LspState | "unavailable";
@@ -61,6 +69,9 @@ type Bridge = {
 	detach(handleId: string): void;
 	send(handleId: string, message: Record<string, unknown>): void;
 	noteResult(handleId: string, outcome: LspResultOutcome): void;
+	/** Absent from an older bridge, which is the same as every document being built. */
+	documentStatus?(handleId: string, path: string): Promise<DocumentStatus>;
+	onSettings?(cb: (e: { handleId: string; key: string }) => void): () => void;
 	onMessage(cb: (e: { handleId: string; message: Record<string, unknown> }) => void): () => void;
 	onState(
 		cb: (e: { handleId: string; key: string; state: LspState; detail?: string; need?: SetupNeed }) => void,
@@ -192,4 +203,48 @@ export function useLanguageServer(workspaceRoot: string | undefined, languageId:
 	}, [workspaceRoot, languageId, generation]);
 
 	return handle;
+}
+
+/**
+ * Whether `absolutePath`'s compile settings come from a real build, for as long
+ * as `client` is attached - asked again whenever main says the settings moved,
+ * which is what clears "waiting for a build" the moment a build lands.
+ *
+ * Null until the answer for THIS client and path is in. Callers treat that as
+ * "not known yet": diagnostics wait for it, the status pill does not claim either.
+ */
+export function useDocumentStatus(client: LspClient | null, absolutePath: string | undefined): DocumentStatus | null {
+	const [answer, setAnswer] = useState<{ handleId: string; path: string; status: DocumentStatus } | null>(null);
+	const handleId = client?.handleId ?? null;
+
+	useEffect(() => {
+		const api = bridge();
+		if (!handleId || !absolutePath || !api) return;
+		let cancelled = false;
+		const ask = () => {
+			const asking = api.documentStatus
+				? api.documentStatus(handleId, absolutePath)
+				: Promise.resolve<DocumentStatus>({ built: true });
+			void asking
+				.then((status) => {
+					if (!cancelled) setAnswer({ handleId, path: absolutePath, status });
+				})
+				.catch(() => {
+					// No answer is no claim: a channel that failed must not leave a file's
+					// diagnostics withheld for ever.
+					if (!cancelled) setAnswer({ handleId, path: absolutePath, status: { built: true } });
+				});
+		};
+		ask();
+		const unsubscribe = api.onSettings?.((event) => {
+			if (event.handleId === handleId) ask();
+		});
+		return () => {
+			cancelled = true;
+			unsubscribe?.();
+		};
+	}, [handleId, absolutePath]);
+
+	// Keyed, so a re-attached client or another file never inherits the last answer.
+	return answer && answer.handleId === handleId && answer.path === absolutePath ? answer.status : null;
 }

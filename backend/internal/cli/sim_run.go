@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcodeproj"
 )
@@ -203,8 +204,14 @@ func (c *commandContext) runSimApp(
 	}
 
 	noteProgress(progress, "Building %s (%s) from %s…\n", scheme, configuration, project.Name)
+	resultBundle, discardResultBundle, err := freshResultBundlePath()
+	if err != nil {
+		return simRunResult{}, err
+	}
 	watch := &signingWatch{out: progress}
-	if err := c.streamBuild(ctx, watch, xcodeproj.Binary, xcodeproj.BuildArgs(project, scheme, configuration)...); err != nil {
+	err = c.streamBuild(ctx, watch, xcodeproj.Binary, xcodeproj.BuildArgs(project, scheme, configuration, resultBundle)...)
+	discardResultBundle()
+	if err != nil {
 		return simRunResult{}, explainSimBuildFailure(err, scheme, device, watch.saw)
 	}
 	app, err := xcodeproj.ProductPath(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
@@ -442,6 +449,52 @@ func bootedSimDevices(devices []simDevice) []simDevice {
 // It needs no working directory: every xcodebuild invocation here names the
 // project by absolute path, so the answer does not depend on where the command
 // was run from.
+// freshResultBundlePath is a path xcodebuild may write a result bundle to, and
+// the cleanup that removes it once the build is over.
+//
+// The bundle is a means, not an artifact: passing one is what makes xcodebuild
+// leave a registered build log in DerivedData (see xcodeproj.BuildArgs), and the
+// log is what the in-app editor reads compile settings from. Nothing reads the
+// bundle, so it does not outlive the build. It lives under the AO data dir like
+// everything else this app writes, in a directory of its own because
+// xcodebuild refuses a path that already exists - which two runs at once would
+// otherwise collide on. A run stopped mid-build never reaches its cleanup, so
+// leftovers older than resultBundleMaxAge are swept by the next run.
+func freshResultBundlePath() (string, func(), error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", nil, err
+	}
+	parent := filepath.Join(cfg.DataDir, "iosrun-results")
+	if err := os.MkdirAll(parent, 0o750); err != nil {
+		return "", nil, fmt.Errorf("could not prepare a place for the build's result bundle: %w", err)
+	}
+	sweepResultBundles(parent, time.Now())
+	dir, err := os.MkdirTemp(parent, "build-")
+	if err != nil {
+		return "", nil, fmt.Errorf("could not prepare a place for the build's result bundle: %w", err)
+	}
+	return filepath.Join(dir, "build.xcresult"), func() { _ = os.RemoveAll(dir) }, nil
+}
+
+// resultBundleMaxAge is longer than any build runs, so a sweep never takes a
+// bundle out from under a build that is still writing it.
+const resultBundleMaxAge = 24 * time.Hour
+
+func sweepResultBundles(parent string, now time.Time) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || !strings.HasPrefix(entry.Name(), "build-") || now.Sub(info.ModTime()) < resultBundleMaxAge {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(parent, entry.Name()))
+	}
+}
+
 func (c *commandContext) streamBuild(ctx context.Context, out io.Writer, name string, args ...string) error {
 	stream, err := c.deps.StartStream(ctx, name, args...)
 	if err != nil {
