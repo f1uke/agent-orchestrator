@@ -188,4 +188,4 @@ ao project set-config nter-android-app --mobile-scripts nter --mobile-platform a
 ao project set-config nter-ios-app --mobile-scripts ""     # turn it off
 ```
 
-The setting reaches the NEXT worker spawned (or restored) in that project: its prompt then teaches the script workflow in place of step-by-step `ao sim` driving, and its qa plays smoke cases with scripts. A project that does not set it is unchanged.
+The setting reaches the NEXT worker spawned (or restored) in that project: its prompt then teaches the script workflow in place of step-by-step `ao sim` driving, and its qa drives its checks with scripts. A project that does not set it is unchanged.

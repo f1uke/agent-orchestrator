@@ -12,21 +12,28 @@ import (
 	"testing"
 )
 
+// learnRequest is one call the CLI made, kept in order.
+type learnRequest struct {
+	path  string
+	query string
+	body  string
+}
+
 // learnServer answers each path with its canned response and status, and keeps
 // every decision body it got.
 func learnServer(t *testing.T, routes map[string]struct {
 	code int
 	body string
-}) (*httptest.Server, *[]smokeRequest) {
+}) (*httptest.Server, *[]learnRequest) {
 	t.Helper()
-	var seen []smokeRequest
+	var seen []learnRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/internal/") {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 		body, _ := io.ReadAll(r.Body)
-		seen = append(seen, smokeRequest{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, body: string(body)})
+		seen = append(seen, learnRequest{path: r.URL.Path, query: r.URL.RawQuery, body: string(body)})
 		route, ok := routes[r.URL.Path]
 		if !ok {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
