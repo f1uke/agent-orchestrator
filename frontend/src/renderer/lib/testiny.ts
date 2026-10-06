@@ -5,9 +5,27 @@ export type TestinyRun = components["schemas"]["TestinyRunView"];
 export type TestinyCase = components["schemas"]["TestinyCaseResult"];
 export type TestinyRunsResponse = components["schemas"]["TestinyRunsResponse"];
 export type TestinyFetchErrorKind = components["schemas"]["TestinyFetchError"]["kind"];
+type TestinyRecord = components["schemas"]["TestinyResultRecord"];
 
-/** The statuses Testiny records, in the order the summary chips show them. */
-const SUMMARY_ORDER = ["PASSED", "FAILED", "BLOCKED", "SKIPPED", "NOTRUN"];
+/** The statuses Testiny records, in the order the summary chips and the status menu show them. */
+export const TESTINY_STATUSES = ["PASSED", "FAILED", "BLOCKED", "SKIPPED", "NOTRUN"] as const;
+export type TestinyStatus = (typeof TESTINY_STATUSES)[number];
+
+/** The longest comment Testiny takes on a result, as the daemon checks it. */
+export const TESTINY_COMMENT_MAX = 300;
+
+/**
+ * One result a person sets from the tab. Testiny's rule, which the daemon
+ * enforces too: a failed, blocked or skipped case says why; a passed or unplayed
+ * one takes no comment.
+ */
+export type TestinyResultWrite =
+	| { caseId: number; status: "PASSED" | "NOTRUN" }
+	| { caseId: number; status: "FAILED" | "BLOCKED" | "SKIPPED"; comment: string };
+
+export function needsComment(status: TestinyStatus): status is "FAILED" | "BLOCKED" | "SKIPPED" {
+	return status === "FAILED" || status === "BLOCKED" || status === "SKIPPED";
+}
 
 /**
  * How urgently a case that did not pass needs a look: a failure before a block
@@ -17,13 +35,60 @@ const SUMMARY_ORDER = ["PASSED", "FAILED", "BLOCKED", "SKIPPED", "NOTRUN"];
 const OPEN_RANK: Record<string, number> = { FAILED: 0, BLOCKED: 1, NOTRUN: 2, SKIPPED: 3 };
 const UNKNOWN_RANK = 2;
 
-export function orderCases(cases: TestinyCase[]): { open: TestinyCase[]; passed: TestinyCase[] } {
-	const open = cases
+/** Where each case sits on a card, by id: the open list, then the passed fold. */
+export type CaseOrder = { open: number[]; passed: number[] };
+
+/**
+ * Splits a run's cases into the open list and the passed fold. With `held`,
+ * every case it names stays where it was whatever its status is now, so a row
+ * the person just changed does not jump from under the pointer; a case it does
+ * not name is placed by the usual rule after them.
+ */
+export function orderCases(cases: TestinyCase[], held?: CaseOrder): { open: TestinyCase[]; passed: TestinyCase[] } {
+	const byId = new Map(cases.map((c) => [c.id, c]));
+	const pick = (ids: number[]) => ids.flatMap((id) => byId.get(id) ?? []);
+	const placed = new Set([...(held?.open ?? []), ...(held?.passed ?? [])]);
+	const rest = cases.filter((c) => !placed.has(c.id));
+	const open = rest
 		.filter((c) => c.status !== "PASSED")
 		.map((c, index) => ({ c, index, rank: OPEN_RANK[c.status] ?? UNKNOWN_RANK }))
 		.sort((a, b) => a.rank - b.rank || a.index - b.index)
 		.map(({ c }) => c);
-	return { open, passed: cases.filter((c) => c.status === "PASSED") };
+	return {
+		open: [...pick(held?.open ?? []), ...open],
+		passed: [...pick(held?.passed ?? []), ...rest.filter((c) => c.status === "PASSED")],
+	};
+}
+
+/**
+ * The run with one case replaced by `next`, its counts moved across when
+ * Testiny gave them (otherwise they are counted from the cases anyway).
+ */
+export function withCase(run: TestinyRun, next: TestinyCase): TestinyRun {
+	const prev = run.cases.find((c) => c.id === next.id);
+	if (!prev) return run;
+	let counts = run.counts;
+	if (counts && prev.status !== next.status) {
+		counts = {
+			...counts,
+			[prev.status]: (counts[prev.status] ?? 1) - 1,
+			[next.status]: (counts[next.status] ?? 0) + 1,
+		};
+		if (counts[prev.status] === 0) delete counts[prev.status];
+	}
+	return { ...run, counts, cases: run.cases.map((c) => (c.id === next.id ? next : c)) };
+}
+
+/** The run as it will read once the person's result is written: what the tab shows meanwhile. */
+export function withResult(run: TestinyRun, write: TestinyResultWrite, at: string): TestinyRun {
+	const prev = run.cases.find((c) => c.id === write.caseId);
+	if (!prev) return run;
+	const comment = "comment" in write ? write.comment : "";
+	return withCase(run, {
+		...prev,
+		status: write.status,
+		recorded: { status: write.status, comment, by: "", sha: "", at },
+	});
 }
 
 export function summaryCounts(run: TestinyRun): { status: string; count: number }[] {
@@ -32,9 +97,9 @@ export function summaryCounts(run: TestinyRun): { status: string; count: number 
 		for (const c of run.cases) counts[c.status] = (counts[c.status] ?? 0) + 1;
 	}
 	const extra = Object.keys(counts)
-		.filter((s) => !SUMMARY_ORDER.includes(s))
+		.filter((s) => !(TESTINY_STATUSES as readonly string[]).includes(s))
 		.sort();
-	return [...SUMMARY_ORDER, ...extra]
+	return [...TESTINY_STATUSES, ...extra]
 		.map((status) => ({ status, count: counts[status] ?? 0 }))
 		.filter((entry) => entry.count > 0);
 }
@@ -93,6 +158,25 @@ export function ageLabel(iso: string, now: number): string {
 export function linkedByLabel(linkedBy: string, sessions: Pick<WorkspaceSession, "id" | "crew">[]): string {
 	if (!linkedBy) return "you";
 	return sessions.find((s) => s.id === linkedBy)?.crew?.role ?? linkedBy;
+}
+
+/**
+ * Who set a case's result through AO, when, and on which commit:
+ * "set by qa · 5 min ago · on 4f2c9e1". Null when AO wrote none, or when
+ * Testiny's status no longer matches it (someone changed the case in Testiny
+ * since), so the line never vouches for a status AO did not set.
+ */
+export function provenanceLabel(
+	testCase: TestinyCase,
+	now: number,
+	sessions: Pick<WorkspaceSession, "id" | "crew">[],
+): string | null {
+	const r: TestinyRecord | undefined = testCase.recorded;
+	if (!r || r.status !== testCase.status) return null;
+	const who = r.byRole || linkedByLabel(r.by, sessions);
+	const parts = [`set by ${who}`, ageLabel(r.at, now)];
+	if (r.sha) parts.push(`on ${r.sha.slice(0, 7)}`);
+	return parts.join(" · ");
 }
 
 const QA_EVIDENCE_ROOT = "/Desktop/QA Evidence/";

@@ -1,10 +1,13 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowUpRight, ChevronRight, CircleDashed, RefreshCw, TriangleAlert } from "lucide-react";
 import {
 	useLinkTestinyRun,
+	useRecordTestinyResult,
 	useRefreshTestinyRuns,
 	useSessionTestinyRuns,
+	useTestinyRunsVersion,
 	useUnlinkTestinyRun,
+	type ResultWriteHold,
 } from "../hooks/useSessionTestinyRuns";
 import { useWorkspaceQuery } from "../hooks/useWorkspaceQuery";
 import { aoBridge } from "../lib/bridge";
@@ -14,20 +17,33 @@ import {
 	ageLabel,
 	evidenceLabel,
 	linkedByLabel,
+	needsComment,
 	orderCases,
+	provenanceLabel,
 	runNotice,
 	scriptCoverage,
 	sharedBlocker,
 	summaryCounts,
+	TESTINY_COMMENT_MAX,
+	TESTINY_STATUSES,
+	type CaseOrder,
 	type TestinyCase,
 	type TestinyFetchErrorKind,
 	type TestinyRun,
+	type TestinyStatus,
 } from "../lib/testiny";
 import { cn } from "../lib/utils";
 import type { WorkspaceSession } from "../types/workspace";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Input } from "./ui/input";
 
 const TONE: Record<TestinyCaseTone, string> = {
@@ -48,6 +64,7 @@ export function TestinyView({ session, project }: { session: WorkspaceSession; p
 	const taskId = taskKeyOf(session);
 	const query = useSessionTestinyRuns(taskId);
 	const refresh = useRefreshTestinyRuns(taskId);
+	const version = useTestinyRunsVersion(taskId);
 	const sessions = (useWorkspaceQuery().data ?? []).flatMap((w) => w.sessions);
 	const runs = query.data?.runs ?? [];
 	const banner = sharedBlocker(runs);
@@ -96,6 +113,8 @@ export function TestinyView({ session, project }: { session: WorkspaceSession; p
 						notice={runNotice(run, now, banner)}
 						linkedBy={`linked by ${linkedByLabel(run.link.linkedBy, sessions)} · ${ageLabel(run.link.createdAt, now)}`}
 						taskId={taskId}
+						version={version}
+						provenance={(c) => provenanceLabel(c, now, sessions)}
 					/>
 				))
 			)}
@@ -167,22 +186,35 @@ function EmptyState() {
 	);
 }
 
+/** What every case row of one card needs to show and set its result. */
+type RowContext = {
+	taskId: string;
+	runId: number;
+	hold: ResultWriteHold;
+	provenance: (testCase: TestinyCase) => string | null;
+};
+
 function RunCard({
 	run,
 	notice,
 	linkedBy,
 	taskId,
+	version,
+	provenance,
 }: {
 	run: TestinyRun;
 	notice: string | null;
 	linkedBy: string;
 	taskId: string;
+	version: number;
+	provenance: (testCase: TestinyCase) => string | null;
 }) {
 	const id = `TR-${run.link.runId}`;
 	const unlink = useUnlinkTestinyRun(taskId);
 	const counts = summaryCounts(run);
 	const coverage = scriptCoverage(run.cases);
-	const { open, passed } = orderCases(run.cases);
+	const { open, passed, hold } = useHeldOrder(run.cases, version);
+	const row: RowContext = { taskId, runId: run.link.runId, hold, provenance };
 
 	return (
 		<Card role="article" aria-label={`${id} ${run.title}`.trim()} className="gap-0 py-0 shadow-none">
@@ -240,8 +272,10 @@ function RunCard({
 
 			{run.cases.length > 0 ? (
 				<div className="flex flex-col gap-1 border-t border-border px-3 py-2">
-					{open.length > 0 ? <CaseList label="Cases" cases={open} /> : null}
-					{passed.length > 0 ? <PassedCases cases={passed} all={open.length === 0} /> : null}
+					{open.length > 0 ? <CaseList label="Cases" cases={open} row={row} /> : null}
+					{passed.length > 0 ? (
+						<PassedCases cases={passed} all={run.cases.every((c) => c.status === "PASSED")} row={row} />
+					) : null}
 				</div>
 			) : null}
 
@@ -339,8 +373,11 @@ function EvidencePath({ path }: { path: string }) {
 	);
 }
 
-function PassedCases({ cases, all }: { cases: TestinyCase[]; all: boolean }) {
+function PassedCases({ cases, all, row }: { cases: TestinyCase[]; all: boolean; row: RowContext }) {
 	const [expanded, setExpanded] = useState(false);
+	// Counted from the statuses, not the fold: a held order can keep a case here
+	// for a moment after it stopped passing.
+	const count = cases.filter((c) => c.status === "PASSED").length;
 	return (
 		<>
 			<button
@@ -350,30 +387,138 @@ function PassedCases({ cases, all }: { cases: TestinyCase[]; all: boolean }) {
 				onClick={() => setExpanded((v) => !v)}
 			>
 				<ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} aria-hidden="true" />
-				{all ? `All ${cases.length} passed` : `${cases.length} passed`}
+				{all ? `All ${count} passed` : `${count} passed`}
 			</button>
-			{expanded ? <CaseList label="Passed cases" cases={cases} /> : null}
+			{expanded ? <CaseList label="Passed cases" cases={cases} row={row} /> : null}
 		</>
 	);
 }
 
-function CaseList({ label, cases }: { label: string; cases: TestinyCase[] }) {
+function CaseList({ label, cases, row }: { label: string; cases: TestinyCase[]; row: RowContext }) {
 	return (
 		<ul aria-label={label} className="flex flex-col">
 			{cases.map((c) => (
-				<CaseRow key={c.id} testCase={c} />
+				<CaseRow key={c.id} testCase={c} row={row} />
 			))}
 		</ul>
 	);
 }
 
-function CaseRow({ testCase }: { testCase: TestinyCase }): ReactNode {
+/**
+ * The card's case order, held still from a person's first result until the
+ * runs are next read after their last write settles. Without it a case set to
+ * Passed would fold away, and a failed one jump to the top, from under the
+ * pointer that set it.
+ */
+function useHeldOrder(cases: TestinyCase[], version: number) {
+	const [held, setHeld] = useState<{ order: CaseOrder; writes: number; settledAt: number } | null>(null);
+	// Not `!==`: the tab can render once with the version from before the write.
+	const live = held && (held.writes > 0 || version <= held.settledAt) ? held : null;
+	const { open, passed } = orderCases(cases, live?.order);
+	const hold: ResultWriteHold = {
+		start: () =>
+			setHeld({
+				order: { open: open.map((c) => c.id), passed: passed.map((c) => c.id) },
+				writes: (live?.writes ?? 0) + 1,
+				settledAt: -1,
+			}),
+		end: (settledAt) => setHeld((h) => h && { ...h, writes: h.writes - 1, settledAt }),
+	};
+	return { open, passed, hold };
+}
+
+type CommentStatus = Extract<TestinyStatus, "FAILED" | "BLOCKED" | "SKIPPED">;
+
+/** The comment field for each status that needs one: its name, and a hint in the plain Thai the comment is written in. */
+const COMMENT_PROMPT: Record<CommentStatus, { label: string; placeholder: string }> = {
+	FAILED: { label: "What went wrong", placeholder: "บอกสั้น ๆ ว่าเกิดอะไรขึ้น (1-2 ประโยค)" },
+	BLOCKED: { label: "Why it is blocked", placeholder: "บอกสั้น ๆ ว่าทำไมทดสอบเคสนี้ไม่ได้ (1-2 ประโยค)" },
+	SKIPPED: { label: "Why it was skipped", placeholder: "บอกสั้น ๆ ว่าทำไมข้ามเคสนี้ (1-2 ประโยค)" },
+};
+
+function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }): ReactNode {
 	const glyph = testinyCaseGlyph(testCase.status);
+	const record = useRecordTestinyResult(row.taskId, row.runId, row.hold);
+	const [draft, setDraft] = useState<{ status: CommentStatus; text: string } | null>(null);
+	const trigger = useRef<HTMLButtonElement>(null);
+	const field = useRef<HTMLInputElement>(null);
+	const focusFieldOnClose = useRef(false);
+	const provenance = row.provenance(testCase);
+	// One write per case at a time, so Testiny cannot land them out of order.
+	// Not `disabled`: that would drop the keyboard focus the trigger holds.
+	const busy = record.isPending;
+	const holdShut = (event: React.SyntheticEvent) => {
+		if (busy) event.preventDefault();
+	};
+
+	const choose = (status: TestinyStatus) => {
+		record.reset();
+		if (needsComment(status)) {
+			focusFieldOnClose.current = true;
+			setDraft({ status, text: "" });
+		} else if (status !== testCase.status) {
+			setDraft(null);
+			record.mutate({ caseId: testCase.id, status });
+		}
+	};
+	const saveComment = (status: CommentStatus, comment: string) => {
+		setDraft(null);
+		trigger.current?.focus();
+		// A refused write puts the reason back in the field, so it is not lost.
+		record.mutate({ caseId: testCase.id, status, comment }, { onError: () => setDraft({ status, text: comment }) });
+	};
+	const cancel = () => {
+		setDraft(null);
+		trigger.current?.focus();
+	};
+
 	return (
-		<li className="flex items-start gap-2 py-1 text-xs leading-snug">
-			<glyph.Icon className={cn("mt-px size-3.5 shrink-0", TONE[glyph.tone])} strokeWidth={2.2} aria-hidden="true" />
-			<span className="w-12 shrink-0 text-muted-foreground">{glyph.label}</span>
-			<span className="min-w-0 flex-1 text-foreground">{testCase.title}</span>
+		<li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 py-1 text-xs leading-snug">
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					asChild
+					onPointerDown={holdShut}
+					onKeyDown={(event) => event.key !== "Tab" && holdShut(event)}
+				>
+					<button
+						ref={trigger}
+						type="button"
+						aria-label={`Result: ${glyph.label}`}
+						aria-disabled={busy || undefined}
+						className="-mx-1 -my-0.5 flex items-start gap-2 rounded px-1 py-0.5 text-left text-muted-foreground transition-colors outline-none hover:bg-raised hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 aria-disabled:opacity-60 data-[state=open]:bg-raised data-[state=open]:text-foreground"
+					>
+						<glyph.Icon
+							className={cn("mt-px size-3.5 shrink-0", TONE[glyph.tone])}
+							strokeWidth={2.2}
+							aria-hidden="true"
+						/>
+						<span className="w-12 shrink-0">{glyph.label}</span>
+					</button>
+				</DropdownMenuTrigger>
+				<DropdownMenuContent
+					align="start"
+					className="min-w-36"
+					onCloseAutoFocus={(event) => {
+						if (!focusFieldOnClose.current) return;
+						focusFieldOnClose.current = false;
+						event.preventDefault();
+						field.current?.focus();
+					}}
+				>
+					<DropdownMenuRadioGroup value={testCase.status}>
+						{TESTINY_STATUSES.map((status) => {
+							const option = testinyCaseGlyph(status);
+							return (
+								<DropdownMenuRadioItem key={status} value={status} onSelect={() => choose(status)}>
+									<option.Icon className={TONE[option.tone]} strokeWidth={2.2} aria-hidden="true" />
+									{option.label}
+								</DropdownMenuRadioItem>
+							);
+						})}
+					</DropdownMenuRadioGroup>
+				</DropdownMenuContent>
+			</DropdownMenu>
+			<span className="min-w-0 text-foreground">{testCase.title}</span>
 			{testCase.script ? (
 				<span
 					className="shrink-0 rounded border border-border px-1 font-mono text-[10px] leading-4 text-muted-foreground"
@@ -382,6 +527,69 @@ function CaseRow({ testCase }: { testCase: TestinyCase }): ReactNode {
 					script
 				</span>
 			) : null}
+			{provenance ? <span className="col-span-2 col-start-2 mt-0.5 text-[11px] text-passive">{provenance}</span> : null}
+			{draft ? (
+				<CommentField
+					ref={field}
+					status={draft.status}
+					text={draft.text}
+					onChange={(text) => setDraft({ ...draft, text })}
+					onSave={(comment) => saveComment(draft.status, comment)}
+					onCancel={cancel}
+				/>
+			) : null}
+			{record.isError ? (
+				<p className="col-span-2 col-start-2 mt-0.5 text-[11px] leading-snug text-error" role="alert">
+					{record.error.message}
+				</p>
+			) : null}
 		</li>
+	);
+}
+
+function CommentField({
+	ref,
+	status,
+	text,
+	onChange,
+	onSave,
+	onCancel,
+}: {
+	ref: React.Ref<HTMLInputElement>;
+	status: CommentStatus;
+	text: string;
+	onChange: (text: string) => void;
+	onSave: (comment: string) => void;
+	onCancel: () => void;
+}) {
+	const prompt = COMMENT_PROMPT[status];
+	const comment = text.trim();
+	return (
+		<form
+			className="col-span-3 mt-1.5 flex gap-1.5"
+			onSubmit={(event) => {
+				event.preventDefault();
+				if (comment) onSave(comment);
+			}}
+		>
+			<Input
+				ref={ref}
+				aria-label={prompt.label}
+				placeholder={prompt.placeholder}
+				maxLength={TESTINY_COMMENT_MAX}
+				className="h-7 px-2 text-xs"
+				value={text}
+				onChange={(event) => onChange(event.target.value)}
+				onKeyDown={(event) => {
+					if (event.key !== "Escape") return;
+					event.preventDefault();
+					event.stopPropagation();
+					onCancel();
+				}}
+			/>
+			<Button type="submit" variant="outline" size="sm" className="h-7 text-xs" disabled={!comment}>
+				Save
+			</Button>
+		</form>
 	);
 }

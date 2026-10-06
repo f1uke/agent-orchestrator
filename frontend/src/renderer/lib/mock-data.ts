@@ -2,6 +2,7 @@ import type { PRState, PullRequestFacts, WorkspaceSummary } from "../types/works
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { components } from "../../api/schema";
 import type { SessionChild } from "./children";
+import { withResult, type TestinyResultWrite } from "./testiny";
 
 type WorkspaceChangesResponse = components["schemas"]["WorkspaceChangesResponse"];
 type WorkspaceFilesResponse = components["schemas"]["WorkspaceFilesResponse"];
@@ -1854,8 +1855,36 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
  * plays; an Android run all passed with its evidence folder; and a run whose
  * latest read Testiny refused, still showing what it read 12 minutes ago. Every
  * other task has none, which is the empty state.
+ *
+ * Results set from the tab are kept here for as long as the page lives, so a
+ * refresh still shows them.
  */
 export function mockTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResponse"] {
+	let runs = mockTestinyStore.get(taskId);
+	if (!runs) {
+		runs = demoTestinyRuns(taskId);
+		mockTestinyStore.set(taskId, runs);
+	}
+	return structuredClone(runs);
+}
+
+/** A result set from the tab in the preview: written into the demo run, as the person, and read back. */
+export function mockRecordTestinyResult(
+	taskId: string,
+	runId: number,
+	write: TestinyResultWrite,
+): components["schemas"]["TestinyRunView"] {
+	const data = mockTestinyRuns(taskId);
+	const run = data.runs.find((r) => r.link.runId === runId);
+	if (!run) throw new Error(`run ${runId} is not linked to this task`);
+	const written = withResult(run, write, new Date().toISOString());
+	mockTestinyStore.set(taskId, { ...data, runs: data.runs.map((r) => (r === run ? written : r)) });
+	return structuredClone(written);
+}
+
+const mockTestinyStore = new Map<string, components["schemas"]["TestinyRunsResponse"]>();
+
+function demoTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResponse"] {
 	if (taskId !== "demo-qa-testing") return { project: "MOB", runs: [] };
 	const link = (runId: number, linkedBy: string, minutes: number) => ({
 		sessionId: taskId,
@@ -1890,6 +1919,14 @@ export function mockTestinyRuns(taskId: string): components["schemas"]["TestinyR
 						title: "[Share] Empty state shows when there is nothing to share",
 						status: "FAILED",
 						script: script("empty_state"),
+						recorded: {
+							status: "FAILED",
+							comment: "เปิดหน้าแชร์ตอนไม่มีรายการ แล้วยังเห็นรายการว่างแทนข้อความแจ้ง",
+							by: "demo-qa-testing-qa",
+							byRole: "qa",
+							sha: "4f2c9e1a7b3d",
+							at: minutesAgo(5),
+						},
 					},
 					{
 						id: 7103,

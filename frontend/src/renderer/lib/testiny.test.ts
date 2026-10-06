@@ -4,10 +4,13 @@ import {
 	evidenceLabel,
 	linkedByLabel,
 	orderCases,
+	provenanceLabel,
 	runNotice,
 	scriptCoverage,
 	sharedBlocker,
 	summaryCounts,
+	withCase,
+	withResult,
 	type TestinyCase,
 	type TestinyRun,
 } from "./testiny";
@@ -169,5 +172,110 @@ describe("evidenceLabel", () => {
 
 	it("only abbreviates the home folder of any other path", () => {
 		expect(evidenceLabel("/Users/fluke/elsewhere/TR-1 - x")).toEqual({ location: "~/elsewhere/", folder: "TR-1 - x" });
+	});
+});
+
+describe("orderCases keeping a held order", () => {
+	it("keeps every case where it was, whatever its status is now", () => {
+		const before = orderCases([tc(1, "PASSED"), tc(2, "NOTRUN"), tc(3, "FAILED")]);
+		const now = orderCases([tc(1, "FAILED"), tc(2, "PASSED"), tc(3, "FAILED")], {
+			open: before.open.map((c) => c.id),
+			passed: before.passed.map((c) => c.id),
+		});
+		expect(now.open.map((c) => [c.id, c.status])).toEqual([
+			[3, "FAILED"],
+			[2, "PASSED"],
+		]);
+		expect(now.passed.map((c) => [c.id, c.status])).toEqual([[1, "FAILED"]]);
+	});
+
+	it("places a case the held order does not know by the usual rule", () => {
+		const { open, passed } = orderCases([tc(1, "NOTRUN"), tc(2, "FAILED"), tc(3, "PASSED")], {
+			open: [1],
+			passed: [],
+		});
+		expect(open.map((c) => c.id)).toEqual([1, 2]);
+		expect(passed.map((c) => c.id)).toEqual([3]);
+	});
+});
+
+describe("withResult", () => {
+	const at = ago(0);
+
+	it("sets the case's status, moves one count across, and records it as the person's", () => {
+		const next = withResult(
+			run({ counts: { PASSED: 1, NOTRUN: 2 }, cases: [tc(1, "PASSED"), tc(2, "NOTRUN"), tc(3, "NOTRUN")] }),
+			{ caseId: 2, status: "FAILED", comment: "ปุ่มแชร์ไม่ขึ้น" },
+			at,
+		);
+		expect(next.cases[1]).toEqual({
+			...tc(2, "FAILED"),
+			recorded: { status: "FAILED", comment: "ปุ่มแชร์ไม่ขึ้น", by: "", sha: "", at },
+		});
+		expect(next.counts).toEqual({ PASSED: 1, NOTRUN: 1, FAILED: 1 });
+	});
+
+	it("leaves counts Testiny did not give to be counted from the cases", () => {
+		const next = withResult(run({ cases: [tc(1, "NOTRUN")] }), { caseId: 1, status: "PASSED" }, at);
+		expect(next.counts).toBeNull();
+		expect(summaryCounts(next)).toEqual([{ status: "PASSED", count: 1 }]);
+	});
+
+	it("does not touch the run when the case is not in it", () => {
+		const before = run({ counts: { NOTRUN: 1 }, cases: [tc(1, "NOTRUN")] });
+		expect(withResult(before, { caseId: 9, status: "PASSED" }, at)).toBe(before);
+	});
+});
+
+describe("withCase", () => {
+	it("puts a case back as it was, counts included, so a failed write rolls back", () => {
+		const before = run({ counts: { NOTRUN: 1, PASSED: 1 }, cases: [tc(1, "NOTRUN"), tc(2, "PASSED")] });
+		const written = withResult(before, { caseId: 1, status: "PASSED" }, ago(0));
+		const back = withCase(written, before.cases[0]);
+		expect(back.cases).toEqual(before.cases);
+		expect(summaryCounts(back)).toEqual(summaryCounts(before));
+	});
+});
+
+describe("provenanceLabel", () => {
+	const sessions = [{ id: "task-1-qa", crew: { id: "task-1", role: "qa" as const, hasRun: true } }];
+	const recorded = (over: Partial<NonNullable<TestinyCase["recorded"]>> = {}) => ({
+		status: "FAILED",
+		comment: "x",
+		by: "task-1-qa",
+		byRole: "qa" as const,
+		sha: "4f2c9e1d0b7a",
+		at: ago(5),
+		...over,
+	});
+
+	it("names the agent's role, when, and the commit it tested", () => {
+		expect(provenanceLabel({ ...tc(1, "FAILED"), recorded: recorded() }, NOW, sessions)).toBe(
+			"set by qa · 5 min ago · on 4f2c9e1",
+		);
+	});
+
+	it("says you for a result set in the app, with no commit", () => {
+		expect(
+			provenanceLabel(
+				{
+					...tc(1, "PASSED"),
+					recorded: recorded({ status: "PASSED", by: "", byRole: undefined, sha: "", at: ago(2) }),
+				},
+				NOW,
+				sessions,
+			),
+		).toBe("set by you · 2 min ago");
+	});
+
+	it("falls back to the session for a solo worker", () => {
+		expect(
+			provenanceLabel({ ...tc(1, "FAILED"), recorded: recorded({ by: "solo-7", byRole: undefined }) }, NOW, sessions),
+		).toBe("set by solo-7 · 5 min ago · on 4f2c9e1");
+	});
+
+	it("says nothing when AO wrote nothing, or Testiny changed the case since", () => {
+		expect(provenanceLabel(tc(1, "FAILED"), NOW, sessions)).toBeNull();
+		expect(provenanceLabel({ ...tc(1, "PASSED"), recorded: recorded() }, NOW, sessions)).toBeNull();
 	});
 });

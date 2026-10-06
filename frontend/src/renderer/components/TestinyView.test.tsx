@@ -368,3 +368,237 @@ describe("TestinyView errors", () => {
 		expect(screen.queryByRole("article")).not.toBeInTheDocument();
 	});
 });
+
+describe("TestinyView setting a result", () => {
+	const row = (title: string) => {
+		const li = screen.getByText(title).closest("li");
+		if (!li) throw new Error(`no row for ${title}`);
+		return within(li);
+	};
+	const results = "/api/v1/sessions/{sessionId}/testiny/runs/{runId}/results";
+	const posted = (runId: number, body: unknown) => [
+		results,
+		{ params: { path: { sessionId: "task-1", runId: String(runId) } }, body },
+	];
+
+	function serveTwoOpen() {
+		serve([
+			run(632, {
+				counts: { FAILED: 1, NOTRUN: 1 },
+				cases: [tc(1, "FAILED", "disclaimer"), tc(2, "NOTRUN", "cold launch")],
+			}),
+		]);
+	}
+
+	it("offers every status from the status word and marks the current one", async () => {
+		const user = userEvent.setup();
+		serveTwoOpen();
+		renderView();
+
+		await user.click(await waitFor(() => row("cold launch").getByRole("button", { name: "Result: Not run" })));
+		const items = await screen.findAllByRole("menuitemradio");
+		expect(items.map((i) => i.textContent)).toEqual(["Passed", "Failed", "Blocked", "Skipped", "Not run"]);
+		expect(items.map((i) => i.getAttribute("aria-checked"))).toEqual(["false", "false", "false", "false", "true"]);
+	});
+
+	it("saves Passed at once, as the person, and counts it", async () => {
+		const user = userEvent.setup();
+		serveTwoOpen();
+		let answer: (value: unknown) => void = () => undefined;
+		postMock.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+		renderView();
+
+		await user.click(await waitFor(() => row("cold launch").getByRole("button", { name: "Result: Not run" })));
+		await user.click(await screen.findByRole("menuitemradio", { name: "Passed" }));
+
+		expect(postMock).toHaveBeenCalledWith(...posted(632, { results: [{ caseId: 2, status: "PASSED" }] }));
+		expect(row("cold launch").getByRole("button", { name: "Result: Passed" })).toBeInTheDocument();
+		expect(screen.getByRole("listitem", { name: "1 Passed" })).toBeInTheDocument();
+		expect(screen.queryByRole("listitem", { name: /Not run$/ })).not.toBeInTheDocument();
+
+		answer({
+			data: run(632, {
+				counts: { FAILED: 1, PASSED: 1 },
+				cases: [
+					tc(1, "FAILED", "disclaimer"),
+					{
+						...tc(2, "PASSED", "cold launch"),
+						recorded: { status: "PASSED", comment: "", by: "", sha: "", at: minutesAgo(0) },
+					},
+				],
+			}),
+			error: undefined,
+		});
+		expect(await row("cold launch").findByText("set by you · just now")).toBeInTheDocument();
+	});
+
+	it("keeps a case it just passed in its place instead of folding it away", async () => {
+		const user = userEvent.setup();
+		serveTwoOpen();
+		postMock.mockResolvedValue({
+			data: run(632, {
+				counts: { FAILED: 1, PASSED: 1 },
+				cases: [tc(1, "FAILED", "disclaimer"), tc(2, "PASSED", "cold launch")],
+			}),
+			error: undefined,
+		});
+		renderView();
+
+		await user.click(await waitFor(() => row("cold launch").getByRole("button", { name: "Result: Not run" })));
+		await user.click(await screen.findByRole("menuitemradio", { name: "Passed" }));
+		await waitFor(() => expect(postMock).toHaveBeenCalled());
+
+		const open = within(screen.getByRole("list", { name: "Cases" }));
+		expect(open.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+			"Faileddisclaimer",
+			"Passedcold launch",
+		]);
+
+		serve([
+			run(632, {
+				counts: { FAILED: 1, PASSED: 1 },
+				cases: [tc(1, "FAILED", "disclaimer"), tc(2, "PASSED", "cold launch")],
+			}),
+		]);
+		await user.click(screen.getByRole("button", { name: "Refresh" }));
+		expect(await screen.findByRole("button", { name: "1 passed" })).toBeInTheDocument();
+		expect(screen.queryByText("cold launch")).not.toBeInTheDocument();
+	});
+
+	it("asks why before saving Failed, and posts the reason on Enter", async () => {
+		const user = userEvent.setup();
+		serveTwoOpen();
+		postMock.mockResolvedValue({ data: run(632), error: undefined });
+		renderView();
+
+		await user.click(await waitFor(() => row("cold launch").getByRole("button", { name: "Result: Not run" })));
+		await user.click(await screen.findByRole("menuitemradio", { name: "Failed" }));
+
+		const field = await screen.findByRole("textbox", { name: "What went wrong" });
+		expect(field).toHaveFocus();
+		expect(field).toHaveAttribute("placeholder", "บอกสั้น ๆ ว่าเกิดอะไรขึ้น (1-2 ประโยค)");
+		expect(field).toHaveAttribute("maxLength", "300");
+		const save = screen.getByRole("button", { name: "Save" });
+		expect(save).toBeDisabled();
+		await user.type(field, "   ");
+		expect(save).toBeDisabled();
+		await user.keyboard("{Enter}");
+		expect(postMock).not.toHaveBeenCalled();
+
+		await user.type(field, "ปุ่มแชร์ไม่ขึ้นหลังเปิดแอปใหม่{Enter}");
+		expect(postMock).toHaveBeenCalledWith(
+			...posted(632, { results: [{ caseId: 2, status: "FAILED", comment: "ปุ่มแชร์ไม่ขึ้นหลังเปิดแอปใหม่" }] }),
+		);
+		expect(screen.queryByRole("textbox", { name: "What went wrong" })).not.toBeInTheDocument();
+	});
+
+	it("works from the keyboard alone", async () => {
+		const user = userEvent.setup();
+		serveTwoOpen();
+		postMock.mockResolvedValue({ data: run(632), error: undefined });
+		renderView();
+
+		const trigger = await waitFor(() => row("cold launch").getByRole("button", { name: "Result: Not run" }));
+		trigger.focus();
+		await user.keyboard("{Enter}");
+		await screen.findByRole("menu");
+		// Opening from the keyboard lands on the first status, Passed.
+		await user.keyboard("{ArrowDown}{Enter}");
+
+		const field = await screen.findByRole("textbox", { name: "What went wrong" });
+		await waitFor(() => expect(field).toHaveFocus());
+		await user.keyboard("ค้างที่หน้าโหลด{Enter}");
+		expect(postMock).toHaveBeenCalledWith(
+			...posted(632, { results: [{ caseId: 2, status: "FAILED", comment: "ค้างที่หน้าโหลด" }] }),
+		);
+	});
+
+	it("keeps focus on the status while a write is on its way, and offers no second one", async () => {
+		const user = userEvent.setup();
+		serveTwoOpen();
+		postMock.mockImplementation(() => new Promise(() => undefined));
+		renderView();
+
+		await user.click(await waitFor(() => row("cold launch").getByRole("button", { name: "Result: Not run" })));
+		await user.click(await screen.findByRole("menuitemradio", { name: "Failed" }));
+		await user.type(await screen.findByRole("textbox", { name: "What went wrong" }), "ค้าง{Enter}");
+
+		const trigger = row("cold launch").getByRole("button", { name: "Result: Failed" });
+		await waitFor(() => expect(trigger).toHaveAttribute("aria-disabled", "true"));
+		expect(trigger).toHaveFocus();
+		await user.keyboard("{Enter}");
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+		await user.click(trigger);
+		expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+		expect(postMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("cancels on Esc without saving or changing the status", async () => {
+		const user = userEvent.setup();
+		serveTwoOpen();
+		renderView();
+
+		const trigger = await waitFor(() => row("cold launch").getByRole("button", { name: "Result: Not run" }));
+		await user.click(trigger);
+		await user.click(await screen.findByRole("menuitemradio", { name: "Blocked" }));
+		const field = await screen.findByRole("textbox", { name: "Why it is blocked" });
+		await user.type(field, "no device{Escape}");
+
+		expect(screen.queryByRole("textbox", { name: "Why it is blocked" })).toBeNull();
+		expect(postMock).not.toHaveBeenCalled();
+		expect(row("cold launch").getByRole("button", { name: "Result: Not run" })).toHaveFocus();
+	});
+
+	it("puts the case back and shows the daemon's reason when the write is refused", async () => {
+		const user = userEvent.setup();
+		serveTwoOpen();
+		postMock.mockResolvedValue({
+			data: undefined,
+			error: {
+				code: "TESTINY_RESULT_SET_BY_PERSON",
+				message: "TC-1 was set by a person; report it in the handback instead",
+			},
+		});
+		renderView();
+
+		await user.click(await waitFor(() => row("disclaimer").getByRole("button", { name: "Result: Failed" })));
+		await user.click(await screen.findByRole("menuitemradio", { name: "Passed" }));
+
+		expect(await row("disclaimer").findByRole("alert")).toHaveTextContent(
+			"TC-1 was set by a person; report it in the handback instead",
+		);
+		expect(row("disclaimer").getByRole("button", { name: "Result: Failed" })).toBeInTheDocument();
+		expect(screen.getByRole("listitem", { name: "1 Failed" })).toBeInTheDocument();
+		expect(screen.queryByRole("listitem", { name: /Passed$/ })).not.toBeInTheDocument();
+	});
+
+	it("says who set a result through AO, when, and on which commit", async () => {
+		serve([
+			run(632, {
+				cases: [
+					{
+						...tc(1, "FAILED", "disclaimer"),
+						recorded: {
+							status: "FAILED",
+							comment: "x",
+							by: "task-1-qa",
+							byRole: "qa",
+							sha: "4f2c9e1d0b7a",
+							at: minutesAgo(5),
+						},
+					},
+					{
+						...tc(2, "NOTRUN", "cold launch"),
+						recorded: { status: "NOTRUN", comment: "", by: "", sha: "", at: minutesAgo(2) },
+					},
+					tc(3, "BLOCKED", "voiceover"),
+				],
+			}),
+		]);
+		renderView();
+
+		expect(await waitFor(() => row("disclaimer").getByText("set by qa · 5 min ago · on 4f2c9e1"))).toBeInTheDocument();
+		expect(row("cold launch").getByText("set by you · 2 min ago")).toBeInTheDocument();
+		expect(row("voiceover").queryByText(/^set by/)).toBeNull();
+	});
+});
