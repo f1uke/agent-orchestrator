@@ -40,10 +40,10 @@ type SpawnConfig struct {
 	// for a normal interactive spawn.
 	CreatedBy domain.SessionID
 	// KeepWarmOnMerge marks a worker expected to open MORE PRs after the current
-	// one merges: when set, a merge that would finish the session SUSPENDS it in
-	// place (card stays on the board) instead of terminating it to Done
-	// (feature/merge-suspend-in-place). Default false - an ordinary single-PR
-	// worker still auto-archives on merge. Set by `ao spawn --keep-warm`.
+	// one merges: when set, a merge that would finish the session leaves it
+	// running (tmux and agent untouched, card stays on the board) instead of
+	// terminating it to Done. Default false - an ordinary single-PR worker still
+	// auto-archives on merge. Set by `ao spawn --keep-warm`.
 	KeepWarmOnMerge bool
 	// TaskSize is the ceremony level for a worker task (`ao spawn --task-size`):
 	// mechanical / standard / deep. It drives only the worker system prompt (a

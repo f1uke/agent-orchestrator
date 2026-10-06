@@ -262,7 +262,7 @@ func TestMarkSpawned_ClearsSuspended(t *testing.T) {
 }
 
 // mergedWorker builds an idle session of the given kind + keep-warm flag, used to
-// drive the merge-suspend divert (its PRs are seeded on the store separately).
+// drive the keep-warm merge path (its PRs are seeded on the store separately).
 func mergedWorker(id domain.SessionID, kind domain.SessionKind, keepWarm bool) domain.SessionRecord {
 	r := working(id)
 	r.Kind = kind
@@ -272,41 +272,110 @@ func mergedWorker(id domain.SessionID, kind domain.SessionKind, keepWarm bool) d
 }
 
 // A KEEP-WARM worker whose last PR merges (completion bar: no open PR, ≥1 merged)
-// SUSPENDS in place — is_suspended set, NOT terminated — and its tmux is reaped
-// via the injected runtime suspender, so the card stays on the board (feature/
-// merge-suspend-in-place) instead of vanishing to Done.
-func TestApplyPRObservation_WorkerMergeSuspendsInPlace(t *testing.T) {
+// keeps RUNNING: not terminated, not suspended, its activity untouched - so the
+// tmux and whatever is running in it carry on. Only reactivated is set, which is
+// what keeps its card on the board instead of letting "every PR merged" derive
+// merged→Done.
+func TestApplyPRObservation_KeepWarmWorkerKeepsRunningThroughMerge(t *testing.T) {
 	m, st, _ := newManager()
-	st.sessions["mer-1"] = mergedWorker("mer-1", domain.KindWorker, true)
+	rec := mergedWorker("mer-1", domain.KindWorker, true)
+	// Mid-build when the merge lands: the agent is busy in its pane.
+	rec.Activity = domain.Activity{State: domain.ActivityActive, LastActivityAt: time.Now()}
+	st.sessions["mer-1"] = rec
 	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
-	var reaped domain.SessionID
-	m.SetRuntimeSuspender(func(_ context.Context, id domain.SessionID) error { reaped = id; return nil })
 
 	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
-	if !got.IsSuspended {
-		t.Fatal("a keep-warm worker whose PR merged must SUSPEND in place (is_suspended)")
-	}
 	if got.IsTerminated {
-		t.Fatal("a suspended worker must NOT terminate (card stays on the board, not Done)")
+		t.Fatal("a keep-warm worker whose PR merged must NOT terminate (card stays on the board, not Done)")
 	}
-	if reaped != "mer-1" {
-		t.Fatalf("merge-suspend must reap the worker's tmux via the injected suspender, reaped=%q", reaped)
+	if got.IsSuspended || got.SleepReason != "" {
+		t.Fatalf("a keep-warm worker must NOT be suspended by its merge (suspended=%v reason=%q)", got.IsSuspended, got.SleepReason)
+	}
+	if got.Activity.State != domain.ActivityActive {
+		t.Fatalf("the merge must leave the running agent's activity alone, got %q", got.Activity.State)
+	}
+	if !got.Reactivated {
+		t.Fatal("a kept-warm worker must be marked reactivated so its card does not derive merged→Done")
+	}
+}
+
+// The keep-warm merge path is idempotent: the observation repeats (a later poll,
+// or the next PR's merge) without error and without changing anything further.
+func TestApplyPRObservation_KeepWarmMergeIsIdempotent(t *testing.T) {
+	m, st, _ := newManager()
+	st.sessions["mer-1"] = mergedWorker("mer-1", domain.KindWorker, true)
+	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
+	obs := ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}
+	if err := m.ApplyPRObservation(ctx, "mer-1", obs); err != nil {
+		t.Fatal(err)
+	}
+	first := st.sessions["mer-1"]
+	if err := m.ApplyPRObservation(ctx, "mer-1", obs); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-1"]; got != first {
+		t.Fatalf("a repeated merge observation must not rewrite the row:\nfirst %+v\ngot   %+v", first, got)
+	}
+}
+
+// The same worker opens its NEXT PR and that one merges too: the second merge
+// behaves exactly like the first - still running, still on the board.
+func TestApplyPRObservation_KeepWarmSecondMergeKeepsRunning(t *testing.T) {
+	m, st, _ := newManager()
+	st.sessions["mer-1"] = mergedWorker("mer-1", domain.KindWorker, true)
+	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
+		t.Fatal(err)
+	}
+	// Next PR opened on a new branch: not complete while it is open.
+	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}, {Number: 8}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr2"}); err != nil {
+		t.Fatal(err)
+	}
+	// ...and merges.
+	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}, {Number: 8, Merged: true}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr2", Merged: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if got.IsTerminated || got.IsSuspended || !got.Reactivated {
+		t.Fatalf("the second merge must leave the worker running on the board (terminated=%v suspended=%v reactivated=%v)",
+			got.IsTerminated, got.IsSuspended, got.Reactivated)
+	}
+}
+
+// A keep-warm worker the idle sweep already put to sleep, whose PR merges while
+// it sleeps, stays asleep (the merge wakes nothing) and is marked reactivated so
+// it reads "Needs you" rather than Done.
+func TestApplyPRObservation_KeepWarmMergeWhileAsleepStaysAsleep(t *testing.T) {
+	m, st, _ := newManager()
+	rec := mergedWorker("mer-1", domain.KindWorker, true)
+	rec.IsSuspended = true
+	rec.SleepReason = domain.SleepReasonIdle
+	st.sessions["mer-1"] = rec
+	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
+	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if !got.IsSuspended || got.SleepReason != domain.SleepReasonIdle || got.IsTerminated {
+		t.Fatalf("an asleep keep-warm worker must stay asleep as it was (suspended=%v reason=%q terminated=%v)",
+			got.IsSuspended, got.SleepReason, got.IsTerminated)
+	}
+	if !got.Reactivated {
+		t.Fatal("an asleep keep-warm worker whose PR merged must be marked reactivated")
 	}
 }
 
 // An ordinary worker WITHOUT keep-warm terminates (auto-archives to Done) on
-// merge, exactly as before the feature — suspend-in-place is strictly opt-in.
+// merge, exactly as before - keep-warm is strictly opt-in.
 func TestApplyPRObservation_UnflaggedWorkerTerminates(t *testing.T) {
 	m, st, _ := newManager()
 	st.sessions["mer-1"] = mergedWorker("mer-1", domain.KindWorker, false)
 	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
-	m.SetRuntimeSuspender(func(context.Context, domain.SessionID) error {
-		t.Fatal("an unflagged worker must not be runtime-suspended on merge")
-		return nil
-	})
 	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -314,15 +383,14 @@ func TestApplyPRObservation_UnflaggedWorkerTerminates(t *testing.T) {
 	if !got.IsTerminated {
 		t.Fatal("an unflagged worker must terminate on merge (auto-Done)")
 	}
-	if got.IsSuspended {
-		t.Fatal("an unflagged worker must not suspend on merge")
+	if got.IsSuspended || got.Reactivated {
+		t.Fatalf("an unflagged worker must neither suspend nor be kept warm (suspended=%v reactivated=%v)", got.IsSuspended, got.Reactivated)
 	}
 }
 
-// A worker with a Kind that was never explicitly stamped (empty) still suspends
-// when keep-warm — the gate is "not orchestrator", not "== worker", so the flag
-// works even for such a session.
-func TestApplyPRObservation_UnstampedKindStillSuspends(t *testing.T) {
+// A worker with a Kind that was never explicitly stamped (empty) is kept warm
+// too - the gate is "not orchestrator", not "== worker".
+func TestApplyPRObservation_UnstampedKindKeptWarm(t *testing.T) {
 	m, st, _ := newManager()
 	st.sessions["mer-1"] = mergedWorker("mer-1", "", true)
 	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
@@ -330,22 +398,19 @@ func TestApplyPRObservation_UnstampedKindStillSuspends(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
-	if !got.IsSuspended || got.IsTerminated {
-		t.Fatalf("an unstamped-kind keep-warm worker must suspend, not terminate (suspended=%v terminated=%v)", got.IsSuspended, got.IsTerminated)
+	if got.IsTerminated || got.IsSuspended || !got.Reactivated {
+		t.Fatalf("an unstamped-kind keep-warm worker must keep running (terminated=%v suspended=%v reactivated=%v)",
+			got.IsTerminated, got.IsSuspended, got.Reactivated)
 	}
 }
 
 // An orchestrator that reaches the completion bar still TERMINATES even if it
-// carries the keep-warm flag — it is a long-lived coordinator, not a per-PR
-// worker — and is never runtime-suspended.
+// carries the keep-warm flag - it is a long-lived coordinator, not a per-PR
+// worker.
 func TestApplyPRObservation_OrchestratorMergeStillTerminates(t *testing.T) {
 	m, st, _ := newManager()
 	st.sessions["mer-1"] = mergedWorker("mer-1", domain.KindOrchestrator, true)
 	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
-	m.SetRuntimeSuspender(func(context.Context, domain.SessionID) error {
-		t.Fatal("an orchestrator must not be runtime-suspended on merge")
-		return nil
-	})
 	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -358,9 +423,9 @@ func TestApplyPRObservation_OrchestratorMergeStillTerminates(t *testing.T) {
 	}
 }
 
-// A still-open sibling PR means the completion bar is not reached: neither suspend
-// nor terminate fires on a merge of one PR in the stack (even when keep-warm).
-func TestApplyPRObservation_OpenSiblingBlocksSuspend(t *testing.T) {
+// A still-open sibling PR means the completion bar is not reached: a merge of
+// one PR in the stack changes nothing about the session (even when keep-warm).
+func TestApplyPRObservation_OpenSiblingBlocksCompletion(t *testing.T) {
 	m, st, _ := newManager()
 	st.sessions["mer-1"] = mergedWorker("mer-1", domain.KindWorker, true)
 	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}, {Number: 8}}
@@ -368,40 +433,18 @@ func TestApplyPRObservation_OpenSiblingBlocksSuspend(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := st.sessions["mer-1"]
-	if got.IsSuspended || got.IsTerminated {
-		t.Fatalf("a still-open sibling PR must keep the session live (suspended=%v terminated=%v)", got.IsSuspended, got.IsTerminated)
+	if got.IsSuspended || got.IsTerminated || got.Reactivated {
+		t.Fatalf("a still-open sibling PR must leave the session as it was (suspended=%v terminated=%v reactivated=%v)",
+			got.IsSuspended, got.IsTerminated, got.Reactivated)
 	}
 }
 
-// The merge-suspend divert must survive the reaped agent's late SessionEnd
-// "exited" hook: MarkSuspended runs BEFORE the reap, so ApplyActivitySignal
-// ignores the late exit and the card never terminates into Done. Regression for
-// the same race idle-suspend fixed, tied end-to-end to the merge path.
-func TestApplyPRObservation_MergeSuspendSurvivesLateExitedHook(t *testing.T) {
-	m, st, _ := newManager()
-	st.sessions["mer-1"] = mergedWorker("mer-1", domain.KindWorker, true)
-	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
-	// The reap that suspends fires the agent's exited hook synchronously here.
-	m.SetRuntimeSuspender(func(c context.Context, id domain.SessionID) error {
-		return m.ApplyActivitySignal(c, id, ports.ActivitySignal{Valid: true, State: domain.ActivityExited})
-	})
-	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
-		t.Fatal(err)
-	}
-	got := st.sessions["mer-1"]
-	if got.IsTerminated {
-		t.Fatal("the reaped agent's late exited hook must not terminate the just-suspended card")
-	}
-	if !got.IsSuspended {
-		t.Fatal("card must remain suspended after the late exited hook")
-	}
-}
-
-// Resuming a merge-completed worker (Continue → wake → Resume → MarkSpawned) must
-// clear is_suspended AND set reactivated, so it stays visible (needs_input) while
-// it opens its NEXT PR instead of re-deriving merged→Done in the interim. An
-// idle-suspended session (no merged PR) stays reactivated=false (idle-suspend
-// unchanged — covered by TestMarkSpawned_ClearsSuspended).
+// Resuming a merge-completed worker the idle sweep put to sleep (open → wake →
+// Resume → MarkSpawned) must clear is_suspended AND set reactivated, so it stays
+// visible (needs_input) while it opens its NEXT PR instead of re-deriving
+// merged→Done in the interim. An idle-suspended session (no merged PR) stays
+// reactivated=false (idle-suspend unchanged — covered by
+// TestMarkSpawned_ClearsSuspended).
 func TestMarkSpawned_MergeCompletedResumesReactivated(t *testing.T) {
 	m, st, _ := newManager()
 	rec := working("mer-1")

@@ -197,31 +197,16 @@ func (m *Manager) ApplyPRObservation(ctx context.Context, id domain.SessionID, o
 			return nil
 		}
 		// A worker EXPECTED TO OPEN MORE PRs (keep_warm_on_merge, set by
-		// `ao spawn --keep-warm` or the board toggle) SUSPENDS in place instead of
-		// terminating when it reaches the completion bar (all PRs merged/closed, ≥1
-		// merged): keep its card on the board (is_suspended is orthogonal to lane;
-		// status derivation surfaces a suspended-merged worker as needs_input) with a
-		// "Merged · open to continue / Move to Done" affordance, tear its tmux down,
-		// keep the worktree. The user then resumes it for the next PR (open the card →
-		// wake) or archives it explicitly (Move to Done → kill). MarkSuspended BEFORE
-		// the reap so the reaped agent's late "exited" hook is ignored
-		// (ApplyActivitySignal skips suspended) rather than racing to terminate the
-		// card into Done. Everything else — an ordinary single-PR worker, and every
-		// orchestrator — still TERMINATES (auto-archives to Done) exactly as before,
-		// so the common case is unchanged.
+		// `ao spawn --keep-warm` or the board toggle) is NOT finished when it
+		// reaches the completion bar (all PRs merged/closed, ≥1 merged): it keeps
+		// running exactly as it was - same tmux, same agent, whatever build or test
+		// is in its pane - and its card stays on the board with a "Merged · Move to
+		// Done" affordance. Nothing is torn down here. If it then sits idle, the
+		// idle sweep suspends it like any other worker. Everything else - an
+		// ordinary single-PR worker, and every orchestrator - still TERMINATES
+		// (auto-archives to Done) exactly as before.
 		if rec.Kind != domain.KindOrchestrator && rec.KeepWarmOnMerge {
-			if err := m.MarkSuspended(ctx, id, domain.SleepReasonMerged); err != nil {
-				return err
-			}
-			if m.runtimeSuspender != nil {
-				if err := m.runtimeSuspender(ctx, id); err != nil {
-					// Best-effort: a failed tmux reap must not abort the observation or
-					// undo the suspend. The card stays in its lane; the stray tmux is
-					// reaped later (agent exit / daemon restart).
-					slog.Default().Warn("lifecycle: merge-suspend runtime reap failed", "session", id, "err", err)
-				}
-			}
-			return nil
+			return m.markKeptWarm(ctx, id)
 		}
 		return m.terminateFinished(ctx, id, domain.TerminationCauseWorkComplete)
 	}

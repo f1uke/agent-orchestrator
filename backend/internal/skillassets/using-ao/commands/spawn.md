@@ -18,7 +18,7 @@ ao spawn [flags]
 | `--claim-pr string` | Immediately claim an existing PR for the spawned session: a github.com PR URL/number, or a full GitLab merge-request URL | - |
 | `--harness string` | Agent harness to use (see list below) | Project `worker.agent`; required if the project has none |
 | `--issue string` | Issue id to associate with the session | - |
-| `--keep-warm` | Keep the worker on the board (suspend in place, resumable) instead of archiving it to Done when its PR merges — for a worker that will open more PRs | - |
+| `--keep-warm` | Keep the worker running on the board when its PR merges instead of archiving it to Done: its tmux, and any build or test in it, carries on (it still sleeps after the idle window like any worker) - for a worker that will open more PRs | - |
 | `--name string` | Display name shown in the sidebar (max 22 characters) | Derived from `--prompt` when omitted |
 | `--no-takeover` | Refuse if another active session owns the claimed PR (requires `--claim-pr`) | - |
 | `--project string` | Project id to spawn the session in | `AO_PROJECT_ID` or the current registered repo |

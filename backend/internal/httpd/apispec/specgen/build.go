@@ -1866,7 +1866,7 @@ func sessionOperations() []operation {
 		},
 		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/keep-warm", id: "setSessionKeepWarm", tag: "sessions",
-			summary:    "Toggle suspend-in-place-on-merge (keep-warm) for a worker session",
+			summary:    "Toggle keep-warm (keep running on the board when its PR merges) for a worker session",
 			pathParams: []any{controllers.SessionIDParam{}},
 			reqBody:    controllers.SetSessionKeepWarmRequest{},
 			resps: []respUnit{

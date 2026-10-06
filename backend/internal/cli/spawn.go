@@ -73,9 +73,9 @@ type spawnRequest struct {
 	// CreatedBy records the orchestrator session queuing a `--todo`, for the
 	// report-back once the worker finishes.
 	CreatedBy string `json:"createdBy,omitempty"`
-	// KeepWarmOnMerge asks the daemon to SUSPEND the worker in place (card stays
-	// on the board, resumable) instead of terminating it to Done when its PR
-	// merges — for a worker expected to open more PRs (feature/merge-suspend-in-place).
+	// KeepWarmOnMerge asks the daemon to keep the worker RUNNING (same tmux, card
+	// stays on the board) instead of terminating it to Done when its PR merges -
+	// for a worker expected to open more PRs.
 	KeepWarmOnMerge bool `json:"keepWarmOnMerge,omitempty"`
 	// TaskSize is the worker ceremony level: mechanical / standard / deep. Empty
 	// (the default) means standard. A mechanical task is authorized in the worker
@@ -262,7 +262,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.noTakeover, "no-takeover", false, "Refuse if another active session owns the claimed PR (requires --claim-pr)")
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip advisory agent catalog install/auth preflight before spawning")
 	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until `ao session start <id>`)")
-	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker on the board (suspend in place, resumable) instead of archiving it to Done when its PR merges — for a worker that will open more PRs")
+	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker running on the board when its PR merges instead of archiving it to Done: its tmux, and any build or test in it, carries on (it still sleeps after the idle window like any worker) - for a worker that will open more PRs")
 	f.StringVar(&opts.taskSize, "task-size", "", "How big the task is - it decides both the ceremony AND how many agents work it.\n"+
 		"  mechanical  ONE agent. Skips the up-front requirements/plan/test-first ceremony and goes\n"+
 		"              straight to edit + verify.\n"+

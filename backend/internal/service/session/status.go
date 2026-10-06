@@ -159,11 +159,12 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonWaitingInput}
 	}
 	if anyMerged(prs) {
-		// A WORKER suspended after its PR merged (feature/merge-suspend-in-place) is
-		// PAUSED awaiting the user's "continue next PR / close" decision. Surface it
-		// as needs_input so it stays in a visible lane (Needs you) with an actionable
-		// chip, instead of the merged status archiving it to the Done bar. Mirrors the
-		// Reactivated branch above (a reopened merged session also shows needs_input);
+		// A keep-warm worker parked by the merge itself, before a merge stopped
+		// parking it (sleep_reason 'merged'; a keep-warm worker now carries on
+		// through a merge and reads through the Reactivated branch above). Such a
+		// row is PAUSED awaiting the user's "continue next PR / close" decision, so
+		// surface it as needs_input in a visible lane (Needs you) with an actionable
+		// chip instead of the merged status archiving it to the Done bar.
 		// attentionZone() stays a pure function of status. A terminated (Close) or a
 		// non-suspended session is unaffected and still reads merged.
 		if rec.IsSuspended {

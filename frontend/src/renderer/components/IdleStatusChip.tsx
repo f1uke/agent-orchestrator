@@ -1,7 +1,7 @@
 import { Clock, Moon } from "lucide-react";
 import { neverStarted } from "../lib/crew";
 import { cn } from "../lib/utils";
-import { isMergeSuspended, type IdleCountdownLevel, type WorkspaceSession } from "../types/workspace";
+import { isMergedAwaitingNext, type IdleCountdownLevel, type WorkspaceSession } from "../types/workspace";
 import { useIdleCountdown } from "../hooks/useIdleCountdown";
 
 // Escalating text colour as the deadline nears: muted (≤1d) → amber (≤6h) → red
@@ -38,9 +38,10 @@ const LEVEL_BORDER: Record<IdleCountdownLevel, string> = {
 export function IdleStatusChip({ session, compact = false }: { session: WorkspaceSession; compact?: boolean }) {
 	const countdown = useIdleCountdown(session);
 
-	// A worker suspended AFTER its PR merged has its own affordance (Continue /
-	// Close via MergeSuspendChip) — don't also render the idle "Paused" chip for it.
-	if (isMergeSuspended(session)) return null;
+	// A worker whose PR merged and that is waiting for its next one has its own
+	// affordance (MergedChip: open to continue / Move to Done) - don't also render
+	// the idle "Paused" chip for it.
+	if (isMergedAwaitingNext(session)) return null;
 
 	if (session.isSuspended) {
 		const notStarted = neverStarted(session);

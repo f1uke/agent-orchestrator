@@ -28,7 +28,7 @@ import { useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
 import {
 	attentionZone,
-	isMergeSuspended,
+	isMergedAwaitingNext,
 	isOrchestratorSession,
 	isUndeliveredParked,
 	jiraKeyFromIssueId,
@@ -92,7 +92,7 @@ import { isWaiting, useLearningStatus, useProposals } from "../hooks/useMemory";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
-import { MergeSuspendChip } from "./MergeSuspendChip";
+import { MergedChip } from "./MergedChip";
 import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
 import { Button } from "./ui/button";
@@ -1156,8 +1156,8 @@ function SessionRow({
 				gap - 9px of the name column spent on a chip that is not there. */}
 				<span className="flex shrink-0 items-center gap-1 empty:hidden group-data-[collapsible=icon]:hidden">
 					<QueuedMessagesChip session={session} compact />
-					{isMergeSuspended(session) ? (
-						<MergeSuspendChip session={session} compact />
+					{isMergedAwaitingNext(session) ? (
+						<MergedChip session={session} compact />
 					) : isUndeliveredParked(session) ? (
 						<UndeliveredWorkChip session={session} compact />
 					) : (

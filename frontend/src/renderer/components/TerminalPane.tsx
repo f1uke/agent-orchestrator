@@ -302,8 +302,8 @@ function AttachedTerminal({
 	// Done session (PR merged) reads status "merged" but is still terminated and
 	// fully restorable at the backend. Keying on status "terminated" alone left
 	// Done/merged sessions with a dead-end banner and no Restore button. This also
-	// matches the backend `Restore` precondition and excludes suspended/keep-warm
-	// sessions (resumed by wake-on-open, not terminated).
+	// matches the backend `Restore` precondition and excludes suspended and
+	// kept-warm sessions (resumed by wake-on-open, or still running).
 	// Restore belongs to the SESSION, and neither the reviewer nor the run pane
 	// is one: restoring from either would relaunch the agent while the human was
 	// looking at a build. Phrased as "no target of its own" rather than

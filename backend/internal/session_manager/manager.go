@@ -2307,13 +2307,15 @@ func (m *Manager) closeIdle(ctx context.Context, rec domain.SessionRecord, liveH
 	return nil
 }
 
-// SuspendRuntime tears a worker's tmux down (best-effort) without touching its
-// worktree, board lane, or terminated flag — the runtime half of the
-// merge-suspend path, injected into the lifecycle reducer via SetRuntimeSuspender
-// and called after the reducer has flagged the session suspended. It mirrors the
-// idle sweep's reap (reapRuntimeIfAlive). Only WORKERS take this path, and a
-// worker owns its own tmux handle (only orchestrators share handles), so no
-// liveHandles guard is needed. A blank or already-dead handle is a no-op.
+// SuspendRuntime tears a session's tmux down (best-effort) without touching its
+// worktree, board lane, or terminated flag - the runtime half of a suspend, for a
+// caller that has already flagged the row suspended (lifecycle MarkSuspended). It
+// is the idle sweep's reap (reapRuntimeIfAlive) without the sweep's shared-handle
+// bookkeeping, so it is for a WORKER, which owns its own tmux handle (only
+// orchestrators share handles). A blank or already-dead handle is a no-op.
+//
+// A merge never calls it: a keep-warm worker keeps its tmux, and everything
+// running in it, when its PR merges.
 func (m *Manager) SuspendRuntime(ctx context.Context, id domain.SessionID) error {
 	rec, ok, err := m.store.GetSession(ctx, id)
 	if err != nil {

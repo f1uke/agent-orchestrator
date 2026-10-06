@@ -549,9 +549,8 @@ func (c *SessionsController) setAutoResolve(w http.ResponseWriter, r *http.Reque
 	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
 }
 
-// setKeepWarm toggles whether a worker suspends-in-place on merge (card stays on
-// the board, resumable) rather than terminating to Done
-// (feature/merge-suspend-in-place).
+// setKeepWarm toggles whether a worker keeps running on the board when its PR
+// merges (tmux untouched) rather than terminating to Done.
 func (c *SessionsController) setKeepWarm(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/keep-warm")

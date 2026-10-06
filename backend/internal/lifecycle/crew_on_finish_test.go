@@ -93,7 +93,7 @@ func TestPRObservation_OpenSiblingDoesNotEndTheCrew(t *testing.T) {
 	}
 }
 
-// A keep-warm worker SUSPENDS in place instead of terminating - it is expected to
+// A keep-warm worker keeps running instead of terminating - it is expected to
 // open more PRs, so it is not finished and its crew must survive with it.
 func TestPRObservation_KeepWarmMergeDoesNotEndTheCrew(t *testing.T) {
 	m, st, _ := newManager()
@@ -101,7 +101,6 @@ func TestPRObservation_KeepWarmMergeDoesNotEndTheCrew(t *testing.T) {
 	st.prs["mer-1"] = []domain.PullRequest{{Number: 7, Merged: true}}
 	spy := &crewReaperSpy{}
 	m.SetCrewReaper(spy.fn(st))
-	m.SetRuntimeSuspender(func(context.Context, domain.SessionID) error { return nil })
 
 	if err := m.ApplyPRObservation(ctx, "mer-1", ports.PRObservation{Fetched: true, URL: "pr1", Merged: true}); err != nil {
 		t.Fatal(err)

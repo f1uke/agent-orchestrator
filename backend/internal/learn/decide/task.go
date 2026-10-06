@@ -63,10 +63,14 @@ func Assess(key string, sessions []SessionFacts, newestDraft, now time.Time) Rea
 				abandoned = true
 			}
 		}
-		if rec.SleepReason == domain.SleepReasonMerged {
+		// A keep-warm worker whose work merged has delivered it, even though it
+		// keeps running for the next PR: it reads as ended-by-merge, as it did
+		// when a merge parked it (SleepReasonMerged, still on older rows).
+		keptWarm := keptWarmAfterMerge(rec, s.PRs)
+		if keptWarm {
 			merged = true
 		}
-		ended := rec.IsTerminated || rec.SleepReason == domain.SleepReasonMerged
+		ended := rec.IsTerminated || keptWarm
 		if !ended {
 			allEnded = false
 			continue
@@ -101,6 +105,29 @@ func Assess(key string, sessions []SessionFacts, newestDraft, now time.Time) Rea
 	default:
 		return Readiness{Outcome: domain.LearnOutcomeUnknown, Why: "ended without saying how; waiting for a later merge"}
 	}
+}
+
+// keptWarmAfterMerge reports whether rec is a keep-warm worker that has reached
+// the merge completion bar - every PR merged or closed, at least one merged -
+// and carries on running, or one a merge parked before that (SleepReasonMerged).
+func keptWarmAfterMerge(rec domain.SessionRecord, prs []domain.PullRequest) bool {
+	if rec.IsTerminated {
+		return false
+	}
+	if rec.SleepReason == domain.SleepReasonMerged {
+		return true
+	}
+	if !rec.KeepWarmOnMerge || rec.Kind == domain.KindOrchestrator {
+		return false
+	}
+	anyMerged := false
+	for _, pr := range prs {
+		if !pr.Merged && !pr.Closed {
+			return false
+		}
+		anyMerged = anyMerged || pr.Merged
+	}
+	return anyMerged
 }
 
 // orchestratorDay is the day of an orchestrator task key

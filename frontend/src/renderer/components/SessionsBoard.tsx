@@ -35,7 +35,7 @@ import {
 	type AttentionZone,
 	type WorkspaceSession,
 	canonicalTrackerIssueId,
-	isMergeSuspended,
+	isMergedAwaitingNext,
 	isUndeliveredParked,
 	jiraKeyFromIssueId,
 	orchestratorHealth,
@@ -51,7 +51,7 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { TodoDetailDialog } from "./TodoDetailDialog";
 import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
-import { MergeSuspendChip } from "./MergeSuspendChip";
+import { MergedChip } from "./MergedChip";
 import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
 import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
 import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/kill-session";
@@ -910,9 +910,9 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 		},
 	});
 
-	// Toggle keep-warm-on-merge: when on, a PR merge suspends the worker in place
-	// (card stays on the board, resumable) instead of archiving it to Done. Keeps
-	// the menu open so the checkmark updates in place.
+	// Toggle keep-warm-on-merge: when on, a PR merge leaves the worker running
+	// (its terminal and anything in it carry on, card stays on the board) instead
+	// of archiving it to Done. Keeps the menu open so the checkmark updates in place.
 	const keepWarm = useMutation({
 		mutationFn: async () => {
 			const { error: apiError } = await apiClient.PUT("/api/v1/sessions/{sessionId}/keep-warm", {
@@ -1003,6 +1003,7 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 						<>
 							<DropdownMenuItem
 								disabled={keepWarm.isPending}
+								title="When its PR merges, keep this worker running on the board - its terminal and anything running in it carry on - instead of moving it to Done"
 								onSelect={(event) => {
 									// Keep the menu open so the checkmark flips in place.
 									event.preventDefault();
@@ -1302,8 +1303,8 @@ function SessionCard({
 							</span>
 						)}
 						<QueuedMessagesChip session={session} />
-						{isMergeSuspended(session) ? (
-							<MergeSuspendChip session={session} />
+						{isMergedAwaitingNext(session) ? (
+							<MergedChip session={session} />
 						) : isUndeliveredParked(session) ? (
 							// Parked holding work nobody has seen. Its own chip, for the same
 							// reason the merged one has one: "Paused - open to resume" is true

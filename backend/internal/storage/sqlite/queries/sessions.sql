@@ -81,8 +81,8 @@ UPDATE sessions SET auto_nudge_comments = ?, updated_at = ? WHERE id = ?;
 UPDATE sessions SET auto_resolve_on_reply = ?, updated_at = ? WHERE id = ?;
 
 -- name: SetSessionKeepWarmOnMerge :execrows
--- Toggle whether a worker suspends-in-place (keeps its card on the board) rather
--- than terminating to Done when its PR merges (feature/merge-suspend-in-place).
+-- Toggle whether a worker keeps running (card on the board, tmux untouched)
+-- rather than terminating to Done when its PR merges.
 -- Bumps updated_at so the sessions_cdc_update trigger refreshes the board.
 UPDATE sessions SET keep_warm_on_merge = ?, updated_at = ? WHERE id = ?;
 

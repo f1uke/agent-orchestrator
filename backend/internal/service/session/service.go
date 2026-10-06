@@ -1180,10 +1180,9 @@ func (s *Service) SetAutoResolve(ctx context.Context, id domain.SessionID, overr
 	return s.Get(ctx, id)
 }
 
-// SetKeepWarmOnMerge toggles whether a worker suspends-in-place on merge (card
-// stays on the board, resumable) rather than terminating to Done, then returns
-// the refreshed read model (feature/merge-suspend-in-place). Returns 404 when the
-// session id is unknown.
+// SetKeepWarmOnMerge toggles whether a worker keeps running on the board when
+// its PR merges (tmux untouched) rather than terminating to Done, then returns
+// the refreshed read model. Returns 404 when the session id is unknown.
 func (s *Service) SetKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool) (domain.Session, error) {
 	updated, err := s.store.SetSessionKeepWarmOnMerge(ctx, id, enabled, time.Now().UTC())
 	if err != nil {
