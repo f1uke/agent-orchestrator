@@ -932,7 +932,7 @@ func TestCoordinationFloor_WorkerReportsAtEachMoment(t *testing.T) {
 		"**you need the human**",
 		"**you finish** - your last act before you end your turn",
 		"the knowledge-store paths you wrote",
-		// With no checklist, the finish report is where the manual checks live.
+		// The finish report is where the manual checks live.
 		"anything a person must check by hand (what, where, and why a test cannot)",
 		"`ao orchestrator ls`",
 		"a check-in before implementing, where the project has one, is the exception",

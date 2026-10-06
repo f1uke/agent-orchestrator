@@ -527,7 +527,7 @@ describe("taskLane — a task with NO qa is a pass, not a pending", () => {
 	// nobody will ever send would hold it out of Ready to merge for ever.
 	const mergeable = { status: "mergeable" as SessionStatus, statusReason: "pr_pipeline" as const };
 
-	it("reads ready to merge with no qa and no checklist at all", () => {
+	it("reads ready to merge with no qa and no handback at all", () => {
 		const dev = session("demo-1", { ...mergeable, activity: running });
 		const lane = taskLane({ dev, members: [dev], isCrew: false }, { review: "approved" });
 		expect(lane.zone).toBe("merge");

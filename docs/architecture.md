@@ -335,7 +335,7 @@ higher up:
 - **The daemon keeps it**: one JSON line per delivery in
   `<AO_DATA_DIR>/message-delivery.jsonl` (`~/.ao/data/` by default), carrying the
   time, the session, what triggered the send (`send`, `queue-drain`, `nudge`,
-  `smoke-report`, `review-notify`, ...), the path, the reason, the sender name, the
+  `review-notify`, `crew-notice`, ...), the path, the reason, the sender name, the
   frame's `msg_id` and any error. A send that was PINNED also carries `wire`
   (`pane` / `socket`), so a forced delivery can be told from an ordinary one, and
   a pane line carries `reason: disabled-by-flag` rather than `disabled-by-env`
@@ -358,7 +358,7 @@ injects a plain user prompt.
 Claude Code names every session after its worktree directory plus a random
 suffix (`mobility-4734-chat-unsafe-url-whitelist-f5`) and shows the agent THAT
 name, so an agent asked to identify itself answers with something that looks
-like an AO session id and is not one. Pasted into `ao send` or `ao smoke list`
+like an AO session id and is not one. Pasted into `ao send` or `ao session get`
 it used to resolve to nothing.
 
 `controllers.SessionAlias` (mounted once, above `TaskScoped`, on the group that
@@ -1017,7 +1017,7 @@ It is opt-in per project (`ProjectConfig.LearnFromSessions`, `ao project set-con
 - _Redaction_ (`internal/learn/redact`): exact secret values AO already knows (test-account credentials in each mobile project's script store, secret-named env values), high-precision token formats and secret assignments, emails and Thai id/phone shapes, and pasted blobs collapsed to their size. No generic digit rule: timestamps, ids and line numbers survive.
 - _Where it goes:_ capture keeps it in AO's SQLite under `~/.ao`. Collect (below) sends batches of the **redacted** excerpts - never a transcript - to Anthropic's API through the human's own `claude` CLI login, the same destination the sessions themselves use. `ao learn forget` deletes a project's capture, drafts and runs once its switch is off.
 
-**Telling the human from AO.** Claude Code tags every user turn with `origin.kind` (`human`, `peer`, `task-notification`, ...), but text AO types into the pane is tagged `human` too. So AO records, at delivery, a fingerprint and an author for everything it puts into a session (`delivered_fingerprint`, written by `runtimeMessenger.Send`): `human` for the app's send box, a person's `ao send` outside any session and the Tests tab's report; `agent` for a `[from @<id>]` send; `ao` for nudges and notices. The session's brief is matched by the fingerprint of `sessions.prompt`. A fingerprint is a sha256 of the text with whitespace collapsed (`internal/learn/fingerprint`) - the body itself is never stored.
+**Telling the human from AO.** Claude Code tags every user turn with `origin.kind` (`human`, `peer`, `task-notification`, ...), but text AO types into the pane is tagged `human` too. So AO records, at delivery, a fingerprint and an author for everything it puts into a session (`delivered_fingerprint`, written by `runtimeMessenger.Send`): `human` for the app's send box and a person's `ao send` outside any session; `agent` for a `[from @<id>]` send; `ao` for nudges and notices. The session's brief is matched by the fingerprint of `sessions.prompt`. A fingerprint is a sha256 of the text with whitespace collapsed (`internal/learn/fingerprint`) - the body itself is never stored.
 
 **Bookkeeping from hooks.** `ao hooks claude-code` reports, on session start, prompt submit, stop and end, the transcript path and native id on its own route (`POST /sessions/{id}/transcript-ref`) - not on `/activity`, whose contract forbids paths and native ids. On a prompt submit it adds the prompt's fingerprint, computed inside the hook process. Capture stamps each such fingerprint when it reads the matching typed turn; `ao learn status` reports prompts that stay unmatched, which is the canary for a change in Claude Code's undocumented transcript format.
 

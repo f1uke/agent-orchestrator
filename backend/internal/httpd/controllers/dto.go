@@ -1916,11 +1916,13 @@ type SetResponseLanguageSettingsRequest struct {
 }
 
 // SystemPromptItem is one editable prompt kind on the wire: its built-in default
-// (for the editor + Reset) and the current override (null when using the default).
+// (for the editor + Reset), the current override (null when using the default),
+// and warnings about that override for the settings row to show.
 type SystemPromptItem struct {
-	Kind     string  `json:"kind"`
-	Default  string  `json:"default"`
-	Override *string `json:"override"`
+	Kind     string   `json:"kind"`
+	Default  string   `json:"default"`
+	Override *string  `json:"override"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // SystemPromptsResponse is the body of GET /api/v1/settings/prompts.

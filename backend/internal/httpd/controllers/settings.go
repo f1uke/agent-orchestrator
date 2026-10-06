@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -459,10 +460,23 @@ func (c *SettingsController) getPrompts(w http.ResponseWriter, r *http.Request) 
 		if v, ok := ov.Base[k]; ok {
 			v := v
 			item.Override = &v
+			if mentionsRemovedCommand(v) {
+				item.Warnings = []string{"This saved prompt mentions commands AO no longer has. Reset it or edit it."}
+			}
 		}
 		items = append(items, item)
 	}
 	envelope.WriteJSON(w, http.StatusOK, SystemPromptsResponse{Prompts: items})
+}
+
+// removedCommandMarkers are phrases only the removed smoke system taught. A
+// saved override is a copy of an old default, so it keeps teaching them until
+// the human resets or edits it.
+var removedCommandMarkers = []string{"ao smoke", "tests tab", "--still-working", "stand-down"}
+
+func mentionsRemovedCommand(prompt string) bool {
+	lower := strings.ToLower(prompt)
+	return slices.ContainsFunc(removedCommandMarkers, func(m string) bool { return strings.Contains(lower, m) })
 }
 
 func (c *SettingsController) setPrompt(w http.ResponseWriter, r *http.Request) {

@@ -20,7 +20,7 @@ import {
 } from "../../lib/sim-trust";
 
 export type PromptKind = "orchestrator" | "worker" | "qa" | "reviewer";
-export type PromptItem = { kind: PromptKind; default: string; override: string | null };
+export type PromptItem = { kind: PromptKind; default: string; override: string | null; warnings?: string[] };
 export type TemplateName =
 	| "review-comment-dispatch"
 	| "ci-failing"

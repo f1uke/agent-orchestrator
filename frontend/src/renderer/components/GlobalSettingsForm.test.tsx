@@ -138,11 +138,20 @@ const templatesPayload = {
 // spawn-confirm, auto-nudge, reclaim) plus the migration availability probe, all
 // on apiClient.GET. getMock branches on the requested path so each slice seeds
 // from its own payload instead of one shared blob. `promptOverrides` lets a test
-// pre-seed an override so the reset→DELETE path can be exercised.
-function mockGet(importPayload: unknown, promptOverrides: Record<string, string> = {}) {
+// pre-seed an override so the reset→DELETE path can be exercised, and
+// `promptWarnings` the daemon's warnings about a saved override.
+function mockGet(
+	importPayload: unknown,
+	promptOverrides: Record<string, string> = {},
+	promptWarnings: Record<string, string[]> = {},
+) {
 	const prompts = {
 		data: {
-			prompts: promptsPayload.data.prompts.map((p) => ({ ...p, override: promptOverrides[p.kind] ?? null })),
+			prompts: promptsPayload.data.prompts.map((p) => ({
+				...p,
+				override: promptOverrides[p.kind] ?? null,
+				...(promptWarnings[p.kind] ? { warnings: promptWarnings[p.kind] } : {}),
+			})),
 		},
 		error: undefined,
 	};
@@ -243,6 +252,25 @@ describe("GlobalSettingsForm", () => {
 				params: { path: { kind: "orchestrator" } },
 			}),
 		);
+	});
+
+	it("opens a saved prompt that mentions removed commands with its warning, and leaves a clean one quiet", async () => {
+		const stale = "This saved prompt mentions commands AO no longer has. Reset it or edit it.";
+		mockGet(
+			{ data: { available: true, legacyRoot: "/x" }, error: undefined },
+			{ worker: "run ao smoke set", orchestrator: "a clean override" },
+			{ worker: [stale] },
+		);
+		renderForm();
+		const worker = await screen.findByRole("button", { name: /^Worker/ });
+		expect(worker).toHaveAttribute("aria-expanded", "true");
+		expect(await screen.findByText(stale)).toHaveClass("text-warning");
+
+		const orchestrator = screen.getByRole("button", { name: /^Orchestrator/ });
+		expect(orchestrator).toHaveAttribute("aria-expanded", "false");
+		await openRows();
+		expect(screen.getAllByText(stale)).toHaveLength(1);
+		expect(worker.parentElement).toContainElement(screen.getByText(stale));
 	});
 
 	it("routes the response-language default through the save bar (PUT response-language)", async () => {

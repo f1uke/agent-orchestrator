@@ -18,8 +18,7 @@ type DeliveryAuthor string
 
 const (
 	// DeliveryAuthorHuman is a person's words that AO carried: the app's send
-	// box, `ao send` typed by a person outside any session, the Tests tab's
-	// report of the human's verdicts and notes.
+	// box and `ao send` typed by a person outside any session.
 	DeliveryAuthorHuman DeliveryAuthor = "human"
 	// DeliveryAuthorAgent is another session's `ao send`, which arrives with a
 	// "[from @<id>]" prefix. An orchestrator relaying the human's rule to a

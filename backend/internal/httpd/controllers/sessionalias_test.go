@@ -106,7 +106,7 @@ func TestSessionAliasNilResolverIsANoOp(t *testing.T) {
 
 // Order matters: TaskScoped reads the same parameter, so the alias has to be
 // resolved before it runs or a crew member's alias would never reach dev's
-// checklist.
+// reviews.
 func TestSessionAliasResolvesBeforeTaskScope(t *testing.T) {
 	alias := &fakeAliasResolver{to: "advisor-ios-app-10", handle: "advisor-ios-app-10"}
 	seen, rec := serve(t,
@@ -116,7 +116,7 @@ func TestSessionAliasResolvesBeforeTaskScope(t *testing.T) {
 	)
 
 	if seen != "advisor-ios-app-9" {
-		t.Fatalf("handler saw %q; the alias should resolve to qa and task scope should then hand it dev's checklist", seen)
+		t.Fatalf("handler saw %q; the alias should resolve to qa and task scope should then hand it dev's reviews", seen)
 	}
 	if rec.Header().Get(SessionResolvedHeader) == "" {
 		t.Fatal("the substitution was not announced")

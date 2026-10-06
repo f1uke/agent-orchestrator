@@ -600,9 +600,9 @@ func (s *Service) WakeCrewMember(ctx context.Context, id domain.SessionID) (Crew
 // is its dev's - and, for a solo session, its own.
 //
 // It exists so the HTTP layer can answer a task-owned resource (the pull
-// request, its comment threads, AO's review verdicts, the smoke checklist) the
-// same way whichever member's id names it, without every handler having to know
-// that a crew exists. The equality "task id == dev's session id" is the one
+// request, its comment threads, AO's review verdicts) the same way whichever
+// member's id names it, without every handler having to know that a crew
+// exists. The equality "task id == dev's session id" is the one
 // $AO_CREW_ID already relies on.
 func (s *Service) TaskDevOf(ctx context.Context, id domain.SessionID) (domain.SessionID, error) {
 	dev, err := s.manager.CrewDevOf(ctx, id)

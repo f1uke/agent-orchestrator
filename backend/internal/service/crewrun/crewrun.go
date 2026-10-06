@@ -33,7 +33,7 @@ var (
 	ErrNotFound = errors.New("crewrun: not found")
 )
 
-// historyDepth is how many runs the Tests tab is shown.
+// historyDepth is how many runs the Summary tab's Machine runs list shows.
 const historyDepth = 20
 
 // Store is the persistence surface this service owns.

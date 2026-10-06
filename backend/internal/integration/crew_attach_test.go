@@ -169,8 +169,9 @@ func TestCrewAttach_StartingItLeavesDevRunning(t *testing.T) {
 		t.Fatal("starting the second member removed the shared worktree")
 	}
 
-	// AO_CREW_ID is dev's id for the member that just came up, so the checklist it
-	// writes lands on the card the human opens.
+	// AO_CREW_ID is dev's id for the member that just came up, so its
+	// `ao session get "$AO_CREW_ID"`, its handback and its task-scoped reads all
+	// reach the task the human opens.
 	if got := s.rt.lastCfg.Env[sessionmanager.EnvCrewID]; got != string(dev.ID) {
 		t.Fatalf("the attached member launched with AO_CREW_ID=%q, want dev's id %q", got, dev.ID)
 	}

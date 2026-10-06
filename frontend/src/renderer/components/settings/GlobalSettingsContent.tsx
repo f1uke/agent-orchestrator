@@ -71,7 +71,7 @@ function hint(key: string): string {
 // hook. Only one section shows at a time, but the draft lives in the hook above
 // it, so navigating between sections never loses an edit and one save bar commits
 // the whole global config. Rows marked "Instant, not saved" (Send test, Check for
-// updates, Run migration, Purge now, the companion switch, the pet library) act on
+// updates, Run migration, the companion switch, the pet library) act on
 // click and are outside the bar by design.
 export function GlobalSettingsContent({ form, activeSection }: { form: GlobalForm; activeSection: string }) {
 	switch (activeSection) {
@@ -115,6 +115,7 @@ function EveryAgentSection({ form }: { form: GlobalForm }) {
 
 				{form.prompts.map((p) => {
 					const value = form.draft.prompts[p.kind] ?? p.override ?? p.default;
+					const warnings = p.warnings ?? [];
 					return (
 						<SettingRow
 							key={p.kind}
@@ -125,12 +126,19 @@ function EveryAgentSection({ form }: { form: GlobalForm }) {
 									AO always appends a protected coordination floor, the confidentiality guard, and dynamic context (git
 									convention, spawn-confirm, session and project ids) on top of whatever you write here - those are not
 									shown and cannot be removed. Use <code>{"{{.ProjectID}}"}</code> to insert the project id.
+									{warnings.map((w) => (
+										<span key={w} className="mt-1.5 block text-warning">
+											{w}
+										</span>
+									))}
 								</>
 							}
 							ownership={{ kind: "global-appendable" }}
 							timing={p.kind === "orchestrator" ? "next-orchestrator" : "next-worker"}
 							value={value === p.default ? "Default" : "Customised"}
 							modified={form.isPromptDirty(p.kind)}
+							// A folded row would hide the warning from the human it is for.
+							defaultOpen={warnings.length > 0}
 						>
 							<SettingEditorControl
 								name={PROMPT_LABELS[p.kind]}

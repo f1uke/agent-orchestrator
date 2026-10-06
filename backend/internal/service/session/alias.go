@@ -21,8 +21,8 @@ type claudeRegistry interface {
 // (derived from the worktree directory plus a random suffix, e.g.
 // "mobility-4734-chat-unsafe-url-whitelist-f5"), shows the agent THAT name, and
 // an agent asked to identify itself repeats it. It looks enough like an AO id
-// to be pasted into `ao send` or `ao smoke list`, and it never resolves - so a
-// message goes nowhere, or a checklist reads as empty.
+// to be pasted into `ao send` or `ao session get`, and it never resolves - so a
+// message goes nowhere, or a lookup finds nothing.
 //
 // The join is the tmux pane: Claude's registry records the pane its process
 // owns, and that pane's session name is exactly AO's runtime handle. Note that

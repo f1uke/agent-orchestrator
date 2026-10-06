@@ -4669,6 +4669,7 @@ export interface components {
             default: string;
             kind: string;
             override: null | string;
+            warnings?: string[];
         };
         SystemPromptsResponse: {
             prompts: components["schemas"]["SystemPromptItem"][];

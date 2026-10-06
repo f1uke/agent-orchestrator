@@ -1,11 +1,13 @@
 package controllers_test
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -390,6 +392,41 @@ func TestSystemPrompts_GetReturnsDefaultAndOverride(t *testing.T) {
 	// non-empty default carrying the placeholder.
 	if !strings.Contains(string(body), `"custom"`) || !strings.Contains(string(body), prompts.ProjectIDPlaceholder) {
 		t.Fatalf("body missing expected content: %s", body)
+	}
+}
+
+func TestSystemPrompts_GetWarnsOnOverrideMentioningRemovedCommands(t *testing.T) {
+	svc := &fakeSystemPromptsSvc{ov: promptoverrides.Overrides{Base: map[prompts.Kind]string{
+		prompts.KindWorker:   "When done, run AO SMOKE set with your checklist.",
+		prompts.KindQA:       "Post evidence to the tests TAB, then hand back with --STILL-working.",
+		prompts.KindReviewer: "Review the diff and reply with a verdict.",
+	}}}
+	srv := newPromptsTestServer(t, svc)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/settings/prompts", "")
+	if status != http.StatusOK {
+		t.Fatalf("code=%d body=%s", status, body)
+	}
+	var got controllers.SystemPromptsResponse
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v body=%s", err, body)
+	}
+	warnings := map[string][]string{}
+	for _, it := range got.Prompts {
+		warnings[it.Kind] = it.Warnings
+	}
+	want := []string{"This saved prompt mentions commands AO no longer has. Reset it or edit it."}
+	for _, k := range []prompts.Kind{prompts.KindWorker, prompts.KindQA} {
+		if !slices.Equal(warnings[string(k)], want) {
+			t.Errorf("%s warnings = %q, want %q", k, warnings[string(k)], want)
+		}
+	}
+	for _, k := range []prompts.Kind{prompts.KindReviewer, prompts.KindOrchestrator} {
+		if len(warnings[string(k)]) != 0 {
+			t.Errorf("%s warnings = %q, want none", k, warnings[string(k)])
+		}
+	}
+	if strings.Contains(string(body), `"warnings":null`) {
+		t.Errorf("clean kinds must omit warnings, body=%s", body)
 	}
 }
 

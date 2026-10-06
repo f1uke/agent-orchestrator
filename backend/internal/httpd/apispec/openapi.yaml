@@ -12860,6 +12860,10 @@ components:
           type:
           - "null"
           - string
+        warnings:
+          items:
+            type: string
+          type: array
       required:
       - kind
       - default

@@ -589,7 +589,7 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 				<SettingRow
 					name="Drive devices only through scripts"
 					summary="Workers here reach a screen by running a reusable Maestro script from the scripts store, never by tapping through the app step by step."
-					detail="Their prompt teaches the script workflow in place of the ao sim tap catalog - find the script, run it, judge the screen it left, write a missing one once, never finish a failed run by hand - and qa plays smoke cases with scripts. iOS scripts run through ao sim flow run; Android has no ao sim, so they run through maestro --device. Off leaves the guidance exactly as it is."
+					detail="Their prompt teaches the script workflow in place of the ao sim tap catalog - find the script, run it, judge the screen it left, write a missing one once, never finish a failed run by hand - and qa drives its checks with scripts. iOS scripts run through ao sim flow run; Android has no ao sim, so they run through maestro --device. Off leaves the guidance exactly as it is."
 					ownership={{ kind: "project-only" }}
 					timing="next-worker"
 					value={

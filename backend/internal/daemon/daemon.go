@@ -709,6 +709,9 @@ func Run() error {
 	// One-off, idempotent: move the planning docs the old data-dir-relative
 	// knowledge store stranded under <dataDir>/knowledge into the real store.
 	knowledgeMigrationDone := startKnowledgeMigration(ctx, cfg, store, log)
+	// One-off, idempotent: delete the evidence tree and retention settings the
+	// removed smoke system left in the data dir.
+	legacySmokeCleanupDone := startLegacySmokeCleanup(cfg, log)
 
 	runErr := srv.Run(ctx)
 
@@ -729,6 +732,7 @@ func Run() error {
 	<-simOwnerSyncDone
 	<-orchSyncDone
 	<-knowledgeMigrationDone
+	<-legacySmokeCleanupDone
 	<-reclaimerDone
 	<-tokenUsageDone
 	<-learnCaptureDone
