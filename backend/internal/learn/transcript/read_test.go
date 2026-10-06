@@ -134,7 +134,6 @@ func TestRead_KeepsOnlyTheHumansTurns(t *testing.T) {
 		line(t, peer("p2", "2026-10-01T10:06:00Z", "There are merge conflicts on PR #12.")),
 		line(t, typed("u5", "2026-10-01T10:07:00Z", "no - run the script instead")),
 		line(t, withSource(typed("u6", "2026-10-01T10:08:00Z", "go ahead"), "suggestion_accepted")),
-		line(t, typed("u7", "2026-10-01T10:09:00Z", "[smoke results]\n\nSmoke test results for this session: 1 of 1 checked")),
 	)
 	res, err := Read(path, 0, nil, Options{
 		FileQuiet: true,
@@ -147,20 +146,20 @@ func TestRead_KeepsOnlyTheHumansTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := texts(res.Turns)
-	want := []string{appSend, "no - run the script instead", "go ahead", "[smoke results]\n\nSmoke test results for this session: 1 of 1 checked"}
+	want := []string{appSend, "no - run the script instead", "go ahead"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("human turns = %q, want %q", got, want)
 	}
-	sources := []domain.LearnSourceClass{res.Turns[0].Source, res.Turns[1].Source, res.Turns[2].Source, res.Turns[3].Source}
-	wantSources := []domain.LearnSourceClass{domain.LearnSourceAppSend, domain.LearnSourceTyped, domain.LearnSourceSuggestionAccepted, domain.LearnSourceSmokeReport}
+	sources := []domain.LearnSourceClass{res.Turns[0].Source, res.Turns[1].Source, res.Turns[2].Source}
+	wantSources := []domain.LearnSourceClass{domain.LearnSourceAppSend, domain.LearnSourceTyped, domain.LearnSourceSuggestionAccepted}
 	for i := range sources {
 		if sources[i] != wantSources[i] {
 			t.Errorf("turn %d source = %s, want %s", i, sources[i], wantSources[i])
 		}
 	}
 	// brief, [from @], notification, CI nudge, slash command, merge-conflict peer.
-	if res.HumanTurns != 4 || res.MachineTurns != 6 {
-		t.Errorf("counts = %d human, %d machine; want 4, 6", res.HumanTurns, res.MachineTurns)
+	if res.HumanTurns != 3 || res.MachineTurns != 6 {
+		t.Errorf("counts = %d human, %d machine; want 3, 6", res.HumanTurns, res.MachineTurns)
 	}
 }
 
@@ -196,6 +195,28 @@ func TestRead_RecognisesAQueuedDeliveryAfterItsDecoration(t *testing.T) {
 	}
 	if got := texts(res.Turns); len(got) != 1 || got[0] != "from the human, via the app" {
 		t.Fatalf("turns = %q", got)
+	}
+	if res.Turns[0].Source != domain.LearnSourceAppSend {
+		t.Errorf("source = %s, want app_send", res.Turns[0].Source)
+	}
+}
+
+func TestRead_AnOldSmokeReportDeliveryIsAnAppSend(t *testing.T) {
+	// Databases from before the Tests tab was removed still hold delivery
+	// records with the "smoke-report" trigger; the author column decides.
+	report := "[smoke results]\n\nSmoke test results for this session: 1 of 1 checked"
+	path := writeTranscript(t, line(t, typed("u1", "2026-10-01T10:00:00Z", report)))
+	res, err := Read(path, 0, nil, Options{
+		FileQuiet: true,
+		Delivered: deliveredOf(map[string]Delivery{
+			report: {Author: domain.DeliveryAuthorHuman, Trigger: "smoke-report"},
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Turns) != 1 || res.Turns[0].Text != report {
+		t.Fatalf("turns = %+v", res.Turns)
 	}
 	if res.Turns[0].Source != domain.LearnSourceAppSend {
 		t.Errorf("source = %s, want app_send", res.Turns[0].Source)

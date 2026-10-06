@@ -132,8 +132,6 @@ const (
 	// LearnSourceAppSend is the human's message from AO's send box, or `ao send`
 	// typed by the human outside any session.
 	LearnSourceAppSend LearnSourceClass = "app_send"
-	// LearnSourceSmokeReport is the Tests tab reporting the human's verdicts.
-	LearnSourceSmokeReport LearnSourceClass = "smoke_report"
 )
 
 // LearnWindow is the bounded context on one side of a human turn: the agent's

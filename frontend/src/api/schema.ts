@@ -2757,7 +2757,7 @@ export interface components {
             } | null;
             sessionId: string;
             /** @enum {string} */
-            sourceClass: "typed" | "queued" | "suggestion_accepted" | "app_send" | "smoke_report";
+            sourceClass: "typed" | "queued" | "suggestion_accepted" | "app_send";
             /** Format: date-time */
             turnAt: string;
         };

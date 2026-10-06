@@ -14,7 +14,7 @@ A project with `learnFromSessions` on (`ao project set-config <id> --learn-from-
 
 ### `ao learn status`
 
-Per project: transcripts tracked, turns kept (by how they arrived: `typed`, `queued`, `suggestion_accepted`, `app_send`, `smoke_report`), the last capture, turns waiting for the model, drafts, the last model-run failure with its stderr, and three warnings:
+Per project: transcripts tracked, turns kept (by how they arrived: `typed`, `queued`, `suggestion_accepted`, `app_send`), the last capture, turns waiting for the model, drafts, the last model-run failure with its stderr, and three warnings:
 
 - prompts the agent hooks saw that never turned up in a transcript (the transcript format may have changed),
 - transcripts with unread turns that are 25+ days old (Claude Code deletes them at 30),

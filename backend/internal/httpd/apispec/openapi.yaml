@@ -8326,7 +8326,6 @@ components:
           - queued
           - suggestion_accepted
           - app_send
-          - smoke_report
           type: string
         turnAt:
           format: date-time

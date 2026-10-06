@@ -70,13 +70,11 @@ var transitionIDPattern = regexp.MustCompile(`^\d+$`)
 // daemon request.
 var defaultHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
-// defaultTransferHTTPClient backs the calls that move a whole file rather than a
-// JSON document: uploading smoke-test evidence, resolving its media id (which
-// follows a redirect into media services), and streaming an attachment back for
-// inline display. Evidence is routinely multiple megabytes — a screen recording
-// is tens — so the 15s budget that suits a read is simply the wrong unit here:
-// it aborts an upload that was progressing fine, and a resolve that times out
-// silently costs the file its inline preview in the posted comment.
+// defaultTransferHTTPClient backs the call that moves a whole file rather than a
+// JSON document: streaming an attachment back for inline display. Attachments
+// are routinely multiple megabytes (a screen recording is tens), so the 15s
+// budget that suits a read is the wrong unit here: it aborts a download that was
+// progressing fine.
 var defaultTransferHTTPClient = &http.Client{Timeout: 5 * time.Minute}
 
 // Transitions returns the issue's available status transitions, read live.
@@ -190,8 +188,7 @@ func newJiraRequest(ctx context.Context, cfg restConfig, method, rawURL string, 
 }
 
 // basicAuth is the HTTP Basic Authorization header value for the resolved config
-// (base64 of "email:token"). Shared by the JSON request builder and the
-// attachment upload, which builds its own multipart request.
+// (base64 of "email:token").
 func basicAuth(cfg restConfig) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(cfg.email+":"+cfg.token))
 }

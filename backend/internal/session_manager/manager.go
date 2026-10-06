@@ -310,11 +310,6 @@ type Manager struct {
 	// service is built to avoid an import cycle; nil in tests/wiring that omit
 	// it, in which case teardown simply skips the reap.
 	sessionPaneReaper func(context.Context, domain.SessionID) error
-	// smokeEvidencePurger hard-deletes a session's on-disk smoke-test evidence
-	// tree when the session is purged (the DB rows cascade separately). Injected
-	// by the daemon after the smoke service is built, same as sessionPaneReaper; nil
-	// in tests/wiring that omit it, in which case purge simply skips it.
-	smokeEvidencePurger func(context.Context, domain.SessionID) error
 	// children owns a worker's child worktrees. Teardown refuses (or settles)
 	// on them and a relaunch settles their orphans. Nil disables child
 	// worktrees altogether: no worker is told it may have them.
@@ -469,25 +464,6 @@ type ChildWork interface {
 // because the service is built from the manager's own provisioning.
 func (m *Manager) SetChildren(c ChildWork) {
 	m.children = c
-}
-
-// SetSmokeEvidencePurger wires the hook that hard-deletes a session's smoke-test
-// evidence blobs on purge. Wired by the daemon after the smoke service exists,
-// mirroring SetSessionPaneReaper. A manager with no purger set skips it.
-func (m *Manager) SetSmokeEvidencePurger(fn func(context.Context, domain.SessionID) error) {
-	m.smokeEvidencePurger = fn
-}
-
-// purgeSmokeEvidence best-effort removes the session's on-disk evidence tree.
-// Purge of the session must never fail because its evidence blobs could not be
-// removed, so any error is logged and swallowed. A nil purger is a no-op.
-func (m *Manager) purgeSmokeEvidence(ctx context.Context, id domain.SessionID) {
-	if m.smokeEvidencePurger == nil {
-		return
-	}
-	if err := m.smokeEvidencePurger(ctx, id); err != nil {
-		m.logger.Warn("smoke evidence purge failed", "sessionID", id, "error", err)
-	}
 }
 
 // SetSimDeviceAssigner wires the hook that reserves one local iOS Simulator per
@@ -1663,9 +1639,6 @@ func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force b
 	// Close the worker's reviewer pane before the row (and its cascading review
 	// rows) are hard-deleted, so a delete never orphans the reviewer's tmux.
 	m.reapSessionPanes(ctx, id)
-	// Hard-delete the session's smoke-test evidence blobs; the DB rows cascade
-	// with the session row below.
-	m.purgeSmokeEvidence(ctx, id)
 	return m.store.PurgeSession(ctx, id)
 }
 

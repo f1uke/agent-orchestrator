@@ -73,7 +73,7 @@ type LearningExcerptDTO struct {
 	ProjectID   string            `json:"projectId"`
 	SessionID   string            `json:"sessionId"`
 	TurnAt      time.Time         `json:"turnAt"`
-	SourceClass string            `json:"sourceClass" enum:"typed,queued,suggestion_accepted,app_send,smoke_report"`
+	SourceClass string            `json:"sourceClass" enum:"typed,queued,suggestion_accepted,app_send"`
 	GitBranch   string            `json:"gitBranch,omitempty"`
 	Before      LearningWindowDTO `json:"before"`
 	HumanText   string            `json:"humanText" description:"What the human typed, redacted."`
