@@ -1,14 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-// dev:web (VITE_NO_ELECTRON=1) serves lib/mock-data.ts. The api-gateway
-// workspace owns a "stacked-auth" session ("auth stack") carrying three PRs:
-// #41 open, #42 draft, #40 merged — the multi-PR-per-session case this suite
-// guards across the inspector rail and the PR board.
+// dev:web (VITE_NO_ELECTRON=1) serves lib/mock-data.ts. The ao-demo workspace
+// owns a "demo-review-stack" session carrying three PRs: !319 open (GitLab),
+// #320 open, #321 draft - the multi-PR-per-session case this suite guards
+// across the inspector rail and the PR board.
 
 test("the inspector rail stacks every PR a session owns, actionable-first", async ({ page }) => {
-	await page.goto("/");
-	await page.getByRole("button", { name: "Open auth stack" }).click();
-	await expect(page).toHaveURL(/sessions\/stacked-auth/);
+	await page.goto("/#/projects/ao-demo/sessions/demo-review-stack");
 
 	const inspector = page.locator("#inspector");
 	await expect(inspector).toBeVisible();
@@ -16,28 +14,33 @@ test("the inspector rail stacks every PR a session owns, actionable-first", asyn
 	// Plural heading reflects the stack size.
 	await expect(inspector.getByText("Pull requests (3)")).toBeVisible();
 
-	// One card per PR, ordered open → draft → merged (the merged base sinks).
+	// One card per PR, ordered open → draft (by number within a state).
 	// Scope to the PR section: the Activity timeline also renders "Opened PR #n".
 	const prSection = inspector.locator("section.inspector-section", { hasText: "Pull requests (3)" });
-	const cards = prSection.locator("text=/^PR #\\d+$/");
-	await expect(cards).toHaveText(["PR #41", "PR #42", "PR #40"]);
+	const cards = prSection.locator("text=/^(PR #|MR !)\\d+$/");
+	await expect(cards).toHaveText(["MR !319", "PR #320", "PR #321"]);
 });
 
 test("the PR board lists one row per attributed PR, actionable PRs first", async ({ page }) => {
 	await page.goto("/#/prs");
 
 	await expect(page.getByRole("heading", { name: "Pull requests" })).toBeVisible();
+	await expect(page.locator("tbody tr").first()).toBeVisible();
 
-	// stacked-auth's three PRs keep actionable-first order across the whole board:
-	// open #41 before draft #42, and the lone merged PR (#40) sinks to the bottom.
+	// Open PRs, then drafts, then merged ones sink to the bottom.
 	const numbers = await page.locator("tbody tr td:first-child").allTextContents();
-	expect(numbers.indexOf("#41")).toBeLessThan(numbers.indexOf("#42"));
-	expect(numbers.indexOf("#42")).toBeLessThan(numbers.indexOf("#40"));
-	expect(numbers.indexOf("#40")).toBe(numbers.length - 1);
+	expect(numbers.indexOf("!319")).toBeGreaterThanOrEqual(0);
+	expect(numbers.indexOf("!319")).toBeLessThan(numbers.indexOf("#321"));
+	expect(numbers.indexOf("#321")).toBeLessThan(numbers.indexOf("#325"));
+	expect(numbers.slice(-2).sort()).toEqual(["#325", "#326"]);
+
+	// A crew's dev and qa both answer for the task's PR; the board lists it once.
+	expect(numbers.filter((n) => n === "!323")).toHaveLength(1);
+	expect(new Set(numbers).size).toBe(numbers.length);
 
 	// Open/draft rows are actionable; the merged row is not.
-	const mergedRow = page.locator("tbody tr", { hasText: "#40" });
+	const mergedRow = page.locator("tbody tr", { hasText: "#326" });
 	await expect(mergedRow.getByRole("button", { name: "Merge" })).toHaveCount(0);
-	const openRow = page.locator("tbody tr", { hasText: "#41" });
+	const openRow = page.locator("tbody tr", { hasText: "!319" });
 	await expect(openRow.getByRole("button", { name: "Merge" })).toBeVisible();
 });

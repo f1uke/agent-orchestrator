@@ -56,7 +56,7 @@ test("project board route: brand clears the macOS titlebar cluster and stays rea
 	await expect(page.getByText("Projects")).toBeVisible();
 
 	// In-app nav to /projects/:id (a hard load boots the router at the board).
-	await page.getByRole("button", { name: "Open api-gateway dashboard" }).click();
+	await page.getByRole("button", { name: "Open ao-demo dashboard" }).click();
 	// The active project row marks itself aria-current=page once navigation lands.
 	await expect(page.locator('[aria-current="page"]')).toBeVisible();
 
@@ -70,7 +70,14 @@ test("brand stays put and readable when navigating board → session", async ({ 
 	const boardBrandBox = await brand(page).boundingBox();
 	expect(boardBrandBox).not.toBeNull();
 
-	await page.getByRole("button", { name: "Open Split terminal mux responsibilities" }).click();
+	// Clicked on the row's title, where a person clicks: the row's button is a
+	// full-bleed layer under it, so a click on the button is refused as intercepted.
+	await page
+		.getByRole("button", { name: "Open Decide the retry policy for webhook delivery" })
+		.locator("xpath=ancestor::li[1]")
+		.getByText("Decide the retry policy for webhook delivery")
+		.click();
+	await expect(page).toHaveURL(/sessions\/demo-question/);
 	await expect(page.locator(".dashboard-app-header")).toBeVisible();
 
 	const sessionBrandBox = await brand(page).boundingBox();
