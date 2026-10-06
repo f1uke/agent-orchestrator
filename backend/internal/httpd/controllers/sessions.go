@@ -1431,8 +1431,8 @@ func (c *SessionsController) getOrchestrator(w http.ResponseWriter, r *http.Requ
 
 // sessionID is the session a request is ABOUT. On a route mounted task-scoped
 // (see TaskScoped) that is the task's dev, so a handler reading a task-owned
-// resource - the pull request, its comments, the review verdicts, the smoke
-// checklist - answers the same whichever crew member's id the path names. Every
+// resource - the pull request, its comments, the review verdicts - answers the
+// same whichever crew member's id the path names. Every
 // other route, and every solo session, gets the path's id unchanged.
 func sessionID(r *http.Request) domain.SessionID {
 	if id, ok := taskScopeOf(r.Context()); ok {

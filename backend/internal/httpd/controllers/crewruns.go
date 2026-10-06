@@ -18,7 +18,7 @@ import (
 // StartCrewRunInput is the body of POST .../crew/runs.
 type StartCrewRunInput struct {
 	Kind  string `json:"kind" description:"What is about to run: build, test or device." enum:"build,test,device"`
-	Label string `json:"label,omitempty" description:"Free-text label for the run (e.g. the command), shown in the Tests tab."`
+	Label string `json:"label,omitempty" description:"Free-text label for the run (e.g. the command), shown on the Summary tab."`
 }
 
 // StartCrewRunResponse is the body of POST .../crew/runs.

@@ -115,36 +115,11 @@ type SessionIDParam struct {
 	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
 }
 
-// SmokeCheckParam is the {sessionId}/{checkId} path parameters for the
-// per-case smoke routes.
-type SmokeCheckParam struct {
-	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
-	CheckID   string `path:"checkId" description:"Smoke-check case identifier."`
-}
-
-// SmokeEvidenceUploadParam is SmokeCheckParam plus the provenance of the file
-// being attached. It rides on the query string because the upload has two body
-// shapes (multipart and raw bytes); a provenance carried in only one of them
-// would be a hole.
-type SmokeEvidenceUploadParam struct {
-	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
-	CheckID   string `path:"checkId" description:"Smoke-check case identifier."`
-	Source    string `query:"source,omitempty" description:"Who attached it: user (default) or agent. Agent files land in the case's separate agentEvidence list so provenance is never ambiguous."`
-}
-
 // SimLeaseParam is the {sessionId}/{udid} path parameters for releasing a
 // simulator device lease.
 type SimLeaseParam struct {
 	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
 	UDID      string `path:"udid" description:"Simulator udid (matched case-insensitively)."`
-}
-
-// SmokeEvidenceParam is the {sessionId}/{checkId}/{evidenceId} path parameters
-// for serving a stored evidence blob.
-type SmokeEvidenceParam struct {
-	SessionID  string `path:"sessionId" description:"Session identifier, e.g. project-1."`
-	CheckID    string `path:"checkId" description:"Smoke-check case identifier."`
-	EvidenceID string `path:"evidenceId" description:"Evidence blob identifier."`
 }
 
 // ListSessionsQuery is the query string accepted by GET /api/v1/sessions.
@@ -1903,27 +1878,6 @@ type ReclaimSettingsResponse struct {
 // shared definition, for the same reason.
 type SetReclaimSettingsRequest struct {
 	reclaimsettings.Settings
-}
-
-// EvidenceRetentionSettingsResponse mirrors evidenceretention.Settings on the
-// wire. It is the body of GET/PUT /api/v1/settings/evidence-retention.
-type EvidenceRetentionSettingsResponse struct {
-	Enabled    bool `json:"enabled" description:"Whether the age-based evidence retention sweep runs at all."`
-	MaxAgeDays int  `json:"maxAgeDays" description:"Purge evidence older than this many days (from its created_at). 0/disabled = keep forever."`
-}
-
-// SetEvidenceRetentionSettingsRequest is the body of PUT
-// /api/v1/settings/evidence-retention.
-type SetEvidenceRetentionSettingsRequest struct {
-	Enabled    bool `json:"enabled"`
-	MaxAgeDays int  `json:"maxAgeDays"`
-}
-
-// EvidenceRetentionSweepResponse is the body of POST
-// /api/v1/settings/evidence-retention/sweep (the manual trigger).
-type EvidenceRetentionSweepResponse struct {
-	Purged     int   `json:"purged" description:"Number of evidence items removed."`
-	FreedBytes int64 `json:"freedBytes" description:"On-disk bytes freed by the sweep."`
 }
 
 // SpawnConfirmSettingsResponse mirrors spawnconfirm.Settings on the wire. It is

@@ -326,23 +326,6 @@ var schemaNames = map[string]string{
 	"DomainSimHold":          "SimHold",
 	"DomainSimRecording":     "SimRecording",
 	"DomainSimRecordingStep": "SimRecordingStep",
-	// httpd/controllers — smoke-test wire envelopes
-	"ControllersSmokeCheckParam":             "SmokeCheckParam",
-	"ControllersSmokeEvidenceParam":          "SmokeEvidenceParam",
-	"ControllersSmokeAuthoredCaseInput":      "SmokeAuthoredCaseInput",
-	"ControllersAuthorSmokeChecksInput":      "AuthorSmokeChecksInput",
-	"ControllersListSmokeChecksResponse":     "ListSmokeChecksResponse",
-	"ControllersSmokeCheckResponse":          "SmokeCheckResponse",
-	"ControllersSetSmokeVerdictInput":        "SetSmokeVerdictInput",
-	"ControllersRecordSmokeAgentResultInput": "RecordSmokeAgentResultInput",
-	"ControllersRetireSmokeCheckInput":       "RetireSmokeCheckInput",
-	"ControllersSmokeEvidenceResponse":       "SmokeEvidenceResponse",
-	"ControllersEvidenceExportResponse":      "EvidenceExportResponse",
-	"ControllersReportSmokeResponse":         "ReportSmokeResponse",
-	"ControllersPostSmokeToJiraResponse":     "PostSmokeToJiraResponse",
-	// domain smoke entities
-	"DomainSmokeCheck":    "SmokeCheck",
-	"DomainSmokeEvidence": "SmokeEvidence",
 	// httpd/controllers — crew-run (tree-write detector) wire envelopes
 	"ControllersStartCrewRunInput":    "StartCrewRunInput",
 	"ControllersStartCrewRunResponse": "StartCrewRunResponse",
@@ -363,44 +346,41 @@ var schemaNames = map[string]string{
 	"ControllersImportStatusResponse": "ImportStatusResponse",
 	"ControllersImportRunResponse":    "ImportRunResponse",
 	// httpd/controllers: settings wire envelopes
-	"ControllersReclaimSettingsResponse":             "ReclaimSettingsResponse",
-	"ControllersSetReclaimSettingsRequest":           "SetReclaimSettingsRequest",
-	"ControllersEvidenceRetentionSettingsResponse":   "EvidenceRetentionSettingsResponse",
-	"ControllersSetEvidenceRetentionSettingsRequest": "SetEvidenceRetentionSettingsRequest",
-	"ControllersEvidenceRetentionSweepResponse":      "EvidenceRetentionSweepResponse",
-	"ControllersSpawnConfirmSettingsResponse":        "SpawnConfirmSettingsResponse",
-	"ControllersSetSpawnConfirmSettingsRequest":      "SetSpawnConfirmSettingsRequest",
-	"ControllersAutoNudgeSettingsResponse":           "AutoNudgeSettingsResponse",
-	"ControllersSetAutoNudgeSettingsRequest":         "SetAutoNudgeSettingsRequest",
-	"ControllersResponseLanguageSettingsResponse":    "ResponseLanguageSettingsResponse",
-	"ControllersSetResponseLanguageSettingsRequest":  "SetResponseLanguageSettingsRequest",
-	"ControllersWikiSettingsResponse":                "WikiSettingsResponse",
-	"ControllersSetWikiSettingsRequest":              "SetWikiSettingsRequest",
-	"ControllersRefLinksSettingsResponse":            "RefLinksSettingsResponse",
-	"ControllersSetRefLinksSettingsRequest":          "SetRefLinksSettingsRequest",
-	"ControllersSimTrustSettingsResponse":            "SimTrustSettingsResponse",
-	"ControllersSetSimTrustSettingsRequest":          "SetSimTrustSettingsRequest",
-	"ControllersWikiStatusResponse":                  "WikiStatusResponse",
-	"ControllersStartWikiAgentRequest":               "StartWikiAgentRequest",
-	"ControllersWikiFilesResponse":                   "WikiFilesResponse",
-	"ControllersWikiNoteSummary":                     "WikiNoteSummary",
-	"ControllersWikiNoteResponse":                    "WikiNoteResponse",
-	"ControllersWriteWikiNoteRequest":                "WriteWikiNoteRequest",
-	"ControllersWriteWikiNoteResponse":               "WriteWikiNoteResponse",
-	"ControllersWikiTaskRow":                         "WikiTaskRow",
-	"ControllersWikiTasksResponse":                   "WikiTasksResponse",
-	"ControllersCompleteWikiTaskRequest":             "CompleteWikiTaskRequest",
-	"ControllersDeleteWikiTaskRequest":               "DeleteWikiTaskRequest",
-	"ControllersCompleteWikiTaskResponse":            "CompleteWikiTaskResponse",
-	"ControllersDeleteWikiTaskResponse":              "DeleteWikiTaskResponse",
-	"ControllersWikiTasksSettingsResponse":           "WikiTasksSettingsResponse",
-	"ControllersSetWikiTasksSettingsRequest":         "SetWikiTasksSettingsRequest",
-	"ControllersSystemPromptItem":                    "SystemPromptItem",
-	"ControllersSystemPromptsResponse":               "SystemPromptsResponse",
-	"ControllersSetSystemPromptRequest":              "SetSystemPromptRequest",
-	"ControllersMessageTemplateItem":                 "MessageTemplateItem",
-	"ControllersMessageTemplatesResponse":            "MessageTemplatesResponse",
-	"ControllersSetMessageTemplateRequest":           "SetMessageTemplateRequest",
+	"ControllersReclaimSettingsResponse":            "ReclaimSettingsResponse",
+	"ControllersSetReclaimSettingsRequest":          "SetReclaimSettingsRequest",
+	"ControllersSpawnConfirmSettingsResponse":       "SpawnConfirmSettingsResponse",
+	"ControllersSetSpawnConfirmSettingsRequest":     "SetSpawnConfirmSettingsRequest",
+	"ControllersAutoNudgeSettingsResponse":          "AutoNudgeSettingsResponse",
+	"ControllersSetAutoNudgeSettingsRequest":        "SetAutoNudgeSettingsRequest",
+	"ControllersResponseLanguageSettingsResponse":   "ResponseLanguageSettingsResponse",
+	"ControllersSetResponseLanguageSettingsRequest": "SetResponseLanguageSettingsRequest",
+	"ControllersWikiSettingsResponse":               "WikiSettingsResponse",
+	"ControllersSetWikiSettingsRequest":             "SetWikiSettingsRequest",
+	"ControllersRefLinksSettingsResponse":           "RefLinksSettingsResponse",
+	"ControllersSetRefLinksSettingsRequest":         "SetRefLinksSettingsRequest",
+	"ControllersSimTrustSettingsResponse":           "SimTrustSettingsResponse",
+	"ControllersSetSimTrustSettingsRequest":         "SetSimTrustSettingsRequest",
+	"ControllersWikiStatusResponse":                 "WikiStatusResponse",
+	"ControllersStartWikiAgentRequest":              "StartWikiAgentRequest",
+	"ControllersWikiFilesResponse":                  "WikiFilesResponse",
+	"ControllersWikiNoteSummary":                    "WikiNoteSummary",
+	"ControllersWikiNoteResponse":                   "WikiNoteResponse",
+	"ControllersWriteWikiNoteRequest":               "WriteWikiNoteRequest",
+	"ControllersWriteWikiNoteResponse":              "WriteWikiNoteResponse",
+	"ControllersWikiTaskRow":                        "WikiTaskRow",
+	"ControllersWikiTasksResponse":                  "WikiTasksResponse",
+	"ControllersCompleteWikiTaskRequest":            "CompleteWikiTaskRequest",
+	"ControllersDeleteWikiTaskRequest":              "DeleteWikiTaskRequest",
+	"ControllersCompleteWikiTaskResponse":           "CompleteWikiTaskResponse",
+	"ControllersDeleteWikiTaskResponse":             "DeleteWikiTaskResponse",
+	"ControllersWikiTasksSettingsResponse":          "WikiTasksSettingsResponse",
+	"ControllersSetWikiTasksSettingsRequest":        "SetWikiTasksSettingsRequest",
+	"ControllersSystemPromptItem":                   "SystemPromptItem",
+	"ControllersSystemPromptsResponse":              "SystemPromptsResponse",
+	"ControllersSetSystemPromptRequest":             "SetSystemPromptRequest",
+	"ControllersMessageTemplateItem":                "MessageTemplateItem",
+	"ControllersMessageTemplatesResponse":           "MessageTemplatesResponse",
+	"ControllersSetMessageTemplateRequest":          "SetMessageTemplateRequest",
 	// legacyimport report
 	"LegacyimportReport": "ImportReport",
 	// service/project entities + DTOs
@@ -492,7 +472,6 @@ func operations() []operation {
 	ops = append(ops, settingsOperations()...)
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
-	ops = append(ops, smokeOperations()...)
 	ops = append(ops, crewRunOperations()...)
 	ops = append(ops, childOperations()...)
 	ops = append(ops, iosRunOperations()...)
@@ -1418,9 +1397,6 @@ func simOperations() []operation {
 	}
 }
 
-// smokeOperations declares the session-scoped /smoke-checks operations. Must
-// stay 1:1 with the routes SmokeController.Register mounts (enforced by the
-// parity test).
 // crewRunOperations is the bracket a crew member puts around a build or test
 // run: the tree-write detector's two readings, and the "this member is running
 // something right now" signal that falls out of the same call.
@@ -1552,196 +1528,6 @@ func iosRunOperations() []operation {
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-	}
-}
-
-func smokeOperations() []operation {
-	return []operation{
-		{
-			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/smoke-checks", id: "listSmokeChecks", tag: "smoke",
-			summary:    "List a session's smoke-test checklist",
-			pathParams: []any{controllers.SessionIDParam{}},
-			resps: []respUnit{
-				{http.StatusOK, controllers.ListSmokeChecksResponse{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/smoke-checks", id: "authorSmokeChecks", tag: "smoke",
-			summary:    "Author/replace a session's smoke-test checklist (results preserved by case id)",
-			pathParams: []any{controllers.SessionIDParam{}},
-			reqBody:    controllers.AuthorSmokeChecksInput{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.ListSmokeChecksResponse{}},
-				{http.StatusBadRequest, envelope.APIError{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPatch, path: "/api/v1/sessions/{sessionId}/smoke-checks", id: "addSmokeCases", tag: "smoke",
-			summary:    "Add or edit cases without touching the rest of the checklist",
-			pathParams: []any{controllers.SessionIDParam{}},
-			reqBody:    controllers.AddSmokeCasesInput{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.ListSmokeChecksResponse{}},
-				{http.StatusBadRequest, envelope.APIError{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPatch, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}", id: "editSmokeCase", tag: "smoke",
-			summary:    "Edit one case's authored fields; an omitted field is left alone",
-			pathParams: []any{controllers.SmokeCheckParam{}},
-			reqBody:    controllers.EditSmokeCaseInput{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.SmokeCheckResponse{}},
-				{http.StatusBadRequest, envelope.APIError{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}", id: "removeSmokeCase", tag: "smoke",
-			summary:    "Remove one case the user has not played (a played case is retired instead)",
-			pathParams: []any{controllers.SmokeCheckParam{}},
-			reqBody:    controllers.RemoveSmokeCaseInput{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.ListSmokeChecksResponse{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/stand-down", id: "standDownSmokeChecklist", tag: "smoke",
-			summary:    "Record that this change needs no human verification, with the reason",
-			pathParams: []any{controllers.SessionIDParam{}},
-			reqBody:    controllers.StandDownSmokeChecklistInput{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.ListSmokeChecksResponse{}},
-				{http.StatusBadRequest, envelope.APIError{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/report", id: "reportSmokeChecks", tag: "smoke",
-			summary:    "Report a session's smoke-test results back to the worker",
-			pathParams: []any{controllers.SessionIDParam{}},
-			resps: []respUnit{
-				{http.StatusOK, controllers.ReportSmokeResponse{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/jira", id: "postSmokeToJira", tag: "smoke",
-			summary:    "Post a session's smoke-test results to its linked Jira issue as a table comment with evidence attachments",
-			pathParams: []any{controllers.SessionIDParam{}},
-			resps: []respUnit{
-				{http.StatusOK, controllers.PostSmokeToJiraResponse{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusInternalServerError, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict", id: "setSmokeVerdict", tag: "smoke",
-			summary:    "Record the user's verdict + note for a smoke-test case",
-			pathParams: []any{controllers.SmokeCheckParam{}},
-			reqBody:    controllers.SetSmokeVerdictInput{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.SmokeCheckResponse{}},
-				{http.StatusBadRequest, envelope.APIError{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/agent-result", id: "recordSmokeAgentResult", tag: "smoke",
-			summary:    "Record a machine's result for a smoke-test case, beside (never instead of) the user's",
-			pathParams: []any{controllers.SmokeCheckParam{}},
-			reqBody:    controllers.RecordSmokeAgentResultInput{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.SmokeCheckResponse{}},
-				{http.StatusBadRequest, envelope.APIError{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/retire", id: "retireSmokeCheck", tag: "smoke",
-			summary:    "Retire a smoke-test case out of the checklist, keeping its results and the reason it went",
-			pathParams: []any{controllers.SmokeCheckParam{}},
-			reqBody:    controllers.RetireSmokeCheckInput{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.SmokeCheckResponse{}},
-				{http.StatusBadRequest, envelope.APIError{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset", id: "resetSmokeCheck", tag: "smoke",
-			summary:    "Clear a smoke-test case's verdict/note/evidence",
-			pathParams: []any{controllers.SmokeCheckParam{}},
-			resps: []respUnit{
-				{http.StatusOK, controllers.SmokeCheckResponse{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence", id: "uploadSmokeEvidence", tag: "smoke",
-			summary:    "Attach a screenshot/short clip to a smoke-test case (multipart/form-data 'file' or raw body)",
-			pathParams: []any{controllers.SmokeEvidenceUploadParam{}},
-			resps: []respUnit{
-				{http.StatusOK, controllers.SmokeEvidenceResponse{}},
-				{http.StatusUnprocessableEntity, envelope.APIError{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", id: "serveSmokeEvidence", tag: "smoke",
-			summary:      "Serve a stored smoke-test evidence blob",
-			pathParams:   []any{controllers.SmokeEvidenceParam{}},
-			resps:        []respUnit{{http.StatusOK, ""}, {http.StatusNotFound, envelope.APIError{}}, {http.StatusNotImplemented, envelope.APIError{}}},
-			contentTypes: map[int]string{http.StatusOK: "application/octet-stream"},
-		},
-		{
-			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}", id: "deleteSmokeEvidence", tag: "smoke",
-			summary:    "Remove one evidence blob from a smoke-test case",
-			pathParams: []any{controllers.SmokeEvidenceParam{}},
-			resps: []respUnit{
-				{http.StatusOK, controllers.SmokeCheckResponse{}},
-				{http.StatusNotFound, envelope.APIError{}},
-				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export", id: "exportSmokeEvidence", tag: "smoke",
-			summary:    "Materialize a human-named, correctly-extensioned copy of an evidence blob for Reveal/Open",
-			pathParams: []any{controllers.SmokeEvidenceParam{}},
-			resps: []respUnit{
-				{http.StatusOK, controllers.EvidenceExportResponse{}},
-				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
@@ -2643,32 +2429,6 @@ func settingsOperations() []operation {
 				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodGet, path: "/api/v1/settings/evidence-retention", id: "getEvidenceRetentionSettings", tag: "settings",
-			summary: "Fetch the smoke-test evidence retention settings",
-			resps: []respUnit{
-				{http.StatusOK, controllers.EvidenceRetentionSettingsResponse{}},
-				{http.StatusInternalServerError, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPut, path: "/api/v1/settings/evidence-retention", id: "setEvidenceRetentionSettings", tag: "settings",
-			summary: "Replace the smoke-test evidence retention settings",
-			reqBody: controllers.SetEvidenceRetentionSettingsRequest{},
-			resps: []respUnit{
-				{http.StatusOK, controllers.EvidenceRetentionSettingsResponse{}},
-				{http.StatusBadRequest, envelope.APIError{}},
-				{http.StatusInternalServerError, envelope.APIError{}},
-			},
-		},
-		{
-			method: http.MethodPost, path: "/api/v1/settings/evidence-retention/sweep", id: "sweepEvidenceRetention", tag: "settings",
-			summary: "Run the evidence retention sweep now (manual trigger)",
-			resps: []respUnit{
-				{http.StatusOK, controllers.EvidenceRetentionSweepResponse{}},
-				{http.StatusInternalServerError, envelope.APIError{}},
 			},
 		},
 		{
