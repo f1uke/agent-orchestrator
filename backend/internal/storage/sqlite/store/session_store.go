@@ -126,9 +126,9 @@ func (s *Store) SetSessionPRTarget(ctx context.Context, id domain.SessionID, tar
 	return rows > 0, nil
 }
 
-// SetSessionKeepWarmOnMerge toggles whether a worker suspends-in-place (keeps its
-// card on the board) rather than terminating to Done when its PR merges
-// (feature/merge-suspend-in-place). Returns ok=false when the session id does not
+// SetSessionKeepWarmOnMerge toggles whether a worker keeps running (card on the
+// board, tmux untouched) rather than terminating to Done when its PR merges.
+// Returns ok=false when the session id does not
 // exist. Bumping updated_at trips the sessions_cdc_update trigger so the board
 // reflects the toggle live.
 func (s *Store) SetSessionKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool, updatedAt time.Time) (bool, error) {

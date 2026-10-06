@@ -18,9 +18,9 @@ vi.mock("../lib/api-client", () => ({
 vi.mock("../lib/telemetry", () => ({ captureRendererEvent: vi.fn() }));
 vi.mock("../hooks/useWorkspaceQuery", () => ({ workspaceQueryKey: ["workspaces"] }));
 
-import { MergeSuspendChip } from "./MergeSuspendChip";
+import { MergedChip } from "./MergedChip";
 
-function mergeSuspended(prNumbers: Array<[number, PRState]> = [[12, "merged"]]): WorkspaceSession {
+function mergedWorker(prNumbers: Array<[number, PRState]> = [[12, "merged"]]): WorkspaceSession {
 	return {
 		id: "sess-9",
 		workspaceId: "proj-1",
@@ -46,24 +46,30 @@ function mergeSuspended(prNumbers: Array<[number, PRState]> = [[12, "merged"]]):
 	};
 }
 
-function renderChip(session = mergeSuspended()) {
+function renderChip(session = mergedWorker()) {
 	const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 	return render(
 		<QueryClientProvider client={qc}>
-			<MergeSuspendChip session={session} />
+			<MergedChip session={session} />
 		</QueryClientProvider>,
 	);
 }
 
-describe("MergeSuspendChip", () => {
+describe("MergedChip", () => {
 	beforeEach(() => {
 		postMock.mockReset();
 		postMock.mockResolvedValue({ error: undefined });
 	});
 
+	it("labels a keep-warm worker that is still running after its merge", () => {
+		renderChip({ ...mergedWorker(), status: "working", isSuspended: false });
+		expect(screen.getByText("Merged #12")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Move to Done" })).toBeInTheDocument();
+	});
+
 	it("labels the highest merged PR number", () => {
 		renderChip(
-			mergeSuspended([
+			mergedWorker([
 				[3, "merged"],
 				[9, "merged"],
 				[5, "closed"],

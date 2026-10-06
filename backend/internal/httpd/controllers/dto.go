@@ -361,9 +361,9 @@ type SpawnSessionRequest struct {
 	// the report-back. `ao spawn --todo` sets it from AO_SESSION_ID.
 	CreatedBy domain.SessionID `json:"createdBy,omitempty"`
 	// KeepWarmOnMerge marks a worker expected to open more PRs: when its PR merges
-	// it SUSPENDS in place (card stays on the board, resumable) instead of
-	// terminating to Done (feature/merge-suspend-in-place). Default false — an
-	// ordinary single-PR worker still auto-archives on merge.
+	// it keeps running (tmux untouched, card stays on the board) instead of
+	// terminating to Done. Default false - an ordinary single-PR worker still
+	// auto-archives on merge.
 	KeepWarmOnMerge bool `json:"keepWarmOnMerge,omitempty"`
 	// TaskSize is the ceremony level for the worker (`ao spawn --task-size`):
 	// mechanical / standard / deep. Absent/empty means standard (full ceremony). A
@@ -426,8 +426,8 @@ type SetAutoResolveRequest struct {
 }
 
 // SetSessionKeepWarmRequest is the body of PUT
-// /api/v1/sessions/{sessionId}/keep-warm: enable/disable
-// suspend-in-place-on-merge for a worker.
+// /api/v1/sessions/{sessionId}/keep-warm: enable/disable keeping a worker
+// running on the board when its PR merges.
 type SetSessionKeepWarmRequest struct {
 	Enabled bool `json:"enabled"`
 }

@@ -1180,7 +1180,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Toggle suspend-in-place-on-merge (keep-warm) for a worker session */
+        /** Toggle keep-warm (keep running on the board when its PR merges) for a worker session */
         put: operations["setSessionKeepWarm"];
         post?: never;
         delete?: never;

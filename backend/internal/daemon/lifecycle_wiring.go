@@ -201,11 +201,6 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// next spawn/restore.
 		ResponseLanguage: func() string { return responseLang.Language() },
 	})
-	// When a worker's PR merges, the lifecycle reducer suspends it in place (card
-	// stays on the board) and calls back here to tear its tmux down, mirroring the
-	// idle sweep. Wired after the manager exists; lifecycle has no runtime of its
-	// own (feature/merge-suspend-in-place).
-	lcm.SetRuntimeSuspender(mgr.SuspendRuntime)
 	// A crew is one task on one worktree. When the reducer terminates a dev
 	// because its PR merged (or its issue closed) it writes one row and nothing
 	// else - so without this its qa would keep running, awake, on a worktree

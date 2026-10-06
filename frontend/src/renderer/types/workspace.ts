@@ -306,8 +306,8 @@ export type WorkspaceSession = {
 	 * (`is_terminated`), independent of the DERIVED {@link status}. A Done session
 	 * whose PR merged reads status `"merged"` yet is still terminated, so this — not
 	 * the display status — is the correct gate for the "Restore session" affordance
-	 * (it mirrors the backend `Restore` precondition and excludes suspended/keep-warm
-	 * sessions, which are resumed by wake-on-open instead).
+	 * (it mirrors the backend `Restore` precondition and excludes suspended and
+	 * kept-warm sessions, which are resumed by wake-on-open or still running).
 	 */
 	isTerminated?: boolean;
 	/**
@@ -335,9 +335,9 @@ export type WorkspaceSession = {
 	 */
 	sleepReason?: "idle" | "turn" | "merged" | "undelivered";
 	/**
-	 * True when this worker is expected to open MORE PRs, so a PR merge SUSPENDS it
-	 * in place (card stays on the board, resumable) instead of terminating it to
-	 * Done (feature/merge-suspend-in-place). Opt-in per session via
+	 * True when this worker is expected to open MORE PRs, so a PR merge leaves it
+	 * running (same terminal, anything running in it carries on, card stays on the
+	 * board) instead of terminating it to Done. Opt-in per session via
 	 * `ao spawn --keep-warm` or the board card toggle; default false.
 	 */
 	keepWarmOnMerge?: boolean;
@@ -572,15 +572,21 @@ export function mergedPRCount(session: WorkspaceSession): number {
 }
 
 /**
- * A worker SUSPENDED after its PR merged (feature/merge-suspend-in-place): its
- * card stays on the board (the daemon surfaces it as needs_input, not merged) with
- * a "Merged · Continue / Close" affordance instead of vanishing to Done. This is
- * exactly the backend completion bar — suspended AND every PR is terminal AND at
- * least one merged — so it never collides with an idle-suspended session (which
- * has no merged-completion state, hence shows the plain "Paused" chip).
+ * A worker whose work has merged and that is still on the board waiting for its
+ * next PR: a keep-warm worker carries on running through its merge (the daemon
+ * surfaces it as working/needs_input, not merged), and a merged worker that has
+ * since been suspended - by the idle sweep, or by a merge before keep-warm
+ * stopped parking it - is still one to continue or archive. Its card gets the
+ * "Merged #N · Move to Done" chip instead of vanishing to Done.
+ *
+ * The PR test is exactly the backend completion bar - every PR terminal and at
+ * least one merged - so it never collides with a worker that has an open PR, or
+ * with an idle-suspended one that merged nothing (the plain "Paused" chip).
  */
-export function isMergeSuspended(session: WorkspaceSession): boolean {
-	if (!session.isSuspended || session.prs.length === 0) return false;
+export function isMergedAwaitingNext(session: WorkspaceSession): boolean {
+	if (session.status === "terminated" || session.status === "merged") return false;
+	if (!session.isSuspended && !session.keepWarmOnMerge) return false;
+	if (session.prs.length === 0) return false;
 	return (
 		session.prs.every((pr) => pr.state === "merged" || pr.state === "closed") &&
 		session.prs.some((pr) => pr.state === "merged")
@@ -606,8 +612,8 @@ export function isUndeliveredParked(session: WorkspaceSession): boolean {
 	return Boolean(session.isSuspended) && session.sleepReason === "undelivered";
 }
 
-/** The merged PR to name in the merge-suspend chip: the highest (most recent) number. */
-export function mergedSuspendPRNumber(session: WorkspaceSession): number | undefined {
+/** The merged PR to name in the merged chip: the highest (most recent) number. */
+export function latestMergedPRNumber(session: WorkspaceSession): number | undefined {
 	const merged = session.prs.filter((pr) => pr.state === "merged").map((pr) => pr.number);
 	return merged.length ? Math.max(...merged) : undefined;
 }

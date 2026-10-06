@@ -19,9 +19,9 @@ import {
 	workerStatusPulses,
 	openPRs,
 	mergedPRCount,
-	isMergeSuspended,
+	isMergedAwaitingNext,
 	isUndeliveredParked,
-	mergedSuspendPRNumber,
+	latestMergedPRNumber,
 	primaryPR,
 	sortedPRs,
 	type AttentionZone,
@@ -408,11 +408,11 @@ describe("PR helpers", () => {
 	});
 });
 
-describe("isMergeSuspended / mergedSuspendPRNumber", () => {
+describe("isMergedAwaitingNext / latestMergedPRNumber", () => {
 	it("is true for a suspended worker whose PRs are all terminal with ≥1 merged", () => {
 		const s = sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "merged" })] });
-		expect(isMergeSuspended(s)).toBe(true);
-		expect(mergedSuspendPRNumber(s)).toBe(7);
+		expect(isMergedAwaitingNext(s)).toBe(true);
+		expect(latestMergedPRNumber(s)).toBe(7);
 	});
 
 	it("names the highest merged PR number when several merged", () => {
@@ -420,14 +420,46 @@ describe("isMergeSuspended / mergedSuspendPRNumber", () => {
 			isSuspended: true,
 			prs: [pr({ number: 3, state: "merged" }), pr({ number: 9, state: "merged" }), pr({ number: 5, state: "closed" })],
 		});
-		expect(isMergeSuspended(s)).toBe(true);
-		expect(mergedSuspendPRNumber(s)).toBe(9);
+		expect(isMergedAwaitingNext(s)).toBe(true);
+		expect(latestMergedPRNumber(s)).toBe(9);
 	});
 
-	it("is false when NOT suspended (a plain merged session archives to Done)", () => {
-		expect(isMergeSuspended(sessionWith({ isSuspended: false, prs: [pr({ number: 7, state: "merged" })] }))).toBe(
+	it("is false when NOT suspended and not keep-warm (a plain merged session archives to Done)", () => {
+		expect(isMergedAwaitingNext(sessionWith({ isSuspended: false, prs: [pr({ number: 7, state: "merged" })] }))).toBe(
 			false,
 		);
+	});
+
+	it("is true for a keep-warm worker still RUNNING after its merge (nothing was suspended)", () => {
+		const s = sessionWith({
+			status: "working",
+			isSuspended: false,
+			keepWarmOnMerge: true,
+			prs: [pr({ number: 7, state: "merged" })],
+		});
+		expect(isMergedAwaitingNext(s)).toBe(true);
+		expect(latestMergedPRNumber(s)).toBe(7);
+	});
+
+	it("is false for a keep-warm worker before anything merged, or with its next PR open", () => {
+		expect(isMergedAwaitingNext(sessionWith({ keepWarmOnMerge: true, prs: [] }))).toBe(false);
+		expect(isMergedAwaitingNext(sessionWith({ keepWarmOnMerge: true, prs: [pr({ number: 7, state: "open" })] }))).toBe(
+			false,
+		);
+		expect(
+			isMergedAwaitingNext(
+				sessionWith({
+					keepWarmOnMerge: true,
+					prs: [pr({ number: 7, state: "merged" }), pr({ number: 8, state: "open" })],
+				}),
+			),
+		).toBe(false);
+	});
+
+	it("is false once the worker has ended (moved to Done, or reads merged)", () => {
+		const prs = [pr({ number: 7, state: "merged" })];
+		expect(isMergedAwaitingNext(sessionWith({ status: "terminated", keepWarmOnMerge: true, prs }))).toBe(false);
+		expect(isMergedAwaitingNext(sessionWith({ status: "merged", keepWarmOnMerge: true, prs }))).toBe(false);
 	});
 
 	it("is false when an open PR remains (still live) — this is idle-suspend territory", () => {
@@ -435,14 +467,16 @@ describe("isMergeSuspended / mergedSuspendPRNumber", () => {
 			isSuspended: true,
 			prs: [pr({ number: 7, state: "merged" }), pr({ number: 8, state: "open" })],
 		});
-		expect(isMergeSuspended(s)).toBe(false);
+		expect(isMergedAwaitingNext(s)).toBe(false);
 	});
 
 	it("is false when suspended but nothing merged (all closed, or no PRs) — idle-suspend", () => {
-		expect(isMergeSuspended(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] }))).toBe(false);
-		expect(isMergeSuspended(sessionWith({ isSuspended: true, prs: [] }))).toBe(false);
+		expect(isMergedAwaitingNext(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] }))).toBe(
+			false,
+		);
+		expect(isMergedAwaitingNext(sessionWith({ isSuspended: true, prs: [] }))).toBe(false);
 		expect(
-			mergedSuspendPRNumber(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] })),
+			latestMergedPRNumber(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] })),
 		).toBeUndefined();
 	});
 });

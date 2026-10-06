@@ -40,9 +40,11 @@ const (
 	// boot reconciliation found it idle past the same window. Opening it resumes
 	// it in place - the behaviour the human relies on daily.
 	SleepReasonIdle SleepReason = "idle"
-	// SleepReasonMerged: a keep-warm worker whose PR merged, parked in place with
-	// the "Merged - open to continue" affordance. Opening it resumes it, which is
-	// what that affordance promises.
+	// SleepReasonMerged: LEGACY. A keep-warm worker whose PR merged used to be
+	// parked with this reason and its tmux torn down. Nothing writes it any more -
+	// a keep-warm worker now keeps running through a merge - but rows parked
+	// before that change still carry it, so it stays a valid value with the same
+	// meaning: opening it resumes it.
 	SleepReasonMerged SleepReason = "merged"
 	// SleepReasonUndelivered: an agent ended its OWN session while holding work
 	// that had reached nobody - no pull request had ever been opened from the

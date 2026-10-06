@@ -3588,7 +3588,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: Toggle suspend-in-place-on-merge (keep-warm) for a worker session
+      summary: Toggle keep-warm (keep running on the board when its PR merges) for
+        a worker session
       tags:
       - sessions
   /api/v1/sessions/{sessionId}/kill:

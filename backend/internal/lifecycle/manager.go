@@ -128,12 +128,6 @@ type Manager struct {
 	// transcriptFor locates a session's agent transcript for the termination
 	// account. Nil until wired; a nil locator records an empty pointer.
 	transcriptFor func(domain.SessionRecord) string
-	// runtimeSuspender tears a worker's tmux down when its PR merges
-	// (feature/merge-suspend-in-place), mirroring the idle sweep's reap. Lifecycle
-	// is a pure fact layer with no runtime access, so the session manager injects
-	// this via SetRuntimeSuspender after it is built. Nil until wired (the flag
-	// flip alone still keeps the card in its lane); best-effort when set.
-	runtimeSuspender func(context.Context, domain.SessionID) error
 	// crewReaper ends the crew MEMBERS of a dev this reducer is about to
 	// terminate because its work is done. Lifecycle owns the fact ("the task is
 	// over") but has no runtime and no crew of its own, so the session manager
@@ -162,19 +156,8 @@ type Manager struct {
 	endings ports.SessionEndingSink
 }
 
-// SetRuntimeSuspender wires the hook the merge-suspend path uses to tear a
-// worker's tmux down when its PR merges — the runtime half of suspend-in-place,
-// injected by the session manager (like SetSessionPaneReaper on the manager side)
-// because lifecycle has no runtime. A manager with no suspender set skips the
-// reap: the session still suspends (card stays in its lane) and the stray tmux is
-// reaped later (agent exit / daemon restart).
-func (m *Manager) SetRuntimeSuspender(fn func(context.Context, domain.SessionID) error) {
-	m.runtimeSuspender = fn
-}
-
 // SetCrewReaper wires the hook that ends a finished dev's crew members, injected
-// by the session manager (like SetRuntimeSuspender above) because lifecycle has
-// no runtime and no view of a crew.
+// by the session manager because lifecycle has no runtime and no view of a crew.
 //
 // It exists because a PR merge is the ONE route to termination that does not go
 // through the session manager's Teardown, and Teardown is where the crew fan-out
@@ -547,12 +530,13 @@ func (m *Manager) MarkSpawned(ctx context.Context, id domain.SessionID, metadata
 	// restore/reopen/continue: mark it reactivated so status derivation surfaces it
 	// as needs_input (the "Needs you" zone) rather than letting a previously-merged
 	// PR pin it to Done. This covers both Restore of a terminated-merged session AND
-	// Resume of a WORKER suspended after its PR merged
-	// (feature/merge-suspend-in-place): once Resume clears is_suspended, the
-	// still-merged worker must stay visible while it opens its NEXT PR instead of
-	// re-deriving merged→Done. An idle-suspended session has NO merged PR, so
-	// anyMerged is false and it stays reactivated=false (idle-suspend's "resume must
-	// not land in Needs you" is preserved); a fresh spawn has no PRs either.
+	// Resume of a keep-warm WORKER whose PR merged and which the idle sweep then
+	// suspended (a row from before keep-warm stopped suspending on merge reaches
+	// here the same way): the still-merged worker must stay visible while it opens
+	// its NEXT PR instead of re-deriving merged→Done. An ordinary idle-suspended
+	// session has NO merged PR, so anyMerged is false and it stays
+	// reactivated=false (idle-suspend's "resume must not land in Needs you" is
+	// preserved); a fresh spawn has no PRs either.
 	merged, err := m.anyMergedPR(ctx, id)
 	if err != nil {
 		return err
@@ -633,6 +617,27 @@ func (m *Manager) MarkSuspended(ctx context.Context, id domain.SessionID, reason
 		cur.IsSuspended = true
 		cur.SleepReason = reason
 		cur.WokenBy = ""
+		return cur, true
+	})
+}
+
+// markKeptWarm records that a keep-warm worker's work merged while the worker
+// itself carries on. It is the same fact Restore records for a revived merged
+// session - Reactivated - and for the same reason: without it, status derivation
+// reads "every PR merged" as StatusMerged and files the card in Done while its
+// agent is still running. With it the card reads working while the agent works
+// and needs_input once it settles, until it opens its next PR (an open PR wins)
+// or is moved to Done.
+//
+// Only the row changes. The runtime is deliberately left alone: whatever is
+// running in the worker's pane keeps running. Idempotent, and a terminated row
+// is never touched.
+func (m *Manager) markKeptWarm(ctx context.Context, id domain.SessionID) error {
+	return m.mutate(ctx, id, func(cur domain.SessionRecord, _ time.Time) (domain.SessionRecord, bool) {
+		if cur.IsTerminated || cur.Reactivated {
+			return cur, false
+		}
+		cur.Reactivated = true
 		return cur, true
 	})
 }

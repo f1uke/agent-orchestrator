@@ -58,12 +58,13 @@ type SessionRecord struct {
 	// of the API read model.
 	FirstSignalAt time.Time `json:"-"`
 	IsTerminated  bool      `json:"isTerminated"`
-	// Reactivated marks a session brought back from a terminal state by
-	// `ao session restore` (the board Reopen action). It stays set while the
-	// session is live so status derivation surfaces a reopened session as
-	// needs_input (the "Needs you" zone) instead of letting a previously-merged PR
-	// pin it to Done, until it takes on new work or is finished again. Internal
-	// durable fact, not part of the API read model.
+	// Reactivated marks a session that carries on past a merged PR: one brought
+	// back from a terminal state by `ao session restore` (the board Reopen
+	// action), or a keep-warm worker whose PR merged while it kept running. It
+	// stays set while the session is live so status derivation surfaces it as
+	// working/needs_input instead of letting a previously-merged PR pin it to
+	// Done, until it takes on new work or is finished again. Internal durable
+	// fact, not part of the API read model.
 	Reactivated bool `json:"-"`
 	// AutoNudgeComments overrides, per session, whether the worker is
 	// auto-nudged when its PR has unresolved review comments. nil = inherit the
@@ -115,9 +116,10 @@ type SessionRecord struct {
 	WokenBy WokenBy `json:"-"`
 	// KeepWarmOnMerge marks a WORKER expected to open MORE PRs after the current
 	// one merges (an orchestrator-dispatched multi-slice worker). When true, a PR
-	// merge that would finish the session SUSPENDS it in place (card stays on the
-	// board, resumable) instead of terminating it to Done
-	// (feature/merge-suspend-in-place). Default false: an ordinary single-PR worker
+	// merge that would finish the session leaves it RUNNING instead of terminating
+	// it to Done: same tmux, same agent, nothing torn down, card stays on the board
+	// (and the idle sweep suspends it later if it sits idle, like any worker).
+	// Default false: an ordinary single-PR worker
 	// still auto-archives to Done on merge. Opt-in per session via
 	// `ao spawn --keep-warm` or the board card toggle. Durable fact, surfaced in the
 	// API read model so the toggle reflects its state.

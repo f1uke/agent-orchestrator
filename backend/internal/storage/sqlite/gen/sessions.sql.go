@@ -522,8 +522,8 @@ type SetSessionKeepWarmOnMergeParams struct {
 	ID              domain.SessionID
 }
 
-// Toggle whether a worker suspends-in-place (keeps its card on the board) rather
-// than terminating to Done when its PR merges (feature/merge-suspend-in-place).
+// Toggle whether a worker keeps running (card on the board, tmux untouched)
+// rather than terminating to Done when its PR merges.
 // Bumps updated_at so the sessions_cdc_update trigger refreshes the board.
 func (q *Queries) SetSessionKeepWarmOnMerge(ctx context.Context, arg SetSessionKeepWarmOnMergeParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSessionKeepWarmOnMerge, arg.KeepWarmOnMerge, arg.UpdatedAt, arg.ID)

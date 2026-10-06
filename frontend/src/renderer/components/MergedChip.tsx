@@ -6,18 +6,20 @@ import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/
 import { captureRendererEvent } from "../lib/telemetry";
 import { cn } from "../lib/utils";
 import { CHIP_ACTION_BUTTON, CHIP_WITH_ACTION } from "../lib/chip-with-action";
-import { mergedSuspendPRNumber, type WorkspaceSession } from "../types/workspace";
+import { latestMergedPRNumber, type WorkspaceSession } from "../types/workspace";
 import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
 
 /**
- * The board-card / sidebar affordance for a keep-warm worker SUSPENDED after its
- * PR merged (feature/merge-suspend-in-place). The card stays in its lane (the
- * daemon surfaces a suspended-merged worker as needs_input, not merged) instead of
+ * The board-card / sidebar affordance for a worker whose PR merged and that is
+ * waiting for its next one (see isMergedAwaitingNext): a keep-warm worker still
+ * running after its merge, or a merged worker since suspended. The card stays in
+ * its lane (the daemon surfaces it as working/needs_input, not merged) instead of
  * vanishing to the hidden Done zone; this chip replaces the idle "Paused" chip.
  *
  * Just ONE explicit action — **Move to Done** (`POST /sessions/{id}/kill`,
  * terminate + reclaim worktree → Done). "Continue" needs no button: opening the
- * card resumes the session in place (SessionView POSTs /wake → Resume, recreating
+ * card attaches to the still-running terminal, or - when the worker was
+ * suspended - resumes it in place (SessionView POSTs /wake → Resume, recreating
  * the tmux from the kept worktree with the conversation intact), exactly like the
  * idle "Paused — open to resume" chip. The Move-to-Done click stopPropagation so
  * it never triggers the card's own open handler.
@@ -25,10 +27,10 @@ import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
  * `compact` renders a glyph-only badge for the sidebar row (the row click opens →
  * resumes); the label + button live on the full board card.
  */
-export function MergeSuspendChip({ session, compact = false }: { session: WorkspaceSession; compact?: boolean }) {
+export function MergedChip({ session, compact = false }: { session: WorkspaceSession; compact?: boolean }) {
 	const queryClient = useQueryClient();
 	const [refused, setRefused] = useState<UncommittedFile[] | null>(null);
-	const prNumber = mergedSuspendPRNumber(session);
+	const prNumber = latestMergedPRNumber(session);
 	const label = prNumber ? `Merged #${prNumber}` : "Merged";
 
 	const done = useMutation({

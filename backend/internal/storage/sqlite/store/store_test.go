@@ -787,6 +787,42 @@ func TestSessionSuspendedRoundTripAndCDC(t *testing.T) {
 	}
 }
 
+// TestSessionReactivatedAloneFiresCDC: a keep-warm worker whose PR merges keeps
+// running, and reactivated is the ONLY column that changes (activity,
+// is_terminated and is_suspended stay put). That flip alone must fire a
+// session_updated event, or the board keeps the card in Done until something
+// else about the session moves.
+func TestSessionReactivatedAloneFiresCDC(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+
+	r, _ := s.CreateSession(ctx, sampleRecord("mer"))
+	base, _ := s.LatestSeq(ctx)
+
+	r.Reactivated = true
+	if err := s.UpdateSession(ctx, r); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, ok, err := s.GetSession(ctx, r.ID)
+	if err != nil || !ok || !got.Reactivated {
+		t.Fatalf("reactivated did not round-trip: found=%v err=%v reactivated=%v", ok, err, got.Reactivated)
+	}
+	evs, err := s.EventsAfter(ctx, base, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updates := 0
+	for _, e := range evs {
+		if string(e.Type) == "session_updated" {
+			updates++
+		}
+	}
+	if updates != 1 {
+		t.Fatalf("session_updated events on a reactivated-only flip = %d, want 1", updates)
+	}
+}
+
 // TestSessionSleepProvenanceRoundTripAndCDC covers the two columns that say WHY a
 // session is asleep and WHAT woke it. Both must round-trip, and - the point of
 // having them at all - both must reach the session_updated payload, because
