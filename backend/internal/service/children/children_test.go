@@ -404,3 +404,38 @@ func TestAChildThatRebasedIsCountedByItsOwnCommitsAndTheConflictIsReported(t *te
 		t.Fatalf("notes = %q, want the merge note to say the child resolved a conflict in C", notes)
 	}
 }
+
+// A merge held because AO's own commit of leftover work was refused (here by a
+// pre-commit hook) must, on retry, re-read the tree and commit that work before
+// merging, not merge the branch without it.
+func TestARetriedHoldCommitsLeftoverWorkBeforeMerging(t *testing.T) {
+	f := newFixture(t, false)
+	c := f.create("a1")
+	f.write(c.WorktreePath, "B", "b\nleft over\n")
+	hooks := filepath.Join(f.root, "hooks")
+	if err := os.MkdirAll(hooks, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil { // #nosec G306 -- a git hook must be executable.
+		t.Fatal(err)
+	}
+	f.git(f.repo, "config", "core.hooksPath", hooks)
+
+	if err := f.svc.SettleOrphans(f.ctx, f.rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.state("a1"); got.State != domain.ChildHeld {
+		t.Fatalf("with the commit refused, state = %+v, want held", got)
+	}
+
+	f.git(f.repo, "config", "--unset", "core.hooksPath")
+	if _, err := f.svc.Notes(f.ctx, f.rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.state("a1"); got.State != domain.ChildMerged {
+		t.Fatalf("after the hook went away, state = %+v, want merged", got)
+	}
+	if got := f.git(f.worker, "show", "HEAD:B"); got != "b\nleft over" {
+		t.Fatalf("worker B = %q, want the leftover work merged", got)
+	}
+}

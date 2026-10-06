@@ -507,17 +507,12 @@ func (s *Service) Notes(ctx context.Context, id domain.SessionID) ([]string, err
 	return notes, nil
 }
 
+// retryHeld runs a held child through the whole stop path again, without
+// asking it anything: whatever held it (overlapping worker edits, a refused
+// commit, a lock) may have cleared, and the tree is re-read rather than assumed
+// clean.
 func (s *Service) retryHeld(ctx context.Context, rec domain.SessionRecord, child domain.SessionChild) (StopOutcome, error) {
-	conflicts, err := s.trees.Conflicts(ctx, rec.Metadata.WorkspacePath, child.TargetBranch, child.Branch)
-	if err != nil {
-		return StopOutcome{Child: child}, err
-	}
-	if len(conflicts) > 0 {
-		child.State = domain.ChildConflict
-		child.Detail = fmt.Sprintf("conflicts with %s in %s", child.TargetBranch, strings.Join(conflicts, ", "))
-		return s.settle(ctx, child)
-	}
-	return s.merge(ctx, rec, child)
+	return s.finish(ctx, rec, child, false)
 }
 
 // List returns a worker's children.
