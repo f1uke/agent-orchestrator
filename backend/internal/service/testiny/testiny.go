@@ -1,10 +1,11 @@
 // Package testiny is the service behind a task's Testiny tab: which Testiny
-// test runs belong to the task, and what each one says right now.
+// test runs belong to the task, what each one says right now, and recording a
+// case's result in one.
 //
-// AO stores only the links. Every title, case and result is read live from
-// Testiny through the read-only adapter, held in memory for a few seconds, and
-// kept as the last good read when a later read fails, so a Testiny outage shows
-// as "data from 3 min ago" rather than an empty tab.
+// AO stores the links and a log of the results it wrote. Every title, case and
+// result is read live from Testiny through the adapter, held in memory for a
+// few seconds, and kept as the last good read when a later read fails, so a
+// Testiny outage shows as "data from 3 min ago" rather than an empty tab.
 package testiny
 
 import (
@@ -44,6 +45,9 @@ var (
 	ErrRunNotFound     = errors.New("testiny has no such run")
 	ErrWrongProject    = errors.New("the run is in another Testiny project")
 	ErrProjectNotFound = errors.New("testiny has no such project")
+	ErrRunNotLinked    = errors.New("the run is not linked to this task")
+	ErrWriteNotYours   = errors.New("this agent may not record results on this task")
+	ErrSetByPerson     = errors.New("a person set this result")
 )
 
 // RunReader reads Testiny. Satisfied by *adapters/testiny.Client.
@@ -56,18 +60,34 @@ type RunReader interface {
 	ProjectByID(ctx context.Context, id int64) (testinyadapter.Project, error)
 }
 
-// LinkStore keeps which runs belong to which task. Satisfied by the sqlite store.
+// ResultWriter records results in a run. Satisfied by *adapters/testiny.Client.
+// It returns the results written before any failure.
+type ResultWriter interface {
+	SetResults(ctx context.Context, run domain.TestinyRunID, projectID int64, results []domain.TestinyResult) ([]domain.TestinyResult, error)
+}
+
+// Client is everything the service asks of Testiny.
+type Client interface {
+	RunReader
+	ResultWriter
+}
+
+// LinkStore keeps which runs belong to which task, and the log of the results
+// AO wrote in them. Satisfied by the sqlite store.
 type LinkStore interface {
 	InsertTestinyRunLink(ctx context.Context, l domain.TestinyRunLink) error
 	DeleteTestinyRunLink(ctx context.Context, sessionID domain.SessionID, runID domain.TestinyRunID) error
 	ListTestinyRunLinks(ctx context.Context, sessionID domain.SessionID) ([]domain.TestinyRunLink, error)
+	AppendTestinyResults(ctx context.Context, entries []domain.TestinyResultEntry) error
+	LatestTestinyResults(ctx context.Context, sessionID domain.SessionID, runID domain.TestinyRunID) ([]domain.TestinyResultEntry, error)
 }
 
-// SessionGateway finds a task's project and its settings. Satisfied by the
-// sqlite store.
+// SessionGateway finds a task's project, its settings and its crew. Satisfied
+// by the sqlite store.
 type SessionGateway interface {
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
+	ListSessions(ctx context.Context, project domain.ProjectID) ([]domain.SessionRecord, error)
 }
 
 // Options configures a Service. Zero fields take the real values.
@@ -87,7 +107,7 @@ type Runs struct {
 
 // Service links runs to tasks and reads them.
 type Service struct {
-	reader   RunReader
+	reader   Client
 	links    LinkStore
 	sessions SessionGateway
 	home     string
@@ -96,10 +116,14 @@ type Service struct {
 	mu      sync.Mutex
 	reads   map[domain.TestinyRunID]domain.TestinyRunView
 	scripts map[scriptsKey]scriptIndex
+
+	// writeMu holds the overwrite guard's read of Testiny and the write it
+	// allows together, so a write in between cannot slip past the guard.
+	writeMu sync.Mutex
 }
 
 // New builds a Service.
-func New(reader RunReader, links LinkStore, sessions SessionGateway, opts Options) *Service {
+func New(reader Client, links LinkStore, sessions SessionGateway, opts Options) *Service {
 	s := &Service{
 		reader: reader, links: links, sessions: sessions, home: opts.Home, now: opts.Now,
 		reads:   map[domain.TestinyRunID]domain.TestinyRunView{},
@@ -150,18 +174,17 @@ func (s *Service) Link(ctx context.Context, task domain.SessionID, ref, by strin
 	if err := s.links.InsertTestinyRunLink(ctx, domain.TestinyRunLink{SessionID: task, RunID: id, LinkedBy: by, CreatedAt: s.now().UTC()}); err != nil {
 		return domain.TestinyRunView{}, err
 	}
-	links, err := s.links.ListTestinyRunLinks(ctx, task)
+	l, err := s.linkOf(ctx, task, id)
 	if err != nil {
 		return domain.TestinyRunView{}, err
 	}
-	for _, l := range links {
-		if l.RunID == id {
-			fresh, err := s.fetch(ctx, run)
-			s.remember(id, fresh, err)
-			return s.view(l, s.caseScripts(ctx, cfg)), nil
-		}
+	fresh, err := s.fetch(ctx, run)
+	s.remember(id, fresh, err)
+	records, err := s.records(ctx, l)
+	if err != nil {
+		return domain.TestinyRunView{}, err
 	}
-	return domain.TestinyRunView{}, fmt.Errorf("link %s to %s: not stored", id, task)
+	return s.view(l, s.caseScripts(ctx, cfg), records), nil
 }
 
 // Unlink removes a run from a task. A run that is not linked is not an error.
@@ -184,6 +207,13 @@ func (s *Service) Runs(ctx context.Context, task domain.SessionID, refresh bool)
 	}
 	scripts := s.caseScripts(ctx, cfg)
 
+	records := make([]map[int64]*domain.TestinyResultRecord, len(links))
+	for i, l := range links {
+		if records[i], err = s.records(ctx, l); err != nil {
+			return Runs{}, err
+		}
+	}
+
 	views := make([]domain.TestinyRunView, len(links))
 	slots := make(chan struct{}, readParallelism)
 	var wg sync.WaitGroup
@@ -197,7 +227,7 @@ func (s *Service) Runs(ctx context.Context, task domain.SessionID, refresh bool)
 				fresh, err := s.fetchByID(ctx, l.RunID)
 				s.remember(l.RunID, fresh, err)
 			}
-			views[i] = s.view(l, scripts)
+			views[i] = s.view(l, scripts, records[i])
 		}()
 	}
 	wg.Wait()
@@ -369,8 +399,9 @@ func (s *Service) remember(id domain.TestinyRunID, v domain.TestinyRunView, err 
 }
 
 // view is the remembered read of a link's run, with what is not Testiny's to
-// say filled in: the link itself, the evidence folder and the case scripts.
-func (s *Service) view(l domain.TestinyRunLink, scripts map[int64]string) domain.TestinyRunView {
+// say filled in: the link itself, the evidence folder, the case scripts and
+// the results AO recorded.
+func (s *Service) view(l domain.TestinyRunLink, scripts map[int64]string, records map[int64]*domain.TestinyResultRecord) domain.TestinyRunView {
 	s.mu.Lock()
 	v := s.reads[l.RunID]
 	s.mu.Unlock()
@@ -379,6 +410,7 @@ func (s *Service) view(l domain.TestinyRunLink, scripts map[int64]string) domain
 	cases := make([]domain.TestinyCaseResult, len(v.Cases))
 	for i, c := range v.Cases {
 		c.Script = scripts[c.ID]
+		c.Recorded = records[c.ID]
 		cases[i] = c
 	}
 	v.Cases = cases

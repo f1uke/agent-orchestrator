@@ -2,6 +2,8 @@ package domain
 
 import (
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -70,5 +72,50 @@ func TestTestinyRunURL(t *testing.T) {
 func TestTestinyRunIDString(t *testing.T) {
 	if got := TestinyRunID(632).String(); got != "TR-632" {
 		t.Fatalf("String = %q", got)
+	}
+}
+
+func TestParseTestinyResults(t *testing.T) {
+	long := strings.Repeat("ก", TestinyCommentMax)
+	got, err := ParseTestinyResults([]TestinyResult{
+		{CaseID: 1, Status: "passed"},
+		{CaseID: 2, Status: " FAILED ", Comment: "  ปุ่มยืนยันไม่แสดง  "},
+		{CaseID: 3, Status: "BLOCKED", Comment: long},
+		{CaseID: 4, Status: "SKIPPED", Comment: "ไม่มีบัญชีทดสอบ"},
+		{CaseID: 5, Status: "NOTRUN", Comment: "   "},
+	})
+	if err != nil {
+		t.Fatalf("ParseTestinyResults: %v", err)
+	}
+	want := []TestinyResult{
+		{CaseID: 1, Status: TestinyPassed},
+		{CaseID: 2, Status: TestinyFailed, Comment: "ปุ่มยืนยันไม่แสดง"},
+		{CaseID: 3, Status: TestinyBlocked, Comment: long},
+		{CaseID: 4, Status: TestinySkipped, Comment: "ไม่มีบัญชีทดสอบ"},
+		{CaseID: 5, Status: TestinyNotRun},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v\nwant %+v", got, want)
+	}
+
+	for name, tc := range map[string]struct {
+		in   []TestinyResult
+		says string
+	}{
+		"empty batch":         {nil, "no results"},
+		"case id 0":           {[]TestinyResult{{CaseID: 0, Status: "PASSED"}}, "case id"},
+		"unknown status":      {[]TestinyResult{{CaseID: 7, Status: "UNTESTED"}}, "TC-7"},
+		"failed, no comment":  {[]TestinyResult{{CaseID: 7, Status: "FAILED", Comment: "  "}}, "TC-7"},
+		"blocked, no comment": {[]TestinyResult{{CaseID: 7, Status: "BLOCKED"}}, "TC-7"},
+		"skipped, no comment": {[]TestinyResult{{CaseID: 7, Status: "SKIPPED"}}, "TC-7"},
+		"comment too long":    {[]TestinyResult{{CaseID: 7, Status: "FAILED", Comment: long + "ข"}}, "300"},
+		"passed with comment": {[]TestinyResult{{CaseID: 7, Status: "PASSED", Comment: "ok"}}, "TC-7"},
+		"notrun with comment": {[]TestinyResult{{CaseID: 7, Status: "NOTRUN", Comment: "later"}}, "TC-7"},
+		"a case twice":        {[]TestinyResult{{CaseID: 7, Status: "PASSED"}, {CaseID: 7, Status: "FAILED", Comment: "x"}}, "TC-7"},
+	} {
+		_, err := ParseTestinyResults(tc.in)
+		if !errors.Is(err, ErrBadTestinyResult) || !strings.Contains(err.Error(), tc.says) {
+			t.Errorf("%s: err = %v, want ErrBadTestinyResult saying %q", name, err, tc.says)
+		}
 	}
 }

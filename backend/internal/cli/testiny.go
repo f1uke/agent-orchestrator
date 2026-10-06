@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,19 +31,33 @@ type testinyRunsResponse struct {
 	Runs    []domain.TestinyRunView `json:"runs"`
 }
 
+// recordTestinyResultsRequest mirrors controllers.RecordTestinyResultsInput.
+type recordTestinyResultsRequest struct {
+	Results []domain.TestinyResult `json:"results"`
+	From    string                 `json:"from,omitempty"`
+	SHA     string                 `json:"sha,omitempty"`
+}
+
 // testinyUsageCodes are the daemon's answers that mean the command was asked
-// for something it can never do as typed: exit 2, like any other misuse.
-var testinyUsageCodes = map[string]bool{"TESTINY_BAD_RUN_REF": true, "TESTINY_OFF": true}
+// for something it can never do as typed, or that the caller must not retry:
+// exit 2, like any other misuse.
+var testinyUsageCodes = map[string]bool{
+	"TESTINY_BAD_RUN_REF":          true,
+	"TESTINY_OFF":                  true,
+	"TESTINY_RESULT_INVALID":       true,
+	"TESTINY_RESULT_SET_BY_PERSON": true,
+	"TESTINY_WRITE_NOT_YOURS":      true,
+}
 
 func newTestinyCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "testiny",
-		Short: "Link a task's Testiny test runs and read them back",
+		Short: "Link a task's Testiny test runs, read them back, and record case results",
 		Long: "A task's Testiny tab lists the Testiny test runs its cases were played in. " +
-			"AO keeps only the links; titles, cases and results are read live from Testiny, " +
-			"and AO never writes to Testiny.",
+			"AO keeps the links and a log of the results it recorded; titles, cases and results " +
+			"are read live from Testiny. Recording a result is the only write AO makes to Testiny.",
 	}
-	cmd.AddCommand(newTestinyLinkCommand(ctx), newTestinyUnlinkCommand(ctx), newTestinyRunsCommand(ctx))
+	cmd.AddCommand(newTestinyLinkCommand(ctx), newTestinyUnlinkCommand(ctx), newTestinyRunsCommand(ctx), newTestinyResultCommand(ctx))
 	return cmd
 }
 
@@ -106,6 +124,111 @@ func newTestinyRunsCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Print the daemon's JSON")
 	return cmd
+}
+
+func newTestinyResultCommand(ctx *commandContext) *cobra.Command {
+	var status, comment, fromFile string
+	cmd := &cobra.Command{
+		Use:   "result <task> <run> [case] (--status <status> [--comment <text>] | --from-file <path|->)",
+		Short: "Record case results in a Testiny run linked to a task",
+		Long: "Records one case's result (--status, with --comment for FAILED, BLOCKED and SKIPPED), " +
+			"or a batch read from --from-file as a JSON array of {caseId, status, comment}. " +
+			"The run must be linked to the task. When the task has a qa, only qa may record, and an " +
+			"agent never overwrites a status a person set: that is refused (exit 2), so report it in " +
+			"the handback instead. Sends $AO_SESSION_ID and the checkout's HEAD commit with the results.",
+		Args: rangeArgs(2, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			task, run := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
+			results, err := testinyResultsFromArgs(cmd, args[2:], status, comment, fromFile)
+			if err != nil {
+				return err
+			}
+			req := recordTestinyResultsRequest{
+				Results: results,
+				From:    strings.TrimSpace(os.Getenv("AO_SESSION_ID")),
+				SHA:     ctx.headCommit(cmd.Context()),
+			}
+			var view domain.TestinyRunView
+			if err := ctx.postJSON(cmd.Context(), testinyRunsPath(task)+"/"+url.PathEscape(run)+"/results", req, &view); err != nil {
+				return testinyError(err)
+			}
+			return writeTestinyRecorded(cmd.OutOrStdout(), view, results)
+		},
+	}
+	cmd.Flags().StringVar(&status, "status", "", "PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN")
+	cmd.Flags().StringVar(&comment, "comment", "", "What happened, at most 300 characters (FAILED, BLOCKED and SKIPPED need one)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "A JSON array of {caseId, status, comment}; - reads stdin")
+	return cmd
+}
+
+var testinyCaseRef = regexp.MustCompile(`^(?i:tc-)?(\d+)$`)
+
+// testinyResultsFromArgs is the one case named on the command line, or the
+// batch in --from-file. The daemon checks statuses and comments.
+func testinyResultsFromArgs(cmd *cobra.Command, caseArg []string, status, comment, fromFile string) ([]domain.TestinyResult, error) {
+	if fromFile != "" {
+		if len(caseArg) > 0 || status != "" || comment != "" {
+			return nil, usageError{errors.New("usage: --from-file takes no case, --status or --comment")}
+		}
+		var raw []byte
+		var err error
+		if fromFile == "-" {
+			raw, err = io.ReadAll(cmd.InOrStdin())
+		} else {
+			raw, err = os.ReadFile(fromFile)
+		}
+		if err != nil {
+			return nil, usageError{fmt.Errorf("read results: %w", err)}
+		}
+		var results []domain.TestinyResult
+		if err := json.Unmarshal(raw, &results); err != nil {
+			return nil, usageError{fmt.Errorf("results must be a JSON array of {caseId, status, comment}: %w", err)}
+		}
+		return results, nil
+	}
+	if len(caseArg) != 1 || status == "" {
+		return nil, usageError{errors.New("usage: give a case and --status, or --from-file")}
+	}
+	m := testinyCaseRef.FindStringSubmatch(strings.TrimSpace(caseArg[0]))
+	if m == nil {
+		return nil, usageError{fmt.Errorf("usage: %q is not a case: give its id (7166) or TC-7166", caseArg[0])}
+	}
+	id, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil {
+		return nil, usageError{fmt.Errorf("usage: %q is not a case id", caseArg[0])}
+	}
+	return []domain.TestinyResult{{CaseID: id, Status: domain.TestinyCaseStatus(status), Comment: comment}}, nil
+}
+
+// headCommit is the short HEAD commit of the checkout the command runs in, or
+// "" outside one: it only labels the results.
+func (c *commandContext) headCommit(ctx context.Context) string {
+	out, err := c.deps.CommandOutput(ctx, "git", "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// writeTestinyRecorded prints each case recorded, as Testiny now has it, and
+// the run's new counts.
+func writeTestinyRecorded(w io.Writer, v domain.TestinyRunView, results []domain.TestinyResult) error {
+	cases := make(map[int64]domain.TestinyCaseResult, len(v.Cases))
+	for _, c := range v.Cases {
+		cases[c.ID] = c
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "recorded in %s %q\n", v.Link.RunID, v.Title)
+	for _, r := range results {
+		c, ok := cases[r.CaseID]
+		if !ok {
+			c = domain.TestinyCaseResult{ID: r.CaseID, Status: r.Status}
+		}
+		fmt.Fprintf(&b, "  %-7s TC-%d %s\n", c.Status, c.ID, c.Title)
+	}
+	fmt.Fprintf(&b, "%s now has %s\n", v.Link.RunID, testinyCounts(v.Counts))
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 func testinyRunsPath(task string) string {

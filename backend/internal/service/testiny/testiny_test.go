@@ -34,6 +34,9 @@ type fakeTestiny struct {
 	fail     error
 	delay    map[domain.TestinyRunID]time.Duration
 	calls    map[string]int
+	sets     []setCall
+	// failAfter, when set, fails SetResults once that many results are written.
+	failAfter *int
 }
 
 func newFakeTestiny() *fakeTestiny {
@@ -137,6 +140,7 @@ func (f *fakeTestiny) ProjectByID(ctx context.Context, id int64) (testinyadapter
 type fakeStore struct {
 	mu       sync.Mutex
 	links    []domain.TestinyRunLink
+	log      []domain.TestinyResultEntry
 	sessions map[domain.SessionID]domain.SessionRecord
 	projects map[string]domain.ProjectRecord
 }

@@ -196,6 +196,18 @@ sql:
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
               type: "TestinyRunID"
+          - column: "testiny_result_log.session_id"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "SessionID"
+          - column: "testiny_result_log.run_id"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "TestinyRunID"
+          - column: "testiny_result_log.status"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "TestinyCaseStatus"
           - column: "session_children.session_id"
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"

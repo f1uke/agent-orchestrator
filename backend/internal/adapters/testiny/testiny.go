@@ -1,5 +1,5 @@
-// Package testiny reads Testiny test runs through the `testiny` CLI. It only
-// ever runs read commands: AO never writes to Testiny itself.
+// Package testiny reads Testiny test runs through the `testiny` CLI, and
+// records case results in a run. Results are the only thing it writes.
 //
 // The CLI prints {"data":...,"meta":...} on stdout, and on failure prints
 // {"error":{kind,message,code,status},"exit_code":N} on stderr with exit code
@@ -184,6 +184,39 @@ func (c *Client) Results(ctx context.Context, id domain.TestinyRunID) (Results, 
 	return res, nil
 }
 
+// SetResults records results in a run. A result with a comment is sent alone,
+// because only `--case` takes a `--comment` (and a comment needs the run's
+// project id); the rest go in one `--result` batch. Every value is its own argv
+// element, so a comment is never read as a flag. It stops at the first call
+// that fails and returns what was written before it, so a caller can account
+// for a partial write.
+func (c *Client) SetResults(ctx context.Context, run domain.TestinyRunID, projectID int64, results []domain.TestinyResult) ([]domain.TestinyResult, error) {
+	written := make([]domain.TestinyResult, 0, len(results))
+	var batch []domain.TestinyResult
+	for _, r := range results {
+		if r.Comment == "" {
+			batch = append(batch, r)
+			continue
+		}
+		if err := c.exec(ctx, "run", "results", "set", "--run="+idArg(int64(run)), "--project-id="+idArg(projectID),
+			"--case="+idArg(r.CaseID), "--status="+string(r.Status), "--comment="+r.Comment); err != nil {
+			return written, err
+		}
+		written = append(written, r)
+	}
+	if len(batch) == 0 {
+		return written, nil
+	}
+	args := []string{"run", "results", "set", "--run=" + idArg(int64(run))}
+	for _, r := range batch {
+		args = append(args, "--result="+idArg(r.CaseID)+"="+string(r.Status))
+	}
+	if err := c.exec(ctx, args...); err != nil {
+		return written, err
+	}
+	return append(written, batch...), nil
+}
+
 // Plan reads a test plan's title.
 func (c *Client) Plan(ctx context.Context, id int64) (Ref, error) {
 	return c.ref(ctx, "plan", id)
@@ -274,26 +307,42 @@ func (c *Client) call(ctx context.Context, out any, args ...string) error {
 
 // callEnvelope runs the CLI and decodes its whole stdout into out.
 func (c *Client) callEnvelope(ctx context.Context, out any, args ...string) error {
-	bin, err := c.binary()
+	stdout, err := c.output(ctx, args...)
 	if err != nil {
 		return err
+	}
+	if err := json.Unmarshal(stdout, out); err != nil {
+		return fmt.Errorf("%w: unreadable output of testiny %s: %w", ErrUnavailable, strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+// exec runs a CLI command whose output is not needed: its exit code says
+// whether it worked.
+func (c *Client) exec(ctx context.Context, args ...string) error {
+	_, err := c.output(ctx, args...)
+	return err
+}
+
+// output runs the CLI and returns its stdout, or the sentinel for how it failed.
+func (c *Client) output(ctx context.Context, args ...string) ([]byte, error) {
+	bin, err := c.binary()
+	if err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.callTimeout)
 	defer cancel()
 	res, err := c.run(ctx, bin, args...)
 	if err != nil {
 		if ctx.Err() != nil {
-			return fmt.Errorf("%w: testiny %s timed out after %s", ErrUnavailable, strings.Join(args, " "), c.callTimeout)
+			return nil, fmt.Errorf("%w: testiny %s timed out after %s", ErrUnavailable, strings.Join(args, " "), c.callTimeout)
 		}
-		return fmt.Errorf("%w: run testiny %s: %w", ErrUnavailable, strings.Join(args, " "), err)
+		return nil, fmt.Errorf("%w: run testiny %s: %w", ErrUnavailable, strings.Join(args, " "), err)
 	}
 	if res.ExitCode != 0 {
-		return cliError(res)
+		return nil, cliError(res)
 	}
-	if err := json.Unmarshal(res.Stdout, out); err != nil {
-		return fmt.Errorf("%w: unreadable output of testiny %s: %w", ErrUnavailable, strings.Join(args, " "), err)
-	}
-	return nil
+	return res.Stdout, nil
 }
 
 // binary finds the CLI on PATH, then in ~/go/bin: the desktop app's daemon

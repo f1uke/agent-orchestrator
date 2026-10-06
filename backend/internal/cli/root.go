@@ -320,6 +320,16 @@ func exactArgs(n int) cobra.PositionalArgs {
 	}
 }
 
+// rangeArgs is cobra.RangeArgs that reports a wrong count as a usage error.
+func rangeArgs(minN, maxN int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := cobra.RangeArgs(minN, maxN)(cmd, args); err != nil {
+			return usageError{err}
+		}
+		return nil
+	}
+}
+
 func atMostOneArg(cmd *cobra.Command, args []string) error {
 	if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
 		return usageError{err}

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // A task can be linked to Testiny test runs: the runs its qa (or its worker)
@@ -113,6 +114,97 @@ type TestinyCaseResult struct {
 	// Script is the store-relative path of the Maestro case script whose header
 	// names this case, or "" when no script plays it yet.
 	Script string `json:"script,omitempty"`
+	// Recorded is the latest result AO wrote for this case, or nil when AO has
+	// written none. Testiny's Status can differ from it when someone changed the
+	// case in Testiny since.
+	Recorded *TestinyResultRecord `json:"recorded,omitempty"`
+}
+
+// TestinyResultRecord is a result AO wrote to Testiny, and who asked for it.
+type TestinyResultRecord struct {
+	Status  TestinyCaseStatus `json:"status"`
+	Comment string            `json:"comment"`
+	// By is the session id of the agent that wrote it, or "" when a person
+	// set it in the app.
+	By string `json:"by"`
+	// ByRole is By's crew role, or "" for a solo worker or a person.
+	ByRole CrewRole `json:"byRole,omitempty" enum:"dev,qa"`
+	// SHA is the commit the agent tested, or "" when it did not say.
+	SHA string    `json:"sha"`
+	At  time.Time `json:"at"`
+}
+
+// TestinyResult is one case's result to record in a run.
+type TestinyResult struct {
+	CaseID  int64             `json:"caseId"`
+	Status  TestinyCaseStatus `json:"status"`
+	Comment string            `json:"comment,omitempty"`
+}
+
+// TestinyResultEntry is one line of AO's log of the results it wrote to
+// Testiny. SessionID is the task's id.
+type TestinyResultEntry struct {
+	SessionID SessionID
+	RunID     TestinyRunID
+	TestinyResult
+	// SetBy is the session id of the agent that wrote it; "" is a person.
+	SetBy     string
+	SHA       string
+	CreatedAt time.Time
+}
+
+// TestinyCommentMax is the longest comment a result may carry, in characters.
+const TestinyCommentMax = 300
+
+// ErrBadTestinyResult reports a result that Testiny's rules do not allow.
+var ErrBadTestinyResult = errors.New("invalid Testiny result")
+
+// testinyNeedsComment lists the statuses a result may be set to, and whether
+// each must say why: a case that did not pass needs a comment, one that passed
+// or was reset takes none.
+var testinyNeedsComment = map[TestinyCaseStatus]bool{
+	TestinyPassed:  false,
+	TestinyFailed:  true,
+	TestinyBlocked: true,
+	TestinySkipped: true,
+	TestinyNotRun:  false,
+}
+
+// ParseTestinyResults checks a batch of results against Testiny's rules and
+// returns it normalised: the status upper-cased, the comment trimmed. The
+// first result that breaks a rule is named in the error.
+func ParseTestinyResults(in []TestinyResult) ([]TestinyResult, error) {
+	if len(in) == 0 {
+		return nil, fmt.Errorf("%w: no results given", ErrBadTestinyResult)
+	}
+	out := make([]TestinyResult, len(in))
+	seen := make(map[int64]bool, len(in))
+	for i, r := range in {
+		if r.CaseID <= 0 {
+			return nil, fmt.Errorf("%w: case id %d is not a Testiny case id", ErrBadTestinyResult, r.CaseID)
+		}
+		tc := fmt.Sprintf("TC-%d", r.CaseID)
+		if seen[r.CaseID] {
+			return nil, fmt.Errorf("%w: %s is given twice", ErrBadTestinyResult, tc)
+		}
+		seen[r.CaseID] = true
+		status := TestinyCaseStatus(strings.ToUpper(strings.TrimSpace(string(r.Status))))
+		needsComment, known := testinyNeedsComment[status]
+		if !known {
+			return nil, fmt.Errorf("%w: %s: status %q is not one of PASSED, FAILED, BLOCKED, SKIPPED, NOTRUN", ErrBadTestinyResult, tc, r.Status)
+		}
+		comment := strings.TrimSpace(r.Comment)
+		switch n := utf8.RuneCountInString(comment); {
+		case needsComment && n == 0:
+			return nil, fmt.Errorf("%w: %s: %s needs a comment that says what happened", ErrBadTestinyResult, tc, status)
+		case n > TestinyCommentMax:
+			return nil, fmt.Errorf("%w: %s: the comment is %d characters; keep it to %d", ErrBadTestinyResult, tc, n, TestinyCommentMax)
+		case !needsComment && n > 0:
+			return nil, fmt.Errorf("%w: %s: %s takes no comment", ErrBadTestinyResult, tc, status)
+		}
+		out[i] = TestinyResult{CaseID: r.CaseID, Status: status, Comment: comment}
+	}
+	return out, nil
 }
 
 // TestinyFetchErrorKind says why a run could not be read from Testiny.

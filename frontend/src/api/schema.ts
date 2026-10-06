@@ -1810,6 +1810,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/testiny/runs/{runId}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record case results in a run linked to the task, and return the run read fresh from Testiny */
+        post: operations["recordTestinyResults"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/transcript-ref": {
         parameters: {
             query?: never;
@@ -3868,6 +3885,14 @@ export interface components {
             enabled: boolean;
             graceMinutes: number;
         };
+        RecordTestinyResultsInput: {
+            /** @description Session id of the agent recording them ($AO_SESSION_ID). Empty when a person sets them in the app. */
+            from?: string;
+            /** @description The results to record. The whole batch is checked before any is written. */
+            results: components["schemas"]["TestinyResultInput"][];
+            /** @description The commit the agent tested, for the tab's provenance line. */
+            sha?: string;
+        };
         RefLinksSettingsResponse: {
             gitlabBaseUrl: string;
             gitlabDefaultRepo: string;
@@ -4720,6 +4745,7 @@ export interface components {
         TestinyCaseResult: {
             /** Format: int64 */
             id: number;
+            recorded?: components["schemas"]["TestinyResultRecord"];
             script?: string;
             status: string;
             title: string;
@@ -4733,6 +4759,27 @@ export interface components {
             /** Format: int64 */
             id: number;
             title: string;
+        };
+        TestinyResultInput: {
+            /**
+             * Format: int64
+             * @description The Testiny case id (7166 for TC-7166).
+             */
+            caseId: number;
+            /** @description What happened, at most 300 characters. FAILED, BLOCKED and SKIPPED need one; PASSED and NOTRUN take none. */
+            comment?: string;
+            /** @description PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. */
+            status: string;
+        };
+        TestinyResultRecord: {
+            /** Format: date-time */
+            at: string;
+            by: string;
+            /** @enum {string} */
+            byRole?: "dev" | "qa";
+            comment: string;
+            sha: string;
+            status: string;
         };
         /** Format: int64 */
         TestinyRunID: number;
@@ -12194,6 +12241,98 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    recordTestinyResults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Testiny run id, e.g. 632 or TR-632. */
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordTestinyResultsInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestinyRunView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

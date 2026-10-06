@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 )
 
 // The fixtures under testdata are real outputs of the testiny CLI, recorded
@@ -29,6 +31,7 @@ type fakeCLI struct {
 	mu      sync.Mutex
 	answers map[string]Output
 	calls   []string
+	argvs   [][]string
 }
 
 func (f *fakeCLI) run(_ context.Context, name string, args ...string) (Output, error) {
@@ -36,6 +39,7 @@ func (f *fakeCLI) run(_ context.Context, name string, args ...string) (Output, e
 	defer f.mu.Unlock()
 	argv := strings.Join(args, " ")
 	f.calls = append(f.calls, name+" "+argv)
+	f.argvs = append(f.argvs, append([]string(nil), args...))
 	out, ok := f.answers[argv]
 	if !ok {
 		return Output{Stderr: []byte(`{"error":{"kind":"usage","message":"unexpected call"},"exit_code":2}`), ExitCode: 2}, nil
@@ -279,4 +283,68 @@ func mustAbs(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return abs
+}
+
+func TestSetResultsSendsEachCommentedResultAloneAndTheRestInOneBatch(t *testing.T) {
+	comment := `ปุ่ม "ยืนยัน" ไม่แสดง --status=PASSED`
+	commented := "run results set --run=632 --project-id=1 --case=7167 --status=FAILED --comment=" + comment
+	blocked := "run results set --run=632 --project-id=1 --case=7170 --status=BLOCKED --comment=no device"
+	batch := "run results set --run=632 --result=7166=PASSED --result=7168=NOTRUN"
+	f := &fakeCLI{answers: map[string]Output{commented: {}, blocked: {}, batch: {}}}
+	results := []domain.TestinyResult{
+		{CaseID: 7166, Status: domain.TestinyPassed},
+		{CaseID: 7167, Status: domain.TestinyFailed, Comment: comment},
+		{CaseID: 7168, Status: domain.TestinyNotRun},
+		{CaseID: 7170, Status: domain.TestinyBlocked, Comment: "no device"},
+	}
+	written, err := newClient(f, time.Now).SetResults(context.Background(), 632, 1, results)
+	if err != nil {
+		t.Fatalf("SetResults: %v", err)
+	}
+	wantArgv := [][]string{
+		{"run", "results", "set", "--run=632", "--project-id=1", "--case=7167", "--status=FAILED", "--comment=" + comment},
+		{"run", "results", "set", "--run=632", "--project-id=1", "--case=7170", "--status=BLOCKED", "--comment=no device"},
+		{"run", "results", "set", "--run=632", "--result=7166=PASSED", "--result=7168=NOTRUN"},
+	}
+	if !reflect.DeepEqual(f.argvs, wantArgv) {
+		t.Fatalf("argv =\n%q\nwant\n%q", f.argvs, wantArgv)
+	}
+	if !reflect.DeepEqual(written, []domain.TestinyResult{results[1], results[3], results[0], results[2]}) {
+		t.Fatalf("written = %+v", written)
+	}
+}
+
+func TestSetResultsWithoutCommentsIsOneCall(t *testing.T) {
+	batch := "run results set --run=632 --result=7166=PASSED"
+	f := &fakeCLI{answers: map[string]Output{batch: {}}}
+	if _, err := newClient(f, time.Now).SetResults(context.Background(), 632, 1, []domain.TestinyResult{{CaseID: 7166, Status: domain.TestinyPassed}}); err != nil {
+		t.Fatalf("SetResults: %v", err)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("calls = %q, want only the batch", f.calls)
+	}
+}
+
+func TestSetResultsStopsAtTheFirstFailureAndSaysWhatWasWritten(t *testing.T) {
+	first := "run results set --run=632 --project-id=1 --case=7167 --status=FAILED --comment=a"
+	second := "run results set --run=632 --project-id=1 --case=7170 --status=SKIPPED --comment=b"
+	f := &fakeCLI{answers: map[string]Output{
+		first:  {},
+		second: failed(t, "run_show_bogus_key.stderr.json", 3),
+	}}
+	results := []domain.TestinyResult{
+		{CaseID: 7166, Status: domain.TestinyPassed},
+		{CaseID: 7167, Status: domain.TestinyFailed, Comment: "a"},
+		{CaseID: 7170, Status: domain.TestinySkipped, Comment: "b"},
+	}
+	written, err := newClient(f, time.Now).SetResults(context.Background(), 632, 1, results)
+	if !errors.Is(err, ErrAuth) {
+		t.Fatalf("err = %v, want ErrAuth", err)
+	}
+	if !reflect.DeepEqual(written, []domain.TestinyResult{results[1]}) {
+		t.Fatalf("written = %+v, want only TC-7167", written)
+	}
+	if len(f.calls) != 2 {
+		t.Fatalf("calls = %q, want it to stop after the failure", f.calls)
+	}
 }

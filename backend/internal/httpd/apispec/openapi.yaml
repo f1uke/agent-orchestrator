@@ -5905,6 +5905,83 @@ paths:
       summary: Unlink a Testiny run from a task
       tags:
       - testiny
+  /api/v1/sessions/{sessionId}/testiny/runs/{runId}/results:
+    post:
+      operationId: recordTestinyResults
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Testiny run id, e.g. 632 or TR-632.
+        in: path
+        name: runId
+        required: true
+        schema:
+          description: Testiny run id, e.g. 632 or TR-632.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordTestinyResultsInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestinyRunView'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+      summary: Record case results in a run linked to the task, and return the run
+        read fresh from Testiny
+      tags:
+      - testiny
   /api/v1/sessions/{sessionId}/transcript-ref:
     post:
       operationId: reportSessionTranscriptRef
@@ -11037,6 +11114,24 @@ components:
       - graceMinutes
       - artifactsEnabled
       type: object
+    RecordTestinyResultsInput:
+      properties:
+        from:
+          description: Session id of the agent recording them ($AO_SESSION_ID). Empty
+            when a person sets them in the app.
+          type: string
+        results:
+          description: The results to record. The whole batch is checked before any
+            is written.
+          items:
+            $ref: '#/components/schemas/TestinyResultInput'
+          type: array
+        sha:
+          description: The commit the agent tested, for the tab's provenance line.
+          type: string
+      required:
+      - results
+      type: object
     RefLinksSettingsResponse:
       properties:
         gitlabBaseUrl:
@@ -13045,6 +13140,8 @@ components:
         id:
           format: int64
           type: integer
+        recorded:
+          $ref: '#/components/schemas/TestinyResultRecord'
         script:
           type: string
         status:
@@ -13082,6 +13179,48 @@ components:
       required:
       - id
       - title
+      type: object
+    TestinyResultInput:
+      properties:
+        caseId:
+          description: The Testiny case id (7166 for TC-7166).
+          format: int64
+          type: integer
+        comment:
+          description: What happened, at most 300 characters. FAILED, BLOCKED and
+            SKIPPED need one; PASSED and NOTRUN take none.
+          type: string
+        status:
+          description: PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN.
+          type: string
+      required:
+      - caseId
+      - status
+      type: object
+    TestinyResultRecord:
+      properties:
+        at:
+          format: date-time
+          type: string
+        by:
+          type: string
+        byRole:
+          enum:
+          - dev
+          - qa
+          type: string
+        comment:
+          type: string
+        sha:
+          type: string
+        status:
+          type: string
+      required:
+      - status
+      - comment
+      - by
+      - sha
+      - at
       type: object
     TestinyRunID:
       format: int64

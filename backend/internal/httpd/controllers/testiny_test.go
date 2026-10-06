@@ -28,6 +28,14 @@ type fakeTestiny struct {
 	linkBy   string
 	refresh  bool
 	unlinked domain.TestinyRunID
+	recorded recordCall
+}
+
+// recordCall is what one RecordResults call was given.
+type recordCall struct {
+	run     domain.TestinyRunID
+	results []domain.TestinyResult
+	by, sha string
 }
 
 func (f *fakeTestiny) Link(_ context.Context, task domain.SessionID, ref, by string) (domain.TestinyRunView, error) {
@@ -49,6 +57,16 @@ func (f *fakeTestiny) Runs(_ context.Context, task domain.SessionID, refresh boo
 	f.asked = append(f.asked, "runs "+string(task))
 	f.refresh = refresh
 	return f.runs, f.err
+}
+
+func (f *fakeTestiny) RecordResults(_ context.Context, task domain.SessionID, id domain.TestinyRunID, results []domain.TestinyResult, by, sha string) (domain.TestinyRunView, error) {
+	f.asked = append(f.asked, "record "+string(task))
+	f.recorded = recordCall{run: id, results: results, by: by, sha: sha}
+	if f.err != nil {
+		return domain.TestinyRunView{}, f.err
+	}
+	return domain.TestinyRunView{Link: domain.TestinyRunLink{SessionID: task, RunID: id}, Title: "Chat notice",
+		Counts: map[domain.TestinyCaseStatus]int{"FAILED": 1}, Cases: []domain.TestinyCaseResult{{ID: 7166, Status: "FAILED"}}}, nil
 }
 
 func newTestinyServer(t *testing.T, svc *fakeTestiny, crew map[domain.SessionID]domain.SessionID) *httptest.Server {
@@ -194,17 +212,71 @@ func TestTestinyRoutesResolveToTheTasksDev(t *testing.T) {
 		{"POST", qa, `{"ref":"632","from":"task-qa"}`},
 		{"GET", qa, ""},
 		{"DELETE", qa + "/632", ""},
+		{"POST", qa + "/632/results", `{"results":[{"caseId":7166,"status":"PASSED"}],"from":"task-qa"}`},
 	} {
 		if body, status, _ := doRequest(t, srv, req[0], req[1], req[2]); status >= 300 {
 			t.Fatalf("%s %s: status %d body %s", req[0], req[1], status, body)
 		}
 	}
-	want := []string{"link task-dev", "runs task-dev", "unlink task-dev"}
+	want := []string{"link task-dev", "runs task-dev", "unlink task-dev", "record task-dev"}
 	if strings.Join(svc.asked, ",") != strings.Join(want, ",") {
 		t.Fatalf("service asked %v, want %v", svc.asked, want)
 	}
-	if svc.linkBy != "task-qa" {
-		t.Fatalf("linked by %q, want qa's own id", svc.linkBy)
+	if svc.linkBy != "task-qa" || svc.recorded.by != "task-qa" {
+		t.Fatalf("linked by %q, recorded by %q; want qa's own id", svc.linkBy, svc.recorded.by)
+	}
+}
+
+func TestTestinyRecordResults(t *testing.T) {
+	svc := &fakeTestiny{}
+	srv := newTestinyServer(t, svc, nil)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/TR-632/results",
+		`{"results":[{"caseId":7166,"status":"FAILED","comment":"ปุ่มไม่แสดง"},{"caseId":7167,"status":"PASSED"}],"from":" solo-1 ","sha":"4f2c9e1"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status %d body %s", status, body)
+	}
+	want := recordCall{run: 632, by: "solo-1", sha: "4f2c9e1", results: []domain.TestinyResult{
+		{CaseID: 7166, Status: "FAILED", Comment: "ปุ่มไม่แสดง"},
+		{CaseID: 7167, Status: "PASSED"},
+	}}
+	if fmt.Sprint(svc.recorded) != fmt.Sprint(want) {
+		t.Fatalf("service got %+v, want %+v", svc.recorded, want)
+	}
+	if !strings.Contains(string(body), `"counts":{"FAILED":1}`) {
+		t.Fatalf("body = %s, want the fresh run view", body)
+	}
+
+	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/632/results", `{"results":[{"caseId":7166,"status":"PASSED"}]}`); status != http.StatusOK || svc.recorded.by != "" {
+		t.Fatalf("from the app: status %d, by %q", status, svc.recorded.by)
+	}
+	for _, bad := range [][2]string{
+		{"/api/v1/sessions/solo-1/testiny/runs/abc/results", `{"results":[]}`},
+		{"/api/v1/sessions/solo-1/testiny/runs/632/results", `{"results":`},
+	} {
+		if body, status, _ := doRequest(t, srv, "POST", bad[0], bad[1]); status != http.StatusBadRequest {
+			t.Fatalf("%s %s: status %d body %s, want 400", bad[0], bad[1], status, body)
+		}
+	}
+}
+
+func TestTestinyRecordResultsErrorsMapToCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{fmt.Errorf("%w: TC-7166: FAILED needs a comment", domain.ErrBadTestinyResult), http.StatusBadRequest, "TESTINY_RESULT_INVALID"},
+		{fmt.Errorf("%w: TR-632 is not linked", testinysvc.ErrRunNotLinked), http.StatusNotFound, "TESTINY_RUN_NOT_LINKED"},
+		{fmt.Errorf("%w: TC-7166 (PASSED)", testinysvc.ErrSetByPerson), http.StatusConflict, "TESTINY_RESULT_SET_BY_PERSON"},
+		{fmt.Errorf("%w: task has a qa", testinysvc.ErrWriteNotYours), http.StatusForbidden, "TESTINY_WRITE_NOT_YOURS"},
+		{fmt.Errorf("%w: Unauthenticated user", testinyadapter.ErrAuth), http.StatusBadGateway, "TESTINY_AUTH"},
+		{testinysvc.ErrOff, http.StatusConflict, "TESTINY_OFF"},
+	} {
+		srv := newTestinyServer(t, &fakeTestiny{err: tc.err}, nil)
+		body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/632/results", `{"results":[{"caseId":7166,"status":"PASSED"}]}`)
+		if status != tc.status || !strings.Contains(string(body), `"code":"`+tc.code+`"`) {
+			t.Errorf("%v: status %d body %s, want %d %s", tc.err, status, body, tc.status, tc.code)
+		}
 	}
 }
 
