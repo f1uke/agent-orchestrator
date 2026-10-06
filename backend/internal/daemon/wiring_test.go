@@ -175,7 +175,7 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 		t.Fatalf("responselang.NewStore: %v", err)
 	}
 	watcher := &recordingWatcher{}
-	svc, reviewSvc, _, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, watcher, log)
+	svc, reviewSvc, _, lc, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, watcher, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestStartTrackerIntake_RunsEvenWithoutEnabledProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("responselang.NewStore: %v", err)
 	}
-	svc, _, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, nil, log)
+	svc, _, _, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, nil, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}

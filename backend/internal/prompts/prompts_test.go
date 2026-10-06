@@ -1164,3 +1164,30 @@ func TestOrchestratorDefault_StatusChecksAreReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// A worker whose agent hands isolated subagents' worktrees to AO is told to use
+// them; every other worker keeps the shared-worktree rules, word for word. The
+// kill-by-PID rule rides along either way, and nothing else changes.
+func TestCoordinationFloorForChildWorktrees(t *testing.T) {
+	for _, k := range []Kind{KindWorker, KindQA} {
+		shared := CoordinationFloorFor(k, false)
+		own := CoordinationFloorFor(k, true)
+		if shared != CoordinationFloor(k) {
+			t.Errorf("%s: CoordinationFloorFor(false) differs from CoordinationFloor", k)
+		}
+		if !strings.Contains(shared, "Do not launch an Agent with `isolation: \"worktree\"`") || strings.Contains(shared, "Child agents and their worktrees") {
+			t.Errorf("%s: shared floor lost the shared-worktree rule", k)
+		}
+		for _, want := range []string{"launch each one with `isolation: \"worktree\"`", "Commit before you delegate", "Never call `EnterWorktree`", "## Stopping processes (AO)"} {
+			if !strings.Contains(own, want) {
+				t.Errorf("%s: child-worktree floor lacks %q", k, want)
+			}
+		}
+		if strings.Contains(own, "Child agents share this AO worktree") {
+			t.Errorf("%s: child-worktree floor still carries the shared-worktree section", k)
+		}
+	}
+	if CoordinationFloorFor(KindOrchestrator, true) != "" || CoordinationFloorFor(KindReviewer, true) != CoordinationFloor(KindReviewer) {
+		t.Error("the flag changed a floor other than worker or qa")
+	}
+}

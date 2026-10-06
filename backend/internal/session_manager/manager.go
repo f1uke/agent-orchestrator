@@ -119,6 +119,10 @@ var (
 const (
 	EnvSessionID   = "AO_SESSION_ID"
 	EnvSessionKind = "AO_SESSION_KIND"
+	// EnvChildWorktrees is "1" in a worker whose agent hands each isolated
+	// subagent's worktree to AO (see ports.ChildWorktreeAgent). The hook CLI
+	// reads it to allow `isolation: "worktree"` instead of denying it.
+	EnvChildWorktrees = "AO_CHILD_WORKTREES"
 	EnvProjectID   = "AO_PROJECT_ID"
 	EnvIssueID     = "AO_ISSUE_ID"
 	// EnvDataDir tells a spawned agent's AO hook commands where the store lives.
@@ -312,6 +316,10 @@ type Manager struct {
 	// by the daemon after the smoke service is built, same as sessionPaneReaper; nil
 	// in tests/wiring that omit it, in which case purge simply skips it.
 	smokeEvidencePurger func(context.Context, domain.SessionID) error
+	// children owns a worker's child worktrees. Teardown refuses (or settles)
+	// on them and a relaunch settles their orphans. Nil disables child
+	// worktrees altogether: no worker is told it may have them.
+	children childWork
 	// simDeviceAssigner returns the udid of the simulator a session owns,
 	// reserving one if it has none. Injected by the daemon after the simulator
 	// services exist, same as sessionPaneReaper; nil in tests/wiring that omit it,
@@ -451,6 +459,19 @@ func (m *Manager) reapSessionPanes(ctx context.Context, id domain.SessionID) {
 	}
 }
 
+// childWork is what the manager needs from the child worktree service.
+type childWork interface {
+	Undelivered(ctx context.Context, id domain.SessionID) ([]domain.SessionChild, error)
+	SettleForTeardown(ctx context.Context, id domain.SessionID) error
+	SettleOrphans(ctx context.Context, id domain.SessionID) error
+}
+
+// SetChildren wires the child worktree service. Wired after construction
+// because the service is built from the manager's own provisioning.
+func (m *Manager) SetChildren(c childWork) {
+	m.children = c
+}
+
 // SetSmokeEvidencePurger wires the hook that hard-deletes a session's smoke-test
 // evidence blobs on purge. Wired by the daemon after the smoke service exists,
 // mirroring SetSessionPaneReaper. A manager with no purger set skips it.
@@ -549,7 +570,8 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	// The role the prompt is written for is the role this session is ABOUT to
 	// have: dev's qa is created after it is materialized, and its prompt is
 	// already fixed by then (promptCrewRole).
-	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, project, promptCrewRole(project, cfg))
+	childWorktrees := m.childWorktreesFor(ctx, cfg.Harness, cfg.Kind)
+	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, project, promptCrewRole(project, cfg), childWorktrees)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: prompt: %w", err)
 	}
@@ -592,7 +614,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	}
 	// Materialize the freshly-seeded row: a hard failure deletes the seed
 	// outright (keepTodo=false) so it never lingers as a terminated orphan.
-	out, err := m.materialize(ctx, project, cfg, rec.ID, prompt, systemPrompt, false)
+	out, err := m.materialize(ctx, project, cfg, rec.ID, prompt, systemPrompt, false, childWorktrees)
 	if err != nil {
 		return out, err
 	}
@@ -617,7 +639,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 // failure it tears down whatever partial workspace/runtime it created; the seed
 // row is then either deleted (keepTodo=false, a fresh spawn) or left intact as a
 // TODO for the user to retry (keepTodo=true, a TODO Start).
-func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord, cfg ports.SpawnConfig, id domain.SessionID, prompt, systemPrompt string, keepTodo bool) (domain.SessionRecord, error) {
+func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord, cfg ports.SpawnConfig, id domain.SessionID, prompt, systemPrompt string, keepTodo, childWorktrees bool) (domain.SessionRecord, error) {
 	disposeSeed := func() {
 		if keepTodo {
 			m.logger.Warn("start todo: materialize failed, keeping task in TODO for retry", "sessionID", id)
@@ -693,7 +715,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: no agent adapter for harness %q", id, cfg.Harness)
 	}
 	agentConfig := effectiveAgentConfig(cfg.Kind, project.Config)
-	if err := m.prepareWorkspace(ctx, agent, id, ws.Path, systemPrompt, agentConfig); err != nil {
+	if err := m.prepareWorkspace(ctx, agent, id, ws.Path, systemPrompt, agentConfig, childWorktrees); err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
@@ -735,7 +757,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:         runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env),
+		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees),
 		ExitStatusFile: m.exitStatusFile(),
 	})
 	if err != nil {
@@ -829,11 +851,12 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if err := m.validateRuntimePrerequisites(); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
 	}
-	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, project, promptCrewRole(project, cfg))
+	childWorktrees := m.childWorktreesFor(ctx, cfg.Harness, cfg.Kind)
+	prompt, systemPrompt, err := m.buildSpawnTexts(ctx, cfg, project, promptCrewRole(project, cfg), childWorktrees)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: prompt: %w", id, err)
 	}
-	out, err := m.materialize(ctx, project, cfg, id, prompt, systemPrompt, true)
+	out, err := m.materialize(ctx, project, cfg, id, prompt, systemPrompt, true, childWorktrees)
 	if err != nil {
 		return out, err
 	}
@@ -1256,6 +1279,9 @@ type TeardownResult struct {
 	// when Reason is ReasonWorkspaceDirty. It is what a refusal has to say to be
 	// worth anything, and what a discard has to show before it runs.
 	Undelivered []ports.UncommittedFile
+	// UndeliveredChildren are the worker's child worktrees whose work is not on
+	// its branch yet, listed when Reason is ReasonChildrenUndelivered.
+	UndeliveredChildren []domain.SessionChild
 	// PreservedRef names the ref a discard captured the undelivered work at
 	// (refs/ao/preserved/<session-id>), so "thrown away" is still recoverable by
 	// someone who changes their mind. Empty when nothing was captured.
@@ -1297,6 +1323,11 @@ const (
 	// the reclaim loop must retry rather than record a reclaim that never
 	// happened.
 	ReasonWorkspaceShared = "workspace_shared"
+	// ReasonChildrenUndelivered means the worker has child worktrees whose work
+	// has not reached its branch, so a kill that asks first was refused. A
+	// discard does not lose that work either: it is preserved on each child's
+	// kept branch.
+	ReasonChildrenUndelivered = "children_undelivered"
 )
 
 // Teardown is the BACKGROUND teardown: auto-reclaim, cleanup, project teardown
@@ -1356,6 +1387,17 @@ func (m *Manager) teardown(ctx context.Context, id domain.SessionID, cause strin
 		preflight, listErr := m.store.ListAllSessions(ctx)
 		if listErr != nil {
 			return TeardownResult{}, fmt.Errorf("kill %s: tenants: %w", id, listErr)
+		}
+		if dirty == DirtyRefuse && m.children != nil {
+			children, childErr := m.children.Undelivered(ctx, id)
+			if childErr != nil {
+				return TeardownResult{}, fmt.Errorf("kill %s: read child worktrees: %w", id, childErr)
+			}
+			if len(children) > 0 {
+				res.UndeliveredChildren = children
+				res.Reason = ReasonChildrenUndelivered
+				return res, nil
+			}
 		}
 		files, filesErr := m.uncommittedWork(ctx, ws, workspaceProjectRows, workspaceProject)
 		if filesErr != nil {
@@ -1421,6 +1463,14 @@ func (m *Manager) teardown(ctx context.Context, id domain.SessionID, cause strin
 	if handle.ID != "" && !runtimeHandleHeldGiven(rec, tenants) {
 		if err := m.runtime.Destroy(ctx, handle); err != nil {
 			return TeardownResult{}, fmt.Errorf("kill %s: runtime: %w", id, err)
+		}
+	}
+	// The runtime is gone, and every child worktree's subagent ran inside it.
+	// Set their work aside on their own branches before anything else is
+	// removed: the worker's teardown must not be where a child's work is lost.
+	if m.children != nil {
+		if err := m.children.SettleForTeardown(ctx, id); err != nil {
+			m.logger.Warn("kill: settle child worktrees", "sessionID", id, "error", err)
 		}
 	}
 	// Rescue any stray planning docs left in the worktree into the private
@@ -1798,6 +1848,15 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if !ok {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: no agent adapter for harness %q", rec.ID, rec.Harness)
 	}
+	// A child worktree's subagent lived inside the process being replaced, so
+	// none can stop by itself any more: settle them before the new process
+	// starts, committing and merging what each left.
+	if m.children != nil {
+		if err := m.children.SettleOrphans(ctx, rec.ID); err != nil {
+			m.logger.Warn("restore: settle orphaned child worktrees", "sessionID", rec.ID, "error", err)
+		}
+	}
+	childWorktrees := m.childWorktreesFor(ctx, rec.Harness, rec.Kind)
 	// The system prompt is derived, not persisted: recompute it so a restored
 	// session keeps its standing instructions across the relaunch.
 	systemPrompt, err := m.buildSystemPrompt(ctx, systemPromptSpec{
@@ -1808,8 +1867,9 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		// no crew columns at all, so reading the row alone drops it to the SOLO
 		// prompt on every restore - and the solo prompt is the one that does not
 		// know `ao crew review` exists. See promptCrewRoleOf.
-		CrewRole: promptCrewRoleOf(project, rec),
-		PRTarget: rec.PRTarget,
+		CrewRole:       promptCrewRoleOf(project, rec),
+		PRTarget:       rec.PRTarget,
+		ChildWorktrees: childWorktrees,
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: system prompt: %w", rec.ID, err)
@@ -1817,7 +1877,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	// Restore re-applies the project's resolved agent config so a configured
 	// model/permissions carry across a restore, matching fresh spawn.
 	agentConfig := effectiveAgentConfig(rec.Kind, project.Config)
-	if err := m.prepareWorkspace(ctx, agent, rec.ID, ws.Path, systemPrompt, agentConfig); err != nil {
+	if err := m.prepareWorkspace(ctx, agent, rec.ID, ws.Path, systemPrompt, agentConfig, childWorktrees); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
 	systemPromptFile, err := m.writeSystemPromptFile(rec.ID, systemPrompt)
@@ -1834,7 +1894,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:         runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env),
+		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees),
 		ExitStatusFile: m.exitStatusFile(),
 	})
 	if err != nil {
@@ -3213,7 +3273,7 @@ func buildPrompt(cfg ports.SpawnConfig) string {
 // they are treated as standing instructions rather than part of the human's task
 // request. A promptless spawn delivers no user prompt at all: the agent simply
 // lands at an empty input box rather than receiving an auto-generated kickoff turn.
-func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, project domain.ProjectRecord, role domain.CrewRole) (prompt, systemPrompt string, err error) {
+func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, project domain.ProjectRecord, role domain.CrewRole, childWorktrees bool) (prompt, systemPrompt string, err error) {
 	prompt = buildPrompt(cfg)
 	// The prompt names the branch this session's PR merges into, so it resolves
 	// the target the same way the row does (an omitted --target is the base, which
@@ -3224,8 +3284,9 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, pr
 		Kind:      cfg.Kind,
 		ProjectID: cfg.ProjectID,
 		TaskSize:  cfg.TaskSize,
-		CrewRole:  role,
-		PRTarget:  prTarget,
+		CrewRole:       role,
+		PRTarget:       prTarget,
+		ChildWorktrees: childWorktrees,
 	})
 	if err != nil {
 		return "", "", err
@@ -3259,6 +3320,9 @@ type systemPromptSpec struct {
 	TaskSize  domain.TaskSize
 	CrewRole  domain.CrewRole
 	PRTarget  string
+	// ChildWorktrees picks the worker floor that lets isolated subagents have
+	// their own AO worktrees (see childWorktreesFor).
+	ChildWorktrees bool
 }
 
 // buildSystemPrompt derives the standing instructions for a session of the
@@ -3305,7 +3369,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		if crewRole == domain.CrewRoleQA {
 			base = m.effectiveBase(prompts.KindQA, projectID) +
 				prompts.Section(adds.Worker) +
-				prompts.CoordinationFloor(prompts.KindQA) +
+				prompts.CoordinationFloorFor(prompts.KindQA, spec.ChildWorktrees) +
 				prompts.CrewProtocol(string(crewRole)) +
 				workerGitConventionPrompt(conv, cfg.DefaultBranch)
 			break
@@ -3316,7 +3380,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		}
 		body := m.effectiveBase(prompts.KindWorker, projectID) +
 			prompts.Section(adds.Worker) +
-			prompts.CoordinationFloor(prompts.KindWorker) +
+			prompts.CoordinationFloorFor(prompts.KindWorker, spec.ChildWorktrees) +
 			// Both members of a crew are told about each other; a SOLO worker -
 			// every session an ordinary spawn creates - renders nothing here and
 			// its prompt is byte-for-byte what it was.
@@ -3727,8 +3791,13 @@ func simDeviceEnv(udid string) map[string]string {
 // command, which fails every callback and silently kills activity tracking).
 // When the pin cannot be applied the inherited PATH is kept and a warning is
 // logged so the degradation isn't silent.
-func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string) map[string]string {
+func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string, childWorktrees bool) map[string]string {
 	env := spawnEnv(id, project, issue, kind, crew, m.crewIDs(ctx, id, crew, role), m.dataDir, m.runFile, projectEnv)
+	if childWorktrees {
+		env[EnvChildWorktrees] = "1"
+	} else {
+		delete(env, EnvChildWorktrees)
+	}
 	for k, v := range crewGitEnv(role, m.dataDir, workspacePath) {
 		env[k] = v
 	}
@@ -3779,6 +3848,13 @@ func HookPATH(executable func() (string, error), getenv func(string) string, pro
 // worktree exists: symlink shared files from the project repo, then run any
 // post-create commands. Either failing aborts the spawn so a half-provisioned
 // workspace never launches an agent.
+// ProvisionWorkspace prepares a freshly created tree the way a spawned worker's
+// is: the project's symlinks, then its postCreate commands. A worker's child
+// worktrees go through it too.
+func (m *Manager) ProvisionWorkspace(ctx context.Context, project domain.ProjectRecord, workspacePath string) error {
+	return m.provisionWorkspace(ctx, project, workspacePath)
+}
+
 func (m *Manager) provisionWorkspace(ctx context.Context, project domain.ProjectRecord, workspacePath string) error {
 	if err := applySymlinks(project.Path, workspacePath, project.Config.Symlinks); err != nil {
 		return err
@@ -3861,6 +3937,23 @@ func runPostCreate(ctx context.Context, workspacePath string, commands []string)
 	return nil
 }
 
+// childWorktreesFor reports whether a session's isolated subagents get their
+// own AO worktrees. It takes a worker (solo, dev or qa) on an agent that hands
+// worktree creation to AO, and a child service to own those worktrees. The
+// answer decides the hooks installed, AO_CHILD_WORKTREES and the worker floor
+// together, so it is computed once per launch.
+func (m *Manager) childWorktreesFor(ctx context.Context, harness domain.AgentHarness, kind domain.SessionKind) bool {
+	if kind != domain.KindWorker || m.children == nil {
+		return false
+	}
+	agent, ok := m.agents.Agent(harness)
+	if !ok {
+		return false
+	}
+	capable, ok := agent.(ports.ChildWorktreeAgent)
+	return ok && capable.SupportsChildWorktrees(ctx)
+}
+
 // preLauncher is an optional Agent capability: a step the manager runs before
 // launch. Claude Code implements it to record workspace trust in ~/.claude.json
 // so its interactive "do you trust this folder?" dialog can't block the headless
@@ -3873,13 +3966,14 @@ type preLauncher interface {
 // starts the agent: installing the workspace-local activity hooks (so early
 // startup hooks can update the already-created session row), then any optional
 // PreLaunch step. Shared by Spawn and Restore.
-func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath, systemPrompt string, agentConfig ports.AgentConfig) error {
+func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath, systemPrompt string, agentConfig ports.AgentConfig, childWorktrees bool) error {
 	if err := agent.GetAgentHooks(ctx, ports.WorkspaceHookConfig{
-		SessionID:     string(id),
-		WorkspacePath: workspacePath,
-		DataDir:       m.dataDir,
-		SystemPrompt:  systemPrompt,
-		Config:        agentConfig,
+		SessionID:      string(id),
+		WorkspacePath:  workspacePath,
+		DataDir:        m.dataDir,
+		SystemPrompt:   systemPrompt,
+		Config:         agentConfig,
+		ChildWorktrees: childWorktrees,
 	}); err != nil {
 		return fmt.Errorf("install hooks: %w", err)
 	}

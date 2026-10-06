@@ -385,7 +385,7 @@ func Run() error {
 	// counter per worktree: qa's `ao crew run` bracket, and a review pass over a
 	// crew's shared checkout.
 	treeWatchers := treewatch.NewRegistry(treewatch.Options{Logger: log})
-	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, reclaimSettings.Get, treeWatchers, log)
+	sessionSvc, reviewSvc, smokeSvc, sessMgr, childSvc, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, reclaimSettings.Get, treeWatchers, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -521,6 +521,7 @@ func Run() error {
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
 		CrewRuns:           crewRunSvc,
+		Children:           childSvc,
 		Sim:                simSvc,
 		IOSRun:             iosRunSvc,
 		SimScreen:          simScreen,
@@ -575,6 +576,11 @@ func Run() error {
 	// before srv.Run so sessions are consistent before the server serves.
 	if reconcileErr := sessMgr.Reconcile(ctx); reconcileErr != nil {
 		log.Error("reconcile sessions on boot failed", "err", reconcileErr)
+	}
+	// A child worktree a crash left mid-merge is settled from what git shows,
+	// and one whose worker has since ended is preserved on its branch.
+	if childErr := childSvc.Reconcile(ctx); childErr != nil {
+		log.Error("reconcile child worktrees on boot failed", "err", childErr)
 	}
 
 	// A queued message still marked "delivering" was in flight when the previous

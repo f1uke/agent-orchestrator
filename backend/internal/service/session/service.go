@@ -721,6 +721,10 @@ type KillOutcome struct {
 // ErrUndeliveredWork is the code a refused kill answers with.
 const ErrUndeliveredWork = "SESSION_HAS_UNDELIVERED_WORK"
 
+// ErrUnmergedChildren is the code a kill refused for the worker's child
+// worktrees answers with.
+const ErrUnmergedChildren = "SESSION_HAS_UNMERGED_CHILDREN"
+
 // Kill ends one session on a person's order.
 //
 // It REFUSES when the worktree holds work that exists nowhere else - no commit,
@@ -740,6 +744,9 @@ func (s *Service) Kill(ctx context.Context, id domain.SessionID, in KillInput) (
 	}
 	if res.Reason == sessionmanager.ReasonWorkspaceDirty && !res.Terminated {
 		return KillOutcome{}, undeliveredWorkError(id, res)
+	}
+	if res.Reason == sessionmanager.ReasonChildrenUndelivered && !res.Terminated {
+		return KillOutcome{}, unmergedChildrenError(id, res)
 	}
 	out := KillOutcome{
 		Terminated:   res.Terminated,
@@ -772,6 +779,27 @@ func undeliveredWorkError(id domain.SessionID, res sessionmanager.TeardownResult
 		"sessionId":     string(id),
 		"workspacePath": res.WorkspacePath,
 		"files":         files,
+	})
+}
+
+// unmergedChildrenError refuses a kill while the worker's child worktrees hold
+// work its branch does not have yet. It names each child and says what a
+// discard would do, which is to keep that work rather than lose it.
+func unmergedChildrenError(id domain.SessionID, res sessionmanager.TeardownResult) error {
+	children := make([]map[string]any, 0, len(res.UndeliveredChildren))
+	for _, c := range res.UndeliveredChildren {
+		children = append(children, map[string]any{
+			"agentId": c.AgentID, "description": c.Description, "state": string(c.State),
+			"branch": c.Branch, "worktreePath": c.WorktreePath, "detail": c.Detail,
+		})
+	}
+	return apierr.Conflict(ErrUnmergedChildren, fmt.Sprintf(
+		"%s has %d child worktree(s) whose work is not on its branch yet, so it was not killed and nothing was torn down. Wait for them to finish and merge, or kill with discard: AO then commits each child's work onto its own branch, keeps that branch, and removes its folder.",
+		id, len(res.UndeliveredChildren),
+	), map[string]any{
+		"reason":    res.Reason,
+		"sessionId": string(id),
+		"children":  children,
 	})
 }
 

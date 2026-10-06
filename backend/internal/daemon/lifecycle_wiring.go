@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/reviewer"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/scm/composite"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/gitworktree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -28,6 +29,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	reviewcore "github.com/aoagents/agent-orchestrator/backend/internal/review"
+	childrensvc "github.com/aoagents/agent-orchestrator/backend/internal/service/children"
 	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
@@ -148,14 +150,14 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, jiraPoster smokesvc.JiraPoster, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, jiraPoster smokesvc.JiraPoster, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, *childrensvc.Service, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
 	}
 	agents, err := buildAgentResolver(defaultAgent, log)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	ws, err := gitworktree.New(gitworktree.Options{
 		// Per-session worktrees live under the data dir, so a single AO_DATA_DIR
@@ -175,7 +177,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("session workspace: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("session workspace: %w", err)
 	}
 	mgr := sessionmanager.New(sessionmanager.Deps{
 		Runtime:      runtime,
@@ -241,7 +243,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	// writer.
 	reviewers, err := reviewer.NewResolver()
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("reviewer resolver: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("reviewer resolver: %w", err)
 	}
 	reviewEngine := reviewcore.New(reviewcore.Deps{
 		Store:    store,
@@ -292,7 +294,19 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	// unconfigured rather than panicking.
 	smokeSvc := smokesvc.New(store, cfg.DataDir, sessionSvc, smokesvc.WithJiraPoster(jiraPoster))
 	mgr.SetSmokeEvidencePurger(smokeSvc.PurgeSessionEvidence)
-	return sessionSvc, reviewSvc, smokeSvc, mgr, nil
+	// A worker's child worktrees: the folders AO creates for subagents its
+	// Claude Code launches with isolation, beside (never inside) the worker
+	// trees, prepared the way a worker's own tree is. The manager refuses or
+	// settles on them at teardown and finishes their orphans on a relaunch.
+	childSvc := childrensvc.New(childrensvc.Options{
+		Store:     store,
+		Trees:     childtree.New(),
+		Root:      filepath.Join(cfg.DataDir, "child-worktrees"),
+		Provision: mgr.ProvisionWorkspace,
+		Logger:    log,
+	})
+	mgr.SetChildren(childSvc)
+	return sessionSvc, reviewSvc, smokeSvc, mgr, childSvc, nil
 }
 
 // runtimeMessageSender is the narrow part of the concrete runtime needed by

@@ -111,16 +111,28 @@ func DefaultBase(k Kind) string {
 // by editing/clearing the base, so AO's own coordination survives any edit.
 // Orchestrator has no tracking invariant beyond the guard, so it returns "".
 func CoordinationFloor(k Kind) string {
+	return CoordinationFloorFor(k, false)
+}
+
+// CoordinationFloorFor is CoordinationFloor for a session whose agent may or
+// may not hand its isolated subagents' worktrees to AO. childWorktrees changes
+// only the worker and qa floors: it swaps "children share this worktree" for
+// "children may each have their own".
+func CoordinationFloorFor(k Kind, childWorktrees bool) string {
+	floor := workerFloor
+	if childWorktrees {
+		floor = childWorktreesWorkerFloor
+	}
 	switch k {
 	case KindWorker:
-		return workerReportFloor + workerFloor
+		return workerReportFloor + floor
 	case KindQA:
 		// qa carries a worker's process rules, swaps the orchestrator report for
 		// plain blocker escalation (dev reports), and adds the one obligation
 		// only it has: telling dev when its run is over. It lives in the FLOOR
 		// rather than in the qa base because a base is editable and clearable,
 		// and this is the rule whose absence stopped a whole task dead.
-		return qaCoordinationFloor + workerFloor + qaHandbackFloor
+		return qaCoordinationFloor + floor + qaHandbackFloor
 	case KindReviewer:
 		return reviewerFloor
 	}
@@ -288,20 +300,38 @@ const qaCoordinationFloor = "\n\n" + `## Required coordination (AO)
 Non-negotiable: keep every branch you create within your session's branch namespace so AO can attribute your pull requests, and message the orchestrator with ` + "`ao send`" + ` if you hit a blocker you cannot resolve.`
 
 // workerFloor carries the process rules every worker session needs, solo or
-// crew, after its kind's coordination block.
+// crew, after its kind's coordination block, for a worker whose children share
+// its worktree (any harness that cannot hand a subagent's worktree to AO).
 //
 // It carries the one process rule every agent needs, because any agent can
 // reach for it: kill by PID, never by pattern. On 2026-09-22 a worker clearing
 // a stuck build ran `pkill -f 'xcodebuild test'`, and that matched - and
 // killed - every other iOS agent on the machine, whose instructions held those
 // words.
-const workerFloor = "\n\n" + `## Child agents share this AO worktree
+const workerFloor = sharedChildrenFloor + stopProcessesFloor
+
+// childWorktreesWorkerFloor replaces workerFloor for a worker whose Claude Code
+// hands each isolated subagent's worktree to AO: there, parallel file-writing
+// children are safe, because AO cuts each one from the worker's HEAD outside
+// its folder and merges its commits back.
+const childWorktreesWorkerFloor = childWorktreesFloor + stopProcessesFloor
+
+const sharedChildrenFloor = "\n\n" + `## Child agents share this AO worktree
 
 This session already runs in an AO-managed git worktree on its assigned branch. That is the isolation boundary for this task. You may still delegate work to child agents, but same-task child agents must work in the current AO worktree so every edit remains on this branch. Do not launch an Agent with ` + "`isolation: \"worktree\"`" + `, do not call ` + "`EnterWorktree`" + `, and do not create another worktree with git. Those actions move child work outside the AO branch and may leave valid changes behind in an untracked checkout.
 
-Because implementation children share this worktree, run only one file-writing or implementation child at a time. The parent worker owns git state and commits: children must not commit, stash, reset, switch or create branches, or run destructive repository-wide commands. Give each child explicit file ownership and wait for it to finish before starting another writer. Read-only children may run concurrently.
+Because implementation children share this worktree, run only one file-writing or implementation child at a time. The parent worker owns git state and commits: children must not commit, stash, reset, switch or create branches, or run destructive repository-wide commands. Give each child explicit file ownership and wait for it to finish before starting another writer. Read-only children may run concurrently.`
 
-## Stopping processes (AO)
+const childWorktreesFloor = "\n\n" + `## Child agents and their worktrees (AO)
+
+This session runs in an AO-managed git worktree on its assigned branch. You may run file-writing child agents in parallel: launch each one with ` + "`isolation: \"worktree\"`" + `. AO creates its worktree outside yours, on a branch cut from your last commit. When the child stops, AO merges its commits into your branch with one merge commit and tells you the result in your next turn. A child that left changes uncommitted, or whose commits conflict with your branch, is asked to fix that before it stops.
+
+- Commit before you delegate. A child does not see your uncommitted edits, and AO holds a merge while you have uncommitted edits in the files it touches.
+- Give children that run at the same time disjoint files. When AO reports a held merge or a conflict, act on what it says.
+- A child launched without isolation shares your worktree: run only one such writer at a time, and it must not commit, stash, reset, switch or create branches.
+- Never call ` + "`EnterWorktree`" + `, and never create a worktree with git yourself.`
+
+const stopProcessesFloor = "\n\n" + `## Stopping processes (AO)
 
 Kill only a process you started, by the PID you captured when you started it (` + "`$!`" + `). Never kill by pattern: no ` + "`pkill -f`" + `, ` + "`killall`" + ` or ` + "`pgrep ... | xargs kill`" + ` on a word. A pattern matches every process on this machine whose command line holds that word, other agents included, and one such kill has already ended every live session at once.`
 
