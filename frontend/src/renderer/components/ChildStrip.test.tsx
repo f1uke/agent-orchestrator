@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ChildStrip } from "./ChildStrip";
 import type { SessionChild } from "../lib/children";
@@ -27,27 +27,22 @@ describe("ChildStrip", () => {
 		expect(container).toBeEmptyDOMElement();
 	});
 
-	it("draws one chip per child with its state, named by its task", () => {
+	it("draws one pip per state with its count, the state needing a person first", () => {
 		render(
 			<ChildStrip
 				items={[
-					child("a1", { description: "Write the parser", state: "merged", commits: 1, filesChanged: 2 }),
-					child("a2", {
-						description: "Fix the tests",
-						state: "held",
-						detail: "the worker has uncommitted changes in A",
-					}),
+					child("a1", { state: "merged" }),
+					child("a2", { state: "merged" }),
+					child("a3", { state: "held", detail: "the worker has uncommitted changes in A" }),
+					child("a4", { state: "running" }),
 				]}
 			/>,
 		);
-		expect(screen.getByText("Write the parser")).toBeInTheDocument();
-		expect(document.querySelector('[data-child-chip="a2"]')).toHaveAttribute("data-child-state", "held");
-		expect(document.querySelectorAll("[data-child-chip]")[0]).toHaveAttribute("data-child-chip", "a2");
-	});
-
-	it("says how many finished without changes when nothing else is left to draw", () => {
-		render(<ChildStrip items={[child("a1", { state: "removed" }), child("a2", { state: "removed" })]} />);
-		expect(screen.getByText("2 without changes")).toBeInTheDocument();
-		expect(document.querySelectorAll("[data-child-chip]")).toHaveLength(0);
+		const pips = [...document.querySelectorAll("[data-child-pip]")];
+		expect(pips.map((p) => [p.getAttribute("data-child-pip"), p.getAttribute("data-child-count")])).toEqual([
+			["held", "1"],
+			["running", "1"],
+			["merged", "2"],
+		]);
 	});
 });

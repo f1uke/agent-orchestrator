@@ -3,10 +3,10 @@
 // work. AO cuts each child from the worker's branch, merges it back when the
 // subagent stops, and keeps it on its own branch when that is not possible.
 //
-// The strip leads with what needs a person (a held merge, a conflict, work kept
-// on a branch after the worker ended), then what is still running, then what
-// merged. A child that finished without changes is counted, never drawn: it
-// left nothing behind to look at.
+// The strip counts children by state, leading with what needs a person (a
+// conflict, a merge held behind the worker's own edits, work kept on a branch
+// after the worker ended), then what is still running, then what merged, then
+// what finished without changes.
 
 import type { components } from "../../api/schema";
 
@@ -63,22 +63,28 @@ export function childTooltip(child: SessionChild): string {
 	return parts.join(" · ");
 }
 
-export type ChildStripModel = {
-	/** Children drawn as chips, most urgent first. */
-	shown: SessionChild[];
-	/** Children with something to show that did not fit. */
-	overflow: number;
-	/** Children that finished without changes. */
-	empty: number;
+/** One state's worth of children: a single pip on the strip. */
+export type ChildGroup = {
+	state: ChildState;
+	children: SessionChild[];
 };
 
-export function childStripModel(children: SessionChild[], maxChips = 3): ChildStripModel {
-	const visible = children
-		.filter((child) => child.state !== "removed")
-		.sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.createdAt.localeCompare(b.createdAt));
-	return {
-		shown: visible.slice(0, maxChips),
-		overflow: Math.max(0, visible.length - maxChips),
-		empty: children.length - visible.length,
-	};
+/**
+ * The strip's pips, most urgent state first. One pip per state keeps the strip
+ * on one line at the board's real column width however many subagents a worker
+ * ran; who they are lives in each pip's tooltip.
+ */
+export function childGroups(children: SessionChild[]): ChildGroup[] {
+	const byState = new Map<ChildState, SessionChild[]>();
+	for (const child of children) {
+		const list = byState.get(child.state) ?? [];
+		list.push(child);
+		byState.set(child.state, list);
+	}
+	return [...byState.entries()]
+		.sort(([a], [b]) => ORDER[a] - ORDER[b])
+		.map(([state, list]) => ({
+			state,
+			children: [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+		}));
 }

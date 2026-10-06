@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type SessionChild, childLabel, childStripModel, childTooltip } from "./children";
+import { type SessionChild, childGroups, childLabel, childTooltip } from "./children";
 
 function child(agentId: string, over: Partial<SessionChild> = {}): SessionChild {
 	return {
@@ -19,23 +19,21 @@ function child(agentId: string, over: Partial<SessionChild> = {}): SessionChild 
 	};
 }
 
-describe("childStripModel", () => {
-	it("leads with what needs a person, then what runs, then what merged, and counts empties without drawing them", () => {
-		const model = childStripModel([
-			child("a1", { state: "merged", createdAt: "2026-10-06T00:00:01Z" }),
+describe("childGroups", () => {
+	it("counts children by state, most urgent first, oldest first inside a state", () => {
+		const groups = childGroups([
+			child("a1", { state: "merged" }),
 			child("a2", { state: "removed" }),
-			child("a3", { state: "running" }),
-			child("a4", { state: "conflict", createdAt: "2026-10-06T00:00:05Z" }),
+			child("a3", { state: "running", createdAt: "2026-10-06T00:00:09Z" }),
+			child("a4", { state: "conflict" }),
+			child("a5", { state: "running", createdAt: "2026-10-06T00:00:01Z" }),
 		]);
-		expect(model.shown.map((c) => c.agentId)).toEqual(["a4", "a3", "a1"]);
-		expect(model.empty).toBe(1);
-		expect(model.overflow).toBe(0);
-	});
-
-	it("caps the chips and says how many more there are", () => {
-		const model = childStripModel(["a", "b", "c", "d", "e"].map((id) => child(id)));
-		expect(model.shown).toHaveLength(3);
-		expect(model.overflow).toBe(2);
+		expect(groups.map((g) => [g.state, g.children.map((c) => c.agentId)])).toEqual([
+			["conflict", ["a4"]],
+			["running", ["a5", "a3"]],
+			["merged", ["a1"]],
+			["removed", ["a2"]],
+		]);
 	});
 });
 
