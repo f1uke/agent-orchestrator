@@ -821,6 +821,12 @@ export type WorkspaceSummary = {
 	 * either way - only what the topbar says AO will do on its own.
 	 */
 	disableAutoCrew?: boolean;
+	/**
+	 * The Testiny project that holds this project's manual test cases
+	 * (ProjectConfig.testinyProject), e.g. `MOB`. Undefined means the project
+	 * does not use Testiny, so its tasks get no Testiny tab.
+	 */
+	testinyProject?: string;
 	accentColor?: string;
 	diff?: {
 		additions: number;

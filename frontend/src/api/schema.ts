@@ -3795,6 +3795,7 @@ export interface components {
             simTrust?: components["schemas"]["DomainSimTrustConfig"];
             symlinks?: string[];
             systemPromptAdditions?: components["schemas"]["DomainSystemPromptAdditions"];
+            testinyProject?: string;
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
             worker?: components["schemas"]["RoleOverride"];
         };
@@ -3818,6 +3819,7 @@ export interface components {
             path: string;
             resolveError?: string;
             sessionPrefix: string;
+            testinyProject?: string;
         };
         ReclaimSettingsResponse: {
             artifactPatterns?: string[];

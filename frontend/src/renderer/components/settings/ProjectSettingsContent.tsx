@@ -647,6 +647,25 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 						/>
 					</SettingRow>
 				)}
+
+				<SettingRow
+					name="Testiny project"
+					summary="Agents keep this project's manual test cases in Testiny, and tasks get a Testiny tab. Empty turns it off."
+					detail="The Testiny project key, the project_key column of testiny project ls (e.g. MOB). Its name or numeric id work too. AO does not check it against Testiny when you save. The tab appears straight away; the guidance in an agent's prompt only reaches the next worker."
+					ownership={{ kind: "project-only" }}
+					timing="live"
+					value={draft.testinyProject.trim() || "not set"}
+					modified={isFieldDirty("testinyProject")}
+					controlId="testinyProject"
+				>
+					<input
+						id="testinyProject"
+						className={INPUT_CLASS}
+						value={draft.testinyProject}
+						onChange={(e) => setField("testinyProject", e.target.value)}
+						placeholder="MOB"
+					/>
+				</SettingRow>
 			</SettingRows>
 		</>
 	);

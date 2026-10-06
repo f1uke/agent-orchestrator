@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -123,6 +124,15 @@ type ProjectConfig struct {
 	// `maestro --device`. Nil leaves a project exactly as it was: an iOS project
 	// without it keeps the full `ao sim` catalog.
 	MobileScripts *MobileScriptsConfig `json:"mobileScripts,omitempty"`
+
+	// TestinyProject is the Testiny project that holds this project's manual
+	// test cases: its key (the `project_key` column of `testiny project ls`,
+	// e.g. MOB), which AO passes to `testiny --project`. Its name or numeric id
+	// work too. Empty means this project does not use Testiny.
+	//
+	// It is checked only for shape when it is set, never against Testiny, so
+	// saving a project never depends on Testiny being reachable.
+	TestinyProject string `json:"testinyProject,omitempty"`
 
 	// DisableAutoCrew turns off AUTOMATIC crew formation for this project, and
 	// nothing else.
@@ -309,6 +319,24 @@ func (c ProjectConfig) Validate() error {
 		if err := c.MobileScripts.Validate(); err != nil {
 			return err
 		}
+	}
+	if err := validateTestinyProject(c.TestinyProject); err != nil {
+		return err
+	}
+	return nil
+}
+
+// testinyProjectPattern admits what Testiny names a project with (a key such as
+// MOB, a name such as "Mobile App", or a numeric id) and nothing a shell or a
+// flag parser could read as more than one argument.
+var testinyProjectPattern = regexp.MustCompile(`^[A-Za-z0-9 _.-]{1,64}$`)
+
+func validateTestinyProject(value string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.TrimSpace(value) != value || !testinyProjectPattern.MatchString(value) {
+		return fmt.Errorf("testinyProject: %q must be a Testiny project key, name or id", value)
 	}
 	return nil
 }

@@ -55,7 +55,7 @@ export const PROJECT_SECTIONS: SectionMeta[] = [
 		Icon: Bot,
 		hint: "language, extra prompts, and what this project has",
 		keywords:
-			"response language thai english japanese german localization override inherit additional system prompt append orchestrator worker reviewer web ui browser preview ao preview ios simulator xcode device mobile android emulator maestro scripts only script store product flow " +
+			"response language thai english japanese german localization override inherit additional system prompt append orchestrator worker reviewer web ui browser preview ao preview ios simulator xcode device mobile android emulator maestro scripts only script store product flow testiny test cases manual testing " +
 			"proxy proxyman certificate ca root trust https ssl tls charles mitmproxy",
 	},
 	{

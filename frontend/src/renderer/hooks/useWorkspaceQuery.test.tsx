@@ -334,4 +334,25 @@ describe("useWorkspaceQuery capability flags", () => {
 		expect(byId.solo.disableAutoCrew).toBe(true);
 		expect(byId.crew.disableAutoCrew).toBe(false);
 	});
+
+	it("carries testinyProject through to the workspace summary", async () => {
+		respondWith({
+			projects: {
+				data: {
+					projects: [
+						{ id: "mob", name: "Mobile", kind: "single_repo", path: "/tmp/mob", testinyProject: "MOB" },
+						{ id: "web", name: "Web", kind: "single_repo", path: "/tmp/web" },
+					],
+				},
+				error: undefined,
+			},
+		});
+
+		const { result } = renderHook(() => useWorkspaceQuery(), { wrapper });
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+		const byId = Object.fromEntries((result.current.data ?? []).map((w) => [w.id, w]));
+		expect(byId.mob.testinyProject).toBe("MOB");
+		expect(byId.web.testinyProject).toBeUndefined();
+	});
 });

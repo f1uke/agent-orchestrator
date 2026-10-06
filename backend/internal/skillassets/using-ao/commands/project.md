@@ -160,6 +160,7 @@ ao project set-config <id> [flags]
 | `--post-create stringArray` | Command to run after workspace creation (repeatable) | - |
 | `--session-prefix string` | Displayed session-id prefix | - |
 | `--symlink stringArray` | Repo-relative path to symlink into workspaces (repeatable) | - |
+| `--testiny-project string` | The Testiny project that holds this project's manual test cases: its key (`project_key` in `testiny project ls`, e.g. `MOB`), name or id; `""` turns it off | off |
 | `--tracker-assignee string` | Issue assignee required for intake eligibility | - |
 | `--tracker-intake` | Enable issue-tracker intake for matching issues | off |
 | `--tracker-provider string` | Issue-tracker provider: `github` or `gitlab` | `github` |
