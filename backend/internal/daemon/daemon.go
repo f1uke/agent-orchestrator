@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
@@ -43,6 +44,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
+	childrensvc "github.com/aoagents/agent-orchestrator/backend/internal/service/children"
 	crewrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crewrun"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
@@ -385,7 +387,7 @@ func Run() error {
 	// counter per worktree: qa's `ao crew run` bracket, and a review pass over a
 	// crew's shared checkout.
 	treeWatchers := treewatch.NewRegistry(treewatch.Options{Logger: log})
-	sessionSvc, reviewSvc, smokeSvc, sessMgr, childSvc, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, reclaimSettings.Get, treeWatchers, log)
+	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, reclaimSettings.Get, treeWatchers, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -395,6 +397,19 @@ func Run() error {
 		return fmt.Errorf("wire session service: %w", err)
 	}
 	lcStack.trackerDone = startTrackerIntake(ctx, store, sessionSvc, loopReg, log)
+
+	// A worker's child worktrees: the folders AO creates for subagents its
+	// Claude Code launches with isolation, beside (never inside) the worker
+	// trees, prepared the way a worker's own tree is. The manager refuses or
+	// settles on them at teardown and finishes their orphans on a relaunch.
+	childSvc := childrensvc.New(childrensvc.Options{
+		Store:     store,
+		Trees:     childtree.New(),
+		Root:      filepath.Join(cfg.DataDir, "child-worktrees"),
+		Provision: sessMgr.ProvisionWorkspace,
+		Logger:    log,
+	})
+	sessMgr.SetChildren(childSvc)
 
 	// Auto-reclaim: a settings-backed poll loop that tears down finished worker
 	// sessions (tmux + worktree, branch kept) once they have sat past the

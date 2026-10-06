@@ -68,7 +68,7 @@ func (c *commandContext) createChildWorktree(ctx context.Context, sessionID stri
 	err := c.postJSON(ctx, "sessions/"+url.PathEscape(sessionID)+"/children", createChildAPIRequest{Name: hook.Name, Cwd: hook.Cwd}, &res)
 	if err != nil {
 		c.reportHookFailure("claude-code", "worktree-create", sessionID, err)
-		return fmt.Errorf("AO could not create a worktree for this subagent: %v. Launch it without isolation to work in the worker's own worktree", err)
+		return fmt.Errorf("AO could not create a worktree for this subagent: %w. Launch it without isolation to work in the worker's own worktree", err)
 	}
 	_, err = fmt.Fprintln(c.deps.Out, res.Child.WorktreePath)
 	return err

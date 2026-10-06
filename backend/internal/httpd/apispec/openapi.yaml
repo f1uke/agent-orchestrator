@@ -12334,6 +12334,14 @@ components:
         sessionId:
           type: string
         state:
+          enum:
+          - running
+          - merging
+          - held
+          - conflict
+          - merged
+          - removed
+          - preserved
           type: string
         targetBranch:
           type: string

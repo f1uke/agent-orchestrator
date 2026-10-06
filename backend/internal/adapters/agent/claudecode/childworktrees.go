@@ -67,10 +67,10 @@ func parseClaudeVersion(out string) ([3]int, bool) {
 	return v, true
 }
 
-func versionAtLeast(v, min [3]int) bool {
+func versionAtLeast(v, floor [3]int) bool {
 	for i := range v {
-		if v[i] != min[i] {
-			return v[i] > min[i]
+		if v[i] != floor[i] {
+			return v[i] > floor[i]
 		}
 	}
 	return true

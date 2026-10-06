@@ -138,7 +138,7 @@ func (s *Service) Create(ctx context.Context, id domain.SessionID, in CreateInpu
 	} else if ok {
 		return existing, nil
 	}
-	if err := s.checkCwd(ctx, rec, in.Cwd); err != nil {
+	if err := s.checkCwd(rec, in.Cwd); err != nil {
 		return domain.SessionChild{}, err
 	}
 	project, ok, err := s.store.GetProject(ctx, string(rec.ProjectID))
@@ -179,7 +179,7 @@ func (s *Service) Create(ctx context.Context, id domain.SessionID, in CreateInpu
 // the worker's children is a grandchild, which v1 refuses; anything else (the
 // primary checkout, which is where EnterWorktree reports from) is not a child of
 // this worker at all.
-func (s *Service) checkCwd(ctx context.Context, rec domain.SessionRecord, cwd string) error {
+func (s *Service) checkCwd(rec domain.SessionRecord, cwd string) error {
 	if within(cwd, s.childDir(rec)) {
 		return ErrNested
 	}

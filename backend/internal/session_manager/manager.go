@@ -123,8 +123,8 @@ const (
 	// subagent's worktree to AO (see ports.ChildWorktreeAgent). The hook CLI
 	// reads it to allow `isolation: "worktree"` instead of denying it.
 	EnvChildWorktrees = "AO_CHILD_WORKTREES"
-	EnvProjectID   = "AO_PROJECT_ID"
-	EnvIssueID     = "AO_ISSUE_ID"
+	EnvProjectID      = "AO_PROJECT_ID"
+	EnvIssueID        = "AO_ISSUE_ID"
 	// EnvDataDir tells a spawned agent's AO hook commands where the store lives.
 	EnvDataDir = "AO_DATA_DIR"
 	// EnvRunFile tells a spawned agent's AO hook commands which daemon to
@@ -319,7 +319,7 @@ type Manager struct {
 	// children owns a worker's child worktrees. Teardown refuses (or settles)
 	// on them and a relaunch settles their orphans. Nil disables child
 	// worktrees altogether: no worker is told it may have them.
-	children childWork
+	children ChildWork
 	// simDeviceAssigner returns the udid of the simulator a session owns,
 	// reserving one if it has none. Injected by the daemon after the simulator
 	// services exist, same as sessionPaneReaper; nil in tests/wiring that omit it,
@@ -459,8 +459,8 @@ func (m *Manager) reapSessionPanes(ctx context.Context, id domain.SessionID) {
 	}
 }
 
-// childWork is what the manager needs from the child worktree service.
-type childWork interface {
+// ChildWork is what the manager needs from the child worktree service.
+type ChildWork interface {
 	Undelivered(ctx context.Context, id domain.SessionID) ([]domain.SessionChild, error)
 	SettleForTeardown(ctx context.Context, id domain.SessionID) error
 	SettleOrphans(ctx context.Context, id domain.SessionID) error
@@ -468,7 +468,7 @@ type childWork interface {
 
 // SetChildren wires the child worktree service. Wired after construction
 // because the service is built from the manager's own provisioning.
-func (m *Manager) SetChildren(c childWork) {
+func (m *Manager) SetChildren(c ChildWork) {
 	m.children = c
 }
 
@@ -3281,9 +3281,9 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, pr
 	// raw flag and telling a worker with no --target to go and look one up.
 	_, prTarget := resolveSpawnBranches(cfg, project)
 	systemPrompt, err = m.buildSystemPrompt(ctx, systemPromptSpec{
-		Kind:      cfg.Kind,
-		ProjectID: cfg.ProjectID,
-		TaskSize:  cfg.TaskSize,
+		Kind:           cfg.Kind,
+		ProjectID:      cfg.ProjectID,
+		TaskSize:       cfg.TaskSize,
 		CrewRole:       role,
 		PRTarget:       prTarget,
 		ChildWorktrees: childWorktrees,
@@ -3844,10 +3844,6 @@ func HookPATH(executable func() (string, error), getenv func(string) string, pro
 	return dir + string(os.PathListSeparator) + base, nil
 }
 
-// provisionWorkspace applies the project's per-workspace setup after the
-// worktree exists: symlink shared files from the project repo, then run any
-// post-create commands. Either failing aborts the spawn so a half-provisioned
-// workspace never launches an agent.
 // ProvisionWorkspace prepares a freshly created tree the way a spawned worker's
 // is: the project's symlinks, then its postCreate commands. A worker's child
 // worktrees go through it too.
@@ -3855,6 +3851,10 @@ func (m *Manager) ProvisionWorkspace(ctx context.Context, project domain.Project
 	return m.provisionWorkspace(ctx, project, workspacePath)
 }
 
+// provisionWorkspace applies the project's per-workspace setup after the
+// worktree exists: symlink shared files from the project repo, then run any
+// post-create commands. Either failing aborts the spawn so a half-provisioned
+// workspace never launches an agent.
 func (m *Manager) provisionWorkspace(ctx context.Context, project domain.ProjectRecord, workspacePath string) error {
 	if err := applySymlinks(project.Path, workspacePath, project.Config.Symlinks); err != nil {
 		return err

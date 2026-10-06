@@ -83,7 +83,7 @@ type SessionChild struct {
 	// which the child therefore cannot see.
 	BaseDirty    []string   `json:"baseDirty,omitempty"`
 	WorktreePath string     `json:"worktreePath"`
-	State        ChildState `json:"state"`
+	State        ChildState `json:"state" enum:"running,merging,held,conflict,merged,removed,preserved"`
 	// MergeHeadBefore is the worker's HEAD just before AO started a merge. It
 	// tells crash recovery whether a half-done merge is AO's to abort.
 	MergeHeadBefore string `json:"-"`

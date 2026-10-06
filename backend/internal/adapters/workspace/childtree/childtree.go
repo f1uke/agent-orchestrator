@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,8 +145,10 @@ func (t *Trees) Create(ctx context.Context, spec ports.ChildTreeSpec) (ports.Chi
 // AO keeps the behaviour a project configured for.
 func (t *Trees) copyWorktreeIncludes(ctx context.Context, worker, child string) error {
 	include := filepath.Join(worker, ".worktreeinclude")
-	if _, err := os.Stat(include); err != nil {
+	if _, err := os.Stat(include); errors.Is(err, fs.ErrNotExist) {
 		return nil
+	} else if err != nil {
+		return fmt.Errorf("childtree: read %s: %w", include, err)
 	}
 	listed, err := t.must(ctx, worker, "ls-files", "-z", "--others", "--ignored", "--exclude-from="+include)
 	if err != nil {
