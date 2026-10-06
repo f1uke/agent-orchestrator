@@ -43,6 +43,9 @@ func newRemoteNotOriginFixture(t *testing.T, git, tmp string) remoteNotOriginFix
 	run(t, git, "clone", forge, colleague)
 	runGit(t, git, colleague, "config", "user.email", "ao@example.com")
 	runGit(t, git, colleague, "config", "user.name", "Ao Agents")
+	// The bare forge's HEAD follows init.defaultBranch, which is not main on
+	// every machine (CI's is master), so the clone may check out nothing.
+	runGit(t, git, colleague, "checkout", "main")
 	writeCommit(t, git, colleague, "landed.txt", "landed\n", "merged after the last pull")
 	runGit(t, git, colleague, "push", "origin", "main")
 	fresh := revParse(t, git, colleague, "HEAD")
