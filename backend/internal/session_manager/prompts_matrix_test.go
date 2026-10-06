@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -22,6 +23,21 @@ var removedCommands = []string{
 	"--still-working",
 	"stand-down",
 }
+
+// staleTestinyRules are Testiny rules that stopped being true when AO began
+// recording results itself: no prompt may still state them.
+var staleTestinyRules = []string{
+	"AO never writes to Testiny",
+	"Every Testiny WRITE waits for the human's explicit yes",
+}
+
+// A result written with the raw Testiny CLI skips AO's log, its policy on who
+// may write and the tab's refresh. The command may appear only as the thing
+// never to run directly: "never" (at most one word between) right before it and
+// "directly" right after, so any other mention, an instruction above all, fails.
+const directResultWrite = "testiny run results set"
+
+var neverDirectResultWrite = regexp.MustCompile("(?i)\\bnever(?: \\w+)? `" + directResultWrite + "` directly\\b")
 
 // promptCell is one point of the prompt matrix: the session facts and project
 // settings that change what buildSystemPrompt assembles.
@@ -121,6 +137,7 @@ func TestPromptMatrix_TeachesNoRemovedCommand(t *testing.T) {
 		t.Run(c.name(), func(t *testing.T) {
 			got := c.build(t)
 			assertTeachesNoRemovedCommand(t, got)
+			assertTeachesNoDirectResultWrite(t, got)
 			c.assertTestinyBlock(t, got)
 			c.assertCaseScriptBlock(t, got)
 			path := filepath.Join(dir, c.name()+".md")
@@ -149,7 +166,8 @@ const testinyHeading = "## Testiny test cases (AO)"
 func (c promptCell) assertTestinyBlock(t *testing.T, got string) {
 	t.Helper()
 	want := c.testiny && c.kind == domain.KindWorker
-	if has := strings.Contains(got, testinyHeading); has != want {
+	block := section(got, testinyHeading)
+	if has := block != ""; has != want {
 		t.Fatalf("%s: Testiny block present = %v, want %v", c.name(), has, want)
 	}
 	if !want {
@@ -161,11 +179,82 @@ func (c promptCell) assertTestinyBlock(t *testing.T, got string) {
 		"~/.ao/knowledge/mer/plans/<branch>--testiny.md",
 		`ao testiny link "$AO_CREW_ID" <run-id>`,
 		"Never upload evidence",
+		"Every other Testiny write waits for the human's explicit yes",
 	} {
-		if !strings.Contains(got, s) {
+		if !strings.Contains(block, s) {
 			t.Errorf("%s: Testiny block is missing %q", c.name(), s)
 		}
 	}
+	c.assertResultRecording(t, block)
+}
+
+// testinyLoop opens the loop qa and a solo worker follow to play a run and
+// record it. A crew's dev does not record results: playing the run is the check
+// it hands to qa.
+const testinyLoop = "**Playing a run, start to finish.**"
+
+func (c promptCell) assertResultRecording(t *testing.T, block string) {
+	t.Helper()
+	records := c.role != domain.CrewRoleDev
+	if has := strings.Contains(block, testinyLoop); has != records {
+		t.Fatalf("%s: the record-a-run loop is present = %v, want %v:\n%s", c.name(), has, records, block)
+	}
+	if !records {
+		for _, s := range []string{"Results are qa's", "do not record results yourself"} {
+			if !strings.Contains(block, s) {
+				t.Errorf("%s: dev is not told results are qa's, missing %q:\n%s", c.name(), s, block)
+			}
+		}
+		if strings.Contains(block, "ao testiny result") {
+			t.Errorf("%s: dev is taught the command that records results:\n%s", c.name(), block)
+		}
+		return
+	}
+	for _, s := range []string{
+		"**Recording a result needs no yes**",
+		"never with `testiny run results set` directly",
+		`ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"]`,
+		"**PASSED** only when both checks hold, with no comment",
+		"plain Thai",
+		"UNDRIVEABLE",
+		"No Figma frame linked",
+		"`TESTINY_RESULT_SET_BY_PERSON`",
+		"never retry it or work around it",
+		"each run's link with its counts",
+	} {
+		if !strings.Contains(block, s) {
+			t.Errorf("%s: the record-a-run loop is missing %q:\n%s", c.name(), s, block)
+		}
+	}
+	// Only a solo worker can be refused as not the task's qa: a person may add a
+	// qa to its task while it runs. qa is never refused that way.
+	solo := c.role == ""
+	if has := strings.Contains(block, "`TESTINY_WRITE_NOT_YOURS`"); has != solo {
+		t.Errorf("%s: the loop explains TESTINY_WRITE_NOT_YOURS = %v, want %v:\n%s", c.name(), has, solo, block)
+	}
+	// Where qa plays cases with case scripts, the loop points at that block
+	// rather than restating how a case is played and judged.
+	defers := c.role == domain.CrewRoleQA && c.mobileScripts
+	if has := strings.Contains(block, `as "Playing test cases with Maestro scripts" above says`); has != defers {
+		t.Errorf("%s: the loop defers playing to the case-script block = %v, want %v:\n%s", c.name(), has, defers, block)
+	}
+	if !defers && !strings.Contains(block, "its Figma frame") {
+		t.Errorf("%s: the loop does not judge a case against its Figma frame:\n%s", c.name(), block)
+	}
+}
+
+// section is the "## " block that starts at heading, up to the next one, or ""
+// when the prompt has no such block.
+func section(prompt, heading string) string {
+	i := strings.Index(prompt, heading)
+	if i < 0 {
+		return ""
+	}
+	block := prompt[i:]
+	if end := strings.Index(block[len(heading):], "\n## "); end >= 0 {
+		block = block[:len(heading)+end]
+	}
+	return block
 }
 
 // caseScriptHeading is qa's block on a script-only project, Testiny on or off:
@@ -176,16 +265,12 @@ const caseScriptHeading = "## Playing test cases with Maestro scripts (AO)"
 func (c promptCell) assertCaseScriptBlock(t *testing.T, got string) {
 	t.Helper()
 	want := c.mobileScripts && c.role == domain.CrewRoleQA
-	i := strings.Index(got, caseScriptHeading)
-	if (i >= 0) != want {
-		t.Fatalf("%s: case-script block present = %v, want %v", c.name(), i >= 0, want)
+	block := section(got, caseScriptHeading)
+	if has := block != ""; has != want {
+		t.Fatalf("%s: case-script block present = %v, want %v", c.name(), has, want)
 	}
 	if !want {
 		return
-	}
-	block := got[i:]
-	if end := strings.Index(block[len(caseScriptHeading):], "\n## "); end >= 0 {
-		block = block[:len(caseScriptHeading)+end]
 	}
 	for _, s := range []string{
 		"bin/flow run nter cases/<area>/<behaviour>",
@@ -215,6 +300,7 @@ func (c promptCell) assertCaseScriptBlock(t *testing.T, got string) {
 func TestPromptBlocks_TeachNoRemovedCommand(t *testing.T) {
 	for _, k := range prompts.KnownKinds() {
 		assertTeachesNoRemovedCommand(t, prompts.DefaultBase(k)+prompts.CoordinationFloor(k))
+		assertTeachesNoDirectResultWrite(t, prompts.DefaultBase(k)+prompts.CoordinationFloor(k))
 	}
 	assertTeachesNoRemovedCommand(t, prompts.ResponseLanguageDirective("Thai"))
 }
@@ -222,10 +308,19 @@ func TestPromptBlocks_TeachNoRemovedCommand(t *testing.T) {
 func assertTeachesNoRemovedCommand(t *testing.T, prompt string) {
 	t.Helper()
 	lower := strings.ToLower(prompt)
-	for _, word := range removedCommands {
+	for _, word := range append(removedCommands, staleTestinyRules...) {
 		if i := strings.Index(lower, strings.ToLower(word)); i >= 0 {
 			from, to := max(0, i-120), min(len(prompt), i+120)
-			t.Errorf("prompt teaches %q, which AO no longer has: ...%s...", word, prompt[from:to])
+			t.Errorf("prompt still says %q, which no longer holds: ...%s...", word, prompt[from:to])
 		}
+	}
+}
+
+func assertTeachesNoDirectResultWrite(t *testing.T, prompt string) {
+	t.Helper()
+	rest := neverDirectResultWrite.ReplaceAllString(prompt, "")
+	if i := strings.Index(strings.ToLower(rest), directResultWrite); i >= 0 {
+		from, to := max(0, i-120), min(len(rest), i+120)
+		t.Errorf("prompt names %q other than to say never to run it directly: ...%s...", directResultWrite, rest[from:to])
 	}
 }

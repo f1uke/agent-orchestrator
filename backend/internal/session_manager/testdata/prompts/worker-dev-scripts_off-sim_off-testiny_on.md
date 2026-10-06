@@ -88,13 +88,14 @@ Never write a bare session number — always `@…` or the full `<project>-<num>
 
 ## Testiny test cases (AO)
 
-This project keeps its manual test cases in Testiny project `MOB`. When your task has a qa member, qa owns everything in this section and dev does not write to Testiny; otherwise you own it. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
+This project keeps its manual test cases in Testiny project `MOB`. Until your task has a qa you own the cases, plans and runs here; once it has one, qa owns everything in this section and you do not write to Testiny. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
 
 - **Reading Testiny needs no permission.**
-- **Every Testiny WRITE waits for the human's explicit yes**: a case, plan, run, result, attachment or milestone link. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
-- **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the evidence folder the skill names.
+- **Results are qa's, never yours.** Playing the run and recording each case's result is the check you ask a qa for once the change is done, so do not record results yourself.
+- **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, a milestone link or an attachment. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
+- **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the run's QA Evidence folder, with the names the skill gives.
 - **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
-- **Your report names what you did here**: the case and run ids you created and the evidence folder path. For qa that report is the handback to dev.
+- **Your report names what you did here**: the case and run ids you created, and the path of any draft you wrote.
 
 ## Using the ao CLI
 

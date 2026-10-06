@@ -294,7 +294,7 @@ func crewJoinedNotice(role domain.CrewRole, testiny bool) string {
 	b.WriteString("What your standing instructions do not know about:\n\n")
 	b.WriteString("- **One worktree, one git index, and anything exclusive is contended live** - a `git add -A` sweeps up your crewmate's half-written work, and the simulator lease is one device two agents can reach for. Commit the paths you meant to commit, and bracket a build or a test run you want to trust with `ao crew run`.\n")
 	if testiny {
-		b.WriteString("- " + string(role) + " now owns the Testiny drafts and runs for this task. Give it the path of any draft you wrote.\n")
+		b.WriteString("- " + string(role) + " now owns the Testiny drafts, runs and results for this task. Give it the path of any draft you wrote.\n")
 	}
 	b.WriteString("\nAddress it by role, never by id: `ao send --crew " + string(role) + " --about <commit-sha|testiny-id> --message \"...\"`. There is no obligation to reply to this.")
 	return b.String()

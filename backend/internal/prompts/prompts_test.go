@@ -726,20 +726,23 @@ func TestCrewProtocol_SoloRendersNothingAndAboutNamesAnArtifact(t *testing.T) {
 	}
 }
 
-// A project without Testiny renders no Testiny block; one with it names its
-// Testiny project and where drafts go in the AO project's own store.
+// A project without Testiny renders no Testiny block, whoever the worker is; one
+// with it names its Testiny project and where drafts go in the AO project's own
+// store, for every worker kind.
 func TestTestinyProtocol_RendersOnlyForATestinyProject(t *testing.T) {
-	if got := TestinyProtocol("", "mer"); got != "" {
-		t.Fatalf("a project without Testiny rendered a Testiny block:\n%s", got)
-	}
-	got := TestinyProtocol("MOB", "mer")
-	for _, want := range []string{
-		"\n\n## Testiny test cases (AO)\n",
-		"Testiny project `MOB`",
-		"`~/.ao/knowledge/mer/plans/<branch>--testiny.md`",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("the Testiny block is missing %q:\n%s", want, got)
+	for _, role := range []string{"", "dev", "qa"} {
+		if got := TestinyProtocol("", "mer", role, true); got != "" {
+			t.Fatalf("role %q: a project without Testiny rendered a Testiny block:\n%s", role, got)
+		}
+		got := TestinyProtocol("MOB", "mer", role, false)
+		for _, want := range []string{
+			"\n\n## Testiny test cases (AO)\n",
+			"Testiny project `MOB`",
+			"`~/.ao/knowledge/mer/plans/<branch>--testiny.md`",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("role %q: the Testiny block is missing %q:\n%s", role, want, got)
+			}
 		}
 	}
 }

@@ -179,11 +179,11 @@ func TestAttachCrewMember_SaysNothingToADevThatAskedForIt(t *testing.T) {
 	}
 }
 
-// On a Testiny project a qa takes over the Testiny drafts and runs, so dev is
+// On a Testiny project a qa takes over the Testiny drafts, runs and results, so dev is
 // told to hand over any draft it wrote, and the arriving qa reads the runs
 // already linked to the task. A project without Testiny hears neither.
 func TestAttachCrewMember_HandsTheTestinyWorkToQAOnATestinyProject(t *testing.T) {
-	const handover = "qa now owns the Testiny drafts and runs for this task. Give it the path of any draft you wrote."
+	const handover = "qa now owns the Testiny drafts, runs and results for this task. Give it the path of any draft you wrote."
 	const runs = "`ao testiny runs \"$AO_CREW_ID\"`"
 	for _, testiny := range []bool{false, true} {
 		m, st, _, _, msgr := newManagerWithMessenger()

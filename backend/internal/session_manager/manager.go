@@ -3395,6 +3395,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// one thing the project rules out. iOS dev keeps the handover note,
 		// which is about the lease and holds unchanged; qa plays its cases with
 		// scripts instead of recording flows into the repository.
+		caseScripts := false
 		if ms := cfg.MobileScripts; ms != nil {
 			scripts := prompts.MobileScripts{Product: ms.Product, IOS: ms.Platform == domain.MobilePlatformIOS, Store: ms.StoreOrDefault()}
 			base += prompts.MobileScriptGuidance(scripts)
@@ -3405,6 +3406,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 				}
 			case domain.CrewRoleQA:
 				base += prompts.MobileScriptPlay(scripts)
+				caseScripts = true
 			}
 		} else if cfg.HasIOSSimulator {
 			base += prompts.SimulatorGuidance()
@@ -3437,11 +3439,10 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 				base += prompts.CheckInGate(string(taskSize.WithDefault()))
 			}
 		}
-		// Every worker kind, qa included: who owns the Testiny work depends on
-		// whether the task gains a qa, which dev cannot know when it launches,
-		// so the block says it and all three carry it. A project without Testiny
-		// renders nothing.
-		base += prompts.TestinyProtocol(cfg.TestinyProject, string(projectID))
+		// Every worker kind, qa included, each told what is its own: qa and a
+		// solo worker play runs and record results, dev hands that check to qa.
+		// A project without Testiny renders nothing.
+		base += prompts.TestinyProtocol(cfg.TestinyProject, string(projectID), string(crewRole), caseScripts)
 	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {

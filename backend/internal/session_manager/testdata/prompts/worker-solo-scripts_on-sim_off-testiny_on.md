@@ -87,13 +87,26 @@ Everything else - the store's layout, its rules and how to set up a device - is 
 
 ## Testiny test cases (AO)
 
-This project keeps its manual test cases in Testiny project `MOB`. When your task has a qa member, qa owns everything in this section and dev does not write to Testiny; otherwise you own it. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
+This project keeps its manual test cases in Testiny project `MOB`. You own everything in this section, recording results included. If a person adds a qa to your task, AO tells you, and from then on it is qa's. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
 
 - **Reading Testiny needs no permission.**
-- **Every Testiny WRITE waits for the human's explicit yes**: a case, plan, run, result, attachment or milestone link. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
-- **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the evidence folder the skill names.
+- **Recording a result needs no yes** when the run is already linked to this task: a case's status, with a reason unless it PASSED. Record it with `ao testiny result`, never with `testiny run results set` directly: AO logs the write, enforces who may write, and updates the Testiny tab.
+- **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, a milestone link or an attachment. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
+- **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the run's QA Evidence folder, with the names the skill gives.
 - **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
-- **Your report names what you did here**: the case and run ids you created and the evidence folder path. For qa that report is the handback to dev.
+
+**Playing a run, start to finish.**
+
+1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
+2. **Play each case**, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.
+3. **Record each case:** `ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"]`, or a whole run at once with `--from-file`.
+   - **PASSED** only when both checks hold, with no comment.
+   - **FAILED** with a short reason in plain Thai: one or two sentences on what went wrong.
+   - **BLOCKED** when you could not drive the case (UNDRIVEABLE), with the reason from your attempt, never a guess.
+   - **No Figma frame linked:** record what the expected result gives, and leave the visual check for a person.
+   - **Refused with `TESTINY_RESULT_SET_BY_PERSON`:** a person already decided that case, and their status stands. Report your finding instead; never retry it or work around it.
+   - **Refused with `TESTINY_WRITE_NOT_YOURS`:** a qa has joined your task, and results are its to record.
+4. **Your finish report names** the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the evidence folder path, and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
 
 ## Using the ao CLI
 
