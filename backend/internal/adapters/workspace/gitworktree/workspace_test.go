@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/gitremote"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
@@ -46,16 +47,16 @@ func TestCommandArgs(t *testing.T) {
 }
 
 func TestBaseRefCandidates(t *testing.T) {
-	got := baseRefCandidates("feature/test", "main")
-	want := []string{"origin/feature/test", "origin/main", "refs/heads/main", "feature/test"}
+	got := baseRefCandidates("feature/test", gitremote.Location{Remote: "Advisor", Branch: "develop"})
+	want := []string{"refs/remotes/Advisor/feature/test", "refs/remotes/Advisor/develop", "refs/heads/develop", "develop", "feature/test"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("candidates = %#v, want %#v", got, want)
 	}
 
-	got = baseRefCandidates("feature/test", "upstream/main")
-	want = []string{"origin/feature/test", "upstream/main", "feature/test"}
+	got = baseRefCandidates("feature/test", gitremote.Location{Branch: "main"})
+	want = []string{"refs/heads/main", "main", "feature/test"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("qualified candidates = %#v, want %#v", got, want)
+		t.Fatalf("remoteless candidates = %#v, want %#v", got, want)
 	}
 }
 
@@ -275,15 +276,18 @@ func TestCreateWorkspaceProjectRepoPrunesStaleRegisteredWorktree(t *testing.T) {
 		joined := strings.Join(args, " ")
 		calls = append(calls, joined)
 		switch {
-		case strings.Contains(joined, "symbolic-ref --quiet --short refs/remotes/origin/HEAD"):
-			return []byte("origin/main\n"), nil
-		case strings.Contains(joined, "rev-parse --verify --quiet origin/feature/test"):
-			return nil, commandError{args: append([]string{binary}, args...), err: exitErr}
-		case strings.Contains(joined, "rev-parse --verify --quiet origin/main"):
+		case strings.HasSuffix(joined, " remote"):
+			return []byte("origin\n"), nil
+		case strings.Contains(joined, "fetch --quiet --no-tags --no-write-fetch-head origin +refs/heads/main:refs/remotes/origin/main"):
 			return nil, nil
-		case strings.Contains(joined, "rev-parse --verify origin/main"):
+		case strings.Contains(joined, "rev-parse --verify --quiet refs/heads/main^{commit}"),
+			strings.Contains(joined, "rev-parse --verify --quiet refs/remotes/origin/feature/test"):
+			return nil, commandError{args: append([]string{binary}, args...), err: exitErr}
+		case strings.Contains(joined, "rev-parse --verify --quiet refs/remotes/origin/main"):
+			return nil, nil
+		case strings.Contains(joined, "rev-parse --verify refs/remotes/origin/main"):
 			return []byte("abc123\n"), nil
-		case strings.Contains(joined, "worktree add -b feature/test "+output+" origin/main"):
+		case strings.Contains(joined, "worktree add -b feature/test "+output+" refs/remotes/origin/main"):
 			addAttempts++
 			if addAttempts == 1 {
 				return nil, commandError{
@@ -305,6 +309,7 @@ func TestCreateWorkspaceProjectRepoPrunesStaleRegisteredWorktree(t *testing.T) {
 		name:       "api",
 		repoPath:   repo,
 		outputPath: output,
+		baseBranch: "main",
 	}, "feature/test")
 	if err != nil {
 		t.Fatalf("createWorkspaceProjectRepo: %v", err)
@@ -601,7 +606,7 @@ func TestCreateRejectsInvalidBranchName(t *testing.T) {
 }
 
 // TestAddWorktreeReportsBranchNotFetched covers Bug 3 (b): if no local head,
-// no origin remote-tracking branch, no default branch ref, and no tag of the
+// no remote-tracking branch, no default branch ref, and no tag of the
 // same name is reachable, Create must surface ports.ErrWorkspaceBranchNotFetched
 // so the HTTP layer can render a typed 400 with a `git fetch` suggestion.
 func TestAddWorktreeReportsBranchNotFetched(t *testing.T) {
@@ -623,7 +628,9 @@ func TestAddWorktreeReportsBranchNotFetched(t *testing.T) {
 			return nil, nil
 		case strings.Contains(joined, "worktree list --porcelain"):
 			return nil, nil
-		case strings.Contains(joined, "symbolic-ref --quiet --short refs/remotes/origin/HEAD"):
+		case strings.HasSuffix(joined, " remote"):
+			return nil, nil // no remote at all
+		case strings.Contains(joined, "symbolic-ref"):
 			return nil, commandError{args: args, err: exitOne}
 		case strings.Contains(joined, "branch --show-current"):
 			return nil, commandError{args: args, err: exitOne}
@@ -640,7 +647,7 @@ func TestAddWorktreeReportsBranchNotFetched(t *testing.T) {
 	}
 }
 
-func TestResolveBaseRefInfersRepoDefaultBranchWhenUnset(t *testing.T) {
+func TestFreshBaseRefInfersTheRemotesDefaultBranchWhenUnset(t *testing.T) {
 	ws, err := New(Options{ManagedRoot: t.TempDir(), RepoResolver: StaticRepoResolver{"proj": t.TempDir()}})
 	if err != nil {
 		t.Fatalf("new: %v", err)
@@ -652,22 +659,25 @@ func TestResolveBaseRefInfersRepoDefaultBranchWhenUnset(t *testing.T) {
 	ws.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
 		joined := strings.Join(args, " ")
 		switch {
-		case strings.Contains(joined, "symbolic-ref --quiet --short refs/remotes/origin/HEAD"):
-			return []byte("origin/master\n"), nil
-		case strings.Contains(joined, "origin/master"):
+		case strings.HasSuffix(joined, " remote"):
+			return []byte("Advisor\n"), nil
+		case strings.Contains(joined, "symbolic-ref --quiet --short refs/remotes/Advisor/HEAD"):
+			return []byte("Advisor/master\n"), nil
+		case strings.Contains(joined, "rev-parse --verify --quiet refs/remotes/Advisor/master"):
 			return []byte("sha\n"), nil
-		case strings.Contains(joined, "rev-parse --verify"):
+		case strings.Contains(joined, "rev-parse --verify"), strings.Contains(joined, "symbolic-ref"),
+			strings.Contains(joined, "config --get"):
 			return nil, commandError{args: args, err: exitOne}
 		default:
 			return nil, nil
 		}
 	}
-	ref, err := ws.resolveBaseRef(context.Background(), "/repo/child", "ao/work", "")
+	ref, err := ws.freshBaseRef(context.Background(), "/repo/child", "ao/work", "", "")
 	if err != nil {
-		t.Fatalf("resolveBaseRef err = %v", err)
+		t.Fatalf("freshBaseRef err = %v", err)
 	}
-	if ref != "origin/master" {
-		t.Fatalf("base ref = %q, want child origin/master", ref)
+	if ref != "refs/remotes/Advisor/master" {
+		t.Fatalf("base ref = %q, want the sole remote's default refs/remotes/Advisor/master", ref)
 	}
 }
 

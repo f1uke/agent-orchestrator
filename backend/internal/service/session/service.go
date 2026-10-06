@@ -1431,7 +1431,7 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	// Resolve the target branch from facts already loaded above — no extra query
 	// and no subprocess, so this stays affordable on the sessions LIST endpoint.
 	// That budget is why the chain stops at the project default here: the
-	// origin/HEAD step needs a worktree and belongs to Changes mode alone.
+	// remote-HEAD step needs a worktree and belongs to Changes mode alone.
 	targetPRs := make([]targetPR, 0, len(prs))
 	for _, p := range prs {
 		targetPRs = append(targetPRs, targetPR{Branch: p.TargetBranch, Open: !p.Merged && !p.Closed})

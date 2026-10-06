@@ -59,6 +59,12 @@ func gitRepoOnBranch(t *testing.T, branch string) string {
 // must record the remote default, not the active branch.
 func gitRepoWithOriginHead(t *testing.T, defaultBranch, featureBranch string) string {
 	t.Helper()
+	return gitRepoWithRemoteHead(t, "origin", defaultBranch, featureBranch)
+}
+
+// gitRepoWithRemoteHead is gitRepoWithOriginHead for a remote of any name.
+func gitRepoWithRemoteHead(t *testing.T, remote, defaultBranch, featureBranch string) string {
+	t.Helper()
 	dir := t.TempDir()
 	run := func(args ...string) {
 		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
@@ -71,10 +77,12 @@ func gitRepoWithOriginHead(t *testing.T, defaultBranch, featureBranch string) st
 	run("config", "user.email", "test@example.com")
 	run("config", "user.name", "test")
 	run("commit", "--allow-empty", "-m", "init")
-	// Fabricate a remote-tracking default without a real remote: point
-	// refs/remotes/origin/<defaultBranch> at HEAD, then set origin/HEAD to it.
-	run("update-ref", "refs/remotes/origin/"+defaultBranch, "HEAD")
-	run("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+defaultBranch)
+	// Fabricate a remote-tracking default for a remote that is never contacted:
+	// point refs/remotes/<remote>/<defaultBranch> at HEAD, then set
+	// <remote>/HEAD to it.
+	run("remote", "add", remote, "https://gitlab.example.com/group/"+remote)
+	run("update-ref", "refs/remotes/"+remote+"/"+defaultBranch, "HEAD")
+	run("symbolic-ref", "refs/remotes/"+remote+"/HEAD", "refs/remotes/"+remote+"/"+defaultBranch)
 	run("checkout", "-b", featureBranch)
 	return dir
 }
@@ -390,6 +398,22 @@ func TestManager_AddPrefersOriginHeadNonMain(t *testing.T) {
 	}
 }
 
+// A repo whose only remote is not called origin (advisor-ios-app's `Advisor`)
+// still records the remote's default, not the checked-out feature branch.
+func TestManager_AddReadsTheDefaultFromARemoteNotNamedOrigin(t *testing.T) {
+	ctx := context.Background()
+	m := newManager(t)
+	repo := gitRepoWithRemoteHead(t, "Advisor", "develop", "fix/pr-attachment")
+
+	proj, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("advisor")})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if proj.DefaultBranch != "develop" {
+		t.Fatalf("DefaultBranch = %q, want develop (Advisor/HEAD), not the feature branch", proj.DefaultBranch)
+	}
+}
+
 func TestManager_SetConfig(t *testing.T) {
 	ctx := context.Background()
 	m := newManager(t)
@@ -680,54 +704,69 @@ func contains(s []string, needle string) bool {
 }
 
 func TestListBranches(t *testing.T) {
-	ctx := context.Background()
-	m := newManager(t)
-	repo := gitRepo(t)
-	run := func(args ...string) {
-		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v (%s)", args, err, out)
-		}
-	}
-	run("config", "user.email", "test@example.com")
-	run("config", "user.name", "test")
-	run("commit", "--allow-empty", "-m", "init")
-	run("branch", "feature/x")
-	// Fabricate a remote-tracking branch plus origin/HEAD (no real remote), to
-	// exercise the refs/remotes/origin half of the ref spec and confirm
-	// origin/HEAD is dropped from the result.
-	run("update-ref", "refs/remotes/origin/main", "HEAD")
-	run("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	// The project's remote is not always called origin: advisor-ios-app has
+	// `Advisor` (its own repo) and `Nter` (another project's), and listing
+	// origin alone offered none of its remote branches.
+	for _, remote := range []string{"origin", "Advisor"} {
+		t.Run(remote, func(t *testing.T) {
+			ctx := context.Background()
+			m := newManager(t)
+			repo := gitRepo(t)
+			run := func(args ...string) {
+				if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v (%s)", args, err, out)
+				}
+			}
+			run("config", "user.email", "test@example.com")
+			run("config", "user.name", "test")
+			run("commit", "--allow-empty", "-m", "init")
+			run("branch", "feature/x")
+			// Fabricate remote-tracking branches plus <remote>/HEAD (the remotes
+			// are never contacted), to exercise the remote half of the ref spec
+			// and confirm <remote>/HEAD is dropped from the result.
+			run("remote", "add", remote, "https://gitlab.example.com/mobility/advisor-ios-app")
+			run("config", "branch.main.remote", remote)
+			run("update-ref", "refs/remotes/"+remote+"/main", "HEAD")
+			run("symbolic-ref", "refs/remotes/"+remote+"/HEAD", "refs/remotes/"+remote+"/main")
+			// A second project's remote: its branches are not this project's.
+			run("remote", "add", "Nter", "https://gitlab.example.com/mobility/nter-ios-app")
+			run("update-ref", "refs/remotes/Nter/release", "HEAD")
 
-	if _, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("branchy")}); err != nil {
-		t.Fatalf("Add: %v", err)
-	}
+			if _, err := m.Add(ctx, project.AddInput{Path: repo, ProjectID: ptr("branchy")}); err != nil {
+				t.Fatalf("Add: %v", err)
+			}
 
-	got, err := m.ListBranches(ctx, "branchy")
-	if err != nil {
-		t.Fatalf("ListBranches: %v", err)
-	}
-	if !contains(got, "main") || !contains(got, "feature/x") {
-		t.Fatalf("branches = %v", got)
-	}
-	if contains(got, "origin/HEAD") {
-		t.Fatalf("branches = %v, want origin/HEAD dropped", got)
-	}
-	// git's for-each-ref shortens refs/remotes/origin/HEAD to the bare "origin"
-	// (not "origin/HEAD"); the bogus "origin" entry must not leak through either.
-	if contains(got, "origin") {
-		t.Fatalf("branches = %v, want bare \"origin\" (shortened origin/HEAD) dropped", got)
-	}
-	if !contains(got, "origin/main") {
-		t.Fatalf("branches = %v, want origin/main present", got)
-	}
+			got, err := m.ListBranches(ctx, "branchy")
+			if err != nil {
+				t.Fatalf("ListBranches: %v", err)
+			}
+			if !contains(got, "main") || !contains(got, "feature/x") {
+				t.Fatalf("branches = %v", got)
+			}
+			if contains(got, remote+"/HEAD") {
+				t.Fatalf("branches = %v, want %s/HEAD dropped", got, remote)
+			}
+			// git's for-each-ref shortens refs/remotes/<remote>/HEAD to the bare
+			// "<remote>"; the bogus entry must not leak through either.
+			if contains(got, remote) {
+				t.Fatalf("branches = %v, want bare %q (shortened HEAD) dropped", got, remote)
+			}
+			if !contains(got, remote+"/main") {
+				t.Fatalf("branches = %v, want %s/main present", got, remote)
+			}
+			if contains(got, "Nter/release") {
+				t.Fatalf("branches = %v, want the other project's remote left out", got)
+			}
 
-	// Unknown/unregistered project degrades gracefully: empty, no error.
-	got, err = m.ListBranches(ctx, "ghost")
-	if err != nil {
-		t.Fatalf("ListBranches(ghost): %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("ListBranches(ghost) = %v, want empty", got)
+			// Unknown/unregistered project degrades gracefully: empty, no error.
+			got, err = m.ListBranches(ctx, "ghost")
+			if err != nil {
+				t.Fatalf("ListBranches(ghost): %v", err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("ListBranches(ghost) = %v, want empty", got)
+			}
+		})
 	}
 }
 

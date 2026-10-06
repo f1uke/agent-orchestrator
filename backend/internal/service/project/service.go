@@ -12,6 +12,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/gitremote"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
@@ -38,8 +39,8 @@ type Manager interface {
 	Remove(ctx context.Context, id domain.ProjectID) (RemoveResult, error)
 
 	// ListBranches returns the project repo's branch names (short form) drawn
-	// from refs/heads and refs/remotes/origin, deduped preserving first-seen
-	// order, with origin/HEAD dropped. Returns (nil, nil) — an empty list, not
+	// from refs/heads and the project remote's refs/remotes/<remote>, deduped
+	// preserving first-seen order, with <remote>/HEAD dropped. Returns (nil, nil) — an empty list, not
 	// an error — when the project is unknown or its repo is otherwise
 	// unavailable, so the New Task branch dropdown degrades gracefully.
 	ListBranches(ctx context.Context, id domain.ProjectID) ([]string, error)
@@ -182,8 +183,8 @@ func (m *Service) backfillRepoOriginURL(ctx context.Context, row *domain.Project
 }
 
 // ListBranches returns the deduped short branch names for a project's repo,
-// drawn from local heads plus origin's remote-tracking branches, with
-// origin/HEAD removed. It never returns an error for a missing/unregistered
+// drawn from local heads plus the project remote's tracking branches, with
+// <remote>/HEAD removed. It never returns an error for a missing/unregistered
 // project or an unreadable repo — those degrade to an empty list so the New
 // Task dialog's branch dropdown can render regardless.
 func (m *Service) ListBranches(ctx context.Context, id domain.ProjectID) ([]string, error) {
@@ -194,11 +195,18 @@ func (m *Service) ListBranches(ctx context.Context, id domain.ProjectID) ([]stri
 	if err != nil || !ok || !row.ArchivedAt.IsZero() {
 		return nil, nil //nolint:nilerr // intentional: unreadable/archived project degrades to an empty branch list (see doc comment)
 	}
+	// The project's own remote, which is not always called origin
+	// (advisor-ios-app has `Advisor` and `Nter`); none means local heads only.
+	remote := gitremote.ForRepo(ctx, gitremote.Exec, row.Path, row.RepoOriginURL)
+	refs := []string{"refs/heads"}
+	if remote != "" {
+		refs = append(refs, "refs/remotes/"+remote)
+	}
 	// Emit both the full ref name and its short form: git's shortening quirk
-	// collapses refs/remotes/origin/HEAD to the bare "origin" (not
-	// "origin/HEAD"), so origin/HEAD must be identified via the full ref name
-	// rather than by matching the short-form text.
-	out, err := gitOutput(ctx, row.Path, "for-each-ref", "--format=%(refname)\t%(refname:short)", "refs/heads", "refs/remotes/origin")
+	// collapses refs/remotes/<remote>/HEAD to the bare "<remote>" (not
+	// "<remote>/HEAD"), so it must be identified via the full ref name rather
+	// than by matching the short-form text.
+	out, err := gitOutput(ctx, row.Path, append([]string{"for-each-ref", "--format=%(refname)\t%(refname:short)"}, refs...)...)
 	if err != nil {
 		return nil, nil //nolint:nilerr // intentional: an unreadable repo degrades to an empty branch list (see doc comment)
 	}
@@ -210,7 +218,7 @@ func (m *Service) ListBranches(ctx context.Context, id domain.ProjectID) ([]stri
 			continue
 		}
 		full, short, ok := strings.Cut(line, "\t")
-		if !ok || full == "refs/remotes/origin/HEAD" {
+		if !ok || (remote != "" && full == "refs/remotes/"+remote+"/HEAD") {
 			continue
 		}
 		if seen[short] {
@@ -422,100 +430,29 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 	return m.projectFromRow(row), nil
 }
 
-// resolveGitOriginURL returns the URL of the remote this project pushes to.
-//
-// `origin` is the convention and stays the first choice, but it is only a
-// convention: a checkout whose remotes are named after the apps they point at
-// (advisor-ios-app has `Advisor` and `Nter`) has no `origin` at all. Keying only
-// off that name recorded an empty repo URL for a perfectly ordinary GitLab
-// project, which silently hid every GitLab-gated setting in the UI. So, in order:
-//
-//  1. `origin`, when it exists;
-//  2. the remote the checked-out branch tracks (`branch.<HEAD>.remote`) — the
-//     remote this repo actually pushes to, and the only safe pick when several
-//     remotes point at different projects;
-//  3. the sole remote, when there is exactly one.
-//
-// Anything else — no remote, several remotes and no tracking branch, a missing
-// repo, any git error — returns an empty string. `project add` must not fail
-// just because no remote is configured (the SCM observer skips such projects),
-// and guessing between remotes that point at different repos would be worse than
-// recording nothing.
+// resolveGitOriginURL returns the URL of the repository at path, by the one
+// remote resolution AO uses everywhere (gitremote.ProjectURL): origin, else the
+// remote the checked-out branch tracks, else the sole remote. "" when none can
+// be attributed - `project add` must not fail just because no remote is
+// configured (the SCM observer skips such projects), and guessing between
+// remotes that point at different repos would be worse than recording nothing.
 func resolveGitOriginURL(path string) string {
-	if url := gitRemoteURL(path, "origin"); url != "" {
-		return url
-	}
-	if name := gitTrackedRemoteName(path); name != "" {
-		if url := gitRemoteURL(path, name); url != "" {
-			return url
-		}
-	}
-	if remotes := gitRemoteNames(path); len(remotes) == 1 {
-		return gitRemoteURL(path, remotes[0])
-	}
-	return ""
-}
-
-// gitRemoteURL returns one remote's fetch URL, or "" when it is not configured.
-func gitRemoteURL(path, remote string) string {
-	out, err := aoprocess.Command("git", "-C", path, "remote", "get-url", remote).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// gitTrackedRemoteName returns the remote the checked-out branch tracks, or ""
-// for a detached HEAD, an untracked branch, or an unreadable repo.
-func gitTrackedRemoteName(path string) string {
-	head, err := aoprocess.Command("git", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
-	if err != nil {
-		return ""
-	}
-	branch := strings.TrimSpace(string(head))
-	if branch == "" {
-		return ""
-	}
-	out, err := aoprocess.Command("git", "-C", path, "config", "--get", "branch."+branch+".remote").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// gitRemoteNames lists the repo's configured remotes.
-func gitRemoteNames(path string) []string {
-	out, err := aoprocess.Command("git", "-C", path, "remote").Output()
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if name := strings.TrimSpace(line); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
+	return gitremote.ProjectURL(context.Background(), gitremote.Exec, path)
 }
 
 // resolveDefaultBranch returns the repo's default branch, preferring the
-// remote's default (`origin/HEAD`) over the currently checked-out branch. This
-// matters because the user may have the repo on a feature branch when adding the
-// project: keying off HEAD would persist that feature branch as the project
-// default and base every session worktree on it. `origin/HEAD` reflects the
-// real default (e.g. `master`, `develop`) regardless of the active branch.
+// remote's advertised default (`<remote>/HEAD`) over the currently checked-out
+// branch. This matters because the user may have the repo on a feature branch
+// when adding the project: keying off HEAD would persist that feature branch as
+// the project default and base every session worktree on it.
 //
-// Falls back to the checked-out branch when origin/HEAD is unset (no remote, or
-// it was never fetched). A detached HEAD, missing repo, or any other git error
-// returns an empty string — `project add` must not fail just because the branch
-// can't be resolved (the caller falls back to DefaultBranchName).
+// Falls back to the checked-out branch when the remote HEAD is unknown (no
+// remote, or it was never fetched). A detached HEAD, missing repo, or any other
+// git error returns an empty string — `project add` must not fail just because
+// the branch can't be resolved (the caller falls back to DefaultBranchName).
 func resolveDefaultBranch(path string) string {
-	if out, err := aoprocess.Command(
-		"git", "-C", path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD",
-	).Output(); err == nil {
-		if ref := strings.TrimSpace(string(out)); ref != "" {
-			return strings.TrimPrefix(ref, "origin/")
-		}
+	if branch := gitremote.DefaultBranch(context.Background(), gitremote.Exec, path, ""); branch != "" {
+		return branch
 	}
 	out, err := aoprocess.Command("git", "-C", path, "symbolic-ref", "--short", "HEAD").Output()
 	if err != nil {

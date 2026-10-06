@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/gitremote"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 )
@@ -224,25 +225,33 @@ func (m *Manager) generateBranchName(ctx context.Context, agent ports.Agent, cfg
 	return name, true
 }
 
-// existingBranchNames lists local and origin branch short-names in the project
-// repo so a generated name can be de-duplicated before worktree creation.
+// existingBranchNames lists local and project-remote branch short-names in the
+// project repo so a generated name can be de-duplicated before worktree
+// creation. The remote is the project's own (gitremote.ForRepo), which is not
+// always called origin.
 func (m *Manager) existingBranchNames(ctx context.Context, project domain.ProjectRecord) map[string]bool {
 	set := map[string]bool{}
 	if strings.TrimSpace(project.Path) == "" {
 		return set
 	}
-	cmd := aoprocess.CommandContext(ctx, "git", "-C", project.Path,
-		"for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin")
-	out, err := cmd.Output()
+	args := []string{"-C", project.Path, "for-each-ref", "--format=%(refname:short)", "refs/heads"}
+	remote := gitremote.ForRepo(ctx, gitremote.Exec, project.Path, project.RepoOriginURL)
+	if remote != "" {
+		args = append(args, "refs/remotes/"+remote)
+	}
+	out, err := aoprocess.CommandContext(ctx, "git", args...).Output()
 	if err != nil {
 		return set
 	}
 	for _, l := range strings.Split(string(out), "\n") {
 		s := strings.TrimSpace(l)
-		if s == "" || s == "origin" { // git shortens refs/remotes/origin/HEAD to bare "origin"
+		if s == "" || (remote != "" && s == remote) { // git shortens refs/remotes/<remote>/HEAD to bare "<remote>"
 			continue
 		}
-		set[strings.ToLower(strings.TrimPrefix(s, "origin/"))] = true
+		if remote != "" {
+			s = strings.TrimPrefix(s, remote+"/")
+		}
+		set[strings.ToLower(s)] = true
 	}
 	return set
 }

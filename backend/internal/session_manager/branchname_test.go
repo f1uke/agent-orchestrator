@@ -1,6 +1,9 @@
 package sessionmanager
 
 import (
+	"context"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -147,4 +150,36 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+// TestExistingBranchNamesReadsTheProjectRemote: a generated name must be
+// de-duplicated against the project's own remote, which in advisor-ios-app is
+// `Advisor` (no origin) - and not against another project's remote beside it.
+func TestExistingBranchNamesReadsTheProjectRemote(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v (%s)", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "develop")
+	git("commit", "-q", "--allow-empty", "-m", "init")
+	git("remote", "add", "Advisor", "https://gitlab.example.com/mobility/advisor-ios-app")
+	git("remote", "add", "Nter", "https://gitlab.example.com/mobility/nter-ios-app")
+	git("update-ref", "refs/remotes/Advisor/feature/MOBILITY-1-taken", "HEAD")
+	git("symbolic-ref", "refs/remotes/Advisor/HEAD", "refs/remotes/Advisor/develop")
+	git("update-ref", "refs/remotes/Nter/feature/other-project", "HEAD")
+
+	got := (&Manager{}).existingBranchNames(context.Background(), domain.ProjectRecord{
+		Path: dir, RepoOriginURL: "git@gitlab.example.com:mobility/advisor-ios-app.git",
+	})
+	if !got["feature/mobility-1-taken"] || !got["develop"] {
+		t.Errorf("names = %v, want the Advisor branch and local develop", got)
+	}
+	if got["advisor"] || got["feature/other-project"] || got["nter/feature/other-project"] {
+		t.Errorf("names = %v, want neither the shortened Advisor/HEAD nor the other project's branches", got)
+	}
 }

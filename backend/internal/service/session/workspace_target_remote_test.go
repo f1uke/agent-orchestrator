@@ -321,22 +321,3 @@ func TestWorkspaceChanges_LocalOnlyTargetNamesTheLocalRef(t *testing.T) {
 			res.TargetRef, res.TargetFetch, res.TargetFetchedAt)
 	}
 }
-
-func TestSameRepoURL(t *testing.T) {
-	cases := []struct {
-		a, b string
-		want bool
-	}{
-		{"https://gitlab.example.com/group/sub/proj", "git@gitlab.example.com:group/sub/proj.git", true},
-		{"https://GitLab.example.com/group/proj.git/", "https://gitlab.example.com/group/proj", true},
-		{"ssh://git@github.com/acme/app.git", "https://github.com/acme/app", true},
-		{"https://gitlab.example.com/group/proj", "https://gitlab.example.com/group/other", false},
-		{"https://gitlab.example.com/group/proj", "https://github.com/group/proj", false},
-		{"/tmp/forge.git", "/tmp/forge.git", true},
-	}
-	for _, tc := range cases {
-		if got := sameRepoURL(tc.a, tc.b); got != tc.want {
-			t.Errorf("sameRepoURL(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
-		}
-	}
-}

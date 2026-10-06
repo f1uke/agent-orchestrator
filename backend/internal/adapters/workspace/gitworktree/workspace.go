@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/gitremote"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 )
@@ -48,6 +50,15 @@ var (
 // RepoResolver maps a project to the absolute path of its source git repo.
 type RepoResolver interface {
 	RepoPath(projectID domain.ProjectID) (string, error)
+}
+
+// RepoURLResolver is an optional RepoResolver extension: the repository URL a
+// project was registered with. With it, a repository carrying several remotes
+// (advisor-ios-app has `Advisor` and `Nter`, no origin) is fetched from the
+// project's own remote; without it, the remote is picked from the repository's
+// configuration alone (origin, the tracked remote, the sole remote).
+type RepoURLResolver interface {
+	RepoURL(projectID domain.ProjectID) string
 }
 
 // StaticRepoResolver is a RepoResolver backed by a fixed project→repo-path map.
@@ -156,7 +167,7 @@ func (w *Workspace) Create(ctx context.Context, cfg ports.WorkspaceConfig) (port
 	} else if ok {
 		return info, nil
 	}
-	if err := w.addWorktree(ctx, repo, path, cfg.Branch, cfg.BaseBranch); err != nil {
+	if err := w.addWorktree(ctx, repo, path, cfg.Branch, cfg.BaseBranch, w.repoURL(cfg.ProjectID)); err != nil {
 		return ports.WorkspaceInfo{}, err
 	}
 	return ports.WorkspaceInfo{Path: path, Branch: cfg.Branch, SessionID: cfg.SessionID, ProjectID: cfg.ProjectID}, nil
@@ -191,6 +202,7 @@ func (w *Workspace) CreateWorkspaceProject(ctx context.Context, cfg ports.Worksp
 		repoPath:   rootRepo,
 		outputPath: rootPath,
 		baseBranch: cfg.BaseBranch,
+		repoURL:    w.repoURL(cfg.ProjectID),
 	})
 	for _, child := range cfg.Repos {
 		repoPath, err := physicalAbs(child.RepoPath)
@@ -211,6 +223,7 @@ func (w *Workspace) CreateWorkspaceProject(ctx context.Context, cfg ports.Worksp
 			repoPath:     repoPath,
 			outputPath:   outPath,
 			baseBranch:   firstNonEmpty(child.BaseBranch, cfg.BaseBranch),
+			repoURL:      child.RepoURL,
 		})
 	}
 	branch, err := w.workspaceProjectBranch(ctx, repos, firstNonEmpty(cfg.Branch, defaultSessionBranchName(cfg.SessionID)))
@@ -589,7 +602,7 @@ func (w *Workspace) Restore(ctx context.Context, cfg ports.WorkspaceConfig) (por
 	if err := w.validateBranch(ctx, repo, cfg.Branch); err != nil {
 		return ports.WorkspaceInfo{}, err
 	}
-	if err := w.addWorktree(ctx, repo, path, cfg.Branch, cfg.BaseBranch); err != nil {
+	if err := w.addWorktree(ctx, repo, path, cfg.Branch, cfg.BaseBranch, w.repoURL(cfg.ProjectID)); err != nil {
 		return ports.WorkspaceInfo{}, err
 	}
 	return ports.WorkspaceInfo{Path: path, Branch: cfg.Branch, SessionID: cfg.SessionID, ProjectID: cfg.ProjectID, RepoPath: repo}, nil
@@ -619,6 +632,8 @@ func (w *Workspace) SyncToBase(ctx context.Context, info ports.WorkspaceInfo, ba
 		return ports.WorkspaceSyncResult{}, err
 	}
 
+	base := w.locate(ctx, repo, baseBranch, w.repoURL(info.ProjectID))
+
 	// Check for uncommitted work FIRST, before any fetch: a dirty worktree is
 	// left completely alone, so there is no reason to touch the network.
 	dirty, err := w.isDirty(ctx, info.Path)
@@ -632,7 +647,7 @@ func (w *Workspace) SyncToBase(ctx context.Context, info ports.WorkspaceInfo, ba
 	if dirty {
 		// ToSHA is resolved without fetching so the skip can still say how far
 		// behind the tree is; a failure to resolve it just leaves it empty.
-		target, _ := w.resolveSyncBaseRef(ctx, repo, baseBranch)
+		target, _ := w.resolveSyncBaseRef(ctx, repo, base)
 		res := skippedSync(ports.WorkspaceSyncReasonDirty, target.ref, head, target.sha)
 		w.logSyncSkip(ctx, info, baseBranch, res)
 		return res, nil
@@ -641,14 +656,16 @@ func (w *Workspace) SyncToBase(ctx context.Context, info ports.WorkspaceInfo, ba
 	// A failed fetch is recorded, not fatal: an offline daemon can still
 	// fast-forward onto refs it already has, which is strictly better than
 	// staying frozen. The error rides along on the result so it stays visible.
+	// A repository with no remote has nothing to fetch: its local base IS the
+	// base, and that is not a failure.
 	var fetchErr string
-	if _, err := w.run(ctx, w.binary, fetchBaseArgs(repo, baseBranch)...); err != nil {
+	if err := w.fetch(ctx, repo, base); err != nil {
 		fetchErr = err.Error()
 		slog.WarnContext(ctx, "gitworktree: SyncToBase fetch failed, falling back to already-fetched refs",
-			"worktree", info.Path, "baseBranch", baseBranch, "error", err)
+			"worktree", info.Path, "baseBranch", baseBranch, "remote", base.Remote, "error", err)
 	}
 
-	target, err := w.resolveSyncBaseRef(ctx, repo, baseBranch)
+	target, err := w.resolveSyncBaseRef(ctx, repo, base)
 	if err != nil {
 		return ports.WorkspaceSyncResult{}, err
 	}
@@ -695,8 +712,8 @@ type syncTarget struct {
 // resolveSyncBaseRef finds the ref the base branch currently lives at. A zero
 // syncTarget (empty ref) means the base resolves nowhere — reported to the
 // caller as base-unreachable rather than treated as "nothing to do".
-func (w *Workspace) resolveSyncBaseRef(ctx context.Context, repo, baseBranch string) (syncTarget, error) {
-	for _, ref := range syncBaseRefCandidates(baseBranch) {
+func (w *Workspace) resolveSyncBaseRef(ctx context.Context, repo string, base gitremote.Location) (syncTarget, error) {
+	for _, ref := range base.Candidates() {
 		exists, err := w.refExists(ctx, repo, ref)
 		if err != nil {
 			return syncTarget{}, err
@@ -748,7 +765,7 @@ func (w *Workspace) existingWorktree(ctx context.Context, repo, path string, cfg
 	return ports.WorkspaceInfo{}, false, nil
 }
 
-func (w *Workspace) addWorktree(ctx context.Context, repo, path, branch, baseBranch string) error {
+func (w *Workspace) addWorktree(ctx context.Context, repo, path, branch, baseBranch, repoURL string) error {
 	// Refuse early if the branch is already checked out in another worktree:
 	// `git worktree add` will fail, but its stderr leaks through as an opaque
 	// 500. A typed sentinel lets the HTTP layer surface a 409.
@@ -772,12 +789,12 @@ func (w *Workspace) addWorktree(ctx context.Context, repo, path, branch, baseBra
 	}
 
 	// `worktree add -b <branch> <path> <base>` creates a fresh local branch from
-	// <base>. resolveBaseRef tries `origin/<branch>` first, so a fetched-but-
+	// <base>. resolveBaseRef tries `<remote>/<branch>` first, so a fetched-but-
 	// not-checked-out remote branch auto-tracks cleanly via that path. If
-	// neither origin/<branch>, the default branch, nor any tag is reachable,
+	// neither <remote>/<branch>, the base branch, nor any tag is reachable,
 	// the branch genuinely has no base — surface ErrBranchNotFetched so callers
 	// can suggest `git fetch`.
-	baseRef, err := w.resolveBaseRef(ctx, repo, branch, baseBranch)
+	baseRef, err := w.freshBaseRef(ctx, repo, branch, baseBranch, repoURL)
 	if err != nil {
 		if errors.Is(err, errNoBaseRef) {
 			return fmt.Errorf("%w: %q has no local head, no remote, and no tag — run `git fetch` then retry", ErrBranchNotFetched, branch)
@@ -804,6 +821,7 @@ type workspaceProjectRepo struct {
 	repoPath     string
 	outputPath   string
 	baseBranch   string
+	repoURL      string
 }
 
 func (w *Workspace) workspaceProjectBranch(ctx context.Context, repos []workspaceProjectRepo, requested string) (string, error) {
@@ -851,7 +869,7 @@ func (w *Workspace) workspaceProjectBranchFree(ctx context.Context, repos []work
 }
 
 func (w *Workspace) createWorkspaceProjectRepo(ctx context.Context, repo workspaceProjectRepo, branch string) (string, error) {
-	baseRef, err := w.resolveBaseRef(ctx, repo.repoPath, branch, repo.baseBranch)
+	baseRef, err := w.freshBaseRef(ctx, repo.repoPath, branch, repo.baseBranch, repo.repoURL)
 	if err != nil {
 		if errors.Is(err, errNoBaseRef) {
 			return "", fmt.Errorf("%w: %q has no local head, no remote, and no tag — run `git fetch` then retry", ErrBranchNotFetched, branch)
@@ -917,16 +935,37 @@ func (w *Workspace) validateBranch(ctx context.Context, repo, branch string) err
 // addWorktree translates it into ErrBranchNotFetched.
 var errNoBaseRef = errors.New("gitworktree: no base ref found")
 
-func (w *Workspace) resolveBaseRef(ctx context.Context, repo, branch, baseBranch string) (string, error) {
-	if strings.TrimSpace(baseBranch) != "" {
-		return w.resolveBaseRefFromDefault(ctx, repo, branch, baseBranch)
+// freshBaseRef is the ref a NEW branch is cut from: the base branch as the
+// project's remote has it now.
+//
+// The base is fetched first. Without it a new session starts from whatever
+// remote-tracking ref happened to be on disk - or, in a repository whose remote
+// is not called origin, from the human's local checkout of the base, which
+// only moves when they pull - so new work began on old code and every commit
+// merged since showed up as a conflict later. The fetch is refs-only and
+// best-effort: offline or unauthenticated, the session is still cut from the
+// newest refs already known, and the failure is logged rather than blocking
+// the spawn.
+func (w *Workspace) freshBaseRef(ctx context.Context, repo, branch, baseBranch, repoURL string) (string, error) {
+	if strings.TrimSpace(baseBranch) == "" {
+		baseBranch = w.inferRepoDefaultBranch(ctx, repo, repoURL)
 	}
-	defaultBranch := w.inferRepoDefaultBranch(ctx, repo)
-	return w.resolveBaseRefFromDefault(ctx, repo, branch, defaultBranch)
+	base := w.locate(ctx, repo, baseBranch, repoURL)
+	fetchCtx, cancel := context.WithTimeout(ctx, baseFetchTimeout)
+	defer cancel()
+	if err := w.fetch(fetchCtx, repo, base); err != nil {
+		slog.WarnContext(ctx, "gitworktree: could not fetch the base before cutting a new branch, using already-fetched refs",
+			"repo", repo, "branch", branch, "baseBranch", baseBranch, "remote", base.Remote, "error", err)
+	}
+	return w.resolveBaseRef(ctx, repo, branch, base)
 }
 
-func (w *Workspace) resolveBaseRefFromDefault(ctx context.Context, repo, branch, defaultBranch string) (string, error) {
-	candidates := baseRefCandidates(branch, defaultBranch)
+// baseFetchTimeout bounds the fetch a new worktree waits on, so an unreachable
+// remote delays a spawn instead of hanging it.
+const baseFetchTimeout = 30 * time.Second
+
+func (w *Workspace) resolveBaseRef(ctx context.Context, repo, branch string, base gitremote.Location) (string, error) {
+	candidates := baseRefCandidates(branch, base)
 	for _, ref := range candidates {
 		exists, err := w.refExists(ctx, repo, ref)
 		if err != nil {
@@ -949,22 +988,50 @@ func (w *Workspace) resolveBaseRefFromDefault(ctx context.Context, repo, branch,
 	return "", fmt.Errorf("%w for branch %q (tried %s, %s)", errNoBaseRef, branch, strings.Join(candidates, ", "), tagRef)
 }
 
-func (w *Workspace) inferRepoDefaultBranch(ctx context.Context, repo string) string {
-	for _, args := range [][]string{
-		{"symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"},
-		{"branch", "--show-current"},
-	} {
-		out, err := w.run(ctx, w.binary, append([]string{"-C", repo}, args...)...)
-		if err != nil {
-			continue
-		}
-		branch := strings.TrimSpace(string(out))
-		branch = strings.TrimPrefix(branch, "origin/")
-		if branch != "" {
+// inferRepoDefaultBranch names the base when none was given: the default
+// branch the project's remote advertises, else the checked-out branch, else
+// the adapter's default.
+func (w *Workspace) inferRepoDefaultBranch(ctx context.Context, repo, repoURL string) string {
+	if branch := gitremote.DefaultBranch(ctx, w.git, repo, repoURL); branch != "" {
+		return branch
+	}
+	if out, err := w.git(ctx, repo, "branch", "--show-current"); err == nil {
+		if branch := strings.TrimSpace(string(out)); branch != "" {
 			return branch
 		}
 	}
 	return w.defaultBranch
+}
+
+// locate is where baseBranch is fetched from: see gitremote.Locate, the one
+// resolution AO uses for every remote decision.
+func (w *Workspace) locate(ctx context.Context, repo, baseBranch, repoURL string) gitremote.Location {
+	return gitremote.Locate(ctx, w.git, repo, baseBranch, repoURL)
+}
+
+// fetch refreshes base's remote-tracking ref in the shared repo. A base with
+// no remote has nothing to fetch and is not an error.
+func (w *Workspace) fetch(ctx context.Context, repo string, base gitremote.Location) error {
+	args := base.FetchArgs()
+	if args == nil {
+		return nil
+	}
+	_, err := w.git(ctx, repo, args...)
+	return err
+}
+
+// git runs one git command in dir through the adapter's runner.
+func (w *Workspace) git(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	return w.run(ctx, w.binary, append([]string{"-C", dir}, args...)...)
+}
+
+// repoURL is the repository URL projectID was registered with, when the
+// resolver knows it.
+func (w *Workspace) repoURL(projectID domain.ProjectID) string {
+	if r, ok := w.repos.(RepoURLResolver); ok {
+		return r.RepoURL(projectID)
+	}
+	return ""
 }
 
 func (w *Workspace) refExists(ctx context.Context, repo, ref string) (bool, error) {

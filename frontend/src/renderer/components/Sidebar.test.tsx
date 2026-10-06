@@ -988,7 +988,7 @@ describe("Sidebar", () => {
 					remote: "",
 					hasRemote: false,
 					status: "error",
-					reason: "Origin remote is required.",
+					reason: "A git remote is required.",
 				},
 				{
 					name: "api",
@@ -1014,7 +1014,7 @@ describe("Sidebar", () => {
 		expect(await screen.findByText(/Import failed · workspace not registered/i)).toBeInTheDocument();
 		expect(screen.getByText("workspace not registered")).toBeInTheDocument();
 		expect(screen.getByText("web")).toBeInTheDocument();
-		expect(screen.getByText("Origin remote is required.")).toBeInTheDocument();
+		expect(screen.getByText("A git remote is required.")).toBeInTheDocument();
 		expect(screen.getByText("api")).toBeInTheDocument();
 		expect(screen.getByText("main github.com/acme/api")).toBeInTheDocument();
 		expect(screen.getByText("Resolve 1 failed repository to continue")).toBeInTheDocument();

@@ -1,6 +1,6 @@
 package gitworktree
 
-import "strings"
+import "github.com/aoagents/agent-orchestrator/backend/internal/gitremote"
 
 func checkRefFormatBranchArgs(repo, branch string) []string {
 	return []string{"-C", repo, "check-ref-format", "--branch", branch}
@@ -155,14 +155,6 @@ func ignoredCountArgs(worktree string) []string {
 	return []string{"-C", worktree, "status", "--ignored", "--porcelain"}
 }
 
-// fetchBaseArgs refreshes origin's view of the base branch in the shared repo.
-// The refspec is explicit so the fetch stays narrow and updates the
-// remote-tracking ref the sync then fast-forwards onto.
-func fetchBaseArgs(repo, baseBranch string) []string {
-	return []string{"-C", repo, "fetch", "--quiet", "origin",
-		"+refs/heads/" + baseBranch + ":refs/remotes/origin/" + baseBranch}
-}
-
 // mergeFFOnlyArgs advances the worktree's branch to ref, or fails. --ff-only is
 // load-bearing: it succeeds exactly when the branch has no commits of its own,
 // so it can never discard committed work.
@@ -170,27 +162,15 @@ func mergeFFOnlyArgs(worktree, ref string) []string {
 	return []string{"-C", worktree, "merge", "--ff-only", ref}
 }
 
-// syncBaseRefCandidates lists where a base branch may live, remote-tracking
-// first so the shared remote wins over a possibly-behind local head. A qualified
-// base ("upstream/main") is used verbatim, matching baseRefCandidates.
-func syncBaseRefCandidates(baseBranch string) []string {
-	if strings.Contains(baseBranch, "/") {
-		return []string{baseBranch}
+// baseRefCandidates lists where a new branch may be cut from, in order: the
+// branch itself on the project's remote (a fetched-but-not-checked-out remote
+// branch then auto-tracks), the base branch (remote-tracking before the local
+// head, see gitremote.Location.Candidates), and the bare branch name last.
+func baseRefCandidates(branch string, base gitremote.Location) []string {
+	var candidates []string
+	if base.Remote != "" {
+		candidates = append(candidates, gitremote.Location{Remote: base.Remote, Branch: branch}.TrackingRef())
 	}
-	return []string{"refs/remotes/origin/" + baseBranch, "refs/heads/" + baseBranch}
-}
-
-func baseRefCandidates(branch, defaultBranch string) []string {
-	candidates := []string{"origin/" + branch}
-	if strings.Contains(defaultBranch, "/") {
-		// A qualified default ("upstream/main") is used verbatim; git's refname
-		// disambiguation already falls back to refs/heads/<defaultBranch>.
-		candidates = append(candidates, defaultBranch)
-	} else {
-		// The local head comes after origin/<defaultBranch> so remote-tracking
-		// still wins when present, but a remoteless repo can base new branches
-		// on its local default branch instead of failing BRANCH_NOT_FETCHED.
-		candidates = append(candidates, "origin/"+defaultBranch, "refs/heads/"+defaultBranch)
-	}
+	candidates = append(candidates, base.Candidates()...)
 	return append(candidates, branch)
 }
