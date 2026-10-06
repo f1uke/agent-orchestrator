@@ -857,3 +857,44 @@ func TestSessionKill_UnterminatedResultIsNotReportedAsAKill(t *testing.T) {
 		t.Fatalf("output = %q, want it to say the session was not killed", out)
 	}
 }
+
+// A worker whose subagents' work is not on its branch is refused the same way,
+// naming the subagents, and the deliberate path says their work is kept on
+// their own branches before it ends the session.
+func TestSessionKill_RefusalForSubagentsNamesThemAndDiscardKeepsTheirBranches(t *testing.T) {
+	cfg := setConfigEnv(t)
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/sessions/demo-1/kill" {
+			http.NotFound(w, r)
+			return
+		}
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		if strings.Contains(string(raw), `"discardUncommitted":true`) {
+			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","freed":true,"terminated":true}`)
+			return
+		}
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"conflict","code":"SESSION_HAS_UNMERGED_CHILDREN",`+
+			`"message":"demo-1 has 1 child worktree(s) whose work is not on its branch yet, so it was not killed and nothing was torn down.",`+
+			`"details":{"reason":"children_undelivered","children":[{"agentId":"a1","description":"Write the parser","state":"running","branch":"ao-child/demo-1/a1"}]}}`)
+	}))
+	t.Cleanup(srv.Close)
+	writeRunFileFor(t, cfg, srv)
+
+	_, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "session", "kill", "demo-1")
+	if err == nil || !strings.Contains(err.Error(), "Write the parser") || !strings.Contains(err.Error(), "ao-child/demo-1/a1") {
+		t.Fatalf("refusal = %v, want the subagent named with its branch", err)
+	}
+
+	bodies = nil
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "session", "kill", "demo-1", "--discard-uncommitted")
+	if err != nil {
+		t.Fatalf("deliberate end failed: %v\nstderr=%s", err, errOut)
+	}
+	if len(bodies) != 2 || !strings.Contains(out, "own branch") || !strings.Contains(out, "session demo-1 killed") {
+		t.Fatalf("requests %v, output:\n%s", bodies, out)
+	}
+}

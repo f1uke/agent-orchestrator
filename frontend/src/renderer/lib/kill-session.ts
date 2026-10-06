@@ -25,17 +25,45 @@ export type UncommittedFile = {
 export const UNDELIVERED_WORK_CODE = "SESSION_HAS_UNDELIVERED_WORK";
 
 /**
+ * The daemon's machine code for "this worker's subagents hold work its branch
+ * does not have yet". A discard does not lose that work: each subagent's work
+ * is committed onto its own branch, which is kept.
+ */
+export const UNMERGED_CHILDREN_CODE = "SESSION_HAS_UNMERGED_CHILDREN";
+
+/** One subagent of the worker whose work has not reached its branch. */
+export type UndeliveredChild = {
+	agentId: string;
+	description: string;
+	state: string;
+	branch: string;
+	detail: string;
+};
+
+/** Everything a refused kill named: the worktree's files and the subagents' work. */
+export type UndeliveredWork = {
+	files: UncommittedFile[];
+	subagents: UndeliveredChild[];
+};
+
+/**
  * The refusal, as an Error a mutation can throw and a dialog can read. It
  * carries the daemon's own sentence AND the file list, because a person deciding
  * whether to throw work away is deciding about the files, not about a count.
  */
 export class UndeliveredWorkError extends Error {
 	readonly files: UncommittedFile[];
+	readonly subagents: UndeliveredChild[];
 
-	constructor(message: string, files: UncommittedFile[]) {
+	constructor(message: string, files: UncommittedFile[], subagents: UndeliveredChild[] = []) {
 		super(message);
 		this.name = "UndeliveredWorkError";
 		this.files = files;
+		this.subagents = subagents;
+	}
+
+	get work(): UndeliveredWork {
+		return { files: this.files, subagents: this.subagents };
 	}
 }
 
@@ -67,7 +95,14 @@ export async function killSession(
 	});
 	if (error) {
 		const files = undeliveredWorkFrom(error);
-		if (files) throw new UndeliveredWorkError(apiErrorMessage(error, "Unable to end this session"), files);
+		const subagents = unmergedChildrenFrom(error);
+		if (files || subagents) {
+			throw new UndeliveredWorkError(
+				apiErrorMessage(error, "Unable to end this session"),
+				files ?? [],
+				subagents ?? [],
+			);
+		}
 		throw new Error(apiErrorMessage(error, "Unable to end this session"));
 	}
 	return {
@@ -100,5 +135,35 @@ export function undeliveredWorkFrom(error: unknown): UncommittedFile[] | null {
 		const file = entry as { path?: unknown; status?: unknown };
 		if (typeof file.path !== "string" || file.path === "") return [];
 		return [{ path: file.path, status: typeof file.status === "string" ? file.status : "changed" }];
+	});
+}
+
+/**
+ * Pull the worker's undelivered subagents out of either refusal: the one for
+ * them alone, and the files refusal, which carries them alongside so a discard
+ * is never confirmed against half the list. Returns null for every other
+ * failure.
+ */
+export function unmergedChildrenFrom(error: unknown): UndeliveredChild[] | null {
+	if (typeof error !== "object" || error === null) return null;
+	const body = error as { code?: unknown; details?: unknown };
+	if (body.code !== UNMERGED_CHILDREN_CODE && body.code !== UNDELIVERED_WORK_CODE) return null;
+	const details = body.details as { children?: unknown } | undefined;
+	if (!Array.isArray(details?.children)) return [];
+	const text = (value: unknown) => (typeof value === "string" ? value : "");
+	return details.children.flatMap((entry): UndeliveredChild[] => {
+		if (typeof entry !== "object" || entry === null) return [];
+		const child = entry as Record<string, unknown>;
+		const agentId = text(child.agentId);
+		if (agentId === "") return [];
+		return [
+			{
+				agentId,
+				description: text(child.description),
+				state: text(child.state),
+				branch: text(child.branch),
+				detail: text(child.detail),
+			},
+		];
 	});
 }

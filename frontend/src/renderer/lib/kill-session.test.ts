@@ -11,7 +11,7 @@ vi.mock("./api-client", () => ({
 	},
 }));
 
-import { killSession, undeliveredWorkFrom, UndeliveredWorkError } from "./kill-session";
+import { killSession, unmergedChildrenFrom, undeliveredWorkFrom, UndeliveredWorkError } from "./kill-session";
 
 const refusalBody = {
 	error: "conflict",
@@ -91,5 +91,49 @@ describe("undeliveredWorkFrom", () => {
 		expect(
 			undeliveredWorkFrom({ code: "SESSION_HAS_UNDELIVERED_WORK", details: { files: [{ path: "a.go" }, 7, null] } }),
 		).toEqual([{ path: "a.go", status: "changed" }]);
+	});
+});
+
+describe("a refusal for the worker's subagents", () => {
+	const childrenRefusal = {
+		error: "conflict",
+		code: "SESSION_HAS_UNMERGED_CHILDREN",
+		message: "sess-1 has 1 child worktree(s) whose work is not on its branch yet",
+		details: {
+			children: [
+				{ agentId: "a1", description: "Write the parser", state: "running", branch: "ao-child/sess-1/a1", detail: "" },
+				{ description: "no id, dropped" },
+			],
+		},
+	};
+
+	beforeEach(() => postMock.mockReset());
+
+	it("is read as undelivered work carrying the subagents, so the same dialog can offer to end it", async () => {
+		postMock.mockResolvedValueOnce({ data: undefined, error: childrenRefusal });
+		const err = await killSession("sess-1").catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(UndeliveredWorkError);
+		const work = (err as UndeliveredWorkError).work;
+		expect(work.files).toEqual([]);
+		expect(work.subagents).toEqual([
+			{ agentId: "a1", description: "Write the parser", state: "running", branch: "ao-child/sess-1/a1", detail: "" },
+		]);
+	});
+
+	it("is not mistaken for any other failure", () => {
+		expect(unmergedChildrenFrom({ code: "SOMETHING_ELSE" })).toBeNull();
+		expect(unmergedChildrenFrom(new Error("boom"))).toBeNull();
+		expect(undeliveredWorkFrom(childrenRefusal)).toBeNull();
+	});
+
+	it("rides along a files refusal, so the dialog shows both lists", async () => {
+		postMock.mockResolvedValueOnce({
+			data: undefined,
+			error: { ...refusalBody, details: { ...refusalBody.details, children: childrenRefusal.details.children } },
+		});
+		const err = await killSession("sess-1").catch((e: unknown) => e);
+		const work = (err as UndeliveredWorkError).work;
+		expect(work.files.length).toBeGreaterThan(0);
+		expect(work.subagents.map((c) => c.agentId)).toEqual(["a1"]);
 	});
 });

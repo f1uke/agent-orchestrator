@@ -771,36 +771,46 @@ func undeliveredWorkError(id domain.SessionID, res sessionmanager.TeardownResult
 	if len(res.Undelivered) == 1 {
 		noun = "file"
 	}
-	return apierr.Conflict(ErrUndeliveredWork, fmt.Sprintf(
-		"%s still holds %d uncommitted %s that no pull request carries, so it was not killed and nothing was torn down. Finish and deliver the work, or discard it deliberately.",
-		id, len(res.Undelivered), noun,
-	), map[string]any{
+	details := map[string]any{
 		"reason":        res.Reason,
 		"sessionId":     string(id),
 		"workspacePath": res.WorkspacePath,
 		"files":         files,
-	})
+	}
+	if len(res.UndeliveredChildren) > 0 {
+		details["children"] = childDetails(res.UndeliveredChildren)
+	}
+	return apierr.Conflict(ErrUndeliveredWork, fmt.Sprintf(
+		"%s still holds %d uncommitted %s that no pull request carries, so it was not killed and nothing was torn down. Finish and deliver the work, or discard it deliberately.",
+		id, len(res.Undelivered), noun,
+	), details)
 }
 
 // unmergedChildrenError refuses a kill while the worker's child worktrees hold
 // work its branch does not have yet. It names each child and says what a
 // discard would do, which is to keep that work rather than lose it.
 func unmergedChildrenError(id domain.SessionID, res sessionmanager.TeardownResult) error {
-	children := make([]map[string]any, 0, len(res.UndeliveredChildren))
-	for _, c := range res.UndeliveredChildren {
-		children = append(children, map[string]any{
-			"agentId": c.AgentID, "description": c.Description, "state": string(c.State),
-			"branch": c.Branch, "worktreePath": c.WorktreePath, "detail": c.Detail,
-		})
-	}
 	return apierr.Conflict(ErrUnmergedChildren, fmt.Sprintf(
 		"%s has %d child worktree(s) whose work is not on its branch yet, so it was not killed and nothing was torn down. Wait for them to finish and merge, or kill with discard: AO then commits each child's work onto its own branch, keeps that branch, and removes its folder.",
 		id, len(res.UndeliveredChildren),
 	), map[string]any{
 		"reason":    res.Reason,
 		"sessionId": string(id),
-		"children":  children,
+		"children":  childDetails(res.UndeliveredChildren),
 	})
+}
+
+// childDetails is the wire list of a worker's undelivered children, shared by
+// both refusals so the CLI and the app read one shape.
+func childDetails(children []domain.SessionChild) []map[string]any {
+	out := make([]map[string]any, 0, len(children))
+	for _, c := range children {
+		out = append(out, map[string]any{
+			"agentId": c.AgentID, "description": c.Description, "state": string(c.State),
+			"branch": c.Branch, "worktreePath": c.WorktreePath, "detail": c.Detail,
+		})
+	}
+	return out
 }
 
 // RollbackSpawn deletes a seed-state session row, or falls back to a Kill if

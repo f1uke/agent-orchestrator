@@ -169,3 +169,23 @@ func TestRestore_SettlesOrphanedChildrenBeforeRelaunch(t *testing.T) {
 		t.Fatalf("relaunched %d, orphans settled for %v; want the children settled before the relaunch", rt.created, children.orphaned)
 	}
 }
+
+// The refusal is the preview a discard is confirmed against, so with both kinds
+// of undelivered work it must name both: naming only the children would let a
+// discard throw away files nobody was shown.
+func TestKill_RefusalNamesFilesAndChildrenTogether(t *testing.T) {
+	children := &fakeChildren{undelivered: []domain.SessionChild{{AgentID: "a1", State: domain.ChildRunning}}}
+	m, st, _, _ := newChildManager(true, children)
+	ws := &fakeWorkspace{}
+	m.workspace = ws
+	st.sessions["mer-1"] = mkLive("mer-1")
+	dirtyWorkspace(ws, ports.UncommittedFile{Path: "src/main.go", Status: ports.UncommittedModified})
+
+	res, err := m.Kill(ctx, "mer-1", KillOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != ReasonWorkspaceDirty || len(res.Undelivered) != 1 || len(res.UndeliveredChildren) != 1 {
+		t.Fatalf("res = %+v, want the files refusal carrying the children too", res)
+	}
+}

@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/kill-session";
+import { killSession, UndeliveredWorkError, type UndeliveredWork } from "../lib/kill-session";
 import { captureRendererEvent } from "../lib/telemetry";
 import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { returnFocusToTerminal } from "../lib/terminal-focus";
@@ -23,7 +23,7 @@ export function KillSessionButton({ session }: { session: WorkspaceSession }) {
 	const navigate = useNavigate();
 	const workspaces = useWorkspaceQuery().data ?? [];
 	const [confirmOpen, setConfirmOpen] = useState(false);
-	const [refused, setRefused] = useState<UncommittedFile[] | null>(null);
+	const [refused, setRefused] = useState<UndeliveredWork | null>(null);
 
 	// Where this pane goes once the session it is showing has ended: the project's
 	// orchestrator, or the board when none is live. Shared with the discard path,
@@ -58,7 +58,7 @@ export function KillSessionButton({ session }: { session: WorkspaceSession }) {
 			// to the dialog that can show the files.
 			if (error instanceof UndeliveredWorkError) {
 				setConfirmOpen(false);
-				setRefused(error.files);
+				setRefused(error.work);
 			}
 		},
 	});
@@ -77,7 +77,8 @@ export function KillSessionButton({ session }: { session: WorkspaceSession }) {
 					onOpenChange={(next) => !next && setRefused(null)}
 					sessionId={session.id}
 					sessionTitle={session.title}
-					files={refused}
+					files={refused.files}
+					subagents={refused.subagents}
 					onDiscarded={goHome}
 				/>
 			)}

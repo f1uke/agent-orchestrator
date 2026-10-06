@@ -515,19 +515,34 @@ func (c *commandContext) killSession(ctx context.Context, cmd *cobra.Command, id
 		return writeKillResult(cmd, res)
 	}
 	files, refused := undeliveredWorkFromError(err)
-	if !refused {
+	children, childrenRefused := unmergedChildrenFromError(err)
+	if !refused && !childrenRefused {
 		return err
 	}
 	out := cmd.OutOrStdout()
 	if !opts.discardUncommitted {
 		// The refusal goes to STDERR with the error: this is a failure, and it
 		// exits non-zero. Nothing about it may read as a completed kill.
-		return fmt.Errorf("%w\n\n%s\nTo throw that work away anyway:\n  ao session kill %s --discard-uncommitted",
-			err, renderUncommittedFiles(files), id)
+		var what strings.Builder
+		if refused {
+			what.WriteString(renderUncommittedFiles(files) + "\n")
+		}
+		if len(children) > 0 {
+			what.WriteString("subagents whose work is not on the branch yet (a discard keeps each one's work on its own branch):\n" + renderUndeliveredChildren(children) + "\n")
+		}
+		return fmt.Errorf("%w\n\n%sTo end it anyway:\n  ao session kill %s --discard-uncommitted", err, what.String(), id)
 	}
-	if _, werr := fmt.Fprintf(out, "discarding the uncommitted work in %s:\n%s\ncaptured to refs/ao/preserved/%s before removal; the branch and its commits stay.\n",
-		id, renderUncommittedFiles(files), id); werr != nil {
-		return werr
+	if refused {
+		if _, werr := fmt.Fprintf(out, "discarding the uncommitted work in %s:\n%s\ncaptured to refs/ao/preserved/%s before removal; the branch and its commits stay.\n",
+			id, renderUncommittedFiles(files), id); werr != nil {
+			return werr
+		}
+	}
+	if len(children) > 0 {
+		if _, werr := fmt.Fprintf(out, "setting aside the work of %d subagent(s); each is committed onto its own branch, which is kept:\n%s\n",
+			len(children), renderUndeliveredChildren(children)); werr != nil {
+			return werr
+		}
 	}
 	res, err = c.postKill(ctx, id, true)
 	if err != nil {
@@ -590,6 +605,57 @@ func undeliveredWorkFromError(err error) ([]uncommittedFileDTO, bool) {
 		files = append(files, uncommittedFileDTO{Path: path, Status: status})
 	}
 	return files, true
+}
+
+// unmergedChildrenFromError recognises either refusal that names the worker's
+// subagents: the one for them alone, and the files refusal that carries them
+// alongside. refused is true only for the first; the list comes from both.
+func unmergedChildrenFromError(err error) ([]undeliveredChildDTO, bool) {
+	var apiErr apiResponseError
+	if !errors.As(err, &apiErr) {
+		return nil, false
+	}
+	code := apiErr.ErrorBody.Code
+	if code != sessionsvc.ErrUnmergedChildren && code != sessionsvc.ErrUndeliveredWork {
+		return nil, false
+	}
+	raw, _ := apiErr.ErrorBody.Details["children"].([]any)
+	children := make([]undeliveredChildDTO, 0, len(raw))
+	for _, entry := range raw {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		var c undeliveredChildDTO
+		c.AgentID, _ = m["agentId"].(string)
+		c.Description, _ = m["description"].(string)
+		c.State, _ = m["state"].(string)
+		c.Branch, _ = m["branch"].(string)
+		children = append(children, c)
+	}
+	return children, code == sessionsvc.ErrUnmergedChildren
+}
+
+type undeliveredChildDTO struct {
+	AgentID     string
+	Description string
+	State       string
+	Branch      string
+}
+
+func renderUndeliveredChildren(children []undeliveredChildDTO) string {
+	if len(children) == 0 {
+		return "  (the daemon named no subagents)"
+	}
+	lines := make([]string, 0, len(children))
+	for _, c := range children {
+		label := c.Description
+		if label == "" {
+			label = c.AgentID
+		}
+		lines = append(lines, fmt.Sprintf("  %-9s %s (%s)", c.State, label, c.Branch))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderUncommittedFiles lists the files themselves, not a count. A count is

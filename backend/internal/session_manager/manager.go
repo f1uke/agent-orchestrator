@@ -1388,6 +1388,14 @@ func (m *Manager) teardown(ctx context.Context, id domain.SessionID, cause strin
 		if listErr != nil {
 			return TeardownResult{}, fmt.Errorf("kill %s: tenants: %w", id, listErr)
 		}
+		files, filesErr := m.uncommittedWork(ctx, ws, workspaceProjectRows, workspaceProject)
+		if filesErr != nil {
+			return TeardownResult{}, fmt.Errorf("kill %s: read uncommitted work: %w", id, filesErr)
+		}
+		filesAtStake := len(files) > 0 && !workspaceOutlivesTeardownGiven(rec, preflight)
+		// The worker's child worktrees are its undelivered work too. A refusal
+		// names BOTH lists at once: it is the preview a discard is confirmed
+		// against, so naming only one would let the other be lost unseen.
 		if dirty == DirtyRefuse && m.children != nil {
 			children, childErr := m.children.Undelivered(ctx, id)
 			if childErr != nil {
@@ -1395,15 +1403,16 @@ func (m *Manager) teardown(ctx context.Context, id domain.SessionID, cause strin
 			}
 			if len(children) > 0 {
 				res.UndeliveredChildren = children
-				res.Reason = ReasonChildrenUndelivered
+				if filesAtStake {
+					res.Undelivered = files
+					res.Reason = ReasonWorkspaceDirty
+				} else {
+					res.Reason = ReasonChildrenUndelivered
+				}
 				return res, nil
 			}
 		}
-		files, filesErr := m.uncommittedWork(ctx, ws, workspaceProjectRows, workspaceProject)
-		if filesErr != nil {
-			return TeardownResult{}, fmt.Errorf("kill %s: read uncommitted work: %w", id, filesErr)
-		}
-		if len(files) > 0 && !workspaceOutlivesTeardownGiven(rec, preflight) {
+		if filesAtStake {
 			res.Undelivered = files
 			if dirty == DirtyRefuse {
 				res.Reason = ReasonWorkspaceDirty

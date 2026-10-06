@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { GitMerge } from "lucide-react";
 import { useState } from "react";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/kill-session";
+import { killSession, UndeliveredWorkError, type UndeliveredWork } from "../lib/kill-session";
 import { captureRendererEvent } from "../lib/telemetry";
 import { cn } from "../lib/utils";
 import { CHIP_ACTION_BUTTON, CHIP_WITH_ACTION } from "../lib/chip-with-action";
@@ -29,7 +29,7 @@ import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
  */
 export function MergedChip({ session, compact = false }: { session: WorkspaceSession; compact?: boolean }) {
 	const queryClient = useQueryClient();
-	const [refused, setRefused] = useState<UncommittedFile[] | null>(null);
+	const [refused, setRefused] = useState<UndeliveredWork | null>(null);
 	const prNumber = latestMergedPRNumber(session);
 	const label = prNumber ? `Merged #${prNumber}` : "Merged";
 
@@ -43,7 +43,7 @@ export function MergedChip({ session, compact = false }: { session: WorkspaceSes
 			// Even a merged worker can be holding uncommitted work in its tree, and
 			// the refusal must reach the human here too rather than dying as a
 			// tooltip that says nothing about which files are in the way.
-			if (error instanceof UndeliveredWorkError) setRefused(error.files);
+			if (error instanceof UndeliveredWorkError) setRefused(error.work);
 		},
 	});
 
@@ -68,7 +68,8 @@ export function MergedChip({ session, compact = false }: { session: WorkspaceSes
 					onOpenChange={(next) => !next && setRefused(null)}
 					sessionId={session.id}
 					sessionTitle={session.title}
-					files={refused}
+					files={refused.files}
+					subagents={refused.subagents}
 				/>
 			)}
 			<span
