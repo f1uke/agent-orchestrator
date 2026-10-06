@@ -104,8 +104,8 @@ var (
 	// ErrCrewAutoFormationOff means an AO SESSION asked to attach a member to a
 	// task on a project whose `disableAutoCrew` is set. The flag turns off
 	// AUTOMATIC crew formation and keeps the manual escape hatch - but the hatch
-	// was designed for a PERSON, and an agent reading its own brief ("the smoke
-	// checklist belongs to qa") walks through it routinely, which is how six
+	// was designed for a PERSON, and an agent reading its own brief ("the manual
+	// checks belong to qa") walks through it routinely, which is how six
 	// consecutive tasks on a crew-off project still got a qa. So the manual path
 	// stays open to a human (the app's `+ qa`, or `ao crew add` typed in an
 	// ordinary shell) and is refused to every AO session, the orchestrator
@@ -135,11 +135,10 @@ const (
 	EnvRunFile = "AO_RUN_FILE"
 	// EnvCrewID names the TASK a crew member is working on, which is dev's session
 	// id. It exists because the artefacts of a task belong to the task, not to
-	// whichever agent happened to produce them: qa authors the smoke checklist the
-	// human plays and dev's card shows, so it must write it against this id and
-	// not against its own. A SOLO session sets it to its own id, so a command
-	// written with it is correct in both shapes and there is no branch for an
-	// agent to get wrong.
+	// whichever agent happened to produce them: what qa reads or links for the task
+	// shows on dev's card, so it must name this id and not its own. A SOLO
+	// session sets it to its own id, so a command written with it is correct in
+	// both shapes and there is no branch for an agent to get wrong.
 	EnvCrewID = "AO_CREW_ID"
 	// EnvCrewDevID and EnvCrewQAID name the two MEMBERS of a crew, so each can say
 	// something about the other and a human reading a transcript can tell which
@@ -3411,27 +3410,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 	// and worker prompts, so it is injected here rather than baked into either
 	// editable base — it stays present even when a base is overridden or cleared.
 	base += prompts.ReferenceConvention()
-	// Workers additionally get the always-injected smoke-test checklist protocol,
-	// placed here (not in the editable base) so it survives a cleared/overridden
-	// base, same as the reference convention.
 	if kind == domain.KindWorker {
-		// The smoke checklist protocol goes to EVERY worker again, dev included.
-		// It was taken off a crew's dev when a crew was formed at spawn, on the
-		// grounds that qa owned the list. Under lazy creation dev owns it until a
-		// qa exists - and on a task that never touches a runtime surface, that is
-		// for ever - so withholding it would silently leave a whole class of
-		// standard tasks with no checklist and nobody able to write one. dev's crew
-		// block (CrewProtocol) carries the handover instead, in the same window AO
-		// enforces: `ao smoke set` from a crew's dev is refused once a qa exists.
-		base += prompts.SmokeChecklistProtocol()
-		// qa is created part-way through a task, so the protocol above times the
-		// list at the END - right for an agent working alone, wrong for the member
-		// whose job the list describes. qa publishes its intent instead, and says
-		// out loud when the answer is that nothing needs a human's eyes: an empty
-		// list otherwise means "still thinking" and "nothing to check" at once.
-		if crewRole == domain.CrewRoleQA {
-			base += prompts.ChecklistIntentEarly()
-		}
 		// A project that targets iOS has a device its workers can look at. Only
 		// they are told: the orchestrator dispatches rather than drives. A crew's
 		// dev keeps the whole catalog - it is alone until it claims, and CLAIMING
@@ -3460,8 +3439,8 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 			case domain.CrewRoleDev:
 				base += prompts.SimulatorHandoverToQA()
 			case domain.CrewRoleQA:
-				// The record -> flow -> retire loop is qa's alone: it is how a
-				// human's ONE play becomes a committed flow and a retired case.
+				// The record -> flow -> commit loop is qa's alone: it is how a
+				// human's ONE play becomes a committed flow.
 				// A solo worker does not get it - there is nobody to ask for that
 				// play, and its prompt stays byte-for-byte what it was.
 				base += prompts.RecordedFlowLoop()
@@ -3470,7 +3449,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// The task-size directive right-sizes ceremony: a mechanical worker is
 		// authorized to skip the process skills. Only mechanical renders anything;
 		// standard/deep add nothing. Injected here (not the editable base) so it
-		// survives a cleared/overridden base, like the smoke + reference blocks.
+		// survives a cleared/overridden base, like the reference block.
 		// A mechanical task never has a qa, so this is dev's/solo's alone.
 		if crewRole != domain.CrewRoleQA {
 			base += prompts.TaskSizeDirective(string(taskSize.WithDefault()))

@@ -219,7 +219,7 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, reason do
 	// The last sentence names the handback CONCRETELY. qa's floor carries the
 	// obligation in full, but the kickoff is the turn qa actually reads, and the
 	// run that stalled ended precisely here - work done, nobody told.
-	b.WriteString("\n\nTriage what is worth verifying, write and RUN what a machine can assert, record what you found, and finish by handing back to dev with `ao send --crew dev --about <sha>` - the commit you tested, what you recorded and retired, and what is left for the human. Hand back even if the answer is that there was nothing to exercise. dev is working in this same worktree while you do, so bracket anything you want to trust with `ao crew run`.")
+	b.WriteString("\n\nTriage what is worth verifying, write and RUN what a machine can assert, and finish by handing back to dev with `ao send --crew dev --about <sha>` - the commit you tested, what you saw and what is left for a person. Hand back even if the answer is that there was nothing to exercise. dev is working in this same worktree while you do, so bracket anything you want to trust with `ao crew run`.")
 	return b.String()
 }
 
@@ -228,11 +228,10 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, reason do
 // work, because none is created until somebody asks for one.
 //
 // The constant fact, whatever created it: DEV DID NOT KNOW IT WOULD GET A QA.
-// dev has been authoring the checklist alone and goes on co-authoring it, so
-// that list may already carry the human's verdicts - exactly the artefact #226's
-// id trap destroys when a case is re-sent under a new name. Everything else a
-// joining member inherits it inherits the same way whatever created it - dev's
-// branch, dev's worktree, dev's brief, dev's id as AO_CREW_ID.
+// dev has been working alone, so the branch, its tests and any PR are work in
+// progress the member must read before it adds to them. Everything a joining
+// member inherits it inherits the same way whatever created it - dev's branch,
+// dev's worktree, dev's brief, dev's id as AO_CREW_ID.
 //
 // What differs by reason is only the FIRST SENTENCE, and what it has to carry is
 // WHO ASKED - because that decides where the member looks first. dev asking means
@@ -260,7 +259,7 @@ func crewArrivalOpening(reason domain.CrewJoinReason) string {
 	}
 }
 
-const crewArrivalCommon = "dev has been working alone until now, so treat what is already there as work in progress rather than a blank page: read the PR and `ao smoke list \"$AO_CREW_ID\"` BEFORE you write anything. Add to that checklist with `ao smoke add`, and change a case that is already on it with `ao smoke edit --case <id>` - never `ao smoke set`, which replaces the whole list and would delete dev's cases along with the human's verdicts, notes and screenshots. There may also be an open PR with CI and review history; read it rather than re-deriving it."
+const crewArrivalCommon = "dev has been working alone until now, so treat what is already there as work in progress rather than a blank page: read the PR and the branch's diff BEFORE you write anything. The PR may already have CI and review history; read it rather than re-deriving it."
 
 // CrewMember returns the session filling `role` on this session's task, if any.
 // It answers for either member (ask dev for its qa, or qa for its dev), so a

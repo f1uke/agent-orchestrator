@@ -47,7 +47,7 @@ func MobileScriptGuidance(ms MobileScripts) string {
 	return ms.fill(body + mobileScriptShared + closing)
 }
 
-// MobileScriptPlay is how qa plays its smoke cases on a script-only project,
+// MobileScriptPlay is how qa drives its checks on a script-only project,
 // and it replaces RecordedFlowLoop there. That loop teaches recording a flow by
 // driving it with `ao sim tap` and committing it into the app's repository;
 // under the rule every device run is a script from the store, which is for
@@ -113,18 +113,18 @@ adb -s <serial> logcat -d -t 500              # what the app printed, when the s
 // the two rules that do not depend on the device.
 const mobileScriptShared = ` Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from ` + "`start/`" + `, no value typed into the script, end with an assertion and ` + "`takeScreenshot`" + `, stop before anything irreversible. Then ` + "`bin/flow check {{product}}`" + `, run it twice green from fresh, and add its row to ` + "`projects/{{product}}/INDEX.md`" + `. The store is outside this repository: nothing there goes into your pull request.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
-- **Accounts are referred to by id.** ` + "`bin/flow accounts {{product}}`" + ` lists them (int/uat only) and ` + "`--account <id>`" + ` passes one. Never copy an email or password into a report, commit, pull request, smoke note or screenshot.`
+- **Accounts are referred to by id.** ` + "`bin/flow accounts {{product}}`" + ` lists them (int/uat only) and ` + "`--account <id>`" + ` passes one. Never copy an email or password into a report, commit, pull request, test case or screenshot.`
 
 const mobileScriptIOSClosing = "\n\n" + `Everything else - the store's layout and rules, the full ` + "`ao sim`" + ` catalog, running several flows in one Maestro start-up - is in the store's README and the ao skill this prompt already points you at.`
 
 const mobileScriptAndroidClosing = "\n\n" + `Everything else - the store's layout, its rules and how to set up a device - is in the store's README.`
 
-const mobileScriptPlay = "\n\n" + `## Playing smoke cases with scripts (AO)
+const mobileScriptPlay = "\n\n" + `## Driving checks with scripts (AO)
 
-Every case you drive on a device, you drive with a script - a case written for a person included, when you capture evidence for them.
+Every check you drive on a device, you drive with a script - a check meant for a person included, when you capture evidence for them.
 
-1. Find the script in ` + "`{{store}}/projects/{{product}}/INDEX.md`" + ` that reaches the case's screen, and run it with the case's values as ` + "`--param`" + `s.
-2. Judge the end state it left ({{judge}}) and attach that screenshot: ` + "`ao smoke record \"$AO_CREW_ID\" --case <id> --evidence <png>`" + `.
-3. A case that needs steps after the screen is reached gets those steps as a script too - one that runs the reach script and goes on - never as gestures. A step that cannot be undone (submit, buy, delete) stays the human's.
+1. Find the script in ` + "`{{store}}/projects/{{product}}/INDEX.md`" + ` that reaches the check's screen, and run it with the check's values as ` + "`--param`" + `s.
+2. Judge the end state it left ({{judge}}) and give that screenshot's path in your handback.
+3. A check that needs steps after the screen is reached gets those steps as a script too - one that runs the reach script and goes on - never as gestures. A step that cannot be undone (submit, buy, delete) stays the human's.
 
-No script reaches the case's screen: author it first (above), then play the case.{{record}} A case whose script you cannot make pass is UNDRIVEABLE (` + "`--verdict skip`" + `, the note naming the missing or failing script) - never a case you finish by hand.`
+No script reaches the check's screen: author it first (above), then drive the check.{{record}} A check whose script you cannot make pass is UNDRIVEABLE: say so in your handback, naming the missing or failing script - never a check you finish by hand.`

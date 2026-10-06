@@ -9,7 +9,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
-// WHO OWNS THE CHECKLIST, AND WHO KNOWS THE VERB.
+// WHO KNOWS THE VERB, AND WHO KNOWS THERE IS A CREWMATE.
 //
 // A system prompt is fixed when a runtime launches; crew membership is not. That
 // gap was survivable while dev's crew block was informational. It is not now: the
@@ -133,11 +133,11 @@ func TestBuildSystemPrompt_SoloWorkerIsUnchangedByTheCrewBlock(t *testing.T) {
 // TestAttachCrewMember_TellsDevItsPromptIsNowWrong is the live half of the same
 // bug, and the one that is destructive rather than merely stale.
 //
-// A dev launched with the SOLO prompt has been told the smoke checklist is its
-// own and handed `ao smoke set`, which REPLACES the whole list. The moment a
-// person attaches a qa that instruction deletes the crewmate's cases. The prompt
-// cannot be rewritten under a running agent, so the correction is delivered the
-// one way a live agent can receive one.
+// A dev launched with the SOLO prompt has never been told it may share its
+// worktree. The moment a person attaches a qa, dev's next `git add -A` sweeps up
+// the crewmate's half-written work. The prompt cannot be rewritten under a
+// running agent, so the correction is delivered the one way a live agent can
+// receive one.
 func TestAttachCrewMember_TellsDevItsPromptIsNowWrong(t *testing.T) {
 	m, _, _, _, msgr := newManagerWithMessenger()
 	dev := spawnMechanical(t, m)
@@ -151,12 +151,10 @@ func TestAttachCrewMember_TellsDevItsPromptIsNowWrong(t *testing.T) {
 		t.Fatalf("dev was told %d times that it gained a crewmate, want 1: %q", len(got), got)
 	}
 	for _, want := range []string{
-		"[AO]",                 // attributed to AO, not to a person or the new member
-		"qa",                   // what joined
-		"Never `ao smoke set`", // the instruction its own prompt got wrong
-		"ao smoke add",         // and what to do instead
-		"ao send --crew qa",    // how to reach it
-		"one git index",        // the other thing a solo prompt does not know
+		"[AO]",              // attributed to AO, not to a person or the new member
+		"qa",                // what joined
+		"one git index",     // the thing a solo prompt does not know
+		"ao send --crew qa", // how to reach it
 	} {
 		if !strings.Contains(got[0], want) {
 			t.Fatalf("the notice to dev is missing %q:\n%s", want, got[0])

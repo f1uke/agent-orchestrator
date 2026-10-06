@@ -36,15 +36,13 @@ func crewOffManager(t *testing.T) (*Manager, *fakeStore, *fakeRuntime, *fakeWork
 //
 // Spawn builds dev's system prompt BEFORE anything could create a qa, from the
 // spawn's INTENT (promptCrewRole). If the flag were read only where qa is
-// created, dev would already have been handed the CREW prompt - which since #240
-// tells dev that the smoke checklist belongs to qa and that `ao smoke set` from
-// it is refused. On a project that will never create a qa that means NOBODY
-// writes the checklist, silently, with no error anywhere.
+// created, dev would already have been handed the CREW prompt, which tells dev
+// to hand verification to a qa. On a project that will never create a qa that
+// means NOBODY names what a person must check, silently, with no error anywhere.
 //
 // So the flag has to be resolved at the eligibility seam both the prompt and the
 // trigger read, and dev's prompt on a crew-off project must be the SOLO one: no
-// crew block, no "the checklist is qa's", and the checklist protocol it has
-// always had.
+// crew block, and a finish report that names what a person must check by hand.
 func TestSpawn_CrewOffProjectLaunchesDevWithTheSoloPrompt(t *testing.T) {
 	for _, size := range []domain.TaskSize{domain.TaskSizeStandard, domain.TaskSizeDeep} {
 		t.Run(string(size), func(t *testing.T) {
@@ -66,16 +64,15 @@ func TestSpawn_CrewOffProjectLaunchesDevWithTheSoloPrompt(t *testing.T) {
 			}
 
 			launched := agent.lastLaunch.SystemPrompt
-			// THE DUTY IT MUST KEEP. Nobody else is coming, so dev owns the list.
-			if !strings.Contains(launched, "## Smoke-test checklist (AO)") {
-				t.Fatalf("dev on a crew-off project cannot author the checklist nobody else will:\n%s", launched)
+			// THE DUTY IT MUST KEEP. Nobody else is coming, so dev owns the manual checks.
+			if !strings.Contains(launched, manualChecksLine) {
+				t.Fatalf("dev on a crew-off project is not told to name the manual checks nobody else will:\n%s", launched)
 			}
-			// THE INSTRUCTION IT MUST NOT GET. Every sentence here hands the list to
-			// an agent this project never creates.
+			// THE INSTRUCTION IT MUST NOT GET. Every sentence here hands the checks
+			// to an agent this project never creates.
 			for _, unwanted := range []string{
-				"The checklist is yours only while you have no qa",
-				"REFUSED by AO for as long as a qa is on this task",
 				"## Your crewmate (AO)",
+				"hand the verification over",
 				"AO creates a qa the first time you touch the app's runtime",
 			} {
 				if strings.Contains(launched, unwanted) {
@@ -208,7 +205,7 @@ func TestRequestCrewReview_OtherProjectsStillFormCrews(t *testing.T) {
 //
 // The escape hatch above was designed for a human clicking `+ qa`. An AGENT can
 // walk through it too, and did: with the flag on, six consecutive tasks still
-// got a qa, because each worker's brief says the smoke checklist belongs to qa,
+// got a qa, because each worker's brief says the manual checks belong to qa,
 // so on finding none it ran `ao crew add` itself. `crew_join_reason` recorded
 // `manual` on every one of them and nothing anywhere said the project's own
 // setting was being overruled - for two days.
