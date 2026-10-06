@@ -4329,7 +4329,8 @@ export interface components {
             parentAgentId?: string;
             projectId: string;
             sessionId: string;
-            state: string;
+            /** @enum {string} */
+            state: "running" | "merging" | "held" | "conflict" | "merged" | "removed" | "preserved";
             targetBranch: string;
             /** Format: date-time */
             updatedAt: string;

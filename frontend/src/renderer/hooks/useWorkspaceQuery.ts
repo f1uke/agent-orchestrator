@@ -102,6 +102,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 				crew: session.crew,
 				taskSize: session.taskSize,
 				runtimeTouch: session.runtimeTouch,
+				children: session.children,
 			})),
 	}));
 }

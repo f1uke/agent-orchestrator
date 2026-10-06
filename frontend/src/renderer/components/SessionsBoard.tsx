@@ -43,6 +43,7 @@ import {
 } from "../types/workspace";
 import { type Task, type TaskGates, crewChipState, reviewGateState, taskLane, workerTasks } from "../lib/crew";
 import { useTaskGates } from "../hooks/useTaskGates";
+import { ChildStrip } from "./ChildStrip";
 import { CrewStrip } from "./CrewStrip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
@@ -1353,6 +1354,7 @@ function SessionCard({
 					{addRoleError}
 				</div>
 			)}
+			<ChildStrip items={task.members.flatMap((member) => member.children ?? [])} />
 			<div
 				className="flex items-start justify-between gap-2 px-[13px] py-2"
 				style={{ borderTop: "1px solid var(--kanban-card-divider)" }}

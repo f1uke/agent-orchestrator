@@ -413,9 +413,18 @@ export type WorkspaceSession = {
 	 * the trigger, rendered next to the `+ qa` control that answers it.
 	 */
 	runtimeTouch?: RuntimeTouch;
+	/**
+	 * The worker's child worktrees: subagents it ran with their own worktree,
+	 * and what became of each one's work. Absent for a session that never ran
+	 * one.
+	 */
+	children?: SessionChild[];
 };
 
 export type TaskSize = "mechanical" | "standard" | "deep";
+
+export type { SessionChild } from "../lib/children";
+import type { SessionChild } from "../lib/children";
 
 /** A runtime surface a session drove: the simulator, or an `ao preview`. */
 export type RuntimeTouch = "sim" | "preview";
