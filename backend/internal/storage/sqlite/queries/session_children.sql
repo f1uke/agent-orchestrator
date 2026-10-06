@@ -14,14 +14,6 @@ SELECT * FROM session_children WHERE session_id = ? ORDER BY created_at, agent_i
 -- reconciliation reads the rows a crash may have left mid-operation.
 SELECT * FROM session_children WHERE state IN (sqlc.slice('states')) ORDER BY created_at, agent_id;
 
--- name: ListBoardSessionChildren :many
--- What the board draws: every child of a live worker, plus preserved children
--- of any worker (their kept branches need a person even after the worker ended).
-SELECT c.* FROM session_children c
-JOIN sessions s ON s.id = c.session_id
-WHERE s.is_terminated = 0 OR c.state = 'preserved'
-ORDER BY c.created_at, c.agent_id;
-
 -- name: UpdateSessionChild :execrows
 UPDATE session_children
 SET agent_type = ?, description = ?, state = ?, merge_head_before = ?, merged_sha = ?, commits = ?,

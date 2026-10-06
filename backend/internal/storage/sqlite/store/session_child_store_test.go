@@ -18,7 +18,7 @@ func sampleChild(rec domain.SessionRecord, agentID string, at time.Time) domain.
 	}
 }
 
-func TestSessionChildRoundTripAndBoardSelection(t *testing.T) {
+func TestSessionChildRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	seedProject(t, s, "chl")
@@ -77,19 +77,6 @@ func TestSessionChildRoundTripAndBoardSelection(t *testing.T) {
 			t.Fatalf("update %s: %v", c.AgentID, err)
 		}
 	}
-	board, err := s.ListBoardSessionChildren(ctx)
-	if err != nil {
-		t.Fatalf("board: %v", err)
-	}
-	var ids []string
-	for _, c := range board {
-		ids = append(ids, string(c.SessionID)+"/"+c.AgentID)
-	}
-	want := []string{string(live.ID) + "/a1", string(ended.ID) + "/b2"}
-	if len(ids) != len(want) || ids[0] != want[0] || ids[1] != want[1] {
-		t.Fatalf("board children = %v, want %v (live worker's child + ended worker's preserved child only)", ids, want)
-	}
-
 	running, err := s.ListSessionChildrenInStates(ctx, domain.ChildMerged, domain.ChildPreserved)
 	if err != nil || len(running) != 3 {
 		t.Fatalf("children in merged/preserved = %d (err %v), want 3", len(running), err)

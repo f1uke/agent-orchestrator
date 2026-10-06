@@ -73,16 +73,6 @@ func (s *Store) ListSessionChildrenInStates(ctx context.Context, states ...domai
 	return sessionChildrenFromRows(rows)
 }
 
-// ListBoardSessionChildren returns the children the board draws: those of live
-// workers, and preserved ones of any worker.
-func (s *Store) ListBoardSessionChildren(ctx context.Context) ([]domain.SessionChild, error) {
-	rows, err := s.qr.ListBoardSessionChildren(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list board children: %w", err)
-	}
-	return sessionChildrenFromRows(rows)
-}
-
 // UpdateSessionChild writes a child's mutable fields. ok=false means the row
 // no longer exists (its worker was purged).
 func (s *Store) UpdateSessionChild(ctx context.Context, c domain.SessionChild) (bool, error) {

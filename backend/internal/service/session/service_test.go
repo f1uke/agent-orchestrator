@@ -218,6 +218,10 @@ func (f *fakeStore) ConsecutiveCrewRunDiscards(_ context.Context, id domain.Sess
 	return f.runDiscards[id], nil
 }
 
+func (f *fakeStore) ListSessionChildren(context.Context, domain.SessionID) ([]domain.SessionChild, error) {
+	return nil, nil
+}
+
 func (f *fakeStore) InsertCrewMessage(_ context.Context, msg domain.CrewMessage) error {
 	f.crewMessages = append(f.crewMessages, msg)
 	return nil

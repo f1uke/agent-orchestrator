@@ -233,6 +233,11 @@ type SessionView struct {
 	// because the tree moved under them. At domain.CappedRepeat the task parks at
 	// NEEDS YOU; one run that ends any other way clears it. Derived on read.
 	CrewRunDiscards int `json:"crewRunDiscards,omitempty"`
+	// Children are the worker's child worktrees: the subagents it ran with
+	// `isolation: "worktree"`, each with what became of its work (running,
+	// merged into the worker's branch, held, in conflict, or preserved on a
+	// kept branch). Omitted for a session that never ran one.
+	Children []domain.SessionChild `json:"children,omitempty"`
 	// TaskSize is the ceremony level chosen at spawn. It is surfaced because it
 	// now decides the SHAPE of the task (mechanical = dev alone; standard/deep =
 	// dev + qa), so the board can say which choice was made on a card whose crew

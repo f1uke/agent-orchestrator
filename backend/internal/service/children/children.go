@@ -52,7 +52,6 @@ type Store interface {
 	GetSessionChild(ctx context.Context, sessionID domain.SessionID, agentID string) (domain.SessionChild, bool, error)
 	ListSessionChildren(ctx context.Context, sessionID domain.SessionID) ([]domain.SessionChild, error)
 	ListSessionChildrenInStates(ctx context.Context, states ...domain.ChildState) ([]domain.SessionChild, error)
-	ListBoardSessionChildren(ctx context.Context) ([]domain.SessionChild, error)
 	UpdateSessionChild(ctx context.Context, c domain.SessionChild) (bool, error)
 }
 
@@ -513,19 +512,6 @@ func (s *Service) retryHeld(ctx context.Context, rec domain.SessionRecord, child
 // List returns a worker's children.
 func (s *Service) List(ctx context.Context, id domain.SessionID) ([]domain.SessionChild, error) {
 	return s.store.ListSessionChildren(ctx, id)
-}
-
-// Board returns the children the board draws, keyed by worker.
-func (s *Service) Board(ctx context.Context) (map[domain.SessionID][]domain.SessionChild, error) {
-	all, err := s.store.ListBoardSessionChildren(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := map[domain.SessionID][]domain.SessionChild{}
-	for _, c := range all {
-		out[c.SessionID] = append(out[c.SessionID], c)
-	}
-	return out, nil
 }
 
 // Undelivered lists a worker's children whose work is not yet on its branch

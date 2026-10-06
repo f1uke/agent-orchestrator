@@ -96,61 +96,6 @@ func (q *Queries) InsertSessionChild(ctx context.Context, arg InsertSessionChild
 	return err
 }
 
-const listBoardSessionChildren = `-- name: ListBoardSessionChildren :many
-SELECT c.session_id, c.project_id, c.agent_id, c.parent_agent_id, c.agent_type, c.description, c.branch, c.target_branch, c.base_sha, c.base_dirty, c.worktree_path, c.state, c.merge_head_before, c.merged_sha, c.commits, c.files_changed, c.detail, c.stop_blocks, c.notified_state, c.created_at, c.updated_at, c.finished_at FROM session_children c
-JOIN sessions s ON s.id = c.session_id
-WHERE s.is_terminated = 0 OR c.state = 'preserved'
-ORDER BY c.created_at, c.agent_id
-`
-
-// What the board draws: every child of a live worker, plus preserved children
-// of any worker (their kept branches need a person even after the worker ended).
-func (q *Queries) ListBoardSessionChildren(ctx context.Context) ([]SessionChild, error) {
-	rows, err := q.db.QueryContext(ctx, listBoardSessionChildren)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []SessionChild{}
-	for rows.Next() {
-		var i SessionChild
-		if err := rows.Scan(
-			&i.SessionID,
-			&i.ProjectID,
-			&i.AgentID,
-			&i.ParentAgentID,
-			&i.AgentType,
-			&i.Description,
-			&i.Branch,
-			&i.TargetBranch,
-			&i.BaseSha,
-			&i.BaseDirty,
-			&i.WorktreePath,
-			&i.State,
-			&i.MergeHeadBefore,
-			&i.MergedSha,
-			&i.Commits,
-			&i.FilesChanged,
-			&i.Detail,
-			&i.StopBlocks,
-			&i.NotifiedState,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.FinishedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listSessionChildren = `-- name: ListSessionChildren :many
 SELECT session_id, project_id, agent_id, parent_agent_id, agent_type, description, branch, target_branch, base_sha, base_dirty, worktree_path, state, merge_head_before, merged_sha, commits, files_changed, detail, stop_blocks, notified_state, created_at, updated_at, finished_at FROM session_children WHERE session_id = ? ORDER BY created_at, agent_id
 `

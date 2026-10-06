@@ -50,6 +50,9 @@ type APIDeps struct {
 	// something right now" signal that falls out of them. nil answers 501, which
 	// is what a daemon with no detector should say rather than a quiet success.
 	CrewRuns crewrunsvc.Manager
+	// Children is the lifecycle of a worker's child worktrees, driven by the
+	// Claude Code hooks a worker's subagents fire. nil answers 501.
+	Children controllers.ChildrenService
 	// SimScreen is the machine-local simulator surface behind the desktop app's
 	// Simulator tab: device discovery, the live frame stream, and the driver a
 	// click goes through. nil on a machine that cannot capture or touch a
@@ -128,6 +131,7 @@ type API struct {
 	smoke          *controllers.SmokeController
 	iosRun         *controllers.IOSRunController
 	crewRuns       *controllers.CrewRunsController
+	children       *controllers.ChildrenController
 	sim            *controllers.SimController
 	simFlows       *controllers.SimFlowsController
 	simVideo       *controllers.SimVideoController
@@ -177,6 +181,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		smoke:          &controllers.SmokeController{Svc: deps.Smoke},
 		iosRun:         &controllers.IOSRunController{Svc: deps.IOSRun},
 		crewRuns:       &controllers.CrewRunsController{Svc: deps.CrewRuns},
+		children:       &controllers.ChildrenController{Svc: deps.Children},
 		sim:            &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
 		simFlows:       &controllers.SimFlowsController{DataDir: cfg.DataDir},
 		simVideo:       &controllers.SimVideoController{Svc: deps.SimVideo},
@@ -227,6 +232,7 @@ func (a *API) Register(root chi.Router) {
 			a.jira.Register(r)
 			a.prs.Register(r)
 			a.crewRuns.Register(r)
+			a.children.Register(r)
 			a.sim.Register(r)
 			a.simFlows.Register(r)
 			a.simVideo.Register(r)

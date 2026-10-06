@@ -65,6 +65,10 @@ type Store interface {
 	// table that is empty for every solo session.
 	OpenCrewRunForSession(ctx context.Context, id domain.SessionID) (domain.CrewRun, bool, error)
 	ConsecutiveCrewRunDiscards(ctx context.Context, id domain.SessionID) (int, error)
+	// ListSessionChildren is the worker's child worktrees, which the board draws
+	// under the card. An indexed lookup on a table that is empty unless a worker
+	// ran an isolated subagent.
+	ListSessionChildren(ctx context.Context, id domain.SessionID) ([]domain.SessionChild, error)
 	ListPRsBySession(ctx context.Context, sessionID domain.SessionID) ([]domain.PullRequest, error)
 	ListChecks(ctx context.Context, prURL string) ([]domain.PullRequestCheck, error)
 	ListPRReviews(ctx context.Context, prURL string) ([]domain.PullRequestReview, error)
@@ -1443,6 +1447,10 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("queued messages %s: %w", rec.ID, err)
 	}
+	children, err := s.store.ListSessionChildren(ctx, rec.ID)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("children %s: %w", rec.ID, err)
+	}
 	return domain.Session{
 		SessionRecord:        rec,
 		Status:               detail.Status,
@@ -1458,6 +1466,7 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		QueuedMessagesFailed: queued.Failed,
 		CrewRun:              openRunPtr(openRun, hasOpenRun),
 		CrewRunDiscards:      discards,
+		Children:             children,
 	}, nil
 }
 
