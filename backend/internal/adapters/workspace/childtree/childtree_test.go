@@ -125,7 +125,7 @@ func TestInspectCountsCommitsFilesAndDirt(t *testing.T) {
 	f.commitIn(path, "N", "new\n")
 	f.write(path, "C", "c\nuncommitted\n")
 
-	facts, err := f.trees.Inspect(context.Background(), path, base)
+	facts, err := f.trees.Inspect(context.Background(), path, base, "feature/w")
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestInspectCountsCommitsFilesAndDirt(t *testing.T) {
 	if err := f.trees.CommitAll(context.Background(), path, "AO: leftover work"); err != nil {
 		t.Fatalf("commit all: %v", err)
 	}
-	facts, _ = f.trees.Inspect(context.Background(), path, base)
+	facts, _ = f.trees.Inspect(context.Background(), path, base, "feature/w")
 	if facts.Dirty || facts.Commits != 3 || facts.FilesChanged != 3 {
 		t.Fatalf("after commit all = %+v, want clean, 3 commits, 3 files", facts)
 	}

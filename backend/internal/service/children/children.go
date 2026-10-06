@@ -39,6 +39,11 @@ var (
 	ErrForeignCwd      = errors.New("children: the request did not come from the worker's worktree")
 )
 
+// resolvedConflictPrefix starts the detail of a child that AO asked to rebase
+// over a conflict. It survives the merge so the worker learns the child chose a
+// resolution, which may have overwritten another child's lines.
+const resolvedConflictPrefix = "it resolved a conflict in "
+
 // BranchPrefix namespaces child branches. It is deliberately outside the
 // worker's own branch (git refuses feature/x/child while feature/x exists) and
 // outside ao/<id>/, which AO attributes to pull requests.
@@ -305,7 +310,7 @@ func (s *Service) Stop(ctx context.Context, id domain.SessionID, agentID string)
 func (s *Service) finish(ctx context.Context, rec domain.SessionRecord, child domain.SessionChild, mayBlock bool) (StopOutcome, error) {
 	worker := rec.Metadata.WorkspacePath
 	for range 2 {
-		facts, err := s.trees.Inspect(ctx, child.WorktreePath, child.BaseSHA)
+		facts, err := s.trees.Inspect(ctx, child.WorktreePath, child.BaseSHA, child.TargetBranch)
 		if err != nil {
 			return s.hold(ctx, child, "AO could not read the child's worktree: "+err.Error())
 		}
@@ -326,6 +331,7 @@ func (s *Service) finish(ctx context.Context, rec domain.SessionRecord, child do
 				"AO: your worktree %s has uncommitted changes. Commit them on your branch (git add -A && git commit -m \"<what you did>\"), then finish. When you stop, AO merges your commits into %s.",
 				child.WorktreePath, child.TargetBranch))
 		case domain.ChildStopBlockRebase:
+			child.Detail = fmt.Sprintf("%s%s when it rebased onto %s", resolvedConflictPrefix, strings.Join(conflicts, ", "), child.TargetBranch)
 			return s.block(ctx, child, fmt.Sprintf(
 				"AO: your commits conflict with %s in %s. In your worktree run `git rebase %s`, resolve the conflicts, finish the rebase, then stop again.",
 				child.TargetBranch, strings.Join(conflicts, ", "), child.TargetBranch))
@@ -403,7 +409,12 @@ func (s *Service) merge(ctx context.Context, rec domain.SessionRecord, child dom
 // what is left of it. A failed cleanup is logged and named, never a reason to
 // report the merge as anything but done.
 func (s *Service) merged(ctx context.Context, worker string, child domain.SessionChild, sha string) (StopOutcome, error) {
-	child.State, child.MergedSHA, child.Detail = domain.ChildMerged, sha, ""
+	child.State, child.MergedSHA = domain.ChildMerged, sha
+	// The one detail a merge keeps: the child resolved a conflict on its own,
+	// which the worker has to be told so it can check how.
+	if !strings.HasPrefix(child.Detail, resolvedConflictPrefix) {
+		child.Detail = ""
+	}
 	if err := s.trees.Remove(ctx, worker, child.WorktreePath, child.Branch, true); err != nil {
 		s.log.Warn("children: remove a merged child", "session", child.SessionID, "agent", child.AgentID, "error", err)
 		child.Detail = "merged, but AO could not remove its worktree: " + err.Error()
@@ -483,7 +494,7 @@ func (s *Service) Notes(ctx context.Context, id domain.SessionID) ([]string, err
 				child = out.Child
 			}
 		}
-		if child.State == child.NotifiedState || child.State == domain.ChildMerging {
+		if child.State == child.NotifiedState || child.State == domain.ChildRunning || child.State == domain.ChildMerging {
 			continue
 		}
 		notes = append(notes, renderNote(child))
@@ -559,7 +570,7 @@ func (s *Service) SettleForTeardown(ctx context.Context, id domain.SessionID) er
 }
 
 func (s *Service) preserve(ctx context.Context, worker string, child domain.SessionChild) error {
-	facts, inspectErr := s.trees.Inspect(ctx, child.WorktreePath, child.BaseSHA)
+	facts, inspectErr := s.trees.Inspect(ctx, child.WorktreePath, child.BaseSHA, child.TargetBranch)
 	if inspectErr == nil && !facts.Dirty && facts.Commits == 0 {
 		if err := s.trees.Remove(ctx, worker, child.WorktreePath, child.Branch, true); err == nil {
 			s.removeDerivedData(child)

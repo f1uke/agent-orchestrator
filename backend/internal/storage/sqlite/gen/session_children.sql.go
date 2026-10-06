@@ -55,8 +55,8 @@ func (q *Queries) GetSessionChild(ctx context.Context, arg GetSessionChildParams
 
 const insertSessionChild = `-- name: InsertSessionChild :exec
 INSERT INTO session_children (session_id, project_id, agent_id, parent_agent_id, agent_type, description,
-    branch, target_branch, base_sha, base_dirty, worktree_path, state, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    branch, target_branch, base_sha, base_dirty, worktree_path, state, notified_state, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionChildParams struct {
@@ -72,6 +72,7 @@ type InsertSessionChildParams struct {
 	BaseDirty     string
 	WorktreePath  string
 	State         domain.ChildState
+	NotifiedState domain.ChildState
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -90,6 +91,7 @@ func (q *Queries) InsertSessionChild(ctx context.Context, arg InsertSessionChild
 		arg.BaseDirty,
 		arg.WorktreePath,
 		arg.State,
+		arg.NotifiedState,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)

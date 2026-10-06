@@ -1,7 +1,7 @@
 -- name: InsertSessionChild :exec
 INSERT INTO session_children (session_id, project_id, agent_id, parent_agent_id, agent_type, description,
-    branch, target_branch, base_sha, base_dirty, worktree_path, state, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    branch, target_branch, base_sha, base_dirty, worktree_path, state, notified_state, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSessionChild :one
 SELECT * FROM session_children WHERE session_id = ? AND agent_id = ?;

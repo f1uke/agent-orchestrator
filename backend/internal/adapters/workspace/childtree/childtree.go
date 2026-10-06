@@ -205,7 +205,7 @@ func copyFile(src, dst string) error {
 }
 
 // Inspect implements ports.ChildTrees.
-func (t *Trees) Inspect(ctx context.Context, path, baseSHA string) (ports.ChildTreeFacts, error) {
+func (t *Trees) Inspect(ctx context.Context, path, baseSHA, targetBranch string) (ports.ChildTreeFacts, error) {
 	status, err := t.must(ctx, path, "status", "--porcelain")
 	if err != nil {
 		return ports.ChildTreeFacts{}, err
@@ -214,7 +214,13 @@ func (t *Trees) Inspect(ctx context.Context, path, baseSHA string) (ports.ChildT
 	if err != nil {
 		return ports.ChildTreeFacts{}, err
 	}
-	count, err := t.must(ctx, path, "rev-list", "--count", baseSHA+"..HEAD")
+	since := baseSHA
+	if targetBranch != "" {
+		if mb, err := t.run(ctx, path, nil, "merge-base", targetBranch, "HEAD"); err == nil && mb.code == 0 && strings.TrimSpace(mb.stdout) != "" {
+			since = strings.TrimSpace(mb.stdout)
+		}
+	}
+	count, err := t.must(ctx, path, "rev-list", "--count", since+"..HEAD")
 	if err != nil {
 		return ports.ChildTreeFacts{}, err
 	}
@@ -222,7 +228,7 @@ func (t *Trees) Inspect(ctx context.Context, path, baseSHA string) (ports.ChildT
 	if err != nil {
 		return ports.ChildTreeFacts{}, fmt.Errorf("childtree: commit count %q: %w", count, err)
 	}
-	names, err := t.must(ctx, path, "diff", "--name-only", baseSHA, "HEAD")
+	names, err := t.must(ctx, path, "diff", "--name-only", since, "HEAD")
 	if err != nil {
 		return ports.ChildTreeFacts{}, err
 	}

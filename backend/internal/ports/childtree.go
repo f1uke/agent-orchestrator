@@ -14,8 +14,11 @@ type ChildTrees interface {
 	// the worker's HEAD. It is idempotent: a path already registered on that
 	// branch is returned as it is.
 	Create(ctx context.Context, spec ChildTreeSpec) (ChildTreeCreated, error)
-	// Inspect reports what a child's worktree holds relative to its base.
-	Inspect(ctx context.Context, path, baseSHA string) (ChildTreeFacts, error)
+	// Inspect reports what a child's worktree holds that targetBranch does
+	// not: its commits and files are counted from where it meets targetBranch,
+	// so a child that rebased onto the worker's branch is not credited with the
+	// worker's own commits. baseSHA is the fallback when targetBranch is gone.
+	Inspect(ctx context.Context, path, baseSHA, targetBranch string) (ChildTreeFacts, error)
 	// CommitAll stages everything in the child's worktree and commits it with
 	// the repository's hooks running.
 	CommitAll(ctx context.Context, path, message string) error

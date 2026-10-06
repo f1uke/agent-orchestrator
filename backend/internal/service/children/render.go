@@ -34,7 +34,10 @@ func renderNote(child domain.SessionChild) string {
 	case domain.ChildMerged:
 		note := fmt.Sprintf("AO merged subagent %s into %s: %d %s, %d %s changed (merge %s). Its worktree is removed.",
 			label, child.TargetBranch, child.Commits, plural(child.Commits, "commit"), child.FilesChanged, plural(child.FilesChanged, "file"), shortSHA(child.MergedSHA))
-		if child.Detail != "" {
+		switch {
+		case strings.HasPrefix(child.Detail, resolvedConflictPrefix):
+			note += " Note: " + child.Detail + "; check that its resolution kept what your branch needs."
+		case child.Detail != "":
 			note += " Note: " + child.Detail + "."
 		}
 		return note

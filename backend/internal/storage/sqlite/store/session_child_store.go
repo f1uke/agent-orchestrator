@@ -32,6 +32,7 @@ func (s *Store) InsertSessionChild(ctx context.Context, c domain.SessionChild) e
 		BaseDirty:     string(dirty),
 		WorktreePath:  c.WorktreePath,
 		State:         c.State,
+		NotifiedState: c.NotifiedState,
 		CreatedAt:     c.CreatedAt,
 		UpdatedAt:     c.UpdatedAt,
 	})

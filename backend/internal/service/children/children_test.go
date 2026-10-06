@@ -353,3 +353,54 @@ func TestBriefTellsTheChildWhereItIsAndHowToBuild(t *testing.T) {
 		t.Error("brief for an unknown subagent")
 	}
 }
+
+// Found in the sandbox run: a worker was told "Subagent ... is running" for
+// every child it had just launched, which is noise.
+func TestNotesSayNothingAboutAChildThatIsStillRunning(t *testing.T) {
+	f := newFixture(t, false)
+	f.create("a1")
+	if err := f.svc.Describe(f.ctx, f.rec.ID, "a1", "general-purpose", "Write B"); err != nil {
+		t.Fatal(err)
+	}
+	if notes, _ := f.svc.Notes(f.ctx, f.rec.ID); len(notes) != 0 {
+		t.Fatalf("notes = %q, want none while the child runs", notes)
+	}
+}
+
+// Found in the sandbox run: a child that rebased onto the worker's branch was
+// reported with the worker's own commits counted as its own, and the worker
+// was not told the child had resolved a conflict, so a line another child
+// wrote was overwritten without anyone noticing.
+func TestAChildThatRebasedIsCountedByItsOwnCommitsAndTheConflictIsReported(t *testing.T) {
+	f := newFixture(t, false)
+	c := f.create("a1")
+	f.commitIn(c.WorktreePath, "C", "c\nchild\n")
+	f.commitIn(f.worker, "C", "c\nworker\n")
+	f.commitIn(f.worker, "W", "worker only\n")
+
+	if out := f.stop("a1"); !out.Block {
+		t.Fatalf("stop = %+v, want a rebase block", out)
+	}
+	if _, err := f.gitErr(c.WorktreePath, "rebase", "feature/w"); err == nil {
+		t.Fatal("setup: expected the rebase to stop on the conflict")
+	}
+	f.write(c.WorktreePath, "C", "c\nchild\n")
+	f.git(c.WorktreePath, "add", "C")
+	cmd := exec.Command("git", "-C", c.WorktreePath, "-c", "core.editor=true", "rebase", "--continue")
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("rebase --continue: %v\n%s", err, out)
+	}
+
+	out := f.stop("a1")
+	if out.Child.State != domain.ChildMerged {
+		t.Fatalf("stop after rebase = %+v, want merged", out)
+	}
+	if out.Child.Commits != 1 || out.Child.FilesChanged != 1 {
+		t.Fatalf("counted %d commits, %d files; want the child's own 1 commit and 1 file", out.Child.Commits, out.Child.FilesChanged)
+	}
+	notes, _ := f.svc.Notes(f.ctx, f.rec.ID)
+	if len(notes) != 1 || !strings.Contains(notes[0], "conflict in C") {
+		t.Fatalf("notes = %q, want the merge note to say the child resolved a conflict in C", notes)
+	}
+}
