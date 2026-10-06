@@ -14,9 +14,14 @@ import (
 // pre-tool-use can be denied: it is the one callback that runs BEFORE the tool,
 // so it is the last point at which the wrong checkout can still be prevented.
 //
+// childWorktrees is true when AO owns the worker's child worktrees (its
+// WorktreeCreate hook is installed): an isolated subagent then gets an AO child
+// worktree that merges back into the worker's branch, so it is allowed.
+// EnterWorktree is refused either way, because it moves the worker itself.
+//
 // The caller scopes this decision to AO worker sessions; this parser deliberately
 // knows nothing about process environment or session kinds.
-func NestedWorktreeDenial(event string, payload []byte) (bool, string) {
+func NestedWorktreeDenial(event string, payload []byte, childWorktrees bool) (bool, string) {
 	if event != "pre-tool-use" {
 		return false, ""
 	}
@@ -33,7 +38,7 @@ func NestedWorktreeDenial(event string, payload []byte) (bool, string) {
 	case "EnterWorktree":
 		return true, "This AO worker already has an isolated worktree. Keep same-task child work in the current AO worktree and do not call EnterWorktree."
 	case "Agent":
-		if p.ToolInput.Isolation == "worktree" {
+		if p.ToolInput.Isolation == "worktree" && !childWorktrees {
 			return true, "This AO worker already has an isolated worktree. Launch the child without worktree isolation so its edits stay in the current AO worktree."
 		}
 	}

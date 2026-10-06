@@ -16,6 +16,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/activitydispatch"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // sessionIDPattern bounds the AO_SESSION_ID we will place in a request path to
@@ -118,10 +119,22 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 	// same-task child that creates or enters another worktree takes its edits off
 	// the worker's branch. Refuse before the tool runs. Only workers are guarded:
 	// other AO session kinds, and any agent used outside AO, are unaffected.
+	//
+	// A worker whose harness hands isolated subagents' worktrees to AO
+	// (AO_CHILD_WORKTREES=1) may launch them: AO creates each one outside the
+	// worker's folder and merges it back. Those lifecycle callbacks are handled
+	// here too.
 	if os.Getenv("AO_SESSION_KIND") == string(domain.KindWorker) {
-		if deny, reason := activitydispatch.DenyNestedWorktree(agent, event, payload); deny {
+		childWorktrees := os.Getenv(envChildWorktrees) == "1"
+		if deny, reason := activitydispatch.DenyNestedWorktree(agent, event, payload, childWorktrees); deny {
 			_ = json.NewEncoder(c.deps.Out).Encode(newPreToolUseDenial(reason))
 			return nil
+		}
+		if hook, ok := activitydispatch.ParseChildHook(agent, event, payload); ok {
+			if hook.Kind == ports.ChildHookCreate {
+				return c.createChildWorktree(ctx, sessionID, hook)
+			}
+			c.reportChildHook(ctx, agent, event, sessionID, hook)
 		}
 	}
 

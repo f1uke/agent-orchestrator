@@ -204,6 +204,49 @@ type WorkspaceHookConfig struct {
 	SessionID     string
 	SystemPrompt  string
 	WorkspacePath string
+	// ChildWorktrees installs the hooks through which AO creates and settles
+	// the worktrees of the session's isolated subagents. Set only for a worker
+	// whose agent supports it (ChildWorktreeAgent); when false those hooks are
+	// removed, so the agent never hands worktree creation to AO.
+	ChildWorktrees bool
+}
+
+// ChildWorktreeAgent is an optional Agent capability: the installed agent can
+// hand an isolated subagent's worktree creation to AO through a hook, so a
+// worker's subagents may each get their own worktree. It answers for the agent
+// binary installed right now.
+type ChildWorktreeAgent interface {
+	SupportsChildWorktrees(ctx context.Context) bool
+}
+
+// ChildHookKind is which part of a child worktree's lifecycle a hook callback
+// reports.
+type ChildHookKind string
+
+// Child hook kinds.
+const (
+	// ChildHookCreate asks AO to create a worktree (Claude Code WorktreeCreate).
+	ChildHookCreate ChildHookKind = "create"
+	// ChildHookStart is a subagent starting, which may be in a child worktree.
+	ChildHookStart ChildHookKind = "start"
+	// ChildHookStop is a subagent stopping.
+	ChildHookStop ChildHookKind = "stop"
+	// ChildHookWorkerTurn is the worker itself (not a subagent) submitting a
+	// prompt or finishing a tool call: the moment to tell it about its
+	// children. AgentID is set when that tool call launched a subagent.
+	ChildHookWorkerTurn ChildHookKind = "worker_turn"
+)
+
+// ChildHook is the part of a native hook payload the child lifecycle reads.
+type ChildHook struct {
+	Kind ChildHookKind
+	// NativeEvent is the harness's own event name, echoed back in a response.
+	NativeEvent string
+	Name        string
+	Cwd         string
+	AgentID     string
+	AgentType   string
+	Description string
 }
 
 // RestoreConfig carries inputs needed to continue an existing native agent session.

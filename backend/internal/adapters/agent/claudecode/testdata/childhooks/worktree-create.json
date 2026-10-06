@@ -1,0 +1,8 @@
+{
+ "session_id": "c83f50fb-16af-424f-bf2c-375b18f07fb6",
+ "transcript_path": "/tmp/transcript.jsonl",
+ "cwd": "/tmp/sandbox/wt/worker",
+ "prompt_id": "bcc97b12-0a57-4771-b9e4-44ddc2bb0bf3",
+ "hook_event_name": "WorktreeCreate",
+ "name": "agent-ad4368059f77a5382"
+}
