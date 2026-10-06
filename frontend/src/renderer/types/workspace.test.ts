@@ -471,7 +471,9 @@ describe("isMergedAwaitingNext / latestMergedPRNumber", () => {
 	});
 
 	it("is false when suspended but nothing merged (all closed, or no PRs) — idle-suspend", () => {
-		expect(isMergedAwaitingNext(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] }))).toBe(false);
+		expect(isMergedAwaitingNext(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] }))).toBe(
+			false,
+		);
 		expect(isMergedAwaitingNext(sessionWith({ isSuspended: true, prs: [] }))).toBe(false);
 		expect(
 			latestMergedPRNumber(sessionWith({ isSuspended: true, prs: [pr({ number: 7, state: "closed" })] })),
