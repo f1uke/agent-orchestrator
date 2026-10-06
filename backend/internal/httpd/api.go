@@ -38,7 +38,10 @@ type APIDeps struct {
 	Jira     controllers.JiraService
 	PRs      prsvc.ActionManager
 	Reviews  reviewsvc.Manager
-	Sim      simsvc.Manager
+	// Testiny is a task's Testiny tab: the test runs linked to the task, read
+	// live from Testiny. nil answers 501.
+	Testiny controllers.TestinyService
+	Sim     simsvc.Manager
 	// IOSRun is the run bar above the terminal: what a session can build, and
 	// the pane `ao sim run` runs in. nil answers 501, which is right on a
 	// machine with no Xcode - the bar then renders nowhere.
@@ -124,6 +127,7 @@ type API struct {
 	jira           *controllers.JiraController
 	prs            *controllers.PRsController
 	reviews        *controllers.ReviewsController
+	testiny        *controllers.TestinyController
 	iosRun         *controllers.IOSRunController
 	crewRuns       *controllers.CrewRunsController
 	children       *controllers.ChildrenController
@@ -173,6 +177,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		jira:           &controllers.JiraController{Svc: deps.Jira},
 		prs:            &controllers.PRsController{Svc: deps.PRs},
 		reviews:        &controllers.ReviewsController{Svc: deps.Reviews},
+		testiny:        &controllers.TestinyController{Svc: deps.Testiny},
 		iosRun:         &controllers.IOSRunController{Svc: deps.IOSRun},
 		crewRuns:       &controllers.CrewRunsController{Svc: deps.CrewRuns},
 		children:       &controllers.ChildrenController{Svc: deps.Children},
@@ -258,9 +263,10 @@ func (a *API) Register(root chi.Router) {
 			//
 			// What these controllers own belongs to the TASK, not to the agent whose
 			// id the path names: the branch's pull request and its comment threads,
-			// and AO's review verdicts on it. A crew's two members share one of
-			// each, so both must be answered the same - reading them per-session is
-			// what left qa with a readiness strip that saw no pull request at all.
+			// AO's review verdicts on it, and the Testiny runs its cases were played
+			// in. A crew's two members share one of each, so both must be answered
+			// the same - reading them per-session is what left qa with a readiness
+			// strip that saw no pull request at all.
 			//
 			// Everything above stays agent-scoped, which is the safe default: a
 			// task-level surface left out of this group merely keeps today's
@@ -271,6 +277,7 @@ func (a *API) Register(root chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(controllers.TaskScoped(a.sessions.Svc))
 				a.reviews.Register(r)
+				a.testiny.Register(r)
 				a.sessions.RegisterTaskScoped(r)
 			})
 		})

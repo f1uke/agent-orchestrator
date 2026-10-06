@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
+	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
@@ -50,6 +51,7 @@ import (
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	testinysvc "github.com/aoagents/agent-orchestrator/backend/internal/service/testiny"
 	wikisvc "github.com/aoagents/agent-orchestrator/backend/internal/service/wiki"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
@@ -510,6 +512,7 @@ func Run() error {
 		Sessions:           sessionSvc,
 		Jira:               jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
 		Reviews:            reviewSvc,
+		Testiny:            testinysvc.New(testinyadapter.New(testinyadapter.Options{}), store, store, testinysvc.Options{}),
 		CrewRuns:           crewRunSvc,
 		Children:           childSvc,
 		Sim:                simSvc,

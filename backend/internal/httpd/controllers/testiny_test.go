@@ -1,0 +1,219 @@
+package controllers_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
+	"github.com/aoagents/agent-orchestrator/backend/internal/config"
+	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
+	testinysvc "github.com/aoagents/agent-orchestrator/backend/internal/service/testiny"
+)
+
+// fakeTestiny records which task each call reached and what it was given.
+type fakeTestiny struct {
+	err      error
+	runs     testinysvc.Runs
+	asked    []string
+	linkRef  string
+	linkBy   string
+	refresh  bool
+	unlinked domain.TestinyRunID
+}
+
+func (f *fakeTestiny) Link(_ context.Context, task domain.SessionID, ref, by string) (domain.TestinyRunView, error) {
+	f.asked = append(f.asked, "link "+string(task))
+	f.linkRef, f.linkBy = ref, by
+	if f.err != nil {
+		return domain.TestinyRunView{}, f.err
+	}
+	return domain.TestinyRunView{Link: domain.TestinyRunLink{SessionID: task, RunID: 632, LinkedBy: by}, Title: "Chat notice", Counts: map[domain.TestinyCaseStatus]int{}, Cases: []domain.TestinyCaseResult{}}, nil
+}
+
+func (f *fakeTestiny) Unlink(_ context.Context, task domain.SessionID, id domain.TestinyRunID) error {
+	f.asked = append(f.asked, "unlink "+string(task))
+	f.unlinked = id
+	return f.err
+}
+
+func (f *fakeTestiny) Runs(_ context.Context, task domain.SessionID, refresh bool) (testinysvc.Runs, error) {
+	f.asked = append(f.asked, "runs "+string(task))
+	f.refresh = refresh
+	return f.runs, f.err
+}
+
+func newTestinyServer(t *testing.T, svc *fakeTestiny, crew map[domain.SessionID]domain.SessionID) *httptest.Server {
+	t.Helper()
+	sessions := &scopeSessions{fakeSessionService: newFakeSessionService(), devOf: crew}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{
+		Sessions: sessions,
+		Testiny:  svc,
+	}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestTestinyRunsList(t *testing.T) {
+	at := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
+	svc := &fakeTestiny{runs: testinysvc.Runs{Project: "MOB", Runs: []domain.TestinyRunView{{
+		Link:       domain.TestinyRunLink{SessionID: "solo-1", RunID: 632, CreatedAt: at},
+		Title:      "Chat notice",
+		URL:        "https://app.testiny.io/MOB/testruns/tr/632",
+		Counts:     map[domain.TestinyCaseStatus]int{"PASSED": 6},
+		Cases:      []domain.TestinyCaseResult{{ID: 7166, Title: "Fund disclaimer", Status: "PASSED", Script: "projects/nter/cases/chat/fund.yaml"}},
+		FetchedAt:  &at,
+		FetchError: &domain.TestinyFetchError{Kind: domain.TestinyErrAuth, Message: "Unauthenticated user"},
+	}}}}
+	srv := newTestinyServer(t, svc, nil)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/runs?refresh=1", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body=%s", status, body)
+	}
+	if !svc.refresh {
+		t.Fatal("refresh=1 did not reach the service")
+	}
+	var got struct {
+		Project string `json:"project"`
+		Runs    []struct {
+			Link struct {
+				RunID int64 `json:"runId"`
+			} `json:"link"`
+			URL        string         `json:"url"`
+			Counts     map[string]int `json:"counts"`
+			FetchError struct {
+				Kind string `json:"kind"`
+			} `json:"fetchError"`
+			Cases []struct {
+				Script string `json:"script"`
+			} `json:"cases"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v (%s)", err, body)
+	}
+	r := got.Runs[0]
+	if got.Project != "MOB" || r.Link.RunID != 632 || r.Counts["PASSED"] != 6 || r.FetchError.Kind != "auth" ||
+		r.Cases[0].Script != "projects/nter/cases/chat/fund.yaml" || r.URL == "" {
+		t.Fatalf("body = %s", body)
+	}
+
+	if _, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/runs", ""); status != http.StatusOK || svc.refresh {
+		t.Fatalf("plain GET: status %d, refresh %v", status, svc.refresh)
+	}
+}
+
+func TestTestinyEmptyListIsAnArray(t *testing.T) {
+	srv := newTestinyServer(t, &fakeTestiny{runs: testinysvc.Runs{Project: "MOB"}}, nil)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/runs", "")
+	if status != http.StatusOK || !strings.Contains(string(body), `"runs":[]`) {
+		t.Fatalf("status %d body %s", status, body)
+	}
+}
+
+func TestTestinyLinkAndUnlink(t *testing.T) {
+	svc := &fakeTestiny{}
+	srv := newTestinyServer(t, svc, nil)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs", `{"ref":"https://app.testiny.io/MOB/testruns/tr/632","from":"solo-2"}`)
+	if status != http.StatusOK {
+		t.Fatalf("link: status %d body %s", status, body)
+	}
+	if svc.linkRef != "https://app.testiny.io/MOB/testruns/tr/632" || svc.linkBy != "solo-2" {
+		t.Fatalf("link got ref %q by %q", svc.linkRef, svc.linkBy)
+	}
+	if !strings.Contains(string(body), `"title":"Chat notice"`) {
+		t.Fatalf("link body = %s", body)
+	}
+	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs", `{"ref":"632"}`); status != http.StatusOK || svc.linkBy != "" {
+		t.Fatalf("link from the app: status %d, by %q", status, svc.linkBy)
+	}
+
+	if body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/solo-1/testiny/runs/TR-632", ""); status != http.StatusNoContent {
+		t.Fatalf("unlink: status %d body %s", status, body)
+	}
+	if svc.unlinked != 632 {
+		t.Fatalf("unlinked %d", svc.unlinked)
+	}
+	body, status, _ = doRequest(t, srv, "DELETE", "/api/v1/sessions/solo-1/testiny/runs/abc", "")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "TESTINY_BAD_RUN_REF") {
+		t.Fatalf("unlink abc: status %d body %s", status, body)
+	}
+	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs", `{"ref":`)
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "INVALID_BODY") {
+		t.Fatalf("bad body: status %d body %s", status, body)
+	}
+}
+
+func TestTestinyErrorsMapToCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{domain.ErrBadRunRef, http.StatusBadRequest, "TESTINY_BAD_RUN_REF"},
+		{fmt.Errorf("%w: TR-999999", testinysvc.ErrRunNotFound), http.StatusNotFound, "TESTINY_RUN_NOT_FOUND"},
+		{fmt.Errorf("%w: TR-900 belongs to KERN", testinysvc.ErrWrongProject), http.StatusUnprocessableEntity, "TESTINY_RUN_WRONG_PROJECT"},
+		{testinysvc.ErrProjectNotFound, http.StatusUnprocessableEntity, "TESTINY_PROJECT_NOT_FOUND"},
+		{testinysvc.ErrOff, http.StatusConflict, "TESTINY_OFF"},
+		{testinysvc.ErrSessionNotFound, http.StatusNotFound, "SESSION_NOT_FOUND"},
+		{fmt.Errorf("%w: Unauthenticated user", testinyadapter.ErrAuth), http.StatusBadGateway, "TESTINY_AUTH"},
+		{testinyadapter.ErrUnavailable, http.StatusBadGateway, "TESTINY_UNAVAILABLE"},
+		{testinyadapter.ErrRejected, http.StatusBadGateway, "TESTINY_UNAVAILABLE"},
+		{testinyadapter.ErrBinaryMissing, http.StatusBadGateway, "TESTINY_CLI_MISSING"},
+		{testinyadapter.ErrNotFound, http.StatusBadGateway, "TESTINY_UNAVAILABLE"},
+	} {
+		srv := newTestinyServer(t, &fakeTestiny{err: tc.err}, nil)
+		body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs", `{"ref":"632"}`)
+		if status != tc.status || !strings.Contains(string(body), `"code":"`+tc.code+`"`) {
+			t.Errorf("%v: status %d body %s, want %d %s", tc.err, status, body, tc.status, tc.code)
+		}
+	}
+	srv := newTestinyServer(t, &fakeTestiny{err: testinysvc.ErrOff}, nil)
+	if _, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/runs", ""); status != http.StatusConflict {
+		t.Fatalf("GET on an off project: status %d, want 409", status)
+	}
+}
+
+// A run links to the TASK. qa's link, list and unlink must all reach dev's
+// task, or the tab dev and the person look at never shows qa's runs.
+func TestTestinyRoutesResolveToTheTasksDev(t *testing.T) {
+	svc := &fakeTestiny{runs: testinysvc.Runs{Project: "MOB"}}
+	srv := newTestinyServer(t, svc, map[domain.SessionID]domain.SessionID{scopeQA: scopeDev})
+	qa := "/api/v1/sessions/" + string(scopeQA) + "/testiny/runs"
+	for _, req := range [][3]string{
+		{"POST", qa, `{"ref":"632","from":"task-qa"}`},
+		{"GET", qa, ""},
+		{"DELETE", qa + "/632", ""},
+	} {
+		if body, status, _ := doRequest(t, srv, req[0], req[1], req[2]); status >= 300 {
+			t.Fatalf("%s %s: status %d body %s", req[0], req[1], status, body)
+		}
+	}
+	want := []string{"link task-dev", "runs task-dev", "unlink task-dev"}
+	if strings.Join(svc.asked, ",") != strings.Join(want, ",") {
+		t.Fatalf("service asked %v, want %v", svc.asked, want)
+	}
+	if svc.linkBy != "task-qa" {
+		t.Fatalf("linked by %q, want qa's own id", svc.linkBy)
+	}
+}
+
+func TestTestinyWithoutAServiceIsNotImplemented(t *testing.T) {
+	sessions := &scopeSessions{fakeSessionService: newFakeSessionService()}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{Sessions: sessions}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	if _, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/runs", ""); status != http.StatusNotImplemented {
+		t.Fatalf("status %d, want 501", status)
+	}
+}

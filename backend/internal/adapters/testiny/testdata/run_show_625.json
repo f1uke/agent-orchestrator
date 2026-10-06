@@ -1,0 +1,30 @@
+{
+  "data": {
+    "_etag": "bdr2a0q81arpy6nf",
+    "closed_at": null,
+    "closed_by": null,
+    "created_at": "2026-10-01T10:10:24.126Z",
+    "created_by": 29862,
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": null,
+    "id": 625,
+    "is_closed": false,
+    "milestone_testrun_values": {
+      "created_at": "2026-10-01T10:10:25.565Z",
+      "created_by": 29862,
+      "modified_at": "2026-10-01T10:10:25.565Z",
+      "modified_by": 29862,
+      "deleted_at": null,
+      "deleted_by": null,
+      "milestone_id": 80,
+      "testrun_id": 625
+    },
+    "modified_at": "2026-10-01T10:10:25.197Z",
+    "modified_by": 29862,
+    "project_id": 1,
+    "testplan_id": 193,
+    "title": "MOBILITY-4901 Chat logout storm - iOS"
+  },
+  "meta": null
+}

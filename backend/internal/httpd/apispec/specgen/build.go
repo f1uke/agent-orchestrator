@@ -66,6 +66,8 @@ func Build() ([]byte, error) {
 			"Pull-request actions (SCM lane)"),
 		*(&openapi31.Tag{Name: "reviews"}).WithDescription(
 			"Code-review runs and findings"),
+		*(&openapi31.Tag{Name: "testiny"}).WithDescription(
+			"The Testiny test runs linked to a task"),
 		*(&openapi31.Tag{Name: "notifications"}).WithDescription(
 			"Durable dashboard notifications"),
 		*(&openapi31.Tag{Name: "events"}).WithDescription(
@@ -280,6 +282,19 @@ var schemaNames = map[string]string{
 	// domain review entities
 	"DomainReviewRun":     "ReviewRun",
 	"ReviewPRReviewState": "PRReviewState",
+	// httpd/controllers and domain - a task's Testiny runs
+	"ControllersTestinyRunsResponse": "TestinyRunsResponse",
+	"ControllersLinkTestinyRunInput": "LinkTestinyRunInput",
+	"ControllersTestinyRunParam":     "TestinyRunParam",
+	"ControllersTestinyRunsQuery":    "TestinyRunsQuery",
+	"DomainTestinyRunView":           "TestinyRunView",
+	"DomainTestinyRunLink":           "TestinyRunLink",
+	"DomainTestinyRunID":             "TestinyRunID",
+	"DomainTestinyRef":               "TestinyRef",
+	"DomainTestinyCaseResult":        "TestinyCaseResult",
+	"DomainTestinyCaseStatus":        "TestinyCaseStatus",
+	"DomainTestinyFetchError":        "TestinyFetchError",
+	"DomainTestinyFetchErrorKind":    "TestinyFetchErrorKind",
 	// httpd/controllers — simulator device-lease wire envelopes
 	"ControllersSimLeaseParam":                 "SimLeaseParam",
 	"ControllersAcquireSimLeaseInput":          "AcquireSimLeaseInput",
@@ -472,6 +487,7 @@ func operations() []operation {
 	ops = append(ops, settingsOperations()...)
 	ops = append(ops, prOperations()...)
 	ops = append(ops, reviewOperations()...)
+	ops = append(ops, testinyOperations()...)
 	ops = append(ops, crewRunOperations()...)
 	ops = append(ops, childOperations()...)
 	ops = append(ops, iosRunOperations()...)
@@ -1129,6 +1145,49 @@ func reviewOperations() []operation {
 				{http.StatusOK, controllers.ResetReviewResponse{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
+}
+
+// testinyOperations declares a task's /testiny operations. Must stay 1:1 with
+// the routes TestinyController.Register mounts (enforced by the parity test).
+func testinyOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/testiny/runs", id: "listTestinyRuns", tag: "testiny",
+			summary:    "List the Testiny runs linked to a task, read live from Testiny",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.TestinyRunsQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.TestinyRunsResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/testiny/runs", id: "linkTestinyRun", tag: "testiny",
+			summary:    "Link a Testiny run to a task, once Testiny confirms it is in the project's Testiny project",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.LinkTestinyRunInput{},
+			resps: []respUnit{
+				{http.StatusOK, domain.TestinyRunView{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusBadGateway, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/testiny/runs/{runId}", id: "unlinkTestinyRun", tag: "testiny",
+			summary:    "Unlink a Testiny run from a task",
+			pathParams: []any{controllers.TestinyRunParam{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},

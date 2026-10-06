@@ -1775,6 +1775,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/testiny/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the Testiny runs linked to a task, read live from Testiny */
+        get: operations["listTestinyRuns"];
+        put?: never;
+        /** Link a Testiny run to a task, once Testiny confirms it is in the project's Testiny project */
+        post: operations["linkTestinyRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/testiny/runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unlink a Testiny run from a task */
+        delete: operations["unlinkTestinyRun"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/transcript-ref": {
         parameters: {
             query?: never;
@@ -3642,6 +3677,12 @@ export interface components {
             kind: string;
             start: number;
         };
+        LinkTestinyRunInput: {
+            /** @description Session id of the agent linking the run ($AO_SESSION_ID). Empty when a person links it in the app. */
+            from?: string;
+            /** @description The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632). */
+            ref: string;
+        };
         ListAgentsResponse: {
             /** @description Compatibility list of installed agents whose local auth probe recently returned authorized. Advisory and stale-prone; spawn may still fail. */
             authorized: components["schemas"]["AgentInfo"][];
@@ -4675,6 +4716,54 @@ export interface components {
         };
         SystemPromptsResponse: {
             prompts: components["schemas"]["SystemPromptItem"][];
+        };
+        TestinyCaseResult: {
+            /** Format: int64 */
+            id: number;
+            script?: string;
+            status: string;
+            title: string;
+        };
+        TestinyFetchError: {
+            /** @enum {string} */
+            kind: "auth" | "not_found" | "unavailable" | "rejected" | "binary_missing";
+            message: string;
+        };
+        TestinyRef: {
+            /** Format: int64 */
+            id: number;
+            title: string;
+        };
+        /** Format: int64 */
+        TestinyRunID: number;
+        TestinyRunLink: {
+            /** Format: date-time */
+            createdAt: string;
+            linkedBy: string;
+            runId: components["schemas"]["TestinyRunID"];
+            sessionId: string;
+        };
+        TestinyRunView: {
+            cases: components["schemas"]["TestinyCaseResult"][];
+            closed: boolean;
+            counts: {
+                [key: string]: number;
+            } | null;
+            evidenceDir: string;
+            fetchError?: components["schemas"]["TestinyFetchError"];
+            /** Format: date-time */
+            fetchedAt?: null | string;
+            link: components["schemas"]["TestinyRunLink"];
+            milestone?: components["schemas"]["TestinyRef"];
+            plan?: components["schemas"]["TestinyRef"];
+            title: string;
+            url: string;
+        };
+        TestinyRunsResponse: {
+            /** @description The project's Testiny project, as set (a key, name or id). */
+            project: string;
+            /** @description The task's runs in the order they were linked. A run Testiny could not read now carries fetchError. */
+            runs: components["schemas"]["TestinyRunView"][];
         };
         TrackerIntakeConfig: {
             assignee?: string;
@@ -11930,6 +12019,181 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listTestinyRuns: {
+        parameters: {
+            query?: {
+                /** @description 1 reads every run from Testiny now instead of serving a read from the last 15 seconds. */
+                refresh?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestinyRunsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    linkTestinyRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkTestinyRunInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestinyRunView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    unlinkTestinyRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Testiny run id, e.g. 632 or TR-632. */
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

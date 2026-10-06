@@ -557,6 +557,13 @@ type TelemetryEvent struct {
 	PayloadJson string
 }
 
+type TestinyRunLink struct {
+	SessionID domain.SessionID
+	RunID     domain.TestinyRunID
+	LinkedBy  string
+	CreatedAt time.Time
+}
+
 type WorkspaceRepo struct {
 	ProjectID     domain.ProjectID
 	Name          string

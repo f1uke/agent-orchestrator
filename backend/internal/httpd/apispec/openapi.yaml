@@ -5759,6 +5759,152 @@ paths:
       summary: Set the branch this session's work merges into (retargets an open PR/MR)
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/testiny/runs:
+    get:
+      operationId: listTestinyRuns
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: 1 reads every run from Testiny now instead of serving a read
+          from the last 15 seconds.
+        in: query
+        name: refresh
+        schema:
+          description: 1 reads every run from Testiny now instead of serving a read
+            from the last 15 seconds.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestinyRunsResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the Testiny runs linked to a task, read live from Testiny
+      tags:
+      - testiny
+    post:
+      operationId: linkTestinyRun
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkTestinyRunInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestinyRunView'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+      summary: Link a Testiny run to a task, once Testiny confirms it is in the project's
+        Testiny project
+      tags:
+      - testiny
+  /api/v1/sessions/{sessionId}/testiny/runs/{runId}:
+    delete:
+      operationId: unlinkTestinyRun
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Testiny run id, e.g. 632 or TR-632.
+        in: path
+        name: runId
+        required: true
+        schema:
+          description: Testiny run id, e.g. 632 or TR-632.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Unlink a Testiny run from a task
+      tags:
+      - testiny
   /api/v1/sessions/{sessionId}/transcript-ref:
     post:
       operationId: reportSessionTranscriptRef
@@ -10384,6 +10530,18 @@ components:
       - end
       - kind
       type: object
+    LinkTestinyRunInput:
+      properties:
+        from:
+          description: Session id of the agent linking the run ($AO_SESSION_ID). Empty
+            when a person links it in the app.
+          type: string
+        ref:
+          description: 'The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632).'
+          type: string
+      required:
+      - ref
+      type: object
     ListAgentsResponse:
       properties:
         authorized:
@@ -12882,6 +13040,126 @@ components:
       required:
       - prompts
       type: object
+    TestinyCaseResult:
+      properties:
+        id:
+          format: int64
+          type: integer
+        script:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+      required:
+      - id
+      - title
+      - status
+      type: object
+    TestinyFetchError:
+      properties:
+        kind:
+          enum:
+          - auth
+          - not_found
+          - unavailable
+          - rejected
+          - binary_missing
+          type: string
+        message:
+          type: string
+      required:
+      - kind
+      - message
+      type: object
+    TestinyRef:
+      properties:
+        id:
+          format: int64
+          type: integer
+        title:
+          type: string
+      required:
+      - id
+      - title
+      type: object
+    TestinyRunID:
+      format: int64
+      type: integer
+    TestinyRunLink:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        linkedBy:
+          type: string
+        runId:
+          $ref: '#/components/schemas/TestinyRunID'
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - runId
+      - linkedBy
+      - createdAt
+      type: object
+    TestinyRunView:
+      properties:
+        cases:
+          items:
+            $ref: '#/components/schemas/TestinyCaseResult'
+          type: array
+        closed:
+          type: boolean
+        counts:
+          additionalProperties:
+            type: integer
+          type:
+          - object
+          - "null"
+        evidenceDir:
+          type: string
+        fetchError:
+          $ref: '#/components/schemas/TestinyFetchError'
+        fetchedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        link:
+          $ref: '#/components/schemas/TestinyRunLink'
+        milestone:
+          $ref: '#/components/schemas/TestinyRef'
+        plan:
+          $ref: '#/components/schemas/TestinyRef'
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - link
+      - title
+      - url
+      - closed
+      - counts
+      - cases
+      - evidenceDir
+      type: object
+    TestinyRunsResponse:
+      properties:
+        project:
+          description: The project's Testiny project, as set (a key, name or id).
+          type: string
+        runs:
+          description: The task's runs in the order they were linked. A run Testiny
+            could not read now carries fetchError.
+          items:
+            $ref: '#/components/schemas/TestinyRunView'
+          type: array
+      required:
+      - project
+      - runs
+      type: object
     TrackerIntakeConfig:
       properties:
         assignee:
@@ -13473,6 +13751,8 @@ tags:
   name: prs
 - description: Code-review runs and findings
   name: reviews
+- description: The Testiny test runs linked to a task
+  name: testiny
 - description: Durable dashboard notifications
   name: notifications
 - description: Server-sent CDC event stream with durable replay

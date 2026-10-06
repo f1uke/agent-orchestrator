@@ -188,6 +188,14 @@ sql:
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
               type: "SessionID"
+          - column: "testiny_run_link.session_id"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "SessionID"
+          - column: "testiny_run_link.run_id"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "TestinyRunID"
           - column: "session_children.session_id"
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
