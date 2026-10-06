@@ -2857,13 +2857,17 @@ export interface components {
         ControllersCheckLearningForbiddenResponse: {
             hits: components["schemas"]["ControllersLearningForbiddenHitDTO"][];
         };
+        ControllersCrewHandbackView: {
+            /** @description The message's --about subject: a commit SHA, or on a Testiny project a case or run id. */
+            about: string;
+            /** Format: date-time */
+            at: string;
+        };
         ControllersCrewSendRequest: {
             about?: string;
             message: string;
             /** @enum {string} */
             role: "dev" | "qa";
-            /** @description qa only: this message is a mid-run update, not the end of the run, so the handback completeness check does not apply. */
-            stillWorking?: boolean;
             /**
              * @description Pin this one message to a path: pane (type it into the terminal, never touch the socket) or socket (socket or nothing - the send FAILS rather than fall back). Absent means the default, prefer the socket and fall back to the pane.
              * @enum {string}
@@ -2914,10 +2918,6 @@ export interface components {
         ControllersForgetLearningResponse: {
             /** @description Captured turns deleted. */
             deletedTurns: number;
-        };
-        ControllersHandbackCompletenessView: {
-            cases: number;
-            notDriven: string[];
         };
         ControllersIOSProjectResponse: {
             /** @description The Xcode project at the root of this session's worktree. An empty name means there is none, and the run bar does not render. */
@@ -4301,7 +4301,6 @@ export interface components {
         };
         SendSessionMessageResponse: {
             delivery?: components["schemas"]["ControllersMessageDeliveryView"];
-            handback?: components["schemas"]["ControllersHandbackCompletenessView"];
             message: string;
             ok: boolean;
             pendingMessages?: number;
@@ -4344,6 +4343,7 @@ export interface components {
              * @enum {string}
              */
             joinReason?: "sim" | "preview" | "manual";
+            lastHandback?: components["schemas"]["ControllersCrewHandbackView"];
             /** @enum {string} */
             role: "dev" | "qa";
         };

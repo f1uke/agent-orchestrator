@@ -58,6 +58,7 @@ type Store interface {
 	CrewMessagesOnSubject(ctx context.Context, crewID domain.SessionID, subject string, from domain.SessionID, since time.Time) (int, error)
 	CrewMessagesSince(ctx context.Context, crewID domain.SessionID, since time.Time) (int, error)
 	LatestCrewMessageFrom(ctx context.Context, from domain.SessionID) (domain.CrewMessage, bool, error)
+	LatestDeliveredCrewMessageFrom(ctx context.Context, from domain.SessionID, since time.Time) (domain.CrewMessage, bool, error)
 	// OpenCrewRunForSession and ConsecutiveCrewRunDiscards are the bracketed-run
 	// facts the read model needs: what this member is running RIGHT NOW (which
 	// nothing else in the daemon can answer - see domain.Session.CrewRun) and how
@@ -79,10 +80,6 @@ type Store interface {
 	// they are different actors and neither substitutes for the other.
 	ListReviewRunsBySession(ctx context.Context, id domain.SessionID) ([]domain.ReviewRun, error)
 	GetProject(ctx context.Context, id string) (domain.ProjectRecord, bool, error)
-	// ListSmokeChecksBySession is the TASK's smoke checklist, read on one leg of
-	// one path: qa handing the task back to dev. It answers the only question the
-	// handback gate asks - which cases still carry nothing from any machine.
-	ListSmokeChecksBySession(ctx context.Context, id domain.SessionID) ([]domain.SmokeCheck, error)
 }
 
 // ListFilter captures API-facing session list query filters.
@@ -1468,6 +1465,10 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("crew talk %s: %w", rec.ID, err)
 	}
+	handback, err := s.lastHandback(ctx, rec)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("crew handback %s: %w", rec.ID, err)
+	}
 	detail := deriveStatusDetail(rec, prs, s.now(), s.harnessSignals(rec.Harness), approvalRule, crewRunFacts{Discards: discards, TalkCapped: talkCapped})
 	// Resolve the target branch from facts already loaded above — no extra query
 	// and no subprocess, so this stays affordable on the sessions LIST endpoint.
@@ -1504,6 +1505,7 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		QueuedMessagesFailed: queued.Failed,
 		CrewRun:              openRunPtr(openRun, hasOpenRun),
 		CrewRunDiscards:      discards,
+		LastHandback:         handback,
 		Children:             children,
 	}, nil
 }

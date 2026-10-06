@@ -86,6 +86,36 @@ func (q *Queries) GetLatestCrewMessageBySender(ctx context.Context, fromSession 
 	return i, err
 }
 
+const getLatestDeliveredCrewMessageBySenderSince = `-- name: GetLatestDeliveredCrewMessageBySenderSince :one
+SELECT id, crew_id, project_id, from_session, to_session, subject, refused_reason, created_at
+FROM crew_message
+WHERE from_session = ? AND refused_reason = '' AND created_at >= ?
+ORDER BY created_at DESC, rowid DESC LIMIT 1
+`
+
+type GetLatestDeliveredCrewMessageBySenderSinceParams struct {
+	FromSession string
+	CreatedAt   time.Time
+}
+
+// The latest message one member DELIVERED in the current round: the crew lane's
+// "qa has handed back" signal. A refusal delivered nothing, so it is skipped.
+func (q *Queries) GetLatestDeliveredCrewMessageBySenderSince(ctx context.Context, arg GetLatestDeliveredCrewMessageBySenderSinceParams) (CrewMessage, error) {
+	row := q.db.QueryRowContext(ctx, getLatestDeliveredCrewMessageBySenderSince, arg.FromSession, arg.CreatedAt)
+	var i CrewMessage
+	err := row.Scan(
+		&i.ID,
+		&i.CrewID,
+		&i.ProjectID,
+		&i.FromSession,
+		&i.ToSession,
+		&i.Subject,
+		&i.RefusedReason,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertCrewMessage = `-- name: InsertCrewMessage :exec
 INSERT INTO crew_message (id, crew_id, project_id, from_session, to_session, subject, refused_reason, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)

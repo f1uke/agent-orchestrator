@@ -8864,6 +8864,19 @@ components:
       required:
       - hits
       type: object
+    ControllersCrewHandbackView:
+      properties:
+        about:
+          description: 'The message''s --about subject: a commit SHA, or on a Testiny
+            project a case or run id.'
+          type: string
+        at:
+          format: date-time
+          type: string
+      required:
+      - at
+      - about
+      type: object
     ControllersCrewSendRequest:
       properties:
         about:
@@ -8877,10 +8890,6 @@ components:
           - dev
           - qa
           type: string
-        stillWorking:
-          description: 'qa only: this message is a mid-run update, not the end of
-            the run, so the handback completeness check does not apply.'
-          type: boolean
         wire:
           description: 'Pin this one message to a path: pane (type it into the terminal,
             never touch the socket) or socket (socket or nothing - the send FAILS
@@ -8996,18 +9005,6 @@ components:
           type: integer
       required:
       - deletedTurns
-      type: object
-    ControllersHandbackCompletenessView:
-      properties:
-        cases:
-          type: integer
-        notDriven:
-          items:
-            type: string
-          type: array
-      required:
-      - cases
-      - notDriven
       type: object
     ControllersIOSProjectResponse:
       properties:
@@ -12271,8 +12268,6 @@ components:
       properties:
         delivery:
           $ref: '#/components/schemas/ControllersMessageDeliveryView'
-        handback:
-          $ref: '#/components/schemas/ControllersHandbackCompletenessView'
         message:
           type: string
         ok:
@@ -12378,6 +12373,8 @@ components:
           - preview
           - manual
           type: string
+        lastHandback:
+          $ref: '#/components/schemas/ControllersCrewHandbackView'
         role:
           enum:
           - dev

@@ -13,12 +13,11 @@ import (
 )
 
 type sendOptions struct {
-	session      string
-	crew         string
-	about        string
-	message      string
-	messageFile  string
-	stillWorking bool
+	session     string
+	crew        string
+	about       string
+	message     string
+	messageFile string
 	// paneOnly and socketOnly are the two per-send delivery overrides. They are
 	// mutually exclusive and neither is sticky: each governs this one message.
 	paneOnly   bool
@@ -33,8 +32,8 @@ type sendAPIRequest struct {
 	// From is the sender's own session id, so the daemon can recognise - and cap -
 	// a message between two members of one crew. Empty when a human runs this.
 	From string `json:"from,omitempty"`
-	// About is the commit SHA or smoke case id the message concerns. Required
-	// between crewmates.
+	// About is the commit SHA, or on a Testiny project a case or run id, the
+	// message concerns. Required between crewmates.
 	About string `json:"about,omitempty"`
 	// Wire pins this one message to a delivery path: "pane", "socket", or empty
 	// for the default. See wireFor.
@@ -47,9 +46,6 @@ type crewSendAPIRequest struct {
 	Role    string `json:"role"`
 	Message string `json:"message"`
 	About   string `json:"about,omitempty"`
-	// StillWorking says this message is a mid-run update rather than the end of
-	// qa's run, which is what exempts it from the handback check.
-	StillWorking bool `json:"stillWorking,omitempty"`
 	// Wire pins this one message to a delivery path; see sendAPIRequest.Wire.
 	Wire string `json:"wire,omitempty"`
 }
@@ -59,9 +55,6 @@ type sendAPIResponse struct {
 	SessionID       string `json:"sessionId"`
 	Queued          bool   `json:"queued"`
 	PendingMessages int    `json:"pendingMessages"`
-	// Handback is present when the daemon checked this message as the end of qa's
-	// run; see reportHandback.
-	Handback *handbackAPIView `json:"handback,omitempty"`
 	// Unreviewed is present when this message was a WORKER reporting to an
 	// orchestrator on a task that drove the app and never had a qa; see
 	// reportUnreviewed.
@@ -84,12 +77,6 @@ type unreviewedAPIView struct {
 	Touch string `json:"touch"`
 }
 
-// handbackAPIView mirrors the daemon's HandbackCompletenessView.
-type handbackAPIView struct {
-	Cases     int      `json:"cases"`
-	NotDriven []string `json:"notDriven"`
-}
-
 func newSendCommand(ctx *commandContext) *cobra.Command {
 	var opts sendOptions
 	cmd := &cobra.Command{
@@ -102,23 +89,16 @@ func newSendCommand(ctx *commandContext) *cobra.Command {
 			"dev is already running, so dev's environment cannot carry qa's id. Those\n" +
 			"messages are CAPPED, and the caps are the only thing standing between two\n" +
 			"agents that can each answer the other and a bill nobody is watching:\n\n" +
-			"  --about is required   name the commit SHA or smoke case id it is about\n" +
+			"  --about is required   name the commit SHA, or on a Testiny project a case or\n" +
+			"                        run id, it is about\n" +
 			"  3 per subject         per direction; the 4th is refused and the task goes\n" +
 			"                        to NEEDS YOU for a human\n" +
 			"  20 per hour per crew  a backstop against a loop that keeps inventing new\n" +
 			"                        subjects\n\n" +
 			"There is NO obligation to reply, and that is deliberate: the ARTIFACT is the\n" +
-			"reply. dev answers a finding by committing; qa answers a handoff by recording a\n" +
-			"result. The one message that is not a reply and IS required is qa telling dev a\n" +
+			"reply. dev answers a finding by committing; qa answers a handoff by running it\n" +
+			"and handing back. The one message that is not a reply and IS required is qa telling dev a\n" +
 			"run has finished - the end of qa's run is the start of dev's.\n\n" +
-			"THE HANDBACK IS CHECKED. A qa->dev message is read as the END of qa's run, so\n" +
-			"AO looks at the task's smoke checklist and says how many cases carry nothing\n" +
-			"from any machine. It does NOT refuse - a handback that never lands is worse than\n" +
-			"an incomplete one - it says so, to you and to dev, and names them. Every case\n" +
-			"should be in one of two states: DRIVEN (`ao smoke record`, a verdict or\n" +
-			"evidence-only) or declared UNDRIVEABLE (`--verdict skip --note \"<why you could\n" +
-			"not run it>\"`, and the why has to come from an attempt). If you are not finished,\n" +
-			"say so with --still-working rather than skipping cases to quiet the count.\n\n" +
 			"WHICH WIRE IT TAKES. AO hands a message to claude's own message channel when it\n" +
 			"can and types it into the terminal when it cannot, and the `delivered:` line says\n" +
 			"which, with the reason. --pane-only and --socket-only pin ONE message to one of\n" +
@@ -126,8 +106,8 @@ func newSendCommand(ctx *commandContext) *cobra.Command {
 			"from the DAEMON's environment and so does nothing at all when you set it in front\n" +
 			"of this command.",
 		Example: `  ao send --session agent-orchestrator-59 --message "CI is green"
-  ao send --crew dev --about 1185d0b4 --message "tests pass on this commit; 2 cases recorded"
-  ao send --crew qa --about tab-stays-live --message "fixed and pushed"`,
+  ao send --crew dev --about 1185d0b4 --message "run finished on this commit; 1 finding, details below"
+  ao send --crew qa --about 9f3e2a1 --message "fixed and pushed"`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return ctx.sendMessage(cmd.Context(), opts, cmd.InOrStdin())
@@ -135,9 +115,8 @@ func newSendCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.session, "session", "", "Session id (required unless --crew)")
 	cmd.Flags().StringVar(&opts.crew, "crew", "", "Message your crewmate by ROLE (`dev` or `qa`) instead of by id. The only address that cannot go stale: a crew is formed after dev is already running, so dev never learns qa's id from its environment.")
-	cmd.Flags().StringVar(&opts.about, "about", "", "The commit SHA or smoke case id this message is ABOUT. Required when messaging your crewmate: every message between the two agents on a task names a durable artifact, and a subject is allowed only 3 messages in one direction before the next is refused and the task goes to NEEDS YOU.")
+	cmd.Flags().StringVar(&opts.about, "about", "", "The commit SHA, or on a Testiny project a case or run id, this message is ABOUT. Required when messaging your crewmate: every message between the two agents on a task names a durable artifact, and a subject is allowed only 3 messages in one direction before the next is refused and the task goes to NEEDS YOU.")
 	cmd.Flags().StringVar(&opts.message, "message", "", "Message body (required unless --message-file)")
-	cmd.Flags().BoolVar(&opts.stillWorking, "still-working", false, "qa only: this message is a mid-run update, NOT the end of your run. Without it a message to dev is read as your handback and AO reports which checklist cases carry nothing from any machine. Use it when you mean it; declaring cases undriveable to quiet the count is the one thing that makes the check worthless.")
 	cmd.Flags().StringVar(&opts.messageFile, "message-file", "", "Read the message from a file, or '-' for stdin; mutually exclusive with --message. Use for large messages that would be awkward to quote on the command line.")
 	cmd.Flags().BoolVar(&opts.paneOnly, "pane-only", false, "Deliver THIS message by typing it into the session's terminal, never over claude's own message channel. The per-send form of AO_CLAUDE_NATIVE_SEND=0, which only works in the DAEMON's environment. Nothing is remembered: the next send takes the default again.")
 	cmd.Flags().BoolVar(&opts.socketOnly, "socket-only", false, "Deliver THIS message over claude's own message channel or not at all: if it cannot be used, the send FAILS naming the reason and nothing is typed at anybody. The per-send form of AO_CLAUDE_NATIVE_SEND=strict. Use it to hunt fallbacks; a message HELD for a sleeping agent is delivered later by the daemon, under whatever the daemon is set to.")
@@ -155,9 +134,6 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 	}
 	if session != "" && role != "" {
 		return usageError{errors.New("--session and --crew are mutually exclusive; pass only one")}
-	}
-	if opts.stillWorking && role == "" {
-		return usageError{errors.New("--still-working is about your own crew run, so it only means something with --crew")}
 	}
 	wire, err := wireFor(opts)
 	if err != nil {
@@ -185,11 +161,8 @@ func (c *commandContext) sendMessage(ctx context.Context, opts sendOptions, stdi
 		// because the sender cannot.
 		path := "sessions/" + url.PathEscape(sender) + "/crew/send"
 		if err := c.postJSON(ctx, path, crewSendAPIRequest{
-			Role: role, Message: message, About: opts.about, StillWorking: opts.stillWorking, Wire: wire,
+			Role: role, Message: message, About: opts.about, Wire: wire,
 		}, &res); err != nil {
-			return err
-		}
-		if err := reportHandback(c.deps.Out, res); err != nil {
 			return err
 		}
 		if err := reportDelivery(c.deps.Out, res); err != nil {
@@ -245,34 +218,6 @@ func unreviewedTouchPhrase(touch string) string {
 		return "opened a preview of the app"
 	}
 	return "drove the app"
-}
-
-// reportHandback says what the task's checklist looked like at the moment this
-// message ended qa's run. It prints only when something was left undone, because
-// a complete handback needs no commentary - and it names the cases, because "3
-// cases" sends the reader back to the list to work out which three.
-//
-// The message has already been delivered by the time this prints. That is the
-// design and not a race: refusing the handback would recreate the silent stall
-// the handback obligation exists to prevent, and it is the version of this check
-// that is easiest to satisfy by declaring the remaining cases undriveable.
-func reportHandback(out io.Writer, res sendAPIResponse) error {
-	if res.Handback == nil || len(res.Handback.NotDriven) == 0 {
-		return nil
-	}
-	n := len(res.Handback.NotDriven)
-	subject := "cases carry"
-	if n == 1 {
-		subject = "case carries"
-	}
-	_, err := fmt.Fprintf(out,
-		"sent - and AO told dev this too: %d of %d checklist %s nothing from any machine.\n"+
-			"  %s\n"+
-			"Each one is either yours to DRIVE (`ao smoke record --case <id>` with a verdict, or with --evidence\n"+
-			"and no verdict) or one you must declare UNDRIVEABLE (`--verdict skip --note \"<why>\"`) - and the why\n"+
-			"has to come from an ATTEMPT, not an assumption. If your run is not actually over, say `--still-working`.\n",
-		n, res.Handback.Cases, subject, strings.Join(res.Handback.NotDriven, ", "))
-	return err
 }
 
 // reportDelivery says WHICH WIRE the message took, because AO has two and they
