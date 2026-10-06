@@ -625,8 +625,11 @@ func TestCoordinationFloor_SoloWorkerHasNoHandbackObligation(t *testing.T) {
 	if strings.Contains(worker, "Handing back (AO)") {
 		t.Fatalf("the worker floor must not carry qa's handback obligation:\n%s", worker)
 	}
-	if CoordinationFloor(KindQA) != worker+qaHandbackFloor {
-		t.Fatal("the qa floor must be the worker floor plus the handback block, so worker invariants cannot drift apart")
+	if CoordinationFloor(KindQA) != qaCoordinationFloor+workerFloor+qaHandbackFloor {
+		t.Fatal("the qa floor must share workerFloor with the worker floor, so worker invariants cannot drift apart")
+	}
+	if !strings.HasSuffix(worker, workerFloor) {
+		t.Fatal("the worker floor must end with the shared workerFloor")
 	}
 }
 
@@ -1088,6 +1091,76 @@ func TestWorkerFloorForbidsPatternKills(t *testing.T) {
 			if !strings.Contains(floor, want) {
 				t.Errorf("%s floor is missing %q", k, want)
 			}
+		}
+	}
+}
+
+// AO does not tell the orchestrator when a worker stops, so a worker that
+// finished silently looked like one that died. The report is a FLOOR rule so it
+// survives a cleared base and no brief has to repeat it.
+func TestCoordinationFloor_WorkerReportsAtEachMoment(t *testing.T) {
+	worker := CoordinationFloor(KindWorker)
+	for _, want := range []string{
+		"report to the orchestrator with `ao send`",
+		"**your PR/MR is open**",
+		"**you need the human**",
+		"**you finish** - your last act before you end your turn",
+		"the knowledge-store paths you wrote",
+		"`ao orchestrator ls`",
+		"a check-in before implementing, where the project has one, is the exception",
+	} {
+		if !strings.Contains(worker, want) {
+			t.Errorf("worker floor missing %q", want)
+		}
+	}
+	if strings.Contains(worker, "true blocker") {
+		t.Error("worker floor must not limit orchestrator contact to true blockers")
+	}
+}
+
+// qa hands back to dev and dev reports; qa must not be told to report to the
+// orchestrator, which its own base forbids.
+func TestCoordinationFloor_QAIsNotToldToReport(t *testing.T) {
+	qa := CoordinationFloor(KindQA)
+	if strings.Contains(qa, "report to the orchestrator") {
+		t.Fatalf("qa floor must not carry the orchestrator report obligation:\n%s", qa)
+	}
+	if !strings.Contains(qa, "## Required coordination (AO)") || !strings.Contains(qa, "namespace") {
+		t.Fatal("qa floor lost the namespace invariant")
+	}
+}
+
+func TestOrchestratorDefault_BriefShape(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"## Briefs",
+		"as checks a reader can verify",
+		"the exact command or skill that verifies it",
+		"the knowledge-store docs to read",
+		"the full report of any worker this one builds on",
+		"a rough timebox",
+		"start ONE and stage the rest with `--todo`",
+		"spawn a fresh worker with the consolidated brief",
+	} {
+		if !strings.Contains(base, want) {
+			t.Errorf("orchestrator default missing %q", want)
+		}
+	}
+}
+
+// Asking a worker for status wakes it and buys a turn; status is read, not sent.
+func TestOrchestratorDefault_StatusChecksAreReadOnly(t *testing.T) {
+	base := DefaultBase(KindOrchestrator)
+	for _, want := range []string{
+		"## Checking on workers",
+		"`ao session get <id>`",
+		"Never `ao send` a worker just to ask how it is going",
+		"re-query the live state",
+		"**Orchestrator additional prompt**",
+		`"Must ask" list and a "Just do" list`,
+	} {
+		if !strings.Contains(base, want) {
+			t.Errorf("orchestrator default missing %q", want)
 		}
 	}
 }
