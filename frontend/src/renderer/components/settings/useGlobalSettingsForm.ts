@@ -40,7 +40,6 @@ const autoNudgeQueryKey = ["settings", "autoNudge"] as const;
 export const responseLanguageQueryKey = ["settings", "responseLanguage"] as const;
 export const wikiSettingsQueryKey = ["settings", "wiki"] as const;
 const reclaimSettingsQueryKey = ["settings", "reclaim"] as const;
-export const evidenceRetentionQueryKey = ["settings", "evidenceRetention"] as const;
 
 // The flat, editable Global-scope draft. Prompt/template overrides are keyed maps
 // (kind/name → effective text); the rest are the daemon/app scalar settings.
@@ -63,8 +62,6 @@ export type GlobalDraft = {
 	reclaimEnabled: boolean;
 	reclaimGrace: number;
 	reclaimArtifacts: boolean;
-	evidenceRetentionEnabled: boolean;
-	evidenceRetentionDays: number;
 	updatesEnabled: boolean;
 	updateChannel: UpdateChannel;
 	// The code editor's preferences (~/.ao/editor-settings.json).
@@ -87,8 +84,6 @@ export type GlobalScalarField =
 	| "reclaimEnabled"
 	| "reclaimGrace"
 	| "reclaimArtifacts"
-	| "evidenceRetentionEnabled"
-	| "evidenceRetentionDays"
 	| "updatesEnabled"
 	| "updateChannel"
 	| "editorIndentOnType"
@@ -111,8 +106,6 @@ const EMPTY_DRAFT: GlobalDraft = {
 	reclaimEnabled: true,
 	reclaimGrace: 24 * 60,
 	reclaimArtifacts: true,
-	evidenceRetentionEnabled: true,
-	evidenceRetentionDays: 30,
 	updatesEnabled: false,
 	updateChannel: "latest",
 	editorIndentOnType: DEFAULT_EDITOR_SETTINGS.indentOnType,
@@ -208,14 +201,6 @@ export function useGlobalSettingsForm() {
 			// Typed from the generated OpenAPI schema, not a hand-written shape: a
 			// local restatement silently omits any settings field added later.
 			return data as components["schemas"]["ReclaimSettingsResponse"];
-		},
-	});
-	const evidenceRetentionQuery = useQuery({
-		queryKey: evidenceRetentionQueryKey,
-		queryFn: async () => {
-			const { data, error } = await apiClient.GET("/api/v1/settings/evidence-retention", {});
-			if (error) throw new Error(apiErrorMessage(error));
-			return data as { enabled: boolean; maxAgeDays: number };
 		},
 	});
 	const updateQuery = useQuery({ queryKey: updateSettingsQueryKey, queryFn: () => aoBridge.updateSettings.get() });
@@ -330,14 +315,6 @@ export function useGlobalSettingsForm() {
 	}, [reclaimQuery.data]);
 
 	useEffect(() => {
-		if (!evidenceRetentionQuery.data || seeded.current.has("evidenceRetention")) return;
-		seeded.current.add("evidenceRetention");
-		const { enabled, maxAgeDays } = evidenceRetentionQuery.data;
-		setDraft((d) => ({ ...d, evidenceRetentionEnabled: enabled, evidenceRetentionDays: maxAgeDays }));
-		setBaseline((b) => ({ ...b, evidenceRetentionEnabled: enabled, evidenceRetentionDays: maxAgeDays }));
-	}, [evidenceRetentionQuery.data]);
-
-	useEffect(() => {
 		if (!updateQuery.data || seeded.current.has("updates")) return;
 		seeded.current.add("updates");
 		const { enabled, channel } = updateQuery.data;
@@ -380,8 +357,6 @@ export function useGlobalSettingsForm() {
 		draft.reclaimEnabled !== baseline.reclaimEnabled ||
 		draft.reclaimGrace !== baseline.reclaimGrace ||
 		draft.reclaimArtifacts !== baseline.reclaimArtifacts ||
-		draft.evidenceRetentionEnabled !== baseline.evidenceRetentionEnabled ||
-		draft.evidenceRetentionDays !== baseline.evidenceRetentionDays ||
 		draft.updatesEnabled !== baseline.updatesEnabled ||
 		draft.updateChannel !== baseline.updateChannel ||
 		editorDirty(draft, baseline);
@@ -536,19 +511,6 @@ export function useGlobalSettingsForm() {
 					})(),
 				);
 			}
-			if (
-				draft.evidenceRetentionEnabled !== baseline.evidenceRetentionEnabled ||
-				draft.evidenceRetentionDays !== baseline.evidenceRetentionDays
-			) {
-				ops.push(
-					(async () => {
-						const { error } = await apiClient.PUT("/api/v1/settings/evidence-retention", {
-							body: { enabled: draft.evidenceRetentionEnabled, maxAgeDays: draft.evidenceRetentionDays },
-						});
-						if (error) throw new Error(apiErrorMessage(error));
-					})(),
-				);
-			}
 			if (draft.updatesEnabled !== baseline.updatesEnabled || draft.updateChannel !== baseline.updateChannel) {
 				// Selecting Nightly in Settings is itself the acknowledgement of the
 				// instability warning; Stable clears it.
@@ -608,7 +570,6 @@ export function useGlobalSettingsForm() {
 			// appear — until the next app start.
 			void queryClient.invalidateQueries({ queryKey: wikiStatusQueryKey });
 			void queryClient.invalidateQueries({ queryKey: reclaimSettingsQueryKey });
-			void queryClient.invalidateQueries({ queryKey: evidenceRetentionQueryKey });
 			void queryClient.invalidateQueries({ queryKey: updateSettingsQueryKey });
 			// Every open editor reads this key: a re-bound shortcut works on the
 			// next key press, without reopening the file.

@@ -1,5 +1,5 @@
 import { AlertTriangle, CircleSlash, Loader, ShieldOff } from "lucide-react";
-import { MONO, PALETTE as P } from "../lib/smoke-test";
+import { MONO } from "../lib/comment-inbox";
 import {
 	CREW_RUN_MAX_ATTEMPTS,
 	type CrewRun,
@@ -9,10 +9,11 @@ import {
 	crewRunState,
 	crewRunTitle,
 	discardStreak,
+	PALETTE as P,
 } from "../lib/crew-run";
 
 /**
- * Tests tab - "Machine runs": every build, test suite or device pass this member
+ * Summary tab - "Machine runs": every build, test suite or device pass this member
  * bracketed with `ao crew run`, newest first, and what the tree-write detector
  * concluded about each.
  *
@@ -22,7 +23,7 @@ import {
  *
  * Absent entirely when the session has never bracketed a run - which is the
  * truth for every solo session and every project that does not use the bracket,
- * and their Tests tab must look exactly as it did before this existed.
+ * and their Summary tab must look exactly as it did before this existed.
  */
 export function CrewRunStrip({ runs }: { runs: CrewRun[] }) {
 	if (runs.length === 0) return null;
@@ -89,7 +90,7 @@ function EscalationBanner({ streak }: { streak: number }) {
 			<AlertTriangle
 				size={12}
 				strokeWidth={2.2}
-				color={P.segFail}
+				color={P.fail}
 				aria-hidden="true"
 				style={{ flex: "none", marginTop: 1 }}
 			/>

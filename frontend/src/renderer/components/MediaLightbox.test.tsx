@@ -28,7 +28,7 @@ it("pages next with the arrow control (wraps)", () => {
 			triggerRef={{ current: null }}
 		/>,
 	);
-	fireEvent.click(screen.getByLabelText("Next evidence"));
+	fireEvent.click(screen.getByLabelText("Next"));
 	expect(onIndexChange).toHaveBeenCalledWith(1);
 });
 
@@ -53,7 +53,7 @@ it("shows the counter only when there is more than one item", () => {
 		/>,
 	);
 	expect(screen.queryByText(/\/ 1$/)).not.toBeInTheDocument();
-	expect(screen.queryByLabelText("Next evidence")).not.toBeInTheDocument();
+	expect(screen.queryByLabelText("Next")).not.toBeInTheDocument();
 });
 
 it("closes on Esc via the dialog", () => {

@@ -92,7 +92,7 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		Icon: Trash2,
 		hint: "what AO deletes once work is finished",
 		keywords:
-			"auto-reclaim reclaim finished sessions grace period tmux worktree build output derived data pods node_modules smoke test evidence retention screenshots clips delete age days purge sweep",
+			"auto-reclaim reclaim finished sessions grace period tmux worktree build output derived data pods node_modules delete",
 	},
 	{
 		key: "editor",

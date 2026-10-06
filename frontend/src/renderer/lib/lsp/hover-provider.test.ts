@@ -8,7 +8,7 @@ import type { LspClient } from "./lsp-client";
  *
  * Everything asserted here is about the POLICY — which requests reach the wire,
  * in what order, and what a refusal looks like — because the mapping is proved
- * in `hover-mapping.test.ts` and the *feel* is the smoke checklist's job.
+ * in `hover-mapping.test.ts` and the *feel* takes a person using the editor.
  */
 const registrations: { languageId: string; provider: languages.HoverProvider; disposed: boolean }[] = [];
 vi.mock("../monaco-setup", () => ({

@@ -8,7 +8,6 @@ import {
 	isOrchestratorSession,
 } from "../types/workspace";
 import { statusLabel } from "./status-glyph";
-import type { SmokeProgress } from "./smoke-test";
 
 /**
  * A TASK, and the lane it belongs in.
@@ -422,8 +421,6 @@ export function reviewGateState(prs: SessionPRSummary[]): ReviewGateState {
 
 /** What the rollup can see beyond the sessions themselves. */
 export type TaskGates = {
-	/** The human's smoke verdicts. Undefined while the checklist has not loaded. */
-	smoke?: SmokeProgress;
 	review: ReviewGateState;
 };
 
@@ -439,10 +436,10 @@ export type TaskLane = {
 	 * The card draws its gutter glyph from it.
 	 *
 	 * It is absent when the lane came from a fact about the TASK rather than about
-	 * a member (`qa · Play the cases` is a fact about the checklist and the human;
+	 * a member (`qa · No handback yet` is a fact about what qa has reported;
 	 * `qa · Next up` is a fact about whose move it is). Returning the member rather
 	 * than leaving the card to parse the note is not merely tidier: drawing a
-	 * sleeping qa's glyph for "play the cases" would paint the board's only SOLID
+	 * sleeping qa's glyph for "no handback yet" would paint the board's only SOLID
 	 * mark - the one reserved for a genuinely live agent - on a dead process.
 	 */
 	holder?: WorkspaceSession;
@@ -470,17 +467,6 @@ export type TaskLane = {
  */
 function isBlockedOnAPerson(member: WorkspaceSession): boolean {
 	return attentionZone(member) === "action" && member.statusReason !== "idle_aged";
-}
-
-/** Has a person judged every case a person still has to judge? */
-function smokeSettled(smoke: SmokeProgress | undefined): boolean {
-	return Boolean(smoke) && smoke!.fail === 0 && smoke!.pending === 0;
-}
-
-/** Did a machine already run these cases, leaving only the human's play? */
-function awaitingOnlyTheHumansPlay(smoke: SmokeProgress | undefined): boolean {
-	if (!smoke || smoke.pending === 0) return false;
-	return smoke.agentPass + smoke.agentFail + smoke.agentCaptured > 0;
 }
 
 /**
@@ -517,12 +503,10 @@ function roleNote(member: WorkspaceSession): string {
  *     `Nobody is working on this`. Ahead of every other rule, because a card that
  *     reads healthy while nothing runs is the worst failure a real run produced
  *  1. an AWAKE member is genuinely blocked on a person -> Needs you, named
- *  2. dev's work can land AND qa has signed off AND review has not objected
- *     -> Ready to merge. THIS is the AND the feature exists for
- *  3. everything an agent can do is done and only the human's play remains
- *     -> Needs you (`qa · Play the cases`), because nothing else can advance it
- *  4. an awake member is working -> its own lane
- *  5. nobody is awake -> In review, naming what the task is waiting for
+ *  2. dev's work can land AND qa has handed back and stopped AND review has not
+ *     objected -> Ready to merge. THIS is the AND the feature exists for
+ *  3. an awake member is working -> its own lane
+ *  4. nobody is awake -> In review, naming what the task is waiting for
  *
  * Rule 2's third input is deliberately "review has not OBJECTED" rather than
  * "review has approved". A review pass is an ephemeral run that something has to
@@ -535,8 +519,8 @@ export function taskLane(task: Task, gates: TaskGates): TaskLane {
 	const { dev, qa, members } = task;
 	// NO QA IS A PASS, NOT A PENDING - and under lazy creation this is the branch
 	// most tasks live in, not an edge case. A task that never needs a qa never
-	// gets one, so a smoke gate that waited for a verdict nobody will ever record
-	// would hold every backend change out of Ready to merge for ever. The absent
+	// gets one, so a gate that waited for a handback nobody will ever send would
+	// hold every backend change out of Ready to merge for ever. The absent
 	// member is simply not an input: the task reads exactly as a solo task does,
 	// which is also what keeps the solo board byte-for-byte what it is today.
 	if (!qa) return { zone: attentionZone(dev), note: "", holder: dev };
@@ -559,10 +543,9 @@ export function taskLane(task: Task, gates: TaskGates): TaskLane {
 	//
 	// The one thing it must not do is cry wolf, so it defers to a board that
 	// already has a better answer: any lane that NAMES an ask (a member at an open
-	// prompt, AO's reviewer objecting, a checklist only a person can play) is
-	// already telling you to act, more precisely than this could. A task waiting on
-	// CI or on a reviewer is likewise quiet on purpose - a machine owes that answer
-	// and dev is nudged when it lands.
+	// prompt, AO's reviewer objecting) is already telling you to act, more
+	// precisely than this could. A task waiting on CI or on a reviewer is likewise
+	// quiet on purpose - a machine owes that answer and dev is nudged when it lands.
 	if (!members.some(isWorking) && !someoneElseOwesTheMove(task, lane)) {
 		return { zone: "action", note: NOBODY_IS_WORKING };
 	}
@@ -580,8 +563,8 @@ const NOBODY_IS_WORKING = "Nobody is working on this";
  * which case its quiet is expected rather than a stall.
  *
  * Two answers, and they are different kinds of thing. A lane already in `action`
- * has NAMED an ask and a person can act on it right now - replacing `qa · Play
- * the cases` with `Nobody is working on this` would trade a specific instruction
+ * has NAMED an ask and a person can act on it right now - replacing `qa · Input
+ * needed` with `Nobody is working on this` would trade a specific instruction
  * for a vague one. A member sitting in the `pending` zone on its PR PIPELINE is
  * waiting on a machine or a reviewer: CI has not finished, or review has not come
  * back. Nobody should be working, and when the answer lands the PR nudge wakes
@@ -592,7 +575,7 @@ function someoneElseOwesTheMove(task: Task, lane: TaskLane): boolean {
 	return task.members.some((member) => attentionZone(member) === "pending" && member.statusReason === "pr_pipeline");
 }
 
-/** Rules 1-5: what the task is waiting FOR, given that somebody could act on it. */
+/** Rules 1-4: what the task is waiting FOR, given that somebody could act on it. */
 function crewLane(task: Task, qa: WorkspaceSession, gates: TaskGates): TaskLane {
 	const { dev, members } = task;
 	const awake = members.filter((member) => crewChipState(member) === "working");
@@ -605,15 +588,19 @@ function crewLane(task: Task, qa: WorkspaceSession, gates: TaskGates): TaskLane 
 	// that to be true, and it is dev's to answer.
 	if (gates.review === "changes") return { zone: "action", note: "review · Changes requested" };
 
-	// 2/3. dev's work can land: the AND, and what is still owed when it cannot.
+	// 2. dev's work can land: the AND, and what is still owed when it cannot. A qa
+	// still working has not had its last word, even if it handed back earlier.
+	// The handback's subject is deliberately not matched against the PR head: dev
+	// routinely commits a fix after qa reports, and a strict match would hold a
+	// correct task in pending.
 	if (attentionZone(dev) === "merge") {
 		if (!dev.crew?.hasRun || !qa.crew?.hasRun) return { zone: "pending", note: "qa · Not started yet" };
-		if (gates.smoke && smokeSettled(gates.smoke)) return { zone: "merge", note: "", holder: dev };
-		if (awaitingOnlyTheHumansPlay(gates.smoke)) return { zone: "action", note: "qa · Play the cases" };
-		return { zone: "pending", note: "qa · Not played yet" };
+		if (isWorking(qa)) return { zone: "pending", note: roleNote(qa), holder: qa };
+		if (qa.crew.lastHandback) return { zone: "merge", note: "", holder: dev };
+		return { zone: "pending", note: "qa · No handback yet" };
 	}
 
-	// 4. Somebody is WORKING - asked of the member that is working rather than of
+	// 3. Somebody is WORKING - asked of the member that is working rather than of
 	// the first awake one, because a parked dev beside a running qa is awake and
 	// has nothing to report.
 	const holder = members.find(isWorking);
@@ -621,7 +608,7 @@ function crewLane(task: Task, qa: WorkspaceSession, gates: TaskGates): TaskLane 
 		return { zone: attentionZone(holder), note: roleNote(holder), holder };
 	}
 
-	// 5. NOBODY IS MID-TURN: whoever was working has ended its turn and the task's
+	// 4. NOBODY IS MID-TURN: whoever was working has ended its turn and the task's
 	// next step belongs to the other agent. Both members may run at once, so this
 	// is not a handover waiting to happen - it is the board naming whose move it is.
 	//

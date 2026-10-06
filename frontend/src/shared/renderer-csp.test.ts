@@ -11,17 +11,17 @@ function directive(csp: string, name: string): string {
 }
 
 describe("buildContentSecurityPolicy", () => {
-	// Regression guard for the app://renderer evidence-thumbnail bug: #111 fetched
+	// Regression guard for the app://renderer media-thumbnail bug: #111 fetched
 	// the bytes and rendered a blob: object URL, but the CSP still forbade blob: in
 	// img-src, so the <img> load was CSP-blocked and stayed a broken thumbnail.
-	it("allows blob: (and data:) for images so evidence object URLs render", () => {
+	it("allows blob: (and data:) for images so media object URLs render", () => {
 		const img = directive(buildContentSecurityPolicy(""), "img-src");
 		expect(img).toContain("blob:");
 		expect(img).toContain("data:");
 		expect(img).toContain("'self'");
 	});
 
-	it("declares media-src allowing blob: so evidence video clips render", () => {
+	it("declares media-src allowing blob: so video clips render", () => {
 		const media = directive(buildContentSecurityPolicy(""), "media-src");
 		expect(media).toContain("blob:");
 		expect(media).toContain("'self'");

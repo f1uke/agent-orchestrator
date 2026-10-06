@@ -25,7 +25,7 @@ const discarded = (id: string, over: Partial<CrewRun> = {}) =>
 describe("CrewRunStrip", () => {
 	// The "must not change" guarantee, on screen: a session that has never
 	// bracketed a run - every solo session, and every project that does not use
-	// the bracket - gets exactly the Tests tab it had before this existed.
+	// the bracket - gets exactly the Summary tab it had before this existed.
 	it("renders nothing at all when the session never bracketed a run", () => {
 		const { container } = render(<CrewRunStrip runs={[]} />);
 		expect(container).toBeEmptyDOMElement();

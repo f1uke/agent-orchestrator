@@ -24,7 +24,7 @@ import { createLspRegistry, type LspRegistry } from "./lsp-registry";
  * BUILD-SERVER branch - the one the human's iOS app uses - needs a real
  * `.xcodeproj`, a real Xcode build and `xcode-build-server`, none of which
  * exist here; it is covered by `scripts/measure-sourcekit.mjs` against a real
- * checkout, and by the smoke checklist. What this file proves is that the
+ * checkout, and by a person using the editor. What this file proves is that the
  * catalogue, the readiness gate, the document mapping and the registry
  * lifecycle carry a real sourcekit-lsp end to end.
  */

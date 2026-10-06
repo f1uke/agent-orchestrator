@@ -185,6 +185,33 @@ describe("useWorkspaceQuery", () => {
 		expect(sessions[1].prs).toEqual([]);
 	});
 
+	it("carries a qa's last handback through to the board, which lanes on it", async () => {
+		const lastHandback = { at: "2026-06-10T16:15:04Z", about: "1a2b3c4" };
+		respondWith({
+			projects: { data: { projects: [{ id: "proj-1", name: "my-app", path: "/p" }] }, error: undefined },
+			sessions: {
+				data: {
+					sessions: [
+						{
+							id: "sess-2",
+							projectId: "proj-1",
+							status: "idle",
+							isTerminated: false,
+							updatedAt: "2026-06-10T16:15:04Z",
+							crew: { id: "sess-1", role: "qa", hasRun: true, lastHandback },
+						},
+					],
+				},
+				error: undefined,
+			},
+		});
+
+		const { result } = renderHook(() => useWorkspaceQuery(), { wrapper });
+		await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+		expect(result.current.data?.[0].sessions[0].crew?.lastHandback).toEqual(lastHandback);
+	});
+
 	it("preserves backend merged status for terminated merged sessions", async () => {
 		respondWith({
 			projects: { data: { projects: [{ id: "proj-1", name: "my-app", path: "/p" }] }, error: undefined },

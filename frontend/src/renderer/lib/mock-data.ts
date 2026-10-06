@@ -349,8 +349,8 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				crew: { id: "demo-ready", role: "dev", hasRun: true },
 			},
 			{
-				// qa has had its turn here (hasRun), so this task's card is held out of
-				// Ready to Merge by the CHECKLIST rather than by an unwoken agent.
+				// qa ran its pass, handed back to dev and went to sleep, so with dev's
+				// PR green this task reads Ready to merge.
 				id: "demo-ready-qa",
 				workspaceId: "ao-demo",
 				workspaceName: "ao-demo",
@@ -364,7 +364,12 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				activity: { state: "idle", lastActivityAt: minutesAgo(12) },
 				prs: [],
 				taskSize: "standard",
-				crew: { id: "demo-ready", role: "qa", hasRun: true },
+				crew: {
+					id: "demo-ready",
+					role: "qa",
+					hasRun: true,
+					lastHandback: { at: minutesAgo(12), about: "4f2c9e1" },
+				},
 			},
 			{
 				// THE STALL, on the demo board so the lane can be looked at: a crew
@@ -390,9 +395,9 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				crew: { id: "demo-stalled", role: "dev", hasRun: true },
 			},
 			{
-				// qa ran, found nothing a person has to play, and parked. Its turn is
-				// over and it never told dev - which is the other half of the same
-				// failure, and why qa's floor now obliges it to hand back.
+				// qa ran and parked without handing anything back. Its turn is over and
+				// it never told dev - which is the other half of the same failure, and
+				// why qa's floor now obliges it to hand back.
 				id: "demo-stalled-qa",
 				workspaceId: "ao-demo",
 				workspaceName: "ao-demo",
@@ -407,6 +412,39 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				prs: [],
 				taskSize: "standard",
 				crew: { id: "demo-stalled", role: "qa", hasRun: true },
+			},
+			{
+				// dev's PR is green, but qa is still mid-pass: the card names qa at work
+				// and stays out of Ready to merge until qa hands back and stops.
+				id: "demo-qa-testing",
+				workspaceId: "ao-demo",
+				workspaceName: "ao-demo",
+				title: "Tighten the share sheet's empty state",
+				provider: "claude-code",
+				branch: "demo/share-empty-state",
+				status: "mergeable",
+				displayStatus: "mergeable",
+				createdAt: hoursAgo(5),
+				updatedAt: minutesAgo(8),
+				activity: { state: "idle", lastActivityAt: minutesAgo(8) },
+				prs: [demoPr(325, "open", "passing", "approved")],
+				taskSize: "standard",
+				crew: { id: "demo-qa-testing", role: "dev", hasRun: true },
+			},
+			{
+				id: "demo-qa-testing-qa",
+				workspaceId: "ao-demo",
+				workspaceName: "ao-demo",
+				title: "Tighten the share sheet's empty state",
+				provider: "claude-code",
+				branch: "demo/share-empty-state",
+				status: "working",
+				createdAt: hoursAgo(5),
+				updatedAt: minutesAgo(1),
+				activity: { state: "active", lastActivityAt: minutesAgo(1) },
+				prs: [],
+				taskSize: "standard",
+				crew: { id: "demo-qa-testing", role: "qa", hasRun: true },
 			},
 			{
 				// PARKED HOLDING WORK NO PR CARRIES: its card wears the widest chip on
@@ -671,12 +709,11 @@ const prSummary = (sessionId: string, number: number, overrides: Partial<Session
  * The TASK a mock session belongs to - the harness's stand-in for the daemon's
  * `TaskScoped` middleware (#242).
  *
- * A crew's two members share one worktree, one branch, one pull request and one
- * smoke checklist, and the daemon resolves any member to its dev before it
- * answers those four surfaces. The mock fixtures are keyed by session, so
- * without this the harness would show a qa an empty Summary and an empty
- * checklist - the very bug the daemon no longer has, reintroduced by the fake
- * data and easy to mistake for a real one.
+ * A crew's two members share one worktree, one branch and one pull request, and
+ * the daemon resolves any member to its dev before it answers those surfaces.
+ * The mock fixtures are keyed by session, so without this the harness would show
+ * a qa an empty Summary - the very bug the daemon no longer has, reintroduced by
+ * the fake data and easy to mistake for a real one.
  *
  * A solo session is its own task, so this is the identity for every session
  * without a crew.
@@ -844,8 +881,6 @@ export const mockSessionScmSummaries: Record<string, SessionPRSummary[]> = {
 	"demo-in-review": [
 		prSummary("demo-in-review", 322, {
 			provider: "gitlab",
-			// A real head commit, so the Tests tab can compare a machine result's
-			// `agentSha` against it and mark the older run stale.
 			headSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
 			review: {
 				decision: "none",
@@ -1337,478 +1372,6 @@ export function mockSimDevices(): components["schemas"]["ListSimDevicesResponse"
 	};
 }
 
-// Mock smoke checklist for the VITE_NO_ELECTRON renderer harness (no daemon).
-// Only the primary demo worker has a checklist; other sessions render the empty
-// state (not every worker authors one). Shared by useSessionSmokeChecks so the
-// Tests tab and the Summary readiness strip read the same mock.
-export function mockSmokeChecks(sessionId: string, worker?: string): components["schemas"]["ListSmokeChecksResponse"] {
-	if (sessionId === "demo-in-review") return mockAgentSmokeChecks(sessionId, worker);
-	// demo-ready is a CREW task whose dev can land and whose qa has already run:
-	// what holds it out of Ready to Merge is a case only a person can judge, which
-	// is the AND this feature exists to make visible.
-	if (sessionId === "demo-ready") {
-		return {
-			worker: worker || "readme assets",
-			checks: [
-				{
-					id: "asset-renders",
-					sessionId,
-					projectId: "agent-orchestrator",
-					seq: 1,
-					name: "The new screenshot renders crisply at 2x",
-					why: "Only a person can say whether an image looks right; a machine can only say the file loaded.",
-					steps: ["Open docs/readme.md in the preview.", "Look at the dashboard screenshot at 200%."],
-					expected: "No blur, no banding, text in the screenshot is legible.",
-					prNum: 323,
-					fileRef: "docs/assets/readme/dashboard.png:1",
-					verdict: "pending",
-					note: "",
-					evidence: [],
-					agentVerdict: "pass",
-					agentNote: "Image loads and is 2560x1600.",
-					agentRanAt: minutesAgo(12),
-					agentEvidence: [],
-					runs: [],
-					authoredBy: "agent-orchestrator-88",
-					authoredByRole: "qa",
-					authoredAt: minutesAgo(20),
-					createdAt: minutesAgo(20),
-					updatedAt: minutesAgo(12),
-				},
-			],
-		} as components["schemas"]["ListSmokeChecksResponse"];
-	}
-	// demo-stalled is the crew whose qa ran, found nothing a person has to play,
-	// and parked. That answer used to be invisible: its Tests tab rendered the
-	// same empty panel as a task nobody had triaged yet. A recorded stand-down is
-	// what lets the two be told apart.
-	if (sessionId === "demo-stalled") {
-		return {
-			worker: worker || "retry flag rename",
-			checks: [],
-			standDown: {
-				sessionId,
-				at: minutesAgo(70),
-				by: "demo-stalled-qa",
-				byRole: "qa",
-				reason:
-					"The rename is compile-time only - every call site is covered by TestExportRetryFlag, and no screen renders the flag's name. Nothing here needs your eyes.",
-				createdAt: minutesAgo(70),
-				updatedAt: minutesAgo(70),
-			},
-		} as components["schemas"]["ListSmokeChecksResponse"];
-	}
-	if (sessionId !== "demo-working") {
-		return { worker: worker || "worker", checks: [] };
-	}
-	return {
-		worker: worker || "fix gl note render",
-		checks: [
-			{
-				id: "gitlab-mr-appears",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 1,
-				name: "A fresh GitLab MR shows up in Reviews on its own",
-				why: "The fix broadens re-polling to every open MR; this confirms one appears without a manual refresh.",
-				steps: [
-					"Open the gitlab-mr-review project and go to the Reviews tab.",
-					"On GitLab, open a brand-new MR against the tracked branch.",
-					"Wait one review interval (~60s) without touching the app.",
-				],
-				expected: "The new MR appears in Reviews automatically, with CI + review status filled in.",
-				prNum: 36,
-				fileRef: "scmobserver.go:936",
-				verdict: "pass",
-				note: "Appeared after ~55s, statuses correct.",
-				evidence: [],
-				agentEvidence: [],
-				runs: [],
-				decidedAt: now,
-				authoredBy: "agent-orchestrator-42",
-				authoredByRole: "qa",
-				authoredAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "canceling-pipeline",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 2,
-				name: 'A canceling pipeline reads as "In progress", never "Unknown"',
-				why: "A canceling GitLab pipeline briefly reported Unknown before; this verifies it stays In progress.",
-				steps: ["Trigger a pipeline then cancel it.", "Watch the badge during the cancel."],
-				expected: 'The badge shows "In progress" then the terminal state — never "Unknown".',
-				prNum: 36,
-				fileRef: "normalize.go:451",
-				verdict: "fail",
-				note: "Flashed Unknown for ~1s before In progress.",
-				evidence: [
-					{
-						id: "ev_demo1",
-						checkId: "canceling-pipeline",
-						sessionId,
-						kind: "image",
-						filename: "unknown-flash.png",
-						mime: "image/png",
-						sizeBytes: 84213,
-						createdAt: now,
-						source: "user",
-					},
-				],
-				agentEvidence: [],
-				runs: [],
-				authoredBy: "agent-orchestrator-42",
-				authoredByRole: "qa",
-				authoredAt: now,
-				decidedAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "reviewers-unchanged",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 3,
-				name: "GitHub PRs still review exactly as before",
-				why: "The change only touches the GitLab path; GitHub review flow must be untouched.",
-				steps: ["Open a GitHub-backed session with an open PR.", "Trigger a review and watch it complete."],
-				expected: "GitHub review behaves identically to before the change.",
-				prNum: 34,
-				fileRef: "observer.go:201",
-				verdict: "skip",
-				note: "No GitHub project handy right now.",
-				evidence: [],
-				agentEvidence: [],
-				runs: [],
-				decidedAt: now,
-				authoredBy: "agent-orchestrator-41",
-				authoredByRole: "dev",
-				authoredAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "ios-sim",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 4,
-				name: "iOS simulator smoke of the share sheet",
-				why: "Native share-sheet timing can't be unit-tested.",
-				steps: ["Open the app in the iOS simulator.", "Tap Share."],
-				expected: "The share sheet opens without a frame drop.",
-				prNum: 31,
-				fileRef: "ShareView.swift:88",
-				verdict: "pending",
-				note: "",
-				evidence: [],
-				agentEvidence: [],
-				runs: [],
-				authoredBy: "agent-orchestrator-41",
-				authoredByRole: "dev",
-				authoredAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-		],
-	};
-}
-
-/**
- * The Tests tab with a MACHINE result beside the human's: one case in each
- * state the tab has to keep apart, since jsdom cannot show whether the screen
- * reads honestly and only looking at it can:
- *
- *  1. human-only, no machine run at all (renders exactly as it always has)
- *  2. ONE machine run, judged pass, human hasn't played it
- *  3. THREE machine runs whose verdict INVERTED - the case failed at one commit
- *     and passes at another, with each round's captures under its own verdict.
- *     This is what a single overwritten result could never show.
- *  4. machine ran and DECLINED to judge: evidence captured, judgement left to a
- *     person, plus captures from BEFORE run history existed - grouped as an
- *     unknown run rather than filed under the verdict showing now
- *  5. stale, ran against a commit that is no longer head
- *  6. DECLARED UNDRIVEABLE: qa tried, could not run it, and said why. It is the
- *     state that tells "nothing could reach this" apart from case 1's "nobody
- *     looked" - which used to be the same blank row.
- *  7. retired, out of the checklist, kept with its reason
- */
-function mockAgentSmokeChecks(sessionId: string, worker?: string): components["schemas"]["ListSmokeChecksResponse"] {
-	const base = {
-		sessionId,
-		projectId: "agent-orchestrator",
-		note: "",
-		evidence: [],
-		agentEvidence: [],
-		runs: [],
-		createdAt: now,
-		updatedAt: now,
-	};
-	// runId "" is a capture that belongs to no run: taken before AO kept a run
-	// history, when the result it was taken for could be overwritten out of
-	// existence. The tab has to say so rather than file it under the newest one.
-	const shot = (checkId: string, id: string, filename: string, runId = "") => ({
-		id,
-		checkId,
-		sessionId,
-		kind: "image",
-		filename,
-		mime: "image/png",
-		sizeBytes: 71204,
-		createdAt: now,
-		source: "agent",
-		runId,
-	});
-	const run = (checkId: string, seq: number, verdict: string, note: string, sha: string, at: string) => ({
-		id: `run_${checkId}_${seq}`,
-		checkId,
-		sessionId,
-		seq,
-		verdict,
-		note,
-		sha,
-		recordedAt: at,
-		createdAt: at,
-		updatedAt: at,
-	});
-	return {
-		worker: worker || "settings copy",
-		checks: [
-			{
-				...base,
-				id: "settings-copy-paint",
-				seq: 1,
-				name: "The settings pane still paints in one frame on open",
-				why: "The copy change re-renders the whole pane; a person has to see whether it flashes.",
-				steps: ["Open Project settings.", "Close it and open it again, watching the first frame."],
-				expected: "No flash of unstyled or half-laid-out content.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:140",
-				verdict: "pending",
-			},
-			{
-				...base,
-				id: "settings-copy-saves",
-				seq: 2,
-				name: "Editing the project name saves and survives a reopen",
-				why: "The save path was touched by the copy refactor.",
-				steps: ["Open Project settings.", "Rename the project.", "Close and reopen the pane."],
-				expected: "The new name is there, and the daemon has it.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:212",
-				verdict: "pending",
-				agentVerdict: "pass",
-				agentNote: "Typed a new name, reopened the pane twice; the value came back both times.",
-				agentRanAt: minutesAgo(24),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				runs: [
-					run(
-						"settings-copy-saves",
-						1,
-						"pass",
-						"Typed a new name, reopened the pane twice; the value came back both times.",
-						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-						minutesAgo(24),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-validation",
-				seq: 3,
-				name: "An empty project name is refused with a message",
-				why: "The validation string moved; the refusal must still reach the user.",
-				steps: ["Clear the project name field.", "Press Save."],
-				expected: "Save is refused and the field explains why.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:233",
-				verdict: "pending",
-				agentVerdict: "fail",
-				agentNote: "Save went through with an empty name; no message appeared.",
-				agentRanAt: minutesAgo(24),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				agentEvidence: [
-					shot("settings-copy-validation", "ev_agent_val1", "empty-name-saved.png", "run_settings-copy-validation_1"),
-					shot("settings-copy-validation", "ev_agent_val2", "refusal-message.png", "run_settings-copy-validation_2"),
-					shot(
-						"settings-copy-validation",
-						"ev_agent_val3",
-						"empty-name-saved-again.png",
-						"run_settings-copy-validation_3",
-					),
-				],
-				runs: [
-					run(
-						"settings-copy-validation",
-						1,
-						"fail",
-						"Empty name saved without a word; the field stayed as it was.",
-						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
-						hoursAgo(6),
-					),
-					run(
-						"settings-copy-validation",
-						2,
-						"pass",
-						"Refused with \u201cName cannot be empty\u201d after the fix.",
-						"c30f1b8e5a2947d6b1e08c73f5a2d914b6e70c8a",
-						hoursAgo(3),
-					),
-					run(
-						"settings-copy-validation",
-						3,
-						"fail",
-						"Save went through with an empty name; no message appeared.",
-						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-						minutesAgo(24),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-focus",
-				seq: 4,
-				name: "Focus lands in the name field, and the ring is visible",
-				why: "Keyboard users open this pane and type immediately; paint and focus are not machine-judgeable.",
-				steps: ["Open Project settings with ⌘,.", "Do not touch the mouse."],
-				expected: "The name field holds focus with a visible ring.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:118",
-				verdict: "pending",
-				agentRanAt: minutesAgo(23),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				agentEvidence: [
-					shot("settings-copy-focus", "ev_agent_focus", "settings-open-focus.png", "run_settings-copy-focus_2"),
-					// No run: captured before AO kept a history, and the result it was
-					// taken for is gone. It must NOT read as evidence for the run above.
-					shot("settings-copy-focus", "ev_agent_focus_old", "settings-open-old.png"),
-				],
-				runs: [
-					run(
-						"settings-copy-focus",
-						1,
-						"pass",
-						"Tabbed to the field and read document.activeElement; it was the input.",
-						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
-						hoursAgo(7),
-					),
-					run("settings-copy-focus", 2, "", "", "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118", minutesAgo(23)),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-scroll",
-				seq: 5,
-				name: "The long settings list scrolls without stutter",
-				why: "The pane grew; drag-scroll feel is exactly what a machine cannot report.",
-				steps: ["Open Project settings.", "Drag the list quickly from top to bottom."],
-				expected: "Scrolling tracks the pointer with no jump or stall.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:301",
-				verdict: "pending",
-				agentVerdict: "pass",
-				agentNote: "Scrolled the container to the end programmatically; no error, all rows rendered.",
-				agentRanAt: hoursAgo(6),
-				agentSha: "9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
-				runs: [
-					run(
-						"settings-copy-scroll",
-						1,
-						"pass",
-						"Scrolled the container to the end programmatically; no error, all rows rendered.",
-						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
-						hoursAgo(6),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-press-hold",
-				seq: 6,
-				name: "Press and hold on a row opens the context menu",
-				why: "The gesture handler moved with the copy refactor.",
-				steps: ["Press and hold a settings row for a second.", "Read the menu that opens."],
-				expected: "The context menu opens under the finger.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:355",
-				verdict: "pending",
-				agentVerdict: "skip",
-				agentNote:
-					"Tried a 1.2s ao sim drag with no movement, twice; the menu never opened and the row took the tap instead, so nothing here was exercised.",
-				agentRanAt: minutesAgo(20),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				runs: [
-					run(
-						"settings-copy-press-hold",
-						1,
-						"skip",
-						"Tried a 1.2s ao sim drag with no movement, twice; the menu never opened and the row took the tap instead, so nothing here was exercised.",
-						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-						minutesAgo(20),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-reset",
-				seq: 7,
-				name: "Reset to defaults restores every field",
-				why: "Reset writes through the same path the copy refactor touched.",
-				steps: ["Change three fields.", "Press Reset to defaults."],
-				expected: "All three come back to their defaults.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:355",
-				// The user AGREED with qa's second run rather than re-deriving it. The
-				// verdict is theirs - "by you", counted as verified - and the row says
-				// which run they confirmed, which matters because run 1 said the
-				// opposite.
-				verdict: "pass",
-				decidedAt: minutesAgo(9),
-				agreedRunId: "run_settings-copy-reset_2",
-				agentVerdict: "pass",
-				agentNote: "Reset restored all three fields; read them back after the write.",
-				agentRanAt: minutesAgo(19),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				runs: [
-					run(
-						"settings-copy-reset",
-						1,
-						"fail",
-						"The third field kept its edited value after Reset.",
-						"c30f1b8e5a2947d6b1e08c73f5a2d914b6e70c8a",
-						hoursAgo(4),
-					),
-					run(
-						"settings-copy-reset",
-						2,
-						"pass",
-						"Reset restored all three fields; read them back after the write.",
-						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-						minutesAgo(19),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-legacy-toggle",
-				seq: 8,
-				name: "The legacy settings toggle still writes the old key",
-				why: "Kept while the old key was read anywhere.",
-				steps: ["Flip the legacy toggle.", "Read the config file."],
-				expected: "The old key flips with it.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:410",
-				verdict: "pass",
-				note: "Old key flipped, checked the file by hand.",
-				decidedAt: hoursAgo(20),
-				retiredAt: hoursAgo(5),
-				retiredReason: "The legacy key was deleted in this PR, and a Go test now covers the migration.",
-			},
-		],
-	};
-}
-
 /**
  * Changes-mode fixtures for the Files panel, keyed by session. Covers one of
  * every row shape the panel must render — modified, added, deleted, renamed,
@@ -2179,13 +1742,13 @@ function windowMockDiff(lines: DiffContextResponse["lines"]): DiffContextRespons
 }
 
 /**
- * Bracketed machine runs for the Tests tab's "Machine runs" strip.
+ * Bracketed machine runs for the Summary tab's "Machine runs" strip.
  *
  * `demo-working` is the interesting one: three runs discarded in a row, which is
  * the state the escalation exists for. `demo-ready` shows the ordinary case - a
  * clean run whose result can be believed - and every other session returns
  * NOTHING, because a session that never brackets a run must get exactly the
- * Tests tab it had before this existed.
+ * Summary tab it had before this existed.
  */
 export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrewRunsResponse"] {
 	const run = (over: Partial<components["schemas"]["CrewRun"]>): components["schemas"]["CrewRun"] =>
@@ -2305,7 +1868,7 @@ export function mockWorkspaceFiles(sessionId: string): WorkspaceFilesResponse {
 			"package-lock.json",
 			"backend/cmd/ao/main.go",
 			"backend/internal/cli/session.go",
-			"backend/internal/cli/smoke.go",
+			"backend/internal/cli/crew.go",
 			"backend/internal/domain/session.go",
 			"backend/internal/httpd/controllers/sessions.go",
 			"backend/internal/httpd/controllers/reviews.go",

@@ -12,10 +12,10 @@ import type { WorkspaceSession } from "../types/workspace";
  * TASK), so the rail's memories agree with each other rather than disagreeing by
  * one member.
  *
- * The bug this exists to not repeat: `useSessionSmokeChecks` keys by session id
- * while `useTaskGates` keys by `task.dev.id`, so a value written from one member
- * is invisible to the other. Anything task-scoped calls THIS — never its own
- * spelling of the same idea.
+ * The bug this exists to not repeat: one hook keying by session id while another
+ * keys by `task.dev.id`, so a value written from one member is invisible to the
+ * other. Anything task-scoped calls THIS - never its own spelling of the same
+ * idea.
  */
 export function taskKeyOf(session: Pick<WorkspaceSession, "id" | "crew">): string {
 	return session.crew?.id ?? session.id;

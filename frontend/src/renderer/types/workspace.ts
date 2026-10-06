@@ -438,9 +438,9 @@ export type SessionCrew = {
 	role: CrewRole;
 	/**
 	 * Whether this member has ever actually had an agent running. A qa nobody has
-	 * woken has not - and it leaves exactly the same empty checklist behind as a
-	 * qa that ran and found nothing worth a human's time, which is why the daemon
-	 * answers this rather than leaving the board to guess.
+	 * woken has not - and it looks exactly like a qa that ran and had nothing to
+	 * report, which is why the daemon answers this rather than leaving the board to
+	 * guess.
 	 */
 	hasRun: boolean;
 	/**
@@ -458,7 +458,18 @@ export type SessionCrew = {
 	 * Absent on dev, and on a member created before AO recorded this.
 	 */
 	joinReason?: "sim" | "preview" | "manual" | "review";
+	/**
+	 * The latest message this member DELIVERED to its crewmate in the current
+	 * round; absent when none. The board reads it on qa only: a qa that handed
+	 * back and stopped has finished its pass, which is what lets the task reach
+	 * Ready to merge.
+	 */
+	lastHandback?: CrewHandback;
 };
+
+/** A crew member's report to its crewmate: when, and what it was about (a commit
+ * SHA, or a Testiny case or run id). */
+export type CrewHandback = { at: string; about: string };
 
 /**
  * The account of how a session ended. `source` is who ended it — the agent

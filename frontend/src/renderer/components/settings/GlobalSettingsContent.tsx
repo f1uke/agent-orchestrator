@@ -1,8 +1,5 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
 import { Check, Minus } from "lucide-react";
 import type { UpdateChannel } from "../../../main/update-settings";
-import { apiClient, apiErrorMessage } from "../../lib/api-client";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
@@ -307,99 +304,9 @@ function CleaningUpSection({ form }: { form: GlobalForm }) {
 						onChange={(v) => setField("reclaimArtifacts", v)}
 					/>
 				</SettingRow>
-
-				<SettingRow
-					name="Retention"
-					summary="Screenshots and clips you attach in the Tests tab are deleted once they pass the age below."
-					detail="Evidence is stored on disk under ~/.ao and the age is measured from when it was captured. Set this to Disabled to keep evidence for ever."
-					ownership={{ kind: "global-only" }}
-					timing="on-save"
-					value={draft.evidenceRetentionEnabled ? "Enabled" : "Disabled"}
-					modified={isFieldDirty("evidenceRetentionEnabled")}
-					controlId="evidenceRetentionEnabled"
-				>
-					<OnOffSelect
-						id="evidenceRetentionEnabled"
-						value={draft.evidenceRetentionEnabled}
-						onChange={(v) => setField("evidenceRetentionEnabled", v)}
-					/>
-				</SettingRow>
-
-				<SettingRow
-					name="Delete evidence older than (days)"
-					summary="The age at which an attached screenshot or clip is swept."
-					ownership={{ kind: "global-only" }}
-					timing="on-save"
-					value={`${draft.evidenceRetentionDays} days`}
-					modified={isFieldDirty("evidenceRetentionDays")}
-					controlId="evidenceRetentionDays"
-				>
-					<input
-						id="evidenceRetentionDays"
-						type="number"
-						min={1}
-						max={3650}
-						className={INPUT_CLASS}
-						value={draft.evidenceRetentionDays}
-						onChange={(e) =>
-							setField("evidenceRetentionDays", Math.max(1, Math.min(3650, Number(e.target.value) || 1)))
-						}
-					/>
-				</SettingRow>
-
-				<SettingRow
-					name="Purge evidence now"
-					summary="Runs the age sweep immediately and reports what it removed."
-					detail="It uses the SAVED retention age, not the number in the box above - save a change first for it to count."
-					ownership={{ kind: "global-only" }}
-					timing="instant"
-				>
-					<EvidenceRetentionPurgeButton />
-				</SettingRow>
 			</SettingRows>
 		</>
 	);
-}
-
-// EvidenceRetentionPurgeButton is an instant action (outside the save bar) that
-// runs the age-based sweep now with the CURRENTLY-SAVED TTL and reports what it
-// removed. Save any TTL change first for it to take effect.
-function EvidenceRetentionPurgeButton() {
-	const [status, setStatus] = useState<string | null>(null);
-	const purge = useMutation({
-		mutationFn: async () => {
-			const { data, error } = await apiClient.POST("/api/v1/settings/evidence-retention/sweep", {});
-			if (error) throw new Error(apiErrorMessage(error));
-			return data as { purged: number; freedBytes: number };
-		},
-		onSuccess: (r) =>
-			setStatus(
-				r.purged > 0
-					? `Purged ${r.purged} item${r.purged === 1 ? "" : "s"} · freed ${formatBytes(r.freedBytes)}.`
-					: "Nothing to purge — no evidence is past the retention age.",
-			),
-		onError: (e) => setStatus(apiErrorMessage(e, "Sweep failed.")),
-	});
-	return (
-		<div className="flex items-center gap-3">
-			<Button type="button" variant="outline" onClick={() => purge.mutate()} disabled={purge.isPending}>
-				{purge.isPending ? "Purging…" : "Purge now"}
-			</Button>
-			{status && <span className="text-[12px] text-muted-foreground">{status}</span>}
-		</div>
-	);
-}
-
-function formatBytes(n: number): string {
-	if (n < 1024) return `${n} B`;
-	const units = ["KB", "MB", "GB", "TB"];
-	let v = n / 1024;
-	let i = 0;
-	while (v >= 1024 && i < units.length - 1) {
-		v /= 1024;
-		i++;
-	}
-	return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 // The built-in editor: predictive completion (both rows instant - they start

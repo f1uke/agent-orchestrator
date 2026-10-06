@@ -5,10 +5,10 @@ import { useProjectBranches } from "../hooks/useProjectBranches";
 import { BranchCombobox } from "./BranchCombobox";
 import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
-import { useSessionSmokeChecks } from "../hooks/useSessionSmokeChecks";
-import { progressFor } from "../lib/smoke-test";
+import { useSessionCrewRuns } from "../hooks/useSessionCrewRuns";
 import { deriveReadiness } from "../lib/readiness";
 import { ReadinessStrip } from "./ReadinessStrip";
+import { CrewRunStrip } from "./CrewRunStrip";
 import {
 	isArchivedPRState,
 	prBrowserUrl,
@@ -25,7 +25,6 @@ import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { FilesPanel, type ChangedFileTarget, type WorktreeFile } from "./FilesPanel";
 import type { SearchHit } from "./SearchResultsList";
 import { taskKeyOf } from "../lib/task-key";
-import { SmokeTestView } from "./SmokeTestView";
 import { SimulatorPanel } from "./SimulatorPanel";
 import { JiraIssueSection } from "./JiraIssueSection";
 import { ProviderBadge } from "./ProviderBadge";
@@ -35,7 +34,7 @@ import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "files" | "tests" | "browser" | "simulator";
+export type InspectorView = "summary" | "reviews" | "files" | "browser" | "simulator";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -69,15 +68,6 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 				<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
 				<path d="M14 3v5h5" />
 				<path d="M9 13h6M9 17h4" />
-			</svg>
-		),
-	},
-	{
-		id: "tests",
-		label: "Tests",
-		icon: (
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-				<path d="M20 6 9 17l-5-5" />
 			</svg>
 		),
 	},
@@ -252,8 +242,6 @@ export function SessionInspector({
 					// reviewer strip + auto-send, scrolling per-PR list, pinned batch
 					// bar), so it renders flush.
 					view === "reviews" && "session-inspector__body--reviews",
-					// The Tests tab (smoke checklist) owns the same full-height layout.
-					view === "tests" && "session-inspector__body--tests",
 					// Files owns its own scroll (segmented control + summary pinned,
 					// list scrolling beneath), so it renders flush too.
 					view === "files" && "session-inspector__body--files",
@@ -285,9 +273,6 @@ export function SessionInspector({
 						search={searchRequest}
 						reveal={revealInTree}
 					/>
-				) : null}
-				{view === "tests" ? (
-					<SmokeTestView sessionId={session.id} worker={session.title} issueId={session.issueId} />
 				) : null}
 				{/* The Simulator panel stays mounted while its tab is off so the chosen
 				    device survives a trip to another tab - with two simulators booted
@@ -347,15 +332,12 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 	const query = useSessionScmSummary(session.id);
 	const prSummaries = sessionPRDisplaySummaries(session, query.data);
 	// Readiness strip: the "how far along, ready to merge?" verdict + gate row,
-	// derived purely from the PR summaries + the smoke rollup + session activity.
+	// derived purely from the PR summaries + session activity.
 	// Skipped for prepared TODOs and orchestrator sessions (no merge pipeline).
-	const smokeQuery = useSessionSmokeChecks(session.id, session.title);
-	const readiness = deriveReadiness(
-		session,
-		prSummaries,
-		progressFor(smokeQuery.data?.checks ?? []),
-		smokeQuery.data?.standDown ?? null,
-	);
+	const readiness = deriveReadiness(session, prSummaries);
+	// Machine runs answer "can this member's build/test result be trusted", a
+	// merge-readiness question, so they sit right under the strip.
+	const crewRuns = useSessionCrewRuns(session.id);
 	const showReadiness = session.kind !== "orchestrator" && !session.isTodo;
 	// Pin the still-actionable PRs/MRs (open, draft) to the top — they're what
 	// needs attention — and sink merged/closed ones into a de-emphasized "archive"
@@ -377,6 +359,8 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 	return (
 		<div role="tabpanel">
 			{showReadiness ? <ReadinessStrip readiness={readiness} /> : null}
+
+			<CrewRunStrip runs={crewRuns.data?.runs ?? []} />
 
 			<EndingSection termination={session.termination} />
 
