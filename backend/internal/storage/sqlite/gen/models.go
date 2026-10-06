@@ -442,6 +442,31 @@ type Session struct {
 	CrewRoundStartedAt        sql.NullTime
 }
 
+type SessionChild struct {
+	SessionID       domain.SessionID
+	ProjectID       domain.ProjectID
+	AgentID         string
+	ParentAgentID   string
+	AgentType       string
+	Description     string
+	Branch          string
+	TargetBranch    string
+	BaseSha         string
+	BaseDirty       string
+	WorktreePath    string
+	State           domain.ChildState
+	MergeHeadBefore string
+	MergedSha       string
+	Commits         int64
+	FilesChanged    int64
+	Detail          string
+	StopBlocks      int64
+	NotifiedState   domain.ChildState
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	FinishedAt      sql.NullTime
+}
+
 type SessionMessageQueue struct {
 	ID        int64
 	SessionID domain.SessionID
