@@ -3533,13 +3533,14 @@ func workspaceRepoList(repos []domain.WorkspaceRepoRecord) string {
 	return strings.Join(lines, "\n")
 }
 
+// workerOrchestratorPrompt names the live orchestrator a worker reports to. WHEN
+// it reports is the worker floor's rule (prompts.CoordinationFloor), so it holds
+// even when no orchestrator was active at spawn and this block is absent.
 func workerOrchestratorPrompt(orchestratorID domain.SessionID) string {
 	return fmt.Sprintf(`## Orchestrator coordination
 
-An active orchestrator session exists for this project. If you hit a true blocker or need cross-session coordination, message it with:
-`+"`ao send --session %s --message \"<your message>\"`"+`
-
-Only ping the orchestrator for true blockers, cross-session coordination, or decisions that cannot be resolved within your own task.`, orchestratorID)
+This project's orchestrator session is %[1]s. Send it the reports "Required coordination" below asks for, and message it for cross-session coordination; settle everything else within your own task:
+`+"`ao send --session %[1]s --message \"<your message>\"`", orchestratorID)
 }
 
 // orchestratorGitConventionPrompt returns the branch-convention section injected

@@ -798,7 +798,8 @@ export function projectSettings(project: PreviewProject): Setting[] {
 		{
 			id: "p.orchestrator-prompt",
 			name: "Orchestrator additional prompt",
-			summary: "Extra text added on top of the global orchestrator base for this project.",
+			summary:
+				'Extra text added on top of the global orchestrator base for this project - including its "Must ask" and "Just do" lists.',
 			timing: "next-orchestrator",
 			ownership: { kind: "project-appends", base: "Orchestrator base prompt" },
 			control: { type: "editor", value: "", customized: false },

@@ -1943,7 +1943,7 @@ func TestSpawnWorker_AppendsActiveOrchestratorContact(t *testing.T) {
 	for _, want := range []string{
 		"## Orchestrator coordination",
 		`ao send --session mer-1 --message "<your message>"`,
-		"Only ping the orchestrator for true blockers, cross-session coordination",
+		"This project's orchestrator session is mer-1.",
 	} {
 		if !strings.Contains(systemPrompt, want) {
 			t.Fatalf("system prompt missing %q:\n%s", want, systemPrompt)
@@ -1972,6 +1972,13 @@ func TestSpawnWorker_SkipsTerminatedOrchestratorContact(t *testing.T) {
 	systemPrompt := agent.lastLaunch.SystemPrompt
 	if strings.Contains(systemPrompt, "## Orchestrator coordination") || strings.Contains(systemPrompt, "ao send --session mer-1") {
 		t.Fatalf("terminated orchestrator should not be added to system prompt:\n%s", systemPrompt)
+	}
+	// The report obligation is a floor rule, so it holds with no live
+	// orchestrator, and tells the worker how to find one that started later.
+	for _, want := range []string{"report to the orchestrator with `ao send`", "`ao orchestrator ls`"} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("worker without a live orchestrator lost the report rule %q:\n%s", want, systemPrompt)
+		}
 	}
 }
 

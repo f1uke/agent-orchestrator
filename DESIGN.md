@@ -207,8 +207,9 @@ ReverbCode is **orchestrator-led**, which is the one thing that differs from emd
   results. It avoids implementing unless necessary.
 - A **Worker is a normal agent session** — nothing special-cased. It runs one focused
   task in an isolated git worktree + branch, with the agent CLI in a terminal as the
-  conversation, producing a diff → commit/push → PR. It escalates to the orchestrator
-  only for true blockers or cross-session coordination.
+  conversation, producing a diff → commit/push → PR. It reports to the orchestrator
+  when it finishes, when it needs the human, and when its PR is open, and otherwise
+  messages it only for cross-session coordination.
 - The daemon **observes** runtime + PR/CI/review facts and **derives** display status
   at read time: `working`, `needs_input`, `ci_failed`, `changes_requested`,
   `mergeable`, `approved`, `review_pending`, `pr_open`, `idle`, `terminated`, `merged`.

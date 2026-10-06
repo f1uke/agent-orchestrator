@@ -455,7 +455,9 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 
 				<SettingRow
 					name="Orchestrator additional prompt"
-					summary="Extra text added on top of the global orchestrator base for this project."
+					summary={
+						'Extra text added on top of the global orchestrator base for this project - including its "Must ask" and "Just do" lists.'
+					}
 					ownership={{ kind: "project-appends", base: "Orchestrator base prompt" }}
 					timing="next-orchestrator"
 					value={draft.orchestratorPrompt ? "Customised" : "None"}
