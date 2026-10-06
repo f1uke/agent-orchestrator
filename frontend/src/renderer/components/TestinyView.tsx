@@ -23,6 +23,7 @@ import {
 	runNotice,
 	scriptCoverage,
 	sharedBlocker,
+	standingRecord,
 	summaryCounts,
 	TESTINY_COMMENT_MAX,
 	TESTINY_STATUSES,
@@ -443,6 +444,7 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 	const trigger = useRef<HTMLButtonElement>(null);
 	const field = useRef<HTMLInputElement>(null);
 	const focusFieldOnClose = useRef(false);
+	const reason = standingRecord(testCase)?.comment;
 	const provenance = row.provenance(testCase);
 	// One write per case at a time, so Testiny cannot land them out of order.
 	// Not `disabled`: that would drop the keyboard focus the trigger holds.
@@ -526,6 +528,11 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 				>
 					script
 				</span>
+			) : null}
+			{reason ? (
+				<p className="col-span-2 col-start-2 mt-1 text-xs leading-relaxed [overflow-wrap:anywhere] whitespace-pre-line text-muted-foreground">
+					{reason}
+				</p>
 			) : null}
 			{provenance ? <span className="col-span-2 col-start-2 mt-0.5 text-[11px] text-passive">{provenance}</span> : null}
 			{draft ? (

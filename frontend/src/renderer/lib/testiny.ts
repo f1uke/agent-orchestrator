@@ -161,18 +161,23 @@ export function linkedByLabel(linkedBy: string, sessions: Pick<WorkspaceSession,
 }
 
 /**
- * Who set a case's result through AO, when, and on which commit:
- * "set by qa · 5 min ago · on 4f2c9e1". Null when AO wrote none, or when
- * Testiny's status no longer matches it (someone changed the case in Testiny
- * since), so the line never vouches for a status AO did not set.
+ * The result AO wrote for a case, while Testiny still has that status. Undefined
+ * when AO wrote none, or when someone changed the case in Testiny since, so the
+ * tab never vouches for a status, or gives a reason for one, that AO did not set.
  */
+export function standingRecord(testCase: TestinyCase): TestinyRecord | undefined {
+	const r = testCase.recorded;
+	return r && r.status === testCase.status ? r : undefined;
+}
+
+/** Who set a case's standing result through AO, when, and on which commit: "set by qa · 5 min ago · on 4f2c9e1". */
 export function provenanceLabel(
 	testCase: TestinyCase,
 	now: number,
 	sessions: Pick<WorkspaceSession, "id" | "crew">[],
 ): string | null {
-	const r: TestinyRecord | undefined = testCase.recorded;
-	if (!r || r.status !== testCase.status) return null;
+	const r = standingRecord(testCase);
+	if (!r) return null;
 	const who = r.byRole || linkedByLabel(r.by, sessions);
 	const parts = [`set by ${who}`, ageLabel(r.at, now)];
 	if (r.sha) parts.push(`on ${r.sha.slice(0, 7)}`);

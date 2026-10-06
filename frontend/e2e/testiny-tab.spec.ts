@@ -50,9 +50,17 @@ test("setting a case to Failed asks why, then shows it as the person's result", 
 	await expect(results.getByRole("listitem", { name: "1 Failed" })).toBeVisible();
 	await expect(results.getByRole("listitem", { name: "2 Not run" })).toBeVisible();
 
-	// qa's own result carries its provenance.
+	// qa's own result carries its reason, above its provenance.
 	const failed = run.getByRole("listitem").filter({ hasText: "Empty state shows when there is nothing to share" });
-	await expect(failed).toContainText("set by qa · 5 min ago · on 4f2c9e1");
+	const reason = failed.getByText("เปิดหน้าแชร์ตอนไม่มีรายการ แล้วยังเห็นรายการว่างแทนข้อความแจ้ง");
+	const provenance = failed.getByText("set by qa · 5 min ago · on 4f2c9e1");
+	await expect(reason).toBeVisible();
+	await expect(provenance).toBeVisible();
+	const reasonBox = (await reason.boundingBox())!;
+	expect(reasonBox.y + reasonBox.height).toBeLessThanOrEqual((await provenance.boundingBox())!.y);
+	expect(reasonBox.x).toBe(
+		(await failed.getByText("Empty state shows when there is nothing to share").boundingBox())!.x,
+	);
 
 	const coldLaunch = run.getByRole("listitem").filter({ hasText: "Empty state survives a cold launch" });
 	await coldLaunch.getByRole("button", { name: "Result: Not run" }).click();
@@ -66,6 +74,7 @@ test("setting a case to Failed asks why, then shows it as the person's result", 
 
 	await expect(field).toHaveCount(0);
 	await expect(coldLaunch.getByRole("button", { name: "Result: Failed" })).toBeVisible();
+	await expect(coldLaunch.getByText("เปิดแอปใหม่แล้วหน้าแชร์ว่างเปล่า ไม่มีข้อความแจ้ง")).toBeVisible();
 	await expect(coldLaunch).toContainText("set by you · just now");
 	await expect(results.getByRole("listitem", { name: "2 Failed" })).toBeVisible();
 	await expect(results.getByRole("listitem", { name: "1 Not run" })).toBeVisible();

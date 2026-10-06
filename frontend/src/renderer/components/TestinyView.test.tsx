@@ -601,4 +601,23 @@ describe("TestinyView setting a result", () => {
 		expect(row("cold launch").getByText("set by you · 2 min ago")).toBeInTheDocument();
 		expect(row("voiceover").queryByText(/^set by/)).toBeNull();
 	});
+
+	it("shows the reason AO recorded above who set it, only while Testiny still has that status", async () => {
+		const reason = "เปิดหน้าแชร์ตอนไม่มีรายการ แล้วยังเห็นรายการว่างแทนข้อความแจ้ง";
+		const recorded = { status: "FAILED", by: "task-1-qa", byRole: "qa" as const, sha: "", at: minutesAgo(5) };
+		serve([
+			run(632, {
+				cases: [
+					{ ...tc(1, "FAILED", "disclaimer"), recorded: { ...recorded, comment: reason } },
+					{ ...tc(2, "BLOCKED", "voiceover"), recorded: { ...recorded, comment: "a reason Testiny moved past" } },
+				],
+			}),
+		]);
+		renderView();
+
+		const shown = await waitFor(() => row("disclaimer").getByText(reason));
+		const provenance = row("disclaimer").getByText("set by qa · 5 min ago");
+		expect(shown.compareDocumentPosition(provenance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(row("voiceover").queryByText("a reason Testiny moved past")).toBeNull();
+	});
 });
