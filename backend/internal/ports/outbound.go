@@ -387,6 +387,10 @@ type WorkspaceProjectRepoConfig struct {
 	RelativePath string
 	RepoPath     string
 	BaseBranch   string
+	// RepoURL is the child repository's registered URL, so its base is fetched
+	// from its own remote when it carries several. Empty picks from the
+	// repository's configuration alone.
+	RepoURL string
 }
 
 // WorkspaceProjectInfo returns the root worktree plus every child worktree.

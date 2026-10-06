@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/gitremote"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
@@ -1625,16 +1626,13 @@ func normalizePRState(draft, merged, closed bool) string {
 	}
 }
 
-// resolveGitOriginURL runs `git -C path remote get-url origin` and returns the
-// trimmed URL, or "" if the command fails (missing repo, no origin remote, etc).
-// The observer uses this to backfill projects that were registered before
-// project.Add resolved origin URLs at add time.
+// resolveGitOriginURL returns the URL of the repository at path, by the same
+// resolution project registration uses (gitremote.ProjectURL: origin, else the
+// tracked remote, else the sole remote), or "" when none can be attributed. The
+// observer uses this to backfill projects that were registered before
+// project.Add resolved repo URLs at add time.
 func resolveGitOriginURL(path string) string {
-	out, err := aoprocess.Command("git", "-C", path, "remote", "get-url", "origin").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return gitremote.ProjectURL(context.Background(), gitremote.Exec, path)
 }
 
 // resolveWorktreeBranch returns the branch currently checked out in the git
@@ -1657,20 +1655,14 @@ func resolveWorktreeBranch(path string) string {
 
 // gitRemoteURLs lists the fetch URL of every git remote configured at path. It
 // returns nil on any error (missing repo, no git, no remotes). The observer uses
-// it to scan upstream/mirror remotes for cross-fork PRs in addition to origin.
+// it to scan upstream/mirror remotes for cross-fork PRs in addition to the
+// project's own repository.
 func gitRemoteURLs(path string) []string {
-	out, err := aoprocess.Command("git", "-C", path, "remote").Output()
-	if err != nil {
-		return nil
-	}
+	ctx := context.Background()
 	var urls []string
-	for _, name := range strings.Fields(string(out)) {
-		u, err := aoprocess.Command("git", "-C", path, "remote", "get-url", name).Output()
-		if err != nil {
-			continue
-		}
-		if s := strings.TrimSpace(string(u)); s != "" {
-			urls = append(urls, s)
+	for _, name := range gitremote.Remotes(ctx, gitremote.Exec, path) {
+		if u := gitremote.RemoteURL(ctx, gitremote.Exec, path, name); u != "" {
+			urls = append(urls, u)
 		}
 	}
 	return urls

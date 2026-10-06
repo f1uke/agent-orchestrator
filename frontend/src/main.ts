@@ -1274,12 +1274,38 @@ async function isGitRepo(repoPath: string): Promise<boolean> {
 	}
 }
 
-async function resolveDefaultBranch(repoPath: string): Promise<string> {
+// resolveProjectRemote names the remote that holds the repo's code, in the
+// same order the daemon registers a project by (backend/internal/gitremote
+// ProjectURL): origin, else the remote the checked-out branch tracks, else the
+// sole remote. A repo's remote is not always called origin (advisor-ios-app has
+// `Advisor` and `Nter`), and the daemon accepts such a repo; this scan must not
+// reject what the daemon would register. "" when none can be attributed.
+async function resolveProjectRemote(repoPath: string): Promise<string> {
+	let remotes: string[];
 	try {
-		const ref = await gitOutput(repoPath, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-		if (ref) return ref.replace(/^origin\//, "");
+		remotes = (await gitOutput(repoPath, ["remote"])).split(/\s+/).filter(Boolean);
 	} catch {
-		// Fall back to the checked-out branch when origin/HEAD is unavailable.
+		return "";
+	}
+	if (remotes.includes("origin")) return "origin";
+	try {
+		const branch = await gitOutput(repoPath, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+		const tracked = branch ? await gitOutput(repoPath, ["config", "--get", `branch.${branch}.remote`]) : "";
+		if (tracked && remotes.includes(tracked)) return tracked;
+	} catch {
+		// Detached HEAD or an untracked branch: fall through to the sole remote.
+	}
+	return remotes.length === 1 ? remotes[0] : "";
+}
+
+async function resolveDefaultBranch(repoPath: string, remote: string): Promise<string> {
+	if (remote) {
+		try {
+			const ref = await gitOutput(repoPath, ["symbolic-ref", "--short", `refs/remotes/${remote}/HEAD`]);
+			if (ref) return ref.slice(`${remote}/`.length);
+		} catch {
+			// Fall back to the checked-out branch when <remote>/HEAD is unavailable.
+		}
 	}
 	try {
 		const branch = await gitOutput(repoPath, ["branch", "--show-current"]);
@@ -1327,9 +1353,10 @@ async function scanGitRepo(repoPath: string, rootPath: string): Promise<GitRepoS
 		return null;
 	}
 	if (!(await isGitRepo(repoPath))) return null;
+	const projectRemote = await resolveProjectRemote(repoPath);
 	const [branchResult, remoteResult, bareResult, headResult] = await Promise.allSettled([
-		resolveDefaultBranch(repoPath),
-		gitOutput(repoPath, ["remote", "get-url", "origin"]),
+		resolveDefaultBranch(repoPath, projectRemote),
+		projectRemote ? gitOutput(repoPath, ["remote", "get-url", projectRemote]) : Promise.resolve(""),
 		gitOutput(repoPath, ["rev-parse", "--is-bare-repository"]),
 		gitOutput(repoPath, ["rev-parse", "--verify", "HEAD"]),
 	]);
@@ -1363,7 +1390,7 @@ function scanRepoValidationReason(
 	if (isBare) return "Bare repositories cannot be imported.";
 	if (!hasHead) return "Repository must have at least one commit.";
 	if (branch === "HEAD") return "Repository must have a checked-out branch.";
-	if (!hasRemote) return "Origin remote is required.";
+	if (!hasRemote) return "A git remote is required.";
 	return undefined;
 }
 

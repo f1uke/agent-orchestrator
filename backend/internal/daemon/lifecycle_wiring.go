@@ -527,7 +527,20 @@ func buildAgentResolver(defaultAgent string, log *slog.Logger) (ports.AgentResol
 // lookup), turning a registered project into a spawnable one.
 type projectRepoResolver struct{ store *sqlite.Store }
 
-var _ gitworktree.RepoResolver = projectRepoResolver{}
+var (
+	_ gitworktree.RepoResolver    = projectRepoResolver{}
+	_ gitworktree.RepoURLResolver = projectRepoResolver{}
+)
+
+// RepoURL is the repository URL the project was registered with, so a repo
+// carrying several remotes has its base fetched from the project's own one.
+func (r projectRepoResolver) RepoURL(projectID domain.ProjectID) string {
+	rec, ok, err := r.store.GetProject(context.Background(), string(projectID))
+	if err != nil || !ok {
+		return ""
+	}
+	return rec.RepoOriginURL
+}
 
 func (r projectRepoResolver) RepoPath(projectID domain.ProjectID) (string, error) {
 	rec, ok, err := r.store.GetProject(context.Background(), string(projectID))

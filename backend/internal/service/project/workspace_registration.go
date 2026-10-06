@@ -214,9 +214,11 @@ func validateWorkspaceChild(ctx context.Context, child string) error {
 		})
 	}
 	if origin := resolveGitOriginURL(child); origin == "" {
-		return apierr.Invalid("WORKSPACE_CHILD_ORIGIN_REQUIRED", "Workspace child repositories must have an origin remote configured", map[string]any{
+		// The code keeps its historical name (it is API); the check itself accepts
+		// any remote the repository can be attributed to, not only origin.
+		return apierr.Invalid("WORKSPACE_CHILD_ORIGIN_REQUIRED", "Workspace child repositories must have a git remote configured: origin, the remote the checked-out branch tracks, or a single remote", map[string]any{
 			"path":         child,
-			"suggestedFix": "Run `git remote add origin <url>` in the child repository, then retry.",
+			"suggestedFix": "Run `git remote add origin <url>` (or set the checked-out branch's upstream) in the child repository, then retry.",
 		})
 	}
 	return nil

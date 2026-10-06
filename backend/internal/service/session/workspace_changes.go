@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/gitremote"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	previewutil "github.com/aoagents/agent-orchestrator/backend/internal/preview"
 )
@@ -103,7 +104,7 @@ type targetPR struct {
 // It deliberately does NOT fall back to a hardcoded "main": a wrong target
 // produces a confidently wrong diff, which is worse than admitting we do not
 // know. Callers with a worktree in hand may extend it with real repo knowledge
-// (see resolveTargetBranch's origin/HEAD step); nobody may extend it with a guess.
+// (see resolveTargetBranch's remote-HEAD step); nobody may extend it with a guess.
 func resolveTargetChain(prs []targetPR, prTarget, baseBranch, projectDefault string) (string, string) {
 	for _, p := range prs {
 		if p.Open {
@@ -518,15 +519,13 @@ func (s *Service) resolveTargetBranch(ctx context.Context, rec domain.SessionRec
 	if b, src := resolveTargetChain(prs, rec.PRTarget, rec.BaseBranch, projectDefault); b != "" {
 		return b, src
 	}
-	// Below the shared chain, and only here: origin/HEAD is real knowledge read
-	// out of the repo, not an assumption — but it needs a worktree, which the
-	// read model does not have. This is the one step Changes mode can take that
-	// toSession cannot, which is why it lives at this call site rather than in
-	// resolveTargetChain.
-	if out, err := gitOutput(ctx, workspace, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
-		if b := strings.TrimSpace(string(out)); b != "" {
-			return strings.TrimPrefix(b, "origin/"), TargetFromGitOriginHead
-		}
+	// Below the shared chain, and only here: the project remote's HEAD is real
+	// knowledge read out of the repo, not an assumption — but it needs a
+	// worktree, which the read model does not have. This is the one step Changes
+	// mode can take that toSession cannot, which is why it lives at this call
+	// site rather than in resolveTargetChain.
+	if b := gitremote.DefaultBranch(ctx, git, workspace, s.projectRepoURL(ctx, rec)); b != "" {
+		return b, TargetFromGitOriginHead
 	}
 	return "", ""
 }
@@ -546,12 +545,7 @@ func (s *Service) resolveTargetBranch(ctx context.Context, rec domain.SessionRec
 // branch that has never been fetched) still diffs. The bare name comes last so
 // a qualified target nobody could attribute to a remote still resolves.
 func resolveBranchRef(ctx context.Context, workspace string, loc targetLocation) (string, bool) {
-	var cands []string
-	if loc.Remote != "" {
-		cands = append(cands, remoteTrackingRef(loc))
-	}
-	cands = append(cands, "refs/heads/"+loc.Branch, loc.Branch)
-	for _, cand := range cands {
+	for _, cand := range loc.Candidates() {
 		if _, err := gitOutput(ctx, workspace, "rev-parse", "--verify", "--quiet", cand+"^{commit}"); err == nil {
 			return cand, true
 		}
