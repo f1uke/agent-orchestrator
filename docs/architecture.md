@@ -386,8 +386,9 @@ gates it): once that hook exists Claude Code creates no worktree itself and neve
 removes one the hook created, so AO owns the whole lifecycle
 (`service/children`, git in `adapters/workspace/childtree`):
 
-- **Create.** `Agent(isolation: "worktree")` → `WorktreeCreate` → `ao hooks
-  claude-code worktree-create` → `POST /sessions/{id}/children`. AO cuts a branch
+- **Create.** `Agent(isolation: "worktree")` fires `WorktreeCreate`, which runs
+  `ao hooks claude-code worktree-create`, which calls
+  `POST /sessions/{id}/children`. AO cuts a branch
   `ao-child/<session>/<agent>` from the worker's HEAD into
   `<dataDir>/child-worktrees/<project>/<session>/<agent>`, outside the worker's
   folder, provisions it like a worker's tree, and prints the path. It is the one
