@@ -180,54 +180,6 @@ sql:
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
               type: "CrewRunDetector"
-          - column: "smoke_check.session_id"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SessionID"
-          - column: "smoke_check.project_id"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "ProjectID"
-          - column: "smoke_check.verdict"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SmokeVerdict"
-          - column: "smoke_run.session_id"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SessionID"
-          - column: "smoke_run.verdict"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SmokeVerdict"
-          - column: "smoke_check.authored_by"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SessionID"
-          - column: "smoke_check.authored_by_role"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "CrewRole"
-          - column: "smoke_checklist_state.session_id"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SessionID"
-          - column: "smoke_checklist_state.stood_down_by"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SessionID"
-          - column: "smoke_checklist_state.stood_down_by_role"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "CrewRole"
-          - column: "smoke_evidence.session_id"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SessionID"
-          - column: "smoke_evidence.source"
-            go_type:
-              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
-              type: "SmokeEvidenceSource"
           - column: "sim_lease.session_id"
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"

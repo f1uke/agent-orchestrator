@@ -111,8 +111,8 @@ type ProjectConfig struct {
 	// It is the single fact behind the device guidance a worker here is given:
 	// set, the step-by-step `ao sim tap` catalog is replaced by the script
 	// workflow (find the script, run it, judge the end state it left, author a
-	// missing one, never finish a failed run by hand), and qa plays its smoke
-	// cases with scripts. The rule came out of a measured study: on a known
+	// missing one, never finish a failed run by hand), and qa drives its checks
+	// with scripts. The rule came out of a measured study: on a known
 	// route a script was as reliable as an agent driving the app and many times
 	// faster, and it stays reliable only because every script starts from a
 	// fresh app state.
@@ -137,8 +137,8 @@ type ProjectConfig struct {
 	//
 	// The hatch is a person's, and AttachCrewMember enforces that. It was built
 	// for a human clicking, and an AGENT walked through it too: with this set,
-	// six consecutive tasks still got a qa, because each worker's brief hands the
-	// smoke checklist to qa, so on finding none it ran `ao crew add` itself. An
+	// six consecutive tasks still got a qa, because each worker's brief hands
+	// testing to qa, so on finding none it ran `ao crew add` itself. An
 	// attach that names a calling session is now refused (ErrCrewAutoFormationOff),
 	// the orchestrator included.
 	//
@@ -152,9 +152,8 @@ type ProjectConfig struct {
 	// It is read at the ELIGIBILITY seam (sessionmanager.crewEligible), which is
 	// upstream of both consumers - the trigger that would create qa, and the
 	// system prompt, which a spawn builds BEFORE any crew could exist. Reading it
-	// only where qa is created would hand dev the crew prompt telling it the smoke
-	// checklist belongs to a qa this project never creates, and nobody would write
-	// one.
+	// only where qa is created would hand dev the crew prompt telling it testing
+	// belongs to a qa this project never creates, and nobody would test.
 	//
 	// It applies to FUTURE spawns and touches. Setting it never kills or sleeps a
 	// qa that is already mid-task.

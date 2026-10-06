@@ -232,7 +232,7 @@ func TestCrewAttach_RefusesASecondQAEvenAgainstTheRealDatabase(t *testing.T) {
 		t.Fatalf("a second attach returned %v, want ErrCrewRoleTaken", err)
 	}
 	// The seat stays qa's even after it is stood down: `ao session restore` is how
-	// it comes back, so the id that smoke_check and review_run rows name survives.
+	// it comes back, so the id that review_run rows name survives.
 	if _, err := s.mgr.Teardown(ctx, qa.ID, domain.TerminationCauseKill); err != nil {
 		t.Fatalf("stand qa down: %v", err)
 	}
@@ -330,9 +330,9 @@ func (s *crewStack) attachedCrewWithStartFailure(t *testing.T, startErr error) (
 // person on the same project, the same task and the same second still gets a qa.
 //
 // This is the failure it exists for. The flag was honoured by the code and
-// defeated in practice for two days: workers whose brief hands the smoke
-// checklist to qa found none, ran `ao crew add` themselves, and `ao crew add`
-// deliberately skipped the eligibility test the flag is read at.
+// defeated in practice for two days: workers whose brief hands testing to qa
+// found none, ran `ao crew add` themselves, and `ao crew add` deliberately skipped
+// the eligibility test the flag is read at.
 func TestCrewAttach_CrewOffProjectRefusesAnAgentAndServesAHuman(t *testing.T) {
 	ctx := context.Background()
 	s := newCrewStack(t)

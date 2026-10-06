@@ -91,8 +91,8 @@ func (r SessionRecord) Awake() bool {
 // enum is all the audit trail the event needs: everything else the board says
 // about the join ("when") is already on the member's CreatedAt. The board turns
 // it into one sentence - `qa joined · dev opened the simulator` - which is what
-// makes a card that moves BACKWARD (from ready-to-merge to in-review, as the
-// smoke gate gains a real input) legible instead of surprising.
+// makes a card that moves BACKWARD (from ready-to-merge to in-review) legible
+// instead of surprising.
 //
 // The zero value is "not recorded": every qa created before this existed, which
 // is why the board falls back to saying nothing rather than guessing.

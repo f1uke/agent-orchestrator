@@ -545,68 +545,6 @@ type SimRecordingStep struct {
 	Secure            int64
 }
 
-type SmokeCheck struct {
-	ID             string
-	SessionID      domain.SessionID
-	ProjectID      domain.ProjectID
-	Seq            int64
-	Name           string
-	Why            string
-	Steps          string
-	Expected       string
-	PRNum          int64
-	FileRef        string
-	Verdict        domain.SmokeVerdict
-	Note           string
-	DecidedAt      sql.NullTime
-	ReportedAt     sql.NullTime
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	RetiredAt      sql.NullTime
-	RetiredReason  string
-	AuthoredBy     domain.SessionID
-	AuthoredByRole domain.CrewRole
-	AuthoredAt     sql.NullTime
-	AgreedRunID    string
-}
-
-type SmokeChecklistState struct {
-	SessionID       domain.SessionID
-	StoodDownAt     time.Time
-	StoodDownBy     domain.SessionID
-	StoodDownByRole domain.CrewRole
-	Reason          string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-}
-
-type SmokeEvidence struct {
-	ID        string
-	CheckID   string
-	SessionID domain.SessionID
-	Kind      string
-	Filename  string
-	Mime      string
-	SizeBytes int64
-	CreatedAt time.Time
-	Source    domain.SmokeEvidenceSource
-	RunID     string
-	Build     string
-}
-
-type SmokeRun struct {
-	ID         string
-	CheckID    string
-	SessionID  domain.SessionID
-	Seq        int64
-	Verdict    domain.SmokeVerdict
-	Note       string
-	Sha        string
-	RecordedAt sql.NullTime
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
 type TelemetryEvent struct {
 	ID          string
 	OccurredAt  time.Time
