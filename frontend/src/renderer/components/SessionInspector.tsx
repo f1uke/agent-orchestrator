@@ -26,6 +26,7 @@ import { FilesPanel, type ChangedFileTarget, type WorktreeFile } from "./FilesPa
 import type { SearchHit } from "./SearchResultsList";
 import { taskKeyOf } from "../lib/task-key";
 import { SimulatorPanel } from "./SimulatorPanel";
+import { TestinyView } from "./TestinyView";
 import { JiraIssueSection } from "./JiraIssueSection";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
@@ -34,7 +35,7 @@ import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "files" | "browser" | "simulator";
+export type InspectorView = "summary" | "reviews" | "files" | "testiny" | "browser" | "simulator";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -72,6 +73,17 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		),
 	},
 	{
+		id: "testiny",
+		label: "Testiny",
+		icon: (
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+				<rect x="5" y="4" width="14" height="17" rx="2" />
+				<path d="M9 4V3h6v1" />
+				<path d="m9 12.5 2 2 4-4" />
+			</svg>
+		),
+	},
+	{
 		id: "simulator",
 		// "Device" and not "Simulator": the tab-strip breakpoints in styles.css
 		// are derived from the widest label, and a longer one there would move
@@ -105,13 +117,14 @@ const prStateTone: Record<SessionPRSummary["state"], string> = {
 };
 
 /**
- * Tabbed inspector rail beside the terminal (Summary · Reviews · Browser).
+ * Tabbed inspector rail beside the terminal (Summary · Reviews · Files · Testiny · Device · Browser).
  */
 export function SessionInspector({
 	session,
 	onOpenReviewerTerminal,
 	hasWebUI = false,
 	hasIOSSimulator = false,
+	testinyProject,
 	browserPoppedOut = false,
 	isInspectorVisible = true,
 	onToggleBrowserPopOut,
@@ -144,6 +157,11 @@ export function SessionInspector({
 	 * ever be empty.
 	 */
 	hasIOSSimulator?: boolean;
+	/**
+	 * The project's Testiny project (ProjectConfig.testinyProject). Only a project
+	 * that keeps its manual test cases in Testiny gets the Testiny tab.
+	 */
+	testinyProject?: string;
 	browserPoppedOut?: boolean;
 	isInspectorVisible?: boolean;
 	onToggleBrowserPopOut?: (next: boolean) => void;
@@ -187,6 +205,7 @@ export function SessionInspector({
 		if (v.id === "files") return showFiles;
 		if (v.id === "browser") return hasWebUI;
 		if (v.id === "simulator") return hasIOSSimulator;
+		if (v.id === "testiny") return Boolean(testinyProject);
 		return true;
 	});
 	// The requested tab can name a view this session does not show: a remembered
@@ -273,6 +292,9 @@ export function SessionInspector({
 						search={searchRequest}
 						reveal={revealInTree}
 					/>
+				) : null}
+				{view === "testiny" && testinyProject ? (
+					<TestinyView key={taskKeyOf(session)} project={testinyProject} session={session} />
 				) : null}
 				{/* The Simulator panel stays mounted while its tab is off so the chosen
 				    device survives a trip to another tab - with two simulators booted

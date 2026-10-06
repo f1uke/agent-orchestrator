@@ -1,4 +1,5 @@
 import {
+	Ban,
 	Check,
 	Circle,
 	CircleCheck,
@@ -12,7 +13,9 @@ import {
 	MessageSquare,
 	OctagonX,
 	TriangleAlert,
+	SkipForward,
 	WifiOff,
+	X,
 	type LucideIcon,
 } from "lucide-react";
 import { attentionZone, primaryPR, type SessionStatus, type WorkspaceSession } from "../types/workspace";
@@ -128,4 +131,32 @@ export function statusGlyph(session: WorkspaceSession): StatusGlyph {
 		lane: laneForZone(attentionZone(session)),
 		label: statusLabel(session),
 	};
+}
+
+/** How a Testiny case result reads: the hue only reinforces the shape and the word. */
+export type TestinyCaseTone = "pass" | "fail" | "warn" | "idle";
+
+export type TestinyCaseGlyph = { Icon: LucideIcon; label: string; tone: TestinyCaseTone };
+
+const TESTINY_CASE: Record<string, TestinyCaseGlyph> = {
+	PASSED: { Icon: Check, label: "Passed", tone: "pass" },
+	FAILED: { Icon: X, label: "Failed", tone: "fail" },
+	BLOCKED: { Icon: Ban, label: "Blocked", tone: "warn" },
+	SKIPPED: { Icon: SkipForward, label: "Skipped", tone: "idle" },
+	// Dashed, like a queued session: nobody has played it yet.
+	NOTRUN: { Icon: CircleDashed, label: "Not run", tone: "idle" },
+};
+
+/**
+ * The glyph and word for a case's result in a Testiny run. A status Testiny adds
+ * later keeps its own word under a question mark rather than borrowing another's.
+ */
+export function testinyCaseGlyph(status: string): TestinyCaseGlyph {
+	return (
+		TESTINY_CASE[status] ?? {
+			Icon: CircleHelp,
+			label: status.charAt(0) + status.slice(1).toLowerCase(),
+			tone: "idle",
+		}
+	);
 }
