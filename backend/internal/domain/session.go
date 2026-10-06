@@ -323,4 +323,8 @@ type Session struct {
 	// streak, not a lifetime count. At CappedRepeat the task parks at NEEDS YOU.
 	// Derived on read; one trusted run clears it.
 	CrewRunDiscards int `json:"-"`
+	// Children are the worker's child worktrees, oldest first: the subagents it
+	// ran with `isolation: "worktree"` and what became of their work. Empty for
+	// every session that never ran one. Derived on read.
+	Children []SessionChild `json:"-"`
 }

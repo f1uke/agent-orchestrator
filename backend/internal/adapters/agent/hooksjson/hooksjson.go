@@ -45,6 +45,9 @@ type HookSpec struct {
 	Event   string
 	Matcher *string
 	Command string
+	// Timeout overrides the manager's per-hook timeout for a hook that waits on
+	// slower work. Zero uses the manager's.
+	Timeout int
 }
 
 // Manager installs, removes, and detects AO's hooks in one agent's matcher-group
@@ -90,7 +93,11 @@ func (m Manager) Install(ctx context.Context, workspacePath string) error {
 		}
 		for _, spec := range specs {
 			if !commandExists(groups, spec.Command) {
-				entry := HookEntry{Type: "command", Command: spec.Command, Timeout: m.Timeout}
+				timeout := m.Timeout
+				if spec.Timeout > 0 {
+					timeout = spec.Timeout
+				}
+				entry := HookEntry{Type: "command", Command: spec.Command, Timeout: timeout}
 				groups = addHook(groups, entry, spec.Matcher)
 			}
 		}

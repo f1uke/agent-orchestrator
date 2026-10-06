@@ -1,6 +1,7 @@
 import type { PRState, PullRequestFacts, WorkspaceSummary } from "../types/workspace";
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { components } from "../../api/schema";
+import type { SessionChild } from "./children";
 
 type WorkspaceChangesResponse = components["schemas"]["WorkspaceChangesResponse"];
 type WorkspaceFilesResponse = components["schemas"]["WorkspaceFilesResponse"];
@@ -27,6 +28,33 @@ const demoPr = (
 	reviewComments: review === "changes_requested",
 	updatedAt: now,
 });
+
+/** A demo child worktree: a subagent the worker ran with its own worktree. */
+function demoChild(
+	sessionId: string,
+	agentId: string,
+	state: SessionChild["state"],
+	description: string,
+	over: Partial<SessionChild> = {},
+): SessionChild {
+	return {
+		agentId,
+		sessionId,
+		projectId: "ao-demo",
+		agentType: "general-purpose",
+		description,
+		branch: `ao-child/${sessionId}/${agentId}`,
+		targetBranch: "demo/dashboard-screenshot",
+		baseSha: "0d1f2c3",
+		worktreePath: `~/.ao/data/child-worktrees/ao-demo/${sessionId}/${agentId}`,
+		state,
+		commits: 0,
+		filesChanged: 0,
+		createdAt: minutesAgo(10),
+		updatedAt: minutesAgo(1),
+		...over,
+	};
+}
 
 export const mockWorkspaces: WorkspaceSummary[] = [
 	{
@@ -136,6 +164,29 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				prs: [],
 				taskSize: "standard",
 				crew: { id: "demo-working", role: "dev", hasRun: true },
+				// Four subagents, one of each kind of outcome the card has to say
+				// apart: still running, merged, held behind the worker's own edits,
+				// and in conflict. Three chips fit; the fourth is "+1".
+				children: [
+					demoChild("demo-working", "a1", "running", "Port the board fixtures", { createdAt: minutesAgo(9) }),
+					demoChild("demo-working", "a2", "merged", "Write the README screenshots", {
+						commits: 2,
+						filesChanged: 3,
+						createdAt: minutesAgo(12),
+					}),
+					demoChild("demo-working", "a3", "held", "Refresh the snapshot tests", {
+						commits: 1,
+						filesChanged: 2,
+						detail: "the worker has uncommitted changes in docs/readme.md",
+						createdAt: minutesAgo(11),
+					}),
+					demoChild("demo-working", "a4", "conflict", "Rename the export flag", {
+						commits: 1,
+						filesChanged: 1,
+						detail: "conflicts with demo/dashboard-screenshot in frontend/src/renderer/lib/mock-data.ts",
+						createdAt: minutesAgo(10),
+					}),
+				],
 			},
 			{
 				// A crew's qa, born asleep: a row and an id, no terminal. It is drawn on

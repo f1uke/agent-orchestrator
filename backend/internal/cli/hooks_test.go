@@ -58,6 +58,8 @@ func capturedState(t *testing.T, capture *activityCapture) string {
 func TestHooks_ClaudeWorkerRejectsNestedWorktreeTools(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "ao-7")
 	t.Setenv("AO_SESSION_KIND", "worker")
+	// Explicitly off: the test may itself run inside an AO worker that has it on.
+	t.Setenv(envChildWorktrees, "")
 
 	cases := []struct {
 		name    string

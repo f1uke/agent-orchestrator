@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
@@ -43,6 +44,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
 	"github.com/aoagents/agent-orchestrator/backend/internal/runfile"
 	agentsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/agent"
+	childrensvc "github.com/aoagents/agent-orchestrator/backend/internal/service/children"
 	crewrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/crewrun"
 	importsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/importer"
 	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
@@ -396,6 +398,19 @@ func Run() error {
 	}
 	lcStack.trackerDone = startTrackerIntake(ctx, store, sessionSvc, loopReg, log)
 
+	// A worker's child worktrees: the folders AO creates for subagents its
+	// Claude Code launches with isolation, beside (never inside) the worker
+	// trees, prepared the way a worker's own tree is. The manager refuses or
+	// settles on them at teardown and finishes their orphans on a relaunch.
+	childSvc := childrensvc.New(childrensvc.Options{
+		Store:     store,
+		Trees:     childtree.New(),
+		Root:      filepath.Join(cfg.DataDir, "child-worktrees"),
+		Provision: sessMgr.ProvisionWorkspace,
+		Logger:    log,
+	})
+	sessMgr.SetChildren(childSvc)
+
 	// Auto-reclaim: a settings-backed poll loop that tears down finished worker
 	// sessions (tmux + worktree, branch kept) once they have sat past the
 	// configured grace period. Every decision it makes — reclaim or refusal — is
@@ -521,6 +536,7 @@ func Run() error {
 		Reviews:            reviewSvc,
 		Smoke:              smokeSvc,
 		CrewRuns:           crewRunSvc,
+		Children:           childSvc,
 		Sim:                simSvc,
 		IOSRun:             iosRunSvc,
 		SimScreen:          simScreen,
@@ -575,6 +591,11 @@ func Run() error {
 	// before srv.Run so sessions are consistent before the server serves.
 	if reconcileErr := sessMgr.Reconcile(ctx); reconcileErr != nil {
 		log.Error("reconcile sessions on boot failed", "err", reconcileErr)
+	}
+	// A child worktree a crash left mid-merge is settled from what git shows,
+	// and one whose worker has since ended is preserved on its branch.
+	if childErr := childSvc.Reconcile(ctx); childErr != nil {
+		log.Error("reconcile child worktrees on boot failed", "err", childErr)
 	}
 
 	// A queued message still marked "delivering" was in flight when the previous

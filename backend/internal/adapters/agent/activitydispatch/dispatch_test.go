@@ -31,13 +31,13 @@ func TestNestedWorktreeDenierTokensAreKnownHarnesses(t *testing.T) {
 func TestDenyNestedWorktree(t *testing.T) {
 	// A registered harness denies a worktree-isolated child before it runs.
 	deny, reason := DenyNestedWorktree("claude-code", "pre-tool-use",
-		[]byte(`{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`))
+		[]byte(`{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`), false)
 	if !deny || reason == "" {
 		t.Fatalf("claude-code Agent(isolation:worktree) = (%v, %q), want (true, non-empty)", deny, reason)
 	}
 	// A harness with no denier is never denied, so its worker children are unaffected.
 	if deny, _ := DenyNestedWorktree("codex", "pre-tool-use",
-		[]byte(`{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`)); deny {
+		[]byte(`{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`), false); deny {
 		t.Fatal("codex has no denier, want deny=false")
 	}
 }

@@ -350,6 +350,15 @@ var schemaNames = map[string]string{
 	"ControllersEndCrewRunResponse":   "EndCrewRunResponse",
 	"ControllersListCrewRunsResponse": "ListCrewRunsResponse",
 	"DomainCrewRun":                   "CrewRun",
+	"ControllersCreateChildInput":     "CreateChildInput",
+	"ControllersChildResponse":        "ChildResponse",
+	"ControllersListChildrenResponse": "ListChildrenResponse",
+	"ControllersChildBriefResponse":   "ChildBriefResponse",
+	"ControllersStopChildResponse":    "StopChildResponse",
+	"ControllersDescribeChildInput":   "DescribeChildInput",
+	"ControllersChildNotesResponse":   "ChildNotesResponse",
+	"DomainSessionChild":              "SessionChild",
+	"DomainChildState":                "ChildState",
 	// httpd/controllers: import wire envelopes
 	"ControllersImportStatusResponse": "ImportStatusResponse",
 	"ControllersImportRunResponse":    "ImportRunResponse",
@@ -485,6 +494,7 @@ func operations() []operation {
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, smokeOperations()...)
 	ops = append(ops, crewRunOperations()...)
+	ops = append(ops, childOperations()...)
 	ops = append(ops, iosRunOperations()...)
 	ops = append(ops, simOperations()...)
 	ops = append(ops, notificationOperations()...)
@@ -1453,6 +1463,64 @@ func crewRunOperations() []operation {
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
+		},
+	}
+}
+
+// childOperations are the hook callbacks through which AO creates, briefs,
+// stops and reports on a worker's child worktrees. Must stay 1:1 with the
+// routes ChildrenController.Register mounts.
+func childOperations() []operation {
+	childErrs := []respUnit{
+		{http.StatusNotFound, envelope.APIError{}},
+		{http.StatusInternalServerError, envelope.APIError{}},
+		{http.StatusNotImplemented, envelope.APIError{}},
+	}
+	withErrs := func(ok respUnit, extra ...respUnit) []respUnit {
+		return append(append([]respUnit{ok}, extra...), childErrs...)
+	}
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/children", id: "listChildren", tag: "sessions",
+			summary:    "List a worker's child worktrees, oldest first",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps:      withErrs(respUnit{http.StatusOK, controllers.ListChildrenResponse{}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/children", id: "createChild", tag: "sessions",
+			summary:    "Create a child worktree for a subagent (Claude Code WorktreeCreate)",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.CreateChildInput{},
+			resps: withErrs(respUnit{http.StatusCreated, controllers.ChildResponse{}},
+				respUnit{http.StatusBadRequest, envelope.APIError{}},
+				respUnit{http.StatusConflict, envelope.APIError{}},
+				respUnit{http.StatusUnprocessableEntity, envelope.APIError{}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/children/notes", id: "childNotes", tag: "sessions",
+			summary:    "Retry held merges and return what the worker has not yet been told about its children",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps:      withErrs(respUnit{http.StatusOK, controllers.ChildNotesResponse{}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/children/{agentId}/start", id: "startChild", tag: "sessions",
+			summary:    "Return the standing brief for a subagent starting in a child worktree (Claude Code SubagentStart)",
+			pathParams: []any{controllers.ChildParam{}},
+			resps:      withErrs(respUnit{http.StatusOK, controllers.ChildBriefResponse{}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/children/{agentId}/stop", id: "stopChild", tag: "sessions",
+			summary:    "Settle a stopping child: ask it to commit or rebase, or merge it into the worker's branch (Claude Code SubagentStop)",
+			pathParams: []any{controllers.ChildParam{}},
+			resps:      withErrs(respUnit{http.StatusOK, controllers.StopChildResponse{}}),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/children/{agentId}/describe", id: "describeChild", tag: "sessions",
+			summary:    "Record the subagent type and task description the worker launched a child with",
+			pathParams: []any{controllers.ChildParam{}},
+			reqBody:    controllers.DescribeChildInput{},
+			resps: withErrs(respUnit{http.StatusNoContent, nil},
+				respUnit{http.StatusBadRequest, envelope.APIError{}}),
 		},
 	}
 }

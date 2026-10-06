@@ -897,6 +897,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/children": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a worker's child worktrees, oldest first */
+        get: operations["listChildren"];
+        put?: never;
+        /** Create a child worktree for a subagent (Claude Code WorktreeCreate) */
+        post: operations["createChild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/children/{agentId}/describe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record the subagent type and task description the worker launched a child with */
+        post: operations["describeChild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/children/{agentId}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Return the standing brief for a subagent starting in a child worktree (Claude Code SubagentStart) */
+        post: operations["startChild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/children/{agentId}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Settle a stopping child: ask it to commit or rebase, or merge it into the worker's branch (Claude Code SubagentStop) */
+        post: operations["stopChild"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/children/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry held merges and return what the worker has not yet been told about its children */
+        post: operations["childNotes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/comment-dispatch": {
         parameters: {
             query?: never;
@@ -2682,6 +2768,19 @@ export interface components {
             path: string;
             status: string;
         };
+        ChildBriefResponse: {
+            /** @description Standing context for the subagent, delivered as SubagentStart additionalContext. */
+            brief?: string;
+            /** @description False when the subagent is not a child worktree of this worker. */
+            known: boolean;
+        };
+        ChildNotesResponse: {
+            /** @description What the worker has not yet been told about its children, oldest first. */
+            notes: string[];
+        };
+        ChildResponse: {
+            child: components["schemas"]["SessionChild"];
+        };
         ClaimPRRequest: {
             allowTakeover?: null | boolean;
             pr: string;
@@ -3287,6 +3386,7 @@ export interface components {
             autoResolveOnReply: null | boolean;
             baseBranch?: string;
             branch?: string;
+            children?: components["schemas"]["SessionChild"][];
             /** Format: date-time */
             createdAt: string;
             createdBy?: string;
@@ -3509,6 +3609,12 @@ export interface components {
             inWorkspace: boolean;
             path: string;
         };
+        CreateChildInput: {
+            /** @description The session's working directory when the subagent was launched. */
+            cwd: string;
+            /** @description The worktree name Claude Code chose; agent-<id> for a subagent. */
+            name: string;
+        };
         CrewRun: {
             attempt: number;
             changedPaths?: string[];
@@ -3567,6 +3673,12 @@ export interface components {
             noteModifiedAt?: string;
             path: string;
             raw: string;
+        };
+        DescribeChildInput: {
+            /** @description The subagent type the worker launched. */
+            agentType?: string;
+            /** @description The Agent call's short description of the task. */
+            description?: string;
         };
         DiffContextLineDTO: {
             kind: string;
@@ -3860,6 +3972,9 @@ export interface components {
             installed: components["schemas"]["AgentInfo"][];
             /** @description Agents supported by this daemon build. */
             supported: components["schemas"]["AgentInfo"][];
+        };
+        ListChildrenResponse: {
+            children: components["schemas"]["SessionChild"][];
         };
         ListCrewRunsResponse: {
             runs: components["schemas"]["CrewRun"][];
@@ -4195,6 +4310,31 @@ export interface components {
             queuedAt?: null | string;
             sessionId: string;
             unreviewed?: components["schemas"]["ControllersUnreviewedRuntimeView"];
+        };
+        SessionChild: {
+            agentId: string;
+            agentType?: string;
+            baseDirty?: string[];
+            baseSha: string;
+            branch: string;
+            commits: number;
+            /** Format: date-time */
+            createdAt: string;
+            description?: string;
+            detail?: string;
+            filesChanged: number;
+            /** Format: date-time */
+            finishedAt?: null | string;
+            mergedSha?: string;
+            parentAgentId?: string;
+            projectId: string;
+            sessionId: string;
+            /** @enum {string} */
+            state: "running" | "merging" | "held" | "conflict" | "merged" | "removed" | "preserved";
+            targetBranch: string;
+            /** Format: date-time */
+            updatedAt: string;
+            worktreePath: string;
         };
         SessionCrew: {
             hasRun: boolean;
@@ -4952,6 +5092,14 @@ export interface components {
         };
         StartWikiAgentRequest: {
             harness?: string;
+        };
+        StopChildResponse: {
+            /** @description Keep the subagent going; Reason is its next instruction. */
+            block: boolean;
+            child?: components["schemas"]["SessionChild"];
+            /** @description False when the subagent is not a child worktree of this worker. */
+            known: boolean;
+            reason?: string;
         };
         SubmitReviewInput: {
             /** @description Review body recorded by AO. Required for changes_requested. */
@@ -8424,6 +8572,354 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listChildren: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListChildrenResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    createChild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChildInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChildResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    describeChild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The worker session that owns the child. */
+                sessionId: string;
+                /** @description Claude Code's id for the subagent. */
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DescribeChildInput"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    startChild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The worker session that owns the child. */
+                sessionId: string;
+                /** @description Claude Code's id for the subagent. */
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChildBriefResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopChild: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The worker session that owns the child. */
+                sessionId: string;
+                /** @description Claude Code's id for the subagent. */
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopChildResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    childNotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChildNotesResponse"];
                 };
             };
             /** @description Not Found */

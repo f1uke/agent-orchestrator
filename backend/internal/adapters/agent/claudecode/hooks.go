@@ -38,15 +38,40 @@ var claudeManagedHooks = []hooksjson.HookSpec{
 	{Event: "SessionEnd", Command: claudeHookCommandPrefix + "session-end"},
 }
 
-// claudeHooks manages AO's hooks in the workspace-local
-// .claude/settings.local.json file.
-var claudeHooks = hooksjson.Manager{
-	Label:         "claude-code",
-	CommandPrefix: claudeHookCommandPrefix,
-	Timeout:       claudeHookTimeout,
-	Path:          claudeSettingsPath,
-	Managed:       claudeManagedHooks,
+// claudeChildHookTimeout is longer than the activity hooks' because these
+// callbacks wait on git: creating a child worktree, and merging a stopping
+// child into the worker's branch.
+const claudeChildHookTimeout = 120
+
+// claudeChildHooks hand an isolated subagent's worktree to AO. Installed only
+// for a worker whose Claude Code supports the contract (see
+// SupportsChildWorktrees): once a WorktreeCreate hook exists, Claude Code
+// creates no worktree of its own, so these must never be present where AO
+// cannot honour them.
+var claudeChildHooks = []hooksjson.HookSpec{
+	{Event: "WorktreeCreate", Command: claudeHookCommandPrefix + "worktree-create", Timeout: claudeChildHookTimeout},
+	{Event: "SubagentStart", Command: claudeHookCommandPrefix + "subagent-start"},
+	{Event: "SubagentStop", Command: claudeHookCommandPrefix + "subagent-stop", Timeout: claudeChildHookTimeout},
 }
+
+func claudeHookManager(managed []hooksjson.HookSpec) hooksjson.Manager {
+	return hooksjson.Manager{
+		Label:         "claude-code",
+		CommandPrefix: claudeHookCommandPrefix,
+		Timeout:       claudeHookTimeout,
+		Path:          claudeSettingsPath,
+		Managed:       managed,
+	}
+}
+
+// claudeHooks manages AO's hooks in the workspace-local
+// .claude/settings.local.json file. Removal and detection cover every hook AO
+// may have installed, the child set included.
+var (
+	claudeHooks            = claudeHookManager(claudeManagedHooks)
+	claudeChildHookManager = claudeHookManager(claudeChildHooks)
+	claudeAllHooks         = claudeHookManager(append(append([]hooksjson.HookSpec{}, claudeManagedHooks...), claudeChildHooks...))
+)
 
 func claudeSettingsPath(workspacePath string) string {
 	return filepath.Join(workspacePath, claudeSettingsDirName, claudeSettingsFileName)
@@ -54,15 +79,21 @@ func claudeSettingsPath(workspacePath string) string {
 
 // GetAgentHooks installs AO's Claude Code hooks, preserving user-defined hooks and unrelated settings.
 func (p *Plugin) GetAgentHooks(ctx context.Context, cfg ports.WorkspaceHookConfig) error {
-	return claudeHooks.Install(ctx, cfg.WorkspacePath)
+	if err := claudeHooks.Install(ctx, cfg.WorkspacePath); err != nil {
+		return err
+	}
+	if cfg.ChildWorktrees {
+		return claudeChildHookManager.Install(ctx, cfg.WorkspacePath)
+	}
+	return claudeChildHookManager.Uninstall(ctx, cfg.WorkspacePath)
 }
 
 // UninstallHooks removes AO's Claude Code hooks, leaving user-defined hooks untouched.
 func (p *Plugin) UninstallHooks(ctx context.Context, workspacePath string) error {
-	return claudeHooks.Uninstall(ctx, workspacePath)
+	return claudeAllHooks.Uninstall(ctx, workspacePath)
 }
 
 // AreHooksInstalled reports whether any AO Claude Code hook is present.
 func (p *Plugin) AreHooksInstalled(ctx context.Context, workspacePath string) (bool, error) {
-	return claudeHooks.AreInstalled(ctx, workspacePath)
+	return claudeAllHooks.AreInstalled(ctx, workspacePath)
 }

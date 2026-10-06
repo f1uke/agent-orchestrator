@@ -2584,6 +2584,296 @@ paths:
       summary: Set (or clear) the per-session auto-resolve-on-reply gate
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/children:
+    get:
+      operationId: listChildren
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListChildrenResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List a worker's child worktrees, oldest first
+      tags:
+      - sessions
+    post:
+      operationId: createChild
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChildInput'
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChildResponse'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Create a child worktree for a subagent (Claude Code WorktreeCreate)
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/children/{agentId}/describe:
+    post:
+      operationId: describeChild
+      parameters:
+      - description: The worker session that owns the child.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: The worker session that owns the child.
+          type: string
+      - description: Claude Code's id for the subagent.
+        in: path
+        name: agentId
+        required: true
+        schema:
+          description: Claude Code's id for the subagent.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DescribeChildInput'
+        required: true
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Record the subagent type and task description the worker launched a
+        child with
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/children/{agentId}/start:
+    post:
+      operationId: startChild
+      parameters:
+      - description: The worker session that owns the child.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: The worker session that owns the child.
+          type: string
+      - description: Claude Code's id for the subagent.
+        in: path
+        name: agentId
+        required: true
+        schema:
+          description: Claude Code's id for the subagent.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChildBriefResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Return the standing brief for a subagent starting in a child worktree
+        (Claude Code SubagentStart)
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/children/{agentId}/stop:
+    post:
+      operationId: stopChild
+      parameters:
+      - description: The worker session that owns the child.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: The worker session that owns the child.
+          type: string
+      - description: Claude Code's id for the subagent.
+        in: path
+        name: agentId
+        required: true
+        schema:
+          description: Claude Code's id for the subagent.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StopChildResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Settle a stopping child: ask it to commit or rebase, or merge it into
+        the worker''s branch (Claude Code SubagentStop)'
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/children/notes:
+    post:
+      operationId: childNotes
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChildNotesResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Retry held merges and return what the worker has not yet been told
+        about its children
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/comment-dispatch:
     post:
       operationId: sessionDispatchComment
@@ -8361,6 +8651,36 @@ components:
       - committed
       - kind
       type: object
+    ChildBriefResponse:
+      properties:
+        brief:
+          description: Standing context for the subagent, delivered as SubagentStart
+            additionalContext.
+          type: string
+        known:
+          description: False when the subagent is not a child worktree of this worker.
+          type: boolean
+      required:
+      - known
+      type: object
+    ChildNotesResponse:
+      properties:
+        notes:
+          description: What the worker has not yet been told about its children, oldest
+            first.
+          items:
+            type: string
+          type: array
+      required:
+      - notes
+      type: object
+    ChildResponse:
+      properties:
+        child:
+          $ref: '#/components/schemas/SessionChild'
+      required:
+      - child
+      type: object
     ClaimPRRequest:
       properties:
         allowTakeover:
@@ -9791,6 +10111,10 @@ components:
           type: string
         branch:
           type: string
+        children:
+          items:
+            $ref: '#/components/schemas/SessionChild'
+          type: array
         createdAt:
           format: date-time
           type: string
@@ -10270,6 +10594,18 @@ components:
       - path
       - inWorkspace
       type: object
+    CreateChildInput:
+      properties:
+        cwd:
+          description: The session's working directory when the subagent was launched.
+          type: string
+        name:
+          description: The worktree name Claude Code chose; agent-<id> for a subagent.
+          type: string
+      required:
+      - name
+      - cwd
+      type: object
     CrewRun:
       properties:
         attempt:
@@ -10417,6 +10753,15 @@ components:
       - line
       - raw
       - moved
+      type: object
+    DescribeChildInput:
+      properties:
+        agentType:
+          description: The subagent type the worker launched.
+          type: string
+        description:
+          description: The Agent call's short description of the task.
+          type: string
       type: object
     DiffContextLineDTO:
       properties:
@@ -11102,6 +11447,15 @@ components:
       - supported
       - installed
       - authorized
+      type: object
+    ListChildrenResponse:
+      properties:
+        children:
+          items:
+            $ref: '#/components/schemas/SessionChild'
+          type: array
+      required:
+      - children
       type: object
     ListCrewRunsResponse:
       properties:
@@ -11940,6 +12294,75 @@ components:
       - ok
       - sessionId
       - message
+      type: object
+    SessionChild:
+      properties:
+        agentId:
+          type: string
+        agentType:
+          type: string
+        baseDirty:
+          items:
+            type: string
+          type: array
+        baseSha:
+          type: string
+        branch:
+          type: string
+        commits:
+          type: integer
+        createdAt:
+          format: date-time
+          type: string
+        description:
+          type: string
+        detail:
+          type: string
+        filesChanged:
+          type: integer
+        finishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        mergedSha:
+          type: string
+        parentAgentId:
+          type: string
+        projectId:
+          type: string
+        sessionId:
+          type: string
+        state:
+          enum:
+          - running
+          - merging
+          - held
+          - conflict
+          - merged
+          - removed
+          - preserved
+          type: string
+        targetBranch:
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        worktreePath:
+          type: string
+      required:
+      - sessionId
+      - projectId
+      - agentId
+      - branch
+      - targetBranch
+      - baseSha
+      - worktreePath
+      - state
+      - commits
+      - filesChanged
+      - createdAt
+      - updatedAt
       type: object
     SessionCrew:
       properties:
@@ -13719,6 +14142,22 @@ components:
       properties:
         harness:
           type: string
+      type: object
+    StopChildResponse:
+      properties:
+        block:
+          description: Keep the subagent going; Reason is its next instruction.
+          type: boolean
+        child:
+          $ref: '#/components/schemas/SessionChild'
+        known:
+          description: False when the subagent is not a child worktree of this worker.
+          type: boolean
+        reason:
+          type: string
+      required:
+      - known
+      - block
       type: object
     SubmitReviewInput:
       properties:

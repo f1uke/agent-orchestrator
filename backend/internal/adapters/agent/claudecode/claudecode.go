@@ -55,6 +55,10 @@ type Plugin struct {
 	agentbase.Base
 	binaryMu       sync.Mutex
 	resolvedBinary string
+
+	childMu        sync.Mutex
+	childCheckedAt time.Time
+	childSupported bool
 }
 
 // New returns a ready-to-register Claude Code adapter.

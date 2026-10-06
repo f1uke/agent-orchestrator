@@ -649,6 +649,12 @@ func (f *fakeSessionLifecycle) SetSimDeviceAssigner(fn func(context.Context, dom
 	f.simDeviceAssigner = fn
 }
 
+func (f *fakeSessionLifecycle) SetChildren(sessionmanager.ChildWork) {}
+
+func (f *fakeSessionLifecycle) ProvisionWorkspace(context.Context, domain.ProjectRecord, string) error {
+	return nil
+}
+
 func (f *fakeSessionLifecycle) SyncOrchestratorWorkspaces(_ context.Context) error {
 	f.syncOrchestratorCalled = true
 	return nil

@@ -134,6 +134,11 @@ type sessionLifecycle interface {
 	// interface for the same reason NoteRuntimeTouch is: the manager is built
 	// before the simulator services, so the daemon is where the two halves meet.
 	SetSimDeviceAssigner(fn func(context.Context, domain.SessionID) (string, error))
+	// SetChildren and ProvisionWorkspace meet the child worktree service, which
+	// prepares a child the way the manager prepares a worker and which the
+	// manager consults at teardown and on a relaunch.
+	SetChildren(c sessionmanager.ChildWork)
+	ProvisionWorkspace(ctx context.Context, project domain.ProjectRecord, workspacePath string) error
 	// ReapOrphanedPromptFiles removes the private prompt files of sessions that
 	// ended while the daemon was down; the boot half of the reap every ending
 	// runs through ReapSessionPanes.

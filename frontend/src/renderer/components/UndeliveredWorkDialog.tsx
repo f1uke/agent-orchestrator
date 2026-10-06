@@ -2,7 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileWarning, Loader2 } from "lucide-react";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { killSession, type UncommittedFile } from "../lib/kill-session";
+import { killSession, type UncommittedFile, type UndeliveredChild } from "../lib/kill-session";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { captureRendererEvent } from "../lib/telemetry";
 import { Button } from "./ui/button";
@@ -26,6 +26,7 @@ export function UndeliveredWorkDialog({
 	sessionId,
 	sessionTitle,
 	files,
+	subagents = [],
 	onOpenSession,
 	onDiscarded,
 }: {
@@ -34,6 +35,8 @@ export function UndeliveredWorkDialog({
 	sessionId: string;
 	sessionTitle?: string;
 	files: UncommittedFile[];
+	/** The worker's subagents whose work has not reached its branch yet. */
+	subagents?: UndeliveredChild[];
 	/** Undefined on surfaces already inside the session (its own toolbar). */
 	onOpenSession?: () => void;
 	onDiscarded?: () => void;
@@ -43,7 +46,10 @@ export function UndeliveredWorkDialog({
 
 	const discard = useMutation({
 		mutationFn: async () => {
-			void captureRendererEvent("ao.renderer.session_discard_requested", { files: files.length });
+			void captureRendererEvent("ao.renderer.session_discard_requested", {
+				files: files.length,
+				subagents: subagents.length,
+			});
 			return killSession(sessionId, { discardUncommitted: true });
 		},
 		onSuccess: () => {
@@ -54,6 +60,10 @@ export function UndeliveredWorkDialog({
 	});
 
 	const noun = files.length === 1 ? "file" : "files";
+	// A refusal for the worker's subagents alone names no files: the worktree
+	// itself is clean, and what is at stake is their work, which a discard keeps
+	// on each subagent's own branch.
+	const subagentsOnly = files.length === 0 && subagents.length > 0;
 
 	return (
 		<Dialog.Root open={open} onOpenChange={(next) => !discard.isPending && onOpenChange(next)}>
@@ -73,27 +83,56 @@ export function UndeliveredWorkDialog({
 						This session still holds undelivered work
 					</Dialog.Title>
 					<Dialog.Description className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
-						{sessionTitle ? `“${sessionTitle}” ` : ""}has {files.length} uncommitted {noun} that no pull request
-						carries, so it was not moved to Done and nothing was torn down.
+						{subagentsOnly ? (
+							<>
+								{sessionTitle ? `“${sessionTitle}” ` : ""}has {subagents.length} subagent
+								{subagents.length === 1 ? "" : "s"} whose work is not on its branch yet, so it was not moved to Done and
+								nothing was torn down.
+							</>
+						) : (
+							<>
+								{sessionTitle ? `“${sessionTitle}” ` : ""}has {files.length} uncommitted {noun} that no pull request
+								carries, so it was not moved to Done and nothing was torn down.
+							</>
+						)}
 					</Dialog.Description>
 
-					<ul className="mt-3 max-h-52 overflow-y-auto rounded-md border border-border bg-background p-2">
-						{files.length === 0 ? (
-							<li className="px-1 py-0.5 text-[12px] text-muted-foreground">
-								The daemon named no files. Open the session to look before discarding.
-							</li>
-						) : (
-							files.map((file) => (
-								<li key={file.path} className="flex items-baseline gap-2 px-1 py-0.5 font-mono text-[11.5px]">
-									<span className="w-[4.75rem] shrink-0 text-passive">{file.status}</span>
-									{/* The path WRAPS rather than truncating. A truncated path is the
+					{subagents.length > 0 && (
+						<ul
+							className="mt-3 max-h-40 overflow-y-auto rounded-md border border-border bg-background p-2"
+							data-undelivered-subagents=""
+						>
+							{subagents.map((child) => (
+								<li key={child.agentId} className="flex items-baseline gap-2 px-1 py-0.5 text-[11.5px]">
+									<span className="w-[4.75rem] shrink-0 font-mono text-passive">{child.state}</span>
+									<span className="min-w-0 flex-1 break-words text-foreground">
+										{child.description || child.agentId}
+										<span className="block break-all font-mono text-[10.5px] text-passive">{child.branch}</span>
+									</span>
+								</li>
+							))}
+						</ul>
+					)}
+
+					{!subagentsOnly && (
+						<ul className="mt-3 max-h-52 overflow-y-auto rounded-md border border-border bg-background p-2">
+							{files.length === 0 ? (
+								<li className="px-1 py-0.5 text-[12px] text-muted-foreground">
+									The daemon named no files. Open the session to look before discarding.
+								</li>
+							) : (
+								files.map((file) => (
+									<li key={file.path} className="flex items-baseline gap-2 px-1 py-0.5 font-mono text-[11.5px]">
+										<span className="w-[4.75rem] shrink-0 text-passive">{file.status}</span>
+										{/* The path WRAPS rather than truncating. A truncated path is the
 									    one thing this list may not do: the decision is about which
 									    files these are, and `src/…/Vie…` answers nothing. */}
-									<span className="min-w-0 flex-1 break-all text-foreground">{file.path}</span>
-								</li>
-							))
-						)}
-					</ul>
+										<span className="min-w-0 flex-1 break-all text-foreground">{file.path}</span>
+									</li>
+								))
+							)}
+						</ul>
+					)}
 
 					{/* Both ways out, named. The card cannot move to Done until one of
 					    them happens, and a dialog that described only the destructive
@@ -102,12 +141,21 @@ export function UndeliveredWorkDialog({
 						<span className="text-foreground">Finish it:</span> open the session — it resumes the agent in this
 						worktree, with the work still there.
 					</p>
-					<p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
-						<span className="text-foreground">Or discard it:</span> the worktree is removed. The branch and every commit
-						on it stay, and these files are captured to{" "}
-						<span className="font-mono text-[11px] text-passive">refs/ao/preserved/{sessionId}</span> first, so this is
-						recoverable.
-					</p>
+					{subagentsOnly ? (
+						<p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+							<span className="text-foreground">Or end it anyway:</span> the subagents stop, and AO commits what each
+							one left onto its own branch, keeps that branch, and removes its folder. Nothing is merged and nothing is
+							deleted.
+						</p>
+					) : (
+						<p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+							<span className="text-foreground">Or discard it:</span> the worktree is removed. The branch and every
+							commit on it stay, and these files are captured to{" "}
+							<span className="font-mono text-[11px] text-passive">refs/ao/preserved/{sessionId}</span> first, so this
+							is recoverable.
+							{subagents.length > 0 && " The subagents' work is kept on their own branches."}
+						</p>
+					)}
 
 					{discard.isError && (
 						<div className="mt-3 text-[12px] text-error" role="alert">
@@ -137,7 +185,11 @@ export function UndeliveredWorkDialog({
 							onClick={() => discard.mutate()}
 						>
 							{discard.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
-							{discard.isPending ? "Discarding…" : "Discard and move to Done"}
+							{discard.isPending
+								? "Discarding…"
+								: subagentsOnly
+									? "Keep their branches and move to Done"
+									: "Discard and move to Done"}
 						</Button>
 					</div>
 				</Dialog.Content>

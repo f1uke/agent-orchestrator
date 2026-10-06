@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileWarning } from "lucide-react";
 import { useState } from "react";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/kill-session";
+import { killSession, UndeliveredWorkError, type UndeliveredWork } from "../lib/kill-session";
 import { captureRendererEvent } from "../lib/telemetry";
 import { cn } from "../lib/utils";
 import { CHIP_ACTION_BUTTON, CHIP_WITH_ACTION } from "../lib/chip-with-action";
@@ -34,7 +34,7 @@ export function UndeliveredWorkChip({
 	onOpenSession?: () => void;
 }) {
 	const queryClient = useQueryClient();
-	const [refused, setRefused] = useState<UncommittedFile[] | null>(null);
+	const [refused, setRefused] = useState<UndeliveredWork | null>(null);
 	const label = "Undelivered";
 	const title = "Ended holding work no pull request carries — open to finish it, or Move to Done";
 
@@ -47,7 +47,7 @@ export function UndeliveredWorkChip({
 		onError: (error) => {
 			// The refusal is not a failure to report — it is the explanation the
 			// board owed the human, and it arrives with the files.
-			if (error instanceof UndeliveredWorkError) setRefused(error.files);
+			if (error instanceof UndeliveredWorkError) setRefused(error.work);
 		},
 	});
 
@@ -95,7 +95,8 @@ export function UndeliveredWorkChip({
 					onOpenChange={(next) => !next && setRefused(null)}
 					sessionId={session.id}
 					sessionTitle={session.title}
-					files={refused}
+					files={refused.files}
+					subagents={refused.subagents}
 					onOpenSession={onOpenSession}
 				/>
 			)}

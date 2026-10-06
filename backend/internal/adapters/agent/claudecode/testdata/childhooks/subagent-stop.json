@@ -1,0 +1,18 @@
+{
+ "session_id": "c83f50fb-16af-424f-bf2c-375b18f07fb6",
+ "transcript_path": "/tmp/transcript.jsonl",
+ "cwd": "/tmp/sandbox/ao-children/agent-ad4368059f77a5382",
+ "prompt_id": "bcc97b12-0a57-4771-b9e4-44ddc2bb0bf3",
+ "permission_mode": "acceptEdits",
+ "agent_id": "ad4368059f77a5382",
+ "agent_type": "general-purpose",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "SubagentStop",
+ "stop_hook_active": false,
+ "agent_transcript_path": "/tmp/transcript.jsonl",
+ "last_assistant_message": "I created `child.txt` containing `hello` in the working directory. I didn't comm",
+ "background_tasks": [],
+ "session_crons": []
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/droid"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/opencode"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 // DeriveFunc maps a native agent hook event and its raw stdin payload onto an AO
@@ -169,7 +170,7 @@ func isEndReasonToken(s string) bool {
 // the reason handed back to the agent. Unlike the derivers above it can change
 // what the agent does, so it is only ever consulted for callbacks that run
 // before the action they describe.
-type DenyFunc func(event string, payload []byte) (bool, string)
+type DenyFunc func(event string, payload []byte, childWorktrees bool) (bool, string)
 
 // NestedWorktreeDeniers maps the agent token in `ao hooks <agent> <event>` to
 // the check that refuses a nested worktree for a same-task child. An AO worker
@@ -185,12 +186,28 @@ var NestedWorktreeDeniers = map[string]DenyFunc{
 
 // DenyNestedWorktree looks up the denier for an agent token and applies it.
 // deny=false when the token has no denier or the callback is harmless.
-func DenyNestedWorktree(agent, event string, payload []byte) (bool, string) {
+func DenyNestedWorktree(agent, event string, payload []byte, childWorktrees bool) (bool, string) {
 	deny, found := NestedWorktreeDeniers[agent]
 	if !found {
 		return false, ""
 	}
-	return deny(event, payload)
+	return deny(event, payload, childWorktrees)
+}
+
+// ChildHookParsers read a harness's hook payloads for the child-worktree
+// lifecycle. Only harnesses that hand an isolated subagent's worktree to a hook
+// appear; every other harness keeps its children in the worker's worktree.
+var ChildHookParsers = map[string]func(event string, payload []byte) (ports.ChildHook, bool){
+	"claude-code": claudecode.ParseChildHook,
+}
+
+// ParseChildHook looks up the parser for an agent token and applies it.
+func ParseChildHook(agent, event string, payload []byte) (ports.ChildHook, bool) {
+	parse, found := ChildHookParsers[agent]
+	if !found {
+		return ports.ChildHook{}, false
+	}
+	return parse(event, payload)
 }
 
 // SupportsHarness reports whether a harness has an activity pipeline at all:

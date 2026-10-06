@@ -65,6 +65,10 @@ type Store interface {
 	// table that is empty for every solo session.
 	OpenCrewRunForSession(ctx context.Context, id domain.SessionID) (domain.CrewRun, bool, error)
 	ConsecutiveCrewRunDiscards(ctx context.Context, id domain.SessionID) (int, error)
+	// ListSessionChildren is the worker's child worktrees, which the board draws
+	// under the card. An indexed lookup on a table that is empty unless a worker
+	// ran an isolated subagent.
+	ListSessionChildren(ctx context.Context, id domain.SessionID) ([]domain.SessionChild, error)
 	ListPRsBySession(ctx context.Context, sessionID domain.SessionID) ([]domain.PullRequest, error)
 	ListChecks(ctx context.Context, prURL string) ([]domain.PullRequestCheck, error)
 	ListPRReviews(ctx context.Context, prURL string) ([]domain.PullRequestReview, error)
@@ -717,6 +721,10 @@ type KillOutcome struct {
 // ErrUndeliveredWork is the code a refused kill answers with.
 const ErrUndeliveredWork = "SESSION_HAS_UNDELIVERED_WORK"
 
+// ErrUnmergedChildren is the code a kill refused for the worker's child
+// worktrees answers with.
+const ErrUnmergedChildren = "SESSION_HAS_UNMERGED_CHILDREN"
+
 // Kill ends one session on a person's order.
 //
 // It REFUSES when the worktree holds work that exists nowhere else - no commit,
@@ -736,6 +744,9 @@ func (s *Service) Kill(ctx context.Context, id domain.SessionID, in KillInput) (
 	}
 	if res.Reason == sessionmanager.ReasonWorkspaceDirty && !res.Terminated {
 		return KillOutcome{}, undeliveredWorkError(id, res)
+	}
+	if res.Reason == sessionmanager.ReasonChildrenUndelivered && !res.Terminated {
+		return KillOutcome{}, unmergedChildrenError(id, res)
 	}
 	out := KillOutcome{
 		Terminated:   res.Terminated,
@@ -760,15 +771,46 @@ func undeliveredWorkError(id domain.SessionID, res sessionmanager.TeardownResult
 	if len(res.Undelivered) == 1 {
 		noun = "file"
 	}
-	return apierr.Conflict(ErrUndeliveredWork, fmt.Sprintf(
-		"%s still holds %d uncommitted %s that no pull request carries, so it was not killed and nothing was torn down. Finish and deliver the work, or discard it deliberately.",
-		id, len(res.Undelivered), noun,
-	), map[string]any{
+	details := map[string]any{
 		"reason":        res.Reason,
 		"sessionId":     string(id),
 		"workspacePath": res.WorkspacePath,
 		"files":         files,
+	}
+	if len(res.UndeliveredChildren) > 0 {
+		details["children"] = childDetails(res.UndeliveredChildren)
+	}
+	return apierr.Conflict(ErrUndeliveredWork, fmt.Sprintf(
+		"%s still holds %d uncommitted %s that no pull request carries, so it was not killed and nothing was torn down. Finish and deliver the work, or discard it deliberately.",
+		id, len(res.Undelivered), noun,
+	), details)
+}
+
+// unmergedChildrenError refuses a kill while the worker's child worktrees hold
+// work its branch does not have yet. It names each child and says what a
+// discard would do, which is to keep that work rather than lose it.
+func unmergedChildrenError(id domain.SessionID, res sessionmanager.TeardownResult) error {
+	return apierr.Conflict(ErrUnmergedChildren, fmt.Sprintf(
+		"%s has %d child worktree(s) whose work is not on its branch yet, so it was not killed and nothing was torn down. Wait for them to finish and merge, or kill with discard: AO then commits each child's work onto its own branch, keeps that branch, and removes its folder.",
+		id, len(res.UndeliveredChildren),
+	), map[string]any{
+		"reason":    res.Reason,
+		"sessionId": string(id),
+		"children":  childDetails(res.UndeliveredChildren),
 	})
+}
+
+// childDetails is the wire list of a worker's undelivered children, shared by
+// both refusals so the CLI and the app read one shape.
+func childDetails(children []domain.SessionChild) []map[string]any {
+	out := make([]map[string]any, 0, len(children))
+	for _, c := range children {
+		out = append(out, map[string]any{
+			"agentId": c.AgentID, "description": c.Description, "state": string(c.State),
+			"branch": c.Branch, "worktreePath": c.WorktreePath, "detail": c.Detail,
+		})
+	}
+	return out
 }
 
 // RollbackSpawn deletes a seed-state session row, or falls back to a Kill if
@@ -1443,6 +1485,10 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("queued messages %s: %w", rec.ID, err)
 	}
+	children, err := s.store.ListSessionChildren(ctx, rec.ID)
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("children %s: %w", rec.ID, err)
+	}
 	return domain.Session{
 		SessionRecord:        rec,
 		Status:               detail.Status,
@@ -1458,6 +1504,7 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		QueuedMessagesFailed: queued.Failed,
 		CrewRun:              openRunPtr(openRun, hasOpenRun),
 		CrewRunDiscards:      discards,
+		Children:             children,
 	}, nil
 }
 

@@ -8,10 +8,11 @@ import (
 
 func TestNestedWorktreeDenial(t *testing.T) {
 	tests := []struct {
-		name    string
-		event   string
-		payload string
-		want    bool
+		name           string
+		event          string
+		payload        string
+		childWorktrees bool
+		want           bool
 	}{
 		{
 			name:    "worktree-isolated child",
@@ -20,10 +21,27 @@ func TestNestedWorktreeDenial(t *testing.T) {
 			want:    true,
 		},
 		{
+			// With AO owning child worktrees, an isolated child gets one that
+			// merges back into the worker's branch, so it is allowed.
+			name:           "worktree-isolated child when AO owns child worktrees",
+			event:          "pre-tool-use",
+			payload:        `{"tool_name":"Agent","tool_input":{"isolation":"worktree"}}`,
+			childWorktrees: true,
+			want:           false,
+		},
+		{
 			name:    "EnterWorktree",
 			event:   "pre-tool-use",
 			payload: `{"tool_name":"EnterWorktree","tool_input":{"name":"nested"}}`,
 			want:    true,
+		},
+		{
+			// EnterWorktree moves the worker itself, so it stays refused.
+			name:           "EnterWorktree when AO owns child worktrees",
+			event:          "pre-tool-use",
+			payload:        `{"tool_name":"EnterWorktree","tool_input":{"name":"nested"}}`,
+			childWorktrees: true,
+			want:           true,
 		},
 		{
 			name:    "shared-worktree child",
@@ -56,9 +74,9 @@ func TestNestedWorktreeDenial(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, _ := NestedWorktreeDenial(tt.event, []byte(tt.payload))
+			got, _ := NestedWorktreeDenial(tt.event, []byte(tt.payload), tt.childWorktrees)
 			if got != tt.want {
-				t.Fatalf("NestedWorktreeDenial(%q, %q) denied = %v, want %v", tt.event, tt.payload, got, tt.want)
+				t.Fatalf("NestedWorktreeDenial(%q, %q, %v) denied = %v, want %v", tt.event, tt.payload, tt.childWorktrees, got, tt.want)
 			}
 		})
 	}

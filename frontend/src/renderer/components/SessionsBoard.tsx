@@ -43,6 +43,7 @@ import {
 } from "../types/workspace";
 import { type Task, type TaskGates, crewChipState, reviewGateState, taskLane, workerTasks } from "../lib/crew";
 import { useTaskGates } from "../hooks/useTaskGates";
+import { ChildStrip } from "./ChildStrip";
 import { CrewStrip } from "./CrewStrip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
@@ -54,7 +55,7 @@ import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergedChip } from "./MergedChip";
 import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
 import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
-import { killSession, UndeliveredWorkError, type UncommittedFile } from "../lib/kill-session";
+import { killSession, UndeliveredWorkError, type UndeliveredWork } from "../lib/kill-session";
 import { TokenUsageChip } from "./TokenUsageChip";
 import { useAgentsQuery } from "../hooks/useAgentsQuery";
 import { Button } from "./ui/button";
@@ -884,7 +885,7 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 	const [open, setOpen] = useState(false);
 	const [confirming, setConfirming] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [refused, setRefused] = useState<UncommittedFile[] | null>(null);
+	const [refused, setRefused] = useState<UndeliveredWork | null>(null);
 
 	const kill = useMutation({
 		mutationFn: async () => {
@@ -903,7 +904,7 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 			if (e instanceof UndeliveredWorkError) {
 				setOpen(false);
 				setConfirming(false);
-				setRefused(e.files);
+				setRefused(e.work);
 				return;
 			}
 			setError(e instanceof Error ? e.message : "Move to Done failed");
@@ -933,7 +934,8 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 					onOpenChange={(next) => !next && setRefused(null)}
 					sessionId={session.id}
 					sessionTitle={session.title}
-					files={refused}
+					files={refused.files}
+					subagents={refused.subagents}
 					onOpenSession={onOpenSession}
 				/>
 			)}
@@ -1353,6 +1355,7 @@ function SessionCard({
 					{addRoleError}
 				</div>
 			)}
+			<ChildStrip items={task.members.flatMap((member) => member.children ?? [])} />
 			<div
 				className="flex items-start justify-between gap-2 px-[13px] py-2"
 				style={{ borderTop: "1px solid var(--kanban-card-divider)" }}

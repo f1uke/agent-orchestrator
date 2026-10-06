@@ -1,0 +1,30 @@
+{
+ "session_id": "27ef4778-b123-419b-a8ce-6b274d34739f",
+ "transcript_path": "/tmp/transcript.jsonl",
+ "cwd": "/tmp/sandbox/wt/worker",
+ "prompt_id": "826445ae-2543-4c13-8d8c-dbc5ffdc6bfa",
+ "permission_mode": "acceptEdits",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Agent",
+ "tool_input": {
+  "description": "Create b.md",
+  "prompt": "Use the Write tool to create b.md containing beta in your current working directory. Then stop and report what you did.",
+  "subagent_type": "general-purpose",
+  "isolation": "worktree"
+ },
+ "tool_response": {
+  "isAsync": true,
+  "status": "async_launched",
+  "agentId": "a37b1b24e43f16f13",
+  "description": "Create b.md",
+  "resolvedModel": "claude-sonnet-5-5",
+  "prompt": "Use the Write tool to create b.md containing beta in your current working directory. Then stop and report what you did.",
+  "outputFile": "/tmp/tasks/a37b1b24e43f16f13.output",
+  "canReadOutputFile": true
+ },
+ "tool_use_id": "toolu_01Pt8tBxSEWUestjq8UAKfF9",
+ "duration_ms": 1182
+}
