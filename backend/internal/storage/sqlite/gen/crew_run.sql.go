@@ -251,6 +251,67 @@ func (q *Queries) ListCrewRunsBySession(ctx context.Context, arg ListCrewRunsByS
 	return items, nil
 }
 
+const listCrewRunsByTask = `-- name: ListCrewRunsByTask :many
+SELECT id, session_id, project_id, crew_id, role, worktree_path, kind, label, attempt, detector,
+    detector_reason, gen_at_start, gen_at_end, started_at, ended_at, outcome, result, changed_paths,
+    head_sha, created_at, updated_at
+FROM crew_run WHERE session_id = ?1 OR crew_id = ?1
+ORDER BY started_at DESC, rowid DESC LIMIT ?2
+`
+
+type ListCrewRunsByTaskParams struct {
+	TaskID   domain.SessionID
+	RowLimit int64
+}
+
+// Every member's runs for one task, newest first. A crew stamps the task id
+// (dev's session id) on each run as crew_id; dev's runs from before the crew
+// formed carry none, so they are matched by dev's own session id.
+func (q *Queries) ListCrewRunsByTask(ctx context.Context, arg ListCrewRunsByTaskParams) ([]CrewRun, error) {
+	rows, err := q.db.QueryContext(ctx, listCrewRunsByTask, arg.TaskID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CrewRun{}
+	for rows.Next() {
+		var i CrewRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.ProjectID,
+			&i.CrewID,
+			&i.Role,
+			&i.WorktreePath,
+			&i.Kind,
+			&i.Label,
+			&i.Attempt,
+			&i.Detector,
+			&i.DetectorReason,
+			&i.GenAtStart,
+			&i.GenAtEnd,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.Outcome,
+			&i.Result,
+			&i.ChangedPaths,
+			&i.HeadSha,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEndedCrewRunOutcomes = `-- name: ListEndedCrewRunOutcomes :many
 SELECT outcome FROM crew_run
 WHERE session_id = ? AND ended_at IS NOT NULL

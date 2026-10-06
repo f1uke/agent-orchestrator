@@ -129,9 +129,10 @@ export function crewRunDuration(run: CrewRun, now: number): string {
 }
 
 /**
- * The CURRENT streak of discarded runs, counted from the newest backwards.
- * Mirrors the daemon's ConsecutiveCrewRunDiscards, which is what the card's lane
- * is derived from, so the strip and the board never disagree.
+ * The CURRENT streak of discarded runs in ONE member's runs, counted from the
+ * newest backwards. Mirrors the daemon's ConsecutiveCrewRunDiscards, which is
+ * what the card's lane is derived from, so the strip and the board never
+ * disagree.
  *
  * Only a TRUSTED run ends the streak. Two states are SKIPPED rather than
  * counted or treated as a clear:
@@ -158,9 +159,20 @@ export function discardStreak(runs: CrewRun[]): number {
  * The backend's domain.CappedRepeat; kept here so the copy can name it. */
 export const CREW_RUN_MAX_ATTEMPTS = 3;
 
-/** Whether the streak has spent the automatic retry and parked at NEEDS YOU. */
-export function crewRunEscalated(runs: CrewRun[]): boolean {
-	return discardStreak(runs) >= CREW_RUN_MAX_ATTEMPTS;
+/**
+ * The member whose streak has spent the automatic retry and parked the task at
+ * NEEDS YOU, if one has. A crew's strip mixes both members' runs, newest first,
+ * but a streak is one member's: dev's quiet runs between qa's discards are no
+ * evidence that qa ever got a quiet tree.
+ */
+export function crewRunEscalation(runs: CrewRun[]): { streak: number; role?: CrewRun["role"] } | undefined {
+	const members = new Map<string, CrewRun[]>();
+	for (const run of runs) members.set(run.sessionId, [...(members.get(run.sessionId) ?? []), run]);
+	for (const memberRuns of members.values()) {
+		const streak = discardStreak(memberRuns);
+		if (streak >= CREW_RUN_MAX_ATTEMPTS) return { streak, role: memberRuns[0].role };
+	}
+	return undefined;
 }
 
 /** The label line for one run: its kind, and the command if the member named one. */

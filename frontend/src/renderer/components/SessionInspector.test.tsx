@@ -981,13 +981,21 @@ describe("SessionInspector machine runs on Summary", () => {
 		updatedAt: "2026-08-21T10:01:00Z",
 	};
 
-	const respondWithRuns = (runs: unknown[]) =>
-		getMock.mockImplementation(async (path: string, init?: { params?: { path?: { sessionId?: string } } }) => {
-			if (path === "/api/v1/sessions/{sessionId}/crew/runs" && init?.params?.path?.sessionId === "sess-1") {
-				return { data: { runs } };
-			}
-			return { data: undefined };
-		});
+	// Answers only the TASK-scoped read of `task`: the strip shows every member's
+	// runs, so a read of the member's own would come back empty here.
+	const respondWithRuns = (runs: unknown[], task = "sess-1") =>
+		getMock.mockImplementation(
+			async (path: string, init?: { params?: { path?: { sessionId?: string }; query?: { scope?: string } } }) => {
+				if (
+					path === "/api/v1/sessions/{sessionId}/crew/runs" &&
+					init?.params?.path?.sessionId === task &&
+					init?.params?.query?.scope === "task"
+				) {
+					return { data: { runs } };
+				}
+				return { data: undefined };
+			},
+		);
 
 	it("shows this member's runs above the ending section", async () => {
 		respondWithRuns([crewRun]);
@@ -1004,6 +1012,22 @@ describe("SessionInspector machine runs on Summary", () => {
 		expect(within(strip).getByText("Test · npm test")).toBeInTheDocument();
 		const ended = screen.getByText("Ended").closest("section.inspector-section") as HTMLElement;
 		expect(strip.compareDocumentPosition(ended) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("shows qa the whole task's runs, dev's included, each tagged with its member", async () => {
+		respondWithRuns(
+			[
+				{ ...crewRun, id: "run-qa", sessionId: "sess-1-qa", crewId: "sess-1", role: "qa", label: "maestro test" },
+				{ ...crewRun, id: "run-dev", crewId: "sess-1", role: "dev", label: "npm test" },
+			],
+			"sess-1",
+		);
+		renderWithQuery(
+			<SessionInspector session={session([], { id: "sess-1-qa", crew: { id: "sess-1", role: "qa", hasRun: true } })} />,
+		);
+		const strip = await screen.findByRole("region", { name: "Machine runs" });
+		const rows = within(strip).getAllByTestId("crew-run-row");
+		expect(rows.map((row) => within(row).getByTestId("crew-run-role").textContent)).toEqual(["qa", "dev"]);
 	});
 
 	it("renders nothing for a session that never bracketed a run", async () => {

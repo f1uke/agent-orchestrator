@@ -179,7 +179,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		reviews:        &controllers.ReviewsController{Svc: deps.Reviews},
 		testiny:        &controllers.TestinyController{Svc: deps.Testiny},
 		iosRun:         &controllers.IOSRunController{Svc: deps.IOSRun},
-		crewRuns:       &controllers.CrewRunsController{Svc: deps.CrewRuns},
+		crewRuns:       &controllers.CrewRunsController{Svc: deps.CrewRuns, Tasks: deps.Sessions},
 		children:       &controllers.ChildrenController{Svc: deps.Children},
 		sim:            &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
 		simFlows:       &controllers.SimFlowsController{DataDir: cfg.DataDir},

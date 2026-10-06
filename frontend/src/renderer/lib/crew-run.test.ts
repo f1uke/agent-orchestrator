@@ -3,7 +3,7 @@ import {
 	CREW_RUN_MAX_ATTEMPTS,
 	type CrewRun,
 	crewRunDuration,
-	crewRunEscalated,
+	crewRunEscalation,
 	crewRunMeta,
 	crewRunState,
 	crewRunTitle,
@@ -53,7 +53,8 @@ describe("crewRunState", () => {
 });
 
 describe("discardStreak", () => {
-	const discarded = (id: string) => run({ id, endedAt: "2026-08-21T10:01:00Z", outcome: "discarded" });
+	const discardedOf = (id: string) => ({ id, endedAt: "2026-08-21T10:01:00Z", outcome: "discarded" as const });
+	const discarded = (id: string) => run(discardedOf(id));
 	const trusted = (id: string) => run({ id, endedAt: "2026-08-21T10:01:00Z", outcome: "trusted", result: "pass" });
 
 	it("counts only the CURRENT streak, newest first", () => {
@@ -82,13 +83,22 @@ describe("discardStreak", () => {
 
 	it("escalates at the cap and not before", () => {
 		const runs = Array.from({ length: CREW_RUN_MAX_ATTEMPTS }, (_, i) => discarded(`d${i}`));
-		expect(crewRunEscalated(runs.slice(0, CREW_RUN_MAX_ATTEMPTS - 1))).toBe(false);
-		expect(crewRunEscalated(runs)).toBe(true);
+		expect(crewRunEscalation(runs.slice(0, CREW_RUN_MAX_ATTEMPTS - 1))).toBeUndefined();
+		expect(crewRunEscalation(runs)).toEqual({ streak: CREW_RUN_MAX_ATTEMPTS, role: undefined });
+	});
+
+	it("counts each member's streak on its own in a crew's mixed list", () => {
+		// The daemon counts a streak per session. Dev's trusted runs between qa's
+		// discards are no evidence that qa got a quiet tree, and must not clear it.
+		const qa = (id: string) => run({ ...discardedOf(id), sessionId: "w1-qa", role: "qa" });
+		const dev = (id: string) => run({ ...trusted(id), role: "dev" });
+		const runs = [qa("q3"), dev("d2"), qa("q2"), dev("d1"), qa("q1")];
+		expect(crewRunEscalation(runs)).toEqual({ streak: 3, role: "qa" });
 	});
 
 	it("reports nothing for a session that never bracketed a run", () => {
 		expect(discardStreak([])).toBe(0);
-		expect(crewRunEscalated([])).toBe(false);
+		expect(crewRunEscalation([])).toBeUndefined();
 	});
 });
 

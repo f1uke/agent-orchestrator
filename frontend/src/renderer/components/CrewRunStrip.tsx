@@ -4,18 +4,18 @@ import {
 	CREW_RUN_MAX_ATTEMPTS,
 	type CrewRun,
 	crewRunDuration,
-	crewRunEscalated,
+	crewRunEscalation,
 	crewRunMeta,
 	crewRunState,
 	crewRunTitle,
-	discardStreak,
 	PALETTE as P,
 } from "../lib/crew-run";
 
 /**
- * Summary tab - "Machine runs": every build, test suite or device pass this member
- * bracketed with `ao crew run`, newest first, and what the tree-write detector
- * concluded about each.
+ * Summary tab - "Machine runs": every build, test suite or device pass the task's
+ * members bracketed with `ao crew run`, newest first, and what the tree-write
+ * detector concluded about each. In a crew each run carries a dev or qa tag, so
+ * dev's Summary shows qa's runs too and says whose they are.
  *
  * It exists because a run thrown away silently is no better than a mixed result
  * reported as clean. A discarded run is a THIRD state next to pass and fail, and
@@ -28,8 +28,7 @@ import {
 export function CrewRunStrip({ runs }: { runs: CrewRun[] }) {
 	if (runs.length === 0) return null;
 	const now = Date.now();
-	const streak = discardStreak(runs);
-	const escalated = crewRunEscalated(runs);
+	const escalation = crewRunEscalation(runs);
 
 	return (
 		<section
@@ -57,7 +56,7 @@ export function CrewRunStrip({ runs }: { runs: CrewRun[] }) {
 				</span>
 			</div>
 
-			{escalated && <EscalationBanner streak={streak} />}
+			{escalation && <EscalationBanner streak={escalation.streak} role={escalation.role} />}
 
 			<div style={{ display: "flex", flexDirection: "column" }}>
 				{runs.map((run) => (
@@ -71,9 +70,10 @@ export function CrewRunStrip({ runs }: { runs: CrewRun[] }) {
 /**
  * The escalation. Three discards in a row means this member cannot get a quiet
  * window in its own worktree, and the automatic retry is spent - so the decision
- * is a person's, and the banner says exactly which decision.
+ * is a person's, and the banner says exactly which decision. In a crew the strip
+ * holds both members' runs, so it names the member.
  */
-function EscalationBanner({ streak }: { streak: number }) {
+function EscalationBanner({ streak, role }: { streak: number; role?: CrewRun["role"] }) {
 	return (
 		<div
 			style={{
@@ -95,9 +95,12 @@ function EscalationBanner({ streak }: { streak: number }) {
 				style={{ flex: "none", marginTop: 1 }}
 			/>
 			<span style={{ fontSize: 11.5, lineHeight: 1.45, color: P.qaFg }}>
-				<b style={{ fontWeight: 600 }}>{streak} runs discarded in a row</b> - the tree changed under each one, so none
-				of them can be trusted. Automatic re-runs stop after {CREW_RUN_MAX_ATTEMPTS}. Pause the other member so this one
-				gets a quiet tree, or accept an uncertified result.
+				<b style={{ fontWeight: 600 }}>
+					{streak} {role ? `of ${role}'s runs` : "runs"} discarded in a row
+				</b>{" "}
+				- the tree changed under each one, so none of them can be trusted. Automatic re-runs stop after{" "}
+				{CREW_RUN_MAX_ATTEMPTS}. Pause the other member so {role ?? "this one"} gets a quiet tree, or accept an
+				uncertified result.
 			</span>
 		</div>
 	);
@@ -110,6 +113,7 @@ function RunRow({ run, now }: { run: CrewRun; now: number }) {
 
 	return (
 		<div
+			data-testid="crew-run-row"
 			style={{
 				display: "flex",
 				alignItems: "flex-start",
@@ -118,7 +122,20 @@ function RunRow({ run, now }: { run: CrewRun; now: number }) {
 				borderTop: `1px solid ${P.borderExpand}`,
 			}}
 		>
-			<StatePill state={state} meta={meta} />
+			<div style={{ flex: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+				<StatePill state={state} meta={meta} />
+				{/* Under the pill, not ahead of the title: the inspector is narrow and
+				    the title is what truncates. Same chip as the split view's pane
+				    header, so a member is named one way everywhere. */}
+				{run.role && (
+					<span
+						data-testid="crew-run-role"
+						className="rounded-full border border-border-strong px-1.5 py-px font-mono text-[10px] leading-none text-muted-foreground"
+					>
+						{run.role}
+					</span>
+				)}
+			</div>
 			<div style={{ flex: 1, minWidth: 0 }}>
 				<div
 					style={{
@@ -143,8 +160,11 @@ function RunRow({ run, now }: { run: CrewRun; now: number }) {
 						</div>
 						<div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", rowGap: 4 }}>
 							{run.changedPaths.map((path) => (
+								// Too long for the column, a path loses its START: the file it
+								// names is the part that tells a person what moved.
 								<span
 									key={path}
+									title={path}
 									style={{
 										fontFamily: MONO,
 										fontSize: 10.5,
@@ -153,9 +173,14 @@ function RunRow({ run, now }: { run: CrewRun; now: number }) {
 										background: P.pillBg,
 										borderRadius: 4,
 										padding: "1px 5px",
+										maxWidth: "100%",
+										overflow: "hidden",
+										whiteSpace: "nowrap",
+										textOverflow: "ellipsis",
+										direction: "rtl",
 									}}
 								>
-									{path}
+									<bdi dir="ltr">{path}</bdi>
 								</span>
 							))}
 						</div>

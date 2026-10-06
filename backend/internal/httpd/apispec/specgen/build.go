@@ -350,6 +350,7 @@ var schemaNames = map[string]string{
 	"ControllersEndCrewRunInput":      "EndCrewRunInput",
 	"ControllersEndCrewRunResponse":   "EndCrewRunResponse",
 	"ControllersListCrewRunsResponse": "ListCrewRunsResponse",
+	"ControllersListCrewRunsQuery":    "ListCrewRunsQuery",
 	"DomainCrewRun":                   "CrewRun",
 	"ControllersCreateChildInput":     "CreateChildInput",
 	"ControllersChildResponse":        "ChildResponse",
@@ -1482,10 +1483,11 @@ func crewRunOperations() []operation {
 	return []operation{
 		{
 			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/crew/runs", id: "listCrewRuns", tag: "sessions",
-			summary:    "List a session's bracketed build/test runs, newest first",
-			pathParams: []any{controllers.SessionIDParam{}},
+			summary:    "List a session's bracketed build/test runs, or with scope=task its whole task's, newest first",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.ListCrewRunsQuery{}},
 			resps: []respUnit{
 				{http.StatusOK, controllers.ListCrewRunsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

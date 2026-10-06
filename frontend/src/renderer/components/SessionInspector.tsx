@@ -357,9 +357,10 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 	// derived purely from the PR summaries + session activity.
 	// Skipped for prepared TODOs and orchestrator sessions (no merge pipeline).
 	const readiness = deriveReadiness(session, prSummaries);
-	// Machine runs answer "can this member's build/test result be trusted", a
-	// merge-readiness question, so they sit right under the strip.
-	const crewRuns = useSessionCrewRuns(session.id);
+	// Machine runs answer "can this task's build/test results be trusted", a
+	// merge-readiness question, so they sit right under the strip. They are the
+	// whole task's, so dev sees qa's runs and qa sees dev's.
+	const crewRuns = useSessionCrewRuns(taskKeyOf(session));
 	const showReadiness = session.kind !== "orchestrator" && !session.isTodo;
 	// Pin the still-actionable PRs/MRs (open, draft) to the top — they're what
 	// needs attention — and sink merged/closed ones into a de-emphasized "archive"

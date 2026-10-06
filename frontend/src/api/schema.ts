@@ -1075,7 +1075,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List a session's bracketed build/test runs, newest first */
+        /** List a session's bracketed build/test runs, or with scope=task its whole task's, newest first */
         get: operations["listCrewRuns"];
         put?: never;
         /** Open a run bracket: attach the tree-write detector and read the worktree's write generation */
@@ -3409,7 +3409,11 @@ export interface components {
             outcome?: string;
             projectId: string;
             result?: string;
-            role?: string;
+            /**
+             * @description The crew member that made the run. Absent when the task has no crew.
+             * @enum {string}
+             */
+            role?: "dev" | "qa";
             sessionId: string;
             /** Format: date-time */
             startedAt: string;
@@ -8981,7 +8985,10 @@ export interface operations {
     };
     listCrewRuns: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description task returns the runs of every member of the session's task (dev and qa), each naming its role. Omitted returns the session's own runs. */
+                scope?: "task";
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */
@@ -8998,6 +9005,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListCrewRunsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Internal Server Error */

@@ -1747,20 +1747,26 @@ function windowMockDiff(lines: DiffContextResponse["lines"]): DiffContextRespons
 }
 
 /**
- * Bracketed machine runs for the Summary tab's "Machine runs" strip.
+ * Bracketed machine runs for the Summary tab's "Machine runs" strip, by task
+ * (dev's session id), as `?scope=task` answers them: every member's runs, each
+ * tagged with its role because all three demo tasks have a crew.
  *
- * `demo-working` is the interesting one: three runs discarded in a row, which is
- * the state the escalation exists for. `demo-ready` shows the ordinary case - a
- * clean run whose result can be believed - and every other session returns
- * NOTHING, because a session that never brackets a run must get exactly the
- * Summary tab it had before this existed.
+ * `demo-working` is the interesting one: three of dev's runs discarded in a
+ * row, which is the state the escalation exists for. `demo-ready` shows the
+ * ordinary case - a clean run whose result can be believed - and
+ * `demo-qa-testing` shows both members on one strip: dev's build passed, qa's
+ * device pass was discarded because dev wrote mid-run. Every other task returns
+ * NOTHING, because a task that never brackets a run must get exactly the Summary
+ * tab it had before this existed.
  */
-export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrewRunsResponse"] {
+export function mockCrewRuns(taskId: string): components["schemas"]["ListCrewRunsResponse"] {
 	const run = (over: Partial<components["schemas"]["CrewRun"]>): components["schemas"]["CrewRun"] =>
 		({
-			id: `${sessionId}-${over.id ?? "r"}`,
-			sessionId,
+			id: `${taskId}-${over.id ?? "r"}`,
+			sessionId: taskId,
 			projectId: "agent-orchestrator",
+			crewId: taskId,
+			role: "dev",
 			attempt: 1,
 			detector: "live",
 			genAtStart: 0,
@@ -1772,7 +1778,35 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
 			...over,
 		}) as components["schemas"]["CrewRun"];
 
-	if (sessionId === "demo-working") {
+	if (taskId === "demo-qa-testing") {
+		return {
+			runs: [
+				run({
+					id: "q1",
+					sessionId: "demo-qa-testing-qa",
+					role: "qa",
+					kind: "device",
+					label: "maestro test share-sheet-empty.yaml",
+					startedAt: minutesAgo(6),
+					endedAt: minutesAgo(4),
+					outcome: "discarded",
+					result: "pass",
+					changedPaths: ["ShareSheet/EmptyStateView.swift"],
+				}),
+				run({
+					id: "d1",
+					kind: "build",
+					label: "xcodebuild -scheme App build",
+					startedAt: minutesAgo(12),
+					endedAt: minutesAgo(9),
+					outcome: "trusted",
+					result: "pass",
+				}),
+			],
+		};
+	}
+
+	if (taskId === "demo-working") {
 		return {
 			runs: [
 				run({
@@ -1830,7 +1864,7 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
 			],
 		};
 	}
-	if (sessionId === "demo-ready") {
+	if (taskId === "demo-ready") {
 		return {
 			runs: [
 				run({
