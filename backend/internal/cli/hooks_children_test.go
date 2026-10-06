@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -174,5 +175,23 @@ func TestHooks_IsolatedChildIsAllowedWhenAOOwnsChildWorktrees(t *testing.T) {
 	}
 	if strings.Contains(out, "deny") {
 		t.Fatalf("stdout = %q, want no denial", out)
+	}
+}
+
+func TestHooks_APausedSubagentIsLeftAlone(t *testing.T) {
+	cs := childHookEnv(t, map[string]string{
+		"/api/v1/sessions/ao-7/children/a1/stop": `{"known":true}`,
+	})
+	transcript := t.TempDir() + "/agent-a1.jsonl"
+	if err := os.WriteFile(transcript, []byte(`Command running in background with ID: sh1. Output is being written to: /x`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	payload := `{"hook_event_name":"SubagentStop","agent_id":"a1","agent_transcript_path":"` + transcript + `","background_tasks":[{"id":"sh1","type":"shell","status":"running"}]}`
+	out, _, err := executeCLI(t, Deps{In: strings.NewReader(payload), ProcessAlive: func(int) bool { return true }}, "hooks", "claude-code", "subagent-stop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "" || cs.called("/api/v1/sessions/ao-7/children/a1/stop") {
+		t.Fatalf("a subagent waiting on its own background shell was settled (stdout %q)", out)
 	}
 }

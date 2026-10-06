@@ -1,8 +1,10 @@
 package claudecode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -82,12 +84,14 @@ func versionAtLeast(v, floor [3]int) bool {
 // its own tool calls.
 func ParseChildHook(event string, payload []byte) (ports.ChildHook, bool) {
 	var p struct {
-		Cwd       string `json:"cwd"`
-		Name      string `json:"name"`
-		AgentID   string `json:"agent_id"`
-		AgentType string `json:"agent_type"`
-		ToolName  string `json:"tool_name"`
-		ToolInput struct {
+		Cwd                 string           `json:"cwd"`
+		Name                string           `json:"name"`
+		AgentID             string           `json:"agent_id"`
+		AgentType           string           `json:"agent_type"`
+		AgentTranscriptPath string           `json:"agent_transcript_path"`
+		BackgroundTasks     []backgroundTask `json:"background_tasks"`
+		ToolName            string           `json:"tool_name"`
+		ToolInput           struct {
 			Description  string `json:"description"`
 			SubagentType string `json:"subagent_type"`
 		} `json:"tool_input"`
@@ -102,7 +106,10 @@ func ParseChildHook(event string, payload []byte) (ports.ChildHook, bool) {
 	case "subagent-start":
 		return ports.ChildHook{Kind: ports.ChildHookStart, NativeEvent: "SubagentStart", AgentID: p.AgentID, AgentType: p.AgentType}, p.AgentID != ""
 	case "subagent-stop":
-		return ports.ChildHook{Kind: ports.ChildHookStop, NativeEvent: "SubagentStop", AgentID: p.AgentID, AgentType: p.AgentType}, p.AgentID != ""
+		return ports.ChildHook{
+			Kind: ports.ChildHookStop, NativeEvent: "SubagentStop", AgentID: p.AgentID, AgentType: p.AgentType,
+			Paused: ownsLiveBackgroundWork(p.AgentTranscriptPath, p.BackgroundTasks),
+		}, p.AgentID != ""
 	case "user-prompt-submit":
 		return ports.ChildHook{Kind: ports.ChildHookWorkerTurn, NativeEvent: "UserPromptSubmit"}, true
 	case "post-tool-use":
@@ -118,6 +125,46 @@ func ParseChildHook(event string, payload []byte) (ports.ChildHook, bool) {
 		return hook, true
 	}
 	return ports.ChildHook{}, false
+}
+
+// backgroundTask is one entry of a Stop/SubagentStop payload's
+// background_tasks: the session's in-flight work, subagents and shells alike.
+type backgroundTask struct {
+	ID     string `json:"id"`
+	Type   string `json:"type"`
+	Status string `json:"status"`
+}
+
+// ownsLiveBackgroundWork reports whether a stopping subagent started
+// background work that is still running, which means it will resume. The
+// payload lists the whole session's background work without saying whose it
+// is, so ownership is read from the subagent's own transcript, where launching
+// it left "Command running in background with ID: <id>". Running siblings
+// (type subagent) are never the stopping subagent's own work.
+//
+// An unreadable transcript with live non-subagent work counts as paused: the
+// cost of that guess is a merge that waits, the cost of the other guess is a
+// worktree removed under a subagent that comes back to it.
+func ownsLiveBackgroundWork(transcriptPath string, tasks []backgroundTask) bool {
+	var live []string
+	for _, task := range tasks {
+		if task.Status == "running" && task.Type != "subagent" && task.ID != "" {
+			live = append(live, task.ID)
+		}
+	}
+	if len(live) == 0 {
+		return false
+	}
+	transcript, err := os.ReadFile(transcriptPath) // #nosec G304 -- the path Claude Code reported for this subagent's own transcript.
+	if err != nil {
+		return true
+	}
+	for _, id := range live {
+		if bytes.Contains(transcript, []byte("ID: "+id)) {
+			return true
+		}
+	}
+	return false
 }
 
 // agentIDFromToolResponse finds the subagent id in an Agent tool result. A

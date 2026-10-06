@@ -132,3 +132,37 @@ func readInstalledHooks(t *testing.T, workspace string) map[string][]hooksjson.M
 	}
 	return config.Hooks
 }
+
+// Found in the sandbox run: a subagent that started a background shell and
+// ended its turn fired SubagentStop while it still meant to come back, and AO
+// removed its worktree from under it. Its stop is a pause when a shell it
+// started is still running; a shell some other agent started does not count.
+func TestParseChildHookSeesASubagentPausedOnItsOwnBackgroundShell(t *testing.T) {
+	dir := t.TempDir()
+	own := filepath.Join(dir, "agent-a1.jsonl")
+	if err := os.WriteFile(own, []byte(`{"type":"tool_result","content":"Command running in background with ID: byz8ktpua. Output is being written to: /tmp/x"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stop := func(transcript, tasks string) []byte {
+		return []byte(`{"hook_event_name":"SubagentStop","agent_id":"a1","agent_type":"general-purpose","agent_transcript_path":"` + transcript + `","background_tasks":` + tasks + `}`)
+	}
+	runningShell := `[{"id":"byz8ktpua","type":"shell","status":"running","command":"sleep 20"}]`
+	cases := []struct {
+		name    string
+		payload []byte
+		paused  bool
+	}{
+		{"its own shell still running", stop(own, runningShell), true},
+		{"its own shell finished", stop(own, `[{"id":"byz8ktpua","type":"shell","status":"completed"}]`), false},
+		{"a shell another agent started", stop(own, `[{"id":"other123","type":"shell","status":"running"}]`), false},
+		{"sibling subagents still running", stop(own, `[{"id":"a2","type":"subagent","status":"running"}]`), false},
+		{"no background work", stop(own, `[]`), false},
+		{"transcript unreadable with a live shell", stop(filepath.Join(dir, "missing.jsonl"), runningShell), true},
+	}
+	for _, tc := range cases {
+		got, ok := ParseChildHook("subagent-stop", tc.payload)
+		if !ok || got.Paused != tc.paused {
+			t.Errorf("%s: paused = %v (ok %v), want %v", tc.name, got.Paused, ok, tc.paused)
+		}
+	}
+}

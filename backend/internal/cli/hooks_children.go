@@ -90,6 +90,10 @@ func (c *commandContext) reportChildHook(ctx context.Context, agent, event, sess
 			c.writeHookContext(hook.NativeEvent, res.Brief)
 		}
 	case ports.ChildHookStop:
+		if hook.Paused {
+			// It started background work and will resume: not a stop yet.
+			return
+		}
 		var res stopChildAPIResponse
 		if err := c.postJSON(ctx, base+"/"+url.PathEscape(hook.AgentID)+"/stop", nil, &res); err != nil {
 			c.reportHookFailure(agent, event, sessionID, err)

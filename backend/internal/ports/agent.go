@@ -247,6 +247,10 @@ type ChildHook struct {
 	AgentID     string
 	AgentType   string
 	Description string
+	// Paused marks a subagent stop that is not an end: the subagent started
+	// background work of its own that is still running, and will resume when
+	// it completes. AO leaves such a child alone until it stops for real.
+	Paused bool
 }
 
 // RestoreConfig carries inputs needed to continue an existing native agent session.
