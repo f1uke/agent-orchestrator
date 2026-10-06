@@ -66,6 +66,12 @@ The only persistent session state is:
   by itself mid-task from one AO reclaimed, and that difference is what someone asking
   "why did it disappear?" needs.
 - PR facts — `pr`, `pr_checks`, `pr_comment` tables
+- `session_children` — A worker's child worktrees (see
+  [Child worktrees](#child-worktrees)): where each one's work is (`running`,
+  `merging`, `held`, `conflict`, `merged`, `removed`, `preserved`). A child whose
+  work is on neither the worker's branch nor a kept branch makes an interactive
+  `Kill` refuse with 409 `SESSION_HAS_UNMERGED_CHILDREN`; every teardown that does
+  end the worker first preserves each such child's work on its own branch.
 
 ### What is NOT Durable
 
@@ -370,6 +376,41 @@ Every resolved request carries `X-AO-Session-Resolved: <given> -> <ao id> (tmux
 <handle>)`, and the CLI prints it to stderr. That is load-bearing rather than
 decorative: because the two crew members are indistinguishable by name, a silent
 substitution could message the wrong agent with nothing to show for it.
+
+### Child worktrees
+
+A worker may run file-writing subagents in parallel, each in its own worktree,
+when its harness hands worktree creation to AO. Claude Code does, through its
+`WorktreeCreate` hook (verified on 2.1.291; `claudecode.minChildWorktreeVersion`
+gates it): once that hook exists Claude Code creates no worktree itself and never
+removes one the hook created, so AO owns the whole lifecycle
+(`service/children`, git in `adapters/workspace/childtree`):
+
+- **Create.** `Agent(isolation: "worktree")` → `WorktreeCreate` → `ao hooks
+  claude-code worktree-create` → `POST /sessions/{id}/children`. AO cuts a branch
+  `ao-child/<session>/<agent>` from the worker's HEAD into
+  `<dataDir>/child-worktrees/<project>/<session>/<agent>`, outside the worker's
+  folder, provisions it like a worker's tree, and prints the path. It is the one
+  hook that fails CLOSED: the Agent call fails with AO's reason rather than run
+  without a worktree. A grandchild and `EnterWorktree` are refused.
+- **Brief.** `SubagentStart` returns the child's standing rules as
+  `additionalContext` (subagents never see the worker's system prompt).
+- **Stop.** `SubagentStop` asks a child that left changes uncommitted, or whose
+  commits conflict with the worker's branch, to fix that (a `block`, at most
+  twice), then merges it into the worker's worktree with `--no-ff`. A merge that
+  cannot run now (the worker has uncommitted edits in the same files, is on
+  another branch, or has a git operation paused) is HELD and retried on the
+  worker's next hook. A stop while the subagent still runs background work it
+  started is a pause, not an end.
+- **Tell.** The worker's own `UserPromptSubmit` and `PostToolUse` carry what
+  happened to its children since it last heard.
+- **Settle.** Teardown preserves undelivered children on their kept branches; a
+  relaunch finishes the children the old process left behind; daemon start
+  reconciles a merge a crash interrupted.
+
+A harness without such a hook, or an older Claude Code, keeps the
+shared-worktree rule: the PreToolUse guard still denies `isolation: "worktree"`
+and the worker floor says children share the worktree.
 
 ### Core Data Flow
 

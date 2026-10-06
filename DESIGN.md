@@ -408,6 +408,19 @@ is windowed (`@tanstack/react-virtual`), measured at ~370 cards: ~14 in the DOM,
 footer or pulse: muted title, a `done`/`terminated` dot with how long ago, then the
 Jira key and branch as plain text, plus Reopen and Delete (with its inline confirm).
 
+**Subagent strip (2026-10-06, new surface; the reference has no equivalent).** A
+worker that ran isolated subagents gets one more row under the crew strip, built from
+the crew strip's own parts (same hairline divider, 10px text, 9px lucide glyphs, lane
+tokens) so it reads as part of that strip rather than a new component. It is ONE line:
+the passive word `subagents` (shed to a passive `GitFork` glyph below a 190px card
+width, which is a 1280px window) followed by one pip per state - glyph + count, most
+urgent first: conflict `TriangleAlert`, held `CirclePause`, kept-on-branch `Archive`
+(all `--lane-needs-bright`), running `GitBranch` / merging `GitMerge`
+(`--lane-working-bright`), merged `GitMerge` (`--lane-merge-bright`), no changes
+`Minus` (`--fg-passive`). Who the subagents are and what to do lives in each pip's
+tooltip. A chip per subagent was tried first and stacked four lines on a ~190px card;
+`e2e/child-strip.spec.ts` keeps it on one line inside the card from 960px to 1800px.
+
 Motion: the card status glyph pulses (`--animate-status-pulse`) **only in WORKING** —
 per the Motion rule that pulse means a genuinely-live session — not in every lane.
 Card status glyph **and label take the lane colour**, not a per-sub-status colour, so

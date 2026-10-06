@@ -169,7 +169,7 @@ This is equivalent to running:
 
 ```bash
 npm run api:spec     # cd backend && go generate ./internal/httpd/apispec/...
-npm run api:ts       # npx openapi-typescript@7.4.4 backend/internal/httpd/apispec/openapi.yaml -o frontend/src/api/schema.ts
+npm run api:ts       # npx openapi-typescript@7.13.0 backend/internal/httpd/apispec/openapi.yaml -o frontend/src/api/schema.ts
 ```
 
 **Verify:**
