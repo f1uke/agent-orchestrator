@@ -720,6 +720,27 @@ func TestCrewProtocol_SoloRendersNothingAndAboutNamesAnArtifact(t *testing.T) {
 		if !strings.Contains(block, "--about <commit-sha|testiny-id>") {
 			t.Fatalf("crew %s is not told what --about names:\n%s", role, block)
 		}
+		if !strings.Contains(block, "`$AO_CREW_ID`"+" is the TASK (dev's id), which `ao testiny` and `ao session get` take") {
+			t.Fatalf("crew %s is not told which commands take the task id:\n%s", role, block)
+		}
+	}
+}
+
+// A project without Testiny renders no Testiny block; one with it names its
+// Testiny project and where drafts go in the AO project's own store.
+func TestTestinyProtocol_RendersOnlyForATestinyProject(t *testing.T) {
+	if got := TestinyProtocol("", "mer"); got != "" {
+		t.Fatalf("a project without Testiny rendered a Testiny block:\n%s", got)
+	}
+	got := TestinyProtocol("MOB", "mer")
+	for _, want := range []string{
+		"\n\n## Testiny test cases (AO)\n",
+		"Testiny project `MOB`",
+		"`~/.ao/knowledge/mer/plans/<branch>--testiny.md`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the Testiny block is missing %q:\n%s", want, got)
+		}
 	}
 }
 

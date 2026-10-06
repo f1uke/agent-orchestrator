@@ -182,7 +182,7 @@ func (m *Manager) spawnSuspendedCrewMemberLocked(ctx context.Context, project do
 			// resume, which on a first wake is always the case - and a promptless
 			// worker is refused outright (ErrNotResumable), so this must not be
 			// empty.
-			Prompt: crewMemberKickoff(role, dev, reason),
+			Prompt: crewMemberKickoff(role, dev, reason, project.Config.TestinyProject != ""),
 		},
 	}
 	rec, err := m.store.CreateSession(ctx, seed)
@@ -205,13 +205,13 @@ func (m *Manager) spawnSuspendedCrewMemberLocked(ctx context.Context, project do
 // dev's conversation is somewhere qa cannot see. Everything else qa needs is
 // standing instruction (prompts.KindQA), not a per-task message, so this stays
 // short: a task with no brief still yields a non-empty prompt.
-func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, reason domain.CrewJoinReason) string {
+func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, reason domain.CrewJoinReason, testiny bool) string {
 	var b strings.Builder
 	b.WriteString("You are ")
 	b.WriteString(string(role))
 	b.WriteString(" on this task. dev is working in the worktree you are in now, at the same time as you - read the branch's diff against its base branch to see what actually changed, rather than assuming the brief below was followed.")
 	b.WriteString("\n\n")
-	b.WriteString(crewArrival(reason))
+	b.WriteString(crewArrival(reason, testiny))
 	if brief := strings.TrimSpace(dev.Metadata.Prompt); brief != "" {
 		b.WriteString("\n\nThe brief dev was given:\n\n")
 		b.WriteString(brief)
@@ -237,8 +237,15 @@ func crewMemberKickoff(role domain.CrewRole, dev domain.SessionRecord, reason do
 // WHO ASKED - because that decides where the member looks first. dev asking means
 // the change is finished and there is a whole diff to judge; a person asking
 // means dev may still be mid-change and knows nothing about this.
-func crewArrival(reason domain.CrewJoinReason) string {
-	return crewArrivalOpening(reason) + " " + crewArrivalCommon
+//
+// On a Testiny project the runs already linked to the task are part of that
+// work in progress, so the member reads them too.
+func crewArrival(reason domain.CrewJoinReason, testiny bool) string {
+	arrival := crewArrivalOpening(reason) + " " + crewArrivalCommon
+	if testiny {
+		arrival += crewArrivalTestiny
+	}
+	return arrival
 }
 
 // crewArrivalOpening carries the two RETIRED reasons as well as the two live
@@ -260,6 +267,8 @@ func crewArrivalOpening(reason domain.CrewJoinReason) string {
 }
 
 const crewArrivalCommon = "dev has been working alone until now, so treat what is already there as work in progress rather than a blank page: read the PR and the branch's diff BEFORE you write anything. The PR may already have CI and review history; read it rather than re-deriving it."
+
+const crewArrivalTestiny = " Read the Testiny runs already linked to this task the same way, with `ao testiny runs \"$AO_CREW_ID\"`."
 
 // CrewMember returns the session filling `role` on this session's task, if any.
 // It answers for either member (ask dev for its qa, or qa for its dev), so a

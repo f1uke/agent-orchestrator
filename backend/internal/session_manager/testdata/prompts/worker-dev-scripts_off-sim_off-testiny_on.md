@@ -75,7 +75,7 @@ ao send --crew qa --about <commit-sha|testiny-id> --message "<what you need them
 - `--about` is REQUIRED and names a durable artifact: a commit, or on a Testiny project a case or run id. There is no "what do you think?": every message is about something that exists.
 - **There is no obligation to reply, because the artifact IS the reply.** dev answers a finding by COMMITTING; qa answers a handoff by RUNNING it and handing back. Do not send an acknowledgement, and do not wait for one.
 - **The caps are real, not advice.** Three messages about one subject in one direction; the fourth is refused and the task goes to NEEDS YOU for a human. Twenty per hour across the crew. If you find yourself about to send a fourth, the conversation is not converging - say so once, plainly, and let the human look.
-- `$AO_CREW_DEV_ID` and `$AO_CREW_QA_ID` name the two sessions when you need to refer to one; `$AO_CREW_ID` is the TASK (dev's id), which `ao session get` takes.
+- `$AO_CREW_DEV_ID` and `$AO_CREW_QA_ID` name the two sessions when you need to refer to one; `$AO_CREW_ID` is the TASK (dev's id), which `ao testiny` and `ao session get` take.
 
 ## Referring to sessions, pull requests, and merge requests
 
@@ -85,6 +85,16 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 - GitLab merge request → `!<num>` (e.g. `!2961`).
 
 Never write a bare session number — always `@…` or the full `<project>-<num>`.
+
+## Testiny test cases (AO)
+
+This project keeps its manual test cases in Testiny project `MOB`. When your task has a qa member, qa owns everything in this section and dev does not write to Testiny; otherwise you own it. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
+
+- **Reading Testiny needs no permission.**
+- **Every Testiny WRITE waits for the human's explicit yes**: a case, plan, run, result, attachment or milestone link. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
+- **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the evidence folder the skill names.
+- **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
+- **Your report names what you did here**: the case and run ids you created and the evidence folder path. For qa that report is the handback to dev.
 
 ## Using the ao CLI
 

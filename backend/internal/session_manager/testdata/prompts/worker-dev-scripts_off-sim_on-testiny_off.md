@@ -75,7 +75,7 @@ ao send --crew qa --about <commit-sha|testiny-id> --message "<what you need them
 - `--about` is REQUIRED and names a durable artifact: a commit, or on a Testiny project a case or run id. There is no "what do you think?": every message is about something that exists.
 - **There is no obligation to reply, because the artifact IS the reply.** dev answers a finding by COMMITTING; qa answers a handoff by RUNNING it and handing back. Do not send an acknowledgement, and do not wait for one.
 - **The caps are real, not advice.** Three messages about one subject in one direction; the fourth is refused and the task goes to NEEDS YOU for a human. Twenty per hour across the crew. If you find yourself about to send a fourth, the conversation is not converging - say so once, plainly, and let the human look.
-- `$AO_CREW_DEV_ID` and `$AO_CREW_QA_ID` name the two sessions when you need to refer to one; `$AO_CREW_ID` is the TASK (dev's id), which `ao session get` takes.
+- `$AO_CREW_DEV_ID` and `$AO_CREW_QA_ID` name the two sessions when you need to refer to one; `$AO_CREW_ID` is the TASK (dev's id), which `ao testiny` and `ao session get` take.
 
 ## Referring to sessions, pull requests, and merge requests
 
@@ -86,28 +86,39 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 
 Never write a bare session number — always `@…` or the full `<project>-<num>`.
 
-## Driving the Android emulator: scripts only (AO)
+## Driving the iOS Simulator (AO)
 
-On this project an emulator is driven ONLY by running a reusable Maestro script from the scripts store at `~/Documents/Projects/mobile-ui-scripts` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on. There is no `ao sim` for Android: scripts run through `maestro --device <serial>`, which `bin/flow` does for you.
+This project targets iOS, so a booted simulator on this machine is something you can read and drive yourself rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
 
 ```bash
-adb devices                                   # which emulators are up, by serial
-adb -s <serial> install -r <app.apk>          # put YOUR build on it first: a script resets the app it finds installed
-~/Documents/Projects/mobile-ui-scripts/bin/flow list nter
-                                              # INDEX.md: which script reaches which screen, its params, what it leaves behind
-~/Documents/Projects/mobile-ui-scripts/bin/flow run nter reach/<script> --platform android --device <serial> --param KEY=VALUE --account <id>
-adb -s <serial> exec-out screencap -p > end.png   # judge the end state
-maestro --device <serial> hierarchy           # the same screen as elements
-adb -s <serial> logcat -d -t 500              # what the app printed, when the screen does not explain it
+ao sim list                     # what exists, and what is booted
+ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
+ao sim claim                    # required before ANY touch; reading never needs it
+ao sim ax                       # the screen as elements: name, state, box, tap point
+ao sim tap --label "Continue"   # tap what `ao sim ax` NAMED; it reads the screen itself, so this replaces a read you would have run
+ao sim tap 0.5 0.93             # by point when nothing names it: the one `ao sim ax` printed, never one estimated from a screenshot
+ao sim drag 0.5 0.8 0.5 0.4     # hold one finger through a route (scrolling); `swipe` is the two-point case
+ao sim shot                     # a PNG to actually look at, plus the BUILD it was of
+ao sim log                      # what the app itself printed, when the screen does not explain it
+ao sim run --scheme <name>      # build this project from source, install it, launch it
+ao sim install ./MyApp.app      # put an already-built bundle on the device
+ao sim launch --terminate-first # start what you just installed
+ao sim release
 ```
 
-- **Reading is how you judge; a script is how you move.** A screenshot, the hierarchy and logcat are fine at any time. Step-by-step input (`adb shell input` taps, text and swipes) is not, except while authoring a missing script (below).
-- **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (`bin/flow` falls back to `$ANDROID_SERIAL`), and never wipe or kill an emulator - it may be someone else's.
-- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: find the selectors with `maestro --device <serial> hierarchy` and write the YAML. A product's iOS and Android apps share their scripts; where they differ, branch with `runFlow: when: platform: Android`. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`. The store is outside this repository: nothing there goes into your pull request.
-- **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
-- **Accounts are referred to by id.** `bin/flow accounts nter` lists them (int/uat only) and `--account <id>` passes one. Never copy an email or password into a report, commit, pull request, test case or screenshot.
+- **The device is shared** with other AO sessions and with a human in Xcode; the claim excludes other AO sessions only, on every AO daemon here (sandbox daemons too). You may power a device **on and nothing else** - no shutdown, reboot or erase, because those wipe a device or take one from whoever is on it. So when nothing is booted, boot one and carry on; a simulator is a multi-gigabyte VM, so boot the one you need and no more.
+- **The device that is yours is `$AO_SIM_UDID`**, one per crew member, so `ao sim` with no `--udid` already means yours. Other tools must be told: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. Unset means none was free - then anything that installs or mutates goes on a scratch device you name, never on whichever one is booted.
+- **A lease guards the device, not the command.** `xcrun simctl` never consults it, and dev and qa clobber each other just as easily as strangers do. Build and install with `ao sim run`, a built bundle with `ao sim install`: both take the lease as part of doing it, and run's build names no device, so it cannot reach one somebody else is driving. A raw `simctl install` chained after a claim that FAILED is how somebody's mid-verification build gets overwritten. A refusal names the holder and means nothing was written - wait, or say so.
+- **A screenshot says which build it was of**, because `xcodebuild test` reinstalls the app while running tests: captures either side of that look identical and are of different software. Compare the `Build:` line before the pictures.
+- **On a device you hold, `ao sim ax` reads every process on screen**: a web sign-in sheet, a system alert, the Paste menu, the keyboard. Tap those by name too (`ao sim tap --label Paste`). Its `Reader:` line says when it could read only the app, and why.
+- **An element marked `off screen` carries no tap point**, because it is on the page and not on the screen. Its `box` says how far away it is (a top edge past 1.0 is below the fold): scroll with `ao sim drag`, read again, then tap. `covered by` means under the tab bar, the keyboard's bar or a sheet, which would take the tap: scroll it clear or close the keyboard, then read again.
+- **An empty `ao sim ax` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so `ao sim tap` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.
 
-Everything else - the store's layout, its rules and how to set up a device - is in the store's README.
+Everything else - naming an element by its identifier, typing, buttons, zooming, recording the screen as a video, or what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.
+
+### Drive it while you work, then hand the verification over (AO)
+
+The device is yours while the change is being built: claim it, install, look, release. What you should NOT do is verify your own finished work on it. When you believe the change is done, ask for the agent whose job that is - `ao crew review` - and give it the driving: it plays the flows, captures the evidence and reports the results. It is awake and working at the same time as you from the moment it exists, so release the lease and leave the device to it rather than re-playing screens yourself; a lease you leave held is one it is blocked on. Reading (`ao sim ax`, `ao sim shot`, `ao sim log`) never needs a claim and never blocks anyone.
 
 ## Using the ao CLI
 

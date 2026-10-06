@@ -47,23 +47,30 @@ func MobileScriptGuidance(ms MobileScripts) string {
 	return ms.fill(body + mobileScriptShared + closing)
 }
 
-// MobileScriptPlay is how qa drives its checks on a script-only project,
-// and it replaces RecordedFlowLoop there. That loop teaches recording a flow by
-// driving it with `ao sim tap` and committing it into the app's repository;
-// under the rule every device run is a script from the store, which is for
-// development and lives outside the repository (CI suites keep their own home),
-// so a recorded route becomes a store script rather than a repo test.
+// MobileScriptPlay is how qa plays test cases on a script-only project, Testiny
+// on or off, and it replaces RecordedFlowLoop there. That loop records a flow by
+// driving it with `ao sim tap` and commits it into the app's repository; under
+// the rule every device run is a script from the store, so a played case
+// becomes a CASE SCRIPT in the store's cases/ layer instead (the human's
+// request, 2026-10-06): one file per behaviour, which today is how qa plays the
+// case and later is promoted into a CI test in finno-maestro.
+//
+// A case result needs two checks, and the block names both because a script
+// can prove only one. Its assertions prove the data and the behaviour; a screen
+// can show the right data and still differ from its Figma frame, so qa compares
+// each judged screenshot with the frame and cites it, and leaves the visual
+// check to a person when no frame is linked. The script's own screenshots feed
+// that comparison, so the block names no screen-reading command.
 //
 // qa only, like the loop it replaces: dev hands verification over, and a solo
 // worker has nobody to play cases for.
 func MobileScriptPlay(ms MobileScripts) string {
-	judge := "`adb -s <serial> exec-out screencap -p`, `maestro --device <serial> hierarchy`"
-	record := ""
+	record, device := "", " --platform android --device <serial>"
 	if ms.IOS {
-		judge = "`ao sim shot`, `ao sim ax`"
 		record = " When nobody knows the route, ask the human to play it ONCE in your Device tab while `ao sim flow record` runs: that one play becomes the script."
+		device = ""
 	}
-	return ms.fill(strings.NewReplacer("{{judge}}", judge, "{{record}}", record).Replace(mobileScriptPlay))
+	return ms.fill(strings.NewReplacer("{{record}}", record, "{{device}}", device).Replace(mobileScriptPlay))
 }
 
 func (ms MobileScripts) fill(s string) string {
@@ -119,12 +126,17 @@ const mobileScriptIOSClosing = "\n\n" + `Everything else - the store's layout an
 
 const mobileScriptAndroidClosing = "\n\n" + `Everything else - the store's layout, its rules and how to set up a device - is in the store's README.`
 
-const mobileScriptPlay = "\n\n" + `## Driving checks with scripts (AO)
+const mobileScriptPlay = "\n\n" + `## Playing test cases with Maestro scripts (AO)
 
-Every check you drive on a device, you drive with a script - a check meant for a person included, when you capture evidence for them.
+Every test case you play on a device, you play by running ONE case script - never by gestures, and never by running reach scripts one after another by hand. A case script is the case written down so a machine can replay it: today it is how you play the case, later it is how the case becomes an automated UI test. The store's README section "Case scripts (` + "`cases/`" + `)" is the full standard.
 
-1. Find the script in ` + "`{{store}}/projects/{{product}}/INDEX.md`" + ` that reaches the check's screen, and run it with the check's values as ` + "`--param`" + `s.
-2. Judge the end state it left ({{judge}}) and give that screenshot's path in your handback.
-3. A check that needs steps after the screen is reached gets those steps as a script too - one that runs the reach script and goes on - never as gestures. A step that cannot be undone (submit, buy, delete) stays the human's.
+1. **Find the case's script** in the Cases table of ` + "`{{store}}/projects/{{product}}/INDEX.md`" + `. On a Testiny project it is listed by its Testiny case id.
+2. **No script yet: write one**, then use it. It lives at ` + "`{{store}}/projects/{{product}}/cases/<area>/<behaviour>.yaml`" + `, named after the behaviour the case checks, never after a ticket. Its header carries one ` + "`# testiny: <project_key> TC-<id>`" + ` line per Testiny case it plays. It starts from ` + "`start/`" + `, reaches the screen through ` + "`reach/`" + ` and ` + "`common/`" + ` scripts, then runs the case's own steps and ASSERTS the case's expected result, taking a screenshot at every screen the case judges, named ` + "`{{product}}-case-<behaviour>-<step>`" + `. Verify it like any other script (above): ` + "`bin/flow check {{product}}`" + ` and two green runs from fresh. Then add its row to the Cases table, and only then trust its result.{{record}}
+3. **Play the case:** ` + "`{{store}}/bin/flow run {{product}} cases/<area>/<behaviour>{{device}} --param KEY=VALUE --account <id>`" + `. The assertions prove the DATA and the BEHAVIOUR: a failed assertion is a failed case, with the Maestro debug folder as the evidence.
+4. **Compare the screen with the DESIGN**, which no assertion proves. For every case that shows UI, compare each screenshot the case judges with the case's Figma frame - layout, spacing, copy, colour, components and states - and cite the frame you compared against. Find the frame from the ticket or the case. If neither links one, say so in your handback and leave the visual check for a person rather than guessing. A visual difference fails the case: name what differs and where.
+5. **The case PASSES only when both hold:** every assertion, and the screen against the design.
+6. **Keep the screenshots as the case's evidence.** On a Testiny project they go in the evidence folder the ` + "`managing-testiny-qa`" + ` skill names; otherwise give their path in your handback.
 
-No script reaches the check's screen: author it first (above), then drive the check.{{record}} A check whose script you cannot make pass is UNDRIVEABLE: say so in your handback, naming the missing or failing script - never a check you finish by hand.`
+A case whose script you cannot make pass, or whose next step cannot be undone (submit, buy, delete), is UNDRIVEABLE for that step: the script stops before it, and you say so in your handback with the reason from your attempt. A person plays that step. Never finish a case by hand.
+
+The store is shared with other sessions: commit only the files you added or changed, by path (` + "`git -C {{store}} commit <paths>`" + `), and name them in your handback.`

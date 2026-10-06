@@ -3437,6 +3437,11 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 				base += prompts.CheckInGate(string(taskSize.WithDefault()))
 			}
 		}
+		// Every worker kind, qa included: who owns the Testiny work depends on
+		// whether the task gains a qa, which dev cannot know when it launches,
+		// so the block says it and all three carry it. A project without Testiny
+		// renders nothing.
+		base += prompts.TestinyProtocol(cfg.TestinyProject, string(projectID))
 	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {

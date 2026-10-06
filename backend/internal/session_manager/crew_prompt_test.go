@@ -301,7 +301,7 @@ var allWorkerRoles = []domain.CrewRole{"", domain.CrewRoleDev, domain.CrewRoleQA
 
 // On a script-only iOS project every worker is taught the script workflow in
 // place of the step-by-step catalog: the catalog teaches `ao sim tap`, the one
-// thing the project rules out. qa drives its checks with scripts instead of
+// thing the project rules out. qa plays its test cases with case scripts instead of
 // recording flows into the repository.
 func TestBuildSystemPrompt_ScriptOnlyIOSReplacesTheTapCatalog(t *testing.T) {
 	cfg := domain.ProjectConfig{HasIOSSimulator: true, MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS}}
@@ -326,7 +326,7 @@ func TestBuildSystemPrompt_ScriptOnlyIOSReplacesTheTapCatalog(t *testing.T) {
 				t.Fatalf("role %q on a script-only iOS project was still taught %q:\n%s", role, gone, got)
 			}
 		}
-		play := strings.Contains(got, "## Driving checks with scripts (AO)")
+		play := strings.Contains(got, "## Playing test cases with Maestro scripts (AO)")
 		if play != (role == domain.CrewRoleQA) {
 			t.Fatalf("role %q: script play block present = %v, want it for qa only", role, play)
 		}
@@ -362,7 +362,7 @@ func TestBuildSystemPrompt_ScriptOnlyAndroidHasNoAOSim(t *testing.T) {
 				t.Fatalf("role %q on an Android project was handed %q:\n%s", role, gone, got)
 			}
 		}
-		if play := strings.Contains(got, "## Driving checks with scripts (AO)"); play != (role == domain.CrewRoleQA) {
+		if play := strings.Contains(got, "## Playing test cases with Maestro scripts (AO)"); play != (role == domain.CrewRoleQA) {
 			t.Fatalf("role %q: script play block present = %v, want it for qa only", role, play)
 		}
 	}
@@ -377,7 +377,7 @@ func TestBuildSystemPrompt_NoMobileScriptsMeansNoScriptRule(t *testing.T) {
 	} {
 		for _, role := range allWorkerRoles {
 			got := scriptOnlyPrompt(t, cfg, role)
-			for _, gone := range []string{"scripts only (AO)", "bin/flow", "## Driving checks with scripts (AO)"} {
+			for _, gone := range []string{"scripts only (AO)", "bin/flow", "## Playing test cases with Maestro scripts (AO)"} {
 				if strings.Contains(got, gone) {
 					t.Fatalf("%s project, role %q, was handed the script rule (%q):\n%s", name, role, gone, got)
 				}

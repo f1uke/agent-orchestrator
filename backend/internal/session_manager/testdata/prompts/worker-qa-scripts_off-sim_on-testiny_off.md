@@ -72,7 +72,7 @@ ao send --crew dev --about <commit-sha|testiny-id> --message "<what you need the
 - `--about` is REQUIRED and names a durable artifact: a commit, or on a Testiny project a case or run id. There is no "what do you think?": every message is about something that exists.
 - **There is no obligation to reply, because the artifact IS the reply.** dev answers a finding by COMMITTING; qa answers a handoff by RUNNING it and handing back. Do not send an acknowledgement, and do not wait for one.
 - **The caps are real, not advice.** Three messages about one subject in one direction; the fourth is refused and the task goes to NEEDS YOU for a human. Twenty per hour across the crew. If you find yourself about to send a fourth, the conversation is not converging - say so once, plainly, and let the human look.
-- `$AO_CREW_DEV_ID` and `$AO_CREW_QA_ID` name the two sessions when you need to refer to one; `$AO_CREW_ID` is the TASK (dev's id), which `ao session get` takes.
+- `$AO_CREW_DEV_ID` and `$AO_CREW_QA_ID` name the two sessions when you need to refer to one; `$AO_CREW_ID` is the TASK (dev's id), which `ao testiny` and `ao session get` take.
 
 ## Referring to sessions, pull requests, and merge requests
 
@@ -82,6 +82,54 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 - GitLab merge request → `!<num>` (e.g. `!2961`).
 
 Never write a bare session number — always `@…` or the full `<project>-<num>`.
+
+## Driving the iOS Simulator (AO)
+
+This project targets iOS, so a booted simulator on this machine is something you can read and drive yourself rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
+
+```bash
+ao sim list                     # what exists, and what is booted
+ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
+ao sim claim                    # required before ANY touch; reading never needs it
+ao sim ax                       # the screen as elements: name, state, box, tap point
+ao sim tap --label "Continue"   # tap what `ao sim ax` NAMED; it reads the screen itself, so this replaces a read you would have run
+ao sim tap 0.5 0.93             # by point when nothing names it: the one `ao sim ax` printed, never one estimated from a screenshot
+ao sim drag 0.5 0.8 0.5 0.4     # hold one finger through a route (scrolling); `swipe` is the two-point case
+ao sim shot                     # a PNG to actually look at, plus the BUILD it was of
+ao sim log                      # what the app itself printed, when the screen does not explain it
+ao sim run --scheme <name>      # build this project from source, install it, launch it
+ao sim install ./MyApp.app      # put an already-built bundle on the device
+ao sim launch --terminate-first # start what you just installed
+ao sim release
+```
+
+- **The device is shared** with other AO sessions and with a human in Xcode; the claim excludes other AO sessions only, on every AO daemon here (sandbox daemons too). You may power a device **on and nothing else** - no shutdown, reboot or erase, because those wipe a device or take one from whoever is on it. So when nothing is booted, boot one and carry on; a simulator is a multi-gigabyte VM, so boot the one you need and no more.
+- **The device that is yours is `$AO_SIM_UDID`**, one per crew member, so `ao sim` with no `--udid` already means yours. Other tools must be told: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. Unset means none was free - then anything that installs or mutates goes on a scratch device you name, never on whichever one is booted.
+- **A lease guards the device, not the command.** `xcrun simctl` never consults it, and dev and qa clobber each other just as easily as strangers do. Build and install with `ao sim run`, a built bundle with `ao sim install`: both take the lease as part of doing it, and run's build names no device, so it cannot reach one somebody else is driving. A raw `simctl install` chained after a claim that FAILED is how somebody's mid-verification build gets overwritten. A refusal names the holder and means nothing was written - wait, or say so.
+- **A screenshot says which build it was of**, because `xcodebuild test` reinstalls the app while running tests: captures either side of that look identical and are of different software. Compare the `Build:` line before the pictures.
+- **On a device you hold, `ao sim ax` reads every process on screen**: a web sign-in sheet, a system alert, the Paste menu, the keyboard. Tap those by name too (`ao sim tap --label Paste`). Its `Reader:` line says when it could read only the app, and why.
+- **An element marked `off screen` carries no tap point**, because it is on the page and not on the screen. Its `box` says how far away it is (a top edge past 1.0 is below the fold): scroll with `ao sim drag`, read again, then tap. `covered by` means under the tab bar, the keyboard's bar or a sheet, which would take the tap: scroll it clear or close the keyboard, then read again.
+- **An empty `ao sim ax` is a diagnosis, not "no elements".** It samples the foreground app before reporting nothing, and says so when that app's main thread is blocked - a blocked app answers no accessibility query and processes no touch either, so `ao sim tap` reports success and changes nothing. Act on the stack it prints; the app's view code is not where the fault is.
+
+Everything else - naming an element by its identifier, typing, buttons, zooming, recording the screen as a video, or what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.
+
+## Turning a played scenario into a test (AO)
+
+The cheapest committed UI test is not one you write from scratch - it is the one somebody already played. `ao sim flow record` hooks the hold lifecycle, so **a human's tap in YOUR Device tab and your own `ao sim tap` are captured identically**: one play, by the person who knows the scenario, becomes a flow that runs forever. This loop is YOURS - nobody else on this task does it.
+
+```bash
+ao sim claim                                        # a recording never claims a device for you
+ao sim flow record start --name "<the case>"        # then drive it yourself, or ask the human to
+                                                    # play it ONCE in your Device tab
+ao sim flow record status                           # what it has captured, without stopping it
+ao sim flow record stop --entry <entry flow>        # writes the Maestro flow
+ao sim flow check <flow.yaml>                       # parses it; needs no device at all
+ao sim flow run <flow.yaml> --udid <scratch>        # a flow relaunches the app: never the human's device
+```
+
+- `--entry` answers *how do you even reach that screen*: a recording starts wherever the app already was, and `--entry` prepends a shared entry-point flow as `runFlow` rather than re-recording the way in every time.
+- `stop` writes the flow into your session's artifact directory, OUTSIDE any repository, so committing it is a deliberate act: `--out` it into a test path, then `git commit <paths>` prefixed `test:`.
+- **Commit the flow; the next run of this check is the flow, not a person.** Asking for one play is a fair thing to ask a person, because it is the LAST time they play it.
 
 ## Using the ao CLI
 

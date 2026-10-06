@@ -178,3 +178,34 @@ func TestAttachCrewMember_SaysNothingToADevThatAskedForIt(t *testing.T) {
 		t.Fatalf("dev was messaged about a qa it asked for itself: %q", got)
 	}
 }
+
+// On a Testiny project a qa takes over the Testiny drafts and runs, so dev is
+// told to hand over any draft it wrote, and the arriving qa reads the runs
+// already linked to the task. A project without Testiny hears neither.
+func TestAttachCrewMember_HandsTheTestinyWorkToQAOnATestinyProject(t *testing.T) {
+	const handover = "qa now owns the Testiny drafts and runs for this task. Give it the path of any draft you wrote."
+	const runs = "`ao testiny runs \"$AO_CREW_ID\"`"
+	for _, testiny := range []bool{false, true} {
+		m, st, _, _, msgr := newManagerWithMessenger()
+		if testiny {
+			p := st.projects["mer"]
+			p.Config.TestinyProject = "MOB"
+			st.projects["mer"] = p
+		}
+		dev := spawnMechanical(t, m)
+		qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
+		if err != nil {
+			t.Fatalf("AttachCrewMember: %v", err)
+		}
+		notice := msgr.sentTo(dev.ID)
+		if len(notice) != 1 {
+			t.Fatalf("testiny=%v: dev was told %d times, want 1: %q", testiny, len(notice), notice)
+		}
+		if got := strings.Contains(notice[0], handover); got != testiny {
+			t.Fatalf("testiny=%v: the notice to dev hands the Testiny work over = %v:\n%s", testiny, got, notice[0])
+		}
+		if got := strings.Contains(qa.Metadata.Prompt, runs); got != testiny {
+			t.Fatalf("testiny=%v: the arriving qa is told to read the linked runs = %v:\n%s", testiny, got, qa.Metadata.Prompt)
+		}
+	}
+}

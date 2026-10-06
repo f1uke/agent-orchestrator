@@ -3,6 +3,7 @@ package sessionmanager
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
@@ -271,7 +272,12 @@ func (m *Manager) RequestCrewReview(ctx context.Context, from domain.SessionID, 
 // still better than a refused attach, and the human asked for the member.
 func (m *Manager) tellDevAMemberJoined(ctx context.Context, devID domain.SessionID, member domain.SessionRecord) {
 	ctx = msgdelivery.WithOrigin(ctx, msgdelivery.Origin{Trigger: msgdelivery.TriggerCrewNotice})
-	if _, err := m.Send(ctx, devID, crewJoinedNotice(member.CrewRole)); err != nil {
+	project, err := m.loadProject(ctx, member.ProjectID)
+	if err != nil {
+		m.logger.Warn("crew: could not read the project; telling dev without its Testiny line",
+			"crew", devID, "member", member.ID, "error", err)
+	}
+	if _, err := m.Send(ctx, devID, crewJoinedNotice(member.CrewRole, project.Config.TestinyProject != "")); err != nil {
 		m.logger.Warn("crew: could not tell dev that a member joined its task",
 			"crew", devID, "member", member.ID, "error", err)
 	}
@@ -279,10 +285,17 @@ func (m *Manager) tellDevAMemberJoined(ctx context.Context, devID domain.Session
 
 // crewJoinedNotice is what dev is told. It is written in AO's voice and marked as
 // such, and it carries only what CHANGES for dev - the fact a solo prompt gets
-// wrong the moment a crewmate exists, and how to address it.
-func crewJoinedNotice(role domain.CrewRole) string {
-	return "[AO] A **" + string(role) + "** has just been added to this task by a person, and is working in your worktree right now, at the same time as you. " +
-		"One thing your standing instructions do not know about:\n\n" +
-		"- **One worktree, one git index, and anything exclusive is contended live** - a `git add -A` sweeps up your crewmate's half-written work, and the simulator lease is one device two agents can reach for. Commit the paths you meant to commit, and bracket a build or a test run you want to trust with `ao crew run`.\n\n" +
-		"Address it by role, never by id: `ao send --crew " + string(role) + " --about <commit-sha|testiny-id> --message \"...\"`. There is no obligation to reply to this."
+// wrong the moment a crewmate exists, and how to address it. On a Testiny
+// project that includes who owns Testiny: the solo prompt's Testiny block made
+// dev the owner, and from here qa is.
+func crewJoinedNotice(role domain.CrewRole, testiny bool) string {
+	var b strings.Builder
+	b.WriteString("[AO] A **" + string(role) + "** has just been added to this task by a person, and is working in your worktree right now, at the same time as you. ")
+	b.WriteString("What your standing instructions do not know about:\n\n")
+	b.WriteString("- **One worktree, one git index, and anything exclusive is contended live** - a `git add -A` sweeps up your crewmate's half-written work, and the simulator lease is one device two agents can reach for. Commit the paths you meant to commit, and bracket a build or a test run you want to trust with `ao crew run`.\n")
+	if testiny {
+		b.WriteString("- " + string(role) + " now owns the Testiny drafts and runs for this task. Give it the path of any draft you wrote.\n")
+	}
+	b.WriteString("\nAddress it by role, never by id: `ao send --crew " + string(role) + " --about <commit-sha|testiny-id> --message \"...\"`. There is no obligation to reply to this.")
+	return b.String()
 }

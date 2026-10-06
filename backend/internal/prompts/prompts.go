@@ -677,7 +677,7 @@ const crewProtocolBody = `
 - ` + "`--about`" + ` is REQUIRED and names a durable artifact: a commit, or on a Testiny project a case or run id. There is no "what do you think?": every message is about something that exists.
 - **There is no obligation to reply, because the artifact IS the reply.** dev answers a finding by COMMITTING; qa answers a handoff by RUNNING it and handing back. Do not send an acknowledgement, and do not wait for one.
 - **The caps are real, not advice.** Three messages about one subject in one direction; the fourth is refused and the task goes to NEEDS YOU for a human. Twenty per hour across the crew. If you find yourself about to send a fourth, the conversation is not converging - say so once, plainly, and let the human look.
-- ` + "`$AO_CREW_DEV_ID`" + ` and ` + "`$AO_CREW_QA_ID`" + ` name the two sessions when you need to refer to one; ` + "`$AO_CREW_ID`" + ` is the TASK (dev's id), which ` + "`ao session get`" + ` takes.`
+- ` + "`$AO_CREW_DEV_ID`" + ` and ` + "`$AO_CREW_QA_ID`" + ` name the two sessions when you need to refer to one; ` + "`$AO_CREW_ID`" + ` is the TASK (dev's id), which ` + "`ao testiny`" + ` and ` + "`ao session get`" + ` take.`
 
 // DefaultResponseLanguage is the shipped global default for the human-facing
 // response language. It renders no directive (English == the ambient language of
