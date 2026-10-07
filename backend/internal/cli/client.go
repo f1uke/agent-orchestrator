@@ -148,6 +148,11 @@ func (c *commandContext) sendDaemonRequest(req *http.Request, out any) error {
 	// give daemon API calls far more headroom than the 2s status-probe timeout.
 	client := *c.deps.HTTPClient
 	client.Timeout = commandTimeout
+	// A command whose call takes longer bounds it with its own context
+	// deadline (an evidence upload sends recordings for minutes).
+	if deadline, ok := req.Context().Deadline(); ok && time.Until(deadline) > commandTimeout {
+		client.Timeout = 0
+	}
 	resp, err := client.Do(req) // #nosec G704 -- request target is the fixed loopback daemon URL above.
 	if err != nil {
 		return fmt.Errorf("call daemon: %w", err)
