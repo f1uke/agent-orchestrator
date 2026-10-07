@@ -61,7 +61,11 @@ describe("attentionZone is unaffected by the activity split", () => {
 			statusReason: "background_work",
 			activity: { state: "background", lastActivityAt: "" },
 		});
-		const active = boardSession({ status: "working", statusReason: "working", activity: { state: "active", lastActivityAt: "" } });
+		const active = boardSession({
+			status: "working",
+			statusReason: "working",
+			activity: { state: "active", lastActivityAt: "" },
+		});
 		expect(attentionZone(background)).toBe(attentionZone(active));
 		expect(attentionZone(background)).not.toBe("action");
 	});

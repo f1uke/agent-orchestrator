@@ -49,7 +49,14 @@ export function toSessionStatus(status?: string, isTerminated = false): SessionS
  */
 export type SessionActivityState = "active" | "idle" | "waiting_input" | "parked" | "background" | "exited" | "unknown";
 
-const sessionActivityStates = new Set<SessionActivityState>(["active", "idle", "waiting_input", "parked", "background", "exited"]);
+const sessionActivityStates = new Set<SessionActivityState>([
+	"active",
+	"idle",
+	"waiting_input",
+	"parked",
+	"background",
+	"exited",
+]);
 
 export type SessionActivity = {
 	state: SessionActivityState;
