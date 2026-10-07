@@ -842,11 +842,11 @@ export type WorkspaceSummary = {
 	 */
 	disableAutoCrew?: boolean;
 	/**
-	 * The Testiny project that holds this project's manual test cases
-	 * (ProjectConfig.testinyProject), e.g. `MOB`. Undefined means the project
-	 * does not use Testiny, so its tasks get no Testiny tab.
+	 * Whether this project keeps its manual test cases in Testiny
+	 * (ProjectConfig.usesTestiny). It names no Testiny project: each linked run
+	 * carries its own. Only a project that uses Testiny gets the Testiny tab.
 	 */
-	testinyProject?: string;
+	usesTestiny?: boolean;
 	accentColor?: string;
 	diff?: {
 		additions: number;

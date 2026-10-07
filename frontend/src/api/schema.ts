@@ -1853,7 +1853,7 @@ export interface paths {
         /** List the Testiny runs linked to a task, read live from Testiny */
         get: operations["listTestinyRuns"];
         put?: never;
-        /** Link a Testiny run to a task, once Testiny confirms it is in the project's Testiny project */
+        /** Link a Testiny run to a task, once Testiny confirms it exists, with the run's own Testiny project */
         post: operations["linkTestinyRun"];
         delete?: never;
         options?: never;
@@ -3653,6 +3653,12 @@ export interface components {
             n: number;
             rid: string;
         };
+        DomainTestinyProject: {
+            /** Format: int64 */
+            id: number;
+            key: string;
+            name: string;
+        };
         DomainTestinyRequirement: {
             /** @description The Jira issue key, e.g. MOBILITY-4839. */
             key: string;
@@ -3861,7 +3867,9 @@ export interface components {
         LinkTestinyRunInput: {
             /** @description Session id of the agent linking the run ($AO_SESSION_ID). Empty when a person links it in the app. */
             from?: string;
-            /** @description The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632). */
+            /** @description The Testiny project the run should be in: its key, name or id. Optional; when given, a run in another project is refused, as is a URL whose key names another project. */
+            project?: string;
+            /** @description The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632). Run ids are global in Testiny, so the run names its own project. */
             ref: string;
         };
         ListAgentsResponse: {
@@ -4017,8 +4025,8 @@ export interface components {
             simTrust?: components["schemas"]["DomainSimTrustConfig"];
             symlinks?: string[];
             systemPromptAdditions?: components["schemas"]["DomainSystemPromptAdditions"];
-            testinyProject?: string;
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
+            usesTestiny?: boolean;
             worker?: components["schemas"]["RoleOverride"];
         };
         ProjectGetResponse: {
@@ -4041,7 +4049,7 @@ export interface components {
             path: string;
             resolveError?: string;
             sessionPrefix: string;
-            testinyProject?: string;
+            usesTestiny: boolean;
         };
         QAEvidenceSettingsResponse: {
             /** @description An rclone path, <remote>:<path>, e.g. finnomena:QA. A run's folder goes under it at <Project>/<YYYY>/<milestone>/TP-<n> - <plan>/TR-<n> - <run>. Empty turns evidence upload off. */
@@ -5062,6 +5070,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             linkedBy: string;
+            project: components["schemas"]["DomainTestinyProject"];
             runId: components["schemas"]["TestinyRunID"];
             sessionId: string;
         };
@@ -5082,8 +5091,6 @@ export interface components {
             url: string;
         };
         TestinyRunsResponse: {
-            /** @description The project's Testiny project, as set (a key, name or id). */
-            project: string;
             /** @description The task's runs in the order they were linked. A run Testiny could not read now carries fetchError. */
             runs: components["schemas"]["TestinyRunView"][];
         };
