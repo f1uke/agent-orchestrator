@@ -1092,7 +1092,7 @@ func TestPrompts_CarryNoEmDash(t *testing.T) {
 		"testiny":             TestinyProtocol(Testiny{On: true, ProjectID: "mer"}, "", nil),
 		"language":            ResponseLanguageDirective("Thai"),
 		"confidentiality":     ConfidentialityGuard,
-		"mobile scripts":      MobileScriptGuidance(MobileScripts{Product: "nter", IOS: true, Store: "/store"}),
+		"mobile scripts":      MobileScriptGuidance(MobileScripts{Product: "nter", IOS: true, Store: "/store"}, ""),
 		"mobile scripts play": MobileScriptPlay(MobileScripts{Product: "nter", IOS: true, Store: "/store"}),
 	}
 	for name, block := range blocks {

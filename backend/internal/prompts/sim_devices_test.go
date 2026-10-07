@@ -14,8 +14,8 @@ func TestIOSDeviceBlocks_OwnCloneAndMockRule(t *testing.T) {
 	skill.Skill = "/store/projects/nter/verify"
 	for name, block := range map[string]string{
 		"catalog": SimulatorGuidance(),
-		"scripts": MobileScriptGuidance(scripts),
-		"skill":   MobileScriptGuidance(skill),
+		"scripts": MobileScriptGuidance(scripts, ""),
+		"skill":   MobileScriptGuidance(skill, ""),
 	} {
 		for _, want := range []string{"Your device is `$AO_SIM_UDID`", "Never fall back to whichever device is booted", "Never claim, boot, install on or drive a base", "failures first, success last"} {
 			if !strings.Contains(block, want) {
@@ -32,7 +32,7 @@ func TestIOSDeviceBlocks_OwnCloneAndMockRule(t *testing.T) {
 	if strings.Contains(SimulatorGuidance(), "bin/flow") {
 		t.Error("the catalog names bin/flow, which a project without mobile scripts does not have")
 	}
-	android := MobileScriptGuidance(MobileScripts{Product: "nter", Store: "/store"})
+	android := MobileScriptGuidance(MobileScripts{Product: "nter", Store: "/store"}, "")
 	if strings.Contains(android, "Real API or mock") {
 		t.Error("the Android block carries the iOS-only mock rule")
 	}
@@ -81,5 +81,38 @@ func TestCasePlay_OneShotOrderReplacesPersonOnly(t *testing.T) {
 	}
 	if !strings.Contains(TestinyProtocol(Testiny{On: true, ProjectID: "mer"}, "qa", nil), "whether each case ran against the real API or which mock set and why") {
 		t.Error("qa's handback does not say which API each case ran against")
+	}
+}
+
+// Who may drive a script-only device by hand is the human's rule (2026-10-08),
+// the same on both platforms and both block shapes: dev and a solo worker may
+// while they debug, then re-test the fix with a script; qa checks only with
+// scripts and drives by hand only to author one. A screen reached by hand is
+// evidence for nobody.
+func TestMobileScriptGuidance_HandDrivingFollowsRole(t *testing.T) {
+	for name, ms := range map[string]MobileScripts{
+		"ios":           {Product: "nter", IOS: true, Store: "/store"},
+		"android":       {Product: "nter", Store: "/store"},
+		"ios skill":     {Product: "nter", IOS: true, Store: "/store", Skill: "/store/projects/nter/verify-ios"},
+		"android skill": {Product: "nter", Store: "/store", Skill: "/store/projects/nter/verify-android"},
+	} {
+		for _, role := range []string{"", "dev", "qa"} {
+			got := MobileScriptGuidance(ms, role)
+			qa := role == "qa"
+			for want, present := range map[string]bool{
+				"Evidence comes only from a script run":                                    true,
+				"A screen you reached by hand is never evidence":                           true,
+				"are not yours, except while authoring a missing script":                   qa,
+				"are yours while you find a cause and debug a fix":                         !qa,
+				"re-test it by running the script for that screen before you call it done": !qa,
+			} {
+				if strings.Contains(got, want) != present {
+					t.Errorf("%s, role %q: carries %q = %v, want %v", name, role, want, !present, present)
+				}
+			}
+			if strings.Contains(got, "ONLY by") || strings.Contains(got, "step by step") {
+				t.Errorf("%s, role %q: still says devices move only by script:\n%s", name, role, got)
+			}
+		}
 	}
 }

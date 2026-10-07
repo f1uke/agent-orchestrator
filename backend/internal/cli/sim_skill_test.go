@@ -51,16 +51,19 @@ func TestSimSkillPage_DocumentsEverySubcommand(t *testing.T) {
 	}
 }
 
-// On a script-only project (ProjectConfig.MobileScripts) the worker prompt rules
-// out step-by-step driving, and the skill page is the next thing that agent
-// reads - so a page that still opened with "drive it with taps" and never said
-// otherwise would teach the rule's opposite one click away from the prompt. The
-// page has to say what the setting changes, and has to show the form of `flow
-// run` that runs several flows in one Maestro start-up.
+// On a script-only project (ProjectConfig.MobileScripts) the worker prompt makes
+// every check a script run and leaves driving by hand to debugging and
+// authoring, and the skill page is the next thing that agent reads - so a page
+// that still opened with "drive it with taps" and never said otherwise would
+// teach the rule's opposite one click away from the prompt. The page has to say
+// what the setting changes, who may drive by hand, and has to show the form of
+// `flow run` that runs several flows in one Maestro start-up.
 func TestSimSkillPage_TeachesTheScriptOnlyRule(t *testing.T) {
 	doc := installedSkillPage(t, "sim.md")
 	for _, want := range []string{
-		"On a script-only project, a script moves the app and you read what it left.",
+		"On a script-only project, every check is a script run and you read what it left.",
+		"qa uses them only to author a script nobody has written yet",
+		"A screen reached by hand is never evidence.",
 		"--mobile-scripts <product> --mobile-platform ios|android",
 		"never finished by hand",
 		"ao sim flow run   <file>...",

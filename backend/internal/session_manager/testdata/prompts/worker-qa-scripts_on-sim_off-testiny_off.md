@@ -65,9 +65,9 @@ Call a session or its pull request by its human-readable board name (the label o
 
 Never write a bare session number: always `@...` or the full `<project>-<num>`.
 
-## Driving the Android emulator: scripts only (AO)
+## Driving the Android emulator: checks by script (AO)
 
-On this project an emulator is driven ONLY by running a reusable Maestro script from the scripts store at `$AO_SCRIPTS_STORE` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on. There is no `ao sim` for Android: scripts run through `maestro --device <serial>`, which `bin/flow` does for you.
+On this project every check on an emulator is a run of a reusable Maestro script from the scripts store at `$AO_SCRIPTS_STORE` (product `nter`): to verify a change or take evidence, run the script that reaches that screen. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on. There is no `ao sim` for Android: scripts run through `maestro --device <serial>`, which `bin/flow` does for you.
 
 ```bash
 adb devices                                   # which emulators are up, by serial
@@ -80,9 +80,11 @@ maestro --device <serial> hierarchy           # the same screen as elements
 adb -s <serial> logcat -d -t 500              # what the app printed, when the screen does not explain it
 ```
 
-- **Reading is how you judge; a script is how you move.** A screenshot, the hierarchy and logcat are fine at any time. Step-by-step input (`adb shell input` taps, text and swipes) is not, except while authoring a missing script (below).
 - **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (`bin/flow` falls back to `$ANDROID_SERIAL`), and never wipe or kill an emulator - it may be someone else's.
-- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: find the selectors with `maestro --device <serial> hierarchy` and write the YAML. A product's iOS and Android apps share their scripts; where they differ, branch with `runFlow: when: platform: Android`. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
+- **Reading is how you judge.** A screenshot, the hierarchy and logcat are fine at any time: they never move the app.
+- **You check only with scripts.** Gestures - `adb shell input` taps, text and swipes - are not yours, except while authoring a missing script.
+- **Evidence comes only from a script run.** Every screenshot or video you attach, every Testiny result and every "verified" or "passes" you report comes from a script run. A screen you reached by hand is never evidence.
+- **No script reaches that screen yet: author one, then use it.** Find the selectors with `maestro --device <serial> hierarchy` and write the YAML. A product's iOS and Android apps share their scripts; where they differ, branch with `runFlow: when: platform: Android`. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
 - **Accounts are referred to by id.** `bin/flow accounts nter` lists them and `--account <id>` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.
 - **The store is yours: `$AO_SCRIPTS_STORE`** is this task's own git worktree of the scripts store, on its own branch. Run `bin/flow` from there and commit there, then run `ao scripts publish` so other sessions get your scripts. A refused publish names the files: merge `main` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: `git -C "$AO_SCRIPTS_STORE" merge main`. `ao scripts status` shows what is not committed or not published yet. Accounts stay in the main checkout, `/scripts/accounts/`, where `bin/flow` reads them from any worktree. Nothing in the store goes into your pull request.

@@ -45,8 +45,8 @@ type MobileScripts struct {
 //
 // Reading the screen stays the agent's (`ao sim shot/ax/log`): judging what a
 // script left behind is the one step that needs an AI, and it never moves the
-// app. Gestures are named only to be ruled out, with the one exception the rule
-// makes - authoring the script nobody has written yet.
+// app. Who may move it by hand depends on role (handRule), and role is the
+// crew role CrewProtocol takes: "qa", "dev", or "" for a solo worker.
 //
 // Android has no `ao sim`, so its block teaches `maestro --device` through the
 // same runner and says plainly that nothing leases an emulator. Which `ao sim`
@@ -63,18 +63,43 @@ type MobileScripts struct {
 // Both iOS shapes end with simAPIMocks, the human's rule for when a run may use
 // a mock, which no verify skill overrides. Android has no `bin/flow --mocks`, so
 // its blocks carry none.
-func MobileScriptGuidance(ms MobileScripts) string {
+func MobileScriptGuidance(ms MobileScripts, role string) string {
 	if ms.Skill != "" {
+		// The skill owns which commands move the device, so the rule names
+		// gestures without them.
+		hand := handRule(role, "taps, typing and swipes")
 		if ms.IOS {
-			return ms.fill(mobileScriptSkillIOS + ms.storeRule() + simAPIMocks(mockToolsScripts))
+			return ms.fill(mobileScriptSkillIOS + hand + ms.storeRule() + simAPIMocks(mockToolsScripts))
 		}
-		return ms.fill(mobileScriptSkillAndroid + ms.storeRule())
+		return ms.fill(mobileScriptSkillAndroid + hand + ms.storeRule())
 	}
 	if ms.IOS {
-		return ms.fill(mobileScriptIOS + mobileScriptShared + ms.storeRule() + mobileScriptIOSClosing + simAPIMocks(mockToolsScripts))
+		hand := handRule(role, "`ao sim tap`, `ao sim type`, `ao sim drag` and the rest")
+		return ms.fill(mobileScriptIOS + hand + mobileScriptIOSAuthor + mobileScriptShared + ms.storeRule() + mobileScriptIOSClosing + simAPIMocks(mockToolsScripts))
 	}
-	return ms.fill(mobileScriptAndroid + mobileScriptShared + ms.storeRule() + mobileScriptAndroidClosing)
+	hand := handRule(role, "`adb shell input` taps, text and swipes")
+	return ms.fill(mobileScriptAndroid + hand + mobileScriptAndroidAuthor + mobileScriptShared + ms.storeRule() + mobileScriptAndroidClosing)
 }
+
+// handRule is who may move a device by hand, and what counts as evidence (the
+// human's rule, 2026-10-08). qa checks only with scripts and drives by hand
+// only to author a missing one: everything qa does is a check. dev and a solo
+// worker may drive any way they need while they find a cause and debug a fix,
+// because a script cannot explore, then prove the fix with a script. Evidence
+// is the same for every role: a screen reached by hand is never evidence.
+func handRule(role, gestures string) string {
+	rule := handDebug
+	if role == "qa" {
+		rule = handQA
+	}
+	return strings.ReplaceAll(rule, "{{gestures}}", gestures) + handEvidence
+}
+
+const handQA = "\n" + `- **You check only with scripts.** Gestures - {{gestures}} - are not yours, except while authoring a missing script.`
+
+const handDebug = "\n" + `- **Debug by hand, prove with a script.** Gestures - {{gestures}} - and any other tool are yours while you find a cause and debug a fix. Once the fix is done, re-test it by running the script for that screen before you call it done; no script yet means authoring one.`
+
+const handEvidence = "\n" + `- **Evidence comes only from a script run.** Every screenshot or video you attach, every Testiny result and every "verified" or "passes" you report comes from a script run. A screen you reached by hand is never evidence.`
 
 // storeRule is where an agent writes scripts and how they reach other
 // sessions. A task's own worktree is published with `ao scripts publish`; the
@@ -143,9 +168,9 @@ func (ms MobileScripts) fill(s string) string {
 	).Replace(s)
 }
 
-const mobileScriptIOS = "\n\n" + `## Driving the iOS Simulator: scripts only (AO)
+const mobileScriptIOS = "\n\n" + `## Driving the iOS Simulator: checks by script (AO)
 
-On this project a simulator is driven ONLY by running a reusable Maestro script from the scripts store at ` + "`{{store}}`" + ` (product ` + "`{{product}}`" + `). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on.
+On this project every check on a simulator is a run of a reusable Maestro script from the scripts store at ` + "`{{store}}`" + ` (product ` + "`{{product}}`" + `): to verify a change or take evidence, run the script that reaches that screen. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on.
 
 ` + "```bash\n" + `ao sim list                     # every device, its role (base, or whose clone) and whether it is booted
 ao sim boot                     # power yours ON; already booted is a no-op
@@ -160,15 +185,18 @@ ao sim ax                       # the same screen as elements
 ao sim log                      # what the app printed, when the screen does not explain it
 ao sim release                  # when you are done with the device` + "\n```" + `
 
-- **Reading is how you judge; a script is how you move.** ` + "`ao sim shot`" + `, ` + "`ao sim ax`" + ` and ` + "`ao sim log`" + ` are fine at any time. Gestures - ` + "`ao sim tap`" + `, ` + "`ao sim type`" + `, ` + "`ao sim drag`" + ` and the rest - are not, except while authoring a missing script (below).
 ` + simDevices + `
 - **A lease guards the device, not the command.** ` + "`ao sim run`" + ` and ` + "`ao sim install`" + ` take it as they install; a raw ` + "`xcrun simctl`" + ` or ` + "`xcodebuild -destination`" + ` never asks it, and aimed at a device that is not yours it overwrites whoever is on it. A refusal names the holder - wait, or say so.
 - **A screenshot says which build it was of.** Compare its ` + "`Build:`" + ` line before the pictures.
-- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: ` + "`ao sim claim`" + `, ` + "`ao sim flow record start --name <screen>`" + `, drive the route once, ` + "`ao sim flow record stop --out {{store}}/projects/{{product}}/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE`" + ` (every typed or tapped VALUE becomes ` + "`${MAESTRO_NAME}`" + `; a password is pasted, never recorded) - or write the YAML yourself.`
+- **Reading is how you judge.** ` + "`ao sim shot`" + `, ` + "`ao sim ax`" + ` and ` + "`ao sim log`" + ` are fine at any time: they never move the app.`
 
-const mobileScriptAndroid = "\n\n" + `## Driving the Android emulator: scripts only (AO)
+// mobileScriptIOSAuthor opens the authoring bullet that mobileScriptShared
+// finishes.
+const mobileScriptIOSAuthor = "\n" + `- **No script reaches that screen yet: author one, then use it.** ` + "`ao sim claim`" + `, ` + "`ao sim flow record start --name <screen>`" + `, drive the route once, ` + "`ao sim flow record stop --out {{store}}/projects/{{product}}/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE`" + ` (every typed or tapped VALUE becomes ` + "`${MAESTRO_NAME}`" + `; a password is pasted, never recorded) - or write the YAML yourself.`
 
-On this project an emulator is driven ONLY by running a reusable Maestro script from the scripts store at ` + "`{{store}}`" + ` (product ` + "`{{product}}`" + `). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on. There is no ` + "`ao sim`" + ` for Android: scripts run through ` + "`maestro --device <serial>`" + `, which ` + "`bin/flow`" + ` does for you.
+const mobileScriptAndroid = "\n\n" + `## Driving the Android emulator: checks by script (AO)
+
+On this project every check on an emulator is a run of a reusable Maestro script from the scripts store at ` + "`{{store}}`" + ` (product ` + "`{{product}}`" + `): to verify a change or take evidence, run the script that reaches that screen. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on. There is no ` + "`ao sim`" + ` for Android: scripts run through ` + "`maestro --device <serial>`" + `, which ` + "`bin/flow`" + ` does for you.
 
 ` + "```bash\n" + `adb devices                                   # which emulators are up, by serial
 adb -s <serial> install -r <app.apk>          # put YOUR build on it first: a script resets the app it finds installed
@@ -179,9 +207,12 @@ adb -s <serial> exec-out screencap -p > end.png   # judge the end state
 maestro --device <serial> hierarchy           # the same screen as elements
 adb -s <serial> logcat -d -t 500              # what the app printed, when the screen does not explain it` + "\n```" + `
 
-- **Reading is how you judge; a script is how you move.** A screenshot, the hierarchy and logcat are fine at any time. Step-by-step input (` + "`adb shell input`" + ` taps, text and swipes) is not, except while authoring a missing script (below).
 - **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (` + "`bin/flow`" + ` falls back to ` + "`$ANDROID_SERIAL`" + `), and never wipe or kill an emulator - it may be someone else's.
-- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: find the selectors with ` + "`maestro --device <serial> hierarchy`" + ` and write the YAML. A product's iOS and Android apps share their scripts; where they differ, branch with ` + "`runFlow: when: platform: Android`" + `.`
+- **Reading is how you judge.** A screenshot, the hierarchy and logcat are fine at any time: they never move the app.`
+
+// mobileScriptAndroidAuthor opens the authoring bullet that mobileScriptShared
+// finishes.
+const mobileScriptAndroidAuthor = "\n" + `- **No script reaches that screen yet: author one, then use it.** Find the selectors with ` + "`maestro --device <serial> hierarchy`" + ` and write the YAML. A product's iOS and Android apps share their scripts; where they differ, branch with ` + "`runFlow: when: platform: Android`" + `.`
 
 // mobileScriptShared finishes the authoring bullet both platforms open, and adds
 // the two rules that do not depend on the device.
@@ -208,7 +239,7 @@ A case whose script you cannot make pass is UNDRIVEABLE: say so in your handback
 
 const mobileScriptSkillIOS = "\n\n" + `## Driving the iOS Simulator: the project's verify skill (AO)
 
-On this project a simulator is driven ONLY by Maestro scripts from the scripts store, and the project's ` + "`verify`" + ` skill is the one guide for building the app, health-checking the device, driving it, mocks and evidence: use it (` + "`.claude/skills/verify`" + `, or read ` + "`{{skill}}/SKILL.md`" + `). This block holds only what AO owns, and nothing in the skill overrides it.
+On this project every check on a simulator is a Maestro script from the scripts store, and the project's ` + "`verify`" + ` skill is the one guide for building the app, health-checking the device, driving it, mocks and evidence: use it (` + "`.claude/skills/verify`" + `, or read ` + "`{{skill}}/SKILL.md`" + `). This block holds only what AO owns, and nothing in the skill overrides it.
 
 ` + simDevices + `
 - **AO makes each device trust the proxy's CA** every time it boots or a session claims it.
@@ -217,7 +248,7 @@ On this project a simulator is driven ONLY by Maestro scripts from the scripts s
 
 const mobileScriptSkillAndroid = "\n\n" + `## Driving the Android emulator: the project's verify skill (AO)
 
-On this project an emulator is driven ONLY by Maestro scripts from the scripts store, and the project's ` + "`verify`" + ` skill is the one guide for building the app, checking the device, driving it, mocks and evidence: use it (` + "`.claude/skills/verify`" + `, or read ` + "`{{skill}}/SKILL.md`" + `). This block holds only what AO owns, and nothing in the skill overrides it.
+On this project every check on an emulator is a Maestro script from the scripts store, and the project's ` + "`verify`" + ` skill is the one guide for building the app, checking the device, driving it, mocks and evidence: use it (` + "`.claude/skills/verify`" + `, or read ` + "`{{skill}}/SKILL.md`" + `). This block holds only what AO owns, and nothing in the skill overrides it.
 
 - **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (` + "`bin/flow`" + ` falls back to ` + "`$ANDROID_SERIAL`" + `), and never wipe or kill an emulator - it may be someone else's.`
 
