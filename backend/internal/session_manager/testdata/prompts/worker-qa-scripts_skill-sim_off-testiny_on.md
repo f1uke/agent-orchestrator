@@ -67,9 +67,11 @@ Never write a bare session number: always `@...` or the full `<project>-<num>`.
 
 ## Driving the Android emulator: the project's verify skill (AO)
 
-On this project an emulator is driven ONLY by Maestro scripts from the scripts store, and the project's `verify` skill is the one guide for building the app, checking the device, driving it, mocks and evidence: use it (`.claude/skills/verify`, or read `$AO_SCRIPTS_STORE/projects/nter/verify/SKILL.md`). This block holds only what AO owns, and nothing in the skill overrides it.
+On this project every check on an emulator is a Maestro script from the scripts store, and the project's `verify` skill is the one guide for building the app, checking the device, driving it, mocks and evidence: use it (`.claude/skills/verify`, or read `$AO_SCRIPTS_STORE/projects/nter/verify/SKILL.md`). This block holds only what AO owns, and nothing in the skill overrides it.
 
 - **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (`bin/flow` falls back to `$ANDROID_SERIAL`), and never wipe or kill an emulator - it may be someone else's.
+- **You check only with scripts.** Gestures - taps, typing and swipes - are not yours, except while authoring a missing script.
+- **Evidence comes only from a script run.** Every screenshot or video you attach, every Testiny result and every "verified" or "passes" you report comes from a script run. A screen you reached by hand is never evidence.
 - **The store is yours: `$AO_SCRIPTS_STORE`** is this task's own git worktree of the scripts store, on its own branch. Run `bin/flow` from there and commit there, then run `ao scripts publish` so other sessions get your scripts. A refused publish names the files: merge `main` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: `git -C "$AO_SCRIPTS_STORE" merge main`. `ao scripts status` shows what is not committed or not published yet. Accounts stay in the main checkout, `/scripts/accounts/`, where `bin/flow` reads them from any worktree. Nothing in the store goes into your pull request.
 
 ## Playing test cases with Maestro scripts (AO)

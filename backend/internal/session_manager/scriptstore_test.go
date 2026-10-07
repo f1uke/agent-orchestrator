@@ -334,7 +334,7 @@ func TestPromptScripts_PointsAtTheVerifySkillOnlyWhenTheStoreHoldsIt(t *testing.
 			unsetScripts := *project.Config.MobileScripts
 			unsetScripts.VerifySkill = ""
 			unset.Config.MobileScripts = &unsetScripts
-			if g, w := prompts.MobileScriptGuidance(got), prompts.MobileScriptGuidance(m.promptScripts(ctx, unset, owner)); g != w {
+			if g, w := prompts.MobileScriptGuidance(got, ""), prompts.MobileScriptGuidance(m.promptScripts(ctx, unset, owner), ""); g != w {
 				t.Fatalf("device guidance with a missing skill differs from the guidance with none named:\n%s\n---\n%s", g, w)
 			}
 		})

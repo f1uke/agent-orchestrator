@@ -3540,15 +3540,15 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// IS WHAT CREATES ITS QA, so telling it not to would leave an iOS task
 		// with no qa for ever - plus the short note on what changes when it does.
 		// A script-only mobile project replaces the step-by-step catalog with
-		// the script workflow, on either platform: its devices are moved only
-		// by reusable scripts, so teaching `ao sim tap` there would teach the
-		// one thing the project rules out. iOS dev keeps the handover note,
+		// the script workflow, on either platform: every check there is a
+		// reusable script, and only dev or a solo worker may drive by hand,
+		// while debugging, so the block is told the role. iOS dev keeps the handover note,
 		// which is about the lease and holds unchanged; qa plays its cases with
 		// scripts instead of recording flows into the repository.
 		var caseScripts *prompts.MobileScripts
 		if cfg.MobileScripts != nil {
 			scripts := m.promptScripts(ctx, project, spec.ScriptsOwner)
-			base += prompts.MobileScriptGuidance(scripts)
+			base += prompts.MobileScriptGuidance(scripts, string(crewRole))
 			switch crewRole {
 			case domain.CrewRoleDev:
 				if scripts.IOS {

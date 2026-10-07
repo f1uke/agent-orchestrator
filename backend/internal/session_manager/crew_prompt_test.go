@@ -299,16 +299,32 @@ func scriptOnlyPrompt(t *testing.T, cfg domain.ProjectConfig, role domain.CrewRo
 
 var allWorkerRoles = []domain.CrewRole{"", domain.CrewRoleDev, domain.CrewRoleQA}
 
+// The device block is told the worker's crew role, so dev and a solo worker
+// get the by-hand debugging rule and qa the scripts-only one
+// (prompts.TestMobileScriptGuidance_HandDrivingFollowsRole has the rule).
+func TestBuildSystemPrompt_ScriptOnlyHandDrivingFollowsRole(t *testing.T) {
+	for name, cfg := range map[string]domain.ProjectConfig{
+		"ios":     {HasIOSSimulator: true, MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS}},
+		"android": {MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformAndroid, Store: "/opt/scripts"}},
+	} {
+		for _, role := range allWorkerRoles {
+			got := scriptOnlyPrompt(t, cfg, role)
+			if debug := strings.Contains(got, "Debug by hand, prove with a script"); debug == (role == domain.CrewRoleQA) {
+				t.Errorf("%s, role %q: by-hand debugging rule present = %v, want it for dev and solo only", name, role, debug)
+			}
+		}
+	}
+}
+
 // On a script-only iOS project every worker is taught the script workflow in
-// place of the step-by-step catalog: the catalog teaches `ao sim tap`, the one
-// thing the project rules out. qa plays its test cases with case scripts instead of
-// recording flows into the repository.
+// place of the step-by-step catalog. qa plays its test cases with case scripts
+// instead of recording flows into the repository.
 func TestBuildSystemPrompt_ScriptOnlyIOSReplacesTheTapCatalog(t *testing.T) {
 	cfg := domain.ProjectConfig{HasIOSSimulator: true, MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS}}
 	for _, role := range allWorkerRoles {
 		got := scriptOnlyPrompt(t, cfg, role)
 		for _, want := range []string{
-			"## Driving the iOS Simulator: scripts only (AO)",
+			"## Driving the iOS Simulator: checks by script (AO)",
 			"mobile-ui-scripts/bin/flow run nter reach/<script>",
 			"never finish the run by hand",
 			"ao sim shot",
@@ -348,7 +364,7 @@ func TestBuildSystemPrompt_ScriptOnlyAndroidHasNoAOSim(t *testing.T) {
 	for _, role := range allWorkerRoles {
 		got := scriptOnlyPrompt(t, cfg, role)
 		for _, want := range []string{
-			"## Driving the Android emulator: scripts only (AO)",
+			"## Driving the Android emulator: checks by script (AO)",
 			"/opt/scripts/bin/flow run nter reach/<script> --platform android --device <serial>",
 			"maestro --device <serial> hierarchy",
 			"Nothing leases an emulator",
@@ -377,7 +393,7 @@ func TestBuildSystemPrompt_NoMobileScriptsMeansNoScriptRule(t *testing.T) {
 	} {
 		for _, role := range allWorkerRoles {
 			got := scriptOnlyPrompt(t, cfg, role)
-			for _, gone := range []string{"scripts only (AO)", "bin/flow", "## Playing test cases with Maestro scripts (AO)"} {
+			for _, gone := range []string{"checks by script (AO)", "bin/flow", "## Playing test cases with Maestro scripts (AO)"} {
 				if strings.Contains(got, gone) {
 					t.Fatalf("%s project, role %q, was handed the script rule (%q):\n%s", name, role, gone, got)
 				}

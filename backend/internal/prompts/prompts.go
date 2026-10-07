@@ -478,7 +478,7 @@ func SimulatorHandoverToQA() string { return simulatorHandoverToQA }
 
 const simulatorHandoverToQA = "\n\n" + `### Your device, and qa's (AO)
 
-Your device is yours for the whole task: build, install and look on it while you work, but do not verify your own finished work on it. **qa gets its own device**, a clone of the same base, never yours, so you keep yours and may go on working while qa tests. What crosses is the build: ` + "`" + `ao crew review` + "`" + ` tells you how to name it.`
+Your device is yours for the whole task: build, install, debug and re-test on it while you work; the verdict on your finished work is qa's. **qa gets its own device**, a clone of the same base, never yours, so you keep yours and may go on working while qa tests. What crosses is the build: ` + "`" + `ao crew review` + "`" + ` tells you how to name it.`
 
 const simulatorGuidance = "\n\n" + `## Driving the iOS Simulator (AO)
 

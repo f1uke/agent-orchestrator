@@ -251,19 +251,20 @@ func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 
 // simScriptDecision is one reviewed decision about the SCRIPT-ONLY block
 // (prompts.MobileScriptGuidance for iOS). It has three values where the
-// catalog's has two, because that block names some commands precisely so an
-// agent does NOT use them: "gestures - `ao sim tap`, ... - are not". A check
-// can only see whether a command is named, so teach and forbid look the same
-// to it; keeping them apart here is what makes the decision readable, and what
-// stops a forbidden command from drifting into "taught" without anybody
-// writing down that the rule changed.
+// catalog's has two, because that block names some commands only inside the
+// role's rule on driving by hand: "Gestures - `ao sim tap`, ... -" are not
+// qa's, and are dev's only while it debugs. A check can only see whether a
+// command is named, so teaching and that rule look the same to it; keeping
+// them apart here is what makes the decision readable, and what stops a
+// gesture from drifting into "taught" without anybody writing down that the
+// rule changed.
 type simScriptDecision int
 
 const (
 	// scriptTeaches: named so an agent runs it.
 	scriptTeaches simScriptDecision = iota + 1
-	// scriptForbids: named only to be ruled out.
-	scriptForbids
+	// scriptGestures: named only in the role's rule on driving by hand.
+	scriptGestures
 	// scriptOmits: not named; the ao skill page covers it.
 	scriptOmits
 )
@@ -316,13 +317,14 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	"claim --model": scriptTeaches,
 	"udid":          scriptTeaches,
 	"release":       scriptTeaches,
-	// The three gestures an agent reaches for first are named to rule them
-	// out; the rest are covered by "and the rest" without spending a name on
-	// each. All of them stay allowed while authoring a missing script, which
-	// is what `flow record` below is for.
-	"tap":    scriptForbids,
-	"type":   scriptForbids,
-	"drag":   scriptForbids,
+	// The three gestures an agent reaches for first are named in the role's
+	// rule on driving by hand; the rest are covered by "and the rest" without
+	// spending a name on each. qa uses them only to author a missing script,
+	// which is what `flow record` below is for; dev and a solo worker also
+	// while they debug.
+	"tap":    scriptGestures,
+	"type":   scriptGestures,
+	"drag":   scriptGestures,
 	"swipe":  scriptOmits,
 	"key":    scriptOmits,
 	"button": scriptOmits,
@@ -360,7 +362,8 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 // mobileScriptSkillDecisions decides the `ao sim` surfaces the verify-skill
 // shape of the block names. That shape holds only what AO owns and leaves
 // building, driving and judging to the project's skill, so it names the device
-// commands that carry AO's rules and nothing that moves or reads the app.
+// commands that carry AO's rules and nothing that moves or reads the app. The
+// role's rule on driving by hand is AO's too, so it is there, in words.
 // Which devices a session has (claim, release, list, boot) is AO's: it clones
 // them, caps how many are booted, and deletes them.
 var mobileScriptSkillDecisions = map[string]bool{
@@ -394,7 +397,7 @@ func TestMobileScriptGuidance_SkillShapeNamesOnlyWhatAOOwns(t *testing.T) {
 	guidance := prompts.MobileScriptGuidance(prompts.MobileScripts{
 		Product: "nter", IOS: true, Store: "$AO_SCRIPTS_STORE", Root: "/scripts", Isolated: true,
 		Base: "main", Skill: "$AO_SCRIPTS_STORE/projects/nter/verify",
-	})
+	}, "")
 	if len(guidance) > mobileScriptSkillBudget {
 		t.Errorf("the verify-skill shape is %d bytes; it exists to be short, so keep it under %d", len(guidance), mobileScriptSkillBudget)
 	}
@@ -418,11 +421,14 @@ const mobileScriptGuidanceBudget = 6700
 
 // mobileScriptSkillBudget caps the verify-skill shape, which holds only what AO
 // owns. It was half the full block's budget until the device bullets and the
-// mock rule became AO's to say: a verify skill cannot override either.
-const mobileScriptSkillBudget = 4400
+// mock rule became AO's to say: a verify skill cannot override either. Raised
+// 4400 -> 4800 for the role's rule on driving by hand and the evidence rule,
+// the human's (2026-10-08), which no verify skill overrides either.
+const mobileScriptSkillBudget = 4800
 
 func TestMobileScriptGuidance_DecidesEverySubcommand(t *testing.T) {
-	guidance := prompts.MobileScriptGuidance(prompts.MobileScripts{Product: "nter", IOS: true, Store: "~/Documents/Projects/mobile-ui-scripts"})
+	ms := prompts.MobileScripts{Product: "nter", IOS: true, Store: "~/Documents/Projects/mobile-ui-scripts"}
+	guidance := prompts.MobileScriptGuidance(ms, "")
 
 	if len(guidance) > mobileScriptGuidanceBudget {
 		t.Errorf("the script-only guidance is %d bytes, over its %d-byte budget: every worker on a script-only iOS project always sees it, so either cut something or raise the budget deliberately", len(guidance), mobileScriptGuidanceBudget)
@@ -430,23 +436,26 @@ func TestMobileScriptGuidance_DecidesEverySubcommand(t *testing.T) {
 
 	decision := func(surface string) (bool, bool) {
 		d, reviewed := mobileScriptDecisions[surface]
-		return d == scriptTeaches || d == scriptForbids, reviewed
+		return d == scriptTeaches || d == scriptGestures, reviewed
 	}
 	// Only a TAUGHT command owes decisions about its flags and subcommands: a
-	// forbidden one is ruled out whole, flags and all.
+	// gesture is decided whole, flags and all.
 	walkInto := func(surface string) bool { return mobileScriptDecisions[surface] == scriptTeaches }
 	checkSimDecisions(t, "prompts.MobileScriptGuidance()", guidance, mapKeys(mobileScriptDecisions), decision, walkInto)
 
-	// Teaching a gesture and forbidding it name the same command, so the
-	// wording is what tells them apart: every forbidden one must sit in the
-	// sentence that rules gestures out.
-	for surface, d := range mobileScriptDecisions {
-		if d != scriptForbids {
-			continue
-		}
-		ruledOut := regexp.MustCompile(`Gestures - [^\n]*\bao sim ` + regexp.QuoteMeta(surface) + `\b[^\n]*- are not`)
-		if !ruledOut.MatchString(guidance) {
-			t.Errorf("`ao sim %s` is decided as forbidden but is not in the sentence that rules gestures out", surface)
+	// Teaching a gesture and ruling on it name the same command, so the
+	// wording is what tells them apart: in every role's block, every gesture
+	// must sit in the sentence that says when that role may use it.
+	for role, rule := range map[string]string{"": "and any other tool", "dev": "and any other tool", "qa": "are not yours"} {
+		block := prompts.MobileScriptGuidance(ms, role)
+		for surface, d := range mobileScriptDecisions {
+			if d != scriptGestures {
+				continue
+			}
+			ruled := regexp.MustCompile(`Gestures - [^\n]*\bao sim ` + regexp.QuoteMeta(surface) + `\b[^\n]* - ` + rule)
+			if !ruled.MatchString(block) {
+				t.Errorf("role %q: `ao sim %s` is decided as a gesture but is not in the sentence that says when %q may use it", role, surface, role)
+			}
 		}
 	}
 }
