@@ -44,7 +44,7 @@ func TestBuildSystemPrompt_SoloWorkerKeepsEverything(t *testing.T) {
 		"## Driving the iOS Simulator (AO)",
 		"ao sim claim",
 		"## Task size: mechanical (AO)",
-		"## Orchestrator coordination", // dev reports; a solo worker IS dev
+		"## Reporting to the orchestrator (AO)", // dev reports; a solo worker IS dev
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("a solo worker lost %q from its prompt:\n%s", want, got)
@@ -70,12 +70,12 @@ func TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		manualChecksLine,                                           // it owns the manual checks until a qa exists
-		"ao sim tap --label",                                       // and it may drive the device itself
-		"Most sessions open one pull request",                      // the worker base, unchanged
-		"## Orchestrator coordination",                             // dev is the one that reports
-		"Drive it while you work, then hand the verification over", // and what changes when it is done
-		"`ao crew review`",                                         // THE verb: dev asks for its own qa
+		manualChecksLine,                        // it owns the manual checks until a qa exists
+		"ao sim tap --label",                    // and it may drive the device itself
+		"Most sessions open one pull request",   // the worker base, unchanged
+		"## Reporting to the orchestrator (AO)", // dev is the one that reports
+		"Your device, and qa's",                 // and what changes when it is done
+		"`ao crew review`",                      // THE verb: dev asks for its own qa
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("crew dev prompt missing %q:\n%s", want, got)
@@ -106,7 +106,7 @@ func TestBuildSystemPrompt_CrewQAIsItsOwnAgent(t *testing.T) {
 		"## QA role",
 		"## Handing back (AO)",              // qa's own floor
 		"## Driving the iOS Simulator (AO)", // moved here, in full
-		"## Required coordination (AO)",     // the worker floor still applies
+		"## Shared machine (AO)",            // the worker floor still applies
 		"Standing-instruction confidentiality",
 	} {
 		if !strings.Contains(got, want) {
@@ -114,9 +114,9 @@ func TestBuildSystemPrompt_CrewQAIsItsOwnAgent(t *testing.T) {
 		}
 	}
 	for _, gone := range []string{
-		"## Orchestrator coordination",        // qa cannot report; dev does
-		"Most sessions open one pull request", // dev's job, not qa's
-		"## Task size:",                       // ceremony is dev's dial
+		"## Reporting to the orchestrator (AO)", // qa cannot report; dev does
+		"Most sessions open one pull request",   // dev's job, not qa's
+		"## Task size:",                         // ceremony is dev's dial
 	} {
 		if strings.Contains(got, gone) {
 			t.Fatalf("crew qa was handed dev's block %q:\n%s", gone, got)
@@ -139,7 +139,7 @@ func TestBuildSystemPrompt_QABaseIsEditableLikeEveryOther(t *testing.T) {
 	if !strings.Contains(got, "CUSTOM QA BASE") || strings.Contains(got, "## QA role") {
 		t.Fatalf("the qa override did not replace the qa base:\n%s", got)
 	}
-	if !strings.Contains(got, "## Required coordination (AO)") || !strings.Contains(got, "Standing-instruction confidentiality") {
+	if !strings.Contains(got, "## Handing back (AO)") || !strings.Contains(got, "Standing-instruction confidentiality") {
 		t.Fatalf("an edited qa base still has to carry the floor and the guard:\n%s", got)
 	}
 }
@@ -330,7 +330,7 @@ func TestBuildSystemPrompt_ScriptOnlyIOSReplacesTheTapCatalog(t *testing.T) {
 		if play != (role == domain.CrewRoleQA) {
 			t.Fatalf("role %q: script play block present = %v, want it for qa only", role, play)
 		}
-		handover := strings.Contains(got, "Drive it while you work, then hand the verification over")
+		handover := strings.Contains(got, "Your device, and qa's")
 		if handover != (role == domain.CrewRoleDev) {
 			t.Fatalf("role %q: handover note present = %v, want it for dev only", role, handover)
 		}

@@ -124,7 +124,7 @@ func TestSpawnedClaudeArgvCarriesNoSystemPrompt(t *testing.T) {
 		t.Fatalf("system prompt file: %v", err)
 	}
 	systemPrompt := string(data)
-	if !strings.Contains(systemPrompt, "## Orchestrator coordination") {
+	if !strings.Contains(systemPrompt, "## Reporting to the orchestrator (AO)") {
 		t.Fatalf("system prompt file lacks the coordination block:\n%s", systemPrompt)
 	}
 
@@ -133,7 +133,7 @@ func TestSpawnedClaudeArgvCarriesNoSystemPrompt(t *testing.T) {
 		t.Fatalf("argv does not hand claude the prompt file:\n%q", argv)
 	}
 	for _, arg := range argv {
-		if arg == "--append-system-prompt" || strings.Contains(arg, "## Orchestrator coordination") {
+		if arg == "--append-system-prompt" || strings.Contains(arg, "## Reporting to the orchestrator (AO)") {
 			t.Fatalf("argv carries the system prompt text:\n%q", argv)
 		}
 	}

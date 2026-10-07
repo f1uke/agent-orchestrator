@@ -98,8 +98,22 @@ func TestWorkerPrompt_NamesThePRTargetAndTheBaseFlag(t *testing.T) {
 	// branch would print `gh pr create --base ` - worse than saying nothing, so
 	// the floor's "recorded PR target" wording stands alone there.
 	t.Run("unknown target renders nothing", func(t *testing.T) {
-		if got := workerPRTargetPrompt("  "); got != "" {
-			t.Fatalf("workerPRTargetPrompt(empty) = %q, want \"\"", got)
+		if got := workerPRPrompt("  ", domain.GitConventionConfig{}, "main"); got != "" {
+			t.Fatalf("workerPRPrompt(empty, no convention) = %q, want \"\"", got)
+		}
+	})
+
+	// With no recorded target the convention still names the branch prefix,
+	// and points at the recorded target in words rather than a bare flag.
+	t.Run("unknown target keeps the convention", func(t *testing.T) {
+		got := workerPRPrompt("", domain.GitConventionConfig{Workflow: domain.GitWorkflowGitflow}, "develop")
+		for _, want := range []string{"gitflow", "recorded PR target (`develop`"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("workerPRPrompt(empty, gitflow) missing %q:\n%s", want, got)
+			}
+		}
+		if strings.Contains(got, "--base ") {
+			t.Fatalf("workerPRPrompt(empty) printed a flag with no branch:\n%s", got)
 		}
 	})
 }

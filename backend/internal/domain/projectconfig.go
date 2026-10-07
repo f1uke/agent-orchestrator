@@ -133,6 +133,15 @@ type ProjectConfig struct {
 	// It is opt-in (false) for the same reason HasWebUI is.
 	UsesTestiny bool `json:"usesTestiny,omitempty"`
 
+	// TestinySkill is the folder (absolute or ~/) of the skill that holds this
+	// team's Testiny conventions: the case standard and the language cases are
+	// written in, plans, runs, milestones and the evidence folder. AO ships no
+	// such skill and names none of its own accord (#278), so a project points
+	// at one here. Its agents are sent to it only while the folder holds a
+	// SKILL.md, the rule a verify skill follows too; otherwise they ask the
+	// human for those conventions.
+	TestinySkill string `json:"testinySkill,omitempty"`
+
 	// DisableAutoCrew turns off AUTOMATIC crew formation for this project, and
 	// nothing else.
 	//
@@ -317,6 +326,14 @@ func (c ProjectConfig) Validate() error {
 	if c.MobileScripts != nil {
 		if err := c.MobileScripts.Validate(); err != nil {
 			return err
+		}
+	}
+	if c.TestinySkill != "" {
+		if strings.TrimSpace(c.TestinySkill) != c.TestinySkill || strings.ContainsAny(c.TestinySkill, "\n\r") {
+			return fmt.Errorf("testinySkill: %q has surrounding whitespace or a line break", c.TestinySkill)
+		}
+		if !strings.HasPrefix(c.TestinySkill, "/") && !strings.HasPrefix(c.TestinySkill, "~/") {
+			return fmt.Errorf("testinySkill: %q must be absolute or start with ~/", c.TestinySkill)
 		}
 	}
 	return nil

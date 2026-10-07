@@ -4114,6 +4114,7 @@ export interface components {
             simTrust?: components["schemas"]["DomainSimTrustConfig"];
             symlinks?: string[];
             systemPromptAdditions?: components["schemas"]["DomainSystemPromptAdditions"];
+            testinySkill?: string;
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
             usesTestiny?: boolean;
             worker?: components["schemas"]["RoleOverride"];

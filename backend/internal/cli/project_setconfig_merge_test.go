@@ -133,6 +133,10 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--testiny"},
 		want: domain.ProjectConfig{UsesTestiny: true},
 	},
+	"testiny-skill": {
+		args: []string{"--testiny-skill", "~/.claude/skills/managing-testiny-qa"},
+		want: domain.ProjectConfig{TestinySkill: "~/.claude/skills/managing-testiny-qa"},
+	},
 }
 
 // captureSetConfig runs `ao project set-config demo <args...>` against a stub

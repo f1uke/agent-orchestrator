@@ -30,7 +30,7 @@ ao spawn [flags]
 
 `--agent` is an alias for `--harness`.
 
-`--from` and `--target` are distinct: `--from` is the git base ref the worktree is **cut from**, `--target` is the branch the worker's pull request **merges into**. They differ whenever a task branches off one line and lands on another — e.g. a hotfix cut from `release/2.1` that merges into `develop`. `--from` is required and omitting it fails fast without spawning; `--target` is optional and resolves to the `--from` branch when omitted. Either way the resolved target is recorded on the session and shown in its Summary tab.
+`--from` and `--target` are distinct: `--from` is the git base ref the worktree is **cut from**, `--target` is the branch the worker's pull request **merges into**. They differ whenever a task branches off one line and lands on another, e.g. a hotfix cut from `release/2.1` that merges into `develop`. `--from` is required and omitting it fails fast without spawning; `--target` is optional and resolves to the `--from` branch when omitted. Either way the resolved target is recorded on the session and shown in its Summary tab.
 
 Leave `--branch` blank to let AO name the new branch from the task (the same auto-naming the UI New task modal does when "New branch name" is left empty), or pass `--branch <name>` to set it yourself. When the project configures a git branch convention (gitflow or a custom prefix), an omitted `--branch` is auto-named on-convention; your standing orchestrator instructions describe the project's prefix, base branch, and PR target.
 

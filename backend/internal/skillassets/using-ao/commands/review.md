@@ -4,8 +4,8 @@ Manage AO code reviews of a worker's branch or PR.
 
 A review does not need a pull request. AO can review a worker's checkout **before**
 any PR/MR is opened: the pass is keyed on (branch, head commit) instead of
-(PR, head commit), the reviewer diffs the branch against its base, and — because
-there is nowhere to post — the body submitted in `ao review submit` is the only
+(PR, head commit), the reviewer diffs the branch against its base, and, because
+there is nowhere to post, the body submitted in `ao review submit` is the only
 place that review lands. Once a PR does open on that same commit, AO does not
 review it again; the pre-MR verdict already covers it.
 
@@ -25,8 +25,8 @@ ao review <subcommand> [args] [flags]
 ### ao review submit
 
 Record a reviewer's result for a worker's branch or PR. On a pass with no PR yet,
-the `--body` (or the `body` field in `--reviews`) is the whole review — write the
-summary and every finding into it, as `<path>:<line> — <finding>`, because there
+the `--body` (or the `body` field in `--reviews`) is the whole review: write the
+summary and every finding into it, as `<path>:<line>: <finding>`, because there
 is no inline comment and no PR thread carrying it.
 
 **Syntax:**
@@ -79,7 +79,7 @@ echo "Please fix the null check on line 42." | ao review submit --session mer-3 
 ```
 
 ```bash
-# Submit a pre-MR review (no PR exists yet) — the body IS the review
+# Submit a pre-MR review (no PR exists yet): the body IS the review
 printf '%s' '{ "reviews": [ { "runId": "review-run-1", "verdict": "approved", "githubReviewId": "", "body": "Looks good. No blocking findings." } ] }' \
   | ao review submit --session mer-3 --reviews -
 ```

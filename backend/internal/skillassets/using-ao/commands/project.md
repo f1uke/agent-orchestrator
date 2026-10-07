@@ -162,6 +162,7 @@ ao project set-config <id> [flags]
 | `--session-prefix string` | Displayed session-id prefix | - |
 | `--symlink stringArray` | Repo-relative path to symlink into workspaces (repeatable). `""` clears the symlinks | - |
 | `--testiny` | This project keeps its manual test cases in Testiny, so its tasks get the Testiny tab and its agents the Testiny guidance. It is not tied to one Testiny project: each linked run carries its own. `--testiny=false` turns it off | off |
+| `--testiny-skill <folder>` | The folder (absolute or `~/`) of the skill holding the team's Testiny conventions: the case standard, the language cases are written in, plans, runs and the evidence folder. Agents are pointed at it once it holds a `SKILL.md`; with none they ask the human for those conventions. `""` clears it | unset |
 | `--tracker-assignee string` | Issue assignee required for intake eligibility | - |
 | `--tracker-intake` | Enable issue-tracker intake for matching issues | off |
 | `--tracker-provider string` | Issue-tracker provider: `github` or `gitlab` | `github` |

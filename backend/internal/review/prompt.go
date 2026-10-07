@@ -46,7 +46,7 @@ func reviewTexts(spec LaunchSpec) (prompt, systemPrompt string) {
 
 	var b strings.Builder
 	if reviewIsPreMR(spec) {
-		fmt.Fprintf(&b, "Review the work on worker session %s's checkout. It has no pull/merge request yet — review the branch's diff against its base branch.\n", spec.WorkerID)
+		fmt.Fprintf(&b, "Review the work on worker session %s's checkout. It has no pull/merge request yet - review the branch's diff against its base branch.\n", spec.WorkerID)
 	} else {
 		fmt.Fprintf(&b, "Review the requested pull/merge request(s) for worker session %s.\n", spec.WorkerID)
 	}
@@ -158,9 +158,9 @@ func reviewStep1(spec LaunchSpec) string {
 // ONLY carrier for the findings: it is what AO persists on the review_run row and
 // what every AO surface reads back. Saying that plainly is what stops a reviewer
 // from writing a two-line "see the PR" summary that points at nothing.
-const preMRReviewStep1 = "1. There is no pull request or merge request for this work yet, so there is nowhere to post a review. Do NOT create one, and do not run `gh`, `glab`, `git push` or anything else that would publish this branch — reviewing is read-only.\n\n" +
+const preMRReviewStep1 = "1. There is no pull request or merge request for this work yet, so there is nowhere to post a review. Do NOT create one, and do not run `gh`, `glab`, `git push` or anything else that would publish this branch - reviewing is read-only.\n\n" +
 	"   - Read the diff yourself: find the branch's base (`git log --oneline` against the target branch, or `git merge-base`) and read `git diff <base>...HEAD`, including any uncommitted work in the checkout.\n" +
-	"   - Your review body in step 2 is the only place this review lands. Write the whole review there — the summary AND every finding, each as `<path>:<line> — <finding>` so it is actionable without an inline comment to anchor it.\n" +
+	"   - Your review body in step 2 is the only place this review lands. Write the whole review there - the summary AND every finding, each as `<path>:<line>: <finding>` so it is actionable without an inline comment to anchor it.\n" +
 	"   - Use an empty githubReviewId in step 2; there is no provider review to reference.\n"
 
 // githubReviewStep1 is the original GitHub review-posting flow, preserved
@@ -184,7 +184,7 @@ const gitlabReviewStep1 = "1. For each merge request below, post your review wit
 	"       glab mr note create <IID> -R <REPO> --resolvable=false -m '<summary markdown>'\n\n" +
 	"   - For each inline finding, add a diff comment anchored to the exact line so the worker can resolve it:\n\n" +
 	"       glab mr note create <IID> -R <REPO> --file '<path>' --line <n> -m '<finding>'\n\n" +
-	"     Use `--old-line <n>` for a removed line, or `--line A:B` for a range. If a diff comment is rejected because the line is not part of the MR diff, fold that finding into the summary note as \"<path>:<line> — <finding>\" instead of failing.\n" +
+	"     Use `--old-line <n>` for a removed line, or `--line A:B` for a range. If a diff comment is rejected because the line is not part of the MR diff, fold that finding into the summary note as \"<path>:<line>: <finding>\" instead of failing.\n" +
 	"   - Keep each -m message on one line and shell-escape any single quotes; or pipe multi-line text via stdin (printf '%s' '<summary>' | glab mr note create <IID> -R <REPO> --resolvable=false). Do not use a heredoc; reviewer panes run through an interactive PTY.\n" +
 	"   - `glab mr note create` does not print a review id, so use an empty githubReviewId for GitLab merge requests in step 2. The machine-readable verdict still goes to AO in step 2.\n"
 

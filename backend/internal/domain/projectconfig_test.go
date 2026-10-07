@@ -441,3 +441,16 @@ func TestProjectConfig_UsesTestinyRoundTrip(t *testing.T) {
 		t.Fatal("usesTestiny = false, want true")
 	}
 }
+
+func TestProjectConfig_ValidatesTestinySkill(t *testing.T) {
+	for _, ok := range []string{"", "/abs/skill", "~/.claude/skills/managing-testiny-qa"} {
+		if err := (ProjectConfig{TestinySkill: ok}).Validate(); err != nil {
+			t.Errorf("TestinySkill %q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"relative/skill", " /abs", "/abs\nnext", "~user/skill"} {
+		if err := (ProjectConfig{TestinySkill: bad}).Validate(); err == nil {
+			t.Errorf("TestinySkill %q validated, want an error", bad)
+		}
+	}
+}

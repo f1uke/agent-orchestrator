@@ -179,6 +179,7 @@ func TestPromptMatrix_TeachesNoRemovedCommand(t *testing.T) {
 		t.Run(c.name(), func(t *testing.T) {
 			got := c.build(t)
 			assertTeachesNoRemovedCommand(t, got)
+			assertCarriesNoLongDash(t, got)
 			assertTeachesNoDirectTestinyWrite(t, got)
 			assertLetsAgentsUploadEvidence(t, got)
 			assertAllowsTestAccounts(t, got)
@@ -222,7 +223,8 @@ func (c promptCell) assertTestinyBlock(t *testing.T, got string) {
 		return
 	}
 	for _, s := range []string{
-		"`managing-testiny-qa`",
+		// The matrix project names no conventions skill, so the agent asks.
+		"names no skill for its Testiny conventions",
 		"~/.ao/knowledge/mer/plans/<branch>--testiny.md",
 		"one task may hold runs from several",
 		"Pick the Testiny project from the task's Jira key",
@@ -282,10 +284,11 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 		"never with `testiny run results set` directly",
 		`ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"] [--step <n>=<STATUS> ...]`,
 		// A case with steps records each step it played on the case's own call.
-		"add `--step <n>=<STATUS>` for each step you played",
+		"Give `--step <n>=<STATUS>` for each step you played",
 		"in the same call as the case",
 		"**PASSED** only when every step passed and both checks hold, with no comment",
-		"plain Thai",
+		// The matrix renders with the default response language.
+		"plain English",
 		"UNDRIVEABLE",
 		"No Figma frame linked",
 		"`TESTINY_RESULT_SET_BY_PERSON`",
@@ -471,6 +474,17 @@ func assertTeachesNoRemovedCommand(t *testing.T, prompt string) {
 			from, to := max(0, i-120), min(len(prompt), i+120)
 			t.Errorf("prompt still says %q, which no longer holds: ...%s...", word, prompt[from:to])
 		}
+	}
+}
+
+// assertCarriesNoLongDash holds the human's no-em-dash rule over everything a
+// prompt renders, project-specific blocks included: agents copy the style of
+// their instructions.
+func assertCarriesNoLongDash(t *testing.T, prompt string) {
+	t.Helper()
+	if i := strings.IndexAny(prompt, "\u2014\u2013"); i >= 0 {
+		from, to := max(0, i-80), min(len(prompt), i+80)
+		t.Errorf("prompt carries a long dash: ...%s...", prompt[from:to])
 	}
 }
 

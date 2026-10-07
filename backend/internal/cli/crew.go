@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
 // crewSessionView is the slice of the daemon's SessionView this command reads.
@@ -147,11 +149,11 @@ func newCrewReviewCommand(ctx *commandContext) *cobra.Command {
 			if err := ctx.postJSON(cmd.Context(), "sessions/"+url.PathEscape(self)+"/crew/review", nil, &out); err != nil {
 				return explainCrewAddRefusal(err)
 			}
+			// This output is the moment dev's crew starts, so it carries the rules
+			// for sharing the task: dev's prompt holds only how to ask.
 			_, printErr := fmt.Fprintf(cmd.OutOrStdout(),
-				"%s (%s) is on this task and working, in your worktree. It reads the diff against the base branch, not your conversation.\n"+
-					"Message it by role: `ao send --crew %s --about <commit-sha> --message \"...\"`.\n"+
-					"On an iOS task it tests on its own simulator: send it the .app path and `Build:` line of the build to install.\n",
-				out.Session.ID, crewRoleOf(out.Session), crewRoleOf(out.Session))
+				"%s (%s) is on this task and working, in your worktree. It reads the diff against the base branch, not your conversation.\n\n%s\n",
+				out.Session.ID, crewRoleOf(out.Session), prompts.CrewReviewGuidance())
 			return printErr
 		},
 	}
