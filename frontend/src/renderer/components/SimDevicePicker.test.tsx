@@ -94,7 +94,9 @@ describe("SimDevicePicker", () => {
 		await openPicker();
 		await userEvent.click(within(screen.getByTestId("sim-device-UDID-C")).getByRole("button", { name: /^boot$/i }));
 
-		expect(screen.getByTestId("sim-power-confirm")).toHaveTextContent(/2 are already up, each about 4 GB. Past the boot cap/i);
+		expect(screen.getByTestId("sim-power-confirm")).toHaveTextContent(
+			/2 are already up, each about 4 GB. Past the boot cap/i,
+		);
 	});
 
 	it("cancelling the warning boots nothing", async () => {
