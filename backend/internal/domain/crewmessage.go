@@ -13,9 +13,10 @@ import (
 // speed. Nothing about being well-prompted stops a loop, so the stopping rules
 // are MECHANISM:
 //
-//  1. Every message names what it is ABOUT - a commit SHA or a smoke case id.
-//     A message with no subject is refused, so there is no "what do you think?"
-//     to answer, and every exchange is anchored to a durable artifact.
+//  1. Every message names what it is ABOUT - a commit SHA, or on a Testiny
+//     project a case or run id. A message with no subject is refused, so there
+//     is no "what do you think?" to answer, and every exchange is anchored to a
+//     durable artifact.
 //  2. CappedRepeat messages per subject per DIRECTION. The next one is refused,
 //     and refusing is what makes it terminate: the same subject always refuses,
 //     so a retry cannot turn into a loop.
@@ -59,8 +60,18 @@ type CrewMessage struct {
 func (m CrewMessage) Refused() bool { return m.RefusedReason != "" }
 
 // NormalizeCrewSubject trims a subject and lower-cases nothing else: a subject is
-// either a commit SHA or a smoke case id, and both are compared verbatim so that
-// "the same subject" means the same artifact rather than something like it.
+// a commit SHA, or on a Testiny project a case or run id, and each is compared
+// verbatim so that "the same subject" means the same artifact rather than
+// something like it.
 func NormalizeCrewSubject(subject string) string {
 	return strings.TrimSpace(subject)
+}
+
+// CrewHandback is a crew member's latest delivered message to its crewmate in
+// the current round.
+type CrewHandback struct {
+	At time.Time
+	// About is the message's --about subject: a commit SHA, or on a Testiny
+	// project a case or run id.
+	About string
 }

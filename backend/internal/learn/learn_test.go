@@ -17,7 +17,6 @@ func TestDeliveryAuthorFor(t *testing.T) {
 		{msgdelivery.TriggerSend, "please run the script", domain.DeliveryAuthorHuman},
 		{"", "please run the script", domain.DeliveryAuthorHuman},
 		{msgdelivery.TriggerSend, "[from @proj-3] qa done", domain.DeliveryAuthorAgent},
-		{msgdelivery.TriggerSmokeReport, "[smoke results]\n\n...", domain.DeliveryAuthorHuman},
 		{msgdelivery.TriggerNudge, "CI is failing on PR #1.", domain.DeliveryAuthorAO},
 		{msgdelivery.TriggerCrewNotice, "qa joined", domain.DeliveryAuthorAO},
 		{msgdelivery.TriggerCommentDispatch, "A reviewer left...", domain.DeliveryAuthorAO},

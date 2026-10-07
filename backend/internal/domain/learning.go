@@ -18,8 +18,7 @@ type DeliveryAuthor string
 
 const (
 	// DeliveryAuthorHuman is a person's words that AO carried: the app's send
-	// box, `ao send` typed by a person outside any session, the Tests tab's
-	// report of the human's verdicts and notes.
+	// box and `ao send` typed by a person outside any session.
 	DeliveryAuthorHuman DeliveryAuthor = "human"
 	// DeliveryAuthorAgent is another session's `ao send`, which arrives with a
 	// "[from @<id>]" prefix. An orchestrator relaying the human's rule to a
@@ -132,8 +131,6 @@ const (
 	// LearnSourceAppSend is the human's message from AO's send box, or `ao send`
 	// typed by the human outside any session.
 	LearnSourceAppSend LearnSourceClass = "app_send"
-	// LearnSourceSmokeReport is the Tests tab reporting the human's verdicts.
-	LearnSourceSmokeReport LearnSourceClass = "smoke_report"
 )
 
 // LearnWindow is the bounded context on one side of a human turn: the agent's

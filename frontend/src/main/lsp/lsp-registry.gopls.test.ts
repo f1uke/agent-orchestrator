@@ -276,13 +276,16 @@ describe.skipIf(!CAN_RUN)("gopls, for real", () => {
 			);
 		}
 		expect(published.length, "gopls published no diagnostics at all").toBeGreaterThan(0);
-		// The version is what an out-of-order publish is judged on, and gopls is the
-		// server that supplies one — sourcekit-lsp never does.
-		expect(typeof published[published.length - 1].params.version).toBe("number");
 		// Every publish addresses a document by URI, and the app matches on it. A
 		// publish for a file nobody opened is normal; one for THIS file is what
 		// makes the feature work at all.
-		expect(published.some((m) => (m.params.uri ?? "").includes(CALL_SITE))).toBe(true);
+		const forThisFile = published.filter((m) => (m.params.uri ?? "").includes(CALL_SITE));
+		expect(forThisFile.length, "gopls never published for the opened file").toBeGreaterThan(0);
+		// The version is what an out-of-order publish is judged on, and gopls is the
+		// server that supplies one; sourcekit-lsp never does. Only an OPENED
+		// document carries one, so a later publish for another file (another
+		// process editing the module during the wait) must not decide this.
+		expect(typeof forThisFile[forThisFile.length - 1].params.version).toBe("number");
 
 		registry.detach(attachment.handleId);
 	}, 240_000); // A cold GOPLSCACHE has to load this module's whole dependency closure.

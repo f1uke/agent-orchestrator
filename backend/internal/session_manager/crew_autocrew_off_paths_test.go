@@ -17,7 +17,7 @@ import (
 // restart or boot pass) - and each one answers "whose prompt is this?" for
 // itself. A flag that is right at one door and wrong at another fails the same
 // silent way the feature exists to prevent: nothing errors, and the human simply
-// never gets a smoke checklist.
+// never hears what a person must check by hand.
 //
 // These two tests stand at the other two doors.
 
@@ -48,8 +48,8 @@ func crewOffAgentManager(t *testing.T) (*Manager, *fakeStore, *recordingAgent) {
 // prompt later, from the replayed spec, at its own call site. A human who stages
 // their work has no reason to expect a different agent than one who spawns it
 // directly - and getting this wrong is invisible, because a staged task looks
-// identical from the outside right up to the point where no checklist is ever
-// written.
+// identical from the outside right up to the point where nobody names the
+// manual checks.
 func TestStartTodo_CrewOffProjectStartsDevWithTheSoloPrompt(t *testing.T) {
 	for _, size := range []domain.TaskSize{domain.TaskSizeStandard, domain.TaskSizeDeep} {
 		t.Run(string(size), func(t *testing.T) {
@@ -71,13 +71,13 @@ func TestStartTodo_CrewOffProjectStartsDevWithTheSoloPrompt(t *testing.T) {
 
 			launched := agent.lastLaunch.SystemPrompt
 			// The duty nobody else is coming to take.
-			if !strings.Contains(launched, "## Smoke-test checklist (AO)") {
-				t.Fatalf("a staged task's dev cannot author the checklist nobody else will:\n%s", launched)
+			if !strings.Contains(launched, manualChecksLine) {
+				t.Fatalf("a staged task's dev is not told to name the manual checks nobody else will:\n%s", launched)
 			}
-			// The instruction that hands the list to a qa this project never creates.
+			// The instruction that hands the checks to a qa this project never creates.
 			for _, unwanted := range []string{
 				"## Your crewmate (AO)",
-				"The checklist is yours only while you have no qa",
+				"hand the verification over",
 			} {
 				if strings.Contains(launched, unwanted) {
 					t.Fatalf("a staged task's dev was told %q on a crew-off project:\n%s", unwanted, launched)
@@ -94,8 +94,8 @@ func TestStartTodo_CrewOffProjectStartsDevWithTheSoloPrompt(t *testing.T) {
 // promise is actually kept or broken: a restore recomputes the system prompt from
 // scratch, so if it asked eligibility - which now answers "no crew here" - a dev
 // with a LIVE qa beside it would come back from a restart believing it is alone.
-// It would then write the checklist qa owns and have it refused by AO, which is
-// the #242 bug in the mirror.
+// It would then take back the verification qa owns, which is the #242 bug in
+// the mirror.
 //
 // It is right for the opposite reason to the two doors above: the prompt is built
 // from the ROW's crew role, which is a fact about this task, not from the

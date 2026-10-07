@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 )
 
@@ -111,8 +112,8 @@ type ProjectConfig struct {
 	// It is the single fact behind the device guidance a worker here is given:
 	// set, the step-by-step `ao sim tap` catalog is replaced by the script
 	// workflow (find the script, run it, judge the end state it left, author a
-	// missing one, never finish a failed run by hand), and qa plays its smoke
-	// cases with scripts. The rule came out of a measured study: on a known
+	// missing one, never finish a failed run by hand), and qa drives its checks
+	// with scripts. The rule came out of a measured study: on a known
 	// route a script was as reliable as an agent driving the app and many times
 	// faster, and it stays reliable only because every script starts from a
 	// fresh app state.
@@ -123,6 +124,15 @@ type ProjectConfig struct {
 	// `maestro --device`. Nil leaves a project exactly as it was: an iOS project
 	// without it keeps the full `ao sim` catalog.
 	MobileScripts *MobileScriptsConfig `json:"mobileScripts,omitempty"`
+
+	// TestinyProject is the Testiny project that holds this project's manual
+	// test cases: its key (the `project_key` column of `testiny project ls`,
+	// e.g. MOB), which AO passes to `testiny --project`. Its name or numeric id
+	// work too. Empty means this project does not use Testiny.
+	//
+	// It is checked only for shape when it is set, never against Testiny, so
+	// saving a project never depends on Testiny being reachable.
+	TestinyProject string `json:"testinyProject,omitempty"`
 
 	// DisableAutoCrew turns off AUTOMATIC crew formation for this project, and
 	// nothing else.
@@ -137,8 +147,8 @@ type ProjectConfig struct {
 	//
 	// The hatch is a person's, and AttachCrewMember enforces that. It was built
 	// for a human clicking, and an AGENT walked through it too: with this set,
-	// six consecutive tasks still got a qa, because each worker's brief hands the
-	// smoke checklist to qa, so on finding none it ran `ao crew add` itself. An
+	// six consecutive tasks still got a qa, because each worker's brief hands
+	// testing to qa, so on finding none it ran `ao crew add` itself. An
 	// attach that names a calling session is now refused (ErrCrewAutoFormationOff),
 	// the orchestrator included.
 	//
@@ -152,9 +162,8 @@ type ProjectConfig struct {
 	// It is read at the ELIGIBILITY seam (sessionmanager.crewEligible), which is
 	// upstream of both consumers - the trigger that would create qa, and the
 	// system prompt, which a spawn builds BEFORE any crew could exist. Reading it
-	// only where qa is created would hand dev the crew prompt telling it the smoke
-	// checklist belongs to a qa this project never creates, and nobody would write
-	// one.
+	// only where qa is created would hand dev the crew prompt telling it testing
+	// belongs to a qa this project never creates, and nobody would test.
 	//
 	// It applies to FUTURE spawns and touches. Setting it never kills or sleeps a
 	// qa that is already mid-task.
@@ -310,6 +319,24 @@ func (c ProjectConfig) Validate() error {
 		if err := c.MobileScripts.Validate(); err != nil {
 			return err
 		}
+	}
+	if err := validateTestinyProject(c.TestinyProject); err != nil {
+		return err
+	}
+	return nil
+}
+
+// testinyProjectPattern admits what Testiny names a project with (a key such as
+// MOB, a name such as "Mobile App", or a numeric id) and nothing a shell or a
+// flag parser could read as more than one argument.
+var testinyProjectPattern = regexp.MustCompile(`^[A-Za-z0-9 _.-]{1,64}$`)
+
+func validateTestinyProject(value string) error {
+	if value == "" {
+		return nil
+	}
+	if strings.TrimSpace(value) != value || !testinyProjectPattern.MatchString(value) {
+		return fmt.Errorf("testinyProject: %q must be a Testiny project key, name or id", value)
 	}
 	return nil
 }

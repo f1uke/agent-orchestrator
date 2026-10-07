@@ -606,6 +606,66 @@ describe("ProjectSettingsForm", () => {
 		expect(body.config.mobileScripts).toBeUndefined();
 	});
 
+	it("saves the Testiny project key, trimmed, and keeps the rest of the config", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: {
+				worker: { agent: "codex" },
+				orchestrator: { agent: "claude-code" },
+				env: { TOKEN: "secret" },
+			},
+		});
+
+		renderSettings();
+		await goToSection("What agents are told");
+
+		// A project that never set it reads "not set" and offers the key's shape.
+		const field = await screen.findByLabelText("Testiny project");
+		expect(field).toHaveValue("");
+		expect(field).toHaveAttribute("placeholder", "MOB");
+		const row = screen.getByRole("button", { name: /^Testiny project/ });
+		expect(row).toHaveTextContent("not set");
+
+		await userEvent.type(field, " MOB ");
+		expect(row).toHaveTextContent("MOB");
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.testinyProject).toBe("MOB");
+		expect(body.config.env).toEqual({ TOKEN: "secret" });
+	});
+
+	it("loads the Testiny project and turns it off by omitting it when emptied", async () => {
+		mockProject({
+			id: "proj-1",
+			name: "Project One",
+			kind: "single_repo",
+			path: "/repo/project-one",
+			repo: "git@github.com:acme/project-one.git",
+			defaultBranch: "main",
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, testinyProject: "MOB" },
+		});
+
+		renderSettings();
+		await goToSection("What agents are told");
+
+		const field = await screen.findByLabelText("Testiny project");
+		expect(field).toHaveValue("MOB");
+
+		await userEvent.clear(field);
+		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+		const body = putMock.mock.calls[0]?.[1]?.body;
+		expect(body.config.testinyProject).toBeUndefined();
+	});
+
 	it("blocks save when script-only driving has no product", async () => {
 		mockProject({
 			id: "proj-1",

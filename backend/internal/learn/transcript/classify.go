@@ -151,10 +151,6 @@ var aoNoticePrefixes = []*regexp.Regexp{
 	regexp.MustCompile(`^<task-notification>`),
 }
 
-// smokeReportPrefix opens the Tests tab's report, which carries the human's
-// verdicts and notes.
-const smokeReportPrefix = "[smoke results"
-
 // classify decides what one user record is. delivered maps a body fingerprint
 // to what AO recorded when it delivered that body (including the session's
 // brief); it may be nil for a session AO holds no records for.
@@ -205,10 +201,6 @@ func classifyTyped(text string, image bool, promptSource string, delivered map[s
 	bodyFP, _ := Fingerprint(body)
 	if d, ok := delivered[bodyFP]; ok {
 		return byDelivery(out, d, body)
-	}
-	if strings.HasPrefix(trimmed, smokeReportPrefix) {
-		out.class, out.source, out.text = classHuman, domain.LearnSourceSmokeReport, body
-		return out
 	}
 	for _, re := range aoNoticePrefixes {
 		if re.MatchString(trimmed) {
@@ -289,9 +281,6 @@ func byDelivery(out classified, d Delivery, body string) classified {
 	case domain.DeliveryAuthorHuman:
 		out.class, out.text = classHuman, strings.TrimSpace(body)
 		out.source = domain.LearnSourceAppSend
-		if d.Trigger == "smoke-report" {
-			out.source = domain.LearnSourceSmokeReport
-		}
 	case domain.DeliveryAuthorAgent:
 		out.class, out.marker = classMachine, "message from another session"
 	default:

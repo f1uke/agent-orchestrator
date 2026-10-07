@@ -30,60 +30,25 @@ type CrewTalk struct {
 	// From is the session that sent it. Empty when a human or a tool sent it,
 	// which is what makes an ordinary `ao send` ordinary.
 	From domain.SessionID
-	// Subject is the commit SHA or smoke case id the message is about. Required
-	// between crewmates and ignored everywhere else.
+	// Subject is the commit SHA, or on a Testiny project a case or run id, the
+	// message is about. Required between crewmates and ignored everywhere else.
 	Subject string
 }
 
 // CrewSend is one message from one crew member to the other, as the caller
-// asked for it. StillWorking is the sender's own claim about its run and is the
-// one field the daemon acts on beyond delivery; see handbackGap.
+// asked for it.
 type CrewSend struct {
 	Role    domain.CrewRole
 	Message string
 	Subject string
-	// StillWorking is qa saying "I am NOT finished yet" - an ordinary mid-run
-	// message rather than the end of its run. It exists so the completeness check
-	// below never pushes qa into declaring cases undriveable just to get past it:
-	// a gate that is easier to satisfy by lying is worse than no gate. The DEFAULT
-	// is the checked shape, because the shape qa is prompted to hand back with is
-	// a plain `ao send --crew dev` - so forgetting is caught and opting out costs
-	// an explicit claim the human can read.
-	StillWorking bool
 }
 
-// CrewSendResult is what came of it: who it reached, what the queue did with it,
-// the message as DELIVERED (the gate may have appended a line of AO's own), and
-// what the checklist said at handback.
+// CrewSendResult is what came of it: who it reached and what the queue did with
+// it.
 type CrewSendResult struct {
-	Peer     domain.SessionID
-	Outcome  ports.SendOutcome
-	Message  string
-	Handback HandbackCompleteness
+	Peer    domain.SessionID
+	Outcome ports.SendOutcome
 }
-
-// HandbackCompleteness is the state of the task's smoke checklist at the moment
-// qa said its run was over.
-//
-// It exists because "not driven yet" and "cannot be driven" are the SAME empty
-// case on screen, so a run that ended with cases untouched looked exactly like
-// one that ended with cases that could not be driven - and neither the human nor
-// qa itself could tell. Both states are now sayable: driven is a recorded run,
-// undriveable is `ao smoke record --verdict skip --note "<why>"`, which IS a
-// recorded run. What remains in neither is this.
-type HandbackCompleteness struct {
-	// Checked is false for every message the gate did not look at: dev's, a
-	// mid-run `--still-working`, a task with no checklist at all.
-	Checked bool
-	// Cases is how many active cases the person still has to play - the
-	// denominator the gap is out of.
-	Cases int
-	// NotDriven names the cases carrying nothing from any machine, oldest first.
-	NotDriven []string
-}
-
-// Incomplete reports whether qa handed back over cases it never touched.
-func (h HandbackCompleteness) Incomplete() bool { return len(h.NotDriven) > 0 }
 
 // SendToCrewmate delivers a message addressed by ROLE rather than by session id.
 //
@@ -91,10 +56,6 @@ func (h HandbackCompleteness) Incomplete() bool { return len(h.NotDriven) > 0 }
 // formed after dev's runtime is already launched, and a qa attached later
 // arrives later still, so an env var would be empty exactly when it mattered.
 // A role never goes stale, and the daemon is the thing that knows who fills it.
-//
-// It is also where qa's handback is CHECKED, because this is the one path a
-// handback takes. See handbackGap for what is checked and why it warns instead
-// of refusing.
 func (s *Service) SendToCrewmate(ctx context.Context, from domain.SessionID, in CrewSend) (CrewSendResult, error) {
 	if !in.Role.Valid() {
 		return CrewSendResult{}, apierr.Invalid("INVALID_CREW_ROLE", "Role must be dev or qa", nil)
@@ -118,60 +79,8 @@ func (s *Service) SendToCrewmate(ctx context.Context, from domain.SessionID, in 
 		return CrewSendResult{}, apierr.NotFound("CREW_ROLE_ABSENT",
 			fmt.Sprintf("This task has no %s to message", in.Role))
 	}
-	handback := s.handbackGap(ctx, sender, in)
-	message := in.Message
-	if handback.Incomplete() {
-		message += handbackNotice(handback)
-	}
-	sent, err := s.SendFrom(ctx, peer.ID, message, CrewTalk{From: from, Subject: in.Subject})
-	return CrewSendResult{Peer: peer.ID, Outcome: sent.Outcome, Message: message, Handback: handback}, err
-}
-
-// handbackGap answers "did qa just end its run over cases nobody drove?".
-//
-// It runs on ONE leg - qa -> dev, not claiming to be still working - because that
-// is the shape of a handback, and it reads the checklist under the TASK's id
-// (dev's, which is what $AO_CREW_ID is and what every `ao smoke` command takes).
-//
-// A store failure here returns no gap rather than an error. The check exists to
-// make a silence visible; letting it break the handback would trade a reported
-// gap for the stall the handback obligation was written to prevent.
-func (s *Service) handbackGap(ctx context.Context, sender domain.SessionRecord, in CrewSend) HandbackCompleteness {
-	if sender.CrewRole != domain.CrewRoleQA || in.Role != domain.CrewRoleDev || in.StillWorking {
-		return HandbackCompleteness{}
-	}
-	checks, err := s.store.ListSmokeChecksBySession(ctx, sender.CrewID)
-	if err != nil {
-		return HandbackCompleteness{}
-	}
-	out := HandbackCompleteness{Checked: true, NotDriven: domain.SmokeHandbackGap(checks)}
-	for _, c := range checks {
-		if !c.Retired() {
-			out.Cases++
-		}
-	}
-	return out
-}
-
-// handbackNotice is the line AO adds to the message dev actually receives.
-//
-// The gate WARNS rather than refuses, and this is what "loudly" means for the
-// member that would otherwise carry on believing the change had been verified.
-// Refusing was the alternative and it is worse three times over: it recreates the
-// silent stall the handback obligation exists to prevent, it is indistinguishable
-// from the runaway-loop refusal that parks a task at NEEDS YOU, and it is the
-// version of this gate that is easiest to satisfy by declaring the remaining
-// cases undriveable. So the message goes, carrying the truth with it.
-//
-// It is written in AO's voice and marked as such: it is a fact about the
-// checklist, not something qa said.
-func handbackNotice(h HandbackCompleteness) string {
-	noun, pronoun, is := "case", "it", "it is"
-	if len(h.NotDriven) != 1 {
-		noun, pronoun, is = "cases", "them", "they are"
-	}
-	return fmt.Sprintf("\n\n[AO] This handback left %d of %d checklist %s with nothing recorded by any machine: %s. Nothing was run against %s and no reason was given for leaving %s, so %s \"nobody looked\" and not \"nothing could reach %s\".",
-		len(h.NotDriven), h.Cases, noun, strings.Join(h.NotDriven, ", "), pronoun, pronoun, is, pronoun)
+	sent, err := s.SendFrom(ctx, peer.ID, in.Message, CrewTalk{From: from, Subject: in.Subject})
+	return CrewSendResult{Peer: peer.ID, Outcome: sent.Outcome}, err
 }
 
 // crewTalkCheck decides whether this message is crew talk at all and, if it is,
@@ -204,7 +113,7 @@ func (s *Service) crewTalkCheck(ctx context.Context, to domain.SessionRecord, ta
 	}
 
 	if msg.Subject == "" {
-		msg.RefusedReason = "a message to your crewmate has to say what it is ABOUT - pass --about with the commit SHA or the smoke case id it concerns"
+		msg.RefusedReason = "a message to your crewmate has to say what it is ABOUT - pass --about with the commit SHA, or on a Testiny project the case or run id, it concerns"
 		return msg, nil
 	}
 	sent, err := s.store.CrewMessagesOnSubject(ctx, to.CrewID, msg.Subject, sender.ID, crewRoundStart(sender, to))
@@ -276,4 +185,18 @@ func (s *Service) crewTalkRefused(ctx context.Context, rec domain.SessionRecord)
 		return false, err
 	}
 	return ok && latest.Refused(), nil
+}
+
+// lastHandback is the latest message this qa DELIVERED to its crewmate in its
+// current round, which is what the board reads as "qa has handed back". Only qa
+// hands back, so every other session skips the lookup.
+func (s *Service) lastHandback(ctx context.Context, rec domain.SessionRecord) (*domain.CrewHandback, error) {
+	if rec.CrewRole != domain.CrewRoleQA {
+		return nil, nil
+	}
+	msg, ok, err := s.store.LatestDeliveredCrewMessageFrom(ctx, rec.ID, rec.CrewRoundStartedAt)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return &domain.CrewHandback{At: msg.CreatedAt, About: msg.Subject}, nil
 }

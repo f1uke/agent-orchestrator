@@ -9,7 +9,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
-// WHO OWNS THE CHECKLIST, AND WHO KNOWS THE VERB.
+// WHO KNOWS THE VERB, AND WHO KNOWS THERE IS A CREWMATE.
 //
 // A system prompt is fixed when a runtime launches; crew membership is not. That
 // gap was survivable while dev's crew block was informational. It is not now: the
@@ -133,11 +133,11 @@ func TestBuildSystemPrompt_SoloWorkerIsUnchangedByTheCrewBlock(t *testing.T) {
 // TestAttachCrewMember_TellsDevItsPromptIsNowWrong is the live half of the same
 // bug, and the one that is destructive rather than merely stale.
 //
-// A dev launched with the SOLO prompt has been told the smoke checklist is its
-// own and handed `ao smoke set`, which REPLACES the whole list. The moment a
-// person attaches a qa that instruction deletes the crewmate's cases. The prompt
-// cannot be rewritten under a running agent, so the correction is delivered the
-// one way a live agent can receive one.
+// A dev launched with the SOLO prompt has never been told it may share its
+// worktree. The moment a person attaches a qa, dev's next `git add -A` sweeps up
+// the crewmate's half-written work. The prompt cannot be rewritten under a
+// running agent, so the correction is delivered the one way a live agent can
+// receive one.
 func TestAttachCrewMember_TellsDevItsPromptIsNowWrong(t *testing.T) {
 	m, _, _, _, msgr := newManagerWithMessenger()
 	dev := spawnMechanical(t, m)
@@ -151,12 +151,10 @@ func TestAttachCrewMember_TellsDevItsPromptIsNowWrong(t *testing.T) {
 		t.Fatalf("dev was told %d times that it gained a crewmate, want 1: %q", len(got), got)
 	}
 	for _, want := range []string{
-		"[AO]",                 // attributed to AO, not to a person or the new member
-		"qa",                   // what joined
-		"Never `ao smoke set`", // the instruction its own prompt got wrong
-		"ao smoke add",         // and what to do instead
-		"ao send --crew qa",    // how to reach it
-		"one git index",        // the other thing a solo prompt does not know
+		"[AO]",              // attributed to AO, not to a person or the new member
+		"qa",                // what joined
+		"one git index",     // the thing a solo prompt does not know
+		"ao send --crew qa", // how to reach it
 	} {
 		if !strings.Contains(got[0], want) {
 			t.Fatalf("the notice to dev is missing %q:\n%s", want, got[0])
@@ -178,5 +176,36 @@ func TestAttachCrewMember_SaysNothingToADevThatAskedForIt(t *testing.T) {
 
 	if got := msgr.sentTo(dev.ID); len(got) != 0 {
 		t.Fatalf("dev was messaged about a qa it asked for itself: %q", got)
+	}
+}
+
+// On a Testiny project a qa takes over the Testiny drafts, runs and results, so dev is
+// told to hand over any draft it wrote, and the arriving qa reads the runs
+// already linked to the task. A project without Testiny hears neither.
+func TestAttachCrewMember_HandsTheTestinyWorkToQAOnATestinyProject(t *testing.T) {
+	const handover = "qa now owns the Testiny drafts, runs and results for this task. Give it the path of any draft you wrote."
+	const runs = "`ao testiny runs \"$AO_CREW_ID\"`"
+	for _, testiny := range []bool{false, true} {
+		m, st, _, _, msgr := newManagerWithMessenger()
+		if testiny {
+			p := st.projects["mer"]
+			p.Config.TestinyProject = "MOB"
+			st.projects["mer"] = p
+		}
+		dev := spawnMechanical(t, m)
+		qa, err := m.AttachCrewMember(ctx, dev.ID, domain.CrewRoleQA, "")
+		if err != nil {
+			t.Fatalf("AttachCrewMember: %v", err)
+		}
+		notice := msgr.sentTo(dev.ID)
+		if len(notice) != 1 {
+			t.Fatalf("testiny=%v: dev was told %d times, want 1: %q", testiny, len(notice), notice)
+		}
+		if got := strings.Contains(notice[0], handover); got != testiny {
+			t.Fatalf("testiny=%v: the notice to dev hands the Testiny work over = %v:\n%s", testiny, got, notice[0])
+		}
+		if got := strings.Contains(qa.Metadata.Prompt, runs); got != testiny {
+			t.Fatalf("testiny=%v: the arriving qa is told to read the linked runs = %v:\n%s", testiny, got, qa.Metadata.Prompt)
+		}
 	}
 }

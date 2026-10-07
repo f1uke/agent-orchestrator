@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
-import { isVideoMime } from "../lib/smoke-test";
+import { isVideoMime } from "../lib/media";
 
 // The lightbox is a full-screen viewer over an opaque scrim, and thumbnails are
 // letterboxed against #000 — its chrome sits on media, never on an app surface.
 // So it stays dark in BOTH themes (as any OS image viewer does) and these are
-// deliberately fixed literals rather than the themed --smoke-*/--inbox-* tokens.
-// They were the smoke palette's dark values before that palette became
-// theme-aware; keeping them literal is what preserves the look in light mode.
+// deliberately fixed literals rather than the themed --inbox-* tokens; keeping
+// them literal is what preserves the look in light mode.
 const OVERLAY = {
 	fg: "#c2c2c8",
 	muted: "#6c6c72",
@@ -21,8 +20,8 @@ const OVERLAY = {
  * One media item the thumbnail + lightbox render: `src` is the daemon URL the
  * bytes are fetched from (rendered via a blob: object URL — a direct
  * http://127.0.0.1 subresource is CSP-blocked on the app:// scheme). `mime`
- * decides image vs video; `filename` is the accessible label. Shared by the
- * smoke-test evidence view and the Jira description media previews.
+ * decides image vs video; `filename` is the accessible label. Used by the Jira
+ * description media previews.
  */
 export type MediaItem = { id: string; filename?: string; mime?: string; src: string };
 
@@ -75,21 +74,14 @@ export function MediaThumb({
 	onOpen,
 	style,
 	className,
-	onLoadState,
 }: {
 	item: MediaItem;
 	onOpen?: (trigger: HTMLElement) => void;
 	style: React.CSSProperties;
 	className?: string;
-	// Notifies the framing parent of load outcome so it can gate its own chrome
-	// (e.g. the smoke view hides its reveal/open bar when the bytes fail to load).
-	onLoadState?: (state: { failed: boolean; loaded: boolean }) => void;
 }) {
 	const { url, failed } = useObjectUrl(item.src);
 	const openable = Boolean(onOpen) && !failed;
-	useEffect(() => {
-		onLoadState?.({ failed, loaded: Boolean(url) });
-	}, [failed, url, onLoadState]);
 
 	const media = failed ? (
 		<div
@@ -307,7 +299,7 @@ export function MediaLightbox({
 					}}
 				/>
 				<Dialog.Content
-					aria-label={`Evidence viewer${current?.filename ? `: ${current.filename}` : ""}`}
+					aria-label={`Media viewer${current?.filename ? `: ${current.filename}` : ""}`}
 					aria-describedby={undefined}
 					onKeyDown={onKeyDown}
 					onCloseAutoFocus={(e) => {
@@ -331,7 +323,7 @@ export function MediaLightbox({
 						background: "transparent",
 					}}
 				>
-					<Dialog.Title style={SR_ONLY}>Evidence viewer</Dialog.Title>
+					<Dialog.Title style={SR_ONLY}>Media viewer</Dialog.Title>
 
 					<button
 						type="button"
@@ -350,7 +342,7 @@ export function MediaLightbox({
 							</span>
 							<button
 								type="button"
-								aria-label="Previous evidence"
+								aria-label="Previous"
 								title="Previous (←)"
 								onClick={() => goto(safeIndex - 1)}
 								style={edgeBtn("left")}
@@ -359,7 +351,7 @@ export function MediaLightbox({
 							</button>
 							<button
 								type="button"
-								aria-label="Next evidence"
+								aria-label="Next"
 								title="Next (→)"
 								onClick={() => goto(safeIndex + 1)}
 								style={edgeBtn("right")}

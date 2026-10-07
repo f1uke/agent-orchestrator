@@ -15,12 +15,11 @@ import (
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
 )
 
-// Answering a task's surfaces for the task is only half of it. What the Tests
-// and Reviews tabs OFFER on what they list is a set of WRITES, and a write that
-// resolves differently from the read that listed it is worse than the empty tab
-// it replaced: qa would play a case whose verdict lands on qa's own empty
-// checklist, where dev can never see it, or reply to a thread through a session
-// that holds no pull request.
+// Answering a task's surfaces for the task is only half of it. What the Reviews
+// tab OFFERS on what it lists is a set of WRITES, and a write that resolves
+// differently from the read that listed it is worse than the empty tab it
+// replaced: qa would reply to a thread through a session that holds no pull
+// request.
 //
 // These pin the write half of the same scope, separately from the read tests,
 // because the two can drift apart: a controller can be moved into the
@@ -69,45 +68,15 @@ func (s *writeScopeSessions) ClaimPR(_ context.Context, id domain.SessionID, _ s
 	return sessionsvc.ClaimPRResult{}, nil
 }
 
-// writeScopeSmoke records the session id each checklist write was filed under.
-type writeScopeSmoke struct {
-	*fakeSmokeService
-	asked map[string][]domain.SessionID
-}
-
-func (s *writeScopeSmoke) note(route string, id domain.SessionID) {
-	if s.asked == nil {
-		s.asked = map[string][]domain.SessionID{}
-	}
-	s.asked[route] = append(s.asked[route], id)
-}
-
-func (s *writeScopeSmoke) SetVerdict(_ context.Context, id domain.SessionID, _ string, _ domain.SmokeVerdict, _, _ string) (domain.SmokeCheck, error) {
-	s.note("verdict", id)
-	return domain.SmokeCheck{}, nil
-}
-
-func (s *writeScopeSmoke) RecordAgentResult(_ context.Context, id domain.SessionID, _ string, _ domain.SmokeAgentResult) (domain.SmokeCheck, error) {
-	s.note("agent-result", id)
-	return domain.SmokeCheck{}, nil
-}
-
-func (s *writeScopeSmoke) Retire(_ context.Context, id domain.SessionID, _, _ string) (domain.SmokeCheck, error) {
-	s.note("retire", id)
-	return domain.SmokeCheck{}, nil
-}
-
-func newWriteScopeServer(t *testing.T, crew map[domain.SessionID]domain.SessionID) (*httptest.Server, *writeScopeSessions, *writeScopeSmoke) {
+func newWriteScopeServer(t *testing.T, crew map[domain.SessionID]domain.SessionID) (*httptest.Server, *writeScopeSessions) {
 	t.Helper()
 	sessions := &writeScopeSessions{fakeSessionService: newFakeSessionService(), devOf: crew}
-	smoke := &writeScopeSmoke{fakeSmokeService: &fakeSmokeService{}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{
 		Sessions: sessions,
-		Smoke:    smoke,
 	}, httpd.ControlDeps{}))
 	t.Cleanup(srv.Close)
-	return srv, sessions, smoke
+	return srv, sessions
 }
 
 // writeCase is one task-owned write, named by the route it posts to.
@@ -115,13 +84,9 @@ type writeCase struct {
 	route string
 	path  string
 	body  string
-	smoke bool
 }
 
 var taskOwnedWrites = []writeCase{
-	{route: "verdict", path: "/smoke-checks/c1/verdict", body: `{"verdict":"pass","note":"ok"}`, smoke: true},
-	{route: "agent-result", path: "/smoke-checks/c1/agent-result", body: `{"verdict":"pass","note":"ran it"}`, smoke: true},
-	{route: "retire", path: "/smoke-checks/c1/retire", body: `{"reason":"covered by a test"}`, smoke: true},
 	{route: "comment-reply", path: "/comment-reply", body: `{"prUrl":"https://x/pull/1","threadId":"t1","body":"hi"}`},
 	{route: "comment-resolve", path: "/comment-resolve", body: `{"prUrl":"https://x/pull/1","threadId":"t1"}`},
 	{route: "comment-dispatch", path: "/comment-dispatch", body: `{"prUrl":"https://x/pull/1","threadId":"t1"}`},
@@ -129,15 +94,12 @@ var taskOwnedWrites = []writeCase{
 
 func postScoped(t *testing.T, from domain.SessionID, crew map[domain.SessionID]domain.SessionID, tc writeCase) domain.SessionID {
 	t.Helper()
-	srv, sessions, smoke := newWriteScopeServer(t, crew)
+	srv, sessions := newWriteScopeServer(t, crew)
 	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/"+string(from)+tc.path, tc.body)
 	if status != http.StatusOK {
 		t.Fatalf("status = %d body=%s", status, body)
 	}
 	got := sessions.asked[tc.route]
-	if tc.smoke {
-		got = smoke.asked[tc.route]
-	}
 	if len(got) != 1 {
 		t.Fatalf("service was asked %d times, want exactly 1: %v", len(got), got)
 	}
@@ -176,7 +138,7 @@ func TestTaskScopedWritesLeaveASoloSessionAlone(t *testing.T) {
 // move the branch's owner without anyone asking, so it must keep the id the path
 // names even when that session belongs to a crew.
 func TestClaimPRStaysAgentScoped(t *testing.T) {
-	srv, sessions, _ := newWriteScopeServer(t, map[domain.SessionID]domain.SessionID{scopeQA: scopeDev})
+	srv, sessions := newWriteScopeServer(t, map[domain.SessionID]domain.SessionID{scopeQA: scopeDev})
 	raw, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/"+string(scopeQA)+"/pr/claim", `{"pr":"https://x/pull/1"}`)
 	if status != http.StatusOK {
 		t.Fatalf("status = %d body=%s", status, raw)

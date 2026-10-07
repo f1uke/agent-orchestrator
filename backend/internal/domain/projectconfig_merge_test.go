@@ -36,6 +36,7 @@ func fullProjectConfig() ProjectConfig {
 		SimProfile:              &SimProfileConfig{Keep: []string{"com.apple.backboardd"}},
 		SimTrust:                &SimTrustConfig{CAFiles: []string{"~/proxy-ca.pem"}},
 		MobileScripts:           &MobileScriptsConfig{Product: "nter", Platform: MobilePlatformIOS},
+		TestinyProject:          "MOB",
 		DisableAutoCrew:         true,
 		PauseBeforeImplementing: true,
 		LearnFromSessions:       true,
@@ -64,6 +65,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		GitConvention:           GitConventionConfig{Workflow: GitWorkflowCustom, BranchPrefix: "chore/"},
 		HasWebUI:                false,
 		HasIOSSimulator:         false,
+		TestinyProject:          "WEB",
 		DisableAutoCrew:         false,
 		PauseBeforeImplementing: false,
 	}
@@ -99,6 +101,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		{"simProfile", func(c ProjectConfig) any { return c.SimProfile }},
 		{"simTrust", func(c ProjectConfig) any { return c.SimTrust }},
 		{"mobileScripts", func(c ProjectConfig) any { return c.MobileScripts }},
+		{"testinyProject", func(c ProjectConfig) any { return c.TestinyProject }},
 		{"approvalRule", func(c ProjectConfig) any { return c.ApprovalRule }},
 		{"systemPromptAdditions", func(c ProjectConfig) any { return c.SystemPromptAdditions }},
 	}

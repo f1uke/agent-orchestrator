@@ -247,8 +247,8 @@ func NewRootCommand(deps Deps) *cobra.Command {
 	root.AddCommand(newSessionCommand(ctx))
 	root.AddCommand(newOrchestratorCommand(ctx))
 	root.AddCommand(newReviewCommand(ctx))
-	root.AddCommand(newSmokeCommand(ctx))
 	root.AddCommand(newCrewCommand(ctx))
+	root.AddCommand(newTestinyCommand(ctx))
 	root.AddCommand(newLearnCommand(ctx))
 	root.AddCommand(newCompletionCommand())
 	root.AddCommand(newVersionCommand())
@@ -314,6 +314,26 @@ func noArgs(cmd *cobra.Command, args []string) error {
 		return usageError{err}
 	}
 	return nil
+}
+
+// exactArgs is cobra.ExactArgs that reports a wrong count as a usage error.
+func exactArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := cobra.ExactArgs(n)(cmd, args); err != nil {
+			return usageError{err}
+		}
+		return nil
+	}
+}
+
+// rangeArgs is cobra.RangeArgs that reports a wrong count as a usage error.
+func rangeArgs(minN, maxN int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := cobra.RangeArgs(minN, maxN)(cmd, args); err != nil {
+			return usageError{err}
+		}
+		return nil
+	}
 }
 
 func atMostOneArg(cmd *cobra.Command, args []string) error {

@@ -19,7 +19,6 @@ import (
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
-	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
@@ -39,8 +38,10 @@ type APIDeps struct {
 	Jira     controllers.JiraService
 	PRs      prsvc.ActionManager
 	Reviews  reviewsvc.Manager
-	Smoke    smokesvc.Manager
-	Sim      simsvc.Manager
+	// Testiny is a task's Testiny tab: the test runs linked to the task, read
+	// live from Testiny. nil answers 501.
+	Testiny controllers.TestinyService
+	Sim     simsvc.Manager
 	// IOSRun is the run bar above the terminal: what a session can build, and
 	// the pane `ao sim run` runs in. nil answers 501, which is right on a
 	// machine with no Xcode - the bar then renders nowhere.
@@ -97,17 +98,15 @@ type APIDeps struct {
 	// Wiki is the personal note vault destination: the global vault-path
 	// setting, plus the one agent pane that runs inside it. It is deliberately
 	// not a session, so it has no lifecycle wiring of its own.
-	WikiSettings      controllers.WikiSettingsService
-	RefLinks          controllers.RefLinksService
-	Wiki              controllers.WikiService
-	EvidenceRetention controllers.EvidenceRetentionService
-	EvidenceSweeper   controllers.EvidenceSweeper
-	SystemPrompts     controllers.SystemPromptsService
-	MessageTemplates  controllers.MessageTemplatesService
-	CDC               cdc.Source
-	Events            cdcSubscriber
-	Telemetry         ports.EventSink
-	LoopTelemetry     controllers.LoopTelemetrySource
+	WikiSettings     controllers.WikiSettingsService
+	RefLinks         controllers.RefLinksService
+	Wiki             controllers.WikiService
+	SystemPrompts    controllers.SystemPromptsService
+	MessageTemplates controllers.MessageTemplatesService
+	CDC              cdc.Source
+	Events           cdcSubscriber
+	Telemetry        ports.EventSink
+	LoopTelemetry    controllers.LoopTelemetrySource
 	// Learning is learning capture: the transcript bookkeeping agent hooks
 	// report, and the read-only view of what capture stored.
 	Learning controllers.LearningService
@@ -128,7 +127,7 @@ type API struct {
 	jira           *controllers.JiraController
 	prs            *controllers.PRsController
 	reviews        *controllers.ReviewsController
-	smoke          *controllers.SmokeController
+	testiny        *controllers.TestinyController
 	iosRun         *controllers.IOSRunController
 	crewRuns       *controllers.CrewRunsController
 	children       *controllers.ChildrenController
@@ -178,9 +177,9 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		jira:           &controllers.JiraController{Svc: deps.Jira},
 		prs:            &controllers.PRsController{Svc: deps.PRs},
 		reviews:        &controllers.ReviewsController{Svc: deps.Reviews},
-		smoke:          &controllers.SmokeController{Svc: deps.Smoke},
+		testiny:        &controllers.TestinyController{Svc: deps.Testiny},
 		iosRun:         &controllers.IOSRunController{Svc: deps.IOSRun},
-		crewRuns:       &controllers.CrewRunsController{Svc: deps.CrewRuns},
+		crewRuns:       &controllers.CrewRunsController{Svc: deps.CrewRuns, Tasks: deps.Sessions},
 		children:       &controllers.ChildrenController{Svc: deps.Children},
 		sim:            &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
 		simFlows:       &controllers.SimFlowsController{DataDir: cfg.DataDir},
@@ -191,7 +190,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:        &controllers.ImportController{Svc: deps.Import},
-		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, SimTrust: simTrustSettings(deps.SimTrust), EvidenceRetention: deps.EvidenceRetention, EvidenceSweeper: deps.EvidenceSweeper, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, SimTrust: simTrustSettings(deps.SimTrust), SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:           &controllers.WikiController{Svc: deps.Wiki},
 		daemon:         &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		learning:       &controllers.LearningController{Svc: deps.Learning},
@@ -264,10 +263,10 @@ func (a *API) Register(root chi.Router) {
 			//
 			// What these controllers own belongs to the TASK, not to the agent whose
 			// id the path names: the branch's pull request and its comment threads,
-			// AO's review verdicts on it, and the smoke checklist. A crew's two
-			// members share one of each, so both must be answered the same - reading
-			// them per-session is what left qa with an empty Tests tab and a
-			// readiness strip that saw no pull request at all.
+			// AO's review verdicts on it, and the Testiny runs its cases were played
+			// in. A crew's two members share one of each, so both must be answered
+			// the same - reading them per-session is what left qa with a readiness
+			// strip that saw no pull request at all.
 			//
 			// Everything above stays agent-scoped, which is the safe default: a
 			// task-level surface left out of this group merely keeps today's
@@ -278,7 +277,7 @@ func (a *API) Register(root chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(controllers.TaskScoped(a.sessions.Svc))
 				a.reviews.Register(r)
-				a.smoke.Register(r)
+				a.testiny.Register(r)
 				a.sessions.RegisterTaskScoped(r)
 			})
 		})

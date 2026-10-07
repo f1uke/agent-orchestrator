@@ -28,7 +28,7 @@ import {
 	type UpdateStatus,
 } from "./main/update-settings";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { readdir, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -369,24 +369,24 @@ function windowStateDir(): string | null {
 	return runFile ? path.dirname(runFile) : null;
 }
 
-// evidenceDir resolves the daemon's smoke-evidence root (<dataDir>/evidence) the
-// same way the backend does: AO_DATA_DIR wins, else ~/.ao/data (or the dev
-// subdir). Used to confine Reveal/Open to real evidence exports.
-function evidenceDir(): string {
-	const dataDir =
-		process.env.AO_DATA_DIR ||
-		(isDev ? path.join(os.homedir(), ".ao", DEV_STATE_SUBDIR, "data") : path.join(os.homedir(), ".ao", "data"));
-	return path.join(dataDir, "evidence");
+// qaEvidenceDir is the QA Evidence tree the Testiny skill files each run's
+// screenshots and recordings under (<Project>/<YYYY>/<milestone>/TP-…/TR-…), the
+// same root the daemon looks a run's folder up in.
+function qaEvidenceDir(): string {
+	return path.join(os.homedir(), "Desktop", "QA Evidence");
 }
 
-// isEvidenceExportPath returns true only for an existing absolute path confined
-// under the evidence root — the guard for the Reveal/Open IPC handlers.
-function isEvidenceExportPath(target: string): boolean {
-	if (!target) return false;
-	const root = path.resolve(evidenceDir());
-	const resolved = path.resolve(target);
-	if (resolved !== root && !resolved.startsWith(root + path.sep)) return false;
-	return existsSync(resolved);
+// isQaEvidencePath is the guard for the Reveal/Open IPC handlers: true only for
+// a path that exists and sits inside the QA Evidence tree. Both sides are
+// resolved through symlinks first, so a link inside the tree cannot point the
+// handlers at a file outside it.
+function isQaEvidencePath(target: string): boolean {
+	if (!target || !path.isAbsolute(target)) return false;
+	try {
+		return pathInside(realpathSync(target), realpathSync(qaEvidenceDir()));
+	} catch {
+		return false;
+	}
 }
 
 // The bounds to open the window at: the saved state clamped/validated against
@@ -1454,16 +1454,15 @@ ipcMain.handle("shell:openExternal", async (_event, url: string) => {
 	await shell.openExternal(url);
 });
 
-// Reveal-in-Finder / Open for smoke-test evidence. The renderer passes an
-// absolute path returned by the daemon's evidence-export endpoint; we confine it
-// under <dataDir>/evidence (mirroring the backend's ConfinedPath) so a stray path
-// can never reveal or launch an arbitrary file, and require it to exist.
+// Reveal-in-Finder / Open for a Testiny run's evidence folder. The renderer
+// passes the absolute path the daemon found for the run; it is confined to the
+// QA Evidence tree so a stray path can never reveal or launch an arbitrary file.
 ipcMain.handle("shell:showItemInFolder", (_event, target: string) => {
-	if (!isEvidenceExportPath(target)) return;
+	if (!isQaEvidencePath(target)) return;
 	shell.showItemInFolder(target);
 });
 ipcMain.handle("shell:openPath", async (_event, target: string) => {
-	if (!isEvidenceExportPath(target)) return;
+	if (!isQaEvidencePath(target)) return;
 	const error = await shell.openPath(target);
 	if (error) throw new Error(error);
 });

@@ -31,7 +31,6 @@ import (
 	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	reviewsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/review"
 	sessionsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/session"
-	smokesvc "github.com/aoagents/agent-orchestrator/backend/internal/service/smoke"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -153,14 +152,14 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, jiraPoster smokesvc.JiraPoster, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, smokesvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
 	}
 	agents, err := buildAgentResolver(defaultAgent, log)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 	ws, err := gitworktree.New(gitworktree.Options{
 		// Per-session worktrees live under the data dir, so a single AO_DATA_DIR
@@ -180,7 +179,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("session workspace: %w", err)
+		return nil, nil, nil, fmt.Errorf("session workspace: %w", err)
 	}
 	mgr := sessionmanager.New(sessionmanager.Deps{
 		Runtime:      runtime,
@@ -246,7 +245,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	// writer.
 	reviewers, err := reviewer.NewResolver()
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("reviewer resolver: %w", err)
+		return nil, nil, nil, fmt.Errorf("reviewer resolver: %w", err)
 	}
 	reviewEngine := reviewcore.New(reviewcore.Deps{
 		Store:    store,
@@ -287,17 +286,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 	// no longer there. Those are the endings that leaked a run pane, because the
 	// reducer writes the terminal row directly and nothing else ran.
 	lcm.SetSessionPaneReaper(mgr.ReapSessionPanes)
-	// The smoke service backs the Tests tab: per-session checklists + evidence
-	// blobs under <dataDir>/evidence, and report-back over the same Send path
-	// `ao send` uses (sessionSvc). Built after sessionSvc so it can deliver
-	// results; its evidence-purge hook is wired into the manager like the
-	// reviewer reaper so a purged session leaves no blobs behind. The jiraPoster
-	// is the write seam behind the Tests tab's "Post to Jira" button (comment +
-	// attachment upload); nil leaves the button's endpoint reporting Jira as
-	// unconfigured rather than panicking.
-	smokeSvc := smokesvc.New(store, cfg.DataDir, sessionSvc, smokesvc.WithJiraPoster(jiraPoster))
-	mgr.SetSmokeEvidencePurger(smokeSvc.PurgeSessionEvidence)
-	return sessionSvc, reviewSvc, smokeSvc, mgr, nil
+	return sessionSvc, reviewSvc, mgr, nil
 }
 
 // runtimeMessageSender is the narrow part of the concrete runtime needed by

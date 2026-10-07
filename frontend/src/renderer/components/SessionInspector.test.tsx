@@ -374,18 +374,18 @@ describe("SessionInspector Activity section", () => {
 describe("SessionInspector tabs", () => {
 	const tabNames = () => screen.getAllByRole("tab").map((el) => el.textContent?.trim());
 
-	it("exposes Summary, Reviews, Files, Tests, and Browser as the inspector tabs (Comments merged into Reviews)", () => {
+	it("exposes Summary, Reviews, Files, and Browser as the inspector tabs (Comments merged into Reviews)", () => {
 		renderWithQuery(<SessionInspector hasWebUI session={session([pr(1, "open")])} />);
 		// Files sits beside Reviews (both are diff surfaces) and ahead of Browser,
 		// which is empty unless the worker ran `ao preview`.
-		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Tests", "Browser"]);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Browser"]);
 	});
 
 	// An orchestrator's workspace is the project checkout, not a per-task
 	// worktree, and it has no branch of its own to diff.
 	it("hides Files for an orchestrator session", () => {
 		renderWithQuery(<SessionInspector hasWebUI session={{ ...session([]), kind: "orchestrator" }} />);
-		expect(tabNames()).toEqual(["Summary", "Reviews", "Tests", "Browser"]);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Browser"]);
 	});
 
 	it("still defaults to Summary rather than the new Files tab", () => {
@@ -397,13 +397,13 @@ describe("SessionInspector tabs", () => {
 	// permanently empty. It is opt-in, so this is what MOST projects show.
 	it("hides Browser for a project with no web UI", () => {
 		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
-		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Tests"]);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files"]);
 		expect(screen.queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
 	});
 
 	it("hides Browser for an orchestrator in a project with no web UI", () => {
 		renderWithQuery(<SessionInspector session={{ ...session([]), kind: "orchestrator" }} />);
-		expect(tabNames()).toEqual(["Summary", "Reviews", "Tests"]);
+		expect(tabNames()).toEqual(["Summary", "Reviews"]);
 	});
 
 	it("still opens on Summary when Browser is hidden", () => {
@@ -823,16 +823,22 @@ describe("SessionInspector target branch", () => {
 // breakpoint, which truncates 5 tabs and needlessly hides 4 that would fit.
 describe("SessionInspector tab-strip width class", () => {
 	it.each([
-		{ name: "worker with a web UI and iOS", props: { hasWebUI: true, hasIOSSimulator: true }, expected: "6" },
-		{ name: "worker with a web UI", props: { hasWebUI: true }, expected: "5" },
-		{ name: "worker with iOS only", props: { hasIOSSimulator: true }, expected: "5" },
-		{ name: "worker with no web UI", props: {}, expected: "4" },
-		{ name: "orchestrator with a web UI", props: { hasWebUI: true, orchestrator: true }, expected: "4" },
-		{ name: "orchestrator with no web UI", props: { orchestrator: true }, expected: "3" },
+		{
+			name: "worker on a Testiny project with a web UI and iOS",
+			props: { hasWebUI: true, hasIOSSimulator: true, testinyProject: "MOB" },
+			expected: "6",
+		},
+		{ name: "worker with a web UI and iOS", props: { hasWebUI: true, hasIOSSimulator: true }, expected: "5" },
+		{ name: "worker with a web UI", props: { hasWebUI: true }, expected: "4" },
+		{ name: "worker with iOS only", props: { hasIOSSimulator: true }, expected: "4" },
+		{ name: "worker with no web UI", props: {}, expected: "3" },
+		{ name: "orchestrator with a web UI", props: { hasWebUI: true, orchestrator: true }, expected: "3" },
+		{ name: "orchestrator with no web UI", props: { orchestrator: true }, expected: "2" },
 	])("reports $expected tabs to the stylesheet for a $name", ({ props, expected }) => {
 		const { orchestrator, ...rest } = props as {
 			hasWebUI?: boolean;
 			hasIOSSimulator?: boolean;
+			testinyProject?: string;
 			orchestrator?: boolean;
 		};
 		renderWithQuery(
@@ -847,8 +853,8 @@ describe("SessionInspector tab-strip width class", () => {
 	// out of the accessibility tree as well as off the screen: at a narrow rail
 	// every tab was an unnamed icon. The name has to be on the tab itself.
 	it("names every tab even where the strip is too narrow to show the label", () => {
-		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator session={session([])} />);
-		for (const label of ["Summary", "Reviews", "Files", "Tests", "Device", "Browser"]) {
+		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator testinyProject="MOB" session={session([])} />);
+		for (const label of ["Summary", "Reviews", "Files", "Testiny", "Device", "Browser"]) {
 			expect(screen.getByRole("tab", { name: label })).toHaveAttribute("aria-label", label);
 		}
 	});
@@ -866,6 +872,41 @@ describe("SessionInspector Simulator tab visibility", () => {
 	it("is offered for a project that targets iOS", () => {
 		renderWithQuery(<SessionInspector hasIOSSimulator session={session([])} />);
 		expect(screen.getByRole("tab", { name: /device/i })).toBeInTheDocument();
+	});
+});
+
+// The Testiny tab shows the runs a task's cases were played in. It exists only
+// on a project that keeps its manual test cases in Testiny; anywhere else it
+// could only ever say the project does not use Testiny.
+describe("SessionInspector Testiny tab", () => {
+	const tabNames = () => screen.getAllByRole("tab").map((el) => el.textContent?.trim());
+
+	it("is absent for a project without a Testiny project", () => {
+		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator session={session([])} />);
+		expect(screen.queryByRole("tab", { name: "Testiny" })).not.toBeInTheDocument();
+	});
+
+	it("sits after Files on a Testiny project", () => {
+		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator testinyProject="MOB" session={session([])} />);
+		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Testiny", "Device", "Browser"]);
+	});
+
+	it("shows the task's runs when opened", async () => {
+		const user = userEvent.setup();
+		getMock.mockImplementation(async (path: string) =>
+			path === "/api/v1/sessions/{sessionId}/testiny/runs"
+				? { data: { project: "MOB", runs: [] } }
+				: { data: undefined },
+		);
+		renderWithQuery(<SessionInspector testinyProject="MOB" session={session([])} />);
+
+		await user.click(screen.getByRole("tab", { name: "Testiny" }));
+		expect(await screen.findByText("No test runs linked")).toBeInTheDocument();
+	});
+
+	it("falls back to Summary when the remembered tab is Testiny and the project turned it off", () => {
+		renderWithQuery(<SessionInspector view="testiny" session={session([])} />);
+		expect(screen.getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
 	});
 });
 
@@ -915,5 +956,86 @@ describe("SessionInspector ending section", () => {
 		mockCommonGets();
 		renderWithQuery(<SessionInspector session={session([pr(7, "open")])} />);
 		expect(screen.queryByText("Ended")).not.toBeInTheDocument();
+	});
+});
+
+// Machine runs answer a merge-readiness question, so they live on Summary under
+// the readiness strip, on every project - and say nothing for a session that
+// never bracketed a run.
+describe("SessionInspector machine runs on Summary", () => {
+	const crewRun = {
+		id: "run-1",
+		sessionId: "sess-1",
+		projectId: "ws-1",
+		kind: "test",
+		label: "npm test",
+		attempt: 1,
+		detector: "live",
+		genAtStart: 0,
+		genAtEnd: 0,
+		result: "pass",
+		outcome: "certified",
+		startedAt: "2026-08-21T10:00:00Z",
+		endedAt: "2026-08-21T10:01:00Z",
+		createdAt: "2026-08-21T10:00:00Z",
+		updatedAt: "2026-08-21T10:01:00Z",
+	};
+
+	// Answers only the TASK-scoped read of `task`: the strip shows every member's
+	// runs, so a read of the member's own would come back empty here.
+	const respondWithRuns = (runs: unknown[], task = "sess-1") =>
+		getMock.mockImplementation(
+			async (path: string, init?: { params?: { path?: { sessionId?: string }; query?: { scope?: string } } }) => {
+				if (
+					path === "/api/v1/sessions/{sessionId}/crew/runs" &&
+					init?.params?.path?.sessionId === task &&
+					init?.params?.query?.scope === "task"
+				) {
+					return { data: { runs } };
+				}
+				return { data: undefined };
+			},
+		);
+
+	it("shows this member's runs above the ending section", async () => {
+		respondWithRuns([crewRun]);
+		renderWithQuery(
+			<SessionInspector
+				session={session([], {
+					status: "terminated",
+					termination: { source: "agent", reason: "", lastState: "active", at: "2026-08-21T10:02:00Z" },
+				})}
+			/>,
+		);
+		const strip = await screen.findByRole("region", { name: "Machine runs" });
+		expect(screen.getByRole("tabpanel")).toContainElement(strip);
+		expect(within(strip).getByText("Test · npm test")).toBeInTheDocument();
+		const ended = screen.getByText("Ended").closest("section.inspector-section") as HTMLElement;
+		expect(strip.compareDocumentPosition(ended) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("shows qa the whole task's runs, dev's included, each tagged with its member", async () => {
+		respondWithRuns(
+			[
+				{ ...crewRun, id: "run-qa", sessionId: "sess-1-qa", crewId: "sess-1", role: "qa", label: "maestro test" },
+				{ ...crewRun, id: "run-dev", crewId: "sess-1", role: "dev", label: "npm test" },
+			],
+			"sess-1",
+		);
+		renderWithQuery(
+			<SessionInspector session={session([], { id: "sess-1-qa", crew: { id: "sess-1", role: "qa", hasRun: true } })} />,
+		);
+		const strip = await screen.findByRole("region", { name: "Machine runs" });
+		const rows = within(strip).getAllByTestId("crew-run-row");
+		expect(rows.map((row) => within(row).getByTestId("crew-run-role").textContent)).toEqual(["qa", "dev"]);
+	});
+
+	it("renders nothing for a session that never bracketed a run", async () => {
+		respondWithRuns([]);
+		renderWithQuery(<SessionInspector session={session([pr(1, "open")])} />);
+		await waitFor(() =>
+			expect(getMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/crew/runs", expect.anything()),
+		);
+		expect(screen.queryByRole("region", { name: "Machine runs" })).not.toBeInTheDocument();
 	});
 });

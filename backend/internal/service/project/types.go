@@ -25,8 +25,13 @@ type Summary struct {
 	// session on a crew-off project can say why no qa ever appears and that one
 	// can still be added by hand. Always emitted, never omitempty, for the same
 	// reason as the two above: absent and false must not be distinguishable.
-	DisableAutoCrew bool   `json:"disableAutoCrew"`
-	ResolveError    string `json:"resolveError,omitempty"`
+	DisableAutoCrew bool `json:"disableAutoCrew"`
+	// TestinyProject is the project's Testiny project key
+	// (ProjectConfig.TestinyProject). The desktop reads it from this list to
+	// decide whether a task shows a Testiny tab. Empty (and so absent) means the
+	// project does not use Testiny.
+	TestinyProject string `json:"testinyProject,omitempty"`
+	ResolveError   string `json:"resolveError,omitempty"`
 }
 
 // Project is the full read-model returned by GET /api/v1/projects/{id}.

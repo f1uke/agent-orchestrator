@@ -1075,7 +1075,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List a session's bracketed build/test runs, newest first */
+        /** List a session's bracketed build/test runs, or with scope=task its whole task's, newest first */
         get: operations["listCrewRuns"];
         put?: never;
         /** Open a run bracket: attach the tree-write detector and read the worktree's write generation */
@@ -1724,214 +1724,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/sessions/{sessionId}/smoke-checks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List a session's smoke-test checklist */
-        get: operations["listSmokeChecks"];
-        /** Author/replace a session's smoke-test checklist (results preserved by case id) */
-        put: operations["authorSmokeChecks"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Add or edit cases without touching the rest of the checklist */
-        patch: operations["addSmokeCases"];
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Remove one case the user has not played (a played case is retired instead) */
-        delete: operations["removeSmokeCase"];
-        options?: never;
-        head?: never;
-        /** Edit one case's authored fields; an omitted field is left alone */
-        patch: operations["editSmokeCase"];
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/agent-result": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Record a machine's result for a smoke-test case, beside (never instead of) the user's */
-        post: operations["recordSmokeAgentResult"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Attach a screenshot/short clip to a smoke-test case (multipart/form-data 'file' or raw body) */
-        post: operations["uploadSmokeEvidence"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Serve a stored smoke-test evidence blob */
-        get: operations["serveSmokeEvidence"];
-        put?: never;
-        post?: never;
-        /** Remove one evidence blob from a smoke-test case */
-        delete: operations["deleteSmokeEvidence"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Materialize a human-named, correctly-extensioned copy of an evidence blob for Reveal/Open */
-        post: operations["exportSmokeEvidence"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Clear a smoke-test case's verdict/note/evidence */
-        post: operations["resetSmokeCheck"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/retire": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Retire a smoke-test case out of the checklist, keeping its results and the reason it went */
-        post: operations["retireSmokeCheck"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Record the user's verdict + note for a smoke-test case */
-        post: operations["setSmokeVerdict"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/jira": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Post a session's smoke-test results to its linked Jira issue as a table comment with evidence attachments */
-        post: operations["postSmokeToJira"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/report": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Report a session's smoke-test results back to the worker */
-        post: operations["reportSmokeChecks"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sessions/{sessionId}/smoke-checks/stand-down": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Record that this change needs no human verification, with the reason */
-        post: operations["standDownSmokeChecklist"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/sessions/{sessionId}/spec": {
         parameters: {
             query?: never;
@@ -1977,6 +1769,75 @@ export interface paths {
         /** Set the branch this session's work merges into (retargets an open PR/MR) */
         put: operations["setSessionTarget"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/testiny/cases/{caseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a case in a run linked to the task in full (test data, precondition, steps), live from Testiny */
+        get: operations["getTestinyCase"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/testiny/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the Testiny runs linked to a task, read live from Testiny */
+        get: operations["listTestinyRuns"];
+        put?: never;
+        /** Link a Testiny run to a task, once Testiny confirms it is in the project's Testiny project */
+        post: operations["linkTestinyRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/testiny/runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unlink a Testiny run from a task */
+        delete: operations["unlinkTestinyRun"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/testiny/runs/{runId}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record case results in a run linked to the task, and return the run read fresh from Testiny */
+        post: operations["recordTestinyResults"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2166,41 +2027,6 @@ export interface paths {
         /** Replace the auto-nudge-on-comments gate setting */
         put: operations["setAutoNudgeSettings"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/settings/evidence-retention": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Fetch the smoke-test evidence retention settings */
-        get: operations["getEvidenceRetentionSettings"];
-        /** Replace the smoke-test evidence retention settings */
-        put: operations["setEvidenceRetentionSettings"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/settings/evidence-retention/sweep": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run the evidence retention sweep now (manual trigger) */
-        post: operations["sweepEvidenceRetention"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2748,12 +2574,6 @@ export interface components {
             enabled?: boolean;
             threshold?: number;
         };
-        AuthorSmokeChecksInput: {
-            /** @description The full 3–6 case checklist. */
-            cases: components["schemas"]["SmokeAuthoredCaseInput"][];
-            /** @description The calling session's own id, used to attribute the write. Omitted or unknown callers author anonymously; nobody is refused for who they are. */
-            from?: string;
-        };
         AutoNudgeSettingsResponse: {
             enabled: boolean;
         };
@@ -2827,12 +2647,6 @@ export interface components {
             session: components["schemas"]["ControllersSessionView"];
             sessionId: string;
         };
-        ControllersAddSmokeCasesInput: {
-            /** @description The cases to add or edit. An id already on the checklist is edited in place, keeping the user's verdict/note/evidence. */
-            cases: components["schemas"]["SmokeAuthoredCaseInput"][];
-            /** @description The calling session's own id, used to attribute the write. */
-            from?: string;
-        };
         ControllersApproveLearningProposalRequest: {
             /** @description The person's edit of what would be written; empty keeps the proposal's content. For a conflict, the new rule's text or the scope of each. */
             content?: string;
@@ -2857,13 +2671,17 @@ export interface components {
         ControllersCheckLearningForbiddenResponse: {
             hits: components["schemas"]["ControllersLearningForbiddenHitDTO"][];
         };
+        ControllersCrewHandbackView: {
+            /** @description The message's --about subject: a commit SHA, or on a Testiny project a case or run id. */
+            about: string;
+            /** Format: date-time */
+            at: string;
+        };
         ControllersCrewSendRequest: {
             about?: string;
             message: string;
             /** @enum {string} */
             role: "dev" | "qa";
-            /** @description qa only: this message is a mid-run update, not the end of the run, so the handback completeness check does not apply. */
-            stillWorking?: boolean;
             /**
              * @description Pin this one message to a path: pane (type it into the terminal, never touch the socket) or socket (socket or nothing - the send FAILS rather than fall back). Absent means the default, prefer the socket and fall back to the pane.
              * @enum {string}
@@ -2895,29 +2713,9 @@ export interface components {
              */
             via?: "app" | "cli" | "api";
         };
-        ControllersEditSmokeCaseInput: {
-            /** @description Expected result. Omit to leave unchanged. */
-            expected?: null | string;
-            /** @description file:line the change touched. Omit to leave unchanged. */
-            fileRef?: null | string;
-            /** @description The calling session's own id, used to attribute the write. */
-            from?: string;
-            /** @description One-line 'what to verify'. Omit to leave unchanged; may not be set empty. */
-            name?: null | string;
-            /** @description PR/MR number. Omit to leave unchanged. */
-            prNum?: null | number;
-            /** @description Ordered play steps, replacing the stored list. Omit to leave unchanged. */
-            steps?: null | string[];
-            /** @description Why it matters. Omit to leave unchanged. */
-            why?: null | string;
-        };
         ControllersForgetLearningResponse: {
             /** @description Captured turns deleted. */
             deletedTurns: number;
-        };
-        ControllersHandbackCompletenessView: {
-            cases: number;
-            notDriven: string[];
         };
         ControllersIOSProjectResponse: {
             /** @description The Xcode project at the root of this session's worktree. An empty name means there is none, and the run bar does not render. */
@@ -3028,7 +2826,7 @@ export interface components {
             } | null;
             sessionId: string;
             /** @enum {string} */
-            sourceClass: "typed" | "queued" | "suggestion_accepted" | "app_send" | "smoke_report";
+            sourceClass: "typed" | "queued" | "suggestion_accepted" | "app_send";
             /** Format: date-time */
             turnAt: string;
         };
@@ -3524,12 +3322,6 @@ export interface components {
              */
             via?: "app" | "cli" | "api";
         };
-        ControllersStandDownSmokeChecklistInput: {
-            /** @description The calling session's own id, used to attribute the claim. */
-            from?: string;
-            /** @description Why nothing here needs a person's eyes. Required - it is the whole content of standing down. */
-            reason: string;
-        };
         ControllersStartIOSRunInput: {
             /** @description The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects. */
             configuration: string;
@@ -3566,6 +3358,12 @@ export interface components {
         };
         ControllersStartLearningDecideResponse: {
             started: boolean;
+        };
+        ControllersTestinyStepResultInput: {
+            /** @description The step's number, counting from 1. */
+            n: number;
+            /** @description PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. A step takes no comment. */
+            status: string;
         };
         ControllersTranscriptRefRequest: {
             /** @description The harness's own conversation id. */
@@ -3634,7 +3432,11 @@ export interface components {
             outcome?: string;
             projectId: string;
             result?: string;
-            role?: string;
+            /**
+             * @description The crew member that made the run. Absent when the task has no crew.
+             * @enum {string}
+             */
+            role?: "dev" | "qa";
             sessionId: string;
             /** Format: date-time */
             startedAt: string;
@@ -3722,37 +3524,59 @@ export interface components {
         DomainSimTrustConfig: {
             caFiles: string[];
         };
-        DomainSmokeRun: {
-            checkId: string;
-            /** Format: date-time */
-            createdAt: string;
-            id: string;
-            note?: string;
-            /** Format: date-time */
-            recordedAt?: null | string;
-            seq: number;
-            sessionId: string;
-            sha?: string;
-            /** Format: date-time */
-            updatedAt: string;
-            verdict?: string;
-        };
-        DomainSmokeStandDown: {
-            /** Format: date-time */
-            at: string;
-            by?: string;
-            byRole?: string;
-            /** Format: date-time */
-            createdAt: string;
-            reason: string;
-            sessionId: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
         DomainSystemPromptAdditions: {
             orchestrator?: string;
             reviewer?: string;
             worker?: string;
+        };
+        DomainTestinyCaseDetail: {
+            /** @description The case's automation status values, e.g. Manual. */
+            automation: string[];
+            bdd: string;
+            description: string;
+            expectedText: string;
+            features: string;
+            /** Format: int64 */
+            id: number;
+            jira: string;
+            platforms: string[];
+            precondition: string;
+            priority?: components["schemas"]["DomainTestinyCasePriority"];
+            remark: string;
+            requirements: components["schemas"]["DomainTestinyRequirement"][];
+            section: string;
+            steps: components["schemas"]["DomainTestinyCaseStep"][];
+            stepsText: string;
+            subFeatures: string;
+            /** @description STEPS, TEXT or BDD; it says which of steps, stepsText/expectedText or bdd is filled. */
+            template: string;
+            testData: string;
+            title: string;
+            /** @description Testiny's testcase_type, e.g. FUNCTIONAL. */
+            type: string;
+        };
+        DomainTestinyCasePriority: {
+            label: string;
+            level: number;
+        };
+        DomainTestinyCaseStep: {
+            action: string;
+            expected: string;
+            n: number;
+            rid: string;
+        };
+        DomainTestinyRequirement: {
+            /** @description The Jira issue key, e.g. MOBILITY-4839. */
+            key: string;
+            /** @description The issue's Jira status name, e.g. In Progress. */
+            status: string;
+            summary: string;
+        };
+        DomainTestinyRunStep: {
+            /** @description The step's number, counting from 1, when the result was recorded. */
+            n: number;
+            rid: string;
+            status: string;
         };
         EndCrewRunInput: {
             /**
@@ -3773,25 +3597,6 @@ export interface components {
             /** @description The run was discarded and an automatic re-run is still within the cap. */
             retry: boolean;
             run: components["schemas"]["CrewRun"];
-        };
-        EvidenceExportResponse: {
-            /** @description Absolute path of the exported, openable copy on the local machine. */
-            path: string;
-        };
-        EvidenceRetentionSettingsResponse: {
-            /** @description Whether the age-based evidence retention sweep runs at all. */
-            enabled: boolean;
-            /** @description Purge evidence older than this many days (from its created_at). 0/disabled = keep forever. */
-            maxAgeDays: number;
-        };
-        EvidenceRetentionSweepResponse: {
-            /**
-             * Format: int64
-             * @description On-disk bytes freed by the sweep.
-             */
-            freedBytes: number;
-            /** @description Number of evidence items removed. */
-            purged: number;
         };
         GitConventionConfig: {
             branchPrefix?: string;
@@ -3965,6 +3770,12 @@ export interface components {
             kind: string;
             start: number;
         };
+        LinkTestinyRunInput: {
+            /** @description Session id of the agent linking the run ($AO_SESSION_ID). Empty when a person links it in the app. */
+            from?: string;
+            /** @description The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632). */
+            ref: string;
+        };
         ListAgentsResponse: {
             /** @description Compatibility list of installed agents whose local auth probe recently returned authorized. Advisory and stale-prone; spawn may still fail. */
             authorized: components["schemas"]["AgentInfo"][];
@@ -4008,18 +3819,6 @@ export interface components {
         };
         ListSimLeasesResponse: {
             leases: components["schemas"]["SimLease"][];
-        };
-        ListSmokeChecksResponse: {
-            checks: components["schemas"]["SmokeCheck"][];
-            /**
-             * Format: date-time
-             * @description When this session's results were last reported back.
-             */
-            reportedAt?: null | string;
-            /** @description Set when a member recorded that this change needs no human verification. */
-            standDown?: components["schemas"]["DomainSmokeStandDown"];
-            /** @description Worker label for the tab subtitle. */
-            worker: string;
         };
         MarkAllNotificationsReadResponse: {
             notifications: components["schemas"]["NotificationResponse"][];
@@ -4088,20 +3887,6 @@ export interface components {
             targetSha: string;
             title: string;
         };
-        PostSmokeToJiraResponse: {
-            /** @description Number of evidence files uploaded as Jira attachments. */
-            attachmentsUploaded: number;
-            /** @description Deep link to the created comment (empty if Jira returned no self link). */
-            commentUrl: string;
-            /** @description Whether image evidence embedded inline (false = attachment-link fallback). */
-            embeddedMedia: boolean;
-            /** @description Number of uploaded evidence files that landed as download links instead of inline previews. */
-            evidenceLinked: number;
-            /** @description The Jira issue key the results were posted to. */
-            key: string;
-            /** @description Number of run rows (verdict set) posted in the table. */
-            rowsPosted: number;
-        };
         ProbeAgentResponse: {
             agent: components["schemas"]["AgentInfo"];
             installed: boolean;
@@ -4144,6 +3929,7 @@ export interface components {
             simTrust?: components["schemas"]["DomainSimTrustConfig"];
             symlinks?: string[];
             systemPromptAdditions?: components["schemas"]["DomainSystemPromptAdditions"];
+            testinyProject?: string;
             trackerIntake?: components["schemas"]["TrackerIntakeConfig"];
             worker?: components["schemas"]["RoleOverride"];
         };
@@ -4167,6 +3953,7 @@ export interface components {
             path: string;
             resolveError?: string;
             sessionPrefix: string;
+            testinyProject?: string;
         };
         ReclaimSettingsResponse: {
             artifactPatterns?: string[];
@@ -4174,13 +3961,13 @@ export interface components {
             enabled: boolean;
             graceMinutes: number;
         };
-        RecordSmokeAgentResultInput: {
-            /** @description What the machine saw. */
-            note?: string;
-            /** @description The commit the case was run against; compare with the PR head to spot a stale result. */
+        RecordTestinyResultsInput: {
+            /** @description Session id of the agent recording them ($AO_SESSION_ID). Empty when a person sets them in the app. */
+            from?: string;
+            /** @description The results to record. The whole batch is checked before any is written. */
+            results: components["schemas"]["TestinyResultInput"][];
+            /** @description The commit the agent tested, for the tab's provenance line. */
             sha?: string;
-            /** @description pass | fail | skip, or omitted for an evidence-only run (allowed only when the case already carries agent evidence). */
-            verdict?: string;
         };
         RefLinksSettingsResponse: {
             gitlabBaseUrl: string;
@@ -4219,14 +4006,6 @@ export interface components {
             comment: components["schemas"]["SessionPRThreadComment"];
             ok: boolean;
         };
-        ReportSmokeResponse: {
-            /** @description Whether the summary was delivered to a live session. */
-            delivered: boolean;
-            /** @description The composed results summary. */
-            summary: string;
-            /** @description worker | orchestrator | persisted. */
-            target: string;
-        };
         ResolveCommentsResponse: {
             ok: boolean;
             resolved: number;
@@ -4252,10 +4031,6 @@ export interface components {
             ok: boolean;
             session: components["schemas"]["ControllersSessionView"];
             sessionId: string;
-        };
-        RetireSmokeCheckInput: {
-            /** @description Why the case is no longer worth playing (e.g. "now covered by TestFoo"). Required - it is the trace retiring leaves behind. */
-            reason: string;
         };
         ReviewRun: {
             batchId: string;
@@ -4301,7 +4076,6 @@ export interface components {
         };
         SendSessionMessageResponse: {
             delivery?: components["schemas"]["ControllersMessageDeliveryView"];
-            handback?: components["schemas"]["ControllersHandbackCompletenessView"];
             message: string;
             ok: boolean;
             pendingMessages?: number;
@@ -4344,6 +4118,7 @@ export interface components {
              * @enum {string}
              */
             joinReason?: "sim" | "preview" | "manual";
+            lastHandback?: components["schemas"]["ControllersCrewHandbackView"];
             /** @enum {string} */
             role: "dev" | "qa";
         };
@@ -4533,10 +4308,6 @@ export interface components {
         SetAutoResolveRequest: {
             override: null | boolean;
         };
-        SetEvidenceRetentionSettingsRequest: {
-            enabled: boolean;
-            maxAgeDays: number;
-        };
         SetMessageTemplateRequest: {
             template: string;
         };
@@ -4573,14 +4344,6 @@ export interface components {
         };
         SetSimTrustSettingsRequest: {
             caFiles: string[];
-        };
-        SetSmokeVerdictInput: {
-            /** @description Optional id of the agent run the user agreed with. The run must be on this case, must have concluded, and its verdict must match; skip cannot be agreed with. */
-            agreedRunId?: string;
-            /** @description Optional note about what the user saw. */
-            note?: string;
-            /** @description pass | fail | skip. */
-            verdict: string;
         };
         SetSpawnConfirmSettingsRequest: {
             enabled: boolean;
@@ -4960,83 +4723,6 @@ export interface components {
             /** Format: double */
             y: number;
         };
-        SmokeAuthoredCaseInput: {
-            /** @description Expected result. */
-            expected?: string;
-            /** @description file:line the change touched. */
-            fileRef?: string;
-            /** @description Stable case id. Optional — derived from the name (slugified) when omitted, so rewording a name changes it. Supplying it keeps the user's verdict/note/evidence across a re-author; dropping a played case is refused (422 SMOKE_RESULTS_AT_RISK). */
-            id?: string;
-            /** @description One-line 'what to verify'. */
-            name: string;
-            /** @description PR/MR number the change belongs to (0 if none). */
-            prNum?: number;
-            /** @description Ordered play steps. */
-            steps?: string[];
-            /** @description Derived display tag (CHECK N); accepted but not persisted. */
-            tag?: string;
-            /** @description Why it matters / what it confirms. */
-            why?: string;
-        };
-        SmokeCheck: {
-            agentEvidence: components["schemas"]["SmokeEvidence"][];
-            agentNote?: string;
-            /** Format: date-time */
-            agentRanAt?: null | string;
-            agentSha?: string;
-            agentVerdict?: string;
-            agreedRunId?: string;
-            /** Format: date-time */
-            authoredAt?: null | string;
-            authoredBy?: string;
-            authoredByRole?: string;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            decidedAt?: null | string;
-            evidence: components["schemas"]["SmokeEvidence"][];
-            expected: string;
-            fileRef: string;
-            id: string;
-            name: string;
-            note: string;
-            prNum: number;
-            projectId: string;
-            /** Format: date-time */
-            reportedAt?: null | string;
-            /** Format: date-time */
-            retiredAt?: null | string;
-            retiredReason?: string;
-            runs: components["schemas"]["DomainSmokeRun"][];
-            seq: number;
-            sessionId: string;
-            steps: string[];
-            /** Format: date-time */
-            updatedAt: string;
-            verdict: string;
-            why: string;
-        };
-        SmokeCheckResponse: {
-            check: components["schemas"]["SmokeCheck"];
-        };
-        SmokeEvidence: {
-            build?: string;
-            checkId: string;
-            /** Format: date-time */
-            createdAt: string;
-            filename: string;
-            id: string;
-            kind: string;
-            mime: string;
-            runId?: string;
-            sessionId: string;
-            /** Format: int64 */
-            sizeBytes: number;
-            source: string;
-        };
-        SmokeEvidenceResponse: {
-            evidence: components["schemas"]["SmokeEvidence"];
-        };
         SpawnConfirmSettingsResponse: {
             enabled: boolean;
         };
@@ -5072,7 +4758,7 @@ export interface components {
              * @enum {string}
              */
             kind: "build" | "test" | "device";
-            /** @description Free-text label for the run (e.g. the command), shown in the Tests tab. */
+            /** @description Free-text label for the run (e.g. the command), shown on the Summary tab. */
             label?: string;
         };
         StartCrewRunResponse: {
@@ -5127,9 +4813,83 @@ export interface components {
             default: string;
             kind: string;
             override: null | string;
+            warnings?: string[];
         };
         SystemPromptsResponse: {
             prompts: components["schemas"]["SystemPromptItem"][];
+        };
+        TestinyCaseResult: {
+            /** Format: int64 */
+            id: number;
+            recorded?: components["schemas"]["TestinyResultRecord"];
+            script?: string;
+            status: string;
+            steps: components["schemas"]["DomainTestinyRunStep"][];
+            title: string;
+        };
+        TestinyFetchError: {
+            /** @enum {string} */
+            kind: "auth" | "not_found" | "unavailable" | "rejected" | "binary_missing" | "cli_too_old";
+            message: string;
+        };
+        TestinyRef: {
+            /** Format: int64 */
+            id: number;
+            title: string;
+        };
+        TestinyResultInput: {
+            /**
+             * Format: int64
+             * @description The Testiny case id (7166 for TC-7166).
+             */
+            caseId: number;
+            /** @description What happened, at most 300 characters. FAILED, BLOCKED and SKIPPED need one; PASSED and NOTRUN take none. */
+            comment?: string;
+            /** @description PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. Empty when only steps are given: the case keeps its status. */
+            status?: string;
+            /** @description Results for steps of a STEPS case. Every other step keeps the result it has. */
+            steps?: components["schemas"]["ControllersTestinyStepResultInput"][];
+        };
+        TestinyResultRecord: {
+            /** Format: date-time */
+            at: string;
+            by: string;
+            /** @enum {string} */
+            byRole?: "dev" | "qa";
+            comment: string;
+            sha: string;
+            status: string;
+        };
+        /** Format: int64 */
+        TestinyRunID: number;
+        TestinyRunLink: {
+            /** Format: date-time */
+            createdAt: string;
+            linkedBy: string;
+            runId: components["schemas"]["TestinyRunID"];
+            sessionId: string;
+        };
+        TestinyRunView: {
+            cases: components["schemas"]["TestinyCaseResult"][];
+            closed: boolean;
+            counts: {
+                [key: string]: number;
+            } | null;
+            evidenceDir: string;
+            fetchError?: components["schemas"]["TestinyFetchError"];
+            /** Format: date-time */
+            fetchedAt?: null | string;
+            link: components["schemas"]["TestinyRunLink"];
+            milestone?: components["schemas"]["TestinyRef"];
+            plan?: components["schemas"]["TestinyRef"];
+            title: string;
+            url: string;
+        };
+        TestinyRunsResponse: {
+            /** @description The project's Testiny project, as set (a key, name or id). */
+            project: string;
+            /** @description The task's runs in the order they were linked. A run Testiny could not read now carries fetchError. */
+            runs: components["schemas"]["TestinyRunView"][];
         };
         TrackerIntakeConfig: {
             assignee?: string;
@@ -9300,7 +9060,10 @@ export interface operations {
     };
     listCrewRuns: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description task returns the runs of every member of the session's task (dev and qa), each naming its role. Omitted returns the session's own runs. */
+                scope?: "task";
+            };
             header?: never;
             path: {
                 /** @description Session identifier, e.g. project-1. */
@@ -9317,6 +9080,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListCrewRunsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Internal Server Error */
@@ -12182,899 +11954,6 @@ export interface operations {
             };
         };
     };
-    listSmokeChecks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    authorSmokeChecks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AuthorSmokeChecksInput"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    addSmokeCases: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ControllersAddSmokeCasesInput"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    removeSmokeCase: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    editSmokeCase: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ControllersEditSmokeCaseInput"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmokeCheckResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    recordSmokeAgentResult: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RecordSmokeAgentResultInput"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmokeCheckResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    uploadSmokeEvidence: {
-        parameters: {
-            query?: {
-                /** @description Who attached it: user (default) or agent. Agent files land in the case's separate agentEvidence list so provenance is never ambiguous. */
-                source?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmokeEvidenceResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    serveSmokeEvidence: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-                /** @description Evidence blob identifier. */
-                evidenceId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": string;
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    deleteSmokeEvidence: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-                /** @description Evidence blob identifier. */
-                evidenceId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmokeCheckResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    exportSmokeEvidence: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-                /** @description Evidence blob identifier. */
-                evidenceId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvidenceExportResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    resetSmokeCheck: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmokeCheckResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    retireSmokeCheck: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RetireSmokeCheckInput"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmokeCheckResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    setSmokeVerdict: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-                /** @description Smoke-check case identifier. */
-                checkId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetSmokeVerdictInput"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SmokeCheckResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    postSmokeToJira: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PostSmokeToJiraResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    reportSmokeChecks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReportSmokeResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    standDownSmokeChecklist: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Session identifier, e.g. project-1. */
-                sessionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ControllersStandDownSmokeChecklistInput"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ListSmokeChecksResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Not Implemented */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
     updateTodoSpec: {
         parameters: {
             query?: never;
@@ -13278,6 +12157,352 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getTestinyCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Testiny case id, e.g. 7166 or TC-7166. */
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainTestinyCaseDetail"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listTestinyRuns: {
+        parameters: {
+            query?: {
+                /** @description 1 reads every run from Testiny now instead of serving a read from the last 15 seconds. */
+                refresh?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestinyRunsResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    linkTestinyRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkTestinyRunInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestinyRunView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    unlinkTestinyRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Testiny run id, e.g. 632 or TR-632. */
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    recordTestinyResults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Testiny run id, e.g. 632 or TR-632. */
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordTestinyResultsInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestinyRunView"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13973,106 +13198,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    getEvidenceRetentionSettings: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvidenceRetentionSettingsResponse"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    setEvidenceRetentionSettings: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetEvidenceRetentionSettingsRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvidenceRetentionSettingsResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    sweepEvidenceRetention: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EvidenceRetentionSweepResponse"];
                 };
             };
             /** @description Internal Server Error */

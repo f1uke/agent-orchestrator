@@ -10,6 +10,10 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
+// manualChecksLine is the finish-report clause through which a worker that
+// reports to the orchestrator names what a person must still check by hand.
+const manualChecksLine = "anything a person must check by hand"
+
 // crewPromptStore is a project with an orchestrator on the board and iOS turned
 // on, so both of the blocks that MOVE between the roles are in play at once.
 func crewPromptStore(t *testing.T) *fakeStore {
@@ -26,8 +30,8 @@ func crewPromptStore(t *testing.T) *fakeStore {
 // TestBuildSystemPrompt_SoloWorkerKeepsEverything is the preservation guard for
 // the prompt split, and it is the one that matters most: a solo worker - every
 // session on this machine today, and every mechanical task after this change -
-// must still be handed the smoke protocol and the full simulator catalog. There
-// is nobody else to hand them to.
+// must still be told to name the manual checks in its finish report, and get the
+// full simulator catalog. There is nobody else to hand them to.
 func TestBuildSystemPrompt_SoloWorkerKeepsEverything(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
@@ -36,7 +40,7 @@ func TestBuildSystemPrompt_SoloWorkerKeepsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"## Smoke-test checklist (AO)",
+		manualChecksLine,
 		"## Driving the iOS Simulator (AO)",
 		"ao sim claim",
 		"## Task size: mechanical (AO)",
@@ -53,10 +57,11 @@ func TestBuildSystemPrompt_SoloWorkerKeepsEverything(t *testing.T) {
 
 // TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA. Under lazy creation
 // a crew-eligible dev is ALONE when its prompt is built, and may be alone for the
-// whole task - so it keeps every block a solo worker has, the checklist protocol
-// and the full simulator catalog included. Taking either away would leave a
-// backend-only standard task with no checklist author, and would forbid the one
-// act that ever creates a qa on an iOS task.
+// whole task - so it keeps every block a solo worker has, the manual-checks
+// line of its finish report and the full simulator catalog included. Taking
+// either away would leave a backend-only standard task with nobody naming what a
+// person must check, and would forbid the one act that ever creates a qa on an
+// iOS task.
 func TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA(t *testing.T) {
 	m := layeredManager(crewPromptStore(t), nil)
 
@@ -65,7 +70,7 @@ func TestBuildSystemPrompt_CrewDevKeepsEverythingUntilItHasAQA(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"## Smoke-test checklist (AO)",                             // it owns the list until a qa exists
+		manualChecksLine,                                           // it owns the manual checks until a qa exists
 		"ao sim tap --label",                                       // and it may drive the device itself
 		"Most sessions open one pull request",                      // the worker base, unchanged
 		"## Orchestrator coordination",                             // dev is the one that reports
@@ -99,7 +104,7 @@ func TestBuildSystemPrompt_CrewQAIsItsOwnAgent(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## QA role",
-		"## Smoke-test checklist (AO)",      // moved here
+		"## Handing back (AO)",              // qa's own floor
 		"## Driving the iOS Simulator (AO)", // moved here, in full
 		"## Required coordination (AO)",     // the worker floor still applies
 		"Standing-instruction confidentiality",
@@ -151,7 +156,7 @@ func TestBuildSystemPrompt_OnlyQAGetsTheRecordedFlowLoop(t *testing.T) {
 	for _, want := range []string{
 		"## Turning a played scenario into a test (AO)",
 		"ao sim flow record start --name",
-		"ao smoke retire",
+		"Commit the flow",
 	} {
 		if !strings.Contains(qa, want) {
 			t.Fatalf("qa was not given the recorded-flow loop (%q):\n%s", want, qa)
@@ -186,60 +191,9 @@ func TestBuildSystemPrompt_NoSimulatorMeansNoRecordedFlowLoop(t *testing.T) {
 	if strings.Contains(got, "## Turning a played scenario into a test (AO)") {
 		t.Fatalf("qa on a project with no device was told to record a device flow:\n%s", got)
 	}
-	// It still owns the checklist - that part has nothing to do with a device.
-	if !strings.Contains(got, "## Smoke-test checklist (AO)") {
-		t.Fatalf("qa lost the checklist protocol on a non-iOS project:\n%s", got)
-	}
-}
-
-// The checklist block dev is assembled with, after the reversal. It used to be a
-// negative ("the checklist is yours only while you have no qa", and `ao smoke
-// set` from you is REFUSED); the human reversed that, so what dev now carries is
-// a capability plus the one mechanical trap in it - `set` replaces the whole
-// list, so two members using it erase each other.
-func TestBuildSystemPrompt_CrewDevIsToldTheChecklistIsShared(t *testing.T) {
-	m := layeredManager(crewPromptStore(t), nil)
-
-	dev, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleDev})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// It carries the protocol AND the window: the list is dev's until a qa exists,
-	// which on a task that never touches a runtime surface is for ever.
-	if !strings.Contains(dev, "## Smoke-test checklist (AO)") {
-		t.Fatalf("crew dev cannot author a checklist for a task that may never get a qa:\n%s", dev)
-	}
-	for _, want := range []string{
-		"The smoke checklist is SHARED",
-		"Never `ao smoke set` once there are two of you",
-		// The half of the old split that survived: cases are shared, machine
-		// results are not.
-		"Cases are shared; RESULTS are not",
-	} {
-		if !strings.Contains(dev, want) {
-			t.Fatalf("crew dev prompt missing the shared-checklist block %q:\n%s", want, dev)
-		}
-	}
-	// The reversed refusal must not survive anywhere in what dev is assembled
-	// with: a prompt asserting an enforcement AO no longer performs is worse than
-	// one that says nothing.
-	for _, gone := range []string{"REFUSED by AO", "that brief predates the crew"} {
-		if strings.Contains(dev, gone) {
-			t.Fatalf("crew dev still carries the reversed refusal %q:\n%s", gone, dev)
-		}
-	}
-
-	// A solo worker is in no crew, so it is told none of this and keeps the
-	// protocol it has always had.
-	solo, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(solo, "The smoke checklist is SHARED") {
-		t.Fatalf("a solo worker was told about a crewmate it can never have:\n%s", solo)
-	}
-	if !strings.Contains(solo, "## Smoke-test checklist (AO)") {
-		t.Fatalf("a solo worker lost the checklist protocol:\n%s", solo)
+	// It still hands back - that part has nothing to do with a device.
+	if !strings.Contains(got, "## Handing back (AO)") {
+		t.Fatalf("qa lost its handback on a non-iOS project:\n%s", got)
 	}
 }
 
@@ -266,17 +220,14 @@ func TestSpawn_StandardTaskLaunchesDevWithTheCrewPrompt(t *testing.T) {
 	if !strings.Contains(launched, "ao crew review") {
 		t.Fatalf("dev was launched without being told how to ask for its qa:\n%s", launched)
 	}
-	if !strings.Contains(launched, "The smoke checklist is SHARED") {
-		t.Fatalf("dev was launched without being told the checklist is shared:\n%s", launched)
-	}
-	if !strings.Contains(launched, "## Smoke-test checklist (AO)") {
-		t.Fatalf("dev was launched unable to author the checklist it co-owns:\n%s", launched)
+	if !strings.Contains(launched, manualChecksLine) {
+		t.Fatalf("dev was launched without being told to name the manual checks it owns:\n%s", launched)
 	}
 }
 
 // A MECHANICAL task is dev alone, so it must be launched with the solo prompt it
-// has always had - the checklist protocol included, because there is nobody else
-// to keep it.
+// has always had - the manual-checks line included, because there is nobody else
+// to name them.
 func TestSpawn_MechanicalTaskLaunchesTheSoloPrompt(t *testing.T) {
 	st := newFakeStore()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: testRoleAgents()}
@@ -288,13 +239,11 @@ func TestSpawn_MechanicalTaskLaunchesTheSoloPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	launched := agent.lastLaunch.SystemPrompt
-	if !strings.Contains(launched, "## Smoke-test checklist (AO)") {
-		t.Fatalf("a mechanical worker lost the checklist protocol it owns:\n%s", launched)
+	if !strings.Contains(launched, manualChecksLine) {
+		t.Fatalf("a mechanical worker lost the manual checks it owns:\n%s", launched)
 	}
-	for _, gone := range []string{"## Your crewmate (AO)", "do not author or edit the smoke checklist"} {
-		if strings.Contains(launched, gone) {
-			t.Fatalf("a mechanical worker was told about a crew it does not have (%q):\n%s", gone, launched)
-		}
+	if strings.Contains(launched, "## Your crewmate (AO)") {
+		t.Fatalf("a mechanical worker was told about a crew it does not have:\n%s", launched)
 	}
 }
 
@@ -336,69 +285,6 @@ func TestBuildSystemPrompt_EveryMemberIsToldNotToDriveADeviceItDoesNotHold(t *te
 	}
 }
 
-// qa is created part-way through a task, so the always-injected protocol's
-// timing - author the list once the change is done, before the PR - leaves a
-// window where a qa is working and nothing says what it intends to verify. qa is
-// re-timed to publish its intent up front, and pointed at `ao smoke stand-down`
-// when the answer is that nothing needs a human - which is the surface that now
-// stops an empty Tests tab meaning "still thinking" and "nothing to check" at
-// the same time. dev and a solo worker keep the timing they had: theirs is the
-// last thing they do, and there is nobody to tell.
-func TestBuildSystemPrompt_OnlyQAPublishesTheChecklistAsIntent(t *testing.T) {
-	m := layeredManager(crewPromptStore(t), nil)
-
-	qa, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"### Publish what you will verify, before you verify it (AO)",
-		"before you start running things", // intent up front, not at the end
-		"ao smoke stand-down",             // the surface, now that one exists
-		"cannot tell your answer from nobody having looked",
-		"## Smoke-test checklist (AO)", // it re-times that block, never replaces it
-	} {
-		if !strings.Contains(qa, want) {
-			t.Fatalf("qa was not told to publish its intent early (%q):\n%s", want, qa)
-		}
-	}
-	// The re-timing is about WHEN qa writes, not WHO writes: dev is still told the
-	// list is shared and still carries the per-case verbs.
-	dev, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleDev})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(dev, "The smoke checklist is SHARED") {
-		t.Fatalf("dev lost the shared-checklist block:\n%s", dev)
-	}
-
-	for _, role := range []domain.CrewRole{domain.CrewRoleDev, ""} {
-		got, err := m.buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: role})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(got, "### Publish what you will verify, before you verify it (AO)") {
-			t.Fatalf("role %q was re-timed for a qa it does not have:\n%s", role, got)
-		}
-		// And the rule it would have overridden is still there, unweakened.
-		if !strings.Contains(got, "BEFORE you open the PR/MR") {
-			t.Fatalf("role %q lost the before-the-PR timing it has always had:\n%s", role, got)
-		}
-	}
-
-	// A qa can be created by `ao preview` on a project with no simulator, and it
-	// owns the same checklist there - so this block is not gated on iOS.
-	st := crewPromptStore(t)
-	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: domain.ProjectConfig{HasIOSSimulator: false}}
-	plain, err := layeredManager(st, nil).buildSystemPrompt(ctx, systemPromptSpec{Kind: domain.KindWorker, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: domain.CrewRoleQA})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(plain, "### Publish what you will verify, before you verify it (AO)") {
-		t.Fatalf("a qa on a non-iOS project lost the checklist timing it owns:\n%s", plain)
-	}
-}
-
 // scriptOnlyPrompt builds a worker prompt on a project with the given config.
 func scriptOnlyPrompt(t *testing.T, cfg domain.ProjectConfig, role domain.CrewRole) string {
 	t.Helper()
@@ -415,7 +301,7 @@ var allWorkerRoles = []domain.CrewRole{"", domain.CrewRoleDev, domain.CrewRoleQA
 
 // On a script-only iOS project every worker is taught the script workflow in
 // place of the step-by-step catalog: the catalog teaches `ao sim tap`, the one
-// thing the project rules out. qa plays its cases with scripts instead of
+// thing the project rules out. qa plays its test cases with case scripts instead of
 // recording flows into the repository.
 func TestBuildSystemPrompt_ScriptOnlyIOSReplacesTheTapCatalog(t *testing.T) {
 	cfg := domain.ProjectConfig{HasIOSSimulator: true, MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS}}
@@ -440,7 +326,7 @@ func TestBuildSystemPrompt_ScriptOnlyIOSReplacesTheTapCatalog(t *testing.T) {
 				t.Fatalf("role %q on a script-only iOS project was still taught %q:\n%s", role, gone, got)
 			}
 		}
-		play := strings.Contains(got, "## Playing smoke cases with scripts (AO)")
+		play := strings.Contains(got, "## Playing test cases with Maestro scripts (AO)")
 		if play != (role == domain.CrewRoleQA) {
 			t.Fatalf("role %q: script play block present = %v, want it for qa only", role, play)
 		}
@@ -476,7 +362,7 @@ func TestBuildSystemPrompt_ScriptOnlyAndroidHasNoAOSim(t *testing.T) {
 				t.Fatalf("role %q on an Android project was handed %q:\n%s", role, gone, got)
 			}
 		}
-		if play := strings.Contains(got, "## Playing smoke cases with scripts (AO)"); play != (role == domain.CrewRoleQA) {
+		if play := strings.Contains(got, "## Playing test cases with Maestro scripts (AO)"); play != (role == domain.CrewRoleQA) {
 			t.Fatalf("role %q: script play block present = %v, want it for qa only", role, play)
 		}
 	}
@@ -491,7 +377,7 @@ func TestBuildSystemPrompt_NoMobileScriptsMeansNoScriptRule(t *testing.T) {
 	} {
 		for _, role := range allWorkerRoles {
 			got := scriptOnlyPrompt(t, cfg, role)
-			for _, gone := range []string{"scripts only (AO)", "bin/flow", "## Playing smoke cases with scripts (AO)"} {
+			for _, gone := range []string{"scripts only (AO)", "bin/flow", "## Playing test cases with Maestro scripts (AO)"} {
 				if strings.Contains(got, gone) {
 					t.Fatalf("%s project, role %q, was handed the script rule (%q):\n%s", name, role, gone, got)
 				}

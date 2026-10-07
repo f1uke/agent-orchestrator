@@ -1,0 +1,64 @@
+{
+  "data": [
+    {
+      "id": 7166,
+      "project_id": 1,
+      "folder_id": 830,
+      "title": "[Finno Chat] Fund disclaimer is displayed in chat",
+      "template": "STEPS",
+      "priority": 1,
+      "testcase_type": "FUNCTIONAL",
+      "precondition": "- Logged in to the Main app (Android or iOS)\n- A chat room exists where a fund disclaimer notice message has been sent",
+      "steps": [
+        {
+          "n": 1,
+          "rid": "5quWOzIAc5",
+          "action": "Open the Main app and go to Finnomena Chat",
+          "expected": "Chat list is displayed"
+        },
+        {
+          "n": 2,
+          "rid": "g0Gf9X8Vbe",
+          "action": "Open the chat room that contains the fund disclaimer message",
+          "expected": "Chat room opens and scrolls to the latest messages"
+        },
+        {
+          "n": 3,
+          "rid": "pCqV0Dbrt8",
+          "action": "Look at the fund disclaimer message",
+          "expected": "Disclaimer is shown as a notice message (not a normal chat bubble) with the full fund disclaimer text, readable and not truncated"
+        },
+        {
+          "n": 4,
+          "rid": "HEcuShOZ5K",
+          "action": "If the disclaimer has a header image, check it",
+          "expected": "Header image loads at the correct width, with no broken-image icon inside the text"
+        }
+      ],
+      "steps_text": null,
+      "expected_text": null,
+      "bdd": null,
+      "custom": {
+        "cf__active": true,
+        "cf__automationstatus": [
+          "Manual"
+        ],
+        "cf__description": null,
+        "cf__features": "Finnomena Chat",
+        "cf__jira": "MOBILITY-4839",
+        "cf__platform": [
+          "ADR",
+          "iOS"
+        ],
+        "cf__regression": [
+          "YES"
+        ],
+        "cf__remark": null,
+        "cf__section": null,
+        "cf__sprint": null,
+        "cf__subfeatures": "Notice disclaimer",
+        "cf__testdata": "qa@example.com / fake-password"
+      }
+    }
+  ]
+}

@@ -76,7 +76,8 @@ const api = {
 	shell: {
 		openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,
 		// Reveal a local file in Finder (selects it); Open launches it in the OS
-		// default app for its type. Used by the Tests tab to surface stored evidence.
+		// default app for its type. Used by the Testiny tab for a run's evidence
+		// folder; the main process accepts only paths inside ~/Desktop/QA Evidence.
 		showItemInFolder: (path: string) => ipcRenderer.invoke("shell:showItemInFolder", path) as Promise<void>,
 		openPath: (path: string) => ipcRenderer.invoke("shell:openPath", path) as Promise<void>,
 	},

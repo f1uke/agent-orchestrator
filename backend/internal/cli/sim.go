@@ -444,7 +444,7 @@ func (c *commandContext) captureSimShot(ctx context.Context, udid, output, app s
 	result.Build, result.BuildUnknown = c.readSimBuild(ctx, device, app)
 	if result.Build != nil {
 		// Into the file, not merely beside it. Evidence gets downloaded, moved
-		// and dragged into the Tests tab by a person who was never told there
+		// and attached to a test result by a person who was never told there
 		// was a second thing to bring, so the build has to travel inside the
 		// picture. A failure here does not fail the capture: a screenshot with
 		// no build recorded is still a screenshot.
@@ -459,8 +459,8 @@ func (c *commandContext) captureSimShot(ctx context.Context, udid, output, app s
 }
 
 // simBuildTextKey is the PNG tEXt keyword the build id is stored under. It is
-// part of the on-disk contract between `ao sim shot`, `ao smoke record` and the
-// Tests tab's own upload, so all three must agree on the spelling.
+// part of the on-disk contract of what `ao sim shot` writes, so anything that
+// reads the build back out of a screenshot must use the same spelling.
 const simBuildTextKey = "ao-build"
 
 // readSimBuild fingerprints the app on a device, or says why it could not.

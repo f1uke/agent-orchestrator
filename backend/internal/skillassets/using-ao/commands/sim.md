@@ -227,7 +227,7 @@ Build: com.example.MyApp 6.5.18 (708) cdhash:d114bed635ed2eb91f5c
 
 That line is the answer to a question you would otherwise have to remember to ask. `xcodebuild test -destination <udid>` **builds and installs the app target as part of running tests**, so the binary on the device changes underneath you: a screenshot taken before it and one taken after look identical and are of different software. Two captures whose `Build:` lines differ are not evidence of the same thing, however similar they look.
 
-The same string is written INSIDE the PNG (an `ao-build` text chunk), so it survives the file being copied, downloaded and attached. `ao smoke record --evidence` and the Tests tab's own upload both read it back off the file and store it with the evidence - you do not pass it anywhere.
+The same string is written INSIDE the PNG (an `ao-build` text chunk), so it survives the file being copied, downloaded and attached. Whoever holds only the file can still read which build it shows - you do not pass it anywhere.
 
 **Which app** is the most recently installed one, discounting the `.xctrunner` host `xcodebuild test` puts on the device beside it - because the app that just landed is the one the question is about. A developer's simulator accumulates apps (the one this was measured on carried nine), so when it chooses between several it says so:
 

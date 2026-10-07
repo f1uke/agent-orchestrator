@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { SessionStatus, WorkspaceSession } from "../types/workspace";
-import { statusGlyph, statusLabel } from "./status-glyph";
+import { statusGlyph, statusLabel, testinyCaseGlyph } from "./status-glyph";
 
 // Every status the daemon can derive. Kept as a literal list on purpose: if a new
 // status is added to the union, TypeScript fails this file until it is listed
@@ -107,5 +107,19 @@ describe("statusGlyph", () => {
 		expect(laneOf("unknown")).toBe("pending");
 		expect(laneOf("approved")).toBe("merge");
 		expect(laneOf("mergeable")).toBe("merge");
+	});
+});
+
+describe("testinyCaseGlyph", () => {
+	const KNOWN = ["PASSED", "FAILED", "BLOCKED", "SKIPPED", "NOTRUN"];
+
+	it("gives every result Testiny records its own silhouette and word", () => {
+		const glyphs = KNOWN.map(testinyCaseGlyph);
+		expect(new Set(glyphs.map((g) => g.Icon)).size).toBe(KNOWN.length);
+		expect(glyphs.map((g) => g.label)).toEqual(["Passed", "Failed", "Blocked", "Skipped", "Not run"]);
+	});
+
+	it("keeps an unknown status's own word", () => {
+		expect(testinyCaseGlyph("RETEST").label).toBe("Retest");
 	});
 });

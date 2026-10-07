@@ -60,12 +60,8 @@ nothing extra.
 
 - **One git index, one branch.** A wide `git add -A` sweeps up your crewmate's
   half-written work. Commit the paths you meant to commit.
-- **The smoke checklist is SHARED and per-case.** Use `ao smoke add` /
-  `edit --case <id>` / `remove --case <id>`. Never `ao smoke set` - it replaces
-  the whole list, so whoever runs it second deletes the other's cases. Leave
-  `ao smoke record` (the machine's result) to qa.
 - **Address the other by ROLE, never by id:**
-  `ao send --crew qa --about <commit-sha|case-id> --message "..."`. dev cannot
+  `ao send --crew qa --about <commit-sha|testiny-id> --message "..."`. dev cannot
   know qa's id: the crew is formed after dev is already running.
 - **Bracket what you want to trust:** `ao crew run --start --kind build|test|device`
   ... `ao crew run --end --result pass|fail`.

@@ -138,11 +138,20 @@ const templatesPayload = {
 // spawn-confirm, auto-nudge, reclaim) plus the migration availability probe, all
 // on apiClient.GET. getMock branches on the requested path so each slice seeds
 // from its own payload instead of one shared blob. `promptOverrides` lets a test
-// pre-seed an override so the reset→DELETE path can be exercised.
-function mockGet(importPayload: unknown, promptOverrides: Record<string, string> = {}) {
+// pre-seed an override so the reset→DELETE path can be exercised, and
+// `promptWarnings` the daemon's warnings about a saved override.
+function mockGet(
+	importPayload: unknown,
+	promptOverrides: Record<string, string> = {},
+	promptWarnings: Record<string, string[]> = {},
+) {
 	const prompts = {
 		data: {
-			prompts: promptsPayload.data.prompts.map((p) => ({ ...p, override: promptOverrides[p.kind] ?? null })),
+			prompts: promptsPayload.data.prompts.map((p) => ({
+				...p,
+				override: promptOverrides[p.kind] ?? null,
+				...(promptWarnings[p.kind] ? { warnings: promptWarnings[p.kind] } : {}),
+			})),
 		},
 		error: undefined,
 	};
@@ -160,8 +169,6 @@ function mockGet(importPayload: unknown, promptOverrides: Record<string, string>
 				return { data: { language: "English" }, error: undefined };
 			case "/api/v1/settings/reclaim":
 				return { data: { enabled: true, graceMinutes: 1440, artifactsEnabled: true }, error: undefined };
-			case "/api/v1/settings/evidence-retention":
-				return { data: { enabled: true, maxAgeDays: 30 }, error: undefined };
 			case "/api/v1/settings/wiki":
 				return { data: { vaultPath: "", harness: "" }, error: undefined };
 			case "/api/v1/settings/sim-trust":
@@ -247,6 +254,25 @@ describe("GlobalSettingsForm", () => {
 		);
 	});
 
+	it("opens a saved prompt that mentions removed commands with its warning, and leaves a clean one quiet", async () => {
+		const stale = "This saved prompt mentions commands AO no longer has. Reset it or edit it.";
+		mockGet(
+			{ data: { available: true, legacyRoot: "/x" }, error: undefined },
+			{ worker: "run ao smoke set", orchestrator: "a clean override" },
+			{ worker: [stale] },
+		);
+		renderForm();
+		const worker = await screen.findByRole("button", { name: /^Worker/ });
+		expect(worker).toHaveAttribute("aria-expanded", "true");
+		expect(await screen.findByText(stale)).toHaveClass("text-warning");
+
+		const orchestrator = screen.getByRole("button", { name: /^Orchestrator/ });
+		expect(orchestrator).toHaveAttribute("aria-expanded", "false");
+		await openRows();
+		expect(screen.getAllByText(stale)).toHaveLength(1);
+		expect(worker.parentElement).toContainElement(screen.getByText(stale));
+	});
+
 	it("routes the response-language default through the save bar (PUT response-language)", async () => {
 		renderForm();
 		await openRows();
@@ -326,34 +352,6 @@ describe("GlobalSettingsForm", () => {
 		await userEvent.type(await screen.findByLabelText("Vault folder"), "~/Notes");
 		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 		await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["wiki", "status"] }));
-	});
-
-	it("routes the evidence-retention TTL through the save bar (PUT evidence-retention)", async () => {
-		renderForm();
-		await goToSection("Cleaning up");
-		const days = await screen.findByLabelText("Delete evidence older than (days)");
-		expect(days).toHaveValue(30);
-		fireEvent.change(days, { target: { value: "7" } });
-		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
-		await waitFor(() =>
-			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/evidence-retention", {
-				body: { enabled: true, maxAgeDays: 7 },
-			}),
-		);
-	});
-
-	it("runs the manual evidence purge (POST sweep) and reports the result", async () => {
-		postMock.mockReset().mockImplementation(async (path: string) => {
-			if (String(path).includes("evidence-retention/sweep")) {
-				return { data: { purged: 2, freedBytes: 2048 }, error: undefined };
-			}
-			return { data: {}, error: undefined };
-		});
-		renderForm();
-		await goToSection("Cleaning up");
-		await userEvent.click(await screen.findByRole("button", { name: "Purge now" }));
-		await waitFor(() => expect(postMock).toHaveBeenCalledWith("/api/v1/settings/evidence-retention/sweep", {}));
-		expect(await screen.findByText(/Purged 2 items · freed 2 KB\./)).toBeInTheDocument();
 	});
 
 	it("changes the update channel and saves it through the bar", async () => {

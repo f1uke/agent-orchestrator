@@ -106,6 +106,7 @@ type projectSetConfigOptions struct {
 	noAutoCrew        bool
 	pauseBeforeImpl   bool
 	learnFromSessions bool
+	testinyProject    string
 	configJSON        string
 	clear             bool
 	json              bool
@@ -311,6 +312,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.noAutoCrew, "no-auto-crew", false, "Never form a crew automatically on this project; a PERSON can still add a qa by hand (`ao crew add`, or `+ qa` in the app), an AO session cannot")
 	f.BoolVar(&opts.pauseBeforeImpl, "pause-before-implementing", false, "A standard/deep worker here stops once it understands the task and hands back to you before it implements anything; mechanical tasks never stop")
 	f.BoolVar(&opts.learnFromSessions, "learn-from-sessions", false, "AO keeps redacted excerpts of what you type to this project's sessions, so it can later propose memories from what you taught; off means nothing here is read")
+	f.StringVar(&opts.testinyProject, "testiny-project", "", "The Testiny project that holds this project's manual test cases: its key (project_key in testiny project ls, e.g. MOB), name or id. \"\" turns it off")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
 	f.StringVar(&opts.trackerAssignee, "tracker-assignee", "", "Issue assignee required for intake eligibility")
@@ -366,6 +368,7 @@ var setConfigFieldFlags = []struct {
 	{flag: "no-auto-crew", path: "disableAutoCrew"},
 	{flag: "pause-before-implementing", path: "pauseBeforeImplementing"},
 	{flag: "learn-from-sessions", path: "learnFromSessions"},
+	{flag: "testiny-project", path: "testinyProject"},
 }
 
 // resolveSetConfigWrite decides what this invocation writes and how: the config
@@ -455,6 +458,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 		DisableAutoCrew:         opts.noAutoCrew,
 		PauseBeforeImplementing: opts.pauseBeforeImpl,
 		LearnFromSessions:       opts.learnFromSessions,
+		TestinyProject:          opts.testinyProject,
 	}
 	// "none" is the CLI-friendly spelling of the default (empty) workflow; the
 	// daemon stores it as unset. Normalize so `--git-workflow none` round-trips.

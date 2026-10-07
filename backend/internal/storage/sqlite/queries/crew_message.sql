@@ -27,3 +27,11 @@ WHERE crew_id = ? AND created_at >= ? AND refused_reason = '';
 -- name: GetLatestCrewMessageBySender :one
 SELECT id, crew_id, project_id, from_session, to_session, subject, refused_reason, created_at
 FROM crew_message WHERE from_session = ? ORDER BY created_at DESC, rowid DESC LIMIT 1;
+
+-- name: GetLatestDeliveredCrewMessageBySenderSince :one
+-- The latest message one member DELIVERED in the current round: the crew lane's
+-- "qa has handed back" signal. A refusal delivered nothing, so it is skipped.
+SELECT id, crew_id, project_id, from_session, to_session, subject, refused_reason, created_at
+FROM crew_message
+WHERE from_session = ? AND refused_reason = '' AND created_at >= ?
+ORDER BY created_at DESC, rowid DESC LIMIT 1;

@@ -127,9 +127,10 @@ func TestCrewParallel_DevAskingBringsUpASecondAgent(t *testing.T) {
 	if got := s.record(t, dev.ID); got.IsSuspended || got.IsTerminated {
 		t.Fatalf("gaining a qa disturbed dev: suspended=%v terminated=%v", got.IsSuspended, got.IsTerminated)
 	}
-	// The checklist the new member writes must land on dev's card, which is what
-	// AO_CREW_ID being dev's id buys - and it is set at LAUNCH, so a member that
-	// is created and started in one breath has to get it right first time.
+	// The new member's `ao session get "$AO_CREW_ID"`, handback and task-scoped
+	// reads must reach dev's task, which is what AO_CREW_ID being dev's id buys -
+	// and it is set at LAUNCH, so a member that is created and started in one
+	// breath has to get it right first time.
 	if got := s.rt.lastCfg.Env[sessionmanager.EnvCrewID]; got != string(dev.ID) {
 		t.Fatalf("the new member launched with AO_CREW_ID=%q, want dev's id %q", got, dev.ID)
 	}

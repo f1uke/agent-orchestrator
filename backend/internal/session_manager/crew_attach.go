@@ -3,6 +3,7 @@ package sessionmanager
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
@@ -39,11 +40,10 @@ import (
 //
 // Attaching is ONE-WAY, and that is deliberate. The two shapes a detach could
 // take are both the id trap one level up (#226/#228): deleting the row orphans
-// the smoke_check rows, evidence directories, review_run rows and transcript
-// that already name it, and DEMOTING it (clearing the crew columns) is worse -
-// an ex-member is still sitting in dev's worktree on dev's branch, but
-// OwnsCrewWorkspace() flips to true, so #224's refcount would let its teardown
-// destroy a live dev's tree. The undo AO already has is STAND DOWN: `ao kill`
+// the review_run rows and transcript that already name it, and DEMOTING it
+// (clearing the crew columns) is worse - an ex-member is still sitting in dev's
+// worktree on dev's branch, but OwnsCrewWorkspace() flips to true, so #224's
+// refcount would let its teardown destroy a live dev's tree. The undo AO already has is STAND DOWN: `ao kill`
 // on the member terminates it locally, leaves dev's tree alone, and keeps the
 // crew columns so the refcount and the history stay correct. Its seat stays
 // its own, and `ao session restore` is how it comes back - the same id
@@ -115,7 +115,7 @@ func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionI
 		return domain.SessionRecord{}, fmt.Errorf(
 			"%w: %s has \"Never form a crew automatically\" turned on, so an AO session may not put a %s on %s. "+
 				"This is the project's policy, not a temporary failure, and there is no flag that overrides it: "+
-				"do the work solo and own the smoke checklist yourself. A person can still add one by hand - "+
+				"do the work solo and do the checks a qa would have run yourself. A person can still add one by hand - "+
 				"the `+ qa` control on the task in the app, or `ao crew add %s` typed in their own shell - "+
 				"so ask them if this task really needs a second agent",
 			ErrCrewAutoFormationOff, dev.ProjectID, role, devID, devID)
@@ -129,7 +129,7 @@ func (m *Manager) attachCrewMemberRow(ctx context.Context, devID domain.SessionI
 	if reason == domain.CrewJoinReview && !crewEligible(project, dev.Kind, dev.TaskSize) {
 		return domain.SessionRecord{}, fmt.Errorf(
 			"%w: %s was tagged `--task-size %s`, which means ONE agent by design, so it cannot ask for a %s. "+
-				"Finish the work and own the smoke checklist yourself. If this task turned out to need a second "+
+				"Finish the work and do the checks a qa would have run yourself. If this task turned out to need a second "+
 				"pair of eyes after all, that is a person's call: ask them to add one with the `+ qa` control on "+
 				"the task in the app, or `ao crew add %s` in their own shell",
 			ErrInvalidCrew, devID, dev.TaskSize.WithDefault(), role, devID)
@@ -261,10 +261,10 @@ func (m *Manager) RequestCrewReview(ctx context.Context, from domain.SessionID, 
 //
 // A dev whose task was never crew-eligible - a `mechanical` one, or any task on a
 // project that forms no crews automatically - is launched with the SOLO prompt.
-// That prompt tells it the smoke checklist is its own and hands it `ao smoke set`,
-// which REPLACES the whole list. The moment a person attaches a qa, that is no
-// longer true and the instruction has become destructive: the next `ao smoke set`
-// from dev deletes every case its new crewmate wrote. The prompt cannot be
+// That prompt says nothing of a crewmate. The moment a person attaches a qa, dev
+// shares its worktree, its git index and the device with a live agent it was
+// never told about, and its next `git add -A` sweeps up that agent's
+// half-written work. The prompt cannot be
 // rewritten under a running agent (only a restore recomputes it, from the row),
 // so the correction is delivered the one way a live agent can receive one.
 //
@@ -272,19 +272,30 @@ func (m *Manager) RequestCrewReview(ctx context.Context, from domain.SessionID, 
 // still better than a refused attach, and the human asked for the member.
 func (m *Manager) tellDevAMemberJoined(ctx context.Context, devID domain.SessionID, member domain.SessionRecord) {
 	ctx = msgdelivery.WithOrigin(ctx, msgdelivery.Origin{Trigger: msgdelivery.TriggerCrewNotice})
-	if _, err := m.Send(ctx, devID, crewJoinedNotice(member.CrewRole)); err != nil {
+	project, err := m.loadProject(ctx, member.ProjectID)
+	if err != nil {
+		m.logger.Warn("crew: could not read the project; telling dev without its Testiny line",
+			"crew", devID, "member", member.ID, "error", err)
+	}
+	if _, err := m.Send(ctx, devID, crewJoinedNotice(member.CrewRole, project.Config.TestinyProject != "")); err != nil {
 		m.logger.Warn("crew: could not tell dev that a member joined its task",
 			"crew", devID, "member", member.ID, "error", err)
 	}
 }
 
 // crewJoinedNotice is what dev is told. It is written in AO's voice and marked as
-// such, and it carries only what CHANGES for dev - the two facts a solo prompt
-// gets wrong the moment a crewmate exists, and how to address them.
-func crewJoinedNotice(role domain.CrewRole) string {
-	return "[AO] A **" + string(role) + "** has just been added to this task by a person, and is working in your worktree right now, at the same time as you. " +
-		"Two things your standing instructions do not know about:\n\n" +
-		"- **The smoke checklist is now SHARED.** Never `ao smoke set` again on this task - it replaces the WHOLE list, so it would delete the cases " + string(role) + " has written. Use `ao smoke add`, `ao smoke edit --case <id>` and `ao smoke remove --case <id>`, which touch only the case they name. Leave `ao smoke record` to " + string(role) + ".\n" +
-		"- **One worktree, one git index, and anything exclusive is contended live** - a `git add -A` sweeps up your crewmate's half-written work, and the simulator lease is one device two agents can reach for. Commit the paths you meant to commit, and bracket a build or a test run you want to trust with `ao crew run`.\n\n" +
-		"Address it by role, never by id: `ao send --crew " + string(role) + " --about <commit-sha|smoke-case-id> --message \"...\"`. There is no obligation to reply to this."
+// such, and it carries only what CHANGES for dev - the fact a solo prompt gets
+// wrong the moment a crewmate exists, and how to address it. On a Testiny
+// project that includes who owns Testiny: the solo prompt's Testiny block made
+// dev the owner, and from here qa is.
+func crewJoinedNotice(role domain.CrewRole, testiny bool) string {
+	var b strings.Builder
+	b.WriteString("[AO] A **" + string(role) + "** has just been added to this task by a person, and is working in your worktree right now, at the same time as you. ")
+	b.WriteString("What your standing instructions do not know about:\n\n")
+	b.WriteString("- **One worktree, one git index, and anything exclusive is contended live** - a `git add -A` sweeps up your crewmate's half-written work, and the simulator lease is one device two agents can reach for. Commit the paths you meant to commit, and bracket a build or a test run you want to trust with `ao crew run`.\n")
+	if testiny {
+		b.WriteString("- " + string(role) + " now owns the Testiny drafts, runs and results for this task. Give it the path of any draft you wrote.\n")
+	}
+	b.WriteString("\nAddress it by role, never by id: `ao send --crew " + string(role) + " --about <commit-sha|testiny-id> --message \"...\"`. There is no obligation to reply to this.")
+	return b.String()
 }

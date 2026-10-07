@@ -318,6 +318,11 @@ type Session struct {
 	// the board reads it from here rather than from a second mechanism.
 	// Not serialized here; the HTTP boundary maps it to the curated wire shape.
 	CrewRun *CrewRun `json:"-"`
+	// LastHandback is the latest message this qa DELIVERED to its crewmate in
+	// the current round, or nil when it has not handed back yet. Only qa members
+	// carry it: the board reads it as "qa is done with this round". Not
+	// serialized here; the HTTP boundary maps it to the curated wire shape.
+	LastHandback *CrewHandback `json:"-"`
 	// CrewRunDiscards is how many of this member's runs, ending most-recent
 	// first, were thrown away because the tree moved under them - the CURRENT
 	// streak, not a lifetime count. At CappedRepeat the task parks at NEEDS YOU.

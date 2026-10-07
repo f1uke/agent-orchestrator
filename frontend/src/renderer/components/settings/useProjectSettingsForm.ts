@@ -55,6 +55,8 @@ export type ProjectSettingsFormState = {
 	mobileScriptsPlatform: string;
 	mobileScriptsProduct: string;
 	mobileScriptsStore: string;
+	// "" means the project does not use Testiny.
+	testinyProject: string;
 	simTrustMode: SimTrustMode;
 	// One root-CA path per line; only read when simTrustMode is "files".
 	simTrustCaFiles: string;
@@ -96,6 +98,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		mobileScriptsPlatform: config.mobileScripts?.platform ?? "",
 		mobileScriptsProduct: config.mobileScripts?.product ?? "",
 		mobileScriptsStore: config.mobileScripts?.store ?? "",
+		testinyProject: config.testinyProject ?? "",
 		simTrustMode: !config.simTrust ? "inherit" : (config.simTrust.caFiles ?? []).length === 0 ? "none" : "files",
 		simTrustCaFiles: formatCaFileLines(config.simTrust?.caFiles ?? []),
 		disableAutoCrew: config.disableAutoCrew ?? false,
@@ -290,6 +293,7 @@ export function useProjectSettingsForm({
 					form.mobileScriptsProduct,
 					form.mobileScriptsStore,
 				),
+				testinyProject: form.testinyProject.trim() || undefined,
 				simTrust: buildSimTrust(form.simTrustMode, form.simTrustCaFiles),
 				// Automatic crew IS the default, so "on" is the absence of the field,
 				// same as the two above.
