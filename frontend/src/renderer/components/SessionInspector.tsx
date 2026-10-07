@@ -124,7 +124,7 @@ export function SessionInspector({
 	onOpenReviewerTerminal,
 	hasWebUI = false,
 	hasIOSSimulator = false,
-	testinyProject,
+	usesTestiny = false,
 	browserPoppedOut = false,
 	isInspectorVisible = true,
 	onToggleBrowserPopOut,
@@ -158,10 +158,10 @@ export function SessionInspector({
 	 */
 	hasIOSSimulator?: boolean;
 	/**
-	 * The project's Testiny project (ProjectConfig.testinyProject). Only a project
-	 * that keeps its manual test cases in Testiny gets the Testiny tab.
+	 * Whether this session's project keeps its manual test cases in Testiny
+	 * (ProjectConfig.usesTestiny). Only such a project gets the Testiny tab.
 	 */
-	testinyProject?: string;
+	usesTestiny?: boolean;
 	browserPoppedOut?: boolean;
 	isInspectorVisible?: boolean;
 	onToggleBrowserPopOut?: (next: boolean) => void;
@@ -205,7 +205,7 @@ export function SessionInspector({
 		if (v.id === "files") return showFiles;
 		if (v.id === "browser") return hasWebUI;
 		if (v.id === "simulator") return hasIOSSimulator;
-		if (v.id === "testiny") return Boolean(testinyProject);
+		if (v.id === "testiny") return usesTestiny;
 		return true;
 	});
 	// The requested tab can name a view this session does not show: a remembered
@@ -293,9 +293,7 @@ export function SessionInspector({
 						reveal={revealInTree}
 					/>
 				) : null}
-				{view === "testiny" && testinyProject ? (
-					<TestinyView key={taskKeyOf(session)} project={testinyProject} session={session} />
-				) : null}
+				{view === "testiny" && usesTestiny ? <TestinyView key={taskKeyOf(session)} session={session} /> : null}
 				{/* The Simulator panel stays mounted while its tab is off so the chosen
 				    device survives a trip to another tab - with two simulators booted
 				    there is no default to fall back on, and re-picking on every tab

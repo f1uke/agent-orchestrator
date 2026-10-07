@@ -604,10 +604,13 @@ type TestinyResultLog struct {
 }
 
 type TestinyRunLink struct {
-	SessionID domain.SessionID
-	RunID     domain.TestinyRunID
-	LinkedBy  string
-	CreatedAt time.Time
+	SessionID   domain.SessionID
+	RunID       domain.TestinyRunID
+	LinkedBy    string
+	CreatedAt   time.Time
+	ProjectID   int64
+	ProjectKey  string
+	ProjectName string
 }
 
 type WorkspaceRepo struct {

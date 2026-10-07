@@ -77,11 +77,31 @@ func TestinyRunURL(projectKey string, id TestinyRunID) string {
 	return fmt.Sprintf("https://%s/%s/testruns/tr/%d", testinyHost, url.PathEscape(projectKey), int64(id))
 }
 
+// TestinyProject is a Testiny project, as `testiny project ls` names it. Key is
+// "" for a project that has none.
+type TestinyProject struct {
+	ID   int64  `json:"id"`
+	Key  string `json:"key"`
+	Name string `json:"name"`
+}
+
+// Label names the project for a person: its key, else its name.
+func (p TestinyProject) Label() string {
+	if p.Key != "" {
+		return p.Key
+	}
+	return p.Name
+}
+
 // TestinyRunLink records that a run belongs to a task. SessionID is the TASK's
 // id (dev's, for a crew), so a link made from qa lands on the task.
 type TestinyRunLink struct {
 	SessionID SessionID    `json:"sessionId"`
 	RunID     TestinyRunID `json:"runId"`
+	// Project is the Testiny project the run is in. Run ids are global in
+	// Testiny, so one task may hold runs from several projects. ID is 0 on a
+	// link made before AO stored it, until the service reads the run again.
+	Project TestinyProject `json:"project"`
 	// LinkedBy is the session id of the agent that linked the run, or "" when a
 	// person linked it from the app.
 	LinkedBy  string    `json:"linkedBy"`

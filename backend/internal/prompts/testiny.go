@@ -8,8 +8,8 @@ import (
 
 // TestinyProtocol is the Testiny block every worker kind (solo, dev and qa)
 // gets on a project that keeps its manual test cases in Testiny, and "" on one
-// that does not. testinyProject is ProjectConfig.TestinyProject; projectID is
-// the AO project whose knowledge store holds the drafts; role is the crew role
+// that does not. usesTestiny is ProjectConfig.UsesTestiny; projectID is the AO
+// project whose knowledge store holds the drafts; role is the crew role
 // ("" for a solo worker); caseScripts is the scripts store when the prompt also
 // carries MobileScriptPlay, which then owns how a case is played and judged, and
 // nil when it does not.
@@ -24,7 +24,10 @@ import (
 // testiny evidence` and needs no yes either (it checks the names, logs every
 // upload and link, refuses a closed run, and never posts a link twice); every
 // other write waits for the human's yes on a draft; and a run is linked to the
-// task so the Testiny tab can show it. Agents upload evidence themselves, unasked
+// task so the Testiny tab can show it. It names no Testiny project: an AO project
+// is not tied to one (the human's decision, 2026-10-07), so the agent picks it
+// from the task's Jira key and asks the human when the key does not settle it.
+// Agents upload evidence themselves, unasked
 // (the human's decision, 2026-10-07): the human is a developer, not QA, and no
 // person is left to upload it or paste its links.
 //
@@ -41,8 +44,8 @@ import (
 // project, while a solo worker and a qa without case scripts record results as
 // well. Where MobileScriptPlay is present, the loop points at it instead of
 // restating how a case is played.
-func TestinyProtocol(testinyProject, projectID, role string, caseScripts *MobileScripts) string {
-	if testinyProject == "" {
+func TestinyProtocol(usesTestiny bool, projectID, role string, caseScripts *MobileScripts) string {
+	if !usesTestiny {
 		return ""
 	}
 	play := testinyPlay + testinyTestData + "."
@@ -61,19 +64,19 @@ func TestinyProtocol(testinyProject, projectID, role string, caseScripts *Mobile
 		"{{owner}}", owner,
 		"{{results}}", results,
 		"{{tail}}", tail,
-		"{{testiny}}", testinyProject,
 		"{{plans}}", knowledgestore.PromptDir+"/"+projectID+"/plans",
 	).Replace(testinyProtocol)
 }
 
 const testinyProtocol = "\n\n" + `## Testiny test cases (AO)
 
-This project keeps its manual test cases in Testiny project ` + "`{{testiny}}`" + `. {{owner}} Follow the ` + "`managing-testiny-qa`" + ` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
+This project keeps its manual test cases in Testiny. It is not tied to one Testiny project: one task may hold runs from several, and each linked run carries its own. {{owner}} Follow the ` + "`managing-testiny-qa`" + ` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
 
+- **Pick the Testiny project from the task's Jira key**, the ` + "`issue`" + ` field of ` + "`ao session get \"$AO_CREW_ID\"`" + `: its prefix names the project by name or key. STAR-2413 is in STAR; MOBILITY-123 is in the MOBILITY project, whose key is MOB. ` + "`testiny project ls`" + ` lists every project with its name and key. When the key does not clearly name one, or the task has no Jira issue, ask the human which project before you write anything.
 - **Reading Testiny needs no permission.**
 {{results}}
 - **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, or a milestone link. Draft it first at ` + "`{{plans}}/<branch>--testiny.md`" + `, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
-- **Link each run for this task once it exists**, so it shows in the Testiny tab: ` + "`ao testiny link \"$AO_CREW_ID\" <run-id>`" + `. Linking a run is AO's own record, not a Testiny write, and needs no permission. ` + "`ao testiny runs \"$AO_CREW_ID\"`" + ` shows what is linked and each case's status.{{tail}}`
+- **Link each run for this task once it exists**, so it shows in the Testiny tab: ` + "`ao testiny link \"$AO_CREW_ID\" <run-url>`" + `, or ` + "`ao testiny link \"$AO_CREW_ID\" <run-id> --project <KEY>`" + `. AO refuses a run that is not in the project the URL or ` + "`--project`" + ` names. Linking a run is AO's own record, not a Testiny write, and needs no permission. ` + "`ao testiny runs \"$AO_CREW_ID\"`" + ` shows what is linked, each run's project, and each case's status.{{tail}}`
 
 const testinyOwnerSolo = `You own everything in this section, recording results included. If a person adds a qa to your task, AO tells you, and from then on it is qa's.`
 

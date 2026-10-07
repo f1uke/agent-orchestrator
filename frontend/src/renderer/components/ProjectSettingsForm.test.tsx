@@ -613,7 +613,7 @@ describe("ProjectSettingsForm", () => {
 		expect(body.config.mobileScripts).toBeUndefined();
 	});
 
-	it("saves the Testiny project key, trimmed, and keeps the rest of the config", async () => {
+	it("turns Uses Testiny on and keeps the rest of the config", async () => {
 		mockProject({
 			id: "proj-1",
 			name: "Project One",
@@ -631,24 +631,23 @@ describe("ProjectSettingsForm", () => {
 		renderSettings();
 		await goToSection("What agents are told");
 
-		// A project that never set it reads "not set" and offers the key's shape.
-		const field = await screen.findByLabelText("Testiny project");
-		expect(field).toHaveValue("");
-		expect(field).toHaveAttribute("placeholder", "MOB");
-		const row = screen.getByRole("button", { name: /^Testiny project/ });
-		expect(row).toHaveTextContent("not set");
+		// A project that never turned it on reads Off.
+		const toggle = await screen.findByRole("switch", { name: "This project keeps its manual test cases in Testiny" });
+		expect(toggle).not.toBeChecked();
+		const row = screen.getByRole("button", { name: /^Uses Testiny/ });
+		expect(row).toHaveTextContent("Off");
 
-		await userEvent.type(field, " MOB ");
-		expect(row).toHaveTextContent("MOB");
+		await userEvent.click(toggle);
+		expect(row).toHaveTextContent("On");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 		const body = putMock.mock.calls[0]?.[1]?.body;
-		expect(body.config.testinyProject).toBe("MOB");
+		expect(body.config.usesTestiny).toBe(true);
 		expect(body.config.env).toEqual({ TOKEN: "secret" });
 	});
 
-	it("loads the Testiny project and turns it off by omitting it when emptied", async () => {
+	it("loads Uses Testiny and turns it off by omitting it", async () => {
 		mockProject({
 			id: "proj-1",
 			name: "Project One",
@@ -656,21 +655,21 @@ describe("ProjectSettingsForm", () => {
 			path: "/repo/project-one",
 			repo: "git@github.com:acme/project-one.git",
 			defaultBranch: "main",
-			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, testinyProject: "MOB" },
+			config: { worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, usesTestiny: true },
 		});
 
 		renderSettings();
 		await goToSection("What agents are told");
 
-		const field = await screen.findByLabelText("Testiny project");
-		expect(field).toHaveValue("MOB");
+		const toggle = await screen.findByRole("switch", { name: "This project keeps its manual test cases in Testiny" });
+		expect(toggle).toBeChecked();
 
-		await userEvent.clear(field);
+		await userEvent.click(toggle);
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 		const body = putMock.mock.calls[0]?.[1]?.body;
-		expect(body.config.testinyProject).toBeUndefined();
+		expect(body.config.usesTestiny).toBeUndefined();
 	});
 
 	it("blocks save when script-only driving has no product", async () => {

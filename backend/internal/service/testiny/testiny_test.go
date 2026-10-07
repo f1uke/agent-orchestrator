@@ -18,8 +18,11 @@ import (
 )
 
 var (
-	mob  = testinyadapter.Project{ID: 1, Name: "MOBILITY", Key: "MOB"}
-	kern = testinyadapter.Project{ID: 2, Name: "KERN", Key: "KERN"}
+	mob  = domain.TestinyProject{ID: 1, Name: "MOBILITY", Key: "MOB"}
+	kern = domain.TestinyProject{ID: 2, Name: "KERN", Key: "KERN"}
+	star = domain.TestinyProject{ID: 3, Name: "STAR", Key: "STAR"}
+	// keyless is a project Testiny gives no key.
+	keyless = domain.TestinyProject{ID: 4, Name: "Sandbox"}
 )
 
 // fakeTestiny stands in for the adapter: runs by id, each answer swappable,
@@ -31,7 +34,7 @@ type fakeTestiny struct {
 	plans    map[int64]string
 	ms       map[int64]string
 	msStart  map[int64]time.Time
-	projects []testinyadapter.Project
+	projects []domain.TestinyProject
 	fail     error
 	delay    map[domain.TestinyRunID]time.Duration
 	calls    map[string]int
@@ -54,16 +57,20 @@ func newFakeTestiny() *fakeTestiny {
 			632: {ID: 632, Title: "MOBILITY-4839 Chat notice disclaimer - iOS", ProjectID: 1},
 			625: {ID: 625, Title: "MOBILITY-4901 Chat logout storm - iOS", ProjectID: 1, PlanID: 193, MilestoneID: 80},
 			900: {ID: 900, Title: "KERN smoke", ProjectID: 2},
+			700: {ID: 700, Title: "STAR-2413 Order summary - web", ProjectID: 3},
+			800: {ID: 800, Title: "Sandbox run", ProjectID: 4},
 		},
 		results: map[domain.TestinyRunID]testinyadapter.Results{
 			632: {Cases: []testinyadapter.Case{{ID: 7166, Title: "Fund disclaimer", Status: "PASSED"}, {ID: 7167, Title: "Bond disclaimer", Status: "FAILED"}}, Summary: map[string]int{"PASSED": 1, "FAILED": 1}},
 			625: {Cases: []testinyadapter.Case{{ID: 3818, Title: "Login", Status: "UNTESTED_NEW"}}, Summary: map[string]int{"UNTESTED_NEW": 1}},
 			900: {Cases: []testinyadapter.Case{}, Summary: map[string]int{}},
+			700: {Cases: []testinyadapter.Case{{ID: 9001, Title: "Order summary", Status: "NOTRUN"}}, Summary: map[string]int{"NOTRUN": 1}},
+			800: {Cases: []testinyadapter.Case{{ID: 9001, Title: "Order summary", Status: "NOTRUN"}}, Summary: map[string]int{"NOTRUN": 1}},
 		},
 		plans:    map[int64]string{193: "Chat session logout"},
 		ms:       map[int64]string{80: "Sprint 2026-20"},
 		msStart:  map[int64]time.Time{80: time.Date(2026, 9, 22, 5, 0, 0, 0, time.UTC)},
-		projects: []testinyadapter.Project{mob, kern},
+		projects: []domain.TestinyProject{mob, kern, star, keyless},
 		delay:    map[domain.TestinyRunID]time.Duration{},
 		calls:    map[string]int{},
 		details:  map[int64]domain.TestinyCaseDetail{},
@@ -131,19 +138,19 @@ func (f *fakeTestiny) Milestone(_ context.Context, id int64) (testinyadapter.Mil
 	return testinyadapter.Milestone{ID: id, Title: f.ms[id], StartAt: f.msStart[id], CreatedAt: time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)}, nil
 }
 
-func (f *fakeTestiny) Project(_ context.Context, ref string) (testinyadapter.Project, error) {
+func (f *fakeTestiny) Project(_ context.Context, ref string) (domain.TestinyProject, error) {
 	if err := f.note("project ls"); err != nil {
-		return testinyadapter.Project{}, err
+		return domain.TestinyProject{}, err
 	}
 	for _, p := range f.projects {
 		if strings.EqualFold(p.Key, ref) || strings.EqualFold(p.Name, ref) || fmt.Sprint(p.ID) == ref {
 			return p, nil
 		}
 	}
-	return testinyadapter.Project{}, fmt.Errorf("%w: no Testiny project %q", testinyadapter.ErrNotFound, ref)
+	return domain.TestinyProject{}, fmt.Errorf("%w: no Testiny project %q", testinyadapter.ErrNotFound, ref)
 }
 
-func (f *fakeTestiny) ProjectByID(ctx context.Context, id int64) (testinyadapter.Project, error) {
+func (f *fakeTestiny) ProjectByID(ctx context.Context, id int64) (domain.TestinyProject, error) {
 	return f.Project(ctx, fmt.Sprint(id))
 }
 
@@ -202,6 +209,17 @@ func (s *fakeStore) ListTestinyRunLinks(_ context.Context, sid domain.SessionID)
 	return out, nil
 }
 
+func (s *fakeStore) FillTestinyRunLinkProject(_ context.Context, id domain.TestinyRunID, p domain.TestinyProject) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, l := range s.links {
+		if l.RunID == id && l.Project.ID == 0 {
+			s.links[i].Project = p
+		}
+	}
+	return nil
+}
+
 func (s *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
 	r, ok := s.sessions[id]
 	return r, ok, nil
@@ -249,11 +267,11 @@ func newRig(t *testing.T, cfg domain.ProjectConfig) *rig {
 	return r
 }
 
-var on = domain.ProjectConfig{TestinyProject: "MOB"}
+var on = domain.ProjectConfig{UsesTestiny: true}
 
 func TestLinkConfirmsTheRunAndStoresIt(t *testing.T) {
 	r := newRig(t, on)
-	view, err := r.svc.Link(context.Background(), "app-1", "TR-625", "app-2")
+	view, err := r.svc.Link(context.Background(), "app-1", "TR-625", "", "app-2")
 	if err != nil {
 		t.Fatalf("Link: %v", err)
 	}
@@ -267,14 +285,14 @@ func TestLinkConfirmsTheRunAndStoresIt(t *testing.T) {
 	if !reflect.DeepEqual(view.Counts, map[domain.TestinyCaseStatus]int{"UNTESTED_NEW": 1}) || view.Cases[0].Status != "UNTESTED_NEW" {
 		t.Fatalf("an unknown status did not pass through raw: %+v %+v", view.Counts, view.Cases)
 	}
-	want := domain.TestinyRunLink{SessionID: "app-1", RunID: 625, LinkedBy: "app-2", CreatedAt: r.clock.Now()}
+	want := domain.TestinyRunLink{SessionID: "app-1", RunID: 625, Project: mob, LinkedBy: "app-2", CreatedAt: r.clock.Now()}
 	if view.Link != want || !reflect.DeepEqual(r.store.links, []domain.TestinyRunLink{want}) {
 		t.Fatalf("link = %+v, stored %+v, want %+v", view.Link, r.store.links, want)
 	}
 
 	// Linking again is a no-op that keeps who linked it first.
 	r.clock.advance(time.Hour)
-	again, err := r.svc.Link(context.Background(), "app-1", "https://app.testiny.io/MOB/testruns/tr/625", "")
+	again, err := r.svc.Link(context.Background(), "app-1", "https://app.testiny.io/MOB/testruns/tr/625", "", "")
 	if err != nil {
 		t.Fatalf("re-link: %v", err)
 	}
@@ -283,9 +301,39 @@ func TestLinkConfirmsTheRunAndStoresIt(t *testing.T) {
 	}
 }
 
+// Run ids are global in Testiny, so a task is not tied to one Testiny
+// project: a STAR run sits next to a MOB run, each in its own project.
+func TestLinkKeepsRunsFromSeveralProjects(t *testing.T) {
+	r := newRig(t, on)
+	ctx := context.Background()
+	if _, err := r.svc.Link(ctx, "app-1", "632", "", ""); err != nil {
+		t.Fatalf("Link MOB run: %v", err)
+	}
+	r.clock.advance(time.Second)
+	star700, err := r.svc.Link(ctx, "app-1", "https://app.testiny.io/STAR/testruns/tr/700", "", "")
+	if err != nil {
+		t.Fatalf("Link STAR run: %v", err)
+	}
+	if star700.Link.Project != star || star700.URL != "https://app.testiny.io/STAR/testruns/tr/700" {
+		t.Fatalf("STAR run = %+v / %q", star700.Link.Project, star700.URL)
+	}
+
+	runs, err := r.svc.Runs(ctx, "app-1", false)
+	if err != nil {
+		t.Fatalf("Runs: %v", err)
+	}
+	got := map[domain.TestinyRunID]domain.TestinyProject{}
+	for _, v := range runs {
+		got[v.Link.RunID] = v.Link.Project
+	}
+	if want := map[domain.TestinyRunID]domain.TestinyProject{632: mob, 700: star}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("runs by project = %v, want %v", got, want)
+	}
+}
+
 func TestLinkRefusesARunTestinyCannotConfirm(t *testing.T) {
 	r := newRig(t, on)
-	_, err := r.svc.Link(context.Background(), "app-1", "999999", "")
+	_, err := r.svc.Link(context.Background(), "app-1", "999999", "", "")
 	if !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("err = %v, want ErrRunNotFound", err)
 	}
@@ -294,7 +342,7 @@ func TestLinkRefusesARunTestinyCannotConfirm(t *testing.T) {
 	}
 
 	r.tny.setFail(fmt.Errorf("%w: Unauthenticated user", testinyadapter.ErrAuth))
-	if _, err := r.svc.Link(context.Background(), "app-1", "632", ""); !errors.Is(err, testinyadapter.ErrAuth) {
+	if _, err := r.svc.Link(context.Background(), "app-1", "632", "", ""); !errors.Is(err, testinyadapter.ErrAuth) {
 		t.Fatalf("err = %v, want the adapter's ErrAuth", err)
 	}
 	if len(r.store.links) != 0 {
@@ -302,39 +350,60 @@ func TestLinkRefusesARunTestinyCannotConfirm(t *testing.T) {
 	}
 }
 
-func TestLinkRefusesARunFromAnotherProject(t *testing.T) {
+// A URL's key and a given project are typo guards: each must name the run's
+// own project.
+func TestLinkRefusesAProjectThatIsNotTheRuns(t *testing.T) {
 	r := newRig(t, on)
-	_, err := r.svc.Link(context.Background(), "app-1", "900", "")
-	if !errors.Is(err, ErrWrongProject) || !strings.Contains(err.Error(), "TR-900 belongs to KERN; this project uses MOB") {
-		t.Fatalf("by the run's project: err = %v", err)
-	}
-	_, err = r.svc.Link(context.Background(), "app-1", "https://app.testiny.io/KERN/testruns/tr/632", "")
-	if !errors.Is(err, ErrWrongProject) || !strings.Contains(err.Error(), "KERN") {
+	ctx := context.Background()
+	_, err := r.svc.Link(ctx, "app-1", "https://app.testiny.io/MOB/testruns/tr/700", "", "")
+	if !errors.Is(err, ErrWrongProject) || !strings.Contains(err.Error(), "TR-700 is in STAR, not MOB") {
 		t.Fatalf("by the URL's key: err = %v", err)
+	}
+	_, err = r.svc.Link(ctx, "app-1", "700", "MOB", "")
+	if !errors.Is(err, ErrWrongProject) || !strings.Contains(err.Error(), "TR-700 is in STAR, not MOB") {
+		t.Fatalf("by the given project: err = %v", err)
+	}
+	_, err = r.svc.Link(ctx, "app-1", "https://app.testiny.io/STAR/testruns/tr/700", "MOB", "")
+	if !errors.Is(err, ErrWrongProject) {
+		t.Fatalf("a URL and a project that disagree: err = %v", err)
 	}
 	if len(r.store.links) != 0 {
 		t.Fatalf("stored %+v", r.store.links)
 	}
 }
 
-func TestLinkAcceptsTheProjectByName(t *testing.T) {
-	r := newRig(t, domain.ProjectConfig{TestinyProject: "mobility"})
-	if _, err := r.svc.Link(context.Background(), "app-1", "https://app.testiny.io/MOB/testruns/tr/632", ""); err != nil {
-		t.Fatalf("Link: %v", err)
+func TestLinkAcceptsTheRunsProjectByKeyNameOrID(t *testing.T) {
+	for _, project := range []string{"STAR", "star", "3"} {
+		r := newRig(t, on)
+		view, err := r.svc.Link(context.Background(), "app-1", "TR-700", project, "")
+		if err != nil {
+			t.Fatalf("Link with project %q: %v", project, err)
+		}
+		if view.Link.Project != star {
+			t.Fatalf("project %q: link = %+v", project, view.Link.Project)
+		}
+	}
+	r := newRig(t, on)
+	if _, err := r.svc.Link(context.Background(), "app-1", "632", "mobility", ""); err != nil {
+		t.Fatalf("Link by the project's name: %v", err)
 	}
 }
 
-func TestLinkNamesAConfiguredProjectTestinyDoesNotHave(t *testing.T) {
-	r := newRig(t, domain.ProjectConfig{TestinyProject: "MOBX"})
-	if _, err := r.svc.Link(context.Background(), "app-1", "632", ""); !errors.Is(err, ErrProjectNotFound) {
+func TestLinkNamesAProjectTestinyDoesNotHave(t *testing.T) {
+	r := newRig(t, on)
+	if _, err := r.svc.Link(context.Background(), "app-1", "632", "MOBX", ""); !errors.Is(err, ErrProjectNotFound) {
 		t.Fatalf("err = %v, want ErrProjectNotFound", err)
 	}
+	if len(r.store.links) != 0 {
+		t.Fatalf("stored %+v", r.store.links)
+	}
 }
 
-func TestOffWithoutATestinyProject(t *testing.T) {
+func TestOffWhenTheProjectDoesNotUseTestiny(t *testing.T) {
 	r := newRig(t, domain.ProjectConfig{})
-	if _, err := r.svc.Link(context.Background(), "app-1", "632", ""); !errors.Is(err, ErrOff) {
-		t.Fatalf("Link err = %v, want ErrOff", err)
+	_, err := r.svc.Link(context.Background(), "app-1", "632", "", "")
+	if !errors.Is(err, ErrOff) || !strings.Contains(err.Error(), "ao project set-config <project> --testiny") {
+		t.Fatalf("Link err = %v, want ErrOff telling how to turn it on", err)
 	}
 	if _, err := r.svc.Runs(context.Background(), "app-1", false); !errors.Is(err, ErrOff) {
 		t.Fatalf("Runs err = %v, want ErrOff", err)
@@ -346,7 +415,7 @@ func TestOffWithoutATestinyProject(t *testing.T) {
 
 func TestBadRefAndUnknownSession(t *testing.T) {
 	r := newRig(t, on)
-	if _, err := r.svc.Link(context.Background(), "app-1", "TC-632", ""); !errors.Is(err, domain.ErrBadRunRef) {
+	if _, err := r.svc.Link(context.Background(), "app-1", "TC-632", "", ""); !errors.Is(err, domain.ErrBadRunRef) {
 		t.Fatalf("err = %v, want ErrBadRunRef", err)
 	}
 	if _, err := r.svc.Runs(context.Background(), "ghost-1", false); !errors.Is(err, ErrSessionNotFound) {
@@ -354,9 +423,43 @@ func TestBadRefAndUnknownSession(t *testing.T) {
 	}
 }
 
+// A link made before AO stored the run's project gets it the first time the
+// run can be read, and keeps it. While Testiny is down the tab still renders.
+func TestALegacyLinkGetsItsProjectFilledOnRead(t *testing.T) {
+	r := newRig(t, on)
+	ctx := context.Background()
+	r.store.links = append(r.store.links, domain.TestinyRunLink{SessionID: "app-1", RunID: 700, CreatedAt: r.clock.Now()})
+
+	r.tny.setFail(fmt.Errorf("%w: down", testinyadapter.ErrUnavailable))
+	down, err := r.svc.Runs(ctx, "app-1", false)
+	if err != nil {
+		t.Fatalf("Runs while Testiny is down: %v", err)
+	}
+	if len(down) != 1 || down[0].FetchError == nil || down[0].Link.Project.ID != 0 {
+		t.Fatalf("view while down = %+v, want a fetch error and no project yet", down)
+	}
+
+	r.tny.setFail(nil)
+	up, err := r.svc.Runs(ctx, "app-1", true)
+	if err != nil {
+		t.Fatalf("Runs: %v", err)
+	}
+	if up[0].Link.Project != star || r.store.links[0].Project != star {
+		t.Fatalf("view project %+v, stored %+v, want STAR in both", up[0].Link.Project, r.store.links[0].Project)
+	}
+}
+
+// link links runs to app-1 as Link would, each with its run's project (MOB
+// for a run Testiny does not have).
 func link(r *rig, ids ...domain.TestinyRunID) {
 	for i, id := range ids {
-		r.store.links = append(r.store.links, domain.TestinyRunLink{SessionID: "app-1", RunID: id, CreatedAt: r.clock.Now().Add(time.Duration(i) * time.Second)})
+		p := mob
+		for _, have := range r.tny.projects {
+			if run, ok := r.tny.runs[id]; ok && have.ID == run.ProjectID {
+				p = have
+			}
+		}
+		r.store.links = append(r.store.links, domain.TestinyRunLink{SessionID: "app-1", RunID: id, Project: p, CreatedAt: r.clock.Now().Add(time.Duration(i) * time.Second)})
 	}
 }
 
@@ -376,17 +479,14 @@ func TestRunsKeepTheLinkOrderWhateverFinishesFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Runs: %v", err)
 	}
-	if res.Project != "MOB" {
-		t.Fatalf("project = %q", res.Project)
-	}
-	if got := runIDs(res.Runs); !reflect.DeepEqual(got, []domain.TestinyRunID{632, 625, 999}) {
+	if got := runIDs(res); !reflect.DeepEqual(got, []domain.TestinyRunID{632, 625, 999}) {
 		t.Fatalf("order = %v", got)
 	}
-	gone := res.Runs[2]
+	gone := res[2]
 	if gone.FetchError == nil || gone.FetchError.Kind != domain.TestinyErrNotFound || gone.FetchedAt != nil || gone.Cases == nil {
 		t.Fatalf("a deleted run = %+v, want an empty view with a not_found error", gone)
 	}
-	first := res.Runs[0]
+	first := res[0]
 	if first.FetchError != nil || first.FetchedAt == nil || !first.FetchedAt.Equal(r.clock.Now()) || first.Plan != nil {
 		t.Fatalf("first run = %+v", first)
 	}
@@ -427,7 +527,7 @@ func TestAFailedReadKeepsTheLastGoodData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	readAt := *good.Runs[0].FetchedAt
+	readAt := *good[0].FetchedAt
 
 	r.clock.advance(3 * time.Minute)
 	r.tny.setFail(fmt.Errorf("%w: Unauthenticated user (AUTH_ACCESS_DENIED)", testinyadapter.ErrAuth))
@@ -435,7 +535,7 @@ func TestAFailedReadKeepsTheLastGoodData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Runs: %v", err)
 	}
-	v := stale.Runs[0]
+	v := stale[0]
 	if v.FetchError == nil || v.FetchError.Kind != domain.TestinyErrAuth || !strings.Contains(v.FetchError.Message, "Unauthenticated user") {
 		t.Fatalf("fetchError = %+v, want auth", v.FetchError)
 	}
@@ -460,7 +560,7 @@ func TestFetchErrorKinds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if fe := res.Runs[0].FetchError; fe == nil || fe.Kind != kind {
+		if fe := res[0].FetchError; fe == nil || fe.Kind != kind {
 			t.Errorf("%v: fetchError = %+v, want %s", sentinel, fe, kind)
 		}
 	}
@@ -502,11 +602,11 @@ func TestEvidenceDirIsTheRunsFolderInTheQAEvidenceTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Runs[0].EvidenceDir != want {
-		t.Fatalf("evidence dir = %q, want %q", res.Runs[0].EvidenceDir, want)
+	if res[0].EvidenceDir != want {
+		t.Fatalf("evidence dir = %q, want %q", res[0].EvidenceDir, want)
 	}
-	if res.Runs[1].EvidenceDir != "" {
-		t.Fatalf("evidence dir for a run with no folder = %q, want empty", res.Runs[1].EvidenceDir)
+	if res[1].EvidenceDir != "" {
+		t.Fatalf("evidence dir for a run with no folder = %q, want empty", res[1].EvidenceDir)
 	}
 }
 
@@ -538,7 +638,7 @@ func TestCaseScriptsAreFoundByTheirTestinyHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := map[int64]string{}
-	for _, v := range res.Runs {
+	for _, v := range res {
 		for _, c := range v.Cases {
 			got[c.ID] = c.Script
 		}
@@ -550,6 +650,40 @@ func TestCaseScriptsAreFoundByTheirTestinyHeader(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("scripts = %v, want %v", got, want)
+	}
+}
+
+// One store holds the scripts of every Testiny project, so a case's script is
+// found by the key of its own run's project: a STAR run gets the STAR script,
+// a MOB run of the same task its MOB one, and a run whose project has no key
+// gets none.
+func TestCaseScriptsAreFoundByTheRunsOwnProjectKey(t *testing.T) {
+	cfg := on
+	r := newRig(t, cfg)
+	store := filepath.Join(r.home, "scripts")
+	cfg.MobileScripts = &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS, Store: store}
+	r.store.projects["app"] = domain.ProjectRecord{ID: "app", Config: cfg}
+	cases := filepath.Join(store, "projects", "nter", "cases")
+	writeScript(t, cases, "a_mob_order.yaml", "# testiny: MOB TC-9001\n# testiny: MOB TC-7166\n---\n")
+	writeScript(t, cases, "b_star_order.yaml", "# testiny: star TC-9001\n---\n")
+	r.tny.results[632] = testinyadapter.Results{Cases: []testinyadapter.Case{{ID: 9001, Title: "Order summary", Status: "NOTRUN"}}}
+
+	link(r, 700, 632, 800)
+	runs, err := r.svc.Runs(context.Background(), "app-1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[domain.TestinyRunID]string{}
+	for _, v := range runs {
+		got[v.Link.RunID] = caseByID(t, v, 9001).Script
+	}
+	want := map[domain.TestinyRunID]string{
+		700: "projects/nter/cases/b_star_order.yaml",
+		632: "projects/nter/cases/a_mob_order.yaml",
+		800: "",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scripts by run = %v, want %v", got, want)
 	}
 }
 
@@ -566,7 +700,7 @@ func TestCaseScriptsAreRescannedAfterAMinute(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return res.Runs[0].Cases[0].Script
+		return res[0].Cases[0].Script
 	}
 	if s := script(); s != "" {
 		t.Fatalf("script before any exists = %q", s)
@@ -597,7 +731,7 @@ func TestACachedRunIsNotChangedByTheScriptsOfAnotherView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := res.Runs[0].Cases[0].Script; s != "" {
+	if s := res[0].Cases[0].Script; s != "" {
 		t.Fatalf("a project without scripts shows %q from a cached view", s)
 	}
 }

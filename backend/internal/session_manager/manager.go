@@ -3595,7 +3595,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// Every worker kind, qa included, each told what is its own: qa and a
 		// solo worker play runs and record results, dev hands that check to qa.
 		// A project without Testiny renders nothing.
-		base += prompts.TestinyProtocol(cfg.TestinyProject, string(projectID), string(crewRole), caseScripts)
+		base += prompts.TestinyProtocol(cfg.UsesTestiny, string(projectID), string(crewRole), caseScripts)
 	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {

@@ -335,13 +335,13 @@ describe("useWorkspaceQuery capability flags", () => {
 		expect(byId.crew.disableAutoCrew).toBe(false);
 	});
 
-	it("carries testinyProject through to the workspace summary", async () => {
+	it("carries usesTestiny through to the workspace summary", async () => {
 		respondWith({
 			projects: {
 				data: {
 					projects: [
-						{ id: "mob", name: "Mobile", kind: "single_repo", path: "/tmp/mob", testinyProject: "MOB" },
-						{ id: "web", name: "Web", kind: "single_repo", path: "/tmp/web" },
+						{ id: "mob", name: "Mobile", kind: "single_repo", path: "/tmp/mob", usesTestiny: true },
+						{ id: "web", name: "Web", kind: "single_repo", path: "/tmp/web", usesTestiny: false },
 					],
 				},
 				error: undefined,
@@ -352,7 +352,7 @@ describe("useWorkspaceQuery capability flags", () => {
 		await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
 		const byId = Object.fromEntries((result.current.data ?? []).map((w) => [w.id, w]));
-		expect(byId.mob.testinyProject).toBe("MOB");
-		expect(byId.web.testinyProject).toBeUndefined();
+		expect(byId.mob.usesTestiny).toBe(true);
+		expect(byId.web.usesTestiny).toBe(false);
 	});
 });

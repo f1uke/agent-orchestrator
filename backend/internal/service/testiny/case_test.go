@@ -96,7 +96,7 @@ func TestCaseRereadsARunOnlyWhenItsReadIsOld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(runs.Runs[0].Cases); n != 3 {
+	if n := len(runs[0].Cases); n != 3 {
 		t.Fatalf("the tab still shows %d cases; the read Case made should be remembered", n)
 	}
 }

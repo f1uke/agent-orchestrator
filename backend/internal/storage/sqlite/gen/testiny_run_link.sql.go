@@ -26,17 +26,44 @@ func (q *Queries) DeleteTestinyRunLink(ctx context.Context, arg DeleteTestinyRun
 	return err
 }
 
+const fillTestinyRunLinkProject = `-- name: FillTestinyRunLinkProject :exec
+UPDATE testiny_run_link SET project_id = ?, project_key = ?, project_name = ?
+WHERE run_id = ? AND project_id = 0
+`
+
+type FillTestinyRunLinkProjectParams struct {
+	ProjectID   int64
+	ProjectKey  string
+	ProjectName string
+	RunID       domain.TestinyRunID
+}
+
+// A link made before AO stored the run's project gets it the first time the
+// run is read again. A link that has its project keeps it.
+func (q *Queries) FillTestinyRunLinkProject(ctx context.Context, arg FillTestinyRunLinkProjectParams) error {
+	_, err := q.db.ExecContext(ctx, fillTestinyRunLinkProject,
+		arg.ProjectID,
+		arg.ProjectKey,
+		arg.ProjectName,
+		arg.RunID,
+	)
+	return err
+}
+
 const insertTestinyRunLink = `-- name: InsertTestinyRunLink :exec
-INSERT INTO testiny_run_link (session_id, run_id, linked_by, created_at)
-VALUES (?, ?, ?, ?)
+INSERT INTO testiny_run_link (session_id, run_id, project_id, project_key, project_name, linked_by, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (session_id, run_id) DO NOTHING
 `
 
 type InsertTestinyRunLinkParams struct {
-	SessionID domain.SessionID
-	RunID     domain.TestinyRunID
-	LinkedBy  string
-	CreatedAt time.Time
+	SessionID   domain.SessionID
+	RunID       domain.TestinyRunID
+	ProjectID   int64
+	ProjectKey  string
+	ProjectName string
+	LinkedBy    string
+	CreatedAt   time.Time
 }
 
 // A re-link keeps the first row, so its author and its place in the list stay.
@@ -44,6 +71,9 @@ func (q *Queries) InsertTestinyRunLink(ctx context.Context, arg InsertTestinyRun
 	_, err := q.db.ExecContext(ctx, insertTestinyRunLink,
 		arg.SessionID,
 		arg.RunID,
+		arg.ProjectID,
+		arg.ProjectKey,
+		arg.ProjectName,
 		arg.LinkedBy,
 		arg.CreatedAt,
 	)
@@ -51,7 +81,7 @@ func (q *Queries) InsertTestinyRunLink(ctx context.Context, arg InsertTestinyRun
 }
 
 const listTestinyRunLinks = `-- name: ListTestinyRunLinks :many
-SELECT session_id, run_id, linked_by, created_at FROM testiny_run_link WHERE session_id = ? ORDER BY created_at, rowid
+SELECT session_id, run_id, linked_by, created_at, project_id, project_key, project_name FROM testiny_run_link WHERE session_id = ? ORDER BY created_at, rowid
 `
 
 func (q *Queries) ListTestinyRunLinks(ctx context.Context, sessionID domain.SessionID) ([]TestinyRunLink, error) {
@@ -68,6 +98,9 @@ func (q *Queries) ListTestinyRunLinks(ctx context.Context, sessionID domain.Sess
 			&i.RunID,
 			&i.LinkedBy,
 			&i.CreatedAt,
+			&i.ProjectID,
+			&i.ProjectKey,
+			&i.ProjectName,
 		); err != nil {
 			return nil, err
 		}

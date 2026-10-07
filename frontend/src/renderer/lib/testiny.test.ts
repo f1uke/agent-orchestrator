@@ -38,7 +38,13 @@ const tc = (id: number, status: string, script?: string): TestinyCase => ({
 });
 
 const run = (over: Partial<TestinyRun> = {}): TestinyRun => ({
-	link: { sessionId: "task-1", runId: 632, linkedBy: "", createdAt: ago(120) },
+	link: {
+		sessionId: "task-1",
+		runId: 632,
+		project: { id: 1, key: "MOB", name: "MOBILITY" },
+		linkedBy: "",
+		createdAt: ago(120),
+	},
 	title: "MOBILITY-4839 Chat notice disclaimer - iOS",
 	url: "https://app.testiny.io/MOB/testruns/tr/632",
 	closed: false,

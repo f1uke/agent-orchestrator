@@ -182,7 +182,7 @@ func (m *Manager) spawnSuspendedCrewMemberLocked(ctx context.Context, project do
 			// resume, which on a first wake is always the case - and a promptless
 			// worker is refused outright (ErrNotResumable), so this must not be
 			// empty.
-			Prompt: crewMemberKickoff(role, dev, reason, project.Config.TestinyProject != ""),
+			Prompt: crewMemberKickoff(role, dev, reason, project.Config.UsesTestiny),
 		},
 	}
 	rec, err := m.store.CreateSession(ctx, seed)

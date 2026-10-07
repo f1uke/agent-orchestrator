@@ -103,7 +103,7 @@ func onOff(b bool) string {
 func (c promptCell) config() domain.ProjectConfig {
 	cfg := domain.ProjectConfig{HasIOSSimulator: c.iosSimulator}
 	if c.testiny {
-		cfg.TestinyProject = "MOB"
+		cfg.UsesTestiny = true
 	}
 	if c.mobileScripts != scriptsOff {
 		platform := domain.MobilePlatformAndroid
@@ -200,6 +200,9 @@ func TestPromptMatrix_TeachesNoRemovedCommand(t *testing.T) {
 	}
 }
 
+// oneBoundProject is how a prompt tied to one Testiny project named it.
+var oneBoundProject = regexp.MustCompile("(?i)(in|uses|keeps its manual test cases in) Testiny project `[^`]+`")
+
 // testinyHeading is the block every worker kind gets on a Testiny project, and
 // nothing else gets: the orchestrator dispatches, and the reviewer prompt is
 // built by the review engine.
@@ -216,15 +219,24 @@ func (c promptCell) assertTestinyBlock(t *testing.T, got string) {
 		return
 	}
 	for _, s := range []string{
-		"Testiny project `MOB`",
 		"`managing-testiny-qa`",
 		"~/.ao/knowledge/mer/plans/<branch>--testiny.md",
-		`ao testiny link "$AO_CREW_ID" <run-id>`,
+		"one task may hold runs from several",
+		"Pick the Testiny project from the task's Jira key",
+		"`testiny project ls`",
+		"ask the human which project",
+		`ao testiny link "$AO_CREW_ID" <run-url>`,
+		`ao testiny link "$AO_CREW_ID" <run-id> --project <KEY>`,
 		"Every other Testiny write waits for the human's explicit yes",
 	} {
 		if !strings.Contains(block, s) {
 			t.Errorf("%s: Testiny block is missing %q", c.name(), s)
 		}
+	}
+	// An AO project is not tied to one Testiny project, so the block names
+	// none as the project's own.
+	if oneBoundProject.MatchString(block) {
+		t.Errorf("%s: Testiny block names a fixed Testiny project: %q", c.name(), oneBoundProject.FindString(block))
 	}
 	c.assertResultRecording(t, block)
 }

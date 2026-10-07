@@ -3,8 +3,10 @@
 Link a task's Testiny test runs, read them and their cases back, record case results in them, and
 upload a run's QA evidence to Google Drive with each file linked on its case's result.
 
-On a project with a Testiny project set (`ao project set-config <project> --testiny-project <key>`),
-each task has a Testiny tab. It lists the Testiny test runs the task's cases were played in.
+On a project that uses Testiny (`ao project set-config <project> --testiny`), each task has a
+Testiny tab. It lists the Testiny test runs the task's cases were played in. A project is not
+tied to one Testiny project: run ids are global in Testiny, so each run names its own project,
+and one task may hold runs from several.
 AO keeps the links and a log of the results and evidence it recorded. Titles, cases and
 results are read live from Testiny. AO makes two writes: a result with `ao testiny result`, and
 a comment holding evidence links with `ao testiny evidence`. Create cases, plans and runs with
@@ -29,15 +31,24 @@ ao testiny <subcommand> [args] [flags]
 
 Link a run to a task. The run is a run id (`632`), `TR-632`, or the run's URL
 (`https://app.testiny.io/MOB/testruns/tr/632`). AO links it only after Testiny confirms the
-run exists and is in the project's Testiny project, so a typo never sits in the list.
-Linking a run twice is a no-op.
+run exists, so a typo never sits in the list, and stores the run's own Testiny project with
+the link. Give the run's URL, or its id with `--project`: a run that is not in the project the
+URL's key or `--project` names is refused (`TR-632 is in STAR, not MOB`). Pick the project
+from the task's Jira key (`STAR-2413` is in STAR, `MOBILITY-123` in MOBILITY, key MOB);
+`testiny project ls` lists every project with its name and key. Linking a run twice is a no-op.
 
 **Syntax:**
 ```
-ao testiny link <task> <run-id|url>
+ao testiny link <task> <run-id|url> [--project <key>]
 ```
 
-Prints the run it linked, e.g. `linked TR-632 "MOBILITY-4839 Chat notice disclaimer - iOS" (6 cases: 6 passed)`.
+**Flags:**
+
+| Flag | Meaning | Default / Required |
+|---|---|---|
+| `--project` | The Testiny project the run is in: its key (`project_key` in `testiny project ls`, e.g. `MOB`), name or id | - |
+
+Prints the run it linked after its project's key, e.g. `linked MOB TR-632 "MOBILITY-4839 Chat notice disclaimer - iOS" (6 cases: 6 passed)`.
 
 ---
 
@@ -54,7 +65,8 @@ ao testiny unlink <task> <run-id>
 
 ### ao testiny runs
 
-Show the runs linked to a task, read from Testiny now: each run's title and counts, every
+Show the runs linked to a task, read from Testiny now: each run's Testiny project (its key,
+else its name) before its id, its title and counts, every
 case that did not pass with its status, and the run's evidence folder under
 `~/Desktop/QA Evidence`. When Testiny cannot be read, the run says why and shows the last
 read AO has.
@@ -194,7 +206,7 @@ ao testiny evidence <task> <run>
 |---|---|---|
 | `TESTINY_BAD_RUN_REF` | 2 | Not a run id, `TR-<id>`, or run URL |
 | `TESTINY_BAD_CASE_REF` | 2 | Not a case id or `TC-<id>` |
-| `TESTINY_OFF` | 2 | The project has no Testiny project set |
+| `TESTINY_OFF` | 2 | The project does not use Testiny: `ao project set-config <project> --testiny` turns it on |
 | `TESTINY_RESULT_INVALID` | 2 | A result breaks a rule above, names a case that is not in the run, or names a step the case does not have |
 | `TESTINY_RESULT_SET_BY_PERSON` | 2 | A person set one of the cases or steps: report it in the handback, do not retry |
 | `TESTINY_WRITE_NOT_YOURS` | 2 | The task has a qa and you are not it, or you are not on the task |
@@ -209,8 +221,8 @@ ao testiny evidence <task> <run>
 | `DRIVE_DUPLICATE` | 1 | The Drive folder holds two files with one name; AO never deletes on Drive, so the human removes the extra copy |
 | `TESTINY_CASE_NOT_IN_TASK` | 1 | The case is in none of the runs linked to the task |
 | `TESTINY_RUN_NOT_FOUND` | 1 | Testiny has no such run |
-| `TESTINY_RUN_WRONG_PROJECT` | 1 | The run is in another Testiny project |
-| `TESTINY_PROJECT_NOT_FOUND` | 1 | The project's Testiny setting names no Testiny project |
+| `TESTINY_RUN_WRONG_PROJECT` | 1 | The run is not in the Testiny project the URL or `--project` names |
+| `TESTINY_PROJECT_NOT_FOUND` | 1 | `--project` names no Testiny project |
 | `TESTINY_AUTH` | 1 | Testiny refused the API key: run `testiny auth status` in a terminal |
 | `TESTINY_UNAVAILABLE` | 1 | Testiny could not be reached or answered with an error |
 | `TESTINY_CLI_MISSING` | 1 | The `testiny` CLI is not installed (on PATH or in `~/go/bin`) |
@@ -220,7 +232,7 @@ ao testiny evidence <task> <run>
 
 ```bash
 # Link the run you just played the task's cases in (from inside the session)
-ao testiny link "$AO_SESSION_ID" 632
+ao testiny link "$AO_SESSION_ID" 632 --project MOB
 ```
 
 ```bash

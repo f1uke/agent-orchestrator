@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -115,6 +116,30 @@ func newResultsRig(t *testing.T) *rig {
 	return r
 }
 
+// A result is written in the run's own Testiny project, whatever other runs
+// the task holds.
+func TestRecordResultsWritesInTheRunsOwnProject(t *testing.T) {
+	r := newResultsRig(t)
+	ctx := context.Background()
+	r.clock.advance(time.Second)
+	if _, err := r.svc.Link(ctx, "app-1", "https://app.testiny.io/STAR/testruns/tr/700", "", ""); err != nil {
+		t.Fatalf("Link: %v", err)
+	}
+	if _, err := r.svc.RecordResults(ctx, "app-1", 700, []domain.TestinyResult{{CaseID: 9001, Status: "PASSED"}}, "", ""); err != nil {
+		t.Fatalf("RecordResults STAR: %v", err)
+	}
+	if _, err := r.svc.RecordResults(ctx, "app-1", 640, []domain.TestinyResult{{CaseID: 7201, Status: "PASSED"}}, "", ""); err != nil {
+		t.Fatalf("RecordResults MOB: %v", err)
+	}
+	got := map[domain.TestinyRunID]int64{}
+	for _, c := range r.tny.sets {
+		got[c.run] = c.projectID
+	}
+	if want := map[domain.TestinyRunID]int64{700: star.ID, 640: mob.ID}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("written in projects %v, want %v", got, want)
+	}
+}
+
 // crew makes app-1 a crew's dev and app-2 its qa.
 func crew(r *rig) {
 	r.store.sessions["app-1"] = domain.SessionRecord{ID: "app-1", ProjectID: "app", CrewID: "app-1", CrewRole: domain.CrewRoleDev}
@@ -182,7 +207,7 @@ func TestRecordResultsWritesLogsAndReturnsTheFreshView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := caseByID(t, runs.Runs[0], 7202).Recorded; !reflect.DeepEqual(got, wantRec) {
+	if got := caseByID(t, runs[0], 7202).Recorded; !reflect.DeepEqual(got, wantRec) {
 		t.Fatalf("Runs: TC-7202 recorded = %+v, want %+v", got, wantRec)
 	}
 }

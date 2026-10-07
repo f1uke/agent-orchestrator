@@ -825,7 +825,7 @@ describe("SessionInspector tab-strip width class", () => {
 	it.each([
 		{
 			name: "worker on a Testiny project with a web UI and iOS",
-			props: { hasWebUI: true, hasIOSSimulator: true, testinyProject: "MOB" },
+			props: { hasWebUI: true, hasIOSSimulator: true, usesTestiny: true },
 			expected: "6",
 		},
 		{ name: "worker with a web UI and iOS", props: { hasWebUI: true, hasIOSSimulator: true }, expected: "5" },
@@ -838,7 +838,7 @@ describe("SessionInspector tab-strip width class", () => {
 		const { orchestrator, ...rest } = props as {
 			hasWebUI?: boolean;
 			hasIOSSimulator?: boolean;
-			testinyProject?: string;
+			usesTestiny?: boolean;
 			orchestrator?: boolean;
 		};
 		renderWithQuery(
@@ -853,7 +853,7 @@ describe("SessionInspector tab-strip width class", () => {
 	// out of the accessibility tree as well as off the screen: at a narrow rail
 	// every tab was an unnamed icon. The name has to be on the tab itself.
 	it("names every tab even where the strip is too narrow to show the label", () => {
-		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator testinyProject="MOB" session={session([])} />);
+		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator usesTestiny session={session([])} />);
 		for (const label of ["Summary", "Reviews", "Files", "Testiny", "Device", "Browser"]) {
 			expect(screen.getByRole("tab", { name: label })).toHaveAttribute("aria-label", label);
 		}
@@ -881,24 +881,22 @@ describe("SessionInspector Simulator tab visibility", () => {
 describe("SessionInspector Testiny tab", () => {
 	const tabNames = () => screen.getAllByRole("tab").map((el) => el.textContent?.trim());
 
-	it("is absent for a project without a Testiny project", () => {
+	it("is absent for a project that does not use Testiny", () => {
 		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator session={session([])} />);
 		expect(screen.queryByRole("tab", { name: "Testiny" })).not.toBeInTheDocument();
 	});
 
-	it("sits after Files on a Testiny project", () => {
-		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator testinyProject="MOB" session={session([])} />);
+	it("sits after Files on a project that uses Testiny", () => {
+		renderWithQuery(<SessionInspector hasWebUI hasIOSSimulator usesTestiny session={session([])} />);
 		expect(tabNames()).toEqual(["Summary", "Reviews", "Files", "Testiny", "Device", "Browser"]);
 	});
 
 	it("shows the task's runs when opened", async () => {
 		const user = userEvent.setup();
 		getMock.mockImplementation(async (path: string) =>
-			path === "/api/v1/sessions/{sessionId}/testiny/runs"
-				? { data: { project: "MOB", runs: [] } }
-				: { data: undefined },
+			path === "/api/v1/sessions/{sessionId}/testiny/runs" ? { data: { runs: [] } } : { data: undefined },
 		);
-		renderWithQuery(<SessionInspector testinyProject="MOB" session={session([])} />);
+		renderWithQuery(<SessionInspector usesTestiny session={session([])} />);
 
 		await user.click(screen.getByRole("tab", { name: "Testiny" }));
 		expect(await screen.findByText("No test runs linked")).toBeInTheDocument();

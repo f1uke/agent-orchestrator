@@ -139,12 +139,13 @@ Your device is yours for the whole task: build, install and look on it while you
 
 ## Testiny test cases (AO)
 
-This project keeps its manual test cases in Testiny project `MOB`. Until your task has a qa you own the cases, plans and runs here; once it has one, qa owns everything in this section and you do not write to Testiny. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
+This project keeps its manual test cases in Testiny. It is not tied to one Testiny project: one task may hold runs from several, and each linked run carries its own. Until your task has a qa you own the cases, plans and runs here; once it has one, qa owns everything in this section and you do not write to Testiny. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
 
+- **Pick the Testiny project from the task's Jira key**, the `issue` field of `ao session get "$AO_CREW_ID"`: its prefix names the project by name or key. STAR-2413 is in STAR; MOBILITY-123 is in the MOBILITY project, whose key is MOB. `testiny project ls` lists every project with its name and key. When the key does not clearly name one, or the task has no Jira issue, ask the human which project before you write anything.
 - **Reading Testiny needs no permission.**
 - **Results and evidence are qa's, never yours.** Playing the run, recording each case's result and linking its evidence is the check you ask a qa for once the change is done, so do not record results or upload evidence yourself.
 - **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, or a milestone link. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
-- **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking a run is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
+- **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-url>`, or `ao testiny link "$AO_CREW_ID" <run-id> --project <KEY>`. AO refuses a run that is not in the project the URL or `--project` names. Linking a run is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked, each run's project, and each case's status.
 - **Your report names what you did here**: the case and run ids you created, and the path of any draft you wrote.
 
 ## Using the ao CLI

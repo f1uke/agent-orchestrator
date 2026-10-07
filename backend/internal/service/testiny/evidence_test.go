@@ -273,6 +273,30 @@ func TestUploadEvidenceUploadsTheFolderAndLinksEachCase(t *testing.T) {
 	}
 }
 
+// Each run's evidence goes under its own Testiny project, in Drive and in the
+// comments: a task's STAR run lands under STAR while its other run is MOB.
+func TestUploadEvidenceGoesUnderTheRunsOwnProject(t *testing.T) {
+	r := newEvidenceRig(t)
+	r.tny.runs[700] = testinyadapter.Run{ID: 700, Title: "STAR-2413 Order summary - web", ProjectID: 3, PlanID: 193, MilestoneID: 80}
+	r.clock.advance(time.Second)
+	link(r.rig, 700)
+	const starRel = "STAR/2026/Sprint 2026-20/TP-193 - Chat session logout/TR-700 - STAR-2413 Order summary - web"
+	r.folder = filepath.Join(r.home, "Desktop", "QA Evidence", filepath.FromSlash(starRel))
+	r.write(t, "README.md", "TC-9001 pass.png")
+
+	report, err := r.svc.UploadEvidence(context.Background(), "app-1", 700, "")
+	if err != nil {
+		t.Fatalf("UploadEvidence: %v", err)
+	}
+	if report.Drive != "finnomena:QA/"+starRel {
+		t.Fatalf("drive = %q, want it under STAR", report.Drive)
+	}
+	want := []commentCall{{run: 700, caseID: 9001, projectID: star.ID, text: domain.DriveFileURL(r.drive.id(report.Drive, "TC-9001 pass.png"))}}
+	if got := r.posted(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("posted = %+v, want the link on STAR's run in STAR", got)
+	}
+}
+
 func TestUploadEvidenceAgainPostsNothing(t *testing.T) {
 	r := newEvidenceRig(t, "TC-3818 pass.png", "TC-3819 FAIL MOBILITY-1.mp4")
 	if _, err := r.upload(""); err != nil {
@@ -504,7 +528,7 @@ func TestRunsShowEachCasesDriveLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := res.Runs[0]
+	v := res[0]
 	if got := caseByID(t, v, 3818).Evidence; len(got) != 1 || got[0].File != "TC-3818 pass.png" {
 		t.Fatalf("TC-3818 evidence = %+v, want AO's link named by its file", got)
 	}

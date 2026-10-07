@@ -21,9 +21,9 @@ import (
 // TestinyService is the controller-facing Testiny contract, satisfied by
 // *service/testiny.Service.
 type TestinyService interface {
-	Link(ctx context.Context, task domain.SessionID, ref, by string) (domain.TestinyRunView, error)
+	Link(ctx context.Context, task domain.SessionID, ref, project, by string) (domain.TestinyRunView, error)
 	Unlink(ctx context.Context, task domain.SessionID, id domain.TestinyRunID) error
-	Runs(ctx context.Context, task domain.SessionID, refresh bool) (testinysvc.Runs, error)
+	Runs(ctx context.Context, task domain.SessionID, refresh bool) ([]domain.TestinyRunView, error)
 	RecordResults(ctx context.Context, task domain.SessionID, id domain.TestinyRunID, results []domain.TestinyResult, by, sha string) (domain.TestinyRunView, error)
 	Case(ctx context.Context, task domain.SessionID, id int64) (domain.TestinyCaseDetail, error)
 	UploadEvidence(ctx context.Context, task domain.SessionID, id domain.TestinyRunID, by string) (domain.TestinyEvidenceReport, error)
@@ -31,8 +31,7 @@ type TestinyService interface {
 
 // TestinyRunsResponse is the body of GET /api/v1/sessions/{sessionId}/testiny/runs.
 type TestinyRunsResponse struct {
-	Project string                  `json:"project" description:"The project's Testiny project, as set (a key, name or id)."`
-	Runs    []domain.TestinyRunView `json:"runs" description:"The task's runs in the order they were linked. A run Testiny could not read now carries fetchError."`
+	Runs []domain.TestinyRunView `json:"runs" description:"The task's runs in the order they were linked. A run Testiny could not read now carries fetchError."`
 }
 
 // TestinyRunsQuery is the query string of GET /api/v1/sessions/{sessionId}/testiny/runs.
@@ -42,8 +41,9 @@ type TestinyRunsQuery struct {
 
 // LinkTestinyRunInput is the body of POST /api/v1/sessions/{sessionId}/testiny/runs.
 type LinkTestinyRunInput struct {
-	Ref  string `json:"ref" description:"The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632)."`
-	From string `json:"from,omitempty" description:"Session id of the agent linking the run ($AO_SESSION_ID). Empty when a person links it in the app."`
+	Ref     string `json:"ref" description:"The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632). Run ids are global in Testiny, so the run names its own project."`
+	Project string `json:"project,omitempty" description:"The Testiny project the run should be in: its key, name or id. Optional; when given, a run in another project is refused, as is a URL whose key names another project."`
+	From    string `json:"from,omitempty" description:"Session id of the agent linking the run ($AO_SESSION_ID). Empty when a person links it in the app."`
 }
 
 // TestinyResultInput is one case's result in RecordTestinyResultsInput.
@@ -116,11 +116,11 @@ func (c *TestinyController) list(w http.ResponseWriter, r *http.Request) {
 		writeTestinyError(w, r, err)
 		return
 	}
-	runs := res.Runs
+	runs := res
 	if runs == nil {
 		runs = []domain.TestinyRunView{}
 	}
-	envelope.WriteJSON(w, http.StatusOK, TestinyRunsResponse{Project: res.Project, Runs: runs})
+	envelope.WriteJSON(w, http.StatusOK, TestinyRunsResponse{Runs: runs})
 }
 
 func (c *TestinyController) link(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +133,7 @@ func (c *TestinyController) link(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
 		return
 	}
-	view, err := c.Svc.Link(r.Context(), sessionID(r), in.Ref, strings.TrimSpace(in.From))
+	view, err := c.Svc.Link(r.Context(), sessionID(r), in.Ref, strings.TrimSpace(in.Project), strings.TrimSpace(in.From))
 	if err != nil {
 		writeTestinyError(w, r, err)
 		return

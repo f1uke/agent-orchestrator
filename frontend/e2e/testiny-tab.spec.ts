@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-// dev:web (VITE_NO_ELECTRON=1) serves lib/mock-data.ts. ao-demo sets
-// testinyProject MOB, and its "demo-qa-testing" crew has three linked runs
-// (mockTestinyRuns) and the Jira issue DEMO-150. docs-site sets no Testiny
-// project, so its tasks get no tab.
+// dev:web (VITE_NO_ELECTRON=1) serves lib/mock-data.ts. ao-demo uses Testiny,
+// and its "demo-qa-testing" crew has three linked runs (mockTestinyRuns), two in
+// MOB and TR-640 in STAR, and the Jira issue DEMO-150. docs-site does not use
+// Testiny, so its tasks get no tab.
 // The preview has no daemon: linking a run posts nowhere, and a result set from
 // the tab is written into the mock run in memory (mockRecordTestinyResult), as
 // is an evidence upload's Drive links (mockUploadTestinyEvidence).
@@ -25,6 +25,9 @@ test("the Testiny tab lists the task's runs, open cases before the passed ones",
 	const runs = inspector.getByRole("article");
 	await expect(runs).toHaveCount(3);
 	await expect(runs.first()).toHaveAccessibleName(/^TR-632 /);
+	// One task holds runs from several Testiny projects; each card names its own.
+	await expect(runs.first().getByText("MOB", { exact: true })).toBeVisible();
+	await expect(runs.nth(2).getByText("STAR", { exact: true })).toBeVisible();
 
 	// The failed case leads the open list, and the passed cases fold into a
 	// disclosure after it.
