@@ -57,6 +57,7 @@ func (f *fakeDelegate) Attach(context.Context, ports.RuntimeHandle, uint16, uint
 func (f *fakeDelegate) GetOutput(context.Context, ports.RuntimeHandle, int) (string, error) {
 	return "", nil
 }
+func (f *fakeDelegate) ConnectsStdinFile() bool { return true }
 
 var _ Delegate = (*fakeDelegate)(nil)
 

@@ -109,6 +109,11 @@ func (r *Runtime) Create(ctx context.Context, cfg ports.RuntimeConfig) (ports.Ru
 	return ports.RuntimeHandle{ID: id}, nil
 }
 
+// ConnectsStdinFile reports that Create cannot honour RuntimeConfig.StdinFile:
+// the pseudo console owns the child's stdin, so an agent's prompt stays in its
+// command here.
+func (r *Runtime) ConnectsStdinFile() bool { return false }
+
 // Destroy gracefully kills the pty-host, waits up to ~500ms for the pid to
 // exit, then force-kills it. Removes the session from the map and the registry.
 // Idempotent: unknown/already-gone session returns nil.

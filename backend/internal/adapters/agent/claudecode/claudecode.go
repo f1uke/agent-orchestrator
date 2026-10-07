@@ -152,8 +152,9 @@ func (p *Plugin) GetConfigSpec(ctx context.Context) (ports.ConfigSpec, error) {
 // mode emits no --permission-mode flag, so Claude's TUI resolves the starting
 // mode from ~/.claude/settings.json exactly as a normal launch.
 //
-// The prompt is passed after `--` so a prompt beginning with "-" is not
-// mistaken for a flag.
+// The prompt, when the caller passes one, goes after `--` so a prompt beginning
+// with "-" is not mistaken for a flag. AO normally passes none and feeds the
+// prompt on stdin instead (see GetPromptDeliveryStrategy).
 func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (cmd []string, err error) {
 	// Defense-in-depth: the project service validates on write, but re-check
 	// here so a config written by any other path can't launch a bad command.
@@ -196,6 +197,17 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 	}
 
 	return cmd, nil
+}
+
+// GetPromptDeliveryStrategy reports that Claude Code takes its initial prompt on
+// stdin: an interactive `claude` submits what it reads there as the first turn
+// and then reads the keyboard from its terminal, so the task brief never has to
+// sit on argv, where `pkill -f <word>` would match the agent.
+func (p *Plugin) GetPromptDeliveryStrategy(ctx context.Context, _ ports.LaunchConfig) (ports.PromptDeliveryStrategy, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return ports.PromptDeliveryStdin, nil
 }
 
 // PreLaunch is an optional capability the spawn engine invokes (via type

@@ -142,6 +142,13 @@ func (l *agentLauncher) Spawn(ctx context.Context, spec LaunchSpec) (string, err
 			return "", fmt.Errorf("reviewer system prompt: %w", err)
 		}
 		inv.SystemPromptFile = path
+		if c, ok := l.runtime.(ports.StdinFileConnector); ok && c.ConnectsStdinFile() {
+			path, err := promptfile.Write(l.dataDir, spec.WorkerID, promptfile.ReviewerPrompt, inv.Prompt)
+			if err != nil {
+				return "", fmt.Errorf("reviewer prompt: %w", err)
+			}
+			inv.PromptFile = path
+		}
 	}
 	if pl, ok := reviewer.(preLaunchReviewer); ok {
 		if err := pl.PreLaunch(ctx, inv); err != nil {
@@ -165,6 +172,7 @@ func (l *agentLauncher) Spawn(ctx context.Context, spec LaunchSpec) (string, err
 		WorkspacePath: spec.WorkspacePath,
 		Argv:          cmd.Argv,
 		Env:           pinnedEnv(cmd.Env),
+		StdinFile:     cmd.StdinFile,
 	})
 	if err != nil {
 		return "", fmt.Errorf("reviewer runtime: %w", err)

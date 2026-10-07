@@ -1,5 +1,6 @@
-// Package promptfile keeps the standing instructions AO hands an agent in a
-// private file, so they never ride on the agent's command line.
+// Package promptfile keeps the standing instructions and the initial prompt AO
+// hands an agent in private files, so they never ride on the agent's command
+// line.
 //
 // A command line is not private and it is not inert. Every process on the
 // machine can read it (`ps`), and `pkill -f <word>` matches against it, so a
@@ -8,7 +9,8 @@
 // word. On 2026-09-22 a worker cleaning up a stuck build ran
 // `pkill -f 'xcodebuild test'`, and every iOS agent on the machine died with it,
 // because the simulator guidance in their system prompt mentions that command.
-// The agent is handed a path instead; the text lives here.
+// The agent is handed a path instead, or the file on its standard input; the
+// text lives here.
 //
 // Files live under <dataDir>/prompts/<session id>/, one directory per session
 // so a session's files are removed together when it ends (see Remove), with the
@@ -33,7 +35,9 @@ import (
 // and are removed with them.
 const (
 	SystemPrompt         = "system-prompt.md"
+	InitialPrompt        = "initial-prompt.md"
 	ReviewerSystemPrompt = "reviewer-system-prompt.md"
+	ReviewerPrompt       = "reviewer-prompt.md"
 )
 
 // dirName is the directory under the data dir that holds every session's files.

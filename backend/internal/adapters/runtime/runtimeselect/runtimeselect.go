@@ -26,6 +26,7 @@ import (
 type Runtime interface {
 	ports.Runtime // Create, Destroy, IsAlive
 	ports.Attacher
+	ports.StdinFileConnector
 	SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error
 	GetOutput(ctx context.Context, handle ports.RuntimeHandle, lines int) (string, error)
 }
