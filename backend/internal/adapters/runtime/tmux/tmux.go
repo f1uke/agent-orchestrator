@@ -909,6 +909,8 @@ func buildLaunchCommand(cfg ports.RuntimeConfig) string {
 	// project configures counts as the user's.
 	b.WriteString(locale.ShellGuard())
 	b.WriteString("; ")
+	// This shell is the agent's parent; see ports.EnvAgentParentPID.
+	b.WriteString("export " + ports.EnvAgentParentPID + "=$$; ")
 	// Quote each argv word so spaces inside a word are preserved.
 	parts := make([]string, len(cfg.Argv))
 	for i, a := range cfg.Argv {

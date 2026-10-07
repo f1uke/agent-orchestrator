@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,6 +139,10 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 		}
 	}
 
+	if !c.firedBySessionAgent(agent) {
+		return nil
+	}
+
 	// Learning capture's transcript bookkeeping, reported on its own route so
 	// the activity signal below keeps its promise of never carrying a native id
 	// or a path. The prompt, when there is one, is already a fingerprint here.
@@ -172,6 +177,36 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 		c.reportHookFailure(agent, event, sessionID, err)
 	}
 	return nil
+}
+
+// firedBySessionAgent reports whether the agent process running this hook is the
+// one AO launched for the session: a direct child of the pane's leader shell
+// (ports.EnvAgentParentPID). Every claude started inside the session - a `claude
+// mcp list` from the agent's own shell tool, a background session Claude Code's
+// daemon hosts, an agent orphaned when Restart destroyed its pane - inherits
+// AO_SESSION_ID and the worktree's hooks, and its SessionEnd would otherwise end
+// the session while the agent runs on. Whatever cannot be established - a
+// session launched before the variable existed, a harness that does not name
+// its pid, a process table that cannot be read - counts as the session's agent,
+// which is how every hook was treated before.
+func (c *commandContext) firedBySessionAgent(agent string) bool {
+	leader, err := strconv.Atoi(os.Getenv(ports.EnvAgentParentPID))
+	if err != nil {
+		return true
+	}
+	pidEnv, ok := activitydispatch.HookAgentPIDEnv[agent]
+	if !ok {
+		return true
+	}
+	pid, err := strconv.Atoi(os.Getenv(pidEnv))
+	if err != nil {
+		return true
+	}
+	parent, err := c.deps.ProcessParent(pid)
+	if err != nil {
+		return true
+	}
+	return parent == leader
 }
 
 // reportTranscriptRef tells the daemon which conversation file the session is

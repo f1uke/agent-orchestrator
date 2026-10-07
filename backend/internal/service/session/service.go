@@ -104,6 +104,9 @@ type commander interface {
 	StartTodo(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	UpdateTodoSpec(ctx context.Context, id domain.SessionID, patch ports.TodoSpecPatch) (domain.SessionRecord, error)
 	Restore(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	// AdoptLiveAgent takes back a terminated session whose agent still runs in its
+	// runtime, relaunching nothing; adopted=false leaves it as it was.
+	AdoptLiveAgent(ctx context.Context, id domain.SessionID) (rec domain.SessionRecord, adopted bool, err error)
 	Restart(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
 	// Wake is the user-open hook: resume a suspended session in place, or reset a
 	// live session's idle-close countdown; terminated sessions are left untouched.
@@ -439,26 +442,29 @@ func (s *Service) SpawnOrchestrator(ctx context.Context, projectID domain.Projec
 	if err != nil {
 		return domain.Session{}, err
 	}
-	active := true
-	if clean {
-		existing, err := s.List(ctx, ListFilter{ProjectID: projectID, Active: &active, OrchestratorOnly: true})
+	// ponytail: check-then-spawn is not atomic; fine for the single-frontend ensure-on-load case. Upgrade path: a partial unique index on (project_id) where kind=orchestrator and not terminated.
+	existing, err := s.activeOrchestrators(ctx, projectID)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if len(existing) == 0 {
+		adopted, err := s.adoptLiveOrchestrator(ctx, projectID)
 		if err != nil {
-			return domain.Session{}, err
+			return domain.Session{}, toAPIError(err)
 		}
-		for _, orch := range existing {
-			_ = s.sendRetireNotice(ctx, orch.ID)
-			if err := s.manager.RetireForReplacement(ctx, orch.ID); err != nil {
-				return domain.Session{}, toAPIError(err)
+		if adopted {
+			if existing, err = s.activeOrchestrators(ctx, projectID); err != nil {
+				return domain.Session{}, err
 			}
 		}
-	} else {
-		// ponytail: check-then-spawn is not atomic; fine for the single-frontend ensure-on-load case. Upgrade path: a partial unique index on (project_id) where kind=orchestrator and not terminated.
-		existing, err := s.List(ctx, ListFilter{ProjectID: projectID, Active: &active, OrchestratorOnly: true})
-		if err != nil {
-			return domain.Session{}, err
-		}
-		if len(existing) > 0 {
-			return newestSession(existing), nil
+	}
+	if !clean && len(existing) > 0 {
+		return newestSession(existing), nil
+	}
+	for _, orch := range existing {
+		_ = s.sendRetireNotice(ctx, orch.ID)
+		if err := s.manager.RetireForReplacement(ctx, orch.ID); err != nil {
+			return domain.Session{}, toAPIError(err)
 		}
 	}
 	sess, err := s.Spawn(ctx, ports.SpawnConfig{ProjectID: projectID, Kind: domain.KindOrchestrator})
@@ -469,6 +475,34 @@ func (s *Service) SpawnOrchestrator(ctx context.Context, projectID domain.Projec
 		return domain.Session{}, err
 	}
 	return sess, nil
+}
+
+func (s *Service) activeOrchestrators(ctx context.Context, projectID domain.ProjectID) ([]domain.Session, error) {
+	active := true
+	return s.List(ctx, ListFilter{ProjectID: projectID, Active: &active, OrchestratorOnly: true})
+}
+
+// adoptLiveOrchestrator takes back the project's last orchestrator when it is
+// marked terminated but its agent still runs. Every orchestrator of a project is
+// launched under one terminal name, so while that agent lives no new one can
+// start ("duplicate session"), and it is the coordinator the human was talking
+// to. Adopted, it is active again: an ensure returns it, a clean spawn retires
+// it. Only the last one to end is asked, because every older one names the same
+// terminal.
+func (s *Service) adoptLiveOrchestrator(ctx context.Context, projectID domain.ProjectID) (bool, error) {
+	active := false
+	ended, err := s.List(ctx, ListFilter{ProjectID: projectID, Active: &active, OrchestratorOnly: true})
+	if err != nil || len(ended) == 0 {
+		return false, err
+	}
+	last := ended[0]
+	for _, o := range ended[1:] {
+		if o.UpdatedAt.After(last.UpdatedAt) {
+			last = o
+		}
+	}
+	_, adopted, err := s.manager.AdoptLiveAgent(ctx, last.ID)
+	return adopted, err
 }
 
 const orchestratorRetireNotice = "AO is replacing this project orchestrator. Stop coordinating new work now; a fresh orchestrator will take over on the canonical branch."
