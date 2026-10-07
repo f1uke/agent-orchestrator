@@ -120,13 +120,22 @@ var simPromptDecisions = map[string]bool{
 	// agent driving by hand gets wrong unprompted; the commands it would name
 	// (boot, claim, install) are already taught here.
 	"doctor": false,
-	// The debugging surface: the dev prompt points at it, and each command
-	// states its own hazards (a held app, a relaunch that ends a capture) at
-	// the moment of use.
-	"pid":     false,
-	"lldb":    false,
-	"console": false,
-	"crashes": false,
+	// The debugging surface. lldb, console and crashes are taught because the
+	// obvious way to do each by hand is a hazard or a dead end: a raw lldb that
+	// waits on `continue` keeps the app attached, and `print` reaches no log.
+	// pid is for the raw tools the ios-sim-debug skill teaches.
+	"pid":                 false,
+	"lldb":                true,
+	"lldb --timeout":      false,
+	"lldb --continue-for": false,
+	"lldb --resume":       false,
+	"console":             true,
+	"console --follow":    false,
+	"console --grep":      false,
+	"console --max-lines": false,
+	"crashes":             true,
+	"crashes --show":      false,
+	"crashes --limit":     false,
 
 	// Flags, keyed "<command> --<flag>", for prompt-worthy commands only: a
 	// flag on an omitted command is covered by the command's own decision.
@@ -171,8 +180,8 @@ var simPromptDecisions = map[string]bool{
 	"install --ttl": false,
 	"launch --ttl":  false,
 	"run --ttl":     false,
-	// `--console` is debugging surface too; the dev prompt points at it.
-	"launch --console": false,
+	// `--console` is how `print` output is kept; taught with the debugging lines.
+	"launch --console": true,
 	"run --console":    false,
 	// `run --scheme` IS in the prompt because on a real project it is not
 	// optional: several schemes is the normal shape of an iOS app (Dev, Staging,
@@ -299,18 +308,32 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	// Debugging an app is not how a script-only project reads it; the ao
 	// skill page covers it for the developer who needs it.
 	"run --console": scriptOmits,
-	"pid":           scriptOmits,
-	"lldb":          scriptOmits,
-	"console":       scriptOmits,
-	"crashes":       scriptOmits,
+	// dev and a solo worker debug by hand (the human's rule, 2026-10-08), and
+	// these are the guarded ways to: named in their iOS debugging line, which
+	// qa does not get.
+	"pid":                 scriptOmits,
+	"lldb":                scriptTeaches,
+	"lldb --timeout":      scriptOmits,
+	"lldb --continue-for": scriptOmits,
+	"lldb --resume":       scriptOmits,
+	"console":             scriptTeaches,
+	"console --follow":    scriptOmits,
+	"console --grep":      scriptOmits,
+	"console --max-lines": scriptOmits,
+	"crashes":             scriptTeaches,
+	"crashes --show":      scriptOmits,
+	"crashes --limit":     scriptOmits,
 	// `install` is named where the lease bullet says which commands take the
 	// lease as they install - the alternative an agent reaches for is a raw
 	// `simctl install`.
 	"install":       scriptTeaches,
 	"install --ttl": scriptOmits,
-	// A script launches the app itself, from a fresh state; launching by hand
-	// is driving.
-	"launch": scriptOmits,
+	// A script launches the app itself, from a fresh state. Launching by hand
+	// is taught only as the debugging relaunch that keeps `print` output.
+	"launch":                   scriptTeaches,
+	"launch --console":         scriptTeaches,
+	"launch --terminate-first": scriptOmits,
+	"launch --ttl":             scriptOmits,
 	// Reading is how an agent judges the end state a script left. It never
 	// moves the app, which is why the rule leaves it with the agent.
 	"shot":            scriptTeaches,
@@ -433,15 +456,17 @@ func TestMobileScriptGuidance_SkillShapeNamesOnlyWhatAOOwns(t *testing.T) {
 // mobileScriptGuidanceBudget caps the script-only iOS block the way
 // simGuidanceBudget caps the catalog, and for the same reason. Raised
 // 4800 -> 6700 for the device bullets and mock rule the catalog carries too
-// (simGuidanceBudget says why); the blocks share them.
-const mobileScriptGuidanceBudget = 6700
+// (simGuidanceBudget says why); the blocks share them. Raised 6700 -> 7000 for
+// the iOS debugging line dev and a solo worker get (iosDebugRule).
+const mobileScriptGuidanceBudget = 7000
 
 // mobileScriptSkillBudget caps the verify-skill shape, which holds only what AO
 // owns. It was half the full block's budget until the device bullets and the
 // mock rule became AO's to say: a verify skill cannot override either. Raised
 // 4400 -> 4800 for the role's rule on driving by hand and the evidence rule,
-// the human's (2026-10-08), which no verify skill overrides either.
-const mobileScriptSkillBudget = 4800
+// the human's (2026-10-08), which no verify skill overrides either. Raised
+// 4800 -> 4900 for the iOS debugging line: a verify skill owns no debugger.
+const mobileScriptSkillBudget = 4900
 
 func TestMobileScriptGuidance_DecidesEverySubcommand(t *testing.T) {
 	ms := prompts.MobileScripts{Product: "nter", IOS: true, Store: "~/Documents/Projects/mobile-ui-scripts"}

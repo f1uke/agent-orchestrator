@@ -70,6 +70,8 @@ ao sim log                      # what the app itself printed, when the screen d
 ao sim run --scheme <name>      # build this project from source, install it, launch it
 ao sim install ./MyApp.app      # put an already-built bundle on the device
 ao sim launch --terminate-first # start what you just installed
+ao sim launch --console         # relaunch keeping print() output, which ao sim console reads
+ao sim lldb -- -o 'bt all'      # a bounded lldb on your app that always detaches; ao sim crashes reads its crashes
 ao sim release
 ```
 

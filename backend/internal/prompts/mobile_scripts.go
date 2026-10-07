@@ -69,12 +69,12 @@ func MobileScriptGuidance(ms MobileScripts, role string) string {
 		// gestures without them.
 		hand := handRule(role, "taps, typing and swipes")
 		if ms.IOS {
-			return ms.fill(mobileScriptSkillIOS + hand + ms.storeRule() + simAPIMocks(mockToolsScripts))
+			return ms.fill(mobileScriptSkillIOS + hand + iosDebugRule(role) + ms.storeRule() + simAPIMocks(mockToolsScripts))
 		}
 		return ms.fill(mobileScriptSkillAndroid + hand + ms.storeRule())
 	}
 	if ms.IOS {
-		hand := handRule(role, "`ao sim tap`, `ao sim type`, `ao sim drag` and the rest")
+		hand := handRule(role, "`ao sim tap`, `ao sim type`, `ao sim drag` and the rest") + iosDebugRule(role)
 		return ms.fill(mobileScriptIOS + hand + mobileScriptIOSAuthor + mobileScriptShared + ms.storeRule() + mobileScriptIOSClosing + simAPIMocks(mockToolsScripts))
 	}
 	hand := handRule(role, "`adb shell input` taps, text and swipes")
@@ -100,6 +100,20 @@ const handQA = "\n" + `- **You check only with scripts.** Gestures - {{gestures}
 const handDebug = "\n" + `- **Debug by hand, prove with a script.** Gestures - {{gestures}} - and any other tool are yours while you find a cause and debug a fix. Once the fix is done, re-test it by running the script for that screen before you call it done; no script yet means authoring one.`
 
 const handEvidence = "\n" + `- **Evidence comes only from a script run.** Every screenshot or video you attach, every Testiny result and every "verified" or "passes" you report comes from a script run. A screen you reached by hand is never evidence.`
+
+// iosDebugRule is the debugging half of handDebug on iOS, for the roles that
+// debug: AO's guarded debugging commands, in both iOS shapes because a verify
+// skill does not own a debugger. The hazard it names was measured: an lldb
+// left attached, or a SIGSTOP an interrupted lldb expression left behind,
+// holds the app, and the next script fails with nothing on screen to say why.
+func iosDebugRule(role string) string {
+	if role == "qa" {
+		return ""
+	}
+	return iosDebug
+}
+
+const iosDebug = "\n" + `- **Debug with AO's tools.** ` + "`ao sim lldb`" + ` (a bounded lldb that always detaches), ` + "`ao sim launch --console`" + ` then ` + "`ao sim console`" + ` (your ` + "`print`" + ` output), ` + "`ao sim crashes`" + `. A debugger left attached, or an app left stopped, fails the next script without saying why.`
 
 // storeRule is where an agent writes scripts and how they reach other
 // sessions. A task's own worktree is published with `ao scripts publish`; the
