@@ -529,6 +529,7 @@ func Run() error {
 		Testiny:            testinysvc.New(testinyadapter.New(testinyadapter.Options{}), store, store, testinysvc.Options{}),
 		CrewRuns:           crewRunSvc,
 		Children:           childSvc,
+		Scripts:            scriptsSvc,
 		Sim:                simSvc,
 		IOSRun:             iosRunSvc,
 		SimScreen:          simScreen,

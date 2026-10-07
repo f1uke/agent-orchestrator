@@ -71,6 +71,9 @@ type Store interface {
 	// under the card. An indexed lookup on a table that is empty unless a worker
 	// ran an isolated subagent.
 	ListSessionChildren(ctx context.Context, id domain.SessionID) ([]domain.SessionChild, error)
+	// GetScriptsStoreWorktree is the session's workspace's scripts store
+	// worktree when the session owns one, which the board's chip reads.
+	GetScriptsStoreWorktree(ctx context.Context, owner domain.SessionID) (domain.ScriptsStoreWorktree, bool, error)
 	ListPRsBySession(ctx context.Context, sessionID domain.SessionID) ([]domain.PullRequest, error)
 	ListChecks(ctx context.Context, prURL string) ([]domain.PullRequestCheck, error)
 	ListPRReviews(ctx context.Context, prURL string) ([]domain.PullRequestReview, error)
@@ -1592,6 +1595,12 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("children %s: %w", rec.ID, err)
 	}
+	var scripts *domain.ScriptsStoreWorktree
+	if w, ok, err := s.store.GetScriptsStoreWorktree(ctx, rec.ID); err != nil {
+		return domain.Session{}, fmt.Errorf("scripts store worktree %s: %w", rec.ID, err)
+	} else if ok && w.State.Live() {
+		scripts = &w
+	}
 	return domain.Session{
 		SessionRecord:        rec,
 		Status:               detail.Status,
@@ -1609,6 +1618,7 @@ func (s *Service) toSession(ctx context.Context, rec domain.SessionRecord) (doma
 		CrewRunDiscards:      discards,
 		LastHandback:         handback,
 		Children:             children,
+		ScriptsStore:         scripts,
 	}, nil
 }
 

@@ -34,6 +34,9 @@ import (
 // already removed it.
 var ErrNoWorktree = errors.New("scriptstore: this session's workspace has no scripts store worktree")
 
+// ErrSessionNotFound means the session a caller named does not exist.
+var ErrSessionNotFound = errors.New("scriptstore: session not found")
+
 // Store is the persistence the service needs.
 type Store interface {
 	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
@@ -164,9 +167,30 @@ type Published struct {
 	Result   ports.ScriptsPublishResult
 }
 
-// Publish merges the owner's committed scripts into the store's main checkout.
-// Uncommitted files stay where they are: only commits publish.
-func (s *Service) Publish(ctx context.Context, owner domain.SessionID) (Published, error) {
+// Owner is the session whose workspace a session works in: its crew's dev for
+// a crew member, itself otherwise.
+func (s *Service) Owner(ctx context.Context, session domain.SessionID) (domain.SessionID, error) {
+	rec, ok, err := s.store.GetSession(ctx, session)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%w: %s", ErrSessionNotFound, session)
+	}
+	if rec.InCrew() {
+		return rec.CrewID, nil
+	}
+	return rec.ID, nil
+}
+
+// Publish merges the committed scripts of the session's workspace into the
+// store's main checkout. Uncommitted files stay where they are: only commits
+// publish.
+func (s *Service) Publish(ctx context.Context, session domain.SessionID) (Published, error) {
+	owner, err := s.Owner(ctx, session)
+	if err != nil {
+		return Published{}, err
+	}
 	w, ok, err := s.Get(ctx, owner)
 	if err != nil {
 		return Published{}, err
@@ -205,9 +229,14 @@ type Status struct {
 	StoreDirty []string
 }
 
-// Status reads the owner's worktree now. The facts it reads are written back
-// when they changed, so the board agrees with what the caller was just told.
-func (s *Service) Status(ctx context.Context, owner domain.SessionID) (Status, error) {
+// Status reads the worktree of the session's workspace now. The facts it reads
+// are written back when they changed, so the board agrees with what the caller
+// was just told.
+func (s *Service) Status(ctx context.Context, session domain.SessionID) (Status, error) {
+	owner, err := s.Owner(ctx, session)
+	if err != nil {
+		return Status{}, err
+	}
 	w, ok, err := s.Get(ctx, owner)
 	if err != nil {
 		return Status{}, err
