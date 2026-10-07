@@ -117,6 +117,11 @@ func (s *Service) Probe(ctx context.Context, root string) (ports.ScriptsStorePro
 	return s.trees.Probe(ctx, root)
 }
 
+// HasFile reports whether a worktree cut from base in root holds path.
+func (s *Service) HasFile(ctx context.Context, root, base, path string) (bool, error) {
+	return s.trees.HasFile(ctx, root, base, path)
+}
+
 // Get reads an owner's worktree while it exists (active or held).
 func (s *Service) Get(ctx context.Context, owner domain.SessionID) (domain.ScriptsStoreWorktree, bool, error) {
 	w, ok, err := s.store.GetScriptsStoreWorktree(ctx, owner)

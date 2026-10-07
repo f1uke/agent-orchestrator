@@ -21,6 +21,9 @@ type ScriptsTrees interface {
 	// Status reads a worktree's uncommitted files and the commits on branch
 	// that base does not have.
 	Status(ctx context.Context, path, branch, base string) (ScriptsTreeStatus, error)
+	// HasFile reports whether ref in the store holds path (slash-separated,
+	// store-relative) as a file: what a worktree cut from ref will hold there.
+	HasFile(ctx context.Context, store, ref, path string) (bool, error)
 	// Dirty lists the uncommitted files of the store's main checkout itself.
 	Dirty(ctx context.Context, store string) ([]string, error)
 	// Publish merges branch into base in the store's main checkout: a fast

@@ -145,9 +145,21 @@ func (e env) startDaemon(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("spawn ao daemon: %v", err)
 	}
+	exited := make(chan struct{})
+	go func() {
+		_, _ = cmd.Process.Wait()
+		close(exited)
+	}()
 	t.Cleanup(func() {
 		e.run(t, "stop")
-		_, _ = cmd.Process.Wait()
+		// A daemon that never wrote its run file is one `ao stop` cannot find:
+		// kill it rather than wait out the test binary's timeout.
+		select {
+		case <-exited:
+		case <-time.After(10 * time.Second):
+			_ = cmd.Process.Kill()
+			<-exited
+		}
 	})
 
 	deadline := time.Now().Add(10 * time.Second)

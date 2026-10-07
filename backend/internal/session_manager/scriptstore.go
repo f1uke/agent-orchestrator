@@ -28,6 +28,7 @@ type ScriptsStore interface {
 	Get(ctx context.Context, owner domain.SessionID) (domain.ScriptsStoreWorktree, bool, error)
 	Ensure(ctx context.Context, project domain.ProjectID, owner domain.SessionID, root, base string) (domain.ScriptsStoreWorktree, error)
 	Settle(ctx context.Context, owner domain.SessionID, policy scriptstore.Policy) (scriptstore.Settlement, error)
+	HasFile(ctx context.Context, root, base, path string) (bool, error)
 }
 
 // SetScriptsStore wires the scripts store worktree service. Nil leaves every
@@ -37,13 +38,13 @@ func (m *Manager) SetScriptsStore(s ScriptsStore) {
 }
 
 // scriptsStorePlan is where a workspace's scripts go. Isolated means the
-// workspace has (or, at spawn and restore, is about to have) its own worktree
-// at Path on Branch, cut from Base. Otherwise the agent works in Root, the
-// store's main checkout, and Reason says why; both are empty when the project
-// has no mobileScripts at all.
+// workspace has (Cut) or, at spawn and restore, is about to have its own
+// worktree at Path on Branch, cut from Base. Otherwise the agent works in Root,
+// the store's main checkout, and Reason says why; both are empty when the
+// project has no mobileScripts at all.
 type scriptsStorePlan struct {
 	Root, Path, Branch, Base string
-	Isolated                 bool
+	Isolated, Cut            bool
 	Reason                   string
 }
 
@@ -65,7 +66,7 @@ func (m *Manager) planScriptsStore(ctx context.Context, project domain.ProjectRe
 	if err != nil {
 		m.logger.Warn("scripts store: read the workspace's worktree", "owner", owner, "error", err)
 	} else if ok {
-		return scriptsStorePlan{Root: w.Store, Path: w.Path, Branch: w.Branch, Base: w.BaseBranch, Isolated: true}
+		return cutPlan(w)
 	}
 	probe, err := m.scripts.Probe(ctx, plan.Root)
 	switch {
@@ -96,17 +97,48 @@ func (m *Manager) promptScripts(ctx context.Context, project domain.ProjectRecor
 		plan = m.planScriptsStore(ctx, project, owner)
 	case m.scripts != nil:
 		if w, ok, err := m.scripts.Get(ctx, owner); err == nil && ok {
-			plan = scriptsStorePlan{Root: w.Store, Base: w.BaseBranch, Isolated: true}
+			plan = cutPlan(w)
 		}
 	}
 	out := prompts.MobileScripts{Product: ms.Product, IOS: ms.Platform == domain.MobilePlatformIOS, Store: plan.Root, Root: plan.Root}
 	if plan.Isolated {
 		out.Store, out.Isolated, out.Base = "$"+EnvScriptsStore, true, plan.Base
 	}
-	if ms.VerifySkill != "" {
+	if ms.VerifySkill != "" && m.hasVerifySkill(ctx, ms.VerifySkill, plan) {
 		out.Skill = out.Store + "/" + strings.TrimSuffix(filepath.ToSlash(ms.VerifySkill), "/")
 	}
 	return out
+}
+
+// cutPlan is the plan of a worktree that exists.
+func cutPlan(w domain.ScriptsStoreWorktree) scriptsStorePlan {
+	return scriptsStorePlan{Root: w.Store, Path: w.Path, Branch: w.Branch, Base: w.BaseBranch, Isolated: true, Cut: true}
+}
+
+// hasVerifySkill reports whether the checkout a plan names holds the verify
+// skill's SKILL.md: a cut worktree or the main checkout on disk, a worktree
+// about to be cut at the base it will be cut from. The prompt and the link
+// both ask it, so a prompt never sends an agent to a skill its store lacks;
+// without one the agent gets the full device guidance instead.
+func (m *Manager) hasVerifySkill(ctx context.Context, skill string, plan scriptsStorePlan) bool {
+	rel := filepath.Join(filepath.FromSlash(skill), "SKILL.md")
+	switch {
+	case plan.Cut:
+		return isFile(filepath.Join(plan.Path, rel))
+	case plan.Isolated:
+		ok, err := m.scripts.HasFile(ctx, plan.Root, plan.Base, filepath.ToSlash(rel))
+		if err != nil {
+			m.logger.Warn("scripts store: read the verify skill at the store's base", "store", plan.Root, "base", plan.Base, "error", err)
+		}
+		return ok
+	default:
+		return isFile(filepath.Join(plan.Root, rel))
+	}
+}
+
+func isFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // ensureScriptsStore makes the owner's worktree exist when its plan says it
@@ -125,7 +157,7 @@ func (m *Manager) ensureScriptsStore(ctx context.Context, project domain.Project
 	if err != nil {
 		return plan, err
 	}
-	return scriptsStorePlan{Root: w.Store, Path: w.Path, Branch: w.Branch, Base: w.BaseBranch, Isolated: true}, nil
+	return cutPlan(w), nil
 }
 
 // scriptsOwner is the session whose store worktree a session uses: its crew's
@@ -188,7 +220,7 @@ func (m *Manager) linkVerifySkill(ctx context.Context, project domain.ProjectRec
 		return
 	}
 	source := filepath.Join(w.Path, filepath.FromSlash(ms.VerifySkill))
-	if info, err := os.Stat(filepath.Join(source, "SKILL.md")); err != nil || info.IsDir() {
+	if !m.hasVerifySkill(ctx, ms.VerifySkill, cutPlan(w)) {
 		m.logger.Warn("scripts store: the project's verify skill is missing from the store worktree; no verify skill is linked",
 			"owner", owner, "skill", source)
 		return

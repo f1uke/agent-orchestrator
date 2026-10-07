@@ -652,7 +652,7 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 					<SettingRow
 						name="Verify skill"
 						summary="The project's verify skill, linked into every worktree as .claude/skills/verify. Device guidance then points at it."
-						detail="Optional. The folder holding SKILL.md, relative to the scripts store (e.g. projects/nter/verify). Each task gets it from its own worktree of the store."
+						detail="Optional. The folder holding SKILL.md, relative to the scripts store (e.g. projects/nter/verify-ios). Each task gets it from its own worktree of the store. Until the folder holds a SKILL.md, agents get the full device guidance instead."
 						ownership={{ kind: "project-only" }}
 						timing="next-worker"
 						value={draft.mobileScriptsVerifySkill || "none"}
@@ -664,7 +664,7 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 							className={INPUT_CLASS}
 							value={draft.mobileScriptsVerifySkill}
 							onChange={(e) => setField("mobileScriptsVerifySkill", e.target.value)}
-							placeholder="projects/<product>/verify"
+							placeholder="projects/<product>/verify-<platform>"
 						/>
 					</SettingRow>
 				)}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/scriptstore"
 )
 
@@ -21,9 +22,11 @@ type settleCall struct {
 
 // fakeScripts stands in for the store worktree service. Ensure lays a row out
 // under root and returns it; Settle answers with blocked, recording each call.
+// HasFile answers from files, keyed "<base>:<path>".
 type fakeScripts struct {
 	root      string
 	probe     ports.ScriptsStoreProbe
+	files     map[string]bool
 	rows      map[domain.SessionID]domain.ScriptsStoreWorktree
 	ensureErr error
 	ensured   []domain.SessionID
@@ -59,6 +62,10 @@ func (f *fakeScripts) Ensure(_ context.Context, project domain.ProjectID, owner 
 	w := domain.ScriptsStoreWorktree{SessionID: owner, ProjectID: project, Store: root, Path: path, Branch: "ao/" + string(owner), BaseBranch: base, State: domain.ScriptsStoreActive}
 	f.rows[owner] = w
 	return w, nil
+}
+
+func (f *fakeScripts) HasFile(_ context.Context, _, base, path string) (bool, error) {
+	return f.files[base+":"+path], nil
 }
 
 func (f *fakeScripts) Settle(_ context.Context, owner domain.SessionID, policy scriptstore.Policy) (scriptstore.Settlement, error) {
@@ -251,6 +258,108 @@ func TestVerifySkillLinkLeavesOthersAndReplacesOnlyStaleStoreLinks(t *testing.T)
 	m.linkVerifySkill(ctx, project, "mer-1", ws.path)
 	if dest, _ := os.Readlink(link); dest != filepath.Join(w.Path, "projects", "nter", "verify") {
 		t.Fatalf("stale store link = %q, want it replaced by the live worktree's skill", dest)
+	}
+}
+
+// TestPromptScripts_PointsAtTheVerifySkillOnlyWhenTheStoreHoldsIt: a project
+// may name a verify skill before anyone has written it. Until the checkout the
+// session's scripts come from holds its SKILL.md, the prompt gives the full
+// device guidance, exactly as if no skill were named.
+func TestPromptScripts_PointsAtTheVerifySkillOnlyWhenTheStoreHoldsIt(t *testing.T) {
+	const skill = "projects/nter/verify"
+	type setup func(t *testing.T, m *Manager, scripts *fakeScripts, project *domain.ProjectRecord) domain.SessionID
+	aboutToBeCut := func(holds bool) setup {
+		return func(_ *testing.T, _ *Manager, scripts *fakeScripts, _ *domain.ProjectRecord) domain.SessionID {
+			scripts.files = map[string]bool{"main:" + skill + "/SKILL.md": holds}
+			return ""
+		}
+	}
+	cut := func(holds bool) setup {
+		return func(t *testing.T, _ *Manager, scripts *fakeScripts, _ *domain.ProjectRecord) domain.SessionID {
+			// The store's base holding the skill must not stand in for the
+			// worktree itself: that is what the link reads.
+			scripts.files = map[string]bool{"main:" + skill + "/SKILL.md": !holds}
+			w, err := scripts.Ensure(ctx, "mer", "mer-1", "/scripts/store", "main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !holds {
+				if err := os.Remove(filepath.Join(w.Path, skill, "SKILL.md")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return "mer-1"
+		}
+	}
+	mainCheckout := func(holds bool) setup {
+		return func(t *testing.T, _ *Manager, scripts *fakeScripts, project *domain.ProjectRecord) domain.SessionID {
+			store := t.TempDir()
+			project.Config.MobileScripts.Store = store
+			scripts.probe = ports.ScriptsStoreProbe{Reason: "not a git repository"}
+			if err := os.MkdirAll(filepath.Join(store, skill), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if holds {
+				if err := os.WriteFile(filepath.Join(store, skill, "SKILL.md"), []byte("verify\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return ""
+		}
+	}
+	for name, tc := range map[string]struct {
+		setup     setup
+		wantSkill string
+	}{
+		"worktree about to be cut, its base holds the skill": {aboutToBeCut(true), "$" + EnvScriptsStore + "/" + skill},
+		"worktree about to be cut, its base lacks the skill": {aboutToBeCut(false), ""},
+		"cut worktree holds the skill":                       {cut(true), "$" + EnvScriptsStore + "/" + skill},
+		"cut worktree lacks the skill":                       {cut(false), ""},
+		"main checkout holds the skill":                      {mainCheckout(true), "<store>/" + skill},
+		"main checkout lacks the skill":                      {mainCheckout(false), ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, _, _, _, scripts := newScriptsManager(t, skill)
+			project := mobileProject(skill)
+			owner := tc.setup(t, m, scripts, &project)
+			got := m.promptScripts(ctx, project, owner)
+			want := strings.ReplaceAll(tc.wantSkill, "<store>", project.Config.MobileScripts.Store)
+			if got.Skill != want {
+				t.Fatalf("Skill = %q, want %q", got.Skill, want)
+			}
+			if want != "" {
+				return
+			}
+			unset := project
+			unsetScripts := *project.Config.MobileScripts
+			unsetScripts.VerifySkill = ""
+			unset.Config.MobileScripts = &unsetScripts
+			if g, w := prompts.MobileScriptGuidance(got), prompts.MobileScriptGuidance(m.promptScripts(ctx, unset, owner)); g != w {
+				t.Fatalf("device guidance with a missing skill differs from the guidance with none named:\n%s\n---\n%s", g, w)
+			}
+		})
+	}
+}
+
+func TestSpawn_MissingVerifySkillGivesTheFullGuidanceAndNoLink(t *testing.T) {
+	m, _, _, ws, scripts := newScriptsManager(t, "projects/advisor/verify-ios")
+	agent := &recordingAgent{}
+	m.agents = singleAgent{agent: agent}
+	if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker}); err != nil {
+		t.Fatal(err)
+	}
+	if len(scripts.ensured) != 1 {
+		t.Fatalf("ensured = %v, want the worker's own worktree", scripts.ensured)
+	}
+	got := agent.lastLaunch.SystemPrompt
+	if strings.Contains(got, "the project's verify skill (AO)") || strings.Contains(got, "projects/advisor/verify-ios") {
+		t.Fatalf("the prompt points at a verify skill the store does not hold:\n%s", got)
+	}
+	if !strings.Contains(got, "## Driving the iOS Simulator") {
+		t.Fatalf("the prompt has no device guidance:\n%s", got)
+	}
+	if _, err := os.Lstat(filepath.Join(ws.path, ".claude", "skills", "verify")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a verify link was made to a missing skill: %v", err)
 	}
 }
 

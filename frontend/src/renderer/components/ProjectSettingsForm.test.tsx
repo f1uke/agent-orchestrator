@@ -564,7 +564,7 @@ describe("ProjectSettingsForm", () => {
 		await openRows();
 		await userEvent.type(screen.getByLabelText("Scripts product"), "nter");
 		await userEvent.type(screen.getByLabelText("Scripts store"), "/opt/scripts");
-		await userEvent.type(screen.getByLabelText("Verify skill"), "projects/nter/verify");
+		await userEvent.type(screen.getByLabelText("Verify skill"), "projects/nter/verify-ios");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
@@ -573,7 +573,7 @@ describe("ProjectSettingsForm", () => {
 			platform: "android",
 			product: "nter",
 			store: "/opt/scripts",
-			verifySkill: "projects/nter/verify",
+			verifySkill: "projects/nter/verify-ios",
 		});
 		expect(body.config.env).toEqual({ TOKEN: "secret" });
 	});
