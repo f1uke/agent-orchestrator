@@ -172,6 +172,9 @@ func (r *Reaper) probeOne(ctx context.Context, sess domain.SessionRecord, now ti
 			"session", sess.ID, "err", probeErr)
 	case alive:
 		facts.Probe = ports.ProbeAlive
+		if sess.Activity.State == domain.ActivityBackground {
+			facts.Agent = r.probeAgent(ctx, sess, handle)
+		}
 	default:
 		facts.Probe = ports.ProbeDead
 	}
@@ -179,6 +182,26 @@ func (r *Reaper) probeOne(ctx context.Context, sess domain.SessionRecord, now ti
 	if err := r.sink.ApplyRuntimeObservation(ctx, sess.ID, facts); err != nil {
 		r.logger.Error("reaper: ApplyRuntimeObservation failed",
 			"session", sess.ID, "err", err)
+	}
+}
+
+// probeAgent reads the agent process inside a live runtime. Empty when the
+// runtime cannot tell; a probe error is a failed reading, never a death.
+func (r *Reaper) probeAgent(ctx context.Context, sess domain.SessionRecord, handle ports.RuntimeHandle) ports.ProbeResult {
+	prober, ok := r.runtime.(ports.AgentLivenessProber)
+	if !ok {
+		return ""
+	}
+	alive, err := prober.AgentAlive(ctx, handle)
+	switch {
+	case err != nil:
+		r.logger.Debug("reaper: agent probe error reported as failed fact",
+			"session", sess.ID, "err", err)
+		return ports.ProbeFailed
+	case alive:
+		return ports.ProbeAlive
+	default:
+		return ports.ProbeDead
 	}
 }
 

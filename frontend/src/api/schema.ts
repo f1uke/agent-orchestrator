@@ -3225,7 +3225,7 @@ export interface components {
             /** @enum {string} */
             status: "todo" | "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "approved" | "mergeable" | "merged" | "needs_input" | "idle" | "terminated" | "no_signal";
             /** @enum {string} */
-            statusReason?: "working" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged" | "runs_discarded";
+            statusReason?: "working" | "background_work" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged" | "runs_discarded" | "crew_talk_capped";
             targetBranch?: string;
             /** @enum {string} */
             targetSource?: "pr" | "session_pr_target" | "session_base" | "project";
@@ -4254,7 +4254,7 @@ export interface components {
             /** Format: date-time */
             at: string;
             /** @enum {string} */
-            lastState?: "active" | "idle" | "waiting_input" | "parked" | "blocked" | "exited";
+            lastState?: "active" | "idle" | "waiting_input" | "parked" | "background" | "blocked" | "exited";
             /** @description The harness's own end reason when source is agent, or the named AO cause otherwise. 'unknown' when the ending is real but unexplained. */
             reason: string;
             /**
@@ -4292,7 +4292,7 @@ export interface components {
              * @description Agent activity state reported by an agent hook.
              * @enum {string}
              */
-            state: "active" | "idle" | "waiting_input" | "parked" | "exited";
+            state: "active" | "idle" | "waiting_input" | "parked" | "background" | "exited";
         };
         SetActivityResponse: {
             ok: boolean;

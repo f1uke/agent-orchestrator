@@ -49,6 +49,15 @@ func activeAgedRec(age time.Duration) domain.SessionRecord {
 	}
 }
 
+// backgroundRec builds a session whose turn ended `age` ago with its own
+// background work still running.
+func backgroundRec(age time.Duration) domain.SessionRecord {
+	return domain.SessionRecord{
+		Activity:      domain.Activity{State: domain.ActivityBackground, LastActivityAt: statusNow.Add(-age)},
+		FirstSignalAt: statusNow.Add(-age),
+	}
+}
+
 // parkedUnsignalledRec builds a session reading parked whose hook pipeline never
 // delivered a first signal, seeded `age` before the derivation time.
 func parkedUnsignalledRec(age time.Duration) domain.SessionRecord {
@@ -300,6 +309,7 @@ func TestReactivatedSessionSurfacesAsNeedsYou(t *testing.T) {
 		{"reactivated-merged-idle-needs-you", reactivated(domain.ActivityIdle, false), statusPR(domain.PRFacts{Merged: true}), domain.StatusNeedsInput},
 		{"reactivated-no-pr-needs-you", reactivated(domain.ActivityIdle, false), nil, domain.StatusNeedsInput},
 		{"reactivated-active-shows-working", reactivated(domain.ActivityActive, false), statusPR(domain.PRFacts{Merged: true}), domain.StatusWorking},
+		{"reactivated-background-shows-working", reactivated(domain.ActivityBackground, false), statusPR(domain.PRFacts{Merged: true}), domain.StatusWorking},
 		{"reactivated-open-pr-wins", reactivated(domain.ActivityIdle, false), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), domain.StatusMergeable},
 		{"reactivated-but-terminated-stays-merged", reactivated(domain.ActivityIdle, true), statusPR(domain.PRFacts{Merged: true}), domain.StatusMerged},
 	}
@@ -457,6 +467,11 @@ func TestDeriveStatusDetailReason(t *testing.T) {
 		// silence. ReasonWaitingInput stays reserved for a real prompt — the
 		// companion's live roster keys "the agent is asking you something" on it.
 		{"parked", statusRec(domain.ActivityParked, false), nil, false, domain.StatusNeedsInput, domain.ReasonIdleAged, ""},
+		// The turn is over but the agent's own background work is still running:
+		// it resumes by itself, so it reads working however long the work takes.
+		{"background", backgroundRec(10 * activeStaleGrace), nil, false, domain.StatusWorking, domain.ReasonBackground, ""},
+		{"background-ci-failing-pr-working", backgroundRec(10 * activeStaleGrace), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusWorking, domain.ReasonBackground, ""},
+		{"background-mergeable-pr-pipeline", backgroundRec(10 * activeStaleGrace), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), false, domain.StatusMergeable, domain.ReasonPRPipeline, ""},
 		{"idle-fresh-signalled", idleAgedRec(waitingInputGrace / 2), nil, false, domain.StatusIdle, domain.ReasonIdle, domain.StatusNeedsInput},
 		{"idle-fresh-never-signalled", silentRec(10 * time.Second), nil, false, domain.StatusIdle, domain.ReasonIdle, domain.StatusNoSignal},
 		{"no-signal", silentRec(2 * noSignalGrace), nil, false, domain.StatusNoSignal, domain.ReasonNoSignal, ""},

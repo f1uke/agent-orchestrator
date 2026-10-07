@@ -44,11 +44,19 @@ export function toSessionStatus(status?: string, isTerminated = false): SessionS
  * `waiting_input` means a permission prompt is open in the pane and the agent is
  * blocked on the human, while `parked` means the turn simply ended and the agent
  * is sitting at an ordinary prompt. Only the first is "the agent is asking you
- * something".
+ * something". `background` is a turn that ended with the agent's own background
+ * work still running: it resumes by itself, so it is not waiting on anyone.
  */
-export type SessionActivityState = "active" | "idle" | "waiting_input" | "parked" | "exited" | "unknown";
+export type SessionActivityState = "active" | "idle" | "waiting_input" | "parked" | "background" | "exited" | "unknown";
 
-const sessionActivityStates = new Set<SessionActivityState>(["active", "idle", "waiting_input", "parked", "exited"]);
+const sessionActivityStates = new Set<SessionActivityState>([
+	"active",
+	"idle",
+	"waiting_input",
+	"parked",
+	"background",
+	"exited",
+]);
 
 export type SessionActivity = {
 	state: SessionActivityState;
@@ -70,6 +78,7 @@ export function toSessionActivity(
 
 export type StatusReason =
 	| "working"
+	| "background_work"
 	| "waiting_input"
 	| "active_stale"
 	| "idle_aged"
@@ -82,6 +91,7 @@ export type StatusReason =
 
 const statusReasons = new Set<StatusReason>([
 	"working",
+	"background_work",
 	"waiting_input",
 	"active_stale",
 	"idle_aged",
@@ -101,6 +111,7 @@ export function toStatusReason(reason?: string): StatusReason | undefined {
 /** Plain-language explanation of WHY a session shows its current status. */
 export const statusReasonLabel: Record<StatusReason, string> = {
 	working: "Agent active",
+	background_work: "Waiting on its own background work",
 	waiting_input: "Agent requested input",
 	active_stale: "No activity for a while — assumed waiting (a turn's Stop hook may have been lost)",
 	idle_aged: "Turn ended and went quiet — assumed waiting",

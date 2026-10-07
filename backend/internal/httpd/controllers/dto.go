@@ -283,7 +283,7 @@ type SessionTermination struct {
 	Reason string `json:"reason" description:"The harness's own end reason when source is agent, or the named AO cause otherwise. 'unknown' when the ending is real but unexplained."`
 	// LastState is what the session was doing immediately before it ended — the
 	// difference between "it was still working" and "it had been waiting on me".
-	LastState string    `json:"lastState,omitempty" enum:"active,idle,waiting_input,parked,blocked,exited"`
+	LastState string    `json:"lastState,omitempty" enum:"active,idle,waiting_input,parked,background,blocked,exited"`
 	At        time.Time `json:"at"`
 	// TranscriptPath points at the agent transcript as it was at termination, so
 	// the last thing the agent did is readable even after the worktree is gone.
@@ -1712,7 +1712,7 @@ type ClaimPRResponse struct {
 // reason is bounded to a short token, and nothing else from the ending payload
 // (transcript path, native ids, cwd) is forwarded.
 type SetActivityRequest struct {
-	State  string                 `json:"state" enum:"active,idle,waiting_input,parked,exited" description:"Agent activity state reported by an agent hook."`
+	State  string                 `json:"state" enum:"active,idle,waiting_input,parked,background,exited" description:"Agent activity state reported by an agent hook."`
 	Detail *domain.ActivityDetail `json:"detail,omitempty" description:"Optional curated detail of the action behind this signal."`
 	End    *SessionEndPayload     `json:"end,omitempty" description:"Present on a terminal signal: the agent reported the ending, with the harness's own reason."`
 }

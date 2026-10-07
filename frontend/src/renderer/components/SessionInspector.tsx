@@ -623,6 +623,9 @@ const ACTIVITY_PILL: Record<SessionActivityState, { label: string; tone: string;
 	// Parked is a finished turn, not a question: it reads like idle, not like the
 	// amber "the agent is asking you something".
 	parked: { label: "Your Turn", tone: "var(--fg-muted)", breathe: false },
+	// The turn ended but the agent's own background work is still running and
+	// will wake it: still working, not the human's turn.
+	background: { label: "Background Work", tone: "var(--orange)", breathe: true },
 	exited: { label: "Exited", tone: "var(--fg-muted)", breathe: false },
 	unknown: { label: "Activity Unavailable", tone: "var(--fg-muted)", breathe: false },
 };

@@ -78,6 +78,14 @@ func DeriveActivityState(event string, payload []byte) (domain.ActivityState, bo
 		// input. A sustained idle is promoted to needs-input by the status deriver
 		// (waitingInputGrace); a later Notification(idle_prompt) says the same thing
 		// outright and reports parked (see below).
+		//
+		// A turn that ends with its own background work still running (a
+		// background shell, a Monitor, a background subagent) is not waiting on
+		// anyone: Claude Code wakes the agent with a new turn as each one reports,
+		// and that turn's Stop lists what is still running.
+		if hasRunningBackgroundTask(payload) {
+			return domain.ActivityBackground, true
+		}
 		return domain.ActivityIdle, true
 	case "notification":
 		return notificationState(payload)
@@ -142,4 +150,19 @@ func sessionEndState(payload []byte) (domain.ActivityState, bool) {
 	default:
 		return domain.ActivityExited, true
 	}
+}
+
+// hasRunningBackgroundTask reports whether a Stop payload's background_tasks
+// lists any work still running. A malformed payload reads as none.
+func hasRunningBackgroundTask(payload []byte) bool {
+	var p struct {
+		BackgroundTasks []backgroundTask `json:"background_tasks"`
+	}
+	_ = json.Unmarshal(payload, &p)
+	for _, task := range p.BackgroundTasks {
+		if task.Status == "running" {
+			return true
+		}
+	}
+	return false
 }

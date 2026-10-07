@@ -344,7 +344,18 @@ func (m *Manager) ApplyRuntimeObservation(ctx context.Context, id domain.Session
 		// tmux down while keeping it on the board. A dead-runtime probe is expected,
 		// not proof of death — never let it flip a suspended session to terminated
 		// (the reaper already skips these; this is the belt-and-suspenders guard).
-		if cur.IsTerminated || cur.IsSuspended || !runtimeClearlyDead(f, cur.Activity, now, m.window) {
+		if cur.IsTerminated || cur.IsSuspended {
+			return cur, false
+		}
+		if backgroundWorkDied(f, cur.Activity) {
+			// The agent died without a hook, and the background work it was
+			// waiting on died with it: nothing will wake it now. It is the idle
+			// its last Stop would have been without that work.
+			next := cur
+			next.Activity.State = domain.ActivityIdle
+			return next, true
+		}
+		if !runtimeClearlyDead(f, cur.Activity, now, m.window) {
 			return cur, false
 		}
 		next := cur
@@ -402,6 +413,13 @@ func (m *Manager) ApplyActivitySignal(ctx context.Context, id domain.SessionID, 
 	if s.State == domain.ActivityExited {
 		m.mu.Unlock()
 		return m.applyAgentExit(ctx, rec, s, now)
+	}
+	// Claude Code reports idle_prompt a minute into any quiet prompt, including
+	// one whose agent is waiting on its own background work. That agent wakes by
+	// itself, so the parked reading would hand the human a turn that is not theirs.
+	if rec.Activity.State == domain.ActivityBackground && s.State == domain.ActivityParked {
+		m.mu.Unlock()
+		return nil
 	}
 	prevState := rec.Activity.State
 	prevAt := rec.Activity.LastActivityAt

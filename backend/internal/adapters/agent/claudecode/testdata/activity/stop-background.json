@@ -1,0 +1,38 @@
+{
+ "session_id": "b6fd0055-7016-55ca-b756-9d220e2d15ef",
+ "transcript_path": "/tmp/transcript.jsonl",
+ "cwd": "/tmp/sandbox/worktree",
+ "scratchpad_dir": "/tmp/sandbox/scratchpad",
+ "prompt_id": "08ce9be5-a2e6-40a8-bcab-f5fa0c71ef14",
+ "permission_mode": "auto",
+ "effort": {
+  "level": "high"
+ },
+ "hook_event_name": "Stop",
+ "stop_hook_active": false,
+ "last_assistant_message": "waiting on background work",
+ "background_tasks": [
+  {
+   "id": "b9umbrwoj",
+   "type": "shell",
+   "status": "running",
+   "description": "Sleep 240s then print done",
+   "command": "sleep 240; echo bash-done"
+  },
+  {
+   "id": "ab425694629dc7973",
+   "type": "subagent",
+   "status": "running",
+   "description": "Sleep 200s then reply done",
+   "agent_type": "general-purpose"
+  },
+  {
+   "id": "bbj0br5e7",
+   "type": "shell",
+   "status": "running",
+   "description": "finite tick watch (3 ticks, 100s apart)",
+   "command": "for i in 1 2 3; do sleep 100; echo tick $i; done"
+  }
+ ],
+ "session_crons": []
+}

@@ -27,6 +27,13 @@ func runtimeClearlyDead(f ports.RuntimeFacts, activity domain.Activity, now time
 	return f.Probe == ports.ProbeDead && !hasRecentActivity(activity, observedAt, window)
 }
 
+// backgroundWorkDied reports whether a session waiting on its own background
+// work has lost the agent that would resume it, while its pane lives on behind
+// the keep-alive shell (a dead pane is runtimeClearlyDead's to handle).
+func backgroundWorkDied(f ports.RuntimeFacts, activity domain.Activity) bool {
+	return activity.State == domain.ActivityBackground && f.Probe == ports.ProbeAlive && f.Agent == ports.ProbeDead
+}
+
 func timeOr(t, fallback time.Time) time.Time {
 	if t.IsZero() {
 		return fallback

@@ -249,14 +249,7 @@ func TestSessionRenameUpdatesDisplayName(t *testing.T) {
 // fails the UPDATE outright rather than degrading - which is how a new state
 // would take the board down instead of just looking wrong.
 func TestSessionActivityStatesAllRoundTrip(t *testing.T) {
-	states := []domain.ActivityState{
-		domain.ActivityActive,
-		domain.ActivityIdle,
-		domain.ActivityWaitingInput,
-		domain.ActivityParked,
-		domain.ActivityExited,
-	}
-	for _, state := range states {
+	for _, state := range domain.ActivityStates {
 		t.Run(string(state), func(t *testing.T) {
 			s := newTestStore(t)
 			ctx := context.Background()

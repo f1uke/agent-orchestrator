@@ -42,6 +42,19 @@ func (r fakeRuntime) IsAlive(context.Context, ports.RuntimeHandle) (bool, error)
 	return r.alive, r.err
 }
 
+// fakeAgentRuntime is a runtime that can also see the agent process.
+type fakeAgentRuntime struct {
+	fakeRuntime
+	agent    bool
+	agentErr error
+	probes   *int
+}
+
+func (r fakeAgentRuntime) AgentAlive(context.Context, ports.RuntimeHandle) (bool, error) {
+	*r.probes++
+	return r.agent, r.agentErr
+}
+
 func probableSession(id domain.SessionID) domain.SessionRecord {
 	return domain.SessionRecord{
 		ID:       id,
@@ -52,7 +65,7 @@ func probableSession(id domain.SessionID) domain.SessionRecord {
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-func newReaper(lcm *fakeLCM, sessions fakeSessions, rt fakeRuntime) *Reaper {
+func newReaper(lcm *fakeLCM, sessions fakeSessions, rt runtimeProber) *Reaper {
 	return New(lcm, sessions, rt, Config{Logger: quietLogger()})
 }
 
@@ -139,5 +152,67 @@ func TestTick_SkipsSessionWithoutHandle(t *testing.T) {
 	}
 	if _, probed := lcm.observed["mer-1"]; probed {
 		t.Fatal("a session without a runtime handle must be skipped")
+	}
+}
+
+func backgroundSession(id domain.SessionID) domain.SessionRecord {
+	rec := probableSession(id)
+	rec.Activity.State = domain.ActivityBackground
+	return rec
+}
+
+func TestTick_ReportsTheAgentOfASessionWaitingOnBackgroundWork(t *testing.T) {
+	tests := []struct {
+		name     string
+		agent    bool
+		agentErr error
+		want     ports.ProbeResult
+	}{
+		{"agent alive", true, nil, ports.ProbeAlive},
+		{"agent dead", false, nil, ports.ProbeDead},
+		{"agent probe error", false, errors.New("ps failed"), ports.ProbeFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lcm := &fakeLCM{}
+			probes := 0
+			rt := fakeAgentRuntime{fakeRuntime: fakeRuntime{alive: true}, agent: tt.agent, agentErr: tt.agentErr, probes: &probes}
+			sessions := fakeSessions{rows: []domain.SessionRecord{backgroundSession("mer-1")}}
+			if err := newReaper(lcm, sessions, rt).Tick(ctx); err != nil {
+				t.Fatal(err)
+			}
+			got := lcm.observed["mer-1"]
+			if got.Probe != ports.ProbeAlive || got.Agent != tt.want {
+				t.Fatalf("got runtime %q agent %q, want runtime alive agent %q", got.Probe, got.Agent, tt.want)
+			}
+		})
+	}
+}
+
+// The agent probe costs a process lookup per session per tick, so it runs only
+// where its answer changes a reading.
+func TestTick_DoesNotProbeTheAgentOfOtherSessions(t *testing.T) {
+	lcm := &fakeLCM{}
+	probes := 0
+	rt := fakeAgentRuntime{fakeRuntime: fakeRuntime{alive: true}, probes: &probes}
+	sessions := fakeSessions{rows: []domain.SessionRecord{probableSession("mer-1")}}
+	if err := newReaper(lcm, sessions, rt).Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if probes != 0 || lcm.observed["mer-1"].Agent != "" {
+		t.Fatalf("an active session's agent must not be probed: %d probes, agent %q", probes, lcm.observed["mer-1"].Agent)
+	}
+}
+
+func TestTick_DoesNotProbeTheAgentInsideADeadRuntime(t *testing.T) {
+	lcm := &fakeLCM{}
+	probes := 0
+	rt := fakeAgentRuntime{fakeRuntime: fakeRuntime{alive: false}, probes: &probes}
+	sessions := fakeSessions{rows: []domain.SessionRecord{backgroundSession("mer-1")}}
+	if err := newReaper(lcm, sessions, rt).Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if probes != 0 || lcm.observed["mer-1"].Probe != ports.ProbeDead {
+		t.Fatalf("got %d agent probes, runtime %q; want 0 probes and a dead runtime", probes, lcm.observed["mer-1"].Probe)
 	}
 }
