@@ -1549,6 +1549,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/sim-clones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get one of this session's simulators by label, cloning a base for it when it has none */
+        post: operations["claimSimClone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/sim-clones/{label}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete one of this session's extra simulators now */
+        delete: operations["removeSimClone"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture": {
         parameters: {
             query?: never;
@@ -2315,6 +2349,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sim/clones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the simulators AO cloned for sessions, and the base devices it clones from */
+        get: operations["listSimClones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sim/devices": {
         parameters: {
             query?: never;
@@ -2697,6 +2748,12 @@ export interface components {
             prs: components["schemas"]["SessionPRFacts"][];
             sessionId: string;
             takenOverFrom: string[];
+        };
+        ClaimSimCloneInput: {
+            /** @description Which of the session's devices; empty is the primary, or the model's own label when model is set. */
+            label?: string;
+            /** @description Base model to clone for a new device, matched by unique prefix (e.g. iPhone SE). Empty is the default. */
+            model?: string;
         };
         CleanupSessionsResponse: {
             cleaned: string[];
@@ -3899,6 +3956,10 @@ export interface components {
         ListSessionsResponse: {
             sessions: components["schemas"]["ControllersSessionView"][];
         };
+        ListSimClonesResponse: {
+            bases: components["schemas"]["SimBaseView"][];
+            clones: components["schemas"]["SimCloneView"][];
+        };
         ListSimDevicesResponse: {
             /** @description Why that device is the default, or why there is none. */
             defaultReason: string;
@@ -4516,6 +4577,32 @@ export interface components {
             /** @description Only rows under these '## ' headings. Empty means every section. */
             sections?: string[];
         };
+        SimBaseView: {
+            deviceType: string;
+            /** @description The label a clone of this base gets when none is named. */
+            key: string;
+            name: string;
+            /** @description Why it cannot be cloned right now, with what to do about it. */
+            problem?: string;
+            /** @description Empty when the base is missing. */
+            udid?: string;
+        };
+        SimCloneResponse: {
+            clone: components["schemas"]["SimCloneView"];
+        };
+        SimCloneView: {
+            /** @description Name of the base simulator it was cloned from. */
+            base: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description The device's name within its session; primary is the one exported as AO_SIM_UDID. */
+            label: string;
+            /** @description The clone's own simctl name. */
+            name: string;
+            primary: boolean;
+            sessionId: string;
+            udid: string;
+        };
         SimDaemon: {
             /** @description The other daemon's AO_DATA_DIR - its identity on this machine. */
             dataDir: string;
@@ -4540,12 +4627,15 @@ export interface components {
         };
         SimDeviceView: {
             available: boolean;
+            clone?: components["schemas"]["SimCloneView"];
             /** @description True for the one device an unqualified request resolves to. Never set when several are booted. */
             default: boolean;
             frame?: components["schemas"]["ControllersSimDeviceFrameView"];
             lease: components["schemas"]["SimDeviceLeaseView"];
             name: string;
             power?: components["schemas"]["ControllersSimDevicePowerView"];
+            /** @enum {string} */
+            role?: "base" | "clone";
             /** @description Human-readable runtime, e.g. iOS 26.3. */
             runtime: string;
             runtimeIdentifier: string;
@@ -11120,6 +11210,157 @@ export interface operations {
             };
         };
     };
+    claimSimClone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaimSimCloneInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimCloneResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    removeSimClone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description The device's label within the session. */
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimCloneResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     performSimGesture: {
         parameters: {
             query?: never;
@@ -14481,6 +14722,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listSimClones: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListSimClonesResponse"];
                 };
             };
             /** @description Internal Server Error */

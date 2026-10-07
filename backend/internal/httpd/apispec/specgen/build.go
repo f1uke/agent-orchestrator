@@ -322,6 +322,12 @@ var schemaNames = map[string]string{
 	"ControllersSimDoctorCheckView":            "SimDoctorCheckView",
 	"ControllersSimDeviceLeaseView":            "SimDeviceLeaseView",
 	"ControllersListSimDevicesResponse":        "ListSimDevicesResponse",
+	"ControllersSimCloneView":                  "SimCloneView",
+	"ControllersSimBaseView":                   "SimBaseView",
+	"ControllersListSimClonesResponse":         "ListSimClonesResponse",
+	"ControllersClaimSimCloneInput":            "ClaimSimCloneInput",
+	"ControllersSimCloneResponse":              "SimCloneResponse",
+	"ControllersSimCloneParam":                 "SimCloneParam",
 	"ControllersSimGestureInput":               "SimGestureInput",
 	"ControllersSimGestureResponse":            "SimGestureResponse",
 	"ControllersSimKeyboardView":               "SimKeyboardView",
@@ -509,6 +515,7 @@ func operations() []operation {
 	ops = append(ops, scriptsOperations()...)
 	ops = append(ops, iosRunOperations()...)
 	ops = append(ops, simOperations()...)
+	ops = append(ops, simCloneOperations()...)
 	ops = append(ops, notificationOperations()...)
 	ops = append(ops, activityOperations()...)
 	ops = append(ops, importOperations()...)
@@ -1252,6 +1259,49 @@ func testinyOperations() []operation {
 				{http.StatusConflict, envelope.APIError{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusBadGateway, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
+}
+
+// simCloneOperations declares the routes SimClonesController.Register mounts.
+func simCloneOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sim/clones", id: "listSimClones", tag: "sim",
+			summary: "List the simulators AO cloned for sessions, and the base devices it clones from",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListSimClonesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-clones", id: "claimSimClone", tag: "sim",
+			summary:    "Get one of this session's simulators by label, cloning a base for it when it has none",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.ClaimSimCloneInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimCloneResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/sim-clones/{label}", id: "removeSimClone", tag: "sim",
+			summary:    "Delete one of this session's extra simulators now",
+			pathParams: []any{controllers.SimCloneParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimCloneResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},

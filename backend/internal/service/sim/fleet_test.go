@@ -402,3 +402,69 @@ func TestSweepSession_OnlyThatSessionAndOnlyOnceItHasEnded(t *testing.T) {
 		t.Fatal("sweeping one session deleted another's device")
 	}
 }
+
+func TestClaim_ModelAloneLabelsTheDeviceAfterItsModel(t *testing.T) {
+	now := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	fleet, store := newFleet(t, now, newSims())
+	id := newSession(t, store, now)
+
+	se, err := fleet.Claim(t.Context(), id, "", "iPhone SE")
+	if err != nil || se.Label != "iphone-se" {
+		t.Fatalf("claim SE = %+v, %v; want label iphone-se", se, err)
+	}
+	primary, err := fleet.Claim(t.Context(), id, "", "")
+	if err != nil || !primary.Primary() {
+		t.Fatalf("plain claim = %+v, %v; want the primary device", primary, err)
+	}
+	if _, err := fleet.Claim(t.Context(), id, "has space", ""); !errors.Is(err, sim.ErrInvalid) {
+		t.Fatalf("bad label: err = %v, want ErrInvalid", err)
+	}
+}
+
+func TestClaim_RefusesOrchestratorsAndEndedSessions(t *testing.T) {
+	now := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	machine := newSims()
+	fleet, store := newFleet(t, now, machine)
+	orch, err := store.CreateSession(t.Context(), domain.SessionRecord{
+		ProjectID: "mer", Kind: domain.KindOrchestrator, Harness: domain.HarnessClaudeCode,
+		Activity: domain.Activity{State: domain.ActivityActive, LastActivityAt: now}, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended := newSession(t, store, now)
+	terminate(t, store, ended)
+
+	for _, id := range []domain.SessionID{orch.ID, ended} {
+		if _, err := fleet.Claim(t.Context(), id, "", ""); !errors.Is(err, sim.ErrInvalid) {
+			t.Fatalf("claim for %s: err = %v, want ErrInvalid", id, err)
+		}
+	}
+	if machine.cloned != 0 {
+		t.Fatalf("cloned %d devices for sessions that must get none", machine.cloned)
+	}
+}
+
+func TestAcquire_RefusesANewLeaseOnABaseButRenewsAHeldOne(t *testing.T) {
+	now := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	machine := newSims()
+	fleet, store := newFleet(t, now, machine)
+	svc := sim.New(store, sim.WithClock(fixedClock(now)))
+	holder, fresh := newSession(t, store, now), newSession(t, store, now)
+	// Taken before AO stopped handing out bases.
+	if _, err := svc.Acquire(t.Context(), holder, udidBaseSE, 0); err != nil {
+		t.Fatalf("seed lease: %v", err)
+	}
+	guarded := sim.New(store, sim.WithClock(fixedClock(now)), sim.WithBaseGuard(fleet.IsBase))
+
+	if _, err := guarded.Acquire(t.Context(), holder, udidBaseSE, 0); err != nil {
+		t.Fatalf("renewing a lease a live session already holds: %v", err)
+	}
+	_, err := guarded.Acquire(t.Context(), fresh, udidProMax, 0)
+	if !errors.Is(err, sim.ErrInvalid) || !errors.Is(err, sim.ErrBaseDevice) {
+		t.Fatalf("new lease on a base: err = %v, want ErrBaseDevice", err)
+	}
+	if _, err := guarded.Acquire(t.Context(), fresh, udidHuman, 0); err != nil {
+		t.Fatalf("a device that is not a base: %v", err)
+	}
+}

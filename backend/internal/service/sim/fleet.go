@@ -36,6 +36,7 @@ type CloneStore interface {
 	DeleteSimClone(ctx context.Context, udid string) (bool, error)
 	ListSimLeases(ctx context.Context, now time.Time) ([]domain.SimLease, error)
 	ReleaseSimLease(ctx context.Context, udid string, sessionID domain.SessionID) (bool, error)
+	GetSession(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error)
 }
 
 // Machine is the simulators this machine has, and the one door that makes and
@@ -197,6 +198,82 @@ func (f *Fleet) Ensure(ctx context.Context, sessionID domain.SessionID, label, m
 	return clone, nil
 }
 
+// Claim is a session asking for a device by label and model: Ensure, for a
+// live worker only. An orchestrator never drives a device, and a device made
+// for an ended session would only be swept again.
+func (f *Fleet) Claim(ctx context.Context, sessionID domain.SessionID, label, model string) (domain.SimClone, error) {
+	if f == nil || f.store == nil {
+		return domain.SimClone{}, simctl.ErrUnavailable
+	}
+	label = strings.TrimSpace(label)
+	if label == "" {
+		label = domain.SimPrimaryLabel
+		if strings.TrimSpace(model) != "" {
+			base, err := domain.MatchSimBase(model)
+			if err != nil {
+				return domain.SimClone{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+			}
+			if base != domain.DefaultSimBase() {
+				label = base.Key
+			}
+		}
+	}
+	parsed, err := domain.ParseSimLabel(label)
+	if err != nil {
+		return domain.SimClone{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	rec, ok, err := f.store.GetSession(ctx, sessionID)
+	if err != nil {
+		return domain.SimClone{}, err
+	}
+	if !ok {
+		return domain.SimClone{}, fmt.Errorf("%w: session %s does not exist", ErrNotFound, sessionID)
+	}
+	if rec.IsTerminated {
+		return domain.SimClone{}, fmt.Errorf("%w: session %s has ended, and its devices are deleted with it", ErrInvalid, sessionID)
+	}
+	if rec.Kind != domain.KindWorker {
+		return domain.SimClone{}, fmt.Errorf("%w: only a worker is given a simulator; %s is an %s", ErrInvalid, sessionID, rec.Kind)
+	}
+	return f.Ensure(ctx, sessionID, parsed, model)
+}
+
+// BaseStatus is one base and whether this machine has it.
+type BaseStatus struct {
+	Base domain.SimBase
+	// UDID is the base device; empty when it is missing.
+	UDID string
+	// Problem is why the base cannot be cloned right now: missing, or booted.
+	Problem string
+}
+
+// Bases reports each base on this machine.
+func (f *Fleet) Bases(ctx context.Context) ([]BaseStatus, error) {
+	if f == nil || f.machine == nil {
+		return nil, nil
+	}
+	listing, err := f.machine.Devices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BaseStatus, 0, len(domain.SimBases))
+	for _, base := range domain.SimBases {
+		status := BaseStatus{Base: base}
+		device, err := findBase(listing.Devices, base)
+		switch {
+		case err != nil:
+			status.Problem = err.Error()
+		case device.Booted():
+			status.UDID = domain.NormalizeSimUDID(device.UDID)
+			status.Problem = (&BaseBootedError{Base: base, UDID: status.UDID}).Error()
+		default:
+			status.UDID = domain.NormalizeSimUDID(device.UDID)
+		}
+		out = append(out, status)
+	}
+	return out, nil
+}
+
 // Remove deletes one of a session's extra devices now, rather than when the
 // session ends.
 func (f *Fleet) Remove(ctx context.Context, sessionID domain.SessionID, label string) (domain.SimClone, error) {
@@ -240,16 +317,13 @@ func (f *Fleet) Clones(ctx context.Context) ([]domain.SimClone, error) {
 
 // IsBase reports whether udid is one of the bases on this machine.
 func (f *Fleet) IsBase(ctx context.Context, udid string) (bool, error) {
-	if f == nil || f.machine == nil {
-		return false, nil
-	}
-	listing, err := f.machine.Devices(ctx)
+	bases, err := f.Bases(ctx)
 	if err != nil {
 		return false, err
 	}
 	key := domain.NormalizeSimUDID(udid)
-	for _, base := range domain.SimBases {
-		if d, err := findBase(listing.Devices, base); err == nil && domain.NormalizeSimUDID(d.UDID) == key {
+	for _, base := range bases {
+		if base.UDID != "" && base.UDID == key {
 			return true, nil
 		}
 	}

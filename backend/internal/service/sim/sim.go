@@ -176,6 +176,9 @@ type Service struct {
 	leaseChanged func()
 	// owners is the machine-wide registry; nil keeps leases to this daemon.
 	owners Ownership
+	// isBase says whether a device is one of the bases AO clones from, which
+	// are never leased. nil leases any device.
+	isBase func(ctx context.Context, udid string) (bool, error)
 	// leaseMu serialises this daemon's lease writes, so the local grant and
 	// the machine-wide record are one step as far as this daemon is concerned.
 	// The exclusion itself is still each table's own conditional upsert.
@@ -232,6 +235,11 @@ func WithLeaseChanged(f func()) Option {
 // what every test and every non-daemon caller wants.
 func WithOwnership(owners Ownership) Option {
 	return func(s *Service) { s.owners = owners }
+}
+
+// WithBaseGuard refuses a new lease on a base device (see domain.SimBase).
+func WithBaseGuard(isBase func(ctx context.Context, udid string) (bool, error)) Option {
+	return func(s *Service) { s.isBase = isBase }
 }
 
 // WithClock overrides the service clock for tests.
@@ -348,6 +356,9 @@ func (s *Service) Acquire(ctx context.Context, sessionID domain.SessionID, udid 
 	s.leaseMu.Lock()
 	defer s.leaseMu.Unlock()
 	now := s.now()
+	if err := s.refuseBase(ctx, sessionID, key, now); err != nil {
+		return domain.SimLease{}, err
+	}
 	if err := s.refuseForeign(ctx, key, now); err != nil {
 		return domain.SimLease{}, err
 	}
@@ -399,6 +410,9 @@ func (s *Service) TakeOver(ctx context.Context, sessionID domain.SessionID, udid
 	s.leaseMu.Lock()
 	defer s.leaseMu.Unlock()
 	now := s.now()
+	if err := s.refuseBase(ctx, sessionID, key, now); err != nil {
+		return domain.SimLease{}, err
+	}
 	// A take-over stops at another daemon's lease. Its one non-negotiable is
 	// not cutting a gesture in half, and the gesture hold lives in THAT
 	// daemon's database, so from here a touch in flight is invisible. Its
@@ -463,6 +477,26 @@ func (s *Service) Release(ctx context.Context, sessionID domain.SessionID, udid 
 		return err
 	}
 	return fmt.Errorf("%w: no lease on simulator %s to release", ErrNotFound, key)
+}
+
+// refuseBase refuses a new lease on a base device. A lease the session already
+// holds is renewed: a session that was driving a base before AO stopped
+// handing them out is not cut off mid-run.
+func (s *Service) refuseBase(ctx context.Context, sessionID domain.SessionID, key string, now time.Time) error {
+	if s.isBase == nil {
+		return nil
+	}
+	base, err := s.isBase(ctx, key)
+	if err != nil {
+		return nil //nolint:nilerr // a listing that cannot be read is no reason to refuse a lease
+	}
+	if !base {
+		return nil
+	}
+	if held, ok, err := s.store.GetSimLease(ctx, key, now); err == nil && ok && held.SessionID == sessionID {
+		return nil
+	}
+	return fmt.Errorf("%w: %w. Drive your own clone instead: `ao sim claim` (your primary device, $AO_SIM_UDID) or `ao sim claim --model <model>`", ErrInvalid, ErrBaseDevice)
 }
 
 // refuseForeign is a *HeldError when another running AO daemon holds the

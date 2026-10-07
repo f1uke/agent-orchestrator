@@ -24,6 +24,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/storetree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemonlog"
@@ -523,7 +524,7 @@ func Run() error {
 	// live.
 	iosRunSvc := newIOSRunService(cfg.DataDir, store, runtimeAdapter)
 
-	simSvc := newSimService(store, simScreen, sessMgr, append(simLeaseNudge, simOwnerLeaseOpts...)...)
+	simSvc := newSimService(store, simScreen, sessMgr, append(append(simLeaseNudge, simOwnerLeaseOpts...), simsvc.WithBaseGuard(simFleet.IsBase))...)
 	// Before anything is served: this daemon's leases go back into the
 	// machine-wide registry under this process's pid, and any another daemon
 	// took while this one was down are given up.
@@ -568,6 +569,7 @@ func Run() error {
 		QAEvidence:         qaEvidenceSettings,
 		SimTrust:           simTrustSettings,
 		SimAssignments:     store,
+		SimFleet:           simFleet,
 		Wiki:               wikiSvc,
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
@@ -742,6 +744,39 @@ func Run() error {
 		}, log)
 	}
 
+	// Delete the simulators AO cloned for sessions that have ended: on boot
+	// (sessions that ended while the daemon was down), the moment a session
+	// ends, and on a slow tick as the backstop for anything both missed.
+	simFleetRec := loopReg.Register(looptelemetry.Spec{
+		Name:        "sim-clone-sweep",
+		Display:     "Simulator clean-up",
+		Description: "Deletes the simulators AO cloned for sessions that have ended.",
+		Interval:    simCloneSweepInterval,
+	})
+	sweepSimClones := func(ctx context.Context) error {
+		simFleetRec.Tick()
+		report, err := simFleet.Sweep(ctx)
+		logSimSweep(log, report)
+		return err
+	}
+	if err := sweepSimClones(ctx); err != nil {
+		log.Warn("simulator clean-up on boot failed", "err", err)
+	}
+	stopSimEndings := cdcPipe.Broadcaster.Subscribe(func(e cdc.Event) {
+		if !sessionEnded(e) {
+			return
+		}
+		go func() {
+			report, err := simFleet.SweepSession(context.WithoutCancel(ctx), domain.SessionID(e.SessionID))
+			logSimSweep(log, report)
+			if err != nil {
+				log.Warn("deleting an ended session's simulators failed; the periodic clean-up retries", "session", e.SessionID, "err", err)
+			}
+		}()
+	})
+	defer stopSimEndings()
+	simCloneSweepDone := startTickerSweep(ctx, "simulator clean-up", simCloneSweepInterval, sweepSimClones, log)
+
 	// Keep every live orchestrator's worktree on its project's default branch.
 	// Spawn and restore already sync at startup; this covers the drift in
 	// between, because an orchestrator session runs for days while the default
@@ -783,6 +818,7 @@ func Run() error {
 	<-scriptsRefreshDone
 	<-queueSweepDone
 	<-simOwnerSyncDone
+	<-simCloneSweepDone
 	<-orchSyncDone
 	<-knowledgeMigrationDone
 	<-legacySmokeCleanupDone

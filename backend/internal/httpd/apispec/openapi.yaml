@@ -4677,6 +4677,128 @@ paths:
       summary: Send a message to a running session's agent
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/sim-clones:
+    post:
+      operationId: claimSimClone
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimSimCloneInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimCloneResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Get one of this session's simulators by label, cloning a base for it
+        when it has none
+      tags:
+      - sim
+  /api/v1/sessions/{sessionId}/sim-clones/{label}:
+    delete:
+      operationId: removeSimClone
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: The device's label within the session.
+        in: path
+        name: label
+        required: true
+        schema:
+          description: The device's label within the session.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimCloneResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Delete one of this session's extra simulators now
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/sim-devices/{udid}/gesture:
     post:
       operationId: performSimGesture
@@ -7574,6 +7696,32 @@ paths:
       summary: Replace the Tasks tab configuration (an empty folder scans nothing)
       tags:
       - settings
+  /api/v1/sim/clones:
+    get:
+      operationId: listSimClones
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSimClonesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the simulators AO cloned for sessions, and the base devices it
+        clones from
+      tags:
+      - sim
   /api/v1/sim/devices:
     get:
       operationId: listSimDevices
@@ -8435,6 +8583,17 @@ components:
       - prs
       - branchChanged
       - takenOverFrom
+      type: object
+    ClaimSimCloneInput:
+      properties:
+        label:
+          description: Which of the session's devices; empty is the primary, or the
+            model's own label when model is set.
+          type: string
+        model:
+          description: Base model to clone for a new device, matched by unique prefix
+            (e.g. iPhone SE). Empty is the default.
+          type: string
       type: object
     CleanupSessionsResponse:
       properties:
@@ -11252,6 +11411,20 @@ components:
       required:
       - sessions
       type: object
+    ListSimClonesResponse:
+      properties:
+        bases:
+          items:
+            $ref: '#/components/schemas/SimBaseView'
+          type: array
+        clones:
+          items:
+            $ref: '#/components/schemas/SimCloneView'
+          type: array
+      required:
+      - clones
+      - bases
+      type: object
     ListSimDevicesResponse:
       properties:
         defaultReason:
@@ -12825,6 +12998,63 @@ components:
             type: string
           type: array
       type: object
+    SimBaseView:
+      properties:
+        deviceType:
+          type: string
+        key:
+          description: The label a clone of this base gets when none is named.
+          type: string
+        name:
+          type: string
+        problem:
+          description: Why it cannot be cloned right now, with what to do about it.
+          type: string
+        udid:
+          description: Empty when the base is missing.
+          type: string
+      required:
+      - name
+      - key
+      - deviceType
+      type: object
+    SimCloneResponse:
+      properties:
+        clone:
+          $ref: '#/components/schemas/SimCloneView'
+      required:
+      - clone
+      type: object
+    SimCloneView:
+      properties:
+        base:
+          description: Name of the base simulator it was cloned from.
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        label:
+          description: The device's name within its session; primary is the one exported
+            as AO_SIM_UDID.
+          type: string
+        name:
+          description: The clone's own simctl name.
+          type: string
+        primary:
+          type: boolean
+        sessionId:
+          type: string
+        udid:
+          type: string
+      required:
+      - udid
+      - sessionId
+      - label
+      - primary
+      - base
+      - name
+      - createdAt
+      type: object
     SimDaemon:
       properties:
         dataDir:
@@ -12874,6 +13104,8 @@ components:
       properties:
         available:
           type: boolean
+        clone:
+          $ref: '#/components/schemas/SimCloneView'
         default:
           description: True for the one device an unqualified request resolves to.
             Never set when several are booted.
@@ -12886,6 +13118,11 @@ components:
           type: string
         power:
           $ref: '#/components/schemas/ControllersSimDevicePowerView'
+        role:
+          enum:
+          - base
+          - clone
+          type: string
         runtime:
           description: Human-readable runtime, e.g. iOS 26.3.
           type: string

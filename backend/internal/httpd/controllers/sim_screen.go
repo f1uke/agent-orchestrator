@@ -150,7 +150,18 @@ type SimDeviceView struct {
 	// a claim) since the daemon started, and what came of it. Absent when that
 	// has not happened, or when every configured CA file was missing.
 	Trust *SimTrustView `json:"trust,omitempty"`
+	// Role is what AO uses this device for: "base" (a template AO clones from
+	// and never drives), "clone" (a device AO made for a session; Clone says
+	// whose), or empty for any other device.
+	Role  string        `json:"role,omitempty" enum:"base,clone"`
+	Clone *SimCloneView `json:"clone,omitempty"`
 }
+
+// Device roles, as SimDeviceView.Role reports them.
+const (
+	SimDeviceRoleBase  = "base"
+	SimDeviceRoleClone = "clone"
+)
 
 // ListSimDevicesResponse is the body of GET /sim/devices.
 type ListSimDevicesResponse struct {
@@ -269,6 +280,9 @@ type SimScreenController struct {
 	// Trust resolves the root CAs a boot makes the device trust. nil trusts
 	// nothing.
 	Trust SimTrustResolver
+	// Fleet says which devices are bases and which are whose clones. nil
+	// reports every device as neither.
+	Fleet SimFleet
 }
 
 // Register mounts the routes. The live frame stream is not here: it is a
@@ -380,6 +394,7 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 
 	power := c.Screen.PowerStatus()
 	truster := c.Screen.Truster()
+	roles := c.deviceRoles(ctx)
 
 	out := make([]SimDeviceView, 0, len(devices))
 	for _, d := range devices {
@@ -402,6 +417,9 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 			}
 		}
 		view.Power = c.powerView(d, power[domain.NormalizeSimUDID(d.UDID)], len(power) > 0)
+		if role, ok := roles[domain.NormalizeSimUDID(d.UDID)]; ok {
+			view.Role, view.Clone = role.role, role.clone
+		}
 		if truster != nil {
 			if last, ok := truster.Last(d.UDID); ok {
 				view.Trust = simTrustView(last)
@@ -410,6 +428,35 @@ func (c *SimScreenController) withLeases(ctx context.Context, devices []simctl.D
 		out = append(out, view)
 	}
 	return out
+}
+
+type deviceRole struct {
+	role  string
+	clone *SimCloneView
+}
+
+// deviceRoles is which devices are bases and which are clones, keyed by
+// normalized udid. A fleet that cannot answer leaves every device unmarked:
+// the listing is still true without it.
+func (c *SimScreenController) deviceRoles(ctx context.Context) map[string]deviceRole {
+	roles := map[string]deviceRole{}
+	if c.Fleet == nil {
+		return roles
+	}
+	if bases, err := c.Fleet.Bases(ctx); err == nil {
+		for _, b := range bases {
+			if b.UDID != "" {
+				roles[b.UDID] = deviceRole{role: SimDeviceRoleBase}
+			}
+		}
+	}
+	if clones, err := c.Fleet.Clones(ctx); err == nil {
+		for _, clone := range clones {
+			view := simCloneView(clone)
+			roles[clone.UDID] = deviceRole{role: SimDeviceRoleClone, clone: &view}
+		}
+	}
+	return roles
 }
 
 // powerView reports a device's in-flight or failed power operation, and drops
@@ -977,6 +1024,14 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 	if reachedGoal(device, op) {
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_POWER_ALREADY", fmt.Sprintf(
 			"simulator %s is already %s", device.Label(), strings.ToLower(device.State)), nil)
+		return
+	}
+
+	// A base is a template: anything that ran on it would be in every clone
+	// made after it, so AO never powers one on.
+	if op == simpower.Boot && c.deviceRoles(r.Context())[domain.NormalizeSimUDID(device.UDID)].role == SimDeviceRoleBase {
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_DEVICE_IS_BASE", fmt.Sprintf(
+			"simulator %s is a base AO clones devices from, and is never booted for work. Boot your own clone: `ao sim claim` makes it", device.Label()), nil)
 		return
 	}
 

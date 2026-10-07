@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	goruntime "runtime"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
@@ -215,4 +217,33 @@ func simOwnershipOptions(reg *simowner.Registry) []simsvc.Option {
 		return nil
 	}
 	return []simsvc.Option{simsvc.WithOwnership(reg)}
+}
+
+// simCloneSweepInterval is the backstop for deleting ended sessions' clones.
+// An ending is normally handled the moment it happens; this only catches what
+// that missed, so it can be slow.
+const simCloneSweepInterval = 10 * time.Minute
+
+// sessionEnded reports whether a change event is a session becoming
+// terminated.
+func sessionEnded(e cdc.Event) bool {
+	if e.Type != cdc.EventSessionUpdated || e.SessionID == "" {
+		return false
+	}
+	var payload struct {
+		IsTerminated bool `json:"isTerminated"`
+	}
+	return json.Unmarshal(e.Payload, &payload) == nil && payload.IsTerminated
+}
+
+func logSimSweep(log *slog.Logger, report simsvc.SweepReport) {
+	for _, clone := range report.Deleted {
+		log.Info("deleted an ended session's simulator", "session", clone.SessionID, "label", clone.Label, "udid", clone.UDID)
+	}
+	for _, clone := range report.Forgotten {
+		log.Info("forgot a simulator that no longer exists", "session", clone.SessionID, "label", clone.Label, "udid", clone.UDID)
+	}
+	for _, clone := range report.Kept {
+		log.Info("kept an ended session's simulator another session is driving", "session", clone.SessionID, "udid", clone.UDID)
+	}
 }
