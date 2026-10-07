@@ -7,6 +7,8 @@ export type TestinyRunsResponse = components["schemas"]["TestinyRunsResponse"];
 export type TestinyFetchErrorKind = components["schemas"]["TestinyFetchError"]["kind"];
 export type TestinyCaseDetail = components["schemas"]["DomainTestinyCaseDetail"];
 export type TestinyCaseStep = TestinyCaseDetail["steps"][number];
+export type TestinyEvidenceLink = components["schemas"]["TestinyEvidenceLink"];
+export type TestinyEvidenceReport = components["schemas"]["TestinyEvidenceReport"];
 type TestinyRecord = components["schemas"]["TestinyResultRecord"];
 type TestinyRunStep = components["schemas"]["DomainTestinyRunStep"];
 type TestinyResultInput = components["schemas"]["TestinyResultInput"];
@@ -238,6 +240,53 @@ export function evidenceLabel(path: string): { location: string; folder: string 
 	const folder = rest.slice(cut);
 	const location = rest.startsWith(`~${QA_EVIDENCE_ROOT}`) ? `~${QA_EVIDENCE_ROOT}…/` : rest.slice(0, cut);
 	return { location, folder };
+}
+
+/** One Drive link on a case's result, as the row shows it. */
+export type EvidenceChip = { url: string; label: string; title: string; kind: "image" | "video" | "file" };
+
+const IMAGE_EXT = /\.(png|jpe?g|gif|heic|webp)$/i;
+const VIDEO_EXT = /\.(mov|mp4|m4v|webm)$/i;
+
+/**
+ * A case's Drive evidence links. A file AO uploaded is named without its
+ * "TC-<id> " prefix, which the row it sits in already says; a link a person
+ * pasted has no name, so it reads "Drive file", numbered when there are several.
+ */
+export function evidenceChips(caseId: number, links: TestinyEvidenceLink[]): EvidenceChip[] {
+	const prefix = new RegExp(`^TC-${caseId}\\s+`);
+	const unnamed = links.filter((l) => !l.file).length;
+	let n = 0;
+	return links.map((link) => {
+		if (!link.file) {
+			n += 1;
+			return { url: link.url, label: unnamed > 1 ? `Drive file ${n}` : "Drive file", title: link.url, kind: "file" };
+		}
+		const kind = IMAGE_EXT.test(link.file) ? "image" : VIDEO_EXT.test(link.file) ? "video" : "file";
+		return { url: link.url, label: link.file.replace(prefix, ""), title: link.file, kind };
+	});
+}
+
+/** Why a run's evidence cannot be uploaded from the tab, or null when it can. */
+export function evidenceUploadBlock(run: Pick<TestinyRun, "closed" | "evidenceDir">): string | null {
+	if (run.closed) return "The run is closed in Testiny, so nothing more can be linked on it";
+	if (!run.evidenceDir) return "This run has no folder in ~/Desktop/QA Evidence yet";
+	return null;
+}
+
+/** What an upload did, in one line: "Uploaded 3 files, linked 2 cases". */
+export function evidenceUploadSummary(report: Pick<TestinyEvidenceReport, "uploaded" | "cases">): string {
+	const uploaded = report.uploaded.length;
+	const linked = report.cases.filter((c) => c.linked.length > 0).length;
+	if (uploaded === 0 && linked === 0) return "Already up to date";
+	return [
+		uploaded === 0 ? "Nothing new to upload" : `Uploaded ${count(uploaded, "file")}`,
+		linked === 0 ? "every link was already on its case" : `linked ${count(linked, "case")}`,
+	].join(", ");
+}
+
+function count(n: number, noun: string): string {
+	return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 /** One fact about a case, with the field it came from, so a bare "High" or "iOS" still says what it is. */
