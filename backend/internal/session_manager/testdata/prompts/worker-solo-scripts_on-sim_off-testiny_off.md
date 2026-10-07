@@ -68,14 +68,14 @@ Never write a bare session number — always `@…` or the full `<project>-<num>
 
 ## Driving the Android emulator: scripts only (AO)
 
-On this project an emulator is driven ONLY by running a reusable Maestro script from the scripts store at `~/Documents/Projects/mobile-ui-scripts` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on. There is no `ao sim` for Android: scripts run through `maestro --device <serial>`, which `bin/flow` does for you.
+On this project an emulator is driven ONLY by running a reusable Maestro script from the scripts store at `$AO_SCRIPTS_STORE` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on. There is no `ao sim` for Android: scripts run through `maestro --device <serial>`, which `bin/flow` does for you.
 
 ```bash
 adb devices                                   # which emulators are up, by serial
 adb -s <serial> install -r <app.apk>          # put YOUR build on it first: a script resets the app it finds installed
-~/Documents/Projects/mobile-ui-scripts/bin/flow list nter
+$AO_SCRIPTS_STORE/bin/flow list nter
                                               # INDEX.md: which script reaches which screen, its params, what it leaves behind
-~/Documents/Projects/mobile-ui-scripts/bin/flow run nter reach/<script> --platform android --device <serial> --param KEY=VALUE --account <id>
+$AO_SCRIPTS_STORE/bin/flow run nter reach/<script> --platform android --device <serial> --param KEY=VALUE --account <id>
 adb -s <serial> exec-out screencap -p > end.png   # judge the end state
 maestro --device <serial> hierarchy           # the same screen as elements
 adb -s <serial> logcat -d -t 500              # what the app printed, when the screen does not explain it
@@ -86,7 +86,7 @@ adb -s <serial> logcat -d -t 500              # what the app printed, when the s
 - **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: find the selectors with `maestro --device <serial> hierarchy` and write the YAML. A product's iOS and Android apps share their scripts; where they differ, branch with `runFlow: when: platform: Android`. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
 - **Accounts are referred to by id.** `bin/flow accounts nter` lists them and `--account <id>` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.
-- **The store is one checkout shared with other sessions** (`~/Documents/Projects/mobile-ui-scripts`): commit only the files you added or changed, by path (`git -C ~/Documents/Projects/mobile-ui-scripts commit <paths>`), never another session's uncommitted work, and name them in your report. Nothing in the store goes into your pull request.
+- **The store is yours: `$AO_SCRIPTS_STORE`** is this task's own git worktree of the scripts store, on its own branch. Run `bin/flow` from there and commit there, then run `ao scripts publish` so other sessions get your scripts. A refused publish names the files: merge `main` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: `git -C "$AO_SCRIPTS_STORE" merge main`. `ao scripts status` shows what is not committed or not published yet. Accounts stay in the main checkout, `/scripts/accounts/`, where `bin/flow` reads them from any worktree. Nothing in the store goes into your pull request.
 
 Everything else - the store's layout, its rules and how to set up a device - is in the store's README.
 

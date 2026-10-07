@@ -1997,6 +1997,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		CrewRole:       promptCrewRoleOf(project, rec),
 		PRTarget:       rec.PRTarget,
 		ChildWorktrees: childWorktrees,
+		ScriptsOwner:   scriptsOwner(rec),
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: system prompt: %w", rec.ID, err)
@@ -3415,6 +3416,7 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, pr
 		CrewRole:       role,
 		PRTarget:       prTarget,
 		ChildWorktrees: childWorktrees,
+		ScriptsOwner:   cfg.CrewOf,
 	})
 	if err != nil {
 		return "", "", err
@@ -3451,6 +3453,10 @@ type systemPromptSpec struct {
 	// ChildWorktrees picks the worker floor that lets isolated subagents have
 	// their own AO worktrees (see childWorktreesFor).
 	ChildWorktrees bool
+	// ScriptsOwner is the session whose scripts store worktree this worker
+	// uses (scriptsOwner): its crew's dev, or itself. Empty while a session
+	// that will own its workspace is being spawned, before it has an id.
+	ScriptsOwner domain.SessionID
 }
 
 // buildSystemPrompt derives the standing instructions for a session of the
@@ -3543,8 +3549,8 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// which is about the lease and holds unchanged; qa plays its cases with
 		// scripts instead of recording flows into the repository.
 		var caseScripts *prompts.MobileScripts
-		if ms := cfg.MobileScripts; ms != nil {
-			scripts := prompts.MobileScripts{Product: ms.Product, IOS: ms.Platform == domain.MobilePlatformIOS, Store: ms.StoreOrDefault()}
+		if cfg.MobileScripts != nil {
+			scripts := m.promptScripts(ctx, project, spec.ScriptsOwner)
 			base += prompts.MobileScriptGuidance(scripts)
 			switch crewRole {
 			case domain.CrewRoleDev:

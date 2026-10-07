@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 )
 
@@ -44,17 +45,30 @@ var neverDirectResultWrite = regexp.MustCompile("(?i)\\bnever(?: \\w+)? `" + dir
 type promptCell struct {
 	kind          domain.SessionKind
 	role          domain.CrewRole
-	mobileScripts bool
+	mobileScripts scriptsMode
 	iosSimulator  bool
 	testiny       bool
 }
+
+// scriptsMode is how a cell's project drives its devices with scripts: not at
+// all, from the one shared store checkout (AO could not make the task a
+// worktree), from the task's own worktree, or from its own worktree with a
+// verify skill the device block defers to.
+type scriptsMode string
+
+const (
+	scriptsOff    scriptsMode = "off"
+	scriptsShared scriptsMode = "shared"
+	scriptsOn     scriptsMode = "on"
+	scriptsSkill  scriptsMode = "skill"
+)
 
 func (c promptCell) name() string {
 	who := string(c.kind)
 	if c.kind == domain.KindWorker {
 		who += "-" + map[domain.CrewRole]string{"": "solo", domain.CrewRoleDev: "dev", domain.CrewRoleQA: "qa"}[c.role]
 	}
-	return fmt.Sprintf("%s-scripts_%s-sim_%s-testiny_%s", who, onOff(c.mobileScripts), onOff(c.iosSimulator), onOff(c.testiny))
+	return fmt.Sprintf("%s-scripts_%s-sim_%s-testiny_%s", who, c.mobileScripts, onOff(c.iosSimulator), onOff(c.testiny))
 }
 
 func onOff(b bool) string {
@@ -72,12 +86,15 @@ func (c promptCell) config() domain.ProjectConfig {
 	if c.testiny {
 		cfg.TestinyProject = "MOB"
 	}
-	if c.mobileScripts {
+	if c.mobileScripts != scriptsOff {
 		platform := domain.MobilePlatformAndroid
 		if c.iosSimulator {
 			platform = domain.MobilePlatformIOS
 		}
-		cfg.MobileScripts = &domain.MobileScriptsConfig{Product: "nter", Platform: platform}
+		cfg.MobileScripts = &domain.MobileScriptsConfig{Product: "nter", Platform: platform, Store: "/scripts"}
+		if c.mobileScripts == scriptsSkill {
+			cfg.MobileScripts.VerifySkill = "projects/nter/verify"
+		}
 	}
 	return cfg
 }
@@ -93,7 +110,7 @@ func promptMatrix() []promptCell {
 	}
 	var cells []promptCell
 	for _, w := range who {
-		for _, scripts := range []bool{false, true} {
+		for _, scripts := range []scriptsMode{scriptsOff, scriptsShared, scriptsOn, scriptsSkill} {
 			for _, sim := range []bool{false, true} {
 				for _, testiny := range []bool{false, true} {
 					c := w
@@ -110,7 +127,10 @@ func (c promptCell) build(t *testing.T) string {
 	t.Helper()
 	st := crewPromptStore(t)
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: c.config()}
-	got, err := layeredManager(st, nil).buildSystemPrompt(ctx, systemPromptSpec{
+	m := layeredManager(st, nil)
+	scripts := &fakeScripts{probe: ports.ScriptsStoreProbe{Base: "main", OK: c.mobileScripts != scriptsShared, Reason: "not a git repository"}}
+	m.SetScriptsStore(scripts)
+	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{
 		Kind: c.kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: c.role,
 	})
 	if err != nil {
@@ -141,6 +161,7 @@ func TestPromptMatrix_TeachesNoRemovedCommand(t *testing.T) {
 			assertAllowsTestAccounts(t, got)
 			c.assertTestinyBlock(t, got)
 			c.assertCaseScriptBlock(t, got)
+			c.assertScriptsStore(t, got)
 			path := filepath.Join(dir, c.name()+".md")
 			if *updatePrompts {
 				if err := os.WriteFile(path, []byte(got+"\n"), 0o644); err != nil {
@@ -249,7 +270,7 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 	}
 	// Where qa plays cases with case scripts, the loop points at that block
 	// rather than restating how a case is played and judged.
-	defers := c.role == domain.CrewRoleQA && c.mobileScripts
+	defers := c.role == domain.CrewRoleQA && c.mobileScripts != scriptsOff
 	if has := strings.Contains(block, `as "Playing test cases with Maestro scripts" above says`); has != defers {
 		t.Errorf("%s: the loop defers playing to the case-script block = %v, want %v:\n%s", c.name(), has, defers, block)
 	}
@@ -260,7 +281,7 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 	// --account, so where qa writes case scripts the loop says how that account
 	// reaches the store's accounts file. Elsewhere there is no store to add it to.
 	for _, s := range []string{
-		"`~/Documents/Projects/mobile-ui-scripts/accounts/nter.json`",
+		"`/scripts/accounts/nter.json`",
 		"`accounts/nter.example.json`",
 		"pass it to the script with `--account <id>`",
 	} {
@@ -299,6 +320,40 @@ func section(prompt, heading string) string {
 	return block
 }
 
+// assertScriptsStore checks where a worker is told its scripts go: its task's
+// own store worktree, published with `ao scripts publish`, or the one shared
+// checkout when AO could not make it one. A verify-skill project's device block
+// defers to the skill and names no gesture or recording command.
+func (c promptCell) assertScriptsStore(t *testing.T, got string) {
+	t.Helper()
+	worker := c.kind == domain.KindWorker && c.mobileScripts != scriptsOff
+	isolated := worker && (c.mobileScripts == scriptsOn || c.mobileScripts == scriptsSkill)
+	skill := worker && c.mobileScripts == scriptsSkill
+	for s, want := range map[string]bool{
+		"`ao scripts publish`":                                   isolated,
+		"`$AO_SCRIPTS_STORE`":                                    isolated,
+		"Accounts stay in the main checkout":                     isolated,
+		"shared with other sessions":                             worker && !isolated,
+		"the project's verify skill (AO)":                        skill,
+		"`$AO_SCRIPTS_STORE/projects/nter/verify/SKILL.md`":      skill,
+		"the way the verify skill says":                          skill && c.role == domain.CrewRoleQA,
+		"`ao sim doctor --app <bundle id> --expect <your .app>`": skill && c.iosSimulator,
+	} {
+		if has := strings.Contains(got, s); has != want {
+			t.Errorf("%s: carries %q = %v, want %v", c.name(), s, has, want)
+		}
+	}
+	if skill {
+		device := got[strings.Index(got, "the project's verify skill (AO)"):]
+		device = device[:strings.Index(device, "Nothing in the store goes into your pull request.")]
+		for _, s := range []string{"ao sim tap", "ao sim shot", "flow record", "bin/flow run"} {
+			if strings.Contains(device, s) {
+				t.Errorf("%s: the verify-skill device block restates %q, which the skill owns", c.name(), s)
+			}
+		}
+	}
+}
+
 // caseScriptHeading is qa's block on a script-only project, Testiny on or off:
 // every case it plays on a device runs as one case script, and a case passes
 // only on its assertions AND a comparison with its Figma frame.
@@ -306,7 +361,7 @@ const caseScriptHeading = "## Playing test cases with Maestro scripts (AO)"
 
 func (c promptCell) assertCaseScriptBlock(t *testing.T, got string) {
 	t.Helper()
-	want := c.mobileScripts && c.role == domain.CrewRoleQA
+	want := c.mobileScripts != scriptsOff && c.role == domain.CrewRoleQA
 	block := section(got, caseScriptHeading)
 	if has := block != ""; has != want {
 		t.Fatalf("%s: case-script block present = %v, want %v", c.name(), has, want)

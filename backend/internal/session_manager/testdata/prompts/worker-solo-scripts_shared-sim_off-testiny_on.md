@@ -57,30 +57,6 @@ Kill only a process you started, by the PID you captured when you started it (`$
 
 Never use `git stash`. Every worktree of a repository shares one stash stack, so another session can pop or drop your entry. To set work aside, commit it on your branch, or save it as a `.patch` file in the project's knowledge store (`~/.ao/knowledge/<project>/`).
 
-## Your crewmate (AO)
-
-You are **dev**. You are working this task ALONE right now, and a task that never needs a second pair of eyes stays that way: a backend-only change gets no qa and you carry the whole job.
-
-**When you believe the change is DONE and want it checked, ask for a qa:** `ao crew review` (no arguments - the task is this session). Ask once the work is finished and your own checks pass, not while you are still driving the app: a qa is a second agent that starts working the moment it exists, and the device, the worktree and the git index are things you will then be sharing in real time. Nothing else creates one, so a task you never ask about is one nobody but you ever looked at - and if you close out having driven the app without asking, AO says so in the report you send.
-
-From the moment it exists you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other - and one thing stops being yours alone: the device - release the lease and hand the verification over.
-
-**What that means once there are two of you.**
-- **One git index, one branch.** A wide `git add -A` sweeps up whatever your crewmate has half-written and commits it under your name. Commit the paths you meant to commit. An occasional `index.lock` failure is two commits landing together - retry it, nothing is damaged.
-- **Bracket anything you want to TRUST.** Wrap a build, a test suite or a device pass in `ao crew run --start --kind build|test|device` ... `ao crew run --end --result pass|fail`. AO watches the worktree across that interval and DISCARDS the run if the tree moved under it - a result read off a half-written tree looks fine and means nothing, and this is the only thing that catches it. An unbracketed run is never certified.
-- **Anything exclusive is contended live** - the `ao sim` lease above all. Take it when you need it, release it the moment you are done.
-
-**Talking to qa.** Address the role, never an id:
-
-```bash
-ao send --crew qa --about <commit-sha|testiny-id> --message "<what you need them to know>"
-```
-
-- `--about` is REQUIRED and names a durable artifact: a commit, or on a Testiny project a case or run id. There is no "what do you think?": every message is about something that exists.
-- **There is no obligation to reply, because the artifact IS the reply.** dev answers a finding by COMMITTING; qa answers a handoff by RUNNING it and handing back. Do not send an acknowledgement, and do not wait for one.
-- **The caps are real, not advice.** Three messages about one subject in one direction; the fourth is refused and the task goes to NEEDS YOU for a human. Twenty per hour across the crew. If you find yourself about to send a fourth, the conversation is not converging - say so once, plainly, and let the human look.
-- `$AO_CREW_DEV_ID` and `$AO_CREW_QA_ID` name the two sessions when you need to refer to one; `$AO_CREW_ID` is the TASK (dev's id), which `ao testiny` and `ao session get` take.
-
 ## Referring to sessions, pull requests, and merge requests
 
 Prefer a work item's human-readable name in conversation, but whenever you do write an id or number, disambiguate it with a sigil so sessions, pull requests, and merge requests never get confused:
@@ -90,39 +66,55 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 
 Never write a bare session number — always `@…` or the full `<project>-<num>`.
 
-## Driving the iOS Simulator: scripts only (AO)
+## Driving the Android emulator: scripts only (AO)
 
-On this project a simulator is driven ONLY by running a reusable Maestro script from the scripts store at `$AO_SCRIPTS_STORE` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on.
+On this project an emulator is driven ONLY by running a reusable Maestro script from the scripts store at `/scripts` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on. There is no `ao sim` for Android: scripts run through `maestro --device <serial>`, which `bin/flow` does for you.
 
 ```bash
-ao sim list                     # what exists, and what is booted
-ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
-ao sim run --scheme <name>      # put YOUR build on the device first: a script resets the app it finds installed
-ao sim doctor --app <bundle id> # read-only health check: device, lease, installed build, proxy CA
-$AO_SCRIPTS_STORE/bin/flow list nter
-                                # INDEX.md: which script reaches which screen, its params, what it leaves behind
-$AO_SCRIPTS_STORE/bin/flow run nter reach/<script> --param KEY=VALUE --account <id>
-                                # claims $AO_SIM_UDID and runs the script through `ao sim flow run`
-ao sim shot                     # judge the end state: a PNG, plus the BUILD it was of
-ao sim ax                       # the same screen as elements
-ao sim log                      # what the app printed, when the screen does not explain it
-ao sim release                  # when you are done with the device
+adb devices                                   # which emulators are up, by serial
+adb -s <serial> install -r <app.apk>          # put YOUR build on it first: a script resets the app it finds installed
+/scripts/bin/flow list nter
+                                              # INDEX.md: which script reaches which screen, its params, what it leaves behind
+/scripts/bin/flow run nter reach/<script> --platform android --device <serial> --param KEY=VALUE --account <id>
+adb -s <serial> exec-out screencap -p > end.png   # judge the end state
+maestro --device <serial> hierarchy           # the same screen as elements
+adb -s <serial> logcat -d -t 500              # what the app printed, when the screen does not explain it
 ```
 
-- **Reading is how you judge; a script is how you move.** `ao sim shot`, `ao sim ax` and `ao sim log` are fine at any time. Gestures - `ao sim tap`, `ao sim type`, `ao sim drag` and the rest - are not, except while authoring a missing script (below).
-- **The device that is yours is `$AO_SIM_UDID`**, and `bin/flow` and `ao sim` already mean it. Unset means none was free: name a scratch device (`--device` / `--udid`), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase.
-- **A lease guards the device, not the command.** `ao sim run` and `ao sim install` take it as they install; a raw `xcrun simctl` or `xcodebuild -destination` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
-- **A screenshot says which build it was of.** Compare its `Build:` line before the pictures.
-- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: `ao sim claim`, `ao sim flow record start --name <screen>`, drive the route once, `ao sim flow record stop --out $AO_SCRIPTS_STORE/projects/nter/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE` (every typed or tapped VALUE becomes `${MAESTRO_NAME}`; a password is pasted, never recorded) - or write the YAML yourself. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
+- **Reading is how you judge; a script is how you move.** A screenshot, the hierarchy and logcat are fine at any time. Step-by-step input (`adb shell input` taps, text and swipes) is not, except while authoring a missing script (below).
+- **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (`bin/flow` falls back to `$ANDROID_SERIAL`), and never wipe or kill an emulator - it may be someone else's.
+- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: find the selectors with `maestro --device <serial> hierarchy` and write the YAML. A product's iOS and Android apps share their scripts; where they differ, branch with `runFlow: when: platform: Android`. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
 - **Accounts are referred to by id.** `bin/flow accounts nter` lists them and `--account <id>` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.
-- **The store is yours: `$AO_SCRIPTS_STORE`** is this task's own git worktree of the scripts store, on its own branch. Run `bin/flow` from there and commit there, then run `ao scripts publish` so other sessions get your scripts. A refused publish names the files: merge `main` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: `git -C "$AO_SCRIPTS_STORE" merge main`. `ao scripts status` shows what is not committed or not published yet. Accounts stay in the main checkout, `/scripts/accounts/`, where `bin/flow` reads them from any worktree. Nothing in the store goes into your pull request.
+- **The store is one checkout shared with other sessions** (`/scripts`): commit only the files you added or changed, by path (`git -C /scripts commit <paths>`), never another session's uncommitted work, and name them in your report. Nothing in the store goes into your pull request.
 
-Everything else - the store's layout and rules, the full `ao sim` catalog, running several flows in one Maestro start-up - is in the store's README and the ao skill this prompt already points you at.
+Everything else - the store's layout, its rules and how to set up a device - is in the store's README.
 
-### Drive it while you work, then hand the verification over (AO)
+## Testiny test cases (AO)
 
-The device is yours while the change is being built: claim it, install, look, release. What you should NOT do is verify your own finished work on it. When you believe the change is done, ask for the agent whose job that is - `ao crew review` - and give it the driving: it plays the flows, captures the evidence and reports the results. It is awake and working at the same time as you from the moment it exists, so release the lease and leave the device to it rather than re-playing screens yourself; a lease you leave held is one it is blocked on. Reading (`ao sim ax`, `ao sim shot`, `ao sim log`) never needs a claim and never blocks anyone.
+This project keeps its manual test cases in Testiny project `MOB`. You own everything in this section, recording results included. If a person adds a qa to your task, AO tells you, and from then on it is qa's. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
+
+- **Reading Testiny needs no permission.**
+- **Recording a result or linking a case to this task's Jira issue needs no yes.** A result goes on a run already linked to this task: a case's status, with a reason unless it PASSED, and its steps' results. Record it with `ao testiny result`, never with `testiny run results set` directly: AO logs the write, enforces who may write, and updates the Testiny tab. A link only adds the issue to the case as a requirement: linking twice writes nothing, and it never writes to Jira.
+- **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, a milestone link or an attachment. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
+- **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the run's QA Evidence folder, with the names the skill gives.
+- **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking a run is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
+
+**Playing a run, start to finish.**
+
+1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
+2. **Link each case to this task's Jira issue** as a requirement: every case you create, right after you create it, and every case in a run linked to this task. Run `testiny case link <case-id> <JIRA-KEY>`, with the key from the `issue` field of `ao session get "$AO_CREW_ID"` (`jira:<KEY>`). If the task has no Jira issue, skip this step and say so in your report.
+3. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.
+   - **Test Data** names the int/uat test account and data the case needs: use it to play the case.
+4. **Record each case and its steps:** `ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"] [--step <n>=<STATUS> ...]`, or a whole run at once with `--from-file`.
+   - **Steps:** when the case has steps, add `--step <n>=<STATUS>` for each step you played, numbered as `ao testiny case` prints them, in the same call as the case. A step you never reached gets none.
+   - **PASSED** only when every step passed and both checks hold, with no comment.
+   - **FAILED** with a short reason in plain Thai: one or two sentences on what went wrong.
+   - **BLOCKED** when you could not drive the case (UNDRIVEABLE), with the reason from your attempt, never a guess.
+   - **No Figma frame linked:** record what the expected result gives, and leave the visual check for a person.
+   - **Refused with `TESTINY_RESULT_SET_BY_PERSON`:** a person already decided that case or step, and their status stands. Report your finding instead; never retry it or work around it.
+   - **Refused with `TESTINY_WRITE_NOT_YOURS`:** a qa has joined your task, and results are its to record.
+5. **Your finish report names** the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the evidence folder path, and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
 
 ## Using the ao CLI
 

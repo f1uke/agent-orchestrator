@@ -87,73 +87,25 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 
 Never write a bare session number — always `@…` or the full `<project>-<num>`.
 
-## Driving the iOS Simulator: scripts only (AO)
+## Driving the Android emulator: the project's verify skill (AO)
 
-On this project a simulator is driven ONLY by running a reusable Maestro script from the scripts store at `$AO_SCRIPTS_STORE` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on.
+On this project an emulator is driven ONLY by Maestro scripts from the scripts store, and the project's `verify` skill is the one guide for building the app, checking the device, driving it, mocks and evidence: use it (`.claude/skills/verify`, or read `$AO_SCRIPTS_STORE/projects/nter/verify/SKILL.md`). This block holds only what AO owns, and nothing in the skill overrides it.
 
-```bash
-ao sim list                     # what exists, and what is booted
-ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
-ao sim run --scheme <name>      # put YOUR build on the device first: a script resets the app it finds installed
-ao sim doctor --app <bundle id> # read-only health check: device, lease, installed build, proxy CA
-$AO_SCRIPTS_STORE/bin/flow list nter
-                                # INDEX.md: which script reaches which screen, its params, what it leaves behind
-$AO_SCRIPTS_STORE/bin/flow run nter reach/<script> --param KEY=VALUE --account <id>
-                                # claims $AO_SIM_UDID and runs the script through `ao sim flow run`
-ao sim shot                     # judge the end state: a PNG, plus the BUILD it was of
-ao sim ax                       # the same screen as elements
-ao sim log                      # what the app printed, when the screen does not explain it
-ao sim release                  # when you are done with the device
-```
-
-- **Reading is how you judge; a script is how you move.** `ao sim shot`, `ao sim ax` and `ao sim log` are fine at any time. Gestures - `ao sim tap`, `ao sim type`, `ao sim drag` and the rest - are not, except while authoring a missing script (below).
-- **The device that is yours is `$AO_SIM_UDID`**, and `bin/flow` and `ao sim` already mean it. Unset means none was free: name a scratch device (`--device` / `--udid`), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase.
-- **A lease guards the device, not the command.** `ao sim run` and `ao sim install` take it as they install; a raw `xcrun simctl` or `xcodebuild -destination` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
-- **A screenshot says which build it was of.** Compare its `Build:` line before the pictures.
-- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: `ao sim claim`, `ao sim flow record start --name <screen>`, drive the route once, `ao sim flow record stop --out $AO_SCRIPTS_STORE/projects/nter/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE` (every typed or tapped VALUE becomes `${MAESTRO_NAME}`; a password is pasted, never recorded) - or write the YAML yourself. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
-- **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
-- **Accounts are referred to by id.** `bin/flow accounts nter` lists them and `--account <id>` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.
+- **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (`bin/flow` falls back to `$ANDROID_SERIAL`), and never wipe or kill an emulator - it may be someone else's.
 - **The store is yours: `$AO_SCRIPTS_STORE`** is this task's own git worktree of the scripts store, on its own branch. Run `bin/flow` from there and commit there, then run `ao scripts publish` so other sessions get your scripts. A refused publish names the files: merge `main` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: `git -C "$AO_SCRIPTS_STORE" merge main`. `ao scripts status` shows what is not committed or not published yet. Accounts stay in the main checkout, `/scripts/accounts/`, where `bin/flow` reads them from any worktree. Nothing in the store goes into your pull request.
-
-Everything else - the store's layout and rules, the full `ao sim` catalog, running several flows in one Maestro start-up - is in the store's README and the ao skill this prompt already points you at.
 
 ## Playing test cases with Maestro scripts (AO)
 
-Every test case you play on a device, you play by running ONE case script - never by gestures, and never by running reach scripts one after another by hand. A case script is the case written down so a machine can replay it: today it is how you play the case, later it is how the case becomes an automated UI test. The store's README section "Case scripts (`cases/`)" is the full standard.
+Set up your device and your build the way the verify skill says (Launch, Doctor), then play every case as below. Every test case you play on a device, you play by running ONE case script - never by gestures, and never by running reach scripts one after another by hand. A case script is the case written down so a machine can replay it: today it is how you play the case, later it is how the case becomes an automated UI test. The store's README section "Case scripts (`cases/`)" is the full standard.
 
 1. **Find the case's script** in the Cases table of `$AO_SCRIPTS_STORE/projects/nter/INDEX.md`. On a Testiny project it is listed by its Testiny case id.
-2. **No script yet: write one**, then use it. It lives at `$AO_SCRIPTS_STORE/projects/nter/cases/<area>/<behaviour>.yaml`, named after the behaviour the case checks, never after a ticket. Its header carries one `# testiny: <project_key> TC-<id>` line per Testiny case it plays. It starts from `start/`, reaches the screen through `reach/` and `common/` scripts, then runs the case's own steps and ASSERTS the case's expected result, taking a screenshot at every screen the case judges, named `nter-case-<behaviour>-<step>`. Verify it like any other script: `bin/flow check nter` and two green runs from fresh. Then add its row to the Cases table, and only then trust its result. When nobody knows the route, ask the human to play it ONCE in your Device tab while `ao sim flow record` runs: that one play becomes the script.
-3. **Play the case:** `$AO_SCRIPTS_STORE/bin/flow run nter cases/<area>/<behaviour> --param KEY=VALUE --account <id>`. The assertions prove the DATA and the BEHAVIOUR: a failed assertion is a failed case, with the Maestro debug folder as the evidence.
+2. **No script yet: write one**, then use it. It lives at `$AO_SCRIPTS_STORE/projects/nter/cases/<area>/<behaviour>.yaml`, named after the behaviour the case checks, never after a ticket. Its header carries one `# testiny: <project_key> TC-<id>` line per Testiny case it plays. It starts from `start/`, reaches the screen through `reach/` and `common/` scripts, then runs the case's own steps and ASSERTS the case's expected result, taking a screenshot at every screen the case judges, named `nter-case-<behaviour>-<step>`. Verify it like any other script: `bin/flow check nter` and two green runs from fresh. Then add its row to the Cases table, and only then trust its result.
+3. **Play the case:** `$AO_SCRIPTS_STORE/bin/flow run nter cases/<area>/<behaviour> --platform android --device <serial> --param KEY=VALUE --account <id>`. The assertions prove the DATA and the BEHAVIOUR: a failed assertion is a failed case, with the Maestro debug folder as the evidence.
 4. **Compare the screen with the DESIGN**, which no assertion proves. For every case that shows UI, compare each screenshot the case judges with the case's Figma frame - layout, spacing, copy, colour, components and states - and cite the frame you compared against. Find the frame from the ticket or the case. If neither links one, say so in your handback and leave the visual check for a person rather than guessing. A visual difference fails the case: name what differs and where.
 5. **The case PASSES only when both hold:** every assertion, and the screen against the design.
 6. **Keep the screenshots as the case's evidence.** On a Testiny project they go in the evidence folder the `managing-testiny-qa` skill names; otherwise give their path in your handback.
 
 A case whose script you cannot make pass, or whose next step cannot be undone (submit, buy, delete), is UNDRIVEABLE for that step: the script stops before it, and you say so in your handback with the reason from your attempt. A person plays that step. Never finish a case by hand. The case scripts you write follow the store rule in the device block above.
-
-## Testiny test cases (AO)
-
-This project keeps its manual test cases in Testiny project `MOB`. You own everything in this section; dev does not write to Testiny. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
-
-- **Reading Testiny needs no permission.**
-- **Recording a result or linking a case to this task's Jira issue needs no yes.** A result goes on a run already linked to this task: a case's status, with a reason unless it PASSED, and its steps' results. Record it with `ao testiny result`, never with `testiny run results set` directly: AO logs the write, enforces who may write, and updates the Testiny tab. A link only adds the issue to the case as a requirement: linking twice writes nothing, and it never writes to Jira.
-- **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, a milestone link or an attachment. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
-- **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the run's QA Evidence folder, with the names the skill gives.
-- **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking a run is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
-
-**Playing a run, start to finish.**
-
-1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
-2. **Link each case to this task's Jira issue** as a requirement: every case you create, right after you create it, and every case in a run linked to this task. Run `testiny case link <case-id> <JIRA-KEY>`, with the key from the `issue` field of `ao session get "$AO_CREW_ID"` (`jira:<KEY>`). If the task has no Jira issue, skip this step and say so in your report.
-3. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Write its case script from that, or check that its script still matches it, then play it with the script, as "Playing test cases with Maestro scripts" above says: its assertions and the Figma comparison are the two checks.
-   - **Test Data** names the int/uat test account and data the case needs: use it to play the case. When the case script needs that account and `/scripts/accounts/nter.json` does not have it yet, add it there under a clear id (the file is git-ignored; its shape is in `accounts/nter.example.json`) and pass it to the script with `--account <id>`. The script still takes the account through `--account`, never as values written into it.
-4. **Record each case and its steps:** `ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"] [--step <n>=<STATUS> ...]`, or a whole run at once with `--from-file`.
-   - **Steps:** when the case has steps, add `--step <n>=<STATUS>` for each step you played, numbered as `ao testiny case` prints them, in the same call as the case. A step you never reached gets none.
-   - **PASSED** only when every step passed and both checks hold, with no comment.
-   - **FAILED** with a short reason in plain Thai: one or two sentences on what went wrong.
-   - **BLOCKED** when you could not drive the case (UNDRIVEABLE), with the reason from your attempt, never a guess.
-   - **No Figma frame linked:** record what the expected result gives, and leave the visual check for a person.
-   - **Refused with `TESTINY_RESULT_SET_BY_PERSON`:** a person already decided that case or step, and their status stands. Report your finding instead; never retry it or work around it.
-5. **Hand back** to dev with the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the evidence folder path, and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
 
 ## Using the ao CLI
 

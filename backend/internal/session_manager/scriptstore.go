@@ -13,6 +13,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
+	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/scriptstore"
 )
 
@@ -77,6 +78,35 @@ func (m *Manager) planScriptsStore(ctx context.Context, project domain.ProjectRe
 		plan.Base, plan.Isolated = probe.Base, true
 	}
 	return plan
+}
+
+// promptScripts is the scripts store a worker's prompt names. The prompt is
+// built before a spawned session has an id, so an isolated store is named by
+// $AO_SCRIPTS_STORE, which the runtime env points at the worktree, never by its
+// path. owner is empty for a session spawned to own its workspace: its
+// worktree is about to be cut, so the store's probe decides. A known owner
+// (a crew member's dev, or a restored owner, re-attached before this runs)
+// is isolated only when its worktree exists: the env falls back to the main
+// checkout otherwise, and the prompt must say the same.
+func (m *Manager) promptScripts(ctx context.Context, project domain.ProjectRecord, owner domain.SessionID) prompts.MobileScripts {
+	ms := *project.Config.MobileScripts
+	plan := scriptsStorePlan{Root: scriptstore.Root(ms)}
+	switch {
+	case owner == "":
+		plan = m.planScriptsStore(ctx, project, owner)
+	case m.scripts != nil:
+		if w, ok, err := m.scripts.Get(ctx, owner); err == nil && ok {
+			plan = scriptsStorePlan{Root: w.Store, Base: w.BaseBranch, Isolated: true}
+		}
+	}
+	out := prompts.MobileScripts{Product: ms.Product, IOS: ms.Platform == domain.MobilePlatformIOS, Store: plan.Root, Root: plan.Root}
+	if plan.Isolated {
+		out.Store, out.Isolated, out.Base = "$"+EnvScriptsStore, true, plan.Base
+	}
+	if ms.VerifySkill != "" {
+		out.Skill = out.Store + "/" + strings.TrimSuffix(filepath.ToSlash(ms.VerifySkill), "/")
+	}
+	return out
 }
 
 // ensureScriptsStore makes the owner's worktree exist when its plan says it

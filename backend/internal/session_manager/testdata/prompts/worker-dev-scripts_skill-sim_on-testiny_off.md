@@ -90,35 +90,14 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 
 Never write a bare session number — always `@…` or the full `<project>-<num>`.
 
-## Driving the iOS Simulator: scripts only (AO)
+## Driving the iOS Simulator: the project's verify skill (AO)
 
-On this project a simulator is driven ONLY by running a reusable Maestro script from the scripts store at `$AO_SCRIPTS_STORE` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on.
+On this project a simulator is driven ONLY by Maestro scripts from the scripts store, and the project's `verify` skill is the one guide for building the app, health-checking the device, driving it, mocks and evidence: use it (`.claude/skills/verify`, or read `$AO_SCRIPTS_STORE/projects/nter/verify/SKILL.md`). This block holds only what AO owns, and nothing in the skill overrides it.
 
-```bash
-ao sim list                     # what exists, and what is booted
-ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
-ao sim run --scheme <name>      # put YOUR build on the device first: a script resets the app it finds installed
-ao sim doctor --app <bundle id> # read-only health check: device, lease, installed build, proxy CA
-$AO_SCRIPTS_STORE/bin/flow list nter
-                                # INDEX.md: which script reaches which screen, its params, what it leaves behind
-$AO_SCRIPTS_STORE/bin/flow run nter reach/<script> --param KEY=VALUE --account <id>
-                                # claims $AO_SIM_UDID and runs the script through `ao sim flow run`
-ao sim shot                     # judge the end state: a PNG, plus the BUILD it was of
-ao sim ax                       # the same screen as elements
-ao sim log                      # what the app printed, when the screen does not explain it
-ao sim release                  # when you are done with the device
-```
-
-- **Reading is how you judge; a script is how you move.** `ao sim shot`, `ao sim ax` and `ao sim log` are fine at any time. Gestures - `ao sim tap`, `ao sim type`, `ao sim drag` and the rest - are not, except while authoring a missing script (below).
-- **The device that is yours is `$AO_SIM_UDID`**, and `bin/flow` and `ao sim` already mean it. Unset means none was free: name a scratch device (`--device` / `--udid`), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase.
+- **The device that is yours is `$AO_SIM_UDID`**, and `bin/flow` and `ao sim` already mean it. Unset means none was free: name a scratch device (`--device` / `--udid`), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase. AO makes the device trust the proxy's CA every time it boots or a session claims it.
 - **A lease guards the device, not the command.** `ao sim run` and `ao sim install` take it as they install; a raw `xcrun simctl` or `xcodebuild -destination` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
-- **A screenshot says which build it was of.** Compare its `Build:` line before the pictures.
-- **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: `ao sim claim`, `ao sim flow record start --name <screen>`, drive the route once, `ao sim flow record stop --out $AO_SCRIPTS_STORE/projects/nter/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE` (every typed or tapped VALUE becomes `${MAESTRO_NAME}`; a password is pasted, never recorded) - or write the YAML yourself. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
-- **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
-- **Accounts are referred to by id.** `bin/flow accounts nter` lists them and `--account <id>` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.
+- **`ao sim doctor --app <bundle id> --expect <your .app>` is the health check** of your device: booted, whose lease, whether the installed build is the one you built, and whether the proxy CA is trusted. It only reads: run it before the first drive and after every failed run.
 - **The store is yours: `$AO_SCRIPTS_STORE`** is this task's own git worktree of the scripts store, on its own branch. Run `bin/flow` from there and commit there, then run `ao scripts publish` so other sessions get your scripts. A refused publish names the files: merge `main` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: `git -C "$AO_SCRIPTS_STORE" merge main`. `ao scripts status` shows what is not committed or not published yet. Accounts stay in the main checkout, `/scripts/accounts/`, where `bin/flow` reads them from any worktree. Nothing in the store goes into your pull request.
-
-Everything else - the store's layout and rules, the full `ao sim` catalog, running several flows in one Maestro start-up - is in the store's README and the ao skill this prompt already points you at.
 
 ### Drive it while you work, then hand the verification over (AO)
 

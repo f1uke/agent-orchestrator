@@ -374,8 +374,8 @@ func codeSpanNames(text, surface string) bool {
 
 func TestMobileScriptGuidance_SkillShapeNamesOnlyWhatAOOwns(t *testing.T) {
 	guidance := prompts.MobileScriptGuidance(prompts.MobileScripts{
-		Product: "nter", IOS: true, Store: "/data/store-worktrees/s/nter-1", Root: "/scripts", Isolated: true,
-		Branch: "ao/nter-1", Base: "main", Skill: "/data/store-worktrees/s/nter-1/projects/nter/verify",
+		Product: "nter", IOS: true, Store: "$AO_SCRIPTS_STORE", Root: "/scripts", Isolated: true,
+		Base: "main", Skill: "$AO_SCRIPTS_STORE/projects/nter/verify",
 	})
 	if len(guidance) >= mobileScriptGuidanceBudget/2 {
 		t.Errorf("the verify-skill shape is %d bytes; it exists to be short, so keep it under %d", len(guidance), mobileScriptGuidanceBudget/2)
@@ -385,7 +385,7 @@ func TestMobileScriptGuidance_SkillShapeNamesOnlyWhatAOOwns(t *testing.T) {
 			t.Errorf("verify-skill shape names `ao sim %s` = %v, decided %v", surface, got, named)
 		}
 	}
-	for _, want := range []string{"/data/store-worktrees/s/nter-1/projects/nter/verify/SKILL.md", "ao scripts publish", "$AO_SCRIPTS_STORE"} {
+	for _, want := range []string{"$AO_SCRIPTS_STORE/projects/nter/verify/SKILL.md", "ao scripts publish", "/scripts/accounts/"} {
 		if !regexp.MustCompile(regexp.QuoteMeta(want)).MatchString(guidance) {
 			t.Errorf("verify-skill shape does not carry %q", want)
 		}

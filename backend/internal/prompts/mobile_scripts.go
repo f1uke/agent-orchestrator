@@ -16,12 +16,12 @@ type MobileScripts struct {
 	// Root is the store's main checkout. accounts/ is git-ignored, so it lives
 	// only there, and a worktree's bin/flow reads it from there too.
 	Root string
-	// Isolated is true when Store is the task's own worktree of the store, on
-	// Branch, published into Base with `ao scripts publish`. False when AO could
-	// not make one (the store is not a git checkout on a branch): Store is then
+	// Isolated is true when Store is the task's own worktree of the store,
+	// published into Base with `ao scripts publish`. False when AO could not
+	// make one (the store is not a git checkout on a branch): Store is then
 	// the one checkout every session shares.
-	Isolated     bool
-	Branch, Base string
+	Isolated bool
+	Base     string
 	// Skill is the folder of the project's verify skill (holding SKILL.md),
 	// or "" when the project names none. When set, the device block defers to
 	// the skill instead of restating how to build, drive and check the app.
@@ -126,7 +126,6 @@ func (ms MobileScripts) fill(s string) string {
 		"{{store}}", ms.Store,
 		"{{root}}", root,
 		"{{product}}", ms.Product,
-		"{{branch}}", ms.Branch,
 		"{{base}}", ms.Base,
 		"{{skill}}", ms.Skill,
 	).Replace(s)
@@ -213,7 +212,7 @@ On this project an emulator is driven ONLY by Maestro scripts from the scripts s
 // worktree of the store. Publishing is an explicit command so the agent that
 // wrote a script sees a refused merge at once and can fix it in its worktree;
 // AO publishes again when the session ends, as the safety net.
-const mobileScriptStoreIsolated = "\n" + `- **The store is yours: ` + "`$AO_SCRIPTS_STORE`" + `** (` + "`{{store}}`" + `) is this task's own git worktree of the scripts store, on branch ` + "`{{branch}}`" + `. Run ` + "`bin/flow`" + ` from there and commit there, then run ` + "`ao scripts publish`" + ` so other sessions get your scripts. A refused publish names the files: merge ` + "`{{base}}`" + ` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: ` + "`git -C \"$AO_SCRIPTS_STORE\" merge {{base}}`" + `. ` + "`ao scripts status`" + ` shows what is not committed or not published yet. Accounts stay in the main checkout, ` + "`{{root}}/accounts/`" + `, where ` + "`bin/flow`" + ` reads them from any worktree. Nothing in the store goes into your pull request.`
+const mobileScriptStoreIsolated = "\n" + `- **The store is yours: ` + "`$AO_SCRIPTS_STORE`" + `** is this task's own git worktree of the scripts store, on its own branch. Run ` + "`bin/flow`" + ` from there and commit there, then run ` + "`ao scripts publish`" + ` so other sessions get your scripts. A refused publish names the files: merge ` + "`{{base}}`" + ` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: ` + "`git -C \"$AO_SCRIPTS_STORE\" merge {{base}}`" + `. ` + "`ao scripts status`" + ` shows what is not committed or not published yet. Accounts stay in the main checkout, ` + "`{{root}}/accounts/`" + `, where ` + "`bin/flow`" + ` reads them from any worktree. Nothing in the store goes into your pull request.`
 
 // mobileScriptStoreShared is the store rule when AO could not give the task a
 // worktree, so every session writes into the one checkout.
