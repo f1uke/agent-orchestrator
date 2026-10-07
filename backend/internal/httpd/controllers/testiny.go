@@ -23,6 +23,7 @@ type TestinyService interface {
 	Unlink(ctx context.Context, task domain.SessionID, id domain.TestinyRunID) error
 	Runs(ctx context.Context, task domain.SessionID, refresh bool) (testinysvc.Runs, error)
 	RecordResults(ctx context.Context, task domain.SessionID, id domain.TestinyRunID, results []domain.TestinyResult, by, sha string) (domain.TestinyRunView, error)
+	Case(ctx context.Context, task domain.SessionID, id int64) (domain.TestinyCaseDetail, error)
 }
 
 // TestinyRunsResponse is the body of GET /api/v1/sessions/{sessionId}/testiny/runs.
@@ -62,6 +63,12 @@ type TestinyRunParam struct {
 	RunID     string `path:"runId" description:"Testiny run id, e.g. 632 or TR-632."`
 }
 
+// TestinyCaseParam is the {sessionId}/{caseId} path of one case in a task's runs.
+type TestinyCaseParam struct {
+	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
+	CaseID    string `path:"caseId" description:"Testiny case id, e.g. 7166 or TC-7166."`
+}
+
 // TestinyController owns a task's /testiny routes. They are task-scoped: a run
 // linked from a crew's qa belongs to the task. A nil Svc answers 501.
 type TestinyController struct {
@@ -74,6 +81,7 @@ func (c *TestinyController) Register(r chi.Router) {
 	r.Post("/sessions/{sessionId}/testiny/runs", c.link)
 	r.Delete("/sessions/{sessionId}/testiny/runs/{runId}", c.unlink)
 	r.Post("/sessions/{sessionId}/testiny/runs/{runId}/results", c.recordResults)
+	r.Get("/sessions/{sessionId}/testiny/cases/{caseId}", c.readCase)
 }
 
 func (c *TestinyController) list(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +164,24 @@ func (c *TestinyController) recordResults(w http.ResponseWriter, r *http.Request
 	envelope.WriteJSON(w, http.StatusOK, view)
 }
 
+func (c *TestinyController) readCase(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/testiny/cases/{caseId}")
+		return
+	}
+	id, err := domain.ParseTestinyCaseRef(chi.URLParam(r, "caseId"))
+	if err != nil {
+		writeTestinyError(w, r, err)
+		return
+	}
+	detail, err := c.Svc.Case(r.Context(), sessionID(r), id)
+	if err != nil {
+		writeTestinyError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, detail)
+}
+
 func writeTestinyError(w http.ResponseWriter, r *http.Request, err error) {
 	write := func(status int, kind, code string) {
 		envelope.WriteAPIError(w, r, status, kind, code, err.Error(), nil)
@@ -163,10 +189,14 @@ func writeTestinyError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, domain.ErrBadRunRef):
 		write(http.StatusBadRequest, "bad_request", "TESTINY_BAD_RUN_REF")
+	case errors.Is(err, domain.ErrBadCaseRef):
+		write(http.StatusBadRequest, "bad_request", "TESTINY_BAD_CASE_REF")
 	case errors.Is(err, domain.ErrBadTestinyResult):
 		write(http.StatusBadRequest, "bad_request", "TESTINY_RESULT_INVALID")
 	case errors.Is(err, testinysvc.ErrRunNotLinked):
 		write(http.StatusNotFound, "not_found", "TESTINY_RUN_NOT_LINKED")
+	case errors.Is(err, testinysvc.ErrCaseNotInTask):
+		write(http.StatusNotFound, "not_found", "TESTINY_CASE_NOT_IN_TASK")
 	case errors.Is(err, testinysvc.ErrWriteNotYours):
 		write(http.StatusForbidden, "forbidden", "TESTINY_WRITE_NOT_YOURS")
 	case errors.Is(err, testinysvc.ErrSetByPerson):

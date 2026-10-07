@@ -321,3 +321,102 @@ func TestTestinyResultErrorsExitByKind(t *testing.T) {
 		}
 	}
 }
+
+const testinyCaseJSON = `{"id":7166,"title":"[Finno Chat] Fund disclaimer is displayed in chat",
+"priority":{"level":1,"label":"High"},"type":"FUNCTIONAL","template":"STEPS",
+"platforms":["ADR","iOS"],"jira":"MOBILITY-4839","features":"Finnomena Chat","subFeatures":"Notice disclaimer","section":"",
+"testData":"qa@example.com / fake-password",
+"precondition":"- Logged in to the Main app\n- A chat room has a fund disclaimer",
+"description":"","remark":"Header image only on iOS","automation":["Manual"],
+"steps":[{"n":1,"action":"Open the Main app and go to Finnomena Chat","expected":"Chat list is displayed"},
+         {"n":2,"action":"Open the chat room\nwith the disclaimer","expected":"- Chat room opens\n- It scrolls to the latest"},
+         {"n":3,"action":"Close the app","expected":""}],
+"stepsText":"","expectedText":"","bdd":""}`
+
+func TestTestinyCasePrintsAReadableBlock(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := reviewServer(t, http.StatusOK, testinyCaseJSON)
+	writeRunFileFor(t, cfg, srv)
+	out, _, err := executeCLI(t, aliveDeps(), "testiny", "case", "app-1", "TC-7166")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capture.method != http.MethodGet || capture.path != "/api/v1/sessions/app-1/testiny/cases/TC-7166" {
+		t.Fatalf("request = %s %s", capture.method, capture.path)
+	}
+	want := `TC-7166 [Finno Chat] Fund disclaimer is displayed in chat
+priority: High | type: FUNCTIONAL | platforms: ADR, iOS | jira: MOBILITY-4839 | features: Finnomena Chat > Notice disclaimer
+
+Test data
+  qa@example.com / fake-password
+
+Precondition
+  - Logged in to the Main app
+  - A chat room has a fund disclaimer
+
+Steps
+  1. Open the Main app and go to Finnomena Chat
+     -> Chat list is displayed
+  2. Open the chat room
+     with the disclaimer
+     -> - Chat room opens
+        - It scrolls to the latest
+  3. Close the app
+
+Remark
+  Header image only on iOS
+`
+	if out != want {
+		t.Fatalf("output =\n%s\nwant\n%s", out, want)
+	}
+}
+
+func TestTestinyCaseOfATextTemplateAndJSON(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, _ := reviewServer(t, http.StatusOK, `{"id":548,"title":"Advisor notification","type":"","template":"TEXT",
+"platforms":[],"jira":"","features":"","subFeatures":"","section":"","testData":"","precondition":"","description":"",
+"remark":"","automation":[],"steps":[],"stepsText":"1. Advisor texts the customer","expectedText":"1. The advisor's profile shows","bdd":""}`)
+	writeRunFileFor(t, cfg, srv)
+	out, _, err := executeCLI(t, aliveDeps(), "testiny", "case", "app-1", "548")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "TC-548 Advisor notification\n\nSteps\n  1. Advisor texts the customer\n\nExpected result\n  1. The advisor's profile shows\n"
+	if out != want {
+		t.Fatalf("output =\n%q\nwant\n%q", out, want)
+	}
+
+	out, _, err = executeCLI(t, aliveDeps(), "testiny", "case", "app-1", "548", "--json")
+	var got struct {
+		ID       int64  `json:"id"`
+		Template string `json:"template"`
+	}
+	if err != nil || json.Unmarshal([]byte(out), &got) != nil || got.ID != 548 || got.Template != "TEXT" {
+		t.Fatalf("--json output = %s (%v)", out, err)
+	}
+}
+
+func TestTestinyCaseErrorsExitByKind(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		code   string
+		exit   int
+	}{
+		{http.StatusBadRequest, "TESTINY_BAD_CASE_REF", 2},
+		{http.StatusConflict, "TESTINY_OFF", 2},
+		{http.StatusNotFound, "TESTINY_CASE_NOT_IN_TASK", 1},
+		{http.StatusBadGateway, "TESTINY_UNAVAILABLE", 1},
+	} {
+		cfg := setConfigEnv(t)
+		srv, _ := reviewServer(t, tc.status, `{"code":"`+tc.code+`","message":"the daemon's words"}`)
+		writeRunFileFor(t, cfg, srv)
+		_, _, err := executeCLI(t, aliveDeps(), "testiny", "case", "app-1", "7166")
+		if err == nil || ExitCode(err) != tc.exit || !strings.Contains(err.Error(), "the daemon's words") {
+			t.Errorf("%s: err = %v (exit %d), want exit %d with the daemon's message", tc.code, err, ExitCode(err), tc.exit)
+		}
+	}
+	setConfigEnv(t)
+	if _, _, err := executeCLI(t, aliveDeps(), "testiny", "case", "app-1"); ExitCode(err) != 2 {
+		t.Fatalf("no case: err = %v, want a usage error", err)
+	}
+}

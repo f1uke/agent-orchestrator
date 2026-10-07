@@ -120,7 +120,7 @@ adb -s <serial> logcat -d -t 500              # what the app printed, when the s
 // the two rules that do not depend on the device.
 const mobileScriptShared = ` Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from ` + "`start/`" + `, no value typed into the script, end with an assertion and ` + "`takeScreenshot`" + `, stop before anything irreversible. Then ` + "`bin/flow check {{product}}`" + `, run it twice green from fresh, and add its row to ` + "`projects/{{product}}/INDEX.md`" + `. The store is outside this repository: nothing there goes into your pull request.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
-- **Accounts are referred to by id.** ` + "`bin/flow accounts {{product}}`" + ` lists them (int/uat only) and ` + "`--account <id>`" + ` passes one. Never copy an email or password into a report, commit, pull request, test case or screenshot.`
+- **Accounts are referred to by id.** ` + "`bin/flow accounts {{product}}`" + ` lists them and ` + "`--account <id>`" + ` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.`
 
 const mobileScriptIOSClosing = "\n\n" + `Everything else - the store's layout and rules, the full ` + "`ao sim`" + ` catalog, running several flows in one Maestro start-up - is in the store's README and the ao skill this prompt already points you at.`
 

@@ -1211,6 +1211,20 @@ func testinyOperations() []operation {
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/testiny/cases/{caseId}", id: "getTestinyCase", tag: "testiny",
+			summary:    "Read a case in a run linked to the task in full (test data, precondition, steps), live from Testiny",
+			pathParams: []any{controllers.TestinyCaseParam{}},
+			resps: []respUnit{
+				{http.StatusOK, domain.TestinyCaseDetail{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusBadGateway, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
 	}
 }
 

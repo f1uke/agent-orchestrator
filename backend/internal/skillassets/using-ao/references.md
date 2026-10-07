@@ -25,6 +25,7 @@ Natural-language-to-command mappings for common AO tasks.
 | Submit a code review verdict | `ao review submit <session-id> --run <run-id> --verdict approved` |
 | Link the Testiny run a task's cases were played in | `ao testiny link <task> <run-id\|url>` |
 | See what a task's Testiny runs say | `ao testiny runs <task>` |
+| Read a case in a task's runs in full (test data, precondition, steps) | `ao testiny case <task> <case-id\|TC-id>` |
 | Record a case's result in a linked run | `ao testiny result <task> <run> <case> --status <status> [--comment <text>]` |
 | Configure a project's default branch or model | `ao project set-config <id> --default-branch <branch> --model <model>` |
 | Import projects from a legacy AO install | `ao import --dry-run` first, then `ao import -y` |

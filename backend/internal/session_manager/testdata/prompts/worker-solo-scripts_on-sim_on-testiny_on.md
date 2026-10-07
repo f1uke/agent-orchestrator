@@ -86,7 +86,7 @@ ao sim release                  # when you are done with the device
 - **A screenshot says which build it was of.** Compare its `Build:` line before the pictures.
 - **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: `ao sim claim`, `ao sim flow record start --name <screen>`, drive the route once, `ao sim flow record stop --out ~/Documents/Projects/mobile-ui-scripts/projects/nter/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE` (every typed or tapped VALUE becomes `${MAESTRO_NAME}`; a password is pasted, never recorded) - or write the YAML yourself. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`. The store is outside this repository: nothing there goes into your pull request.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
-- **Accounts are referred to by id.** `bin/flow accounts nter` lists them (int/uat only) and `--account <id>` passes one. Never copy an email or password into a report, commit, pull request, test case or screenshot.
+- **Accounts are referred to by id.** `bin/flow accounts nter` lists them and `--account <id>` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.
 
 Everything else - the store's layout and rules, the full `ao sim` catalog, running several flows in one Maestro start-up - is in the store's README and the ao skill this prompt already points you at.
 
@@ -103,7 +103,8 @@ This project keeps its manual test cases in Testiny project `MOB`. You own every
 **Playing a run, start to finish.**
 
 1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
-2. **Play each case**, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.
+2. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.
+   - **Test Data** names the int/uat test account and data the case needs: use it to play the case.
 3. **Record each case:** `ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"]`, or a whole run at once with `--from-file`.
    - **PASSED** only when both checks hold, with no comment.
    - **FAILED** with a short reason in plain Thai: one or two sentences on what went wrong.

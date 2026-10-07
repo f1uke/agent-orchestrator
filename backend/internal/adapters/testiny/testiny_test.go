@@ -348,3 +348,96 @@ func TestSetResultsStopsAtTheFirstFailureAndSaysWhatWasWritten(t *testing.T) {
 		t.Fatalf("calls = %q, want it to stop after the failure", f.calls)
 	}
 }
+
+func TestCaseReadsAStepsCaseInFull(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{"case show 7166": ok(t, "case_show_7166.json")}}
+	got, err := newClient(f, time.Now).Case(context.Background(), 7166)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	want := domain.TestinyCaseDetail{
+		ID:          7166,
+		Title:       "[Finno Chat] Fund disclaimer is displayed in chat",
+		Priority:    &domain.TestinyCasePriority{Level: 1, Label: "High"},
+		Type:        "FUNCTIONAL",
+		Template:    domain.TestinyTemplateSteps,
+		Platforms:   []string{"ADR", "iOS"},
+		Jira:        "MOBILITY-4839",
+		Features:    "Finnomena Chat",
+		SubFeatures: "Notice disclaimer",
+		TestData:    "qa@example.com / fake-password",
+		Precondition: "- Logged in to the Main app (Android or iOS)\n" +
+			"- A chat room exists where a fund disclaimer notice message has been sent",
+		Automation: []string{"Manual"},
+		Steps: []domain.TestinyCaseStep{
+			{N: 1, Action: "Open the Main app and go to Finnomena Chat", Expected: "Chat list is displayed"},
+			{N: 2, Action: "Open the chat room that contains the fund disclaimer message", Expected: "Chat room opens and scrolls to the latest messages"},
+			{N: 3, Action: "Look at the fund disclaimer message", Expected: "Disclaimer is shown as a notice message (not a normal chat bubble) with the full fund disclaimer text, readable and not truncated"},
+			{N: 4, Action: "If the disclaimer has a header image, check it", Expected: "Header image loads at the correct width, with no broken-image icon inside the text"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Case =\n%+v\nwant\n%+v", got, want)
+	}
+	if f.count("case bdd 7166") != 0 {
+		t.Fatalf("a STEPS case read its BDD feature file: %v", f.calls)
+	}
+}
+
+func TestCaseReadsATextCaseAndRichTestData(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{
+		"case show 548": ok(t, "case_show_548.json"),
+		"case show 558": ok(t, "case_show_558.json"),
+	}}
+	c := newClient(f, time.Now)
+	got, err := c.Case(context.Background(), 548)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	if got.Priority != nil || got.Template != domain.TestinyTemplateText {
+		t.Fatalf("priority %v template %q, want none and TEXT", got.Priority, got.Template)
+	}
+	if got.TestData != "INT\n\nAdvisor: advisor@example.com | fake-password\n\nCustomer: customer@example.com | fake-password" {
+		t.Fatalf("TestData = %q", got.TestData)
+	}
+	if got.Precondition != "1. Login user customer" || got.StepsText != "1. Advisor text to customer" ||
+		got.ExpectedText != "1. Advisor profile shows on notification correctly" {
+		t.Fatalf("precondition %q, steps %q, expected %q", got.Precondition, got.StepsText, got.ExpectedText)
+	}
+	if got.Platforms == nil || len(got.Platforms) != 0 || got.Automation == nil || got.Steps == nil || len(got.Steps) != 0 {
+		t.Fatalf("empty lists must be empty, not nil: platforms %#v automation %#v steps %#v", got.Platforms, got.Automation, got.Steps)
+	}
+
+	got, err = c.Case(context.Background(), 558)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	if got.Remark != "Test for import in jira" || got.TestData != "" {
+		t.Fatalf("remark %q, test data %q; want the remark rendered and an empty test data", got.Remark, got.TestData)
+	}
+}
+
+func TestCaseReadsABDDCasesFeatureFile(t *testing.T) {
+	// No MOB case uses the BDD template, so this show output is the 7166
+	// fixture with its template changed; `case bdd` prints the raw file.
+	show := strings.Replace(string(fixture(t, "case_show_7166.json")), `"template": "STEPS"`, `"template": "BDD"`, 1)
+	feature := "Feature: Chat\n  Scenario: Disclaimer\n    Given a chat room\n"
+	f := &fakeCLI{answers: map[string]Output{
+		"case show 7166": {Stdout: []byte(show)},
+		"case bdd 7166":  {Stdout: []byte(feature)},
+	}}
+	got, err := newClient(f, time.Now).Case(context.Background(), 7166)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	if got.Template != domain.TestinyTemplateBDD || got.BDD != strings.TrimSpace(feature) || len(got.Steps) != 0 {
+		t.Fatalf("template %q bdd %q steps %v", got.Template, got.BDD, got.Steps)
+	}
+}
+
+func TestAMissingCaseIsNotFound(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{"case show 99999999": failed(t, "case_show_99999999.stderr.json", 3)}}
+	if _, err := newClient(f, time.Now).Case(context.Background(), 99999999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Case err = %v, want ErrNotFound", err)
+	}
+}

@@ -252,3 +252,94 @@ type TestinyRunView struct {
 	// last good read (as of FetchedAt), or empty.
 	FetchError *TestinyFetchError `json:"fetchError,omitempty"`
 }
+
+// ErrBadCaseRef reports a case reference that is not a case id or a TC-<id>
+// label.
+var ErrBadCaseRef = errors.New("not a Testiny case: give its id (7166) or TC-7166")
+
+var testinyCaseIDPattern = regexp.MustCompile(`^(?i:tc-)?(\d+)$`)
+
+// ParseTestinyCaseRef accepts "7166" or "TC-7166" (any case).
+func ParseTestinyCaseRef(s string) (int64, error) {
+	m := testinyCaseIDPattern.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return 0, ErrBadCaseRef
+	}
+	id, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || id <= 0 {
+		return 0, ErrBadCaseRef
+	}
+	return id, nil
+}
+
+// TestinyCaseTemplate is how a case's steps are written. Testiny's own value
+// passes through unchanged, including one this list does not name.
+type TestinyCaseTemplate string
+
+// The templates a Testiny case is written in.
+const (
+	// TestinyTemplateSteps: a table of steps, each an action and its expected result.
+	TestinyTemplateSteps TestinyCaseTemplate = "STEPS"
+	// TestinyTemplateText: the steps and the expected result as two texts.
+	TestinyTemplateText TestinyCaseTemplate = "TEXT"
+	// TestinyTemplateBDD: Gherkin scenarios.
+	TestinyTemplateBDD TestinyCaseTemplate = "BDD"
+)
+
+// TestinyCasePriority is a case's priority: Testiny's level (0 is the most
+// urgent) and the name Testiny shows for it.
+type TestinyCasePriority struct {
+	Level int    `json:"level"`
+	Label string `json:"label"`
+}
+
+var testinyPriorityLabels = []string{"Critical", "High", "Medium", "Low"}
+
+// NewTestinyCasePriority names a priority level. A level Testiny may add later
+// is named by its number.
+func NewTestinyCasePriority(level int) TestinyCasePriority {
+	if level >= 0 && level < len(testinyPriorityLabels) {
+		return TestinyCasePriority{Level: level, Label: testinyPriorityLabels[level]}
+	}
+	return TestinyCasePriority{Level: level, Label: strconv.Itoa(level)}
+}
+
+// TestinyCaseStep is one row of a STEPS case.
+type TestinyCaseStep struct {
+	N        int    `json:"n"`
+	Action   string `json:"action"`
+	Expected string `json:"expected"`
+}
+
+// TestinyCaseDetail is a Testiny case in full, read live. Rich text is
+// rendered to plain text that keeps its lists, paragraphs and tables. A field
+// the case leaves empty is "" (or an empty list).
+type TestinyCaseDetail struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	// Priority is nil when the case has none.
+	Priority *TestinyCasePriority `json:"priority,omitempty"`
+	Type     string               `json:"type" description:"Testiny's testcase_type, e.g. FUNCTIONAL."`
+	Template TestinyCaseTemplate  `json:"template" description:"STEPS, TEXT or BDD; it says which of steps, stepsText/expectedText or bdd is filled."`
+	// Platforms, Jira, Features, SubFeatures and Section are the project's
+	// custom fields of the same names.
+	Platforms   []string `json:"platforms"`
+	Jira        string   `json:"jira"`
+	Features    string   `json:"features"`
+	SubFeatures string   `json:"subFeatures"`
+	Section     string   `json:"section"`
+	// TestData is what the case needs to be played, such as the int/uat test
+	// account to log in with.
+	TestData     string   `json:"testData"`
+	Precondition string   `json:"precondition"`
+	Description  string   `json:"description"`
+	Remark       string   `json:"remark"`
+	Automation   []string `json:"automation" description:"The case's automation status values, e.g. Manual."`
+	// Steps is a STEPS case's table.
+	Steps []TestinyCaseStep `json:"steps"`
+	// StepsText and ExpectedText are a TEXT case's two texts.
+	StepsText    string `json:"stepsText"`
+	ExpectedText string `json:"expectedText"`
+	// BDD is a BDD case's Gherkin feature file.
+	BDD string `json:"bdd"`
+}

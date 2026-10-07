@@ -1775,6 +1775,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/testiny/cases/{caseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a case in a run linked to the task in full (test data, precondition, steps), live from Testiny */
+        get: operations["getTestinyCase"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/testiny/runs": {
         parameters: {
             query?: never;
@@ -3505,6 +3522,40 @@ export interface components {
             orchestrator?: string;
             reviewer?: string;
             worker?: string;
+        };
+        DomainTestinyCaseDetail: {
+            /** @description The case's automation status values, e.g. Manual. */
+            automation: string[];
+            bdd: string;
+            description: string;
+            expectedText: string;
+            features: string;
+            /** Format: int64 */
+            id: number;
+            jira: string;
+            platforms: string[];
+            precondition: string;
+            priority?: components["schemas"]["DomainTestinyCasePriority"];
+            remark: string;
+            section: string;
+            steps: components["schemas"]["DomainTestinyCaseStep"][];
+            stepsText: string;
+            subFeatures: string;
+            /** @description STEPS, TEXT or BDD; it says which of steps, stepsText/expectedText or bdd is filled. */
+            template: string;
+            testData: string;
+            title: string;
+            /** @description Testiny's testcase_type, e.g. FUNCTIONAL. */
+            type: string;
+        };
+        DomainTestinyCasePriority: {
+            label: string;
+            level: number;
+        };
+        DomainTestinyCaseStep: {
+            action: string;
+            expected: string;
+            n: number;
         };
         EndCrewRunInput: {
             /**
@@ -12082,6 +12133,85 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getTestinyCase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Testiny case id, e.g. 7166 or TC-7166. */
+                caseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainTestinyCaseDetail"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

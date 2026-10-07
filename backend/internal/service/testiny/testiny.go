@@ -1,6 +1,6 @@
 // Package testiny is the service behind a task's Testiny tab: which Testiny
-// test runs belong to the task, what each one says right now, and recording a
-// case's result in one.
+// test runs belong to the task, what each one says right now, what a case in
+// them asks for, and recording a case's result in one.
 //
 // AO stores the links and a log of the results it wrote. Every title, case and
 // result is read live from Testiny through the adapter, held in memory for a
@@ -31,6 +31,8 @@ const (
 	// runTTL is how long one read of a run is served before Testiny is asked
 	// again. A refresh skips it.
 	runTTL = 15 * time.Second
+	// caseTTL is how long one read of a case is served.
+	caseTTL = 60 * time.Second
 	// scriptsTTL is how long one scan of the case scripts is used.
 	scriptsTTL = 60 * time.Second
 	// readParallelism caps how many runs are read from Testiny at once.
@@ -46,6 +48,7 @@ var (
 	ErrWrongProject    = errors.New("the run is in another Testiny project")
 	ErrProjectNotFound = errors.New("testiny has no such project")
 	ErrRunNotLinked    = errors.New("the run is not linked to this task")
+	ErrCaseNotInTask   = errors.New("the case is not in a run linked to this task")
 	ErrWriteNotYours   = errors.New("this agent may not record results on this task")
 	ErrSetByPerson     = errors.New("a person set this result")
 )
@@ -54,6 +57,7 @@ var (
 type RunReader interface {
 	Run(ctx context.Context, id domain.TestinyRunID) (testinyadapter.Run, error)
 	Results(ctx context.Context, id domain.TestinyRunID) (testinyadapter.Results, error)
+	Case(ctx context.Context, id int64) (domain.TestinyCaseDetail, error)
 	Plan(ctx context.Context, id int64) (testinyadapter.Ref, error)
 	Milestone(ctx context.Context, id int64) (testinyadapter.Ref, error)
 	Project(ctx context.Context, ref string) (testinyadapter.Project, error)
@@ -115,6 +119,7 @@ type Service struct {
 
 	mu      sync.Mutex
 	reads   map[domain.TestinyRunID]domain.TestinyRunView
+	cases   map[int64]caseRead
 	scripts map[scriptsKey]scriptIndex
 
 	// writeMu holds the overwrite guard's read of Testiny and the write it
@@ -127,6 +132,7 @@ func New(reader Client, links LinkStore, sessions SessionGateway, opts Options) 
 	s := &Service{
 		reader: reader, links: links, sessions: sessions, home: opts.Home, now: opts.Now,
 		reads:   map[domain.TestinyRunID]domain.TestinyRunView{},
+		cases:   map[int64]caseRead{},
 		scripts: map[scriptsKey]scriptIndex{},
 	}
 	if s.home == "" {

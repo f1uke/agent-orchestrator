@@ -3395,7 +3395,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// one thing the project rules out. iOS dev keeps the handover note,
 		// which is about the lease and holds unchanged; qa plays its cases with
 		// scripts instead of recording flows into the repository.
-		caseScripts := false
+		var caseScripts *prompts.MobileScripts
 		if ms := cfg.MobileScripts; ms != nil {
 			scripts := prompts.MobileScripts{Product: ms.Product, IOS: ms.Platform == domain.MobilePlatformIOS, Store: ms.StoreOrDefault()}
 			base += prompts.MobileScriptGuidance(scripts)
@@ -3406,7 +3406,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 				}
 			case domain.CrewRoleQA:
 				base += prompts.MobileScriptPlay(scripts)
-				caseScripts = true
+				caseScripts = &scripts
 			}
 		} else if cfg.HasIOSSimulator {
 			base += prompts.SimulatorGuidance()

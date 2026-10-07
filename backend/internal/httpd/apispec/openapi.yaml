@@ -5777,6 +5777,71 @@ paths:
       summary: Set the branch this session's work merges into (retargets an open PR/MR)
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/testiny/cases/{caseId}:
+    get:
+      operationId: getTestinyCase
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Testiny case id, e.g. 7166 or TC-7166.
+        in: path
+        name: caseId
+        required: true
+        schema:
+          description: Testiny case id, e.g. 7166 or TC-7166.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainTestinyCaseDetail'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+      summary: Read a case in a run linked to the task in full (test data, precondition,
+        steps), live from Testiny
+      tags:
+      - testiny
   /api/v1/sessions/{sessionId}/testiny/runs:
     get:
       operationId: listTestinyRuns
@@ -10181,6 +10246,100 @@ components:
           type: string
         worker:
           type: string
+      type: object
+    DomainTestinyCaseDetail:
+      properties:
+        automation:
+          description: The case's automation status values, e.g. Manual.
+          items:
+            type: string
+          type: array
+        bdd:
+          type: string
+        description:
+          type: string
+        expectedText:
+          type: string
+        features:
+          type: string
+        id:
+          format: int64
+          type: integer
+        jira:
+          type: string
+        platforms:
+          items:
+            type: string
+          type: array
+        precondition:
+          type: string
+        priority:
+          $ref: '#/components/schemas/DomainTestinyCasePriority'
+        remark:
+          type: string
+        section:
+          type: string
+        steps:
+          items:
+            $ref: '#/components/schemas/DomainTestinyCaseStep'
+          type: array
+        stepsText:
+          type: string
+        subFeatures:
+          type: string
+        template:
+          description: STEPS, TEXT or BDD; it says which of steps, stepsText/expectedText
+            or bdd is filled.
+          type: string
+        testData:
+          type: string
+        title:
+          type: string
+        type:
+          description: Testiny's testcase_type, e.g. FUNCTIONAL.
+          type: string
+      required:
+      - id
+      - title
+      - type
+      - template
+      - platforms
+      - jira
+      - features
+      - subFeatures
+      - section
+      - testData
+      - precondition
+      - description
+      - remark
+      - automation
+      - steps
+      - stepsText
+      - expectedText
+      - bdd
+      type: object
+    DomainTestinyCasePriority:
+      properties:
+        label:
+          type: string
+        level:
+          type: integer
+      required:
+      - level
+      - label
+      type: object
+    DomainTestinyCaseStep:
+      properties:
+        action:
+          type: string
+        expected:
+          type: string
+        "n":
+          type: integer
+      required:
+      - "n"
+      - action
+      - expected
       type: object
     EndCrewRunInput:
       properties:

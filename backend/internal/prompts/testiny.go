@@ -10,8 +10,9 @@ import (
 // gets on a project that keeps its manual test cases in Testiny, and "" on one
 // that does not. testinyProject is ProjectConfig.TestinyProject; projectID is
 // the AO project whose knowledge store holds the drafts; role is the crew role
-// ("" for a solo worker); caseScripts is true when the prompt also carries
-// MobileScriptPlay, which then owns how a case is played and judged.
+// ("" for a solo worker); caseScripts is the scripts store when the prompt also
+// carries MobileScriptPlay, which then owns how a case is played and judged, and
+// nil when it does not.
 //
 // It defers every Testiny convention (the case standard, the language cases are
 // written in, plans, runs, milestones, comment style, evidence folder names) to
@@ -31,13 +32,13 @@ import (
 // project, while a solo worker and a qa without case scripts record results as
 // well. Where MobileScriptPlay is present, the loop points at it instead of
 // restating how a case is played.
-func TestinyProtocol(testinyProject, projectID, role string, caseScripts bool) string {
+func TestinyProtocol(testinyProject, projectID, role string, caseScripts *MobileScripts) string {
 	if testinyProject == "" {
 		return ""
 	}
-	play := testinyPlay
-	if caseScripts {
-		play = testinyPlayCaseScripts
+	play := testinyPlay + testinyTestData + "."
+	if caseScripts != nil {
+		play = testinyPlayCaseScripts + testinyTestData + caseScripts.fill(testinyCaseScriptAccount)
 	}
 	loop := strings.Replace(testinyLoop, "{{play}}", play, 1)
 	owner, results, tail := testinyOwnerSolo, testinyResultsRecorded, loop+testinyNotYours+testinyReportSolo
@@ -79,7 +80,7 @@ const testinyResultsQAs = `- **Results are qa's, never yours.** Playing the run 
 const testinyLoop = "\n\n" + `**Playing a run, start to finish.**
 
 1. **Plan.** ` + "`ao testiny runs \"$AO_CREW_ID\"`" + ` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
-2. **Play each case**{{play}}
+2. **Play each case.** Read it first: ` + "`ao testiny case \"$AO_CREW_ID\" <case-id>`" + ` prints its test data, precondition, and each step with its expected result. {{play}}
 3. **Record each case:** ` + "`ao testiny result \"$AO_CREW_ID\" <run-id> <case-id> --status <STATUS> [--comment \"<reason>\"]`" + `, or a whole run at once with ` + "`--from-file`" + `.
    - **PASSED** only when both checks hold, with no comment.
    - **FAILED** with a short reason in plain Thai: one or two sentences on what went wrong.
@@ -91,9 +92,19 @@ const testinyLoop = "\n\n" + `**Playing a run, start to finish.**
 // while it runs, and from then on the daemon refuses its results.
 const testinyNotYours = "\n" + `   - **Refused with ` + "`TESTINY_WRITE_NOT_YOURS`" + `:** a qa has joined your task, and results are its to record.`
 
-const testinyPlay = `, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.`
+const testinyPlay = `Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.`
 
-const testinyPlayCaseScripts = ` with its case script, as "Playing test cases with Maestro scripts" above says: its assertions and the Figma comparison are the two checks.`
+const testinyPlayCaseScripts = `Write its case script from that, or check that its script still matches it, then play it with the script, as "Playing test cases with Maestro scripts" above says: its assertions and the Figma comparison are the two checks.`
+
+// testinyTestData opens the Test Data bullet. Test Data holds int/uat test
+// accounts only, which are safe to use and to store.
+const testinyTestData = "\n   - **Test Data** names the int/uat test account and data the case needs: use it to play the case"
+
+// testinyCaseScriptAccount finishes the Test Data bullet where qa writes case
+// scripts: a script takes its account through --account, so the account goes
+// in the store's accounts file. The store's no-data-in-script rule is about
+// reuse, not secrecy.
+const testinyCaseScriptAccount = `. When the case script needs that account and ` + "`{{store}}/accounts/{{product}}.json`" + ` does not have it yet, add it there under a clear id (the file is git-ignored; its shape is in ` + "`accounts/{{product}}.example.json`" + `) and pass it to the script with ` + "`--account <id>`" + `. The script still takes the account through ` + "`--account`" + `, never as values written into it.`
 
 const testinyReportItems = `the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the evidence folder path, and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.`
 

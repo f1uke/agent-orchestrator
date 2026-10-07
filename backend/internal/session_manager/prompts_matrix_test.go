@@ -138,6 +138,7 @@ func TestPromptMatrix_TeachesNoRemovedCommand(t *testing.T) {
 			got := c.build(t)
 			assertTeachesNoRemovedCommand(t, got)
 			assertTeachesNoDirectResultWrite(t, got)
+			assertAllowsTestAccounts(t, got)
 			c.assertTestinyBlock(t, got)
 			c.assertCaseScriptBlock(t, got)
 			path := filepath.Join(dir, c.name()+".md")
@@ -221,6 +222,8 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 		"`TESTINY_RESULT_SET_BY_PERSON`",
 		"never retry it or work around it",
 		"each run's link with its counts",
+		`ao testiny case "$AO_CREW_ID" <case-id>`,
+		"**Test Data** names the int/uat test account and data the case needs",
 	} {
 		if !strings.Contains(block, s) {
 			t.Errorf("%s: the record-a-run loop is missing %q:\n%s", c.name(), s, block)
@@ -240,6 +243,33 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 	}
 	if !defers && !strings.Contains(block, "its Figma frame") {
 		t.Errorf("%s: the loop does not judge a case against its Figma frame:\n%s", c.name(), block)
+	}
+	// A case script takes the account its case's Test Data names through
+	// --account, so where qa writes case scripts the loop says how that account
+	// reaches the store's accounts file. Elsewhere there is no store to add it to.
+	for _, s := range []string{
+		"`~/Documents/Projects/mobile-ui-scripts/accounts/nter.json`",
+		"`accounts/nter.example.json`",
+		"pass it to the script with `--account <id>`",
+	} {
+		if has := strings.Contains(block, s); has != defers {
+			t.Errorf("%s: the loop says %q = %v, want %v:\n%s", c.name(), s, has, defers, block)
+		}
+	}
+}
+
+// Test Data and the store's accounts hold int/uat test accounts only, which
+// are safe to use and to store (the human's decision, 2026-10-08). No prompt
+// may forbid copying them, or an agent refuses the very account a case needs.
+var forbidsTestAccounts = []string{"Never copy an email or password", "never copy them into"}
+
+func assertAllowsTestAccounts(t *testing.T, prompt string) {
+	t.Helper()
+	for _, s := range forbidsTestAccounts {
+		if i := strings.Index(prompt, s); i >= 0 {
+			from, to := max(0, i-120), min(len(prompt), i+120)
+			t.Errorf("prompt forbids copying int/uat test accounts: ...%s...", prompt[from:to])
+		}
 	}
 }
 

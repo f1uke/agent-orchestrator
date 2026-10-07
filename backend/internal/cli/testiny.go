@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +41,7 @@ type recordTestinyResultsRequest struct {
 // for something it can never do as typed, or that the caller must not retry:
 // exit 2, like any other misuse.
 var testinyUsageCodes = map[string]bool{
+	"TESTINY_BAD_CASE_REF":         true,
 	"TESTINY_BAD_RUN_REF":          true,
 	"TESTINY_OFF":                  true,
 	"TESTINY_RESULT_INVALID":       true,
@@ -52,12 +52,13 @@ var testinyUsageCodes = map[string]bool{
 func newTestinyCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "testiny",
-		Short: "Link a task's Testiny test runs, read them back, and record case results",
+		Short: "Link a task's Testiny test runs, read them and their cases back, and record case results",
 		Long: "A task's Testiny tab lists the Testiny test runs its cases were played in. " +
 			"AO keeps the links and a log of the results it recorded; titles, cases and results " +
 			"are read live from Testiny. Recording a result is the only write AO makes to Testiny.",
 	}
-	cmd.AddCommand(newTestinyLinkCommand(ctx), newTestinyUnlinkCommand(ctx), newTestinyRunsCommand(ctx), newTestinyResultCommand(ctx))
+	cmd.AddCommand(newTestinyLinkCommand(ctx), newTestinyUnlinkCommand(ctx), newTestinyRunsCommand(ctx),
+		newTestinyCaseCommand(ctx), newTestinyResultCommand(ctx))
 	return cmd
 }
 
@@ -126,6 +127,96 @@ func newTestinyRunsCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
+func newTestinyCaseCommand(ctx *commandContext) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "case <task> <case-id|TC-id>",
+		Short: "Show a case in a task's Testiny runs in full",
+		Long: "Shows what a case asks for, read from Testiny: its test data, precondition, steps " +
+			"with their expected results, description and remark. The case must be in a run " +
+			"linked to the task.",
+		Args: exactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			task, ref := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
+			var c domain.TestinyCaseDetail
+			if err := ctx.getJSON(cmd.Context(), "sessions/"+url.PathEscape(task)+"/testiny/cases/"+url.PathEscape(ref), &c); err != nil {
+				return testinyError(err)
+			}
+			if asJSON {
+				return writeJSON(cmd.OutOrStdout(), c)
+			}
+			_, err := io.WriteString(cmd.OutOrStdout(), testinyCaseText(c))
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Print the daemon's JSON")
+	return cmd
+}
+
+// testinyCaseText is a case as a block an agent reads before playing it: the
+// title, one meta line, then each section the case fills in.
+func testinyCaseText(c domain.TestinyCaseDetail) string {
+	var meta []string
+	add := func(label, value string) {
+		if value != "" {
+			meta = append(meta, label+": "+value)
+		}
+	}
+	if c.Priority != nil {
+		add("priority", c.Priority.Label)
+	}
+	add("type", c.Type)
+	add("platforms", strings.Join(c.Platforms, ", "))
+	add("jira", c.Jira)
+	var features []string
+	for _, f := range []string{c.Features, c.SubFeatures} {
+		if f != "" {
+			features = append(features, f)
+		}
+	}
+	add("features", strings.Join(features, " > "))
+	add("section", c.Section)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "TC-%d %s\n", c.ID, c.Title)
+	if len(meta) > 0 {
+		b.WriteString(strings.Join(meta, " | ") + "\n")
+	}
+	section := func(heading, body string) {
+		if body != "" {
+			fmt.Fprintf(&b, "\n%s\n%s\n", heading, indentLines(body, "  "))
+		}
+	}
+	section("Test data", c.TestData)
+	section("Precondition", c.Precondition)
+	section("Steps", testinyStepsText(c.Steps))
+	section("Steps", c.StepsText)
+	section("Expected result", c.ExpectedText)
+	section("Scenarios", c.BDD)
+	section("Description", c.Description)
+	section("Remark", c.Remark)
+	return b.String()
+}
+
+// testinyStepsText numbers each step, with its expected result under it.
+func testinyStepsText(steps []domain.TestinyCaseStep) string {
+	var lines []string
+	for _, s := range steps {
+		marker := strconv.Itoa(s.N) + ". "
+		pad := strings.Repeat(" ", len(marker))
+		lines = append(lines, marker+indentLines(s.Action, pad)[len(pad):])
+		if s.Expected != "" {
+			lines = append(lines, pad+"-> "+indentLines(s.Expected, pad+"   ")[len(pad)+3:])
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// indentLines puts prefix before every line of s.
+func indentLines(s, prefix string) string {
+	return prefix + strings.ReplaceAll(s, "\n", "\n"+prefix)
+}
+
 func newTestinyResultCommand(ctx *commandContext) *cobra.Command {
 	var status, comment, fromFile string
 	cmd := &cobra.Command{
@@ -161,8 +252,6 @@ func newTestinyResultCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
-var testinyCaseRef = regexp.MustCompile(`^(?i:tc-)?(\d+)$`)
-
 // testinyResultsFromArgs is the one case named on the command line, or the
 // batch in --from-file. The daemon checks statuses and comments.
 func testinyResultsFromArgs(cmd *cobra.Command, caseArg []string, status, comment, fromFile string) ([]domain.TestinyResult, error) {
@@ -189,13 +278,9 @@ func testinyResultsFromArgs(cmd *cobra.Command, caseArg []string, status, commen
 	if len(caseArg) != 1 || status == "" {
 		return nil, usageError{errors.New("usage: give a case and --status, or --from-file")}
 	}
-	m := testinyCaseRef.FindStringSubmatch(strings.TrimSpace(caseArg[0]))
-	if m == nil {
-		return nil, usageError{fmt.Errorf("usage: %q is not a case: give its id (7166) or TC-7166", caseArg[0])}
-	}
-	id, err := strconv.ParseInt(m[1], 10, 64)
+	id, err := domain.ParseTestinyCaseRef(caseArg[0])
 	if err != nil {
-		return nil, usageError{fmt.Errorf("usage: %q is not a case id", caseArg[0])}
+		return nil, usageError{fmt.Errorf("usage: %q is %w", caseArg[0], err)}
 	}
 	return []domain.TestinyResult{{CaseID: id, Status: domain.TestinyCaseStatus(status), Comment: comment}}, nil
 }

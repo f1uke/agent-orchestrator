@@ -102,7 +102,7 @@ adb -s <serial> logcat -d -t 500              # what the app printed, when the s
 - **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (`bin/flow` falls back to `$ANDROID_SERIAL`), and never wipe or kill an emulator - it may be someone else's.
 - **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: find the selectors with `maestro --device <serial> hierarchy` and write the YAML. A product's iOS and Android apps share their scripts; where they differ, branch with `runFlow: when: platform: Android`. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`. The store is outside this repository: nothing there goes into your pull request.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
-- **Accounts are referred to by id.** `bin/flow accounts nter` lists them (int/uat only) and `--account <id>` passes one. Never copy an email or password into a report, commit, pull request, test case or screenshot.
+- **Accounts are referred to by id.** `bin/flow accounts nter` lists them and `--account <id>` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.
 
 Everything else - the store's layout, its rules and how to set up a device - is in the store's README.
 
@@ -134,7 +134,8 @@ This project keeps its manual test cases in Testiny project `MOB`. You own every
 **Playing a run, start to finish.**
 
 1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
-2. **Play each case** with its case script, as "Playing test cases with Maestro scripts" above says: its assertions and the Figma comparison are the two checks.
+2. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Write its case script from that, or check that its script still matches it, then play it with the script, as "Playing test cases with Maestro scripts" above says: its assertions and the Figma comparison are the two checks.
+   - **Test Data** names the int/uat test account and data the case needs: use it to play the case. When the case script needs that account and `~/Documents/Projects/mobile-ui-scripts/accounts/nter.json` does not have it yet, add it there under a clear id (the file is git-ignored; its shape is in `accounts/nter.example.json`) and pass it to the script with `--account <id>`. The script still takes the account through `--account`, never as values written into it.
 3. **Record each case:** `ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"]`, or a whole run at once with `--from-file`.
    - **PASSED** only when both checks hold, with no comment.
    - **FAILED** with a short reason in plain Thai: one or two sentences on what went wrong.

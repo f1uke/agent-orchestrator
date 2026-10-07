@@ -1,4 +1,4 @@
-// Package testiny reads Testiny test runs through the `testiny` CLI, and
+// Package testiny reads Testiny test runs and cases through the `testiny` CLI, and
 // records case results in a run. Results are the only thing it writes.
 //
 // The CLI prints {"data":...,"meta":...} on stdout, and on failure prints
@@ -65,7 +65,7 @@ type Options struct {
 	Now  func() time.Time
 }
 
-// Client reads runs, plans, milestones and projects.
+// Client reads runs, cases, plans, milestones and projects.
 type Client struct {
 	lookPath    LookPath
 	run         Runner
@@ -215,6 +215,88 @@ func (c *Client) SetResults(ctx context.Context, run domain.TestinyRunID, projec
 		return written, err
 	}
 	return append(written, batch...), nil
+}
+
+// Case reads one test case in full, its rich text rendered to plain text. A
+// STEPS case's steps come from its table; a BDD case's feature file is a second
+// call. A case that does not exist is ErrNotFound.
+func (c *Client) Case(ctx context.Context, id int64) (domain.TestinyCaseDetail, error) {
+	var raw struct {
+		ID           int64    `json:"id"`
+		Title        string   `json:"title"`
+		Priority     *int     `json:"priority"`
+		Type         string   `json:"testcase_type"`
+		Template     string   `json:"template"`
+		Precondition string   `json:"precondition_text"`
+		Content      string   `json:"content_text"`
+		StepsText    string   `json:"steps_text"`
+		ExpectedText string   `json:"expected_result_text"`
+		Description  string   `json:"description"`
+		Platforms    []string `json:"cf__platform"`
+		Jira         string   `json:"cf__jira"`
+		Features     string   `json:"cf__features"`
+		SubFeatures  string   `json:"cf__subfeatures"`
+		Section      string   `json:"cf__section"`
+		TestData     string   `json:"cf__testdata"`
+		CfDesc       string   `json:"cf__description"`
+		Remark       string   `json:"cf__remark"`
+		Automation   []string `json:"cf__automationstatus"`
+	}
+	if err := c.call(ctx, &raw, "case", "show", idArg(id)); err != nil {
+		return domain.TestinyCaseDetail{}, err
+	}
+	d := domain.TestinyCaseDetail{
+		ID:           raw.ID,
+		Title:        raw.Title,
+		Type:         raw.Type,
+		Template:     domain.TestinyCaseTemplate(raw.Template),
+		Platforms:    nonNil(raw.Platforms),
+		Jira:         raw.Jira,
+		Features:     raw.Features,
+		SubFeatures:  raw.SubFeatures,
+		Section:      raw.Section,
+		TestData:     richText(raw.TestData),
+		Precondition: richText(raw.Precondition),
+		Description:  joinNonEmpty(richText(raw.Description), richText(raw.CfDesc)),
+		Remark:       richText(raw.Remark),
+		Automation:   nonNil(raw.Automation),
+		Steps:        []domain.TestinyCaseStep{},
+	}
+	if raw.Priority != nil {
+		p := domain.NewTestinyCasePriority(*raw.Priority)
+		d.Priority = &p
+	}
+	switch d.Template {
+	case domain.TestinyTemplateSteps:
+		d.Steps = stepsTable(raw.Content)
+	case domain.TestinyTemplateText:
+		d.StepsText, d.ExpectedText = richText(raw.StepsText), richText(raw.ExpectedText)
+	case domain.TestinyTemplateBDD:
+		feature, err := c.output(ctx, "case", "bdd", idArg(id))
+		if err != nil {
+			return domain.TestinyCaseDetail{}, err
+		}
+		d.BDD = strings.TrimSpace(string(feature))
+	}
+	return d, nil
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// joinNonEmpty joins the texts that are not empty, a blank line apart.
+func joinNonEmpty(texts ...string) string {
+	var kept []string
+	for _, t := range texts {
+		if t != "" {
+			kept = append(kept, t)
+		}
+	}
+	return strings.Join(kept, "\n\n")
 }
 
 // Plan reads a test plan's title.

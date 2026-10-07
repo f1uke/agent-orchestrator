@@ -119,3 +119,25 @@ func TestParseTestinyResults(t *testing.T) {
 		}
 	}
 }
+
+func TestParseTestinyCaseRef(t *testing.T) {
+	for in, want := range map[string]int64{"7166": 7166, "TC-7166": 7166, "tc-12": 12, " 7166 ": 7166} {
+		got, err := ParseTestinyCaseRef(in)
+		if err != nil || got != want {
+			t.Errorf("ParseTestinyCaseRef(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "0", "TC-0", "TR-7166", "7166x", "-1", "99999999999999999999"} {
+		if _, err := ParseTestinyCaseRef(in); !errors.Is(err, ErrBadCaseRef) {
+			t.Errorf("ParseTestinyCaseRef(%q) err = %v, want ErrBadCaseRef", in, err)
+		}
+	}
+}
+
+func TestTestinyCasePriorityNamesTestinysLevels(t *testing.T) {
+	for level, want := range map[int]string{0: "Critical", 1: "High", 2: "Medium", 3: "Low", 4: "4"} {
+		if got := NewTestinyCasePriority(level); got != (TestinyCasePriority{Level: level, Label: want}) {
+			t.Errorf("NewTestinyCasePriority(%d) = %+v, want label %q", level, got, want)
+		}
+	}
+}

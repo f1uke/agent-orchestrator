@@ -29,6 +29,7 @@ type fakeTestiny struct {
 	refresh  bool
 	unlinked domain.TestinyRunID
 	recorded recordCall
+	caseID   int64
 }
 
 // recordCall is what one RecordResults call was given.
@@ -67,6 +68,17 @@ func (f *fakeTestiny) RecordResults(_ context.Context, task domain.SessionID, id
 	}
 	return domain.TestinyRunView{Link: domain.TestinyRunLink{SessionID: task, RunID: id}, Title: "Chat notice",
 		Counts: map[domain.TestinyCaseStatus]int{"FAILED": 1}, Cases: []domain.TestinyCaseResult{{ID: 7166, Status: "FAILED"}}}, nil
+}
+
+func (f *fakeTestiny) Case(_ context.Context, task domain.SessionID, id int64) (domain.TestinyCaseDetail, error) {
+	f.asked = append(f.asked, "case "+string(task))
+	f.caseID = id
+	if f.err != nil {
+		return domain.TestinyCaseDetail{}, f.err
+	}
+	return domain.TestinyCaseDetail{ID: id, Title: "Fund disclaimer", Template: domain.TestinyTemplateSteps,
+		Priority: &domain.TestinyCasePriority{Level: 1, Label: "High"}, Platforms: []string{"iOS"}, Automation: []string{},
+		TestData: "qa@example.com / fake-password", Steps: []domain.TestinyCaseStep{{N: 1, Action: "Open chat", Expected: "Chat list shows"}}}, nil
 }
 
 func newTestinyServer(t *testing.T, svc *fakeTestiny, crew map[domain.SessionID]domain.SessionID) *httptest.Server {
@@ -213,12 +225,13 @@ func TestTestinyRoutesResolveToTheTasksDev(t *testing.T) {
 		{"GET", qa, ""},
 		{"DELETE", qa + "/632", ""},
 		{"POST", qa + "/632/results", `{"results":[{"caseId":7166,"status":"PASSED"}],"from":"task-qa"}`},
+		{"GET", "/api/v1/sessions/" + string(scopeQA) + "/testiny/cases/7166", ""},
 	} {
 		if body, status, _ := doRequest(t, srv, req[0], req[1], req[2]); status >= 300 {
 			t.Fatalf("%s %s: status %d body %s", req[0], req[1], status, body)
 		}
 	}
-	want := []string{"link task-dev", "runs task-dev", "unlink task-dev", "record task-dev"}
+	want := []string{"link task-dev", "runs task-dev", "unlink task-dev", "record task-dev", "case task-dev"}
 	if strings.Join(svc.asked, ",") != strings.Join(want, ",") {
 		t.Fatalf("service asked %v, want %v", svc.asked, want)
 	}
@@ -274,6 +287,50 @@ func TestTestinyRecordResultsErrorsMapToCodes(t *testing.T) {
 	} {
 		srv := newTestinyServer(t, &fakeTestiny{err: tc.err}, nil)
 		body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/632/results", `{"results":[{"caseId":7166,"status":"PASSED"}]}`)
+		if status != tc.status || !strings.Contains(string(body), `"code":"`+tc.code+`"`) {
+			t.Errorf("%v: status %d body %s, want %d %s", tc.err, status, body, tc.status, tc.code)
+		}
+	}
+}
+
+func TestTestinyCase(t *testing.T) {
+	svc := &fakeTestiny{}
+	srv := newTestinyServer(t, svc, nil)
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/cases/TC-7166", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d body %s", status, body)
+	}
+	if svc.caseID != 7166 {
+		t.Fatalf("service got case %d, want 7166", svc.caseID)
+	}
+	var got domain.TestinyCaseDetail
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode: %v (%s)", err, body)
+	}
+	if got.ID != 7166 || got.Priority == nil || got.Priority.Label != "High" || got.TestData != "qa@example.com / fake-password" ||
+		len(got.Steps) != 1 || got.Steps[0].Expected != "Chat list shows" {
+		t.Fatalf("body = %s", body)
+	}
+	if !strings.Contains(string(body), `"automation":[]`) {
+		t.Fatalf("an empty list must be [], body = %s", body)
+	}
+
+	body, status, _ = doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/cases/TR-7166", "")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), `"code":"TESTINY_BAD_CASE_REF"`) {
+		t.Fatalf("bad case ref: status %d body %s", status, body)
+	}
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{fmt.Errorf("%w: TC-7166 is in none of the runs", testinysvc.ErrCaseNotInTask), http.StatusNotFound, "TESTINY_CASE_NOT_IN_TASK"},
+		{testinysvc.ErrOff, http.StatusConflict, "TESTINY_OFF"},
+		{fmt.Errorf("%w: Unauthenticated user", testinyadapter.ErrAuth), http.StatusBadGateway, "TESTINY_AUTH"},
+		{testinyadapter.ErrNotFound, http.StatusBadGateway, "TESTINY_UNAVAILABLE"},
+	} {
+		srv := newTestinyServer(t, &fakeTestiny{err: tc.err}, nil)
+		body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/cases/7166", "")
 		if status != tc.status || !strings.Contains(string(body), `"code":"`+tc.code+`"`) {
 			t.Errorf("%v: status %d body %s, want %d %s", tc.err, status, body, tc.status, tc.code)
 		}

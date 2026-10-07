@@ -731,10 +731,10 @@ func TestCrewProtocol_SoloRendersNothingAndAboutNamesAnArtifact(t *testing.T) {
 // store, for every worker kind.
 func TestTestinyProtocol_RendersOnlyForATestinyProject(t *testing.T) {
 	for _, role := range []string{"", "dev", "qa"} {
-		if got := TestinyProtocol("", "mer", role, true); got != "" {
+		if got := TestinyProtocol("", "mer", role, &MobileScripts{Product: "nter", IOS: true, Store: "/store"}); got != "" {
 			t.Fatalf("role %q: a project without Testiny rendered a Testiny block:\n%s", role, got)
 		}
-		got := TestinyProtocol("MOB", "mer", role, false)
+		got := TestinyProtocol("MOB", "mer", role, nil)
 		for _, want := range []string{
 			"\n\n## Testiny test cases (AO)\n",
 			"Testiny project `MOB`",
