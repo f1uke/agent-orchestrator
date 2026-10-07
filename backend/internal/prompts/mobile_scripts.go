@@ -201,7 +201,7 @@ On this project a simulator is driven ONLY by Maestro scripts from the scripts s
 
 - **The device that is yours is ` + "`$AO_SIM_UDID`" + `**, and ` + "`bin/flow`" + ` and ` + "`ao sim`" + ` already mean it. Unset means none was free: name a scratch device (` + "`--device`" + ` / ` + "`--udid`" + `), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase. AO makes the device trust the proxy's CA every time it boots or a session claims it.
 - **A lease guards the device, not the command.** ` + "`ao sim run`" + ` and ` + "`ao sim install`" + ` take it as they install; a raw ` + "`xcrun simctl`" + ` or ` + "`xcodebuild -destination`" + ` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
-- **` + "`ao sim doctor --app <bundle id>`" + ` is the health check** of your device: booted, whose lease, which build is installed (` + "`--expect <your .app>`" + ` compares it with what you built) and whether the proxy CA is trusted. It only reads: run it before the first drive and after every failed run.`
+- **` + "`ao sim doctor --app <bundle id> --expect <your .app>`" + ` is the health check** of your device: booted, whose lease, whether the installed build is the one you built, and whether the proxy CA is trusted. It only reads: run it before the first drive and after every failed run.`
 
 const mobileScriptSkillAndroid = "\n\n" + `## Driving the Android emulator: the project's verify skill (AO)
 
