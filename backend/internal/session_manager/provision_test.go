@@ -211,7 +211,7 @@ func TestRunPostCreate(t *testing.T) {
 }
 
 // TestSpawnEnv_CrewID: AO_CREW_ID names the TASK, so a command an agent is
-// taught ("write the checklist against $AO_CREW_ID") is correct in both shapes.
+// taught ("`ao session get \"$AO_CREW_ID\"`") is correct in both shapes.
 // A solo session is its own task and gets its own id, so there is no branch for
 // an agent to get wrong.
 func TestSpawnEnv_CrewID(t *testing.T) {

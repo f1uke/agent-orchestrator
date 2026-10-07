@@ -840,6 +840,7 @@ export function SessionView({ sessionId }: SessionViewProps) {
 									browserPoppedOut={browserPoppedOut}
 									hasIOSSimulator={hasIOSSimulator}
 									hasWebUI={hasWebUI}
+									testinyProject={workspace?.testinyProject}
 									isInspectorVisible={isInspectorOpen}
 									onOpenReviewerTerminal={({ handleId, harness }) =>
 										setTerminalTarget({ kind: "reviewer", handleId, harness })

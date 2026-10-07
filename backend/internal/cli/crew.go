@@ -57,11 +57,11 @@ type crewWakeResponse struct {
 
 type crewAddRequest struct {
 	Role string `json:"role,omitempty"`
-	// From names the SENDING session, the same way `ao send` and `ao smoke set`
-	// do. It is the only thing that tells the daemon an AGENT ran this rather
-	// than a person: a human's shell has no $AO_SESSION_ID, so the field is empty
-	// and the call is never refused, while every AO session identifies itself and
-	// is refused on a project that has turned automatic crew formation off.
+	// From names the SENDING session, the same way `ao send` does. It is the
+	// only thing that tells the daemon an AGENT ran this rather than a person: a
+	// human's shell has no $AO_SESSION_ID, so the field is empty and the call is
+	// never refused, while every AO session identifies itself and is refused on a
+	// project that has turned automatic crew formation off.
 	From string `json:"from,omitempty"`
 }
 
@@ -147,7 +147,6 @@ func newCrewReviewCommand(ctx *commandContext) *cobra.Command {
 			}
 			_, printErr := fmt.Fprintf(cmd.OutOrStdout(),
 				"%s (%s) is on this task and working, in your worktree. It reads the diff against the base branch, not your conversation.\n"+
-					"From here the smoke checklist is SHARED: use `ao smoke add` / `edit --case <id>`, never `ao smoke set`, which would delete its cases.\n"+
 					"Message it by role: `ao send --crew %s --about <commit-sha> --message \"...\"`.\n",
 				out.Session.ID, crewRoleOf(out.Session), crewRoleOf(out.Session))
 			return printErr
@@ -177,8 +176,8 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 			"dev asks for its own qa with `ao crew review` once it thinks the change is done.\n" +
 			"This is the wider door: it also works on a `mechanical` task, where dev may not\n" +
 			"ask, and on a task whose dev never got round to it. dev is TOLD when you use it,\n" +
-			"because a dev that was working alone is holding instructions that say the smoke\n" +
-			"checklist is its own.\n\n" +
+			"because a dev that was working alone is holding instructions that say the\n" +
+			"worktree is its own.\n\n" +
 			"Name either member of the task; both resolve to the same crew. It is refused if\n" +
 			"the task already has that role, or if the task is finished (its pull request has\n" +
 			"merged, or its agent has been torn down).\n\n" +
@@ -212,9 +211,8 @@ func newCrewAddCommand(ctx *commandContext) *cobra.Command {
 }
 
 // explainCrewAddRefusal turns the crew-off refusal into a usage error (exit 2),
-// the same way `ao smoke set` treats its two: it is not a failure of the command
-// but a statement that this caller may not do this here, and the daemon's
-// message already names who can. Everything else passes through unchanged, so a
+// because it is not a failure of the command but a statement that this caller
+// may not do this here, and the daemon's message already names who can. Everything else passes through unchanged, so a
 // real error still exits 1 and still looks like one.
 func explainCrewAddRefusal(err error) error {
 	var apiErr apiResponseError

@@ -18,7 +18,7 @@ import (
 // StartCrewRunInput is the body of POST .../crew/runs.
 type StartCrewRunInput struct {
 	Kind  string `json:"kind" description:"What is about to run: build, test or device." enum:"build,test,device"`
-	Label string `json:"label,omitempty" description:"Free-text label for the run (e.g. the command), shown in the Tests tab."`
+	Label string `json:"label,omitempty" description:"Free-text label for the run (e.g. the command), shown on the Summary tab."`
 }
 
 // StartCrewRunResponse is the body of POST .../crew/runs.
@@ -47,6 +47,11 @@ type EndCrewRunResponse struct {
 	Escalated   bool           `json:"escalated" description:"The cap is spent: stop re-running; the task parks at NEEDS YOU."`
 }
 
+// ListCrewRunsQuery is the query string of GET .../crew/runs.
+type ListCrewRunsQuery struct {
+	Scope string `query:"scope,omitempty" enum:"task" description:"task returns the runs of every member of the session's task (dev and qa), each naming its role. Omitted returns the session's own runs."`
+}
+
 // ListCrewRunsResponse is the body of GET .../crew/runs.
 type ListCrewRunsResponse struct {
 	Runs []domain.CrewRun `json:"runs"`
@@ -55,8 +60,13 @@ type ListCrewRunsResponse struct {
 // CrewRunsController owns the session-scoped /crew/runs routes: the bracket a
 // crew member puts around a build or a test run. A nil Svc returns 501,
 // mirroring the other optional controllers.
+//
+// The routes are agent-scoped: a bracket is the member's own, and so is the
+// list `ao crew run --list` prints. Only the list's ?scope=task reads the whole
+// task, through Tasks, so the default stays what every existing caller expects.
 type CrewRunsController struct {
-	Svc crewrunsvc.Manager
+	Svc   crewrunsvc.Manager
+	Tasks TaskResolver
 }
 
 // Register mounts the crew-run routes on the supplied router.
@@ -71,7 +81,19 @@ func (c *CrewRunsController) list(w http.ResponseWriter, r *http.Request) {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/crew/runs")
 		return
 	}
-	runs, err := c.Svc.List(r.Context(), sessionID(r))
+	var (
+		runs []domain.CrewRun
+		err  error
+	)
+	switch r.URL.Query().Get("scope") {
+	case "":
+		runs, err = c.Svc.List(r.Context(), sessionID(r))
+	case "task":
+		runs, err = c.Svc.ListTask(r.Context(), c.taskOf(r))
+	default:
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SCOPE", "scope must be task or omitted", nil)
+		return
+	}
 	if err != nil {
 		c.fail(w, r, err)
 		return
@@ -80,6 +102,21 @@ func (c *CrewRunsController) list(w http.ResponseWriter, r *http.Request) {
 		runs = []domain.CrewRun{}
 	}
 	envelope.WriteJSON(w, http.StatusOK, ListCrewRunsResponse{Runs: runs})
+}
+
+// taskOf resolves the path's session to its task's id (dev's). It fails quiet
+// the way TaskScoped does: an id that cannot be resolved is read as its own
+// task, so the service answers with whatever that id has.
+func (c *CrewRunsController) taskOf(r *http.Request) domain.SessionID {
+	id := sessionID(r)
+	if c.Tasks == nil {
+		return id
+	}
+	dev, err := c.Tasks.TaskDevOf(r.Context(), id)
+	if err != nil || dev == "" {
+		return id
+	}
+	return dev
 }
 
 func (c *CrewRunsController) start(w http.ResponseWriter, r *http.Request) {

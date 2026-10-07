@@ -166,7 +166,7 @@ resizable`, react-resizable-panels v4 `collapsible` panel + imperative API,
   - **Deliberately untouched:** left rails that convey _selection, focus,
     quotation or hierarchy_ rather than status — selected file-panel/file-tree
     row, Browse-Jira "assigned to me" + focus rows, ADF blockquote, anchored diff
-    comment, smoke "why" callout, subtask indent. Those are a live convention,
+    comment, subtask indent. Those are a live convention,
     not the dated thing; the user confirmed leaving them.
   - Light-theme lane hues were darkened at the same time
     (`--lane-working-bright` 4.09:1 → 5.14:1, `--lane-needs-bright` 4.44:1 →

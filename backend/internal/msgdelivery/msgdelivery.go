@@ -62,7 +62,6 @@ const (
 	TriggerSend            = "send"             // ao send / the app's send box / crew send
 	TriggerQueueDrain      = "queue-drain"      // a held message delivered once the agent was listening
 	TriggerNudge           = "nudge"            // lifecycle: CI failed, review posted, merge conflict
-	TriggerSmokeReport     = "smoke-report"     // the Tests tab reporting results back
 	TriggerReviewNotify    = "review-notify"    // the reviewer pane being handed its brief
 	TriggerCrewNotice      = "crew-notice"      // AO's own housekeeping notices to a session
 	TriggerCommentDispatch = "comment-dispatch" // a review thread forwarded to the worker

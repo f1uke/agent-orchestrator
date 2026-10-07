@@ -113,7 +113,7 @@ type CrewRun struct {
 	// CrewID is the task this run belongs to (dev's session id), or empty when
 	// the member is solo. Stored so a run survives being read from either member.
 	CrewID SessionID `json:"crewId,omitempty"`
-	Role   CrewRole  `json:"role,omitempty"`
+	Role   CrewRole  `json:"role,omitempty" enum:"dev,qa" description:"The crew member that made the run. Absent when the task has no crew."`
 	// WorktreePath is the checkout that was watched.
 	WorktreePath string      `json:"worktreePath,omitempty"`
 	Kind         CrewRunKind `json:"kind"`

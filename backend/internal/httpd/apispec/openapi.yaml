@@ -3162,6 +3162,17 @@ paths:
         schema:
           description: Session identifier, e.g. project-1.
           type: string
+      - description: task returns the runs of every member of the session's task (dev
+          and qa), each naming its role. Omitted returns the session's own runs.
+        in: query
+        name: scope
+        schema:
+          description: task returns the runs of every member of the session's task
+            (dev and qa), each naming its role. Omitted returns the session's own
+            runs.
+          enum:
+          - task
+          type: string
       responses:
         "200":
           content:
@@ -3169,6 +3180,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListCrewRunsResponse'
           description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
         "500":
           content:
             application/json:
@@ -3181,7 +3198,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Not Implemented
-      summary: List a session's bracketed build/test runs, newest first
+      summary: List a session's bracketed build/test runs, or with scope=task its
+        whole task's, newest first
       tags:
       - sessions
     post:
@@ -5594,797 +5612,6 @@ paths:
       summary: Start recording a simulator's screen to a video file for this session
       tags:
       - sim
-  /api/v1/sessions/{sessionId}/smoke-checks:
-    get:
-      operationId: listSmokeChecks
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListSmokeChecksResponse'
-          description: OK
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: List a session's smoke-test checklist
-      tags:
-      - smoke
-    patch:
-      operationId: addSmokeCases
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ControllersAddSmokeCasesInput'
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListSmokeChecksResponse'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Add or edit cases without touching the rest of the checklist
-      tags:
-      - smoke
-    put:
-      operationId: authorSmokeChecks
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AuthorSmokeChecksInput'
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListSmokeChecksResponse'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Author/replace a session's smoke-test checklist (results preserved
-        by case id)
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}:
-    delete:
-      operationId: removeSmokeCase
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListSmokeChecksResponse'
-          description: OK
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Remove one case the user has not played (a played case is retired instead)
-      tags:
-      - smoke
-    patch:
-      operationId: editSmokeCase
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ControllersEditSmokeCaseInput'
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SmokeCheckResponse'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Edit one case's authored fields; an omitted field is left alone
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/agent-result:
-    post:
-      operationId: recordSmokeAgentResult
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RecordSmokeAgentResultInput'
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SmokeCheckResponse'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Record a machine's result for a smoke-test case, beside (never instead
-        of) the user's
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence:
-    post:
-      operationId: uploadSmokeEvidence
-      parameters:
-      - description: 'Who attached it: user (default) or agent. Agent files land in
-          the case''s separate agentEvidence list so provenance is never ambiguous.'
-        in: query
-        name: source
-        schema:
-          description: 'Who attached it: user (default) or agent. Agent files land
-            in the case''s separate agentEvidence list so provenance is never ambiguous.'
-          type: string
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SmokeEvidenceResponse'
-          description: OK
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Attach a screenshot/short clip to a smoke-test case (multipart/form-data
-        'file' or raw body)
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}:
-    delete:
-      operationId: deleteSmokeEvidence
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      - description: Evidence blob identifier.
-        in: path
-        name: evidenceId
-        required: true
-        schema:
-          description: Evidence blob identifier.
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SmokeCheckResponse'
-          description: OK
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Remove one evidence blob from a smoke-test case
-      tags:
-      - smoke
-    get:
-      operationId: serveSmokeEvidence
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      - description: Evidence blob identifier.
-        in: path
-        name: evidenceId
-        required: true
-        schema:
-          description: Evidence blob identifier.
-          type: string
-      responses:
-        "200":
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-          description: OK
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Serve a stored smoke-test evidence blob
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/evidence/{evidenceId}/export:
-    post:
-      operationId: exportSmokeEvidence
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      - description: Evidence blob identifier.
-        in: path
-        name: evidenceId
-        required: true
-        schema:
-          description: Evidence blob identifier.
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvidenceExportResponse'
-          description: OK
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Materialize a human-named, correctly-extensioned copy of an evidence
-        blob for Reveal/Open
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/reset:
-    post:
-      operationId: resetSmokeCheck
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SmokeCheckResponse'
-          description: OK
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Clear a smoke-test case's verdict/note/evidence
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/retire:
-    post:
-      operationId: retireSmokeCheck
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RetireSmokeCheckInput'
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SmokeCheckResponse'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Retire a smoke-test case out of the checklist, keeping its results
-        and the reason it went
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/{checkId}/verdict:
-    post:
-      operationId: setSmokeVerdict
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      - description: Smoke-check case identifier.
-        in: path
-        name: checkId
-        required: true
-        schema:
-          description: Smoke-check case identifier.
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetSmokeVerdictInput'
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SmokeCheckResponse'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Record the user's verdict + note for a smoke-test case
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/jira:
-    post:
-      operationId: postSmokeToJira
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PostSmokeToJiraResponse'
-          description: OK
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Internal Server Error
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Post a session's smoke-test results to its linked Jira issue as a table
-        comment with evidence attachments
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/report:
-    post:
-      operationId: reportSmokeChecks
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReportSmokeResponse'
-          description: OK
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Report a session's smoke-test results back to the worker
-      tags:
-      - smoke
-  /api/v1/sessions/{sessionId}/smoke-checks/stand-down:
-    post:
-      operationId: standDownSmokeChecklist
-      parameters:
-      - description: Session identifier, e.g. project-1.
-        in: path
-        name: sessionId
-        required: true
-        schema:
-          description: Session identifier, e.g. project-1.
-          type: string
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ControllersStandDownSmokeChecklistInput'
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListSmokeChecksResponse'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
-        "404":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Found
-        "422":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Unprocessable Entity
-        "501":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Not Implemented
-      summary: Record that this change needs no human verification, with the reason
-      tags:
-      - smoke
   /api/v1/sessions/{sessionId}/spec:
     patch:
       operationId: updateTodoSpec
@@ -6550,6 +5777,294 @@ paths:
       summary: Set the branch this session's work merges into (retargets an open PR/MR)
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/testiny/cases/{caseId}:
+    get:
+      operationId: getTestinyCase
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Testiny case id, e.g. 7166 or TC-7166.
+        in: path
+        name: caseId
+        required: true
+        schema:
+          description: Testiny case id, e.g. 7166 or TC-7166.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainTestinyCaseDetail'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+      summary: Read a case in a run linked to the task in full (test data, precondition,
+        steps), live from Testiny
+      tags:
+      - testiny
+  /api/v1/sessions/{sessionId}/testiny/runs:
+    get:
+      operationId: listTestinyRuns
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: 1 reads every run from Testiny now instead of serving a read
+          from the last 15 seconds.
+        in: query
+        name: refresh
+        schema:
+          description: 1 reads every run from Testiny now instead of serving a read
+            from the last 15 seconds.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestinyRunsResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the Testiny runs linked to a task, read live from Testiny
+      tags:
+      - testiny
+    post:
+      operationId: linkTestinyRun
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkTestinyRunInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestinyRunView'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+      summary: Link a Testiny run to a task, once Testiny confirms it is in the project's
+        Testiny project
+      tags:
+      - testiny
+  /api/v1/sessions/{sessionId}/testiny/runs/{runId}:
+    delete:
+      operationId: unlinkTestinyRun
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Testiny run id, e.g. 632 or TR-632.
+        in: path
+        name: runId
+        required: true
+        schema:
+          description: Testiny run id, e.g. 632 or TR-632.
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Unlink a Testiny run from a task
+      tags:
+      - testiny
+  /api/v1/sessions/{sessionId}/testiny/runs/{runId}/results:
+    post:
+      operationId: recordTestinyResults
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Testiny run id, e.g. 632 or TR-632.
+        in: path
+        name: runId
+        required: true
+        schema:
+          description: Testiny run id, e.g. 632 or TR-632.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordTestinyResultsInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestinyRunView'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+      summary: Record case results in a run linked to the task, and return the run
+        read fresh from Testiny
+      tags:
+      - testiny
   /api/v1/sessions/{sessionId}/transcript-ref:
     post:
       operationId: reportSessionTranscriptRef
@@ -7194,74 +6709,6 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Internal Server Error
       summary: Replace the auto-nudge-on-comments gate setting
-      tags:
-      - settings
-  /api/v1/settings/evidence-retention:
-    get:
-      operationId: getEvidenceRetentionSettings
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvidenceRetentionSettingsResponse'
-          description: OK
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Internal Server Error
-      summary: Fetch the smoke-test evidence retention settings
-      tags:
-      - settings
-    put:
-      operationId: setEvidenceRetentionSettings
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SetEvidenceRetentionSettingsRequest'
-        required: true
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvidenceRetentionSettingsResponse'
-          description: OK
-        "400":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Bad Request
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Internal Server Error
-      summary: Replace the smoke-test evidence retention settings
-      tags:
-      - settings
-  /api/v1/settings/evidence-retention/sweep:
-    post:
-      operationId: sweepEvidenceRetention
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EvidenceRetentionSweepResponse'
-          description: OK
-        "500":
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/APIError'
-          description: Internal Server Error
-      summary: Run the evidence retention sweep now (manual trigger)
       tags:
       - settings
   /api/v1/settings/message-templates:
@@ -8600,21 +8047,6 @@ components:
         threshold:
           type: integer
       type: object
-    AuthorSmokeChecksInput:
-      properties:
-        cases:
-          description: The full 3–6 case checklist.
-          items:
-            $ref: '#/components/schemas/SmokeAuthoredCaseInput'
-          type: array
-        from:
-          description: The calling session's own id, used to attribute the write.
-            Omitted or unknown callers author anonymously; nobody is refused for who
-            they are.
-          type: string
-      required:
-      - cases
-      type: object
     AutoNudgeSettingsResponse:
       properties:
         enabled:
@@ -8804,20 +8236,6 @@ components:
       - sessionId
       - session
       type: object
-    ControllersAddSmokeCasesInput:
-      properties:
-        cases:
-          description: The cases to add or edit. An id already on the checklist is
-            edited in place, keeping the user's verdict/note/evidence.
-          items:
-            $ref: '#/components/schemas/SmokeAuthoredCaseInput'
-          type: array
-        from:
-          description: The calling session's own id, used to attribute the write.
-          type: string
-      required:
-      - cases
-      type: object
     ControllersApproveLearningProposalRequest:
       properties:
         content:
@@ -8864,6 +8282,19 @@ components:
       required:
       - hits
       type: object
+    ControllersCrewHandbackView:
+      properties:
+        about:
+          description: 'The message''s --about subject: a commit SHA, or on a Testiny
+            project a case or run id.'
+          type: string
+        at:
+          format: date-time
+          type: string
+      required:
+      - at
+      - about
+      type: object
     ControllersCrewSendRequest:
       properties:
         about:
@@ -8877,10 +8308,6 @@ components:
           - dev
           - qa
           type: string
-        stillWorking:
-          description: 'qa only: this message is a mid-run update, not the end of
-            the run, so the handback completeness check does not apply.'
-          type: boolean
         wire:
           description: 'Pin this one message to a path: pane (type it into the terminal,
             never touch the socket) or socket (socket or nothing - the send FAILS
@@ -8949,46 +8376,6 @@ components:
       required:
       - content
       type: object
-    ControllersEditSmokeCaseInput:
-      properties:
-        expected:
-          description: Expected result. Omit to leave unchanged.
-          type:
-          - "null"
-          - string
-        fileRef:
-          description: file:line the change touched. Omit to leave unchanged.
-          type:
-          - "null"
-          - string
-        from:
-          description: The calling session's own id, used to attribute the write.
-          type: string
-        name:
-          description: One-line 'what to verify'. Omit to leave unchanged; may not
-            be set empty.
-          type:
-          - "null"
-          - string
-        prNum:
-          description: PR/MR number. Omit to leave unchanged.
-          type:
-          - "null"
-          - integer
-        steps:
-          description: Ordered play steps, replacing the stored list. Omit to leave
-            unchanged.
-          items:
-            type: string
-          type:
-          - "null"
-          - array
-        why:
-          description: Why it matters. Omit to leave unchanged.
-          type:
-          - "null"
-          - string
-      type: object
     ControllersForgetLearningResponse:
       properties:
         deletedTurns:
@@ -8996,18 +8383,6 @@ components:
           type: integer
       required:
       - deletedTurns
-      type: object
-    ControllersHandbackCompletenessView:
-      properties:
-        cases:
-          type: integer
-        notDriven:
-          items:
-            type: string
-          type: array
-      required:
-      - cases
-      - notDriven
       type: object
     ControllersIOSProjectResponse:
       properties:
@@ -9257,7 +8632,6 @@ components:
           - queued
           - suggestion_accepted
           - app_send
-          - smoke_report
           type: string
         turnAt:
           format: date-time
@@ -10430,18 +9804,6 @@ components:
       required:
       - until
       type: object
-    ControllersStandDownSmokeChecklistInput:
-      properties:
-        from:
-          description: The calling session's own id, used to attribute the claim.
-          type: string
-        reason:
-          description: Why nothing here needs a person's eyes. Required - it is the
-            whole content of standing down.
-          type: string
-      required:
-      - reason
-      type: object
     ControllersStartIOSRunInput:
       properties:
         configuration:
@@ -10508,6 +9870,19 @@ components:
           type: boolean
       required:
       - started
+      type: object
+    ControllersTestinyStepResultInput:
+      properties:
+        "n":
+          description: The step's number, counting from 1.
+          type: integer
+        status:
+          description: PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. A step takes no
+            comment.
+          type: string
+      required:
+      - "n"
+      - status
       type: object
     ControllersTranscriptRefRequest:
       properties:
@@ -10649,6 +10024,11 @@ components:
         result:
           type: string
         role:
+          description: The crew member that made the run. Absent when the task has
+            no crew.
+          enum:
+          - dev
+          - qa
           type: string
         sessionId:
           type: string
@@ -10871,67 +10251,6 @@ components:
       required:
       - caFiles
       type: object
-    DomainSmokeRun:
-      properties:
-        checkId:
-          type: string
-        createdAt:
-          format: date-time
-          type: string
-        id:
-          type: string
-        note:
-          type: string
-        recordedAt:
-          format: date-time
-          type:
-          - "null"
-          - string
-        seq:
-          type: integer
-        sessionId:
-          type: string
-        sha:
-          type: string
-        updatedAt:
-          format: date-time
-          type: string
-        verdict:
-          type: string
-      required:
-      - id
-      - checkId
-      - sessionId
-      - seq
-      - createdAt
-      - updatedAt
-      type: object
-    DomainSmokeStandDown:
-      properties:
-        at:
-          format: date-time
-          type: string
-        by:
-          type: string
-        byRole:
-          type: string
-        createdAt:
-          format: date-time
-          type: string
-        reason:
-          type: string
-        sessionId:
-          type: string
-        updatedAt:
-          format: date-time
-          type: string
-      required:
-      - sessionId
-      - at
-      - reason
-      - createdAt
-      - updatedAt
-      type: object
     DomainSystemPromptAdditions:
       properties:
         orchestrator:
@@ -10940,6 +10259,137 @@ components:
           type: string
         worker:
           type: string
+      type: object
+    DomainTestinyCaseDetail:
+      properties:
+        automation:
+          description: The case's automation status values, e.g. Manual.
+          items:
+            type: string
+          type: array
+        bdd:
+          type: string
+        description:
+          type: string
+        expectedText:
+          type: string
+        features:
+          type: string
+        id:
+          format: int64
+          type: integer
+        jira:
+          type: string
+        platforms:
+          items:
+            type: string
+          type: array
+        precondition:
+          type: string
+        priority:
+          $ref: '#/components/schemas/DomainTestinyCasePriority'
+        remark:
+          type: string
+        requirements:
+          items:
+            $ref: '#/components/schemas/DomainTestinyRequirement'
+          type: array
+        section:
+          type: string
+        steps:
+          items:
+            $ref: '#/components/schemas/DomainTestinyCaseStep'
+          type: array
+        stepsText:
+          type: string
+        subFeatures:
+          type: string
+        template:
+          description: STEPS, TEXT or BDD; it says which of steps, stepsText/expectedText
+            or bdd is filled.
+          type: string
+        testData:
+          type: string
+        title:
+          type: string
+        type:
+          description: Testiny's testcase_type, e.g. FUNCTIONAL.
+          type: string
+      required:
+      - id
+      - title
+      - type
+      - template
+      - platforms
+      - jira
+      - features
+      - subFeatures
+      - section
+      - testData
+      - precondition
+      - description
+      - remark
+      - automation
+      - steps
+      - stepsText
+      - expectedText
+      - bdd
+      - requirements
+      type: object
+    DomainTestinyCasePriority:
+      properties:
+        label:
+          type: string
+        level:
+          type: integer
+      required:
+      - level
+      - label
+      type: object
+    DomainTestinyCaseStep:
+      properties:
+        action:
+          type: string
+        expected:
+          type: string
+        "n":
+          type: integer
+        rid:
+          type: string
+      required:
+      - "n"
+      - rid
+      - action
+      - expected
+      type: object
+    DomainTestinyRequirement:
+      properties:
+        key:
+          description: The Jira issue key, e.g. MOBILITY-4839.
+          type: string
+        status:
+          description: The issue's Jira status name, e.g. In Progress.
+          type: string
+        summary:
+          type: string
+      required:
+      - key
+      - summary
+      - status
+      type: object
+    DomainTestinyRunStep:
+      properties:
+        "n":
+          description: The step's number, counting from 1, when the result was recorded.
+          type: integer
+        rid:
+          type: string
+        status:
+          type: string
+      required:
+      - "n"
+      - rid
+      - status
       type: object
     EndCrewRunInput:
       properties:
@@ -10979,40 +10429,6 @@ components:
       - attempt
       - maxAttempts
       - escalated
-      type: object
-    EvidenceExportResponse:
-      properties:
-        path:
-          description: Absolute path of the exported, openable copy on the local machine.
-          type: string
-      required:
-      - path
-      type: object
-    EvidenceRetentionSettingsResponse:
-      properties:
-        enabled:
-          description: Whether the age-based evidence retention sweep runs at all.
-          type: boolean
-        maxAgeDays:
-          description: Purge evidence older than this many days (from its created_at).
-            0/disabled = keep forever.
-          type: integer
-      required:
-      - enabled
-      - maxAgeDays
-      type: object
-    EvidenceRetentionSweepResponse:
-      properties:
-        freedBytes:
-          description: On-disk bytes freed by the sweep.
-          format: int64
-          type: integer
-        purged:
-          description: Number of evidence items removed.
-          type: integer
-      required:
-      - purged
-      - freedBytes
       type: object
     GitConventionConfig:
       properties:
@@ -11423,6 +10839,18 @@ components:
       - end
       - kind
       type: object
+    LinkTestinyRunInput:
+      properties:
+        from:
+          description: Session id of the agent linking the run ($AO_SESSION_ID). Empty
+            when a person links it in the app.
+          type: string
+        ref:
+          description: 'The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632).'
+          type: string
+      required:
+      - ref
+      type: object
     ListAgentsResponse:
       properties:
         authorized:
@@ -11555,29 +10983,6 @@ components:
           type: array
       required:
       - leases
-      type: object
-    ListSmokeChecksResponse:
-      properties:
-        checks:
-          items:
-            $ref: '#/components/schemas/SmokeCheck'
-          type: array
-        reportedAt:
-          description: When this session's results were last reported back.
-          format: date-time
-          type:
-          - "null"
-          - string
-        standDown:
-          $ref: '#/components/schemas/DomainSmokeStandDown'
-          description: Set when a member recorded that this change needs no human
-            verification.
-        worker:
-          description: Worker label for the tab subtitle.
-          type: string
-      required:
-      - worker
-      - checks
       type: object
     MarkAllNotificationsReadResponse:
       properties:
@@ -11756,37 +11161,6 @@ components:
       - targetSha
       - status
       type: object
-    PostSmokeToJiraResponse:
-      properties:
-        attachmentsUploaded:
-          description: Number of evidence files uploaded as Jira attachments.
-          type: integer
-        commentUrl:
-          description: Deep link to the created comment (empty if Jira returned no
-            self link).
-          type: string
-        embeddedMedia:
-          description: Whether image evidence embedded inline (false = attachment-link
-            fallback).
-          type: boolean
-        evidenceLinked:
-          description: Number of uploaded evidence files that landed as download links
-            instead of inline previews.
-          type: integer
-        key:
-          description: The Jira issue key the results were posted to.
-          type: string
-        rowsPosted:
-          description: Number of run rows (verdict set) posted in the table.
-          type: integer
-      required:
-      - key
-      - commentUrl
-      - attachmentsUploaded
-      - rowsPosted
-      - embeddedMedia
-      - evidenceLinked
-      type: object
     ProbeAgentResponse:
       properties:
         agent:
@@ -11889,6 +11263,8 @@ components:
           type: array
         systemPromptAdditions:
           $ref: '#/components/schemas/DomainSystemPromptAdditions'
+        testinyProject:
+          type: string
         trackerIntake:
           $ref: '#/components/schemas/TrackerIntakeConfig'
         worker:
@@ -11941,6 +11317,8 @@ components:
           type: string
         sessionPrefix:
           type: string
+        testinyProject:
+          type: string
       required:
       - id
       - name
@@ -11968,19 +11346,23 @@ components:
       - graceMinutes
       - artifactsEnabled
       type: object
-    RecordSmokeAgentResultInput:
+    RecordTestinyResultsInput:
       properties:
-        note:
-          description: What the machine saw.
+        from:
+          description: Session id of the agent recording them ($AO_SESSION_ID). Empty
+            when a person sets them in the app.
           type: string
+        results:
+          description: The results to record. The whole batch is checked before any
+            is written.
+          items:
+            $ref: '#/components/schemas/TestinyResultInput'
+          type: array
         sha:
-          description: The commit the case was run against; compare with the PR head
-            to spot a stale result.
+          description: The commit the agent tested, for the tab's provenance line.
           type: string
-        verdict:
-          description: pass | fail | skip, or omitted for an evidence-only run (allowed
-            only when the case already carries agent evidence).
-          type: string
+      required:
+      - results
       type: object
     RefLinksSettingsResponse:
       properties:
@@ -12072,22 +11454,6 @@ components:
       - ok
       - comment
       type: object
-    ReportSmokeResponse:
-      properties:
-        delivered:
-          description: Whether the summary was delivered to a live session.
-          type: boolean
-        summary:
-          description: The composed results summary.
-          type: string
-        target:
-          description: worker | orchestrator | persisted.
-          type: string
-      required:
-      - delivered
-      - target
-      - summary
-      type: object
     ResolveCommentsResponse:
       properties:
         ok:
@@ -12153,15 +11519,6 @@ components:
       - ok
       - sessionId
       - session
-      type: object
-    RetireSmokeCheckInput:
-      properties:
-        reason:
-          description: Why the case is no longer worth playing (e.g. "now covered
-            by TestFoo"). Required - it is the trace retiring leaves behind.
-          type: string
-      required:
-      - reason
       type: object
     ReviewRun:
       properties:
@@ -12271,8 +11628,6 @@ components:
       properties:
         delivery:
           $ref: '#/components/schemas/ControllersMessageDeliveryView'
-        handback:
-          $ref: '#/components/schemas/ControllersHandbackCompletenessView'
         message:
           type: string
         ok:
@@ -12378,6 +11733,8 @@ components:
           - preview
           - manual
           type: string
+        lastHandback:
+          $ref: '#/components/schemas/ControllersCrewHandbackView'
         role:
           enum:
           - dev
@@ -12876,16 +12233,6 @@ components:
       required:
       - override
       type: object
-    SetEvidenceRetentionSettingsRequest:
-      properties:
-        enabled:
-          type: boolean
-        maxAgeDays:
-          type: integer
-      required:
-      - enabled
-      - maxAgeDays
-      type: object
     SetMessageTemplateRequest:
       properties:
         template:
@@ -12978,22 +12325,6 @@ components:
           type: array
       required:
       - caFiles
-      type: object
-    SetSmokeVerdictInput:
-      properties:
-        agreedRunId:
-          description: Optional id of the agent run the user agreed with. The run
-            must be on this case, must have concluded, and its verdict must match;
-            skip cannot be agreed with.
-          type: string
-        note:
-          description: Optional note about what the user saw.
-          type: string
-        verdict:
-          description: pass | fail | skip.
-          type: string
-      required:
-      - verdict
       type: object
     SetSpawnConfirmSettingsRequest:
       properties:
@@ -13813,195 +13144,6 @@ components:
       - x
       - "y"
       type: object
-    SmokeAuthoredCaseInput:
-      properties:
-        expected:
-          description: Expected result.
-          type: string
-        fileRef:
-          description: file:line the change touched.
-          type: string
-        id:
-          description: Stable case id. Optional — derived from the name (slugified)
-            when omitted, so rewording a name changes it. Supplying it keeps the user's
-            verdict/note/evidence across a re-author; dropping a played case is refused
-            (422 SMOKE_RESULTS_AT_RISK).
-          type: string
-        name:
-          description: One-line 'what to verify'.
-          type: string
-        prNum:
-          description: PR/MR number the change belongs to (0 if none).
-          type: integer
-        steps:
-          description: Ordered play steps.
-          items:
-            type: string
-          type: array
-        tag:
-          description: Derived display tag (CHECK N); accepted but not persisted.
-          type: string
-        why:
-          description: Why it matters / what it confirms.
-          type: string
-      required:
-      - name
-      type: object
-    SmokeCheck:
-      properties:
-        agentEvidence:
-          items:
-            $ref: '#/components/schemas/SmokeEvidence'
-          type: array
-        agentNote:
-          type: string
-        agentRanAt:
-          format: date-time
-          type:
-          - "null"
-          - string
-        agentSha:
-          type: string
-        agentVerdict:
-          type: string
-        agreedRunId:
-          type: string
-        authoredAt:
-          format: date-time
-          type:
-          - "null"
-          - string
-        authoredBy:
-          type: string
-        authoredByRole:
-          type: string
-        createdAt:
-          format: date-time
-          type: string
-        decidedAt:
-          format: date-time
-          type:
-          - "null"
-          - string
-        evidence:
-          items:
-            $ref: '#/components/schemas/SmokeEvidence'
-          type: array
-        expected:
-          type: string
-        fileRef:
-          type: string
-        id:
-          type: string
-        name:
-          type: string
-        note:
-          type: string
-        prNum:
-          type: integer
-        projectId:
-          type: string
-        reportedAt:
-          format: date-time
-          type:
-          - "null"
-          - string
-        retiredAt:
-          format: date-time
-          type:
-          - "null"
-          - string
-        retiredReason:
-          type: string
-        runs:
-          items:
-            $ref: '#/components/schemas/DomainSmokeRun'
-          type: array
-        seq:
-          type: integer
-        sessionId:
-          type: string
-        steps:
-          items:
-            type: string
-          type: array
-        updatedAt:
-          format: date-time
-          type: string
-        verdict:
-          type: string
-        why:
-          type: string
-      required:
-      - id
-      - sessionId
-      - projectId
-      - seq
-      - name
-      - why
-      - steps
-      - expected
-      - prNum
-      - fileRef
-      - verdict
-      - note
-      - evidence
-      - runs
-      - agentEvidence
-      - createdAt
-      - updatedAt
-      type: object
-    SmokeCheckResponse:
-      properties:
-        check:
-          $ref: '#/components/schemas/SmokeCheck'
-      required:
-      - check
-      type: object
-    SmokeEvidence:
-      properties:
-        build:
-          type: string
-        checkId:
-          type: string
-        createdAt:
-          format: date-time
-          type: string
-        filename:
-          type: string
-        id:
-          type: string
-        kind:
-          type: string
-        mime:
-          type: string
-        runId:
-          type: string
-        sessionId:
-          type: string
-        sizeBytes:
-          format: int64
-          type: integer
-        source:
-          type: string
-      required:
-      - id
-      - checkId
-      - sessionId
-      - kind
-      - filename
-      - mime
-      - sizeBytes
-      - createdAt
-      - source
-      type: object
-    SmokeEvidenceResponse:
-      properties:
-        evidence:
-          $ref: '#/components/schemas/SmokeEvidence'
-      required:
-      - evidence
-      type: object
     SpawnConfirmSettingsResponse:
       properties:
         enabled:
@@ -14103,8 +13245,8 @@ components:
           - device
           type: string
         label:
-          description: Free-text label for the run (e.g. the command), shown in the
-            Tests tab.
+          description: Free-text label for the run (e.g. the command), shown on the
+            Summary tab.
           type: string
       required:
       - kind
@@ -14207,6 +13349,10 @@ components:
           type:
           - "null"
           - string
+        warnings:
+          items:
+            type: string
+          type: array
       required:
       - kind
       - default
@@ -14220,6 +13366,182 @@ components:
           type: array
       required:
       - prompts
+      type: object
+    TestinyCaseResult:
+      properties:
+        id:
+          format: int64
+          type: integer
+        recorded:
+          $ref: '#/components/schemas/TestinyResultRecord'
+        script:
+          type: string
+        status:
+          type: string
+        steps:
+          items:
+            $ref: '#/components/schemas/DomainTestinyRunStep'
+          type: array
+        title:
+          type: string
+      required:
+      - id
+      - title
+      - status
+      - steps
+      type: object
+    TestinyFetchError:
+      properties:
+        kind:
+          enum:
+          - auth
+          - not_found
+          - unavailable
+          - rejected
+          - binary_missing
+          - cli_too_old
+          type: string
+        message:
+          type: string
+      required:
+      - kind
+      - message
+      type: object
+    TestinyRef:
+      properties:
+        id:
+          format: int64
+          type: integer
+        title:
+          type: string
+      required:
+      - id
+      - title
+      type: object
+    TestinyResultInput:
+      properties:
+        caseId:
+          description: The Testiny case id (7166 for TC-7166).
+          format: int64
+          type: integer
+        comment:
+          description: What happened, at most 300 characters. FAILED, BLOCKED and
+            SKIPPED need one; PASSED and NOTRUN take none.
+          type: string
+        status:
+          description: 'PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. Empty when only
+            steps are given: the case keeps its status.'
+          type: string
+        steps:
+          description: Results for steps of a STEPS case. Every other step keeps the
+            result it has.
+          items:
+            $ref: '#/components/schemas/ControllersTestinyStepResultInput'
+          type: array
+      required:
+      - caseId
+      type: object
+    TestinyResultRecord:
+      properties:
+        at:
+          format: date-time
+          type: string
+        by:
+          type: string
+        byRole:
+          enum:
+          - dev
+          - qa
+          type: string
+        comment:
+          type: string
+        sha:
+          type: string
+        status:
+          type: string
+      required:
+      - status
+      - comment
+      - by
+      - sha
+      - at
+      type: object
+    TestinyRunID:
+      format: int64
+      type: integer
+    TestinyRunLink:
+      properties:
+        createdAt:
+          format: date-time
+          type: string
+        linkedBy:
+          type: string
+        runId:
+          $ref: '#/components/schemas/TestinyRunID'
+        sessionId:
+          type: string
+      required:
+      - sessionId
+      - runId
+      - linkedBy
+      - createdAt
+      type: object
+    TestinyRunView:
+      properties:
+        cases:
+          items:
+            $ref: '#/components/schemas/TestinyCaseResult'
+          type: array
+        closed:
+          type: boolean
+        counts:
+          additionalProperties:
+            type: integer
+          type:
+          - object
+          - "null"
+        evidenceDir:
+          type: string
+        fetchError:
+          $ref: '#/components/schemas/TestinyFetchError'
+        fetchedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        link:
+          $ref: '#/components/schemas/TestinyRunLink'
+        milestone:
+          $ref: '#/components/schemas/TestinyRef'
+        plan:
+          $ref: '#/components/schemas/TestinyRef'
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - link
+      - title
+      - url
+      - closed
+      - counts
+      - cases
+      - evidenceDir
+      type: object
+    TestinyRunsResponse:
+      properties:
+        project:
+          description: The project's Testiny project, as set (a key, name or id).
+          type: string
+        runs:
+          description: The task's runs in the order they were linked. A run Testiny
+            could not read now carries fetchError.
+          items:
+            $ref: '#/components/schemas/TestinyRunView'
+          type: array
+      required:
+      - project
+      - runs
       type: object
     TrackerIntakeConfig:
       properties:
@@ -14812,6 +14134,8 @@ tags:
   name: prs
 - description: Code-review runs and findings
   name: reviews
+- description: The Testiny test runs linked to a task
+  name: testiny
 - description: Durable dashboard notifications
   name: notifications
 - description: Server-sent CDC event stream with durable replay

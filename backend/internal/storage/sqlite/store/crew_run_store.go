@@ -104,6 +104,23 @@ func (s *Store) ListCrewRunsForSession(ctx context.Context, id domain.SessionID,
 	if err != nil {
 		return nil, fmt.Errorf("list crew runs for session %s: %w", id, err)
 	}
+	return crewRunsFromRows(rows)
+}
+
+// ListCrewRunsForTask returns the runs of every member of the task whose id is
+// taskID (dev's session id), newest first, capped at limit across members.
+func (s *Store) ListCrewRunsForTask(ctx context.Context, taskID domain.SessionID, limit int) ([]domain.CrewRun, error) {
+	if limit <= 0 {
+		limit = crewRunHistoryDepth
+	}
+	rows, err := s.qr.ListCrewRunsByTask(ctx, gen.ListCrewRunsByTaskParams{TaskID: taskID, RowLimit: int64(limit)})
+	if err != nil {
+		return nil, fmt.Errorf("list crew runs for task %s: %w", taskID, err)
+	}
+	return crewRunsFromRows(rows)
+}
+
+func crewRunsFromRows(rows []gen.CrewRun) ([]domain.CrewRun, error) {
 	runs := make([]domain.CrewRun, 0, len(rows))
 	for _, row := range rows {
 		run, err := crewRunFromRow(row)
@@ -145,15 +162,7 @@ func (s *Store) OpenCrewRunsForCrewmates(ctx context.Context, crewID, self domai
 	if err != nil {
 		return nil, fmt.Errorf("open crew runs for crew %s: %w", crewID, err)
 	}
-	runs := make([]domain.CrewRun, 0, len(rows))
-	for _, row := range rows {
-		run, err := crewRunFromRow(row)
-		if err != nil {
-			return nil, err
-		}
-		runs = append(runs, run)
-	}
-	return runs, nil
+	return crewRunsFromRows(rows)
 }
 
 // ConsecutiveCrewRunDiscards counts the discarded runs at the HEAD of a

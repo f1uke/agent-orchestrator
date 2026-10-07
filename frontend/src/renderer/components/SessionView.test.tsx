@@ -948,12 +948,12 @@ describe("SessionView — the rail does not move when you switch MEMBERS", () =>
 		act(() => useUiStore.getState().requestInspectorView("reviews"));
 		await waitFor(() => expect(railView()).toBe("reviews"));
 
-		// dev -> qa: the same task, so four of the six tabs answer identically and
+		// dev -> qa: the same task, so most tabs answer identically and
 		// re-selecting Summary would be churn with no information behind it.
 		rerender(<SessionView sessionId="crew-qa" />);
 		expect(railView()).toBe("reviews");
 
-		// A different task is a different pull request, checklist and worktree, so
+		// A different task is a different pull request and worktree, so
 		// the rail starts over - exactly as it always has.
 		rerender(<SessionView sessionId="sess-2" />);
 		await waitFor(() => expect(railView()).toBe("summary"));
@@ -962,9 +962,9 @@ describe("SessionView — the rail does not move when you switch MEMBERS", () =>
 	it("honours a rail tab asked for from outside, then clears the request", async () => {
 		render(<SessionView sessionId="sess-1" />);
 
-		act(() => useUiStore.getState().requestInspectorView("tests"));
+		act(() => useUiStore.getState().requestInspectorView("files"));
 
-		await waitFor(() => expect(railView()).toBe("tests"));
+		await waitFor(() => expect(railView()).toBe("files"));
 		expect(useUiStore.getState().inspectorViewRequest).toBeNull();
 	});
 });

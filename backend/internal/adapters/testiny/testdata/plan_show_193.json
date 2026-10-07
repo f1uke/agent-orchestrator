@@ -1,0 +1,19 @@
+{
+  "data": {
+    "id": 193,
+    "title": "Chat session logout",
+    "project_id": 1,
+    "created_at": "2026-10-01T10:10:15.980Z",
+    "created_by": 29862,
+    "modified_at": "2026-10-01T10:10:15.980Z",
+    "modified_by": 29862,
+    "deleted_at": null,
+    "deleted_by": null,
+    "description": "",
+    "$testrun_count": 1,
+    "$last_testrun_created": "2026-10-01T10:10:24.126Z",
+    "$open_testrun_count": 1,
+    "$query_count": 1
+  },
+  "meta": null
+}

@@ -104,8 +104,8 @@ var (
 	// ErrCrewAutoFormationOff means an AO SESSION asked to attach a member to a
 	// task on a project whose `disableAutoCrew` is set. The flag turns off
 	// AUTOMATIC crew formation and keeps the manual escape hatch - but the hatch
-	// was designed for a PERSON, and an agent reading its own brief ("the smoke
-	// checklist belongs to qa") walks through it routinely, which is how six
+	// was designed for a PERSON, and an agent reading its own brief ("the manual
+	// checks belong to qa") walks through it routinely, which is how six
 	// consecutive tasks on a crew-off project still got a qa. So the manual path
 	// stays open to a human (the app's `+ qa`, or `ao crew add` typed in an
 	// ordinary shell) and is refused to every AO session, the orchestrator
@@ -135,11 +135,10 @@ const (
 	EnvRunFile = "AO_RUN_FILE"
 	// EnvCrewID names the TASK a crew member is working on, which is dev's session
 	// id. It exists because the artefacts of a task belong to the task, not to
-	// whichever agent happened to produce them: qa authors the smoke checklist the
-	// human plays and dev's card shows, so it must write it against this id and
-	// not against its own. A SOLO session sets it to its own id, so a command
-	// written with it is correct in both shapes and there is no branch for an
-	// agent to get wrong.
+	// whichever agent happened to produce them: what qa reads or links for the task
+	// shows on dev's card, so it must name this id and not its own. A SOLO
+	// session sets it to its own id, so a command written with it is correct in
+	// both shapes and there is no branch for an agent to get wrong.
 	EnvCrewID = "AO_CREW_ID"
 	// EnvCrewDevID and EnvCrewQAID name the two MEMBERS of a crew, so each can say
 	// something about the other and a human reading a transcript can tell which
@@ -311,11 +310,6 @@ type Manager struct {
 	// service is built to avoid an import cycle; nil in tests/wiring that omit
 	// it, in which case teardown simply skips the reap.
 	sessionPaneReaper func(context.Context, domain.SessionID) error
-	// smokeEvidencePurger hard-deletes a session's on-disk smoke-test evidence
-	// tree when the session is purged (the DB rows cascade separately). Injected
-	// by the daemon after the smoke service is built, same as sessionPaneReaper; nil
-	// in tests/wiring that omit it, in which case purge simply skips it.
-	smokeEvidencePurger func(context.Context, domain.SessionID) error
 	// children owns a worker's child worktrees. Teardown refuses (or settles)
 	// on them and a relaunch settles their orphans. Nil disables child
 	// worktrees altogether: no worker is told it may have them.
@@ -470,25 +464,6 @@ type ChildWork interface {
 // because the service is built from the manager's own provisioning.
 func (m *Manager) SetChildren(c ChildWork) {
 	m.children = c
-}
-
-// SetSmokeEvidencePurger wires the hook that hard-deletes a session's smoke-test
-// evidence blobs on purge. Wired by the daemon after the smoke service exists,
-// mirroring SetSessionPaneReaper. A manager with no purger set skips it.
-func (m *Manager) SetSmokeEvidencePurger(fn func(context.Context, domain.SessionID) error) {
-	m.smokeEvidencePurger = fn
-}
-
-// purgeSmokeEvidence best-effort removes the session's on-disk evidence tree.
-// Purge of the session must never fail because its evidence blobs could not be
-// removed, so any error is logged and swallowed. A nil purger is a no-op.
-func (m *Manager) purgeSmokeEvidence(ctx context.Context, id domain.SessionID) {
-	if m.smokeEvidencePurger == nil {
-		return
-	}
-	if err := m.smokeEvidencePurger(ctx, id); err != nil {
-		m.logger.Warn("smoke evidence purge failed", "sessionID", id, "error", err)
-	}
 }
 
 // SetSimDeviceAssigner wires the hook that reserves one local iOS Simulator per
@@ -1664,9 +1639,6 @@ func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force b
 	// Close the worker's reviewer pane before the row (and its cascading review
 	// rows) are hard-deleted, so a delete never orphans the reviewer's tmux.
 	m.reapSessionPanes(ctx, id)
-	// Hard-delete the session's smoke-test evidence blobs; the DB rows cascade
-	// with the session row below.
-	m.purgeSmokeEvidence(ctx, id)
 	return m.store.PurgeSession(ctx, id)
 }
 
@@ -3441,27 +3413,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 	// and worker prompts, so it is injected here rather than baked into either
 	// editable base — it stays present even when a base is overridden or cleared.
 	base += prompts.ReferenceConvention()
-	// Workers additionally get the always-injected smoke-test checklist protocol,
-	// placed here (not in the editable base) so it survives a cleared/overridden
-	// base, same as the reference convention.
 	if kind == domain.KindWorker {
-		// The smoke checklist protocol goes to EVERY worker again, dev included.
-		// It was taken off a crew's dev when a crew was formed at spawn, on the
-		// grounds that qa owned the list. Under lazy creation dev owns it until a
-		// qa exists - and on a task that never touches a runtime surface, that is
-		// for ever - so withholding it would silently leave a whole class of
-		// standard tasks with no checklist and nobody able to write one. dev's crew
-		// block (CrewProtocol) carries the handover instead, in the same window AO
-		// enforces: `ao smoke set` from a crew's dev is refused once a qa exists.
-		base += prompts.SmokeChecklistProtocol()
-		// qa is created part-way through a task, so the protocol above times the
-		// list at the END - right for an agent working alone, wrong for the member
-		// whose job the list describes. qa publishes its intent instead, and says
-		// out loud when the answer is that nothing needs a human's eyes: an empty
-		// list otherwise means "still thinking" and "nothing to check" at once.
-		if crewRole == domain.CrewRoleQA {
-			base += prompts.ChecklistIntentEarly()
-		}
 		// A project that targets iOS has a device its workers can look at. Only
 		// they are told: the orchestrator dispatches rather than drives. A crew's
 		// dev keeps the whole catalog - it is alone until it claims, and CLAIMING
@@ -3473,6 +3425,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// one thing the project rules out. iOS dev keeps the handover note,
 		// which is about the lease and holds unchanged; qa plays its cases with
 		// scripts instead of recording flows into the repository.
+		var caseScripts *prompts.MobileScripts
 		if ms := cfg.MobileScripts; ms != nil {
 			scripts := prompts.MobileScripts{Product: ms.Product, IOS: ms.Platform == domain.MobilePlatformIOS, Store: ms.StoreOrDefault()}
 			base += prompts.MobileScriptGuidance(scripts)
@@ -3483,6 +3436,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 				}
 			case domain.CrewRoleQA:
 				base += prompts.MobileScriptPlay(scripts)
+				caseScripts = &scripts
 			}
 		} else if cfg.HasIOSSimulator {
 			base += prompts.SimulatorGuidance()
@@ -3490,8 +3444,8 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 			case domain.CrewRoleDev:
 				base += prompts.SimulatorHandoverToQA()
 			case domain.CrewRoleQA:
-				// The record -> flow -> retire loop is qa's alone: it is how a
-				// human's ONE play becomes a committed flow and a retired case.
+				// The record -> flow -> commit loop is qa's alone: it is how a
+				// human's ONE play becomes a committed flow.
 				// A solo worker does not get it - there is nobody to ask for that
 				// play, and its prompt stays byte-for-byte what it was.
 				base += prompts.RecordedFlowLoop()
@@ -3500,7 +3454,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// The task-size directive right-sizes ceremony: a mechanical worker is
 		// authorized to skip the process skills. Only mechanical renders anything;
 		// standard/deep add nothing. Injected here (not the editable base) so it
-		// survives a cleared/overridden base, like the smoke + reference blocks.
+		// survives a cleared/overridden base, like the reference block.
 		// A mechanical task never has a qa, so this is dev's/solo's alone.
 		if crewRole != domain.CrewRoleQA {
 			base += prompts.TaskSizeDirective(string(taskSize.WithDefault()))
@@ -3515,6 +3469,10 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 				base += prompts.CheckInGate(string(taskSize.WithDefault()))
 			}
 		}
+		// Every worker kind, qa included, each told what is its own: qa and a
+		// solo worker play runs and record results, dev hands that check to qa.
+		// A project without Testiny renders nothing.
+		base += prompts.TestinyProtocol(cfg.TestinyProject, string(projectID), string(crewRole), caseScripts)
 	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {

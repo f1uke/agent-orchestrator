@@ -57,6 +57,7 @@ async function fetchWorkspaces(): Promise<WorkspaceSummary[]> {
 		hasWebUI: project.hasWebUI,
 		hasIOSSimulator: project.hasIOSSimulator,
 		disableAutoCrew: project.disableAutoCrew,
+		testinyProject: project.testinyProject,
 		sessions: (sessionsData?.sessions ?? [])
 			.filter((session) => session.projectId === project.id)
 			.map((session) => ({

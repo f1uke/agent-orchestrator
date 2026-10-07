@@ -46,9 +46,8 @@ var (
 	// usually invalid JQL (e.g. a project key that doesn't exist). Lets the service
 	// fall back from a project-scoped guess to a plain text search.
 	errBadQuery = errors.New("jira: invalid search query")
-	// errBadRequest backs ErrBadRequest (surfaced in comments.go): a 400 from a
-	// comment/attachment write, usually a malformed ADF body (e.g. an unrenderable
-	// media node). Lets the smoke service retry a comment without inline media.
+	// errBadRequest backs ErrBadRequest (surfaced in comments.go): a 400 from an
+	// attachment download, or a request refused before it is sent.
 	errBadRequest = errors.New("jira: bad request")
 )
 
@@ -67,8 +66,8 @@ type Client struct {
 	// httpDo + config back every REST call (display, transitions, search); both are
 	// seams so tests drive an httptest server with a static identity.
 	httpDo HTTPDoer
-	// transferDo backs the file-moving calls (evidence upload, media-id resolve,
-	// attachment download), which need a far larger time budget than a JSON read.
+	// transferDo backs the attachment download, which needs a far larger time
+	// budget than a JSON read.
 	// WithHTTPDoer sets both, so an injected test doer still sees every call.
 	transferDo HTTPDoer
 	config     ConfigSource

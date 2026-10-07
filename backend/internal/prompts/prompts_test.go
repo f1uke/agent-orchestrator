@@ -397,59 +397,6 @@ func TestReferenceConvention(t *testing.T) {
 	}
 }
 
-// TestSmokeChecklistProtocol_AuthorsBeforePR: the smoke protocol must trigger the
-// checklist once the change is complete and local checks pass, BEFORE the PR/MR is
-// opened — NOT gated on CI being green (CI can't have run yet since the PR isn't
-// open). It must also keep the conditional scope, the JSON-on-stdin mechanism, the
-// full case schema, and the "play in the Tests tab" contract intact.
-func TestSmokeChecklistProtocol_AuthorsBeforePR(t *testing.T) {
-	got := SmokeChecklistProtocol()
-	if !strings.HasPrefix(got, "\n\n") {
-		t.Fatalf("smoke protocol must start with a blank-line separator: %q", got)
-	}
-	// The old timing must be gone: no "after CI is green", no "wrap-up" trigger.
-	for _, forbidden := range []string{"after CI is green", "wrap-up"} {
-		if strings.Contains(got, forbidden) {
-			t.Fatalf("smoke protocol still carries stale ordering %q:\n%s", forbidden, got)
-		}
-	}
-	for _, want := range []string{
-		"## Smoke-test checklist (AO)",
-		"BEFORE you open the PR/MR",                                       // new timing: author before the PR exists
-		"local checks (build, tests, lint) pass",                          // gated on local checks, not CI
-		"UI flows, live SCM/CI polling, native-app behavior, timing/race", // conditional scope kept
-		"Skip this for pure-logic changes already covered by tests",       // skip clause kept
-		"leave `prNum` at 0",                                              // prNum note for pre-PR authoring
-		"cat <<'JSON' | ao smoke set \"$AO_CREW_ID\" --from-file -",       // JSON-on-stdin mechanism
-		"\"name\"", "\"why\"", "\"steps\"", "\"expected\"", "\"prNum\"", "\"fileRef\"", // case schema
-		"plays each case live in the Tests tab, attaches evidence, and reports results back to you", // contract
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("smoke protocol missing %q:\n%s", want, got)
-		}
-	}
-}
-
-// TestSmokeChecklistProtocol_StaysLanguageNeutral: the smoke protocol is injected
-// for EVERY worker regardless of language, so response-language wording must never
-// land here — that would change the prompt for every English project and spend
-// tokens on the default path. The language scoping belongs in
-// ResponseLanguageDirective, which is already a no-op for English.
-func TestSmokeChecklistProtocol_StaysLanguageNeutral(t *testing.T) {
-	got := SmokeChecklistProtocol()
-	for _, forbidden := range []string{
-		"response language",
-		"Human-facing response language",
-		"in that language",
-		"configured language",
-		"Thai",
-	} {
-		if strings.Contains(strings.ToLower(got), strings.ToLower(forbidden)) {
-			t.Fatalf("smoke protocol must stay language-neutral but mentions %q:\n%s", forbidden, got)
-		}
-	}
-}
-
 // TestTaskSizeDirective_MechanicalAuthorizesSkip: a mechanical task must render a
 // "\n\n"-prefixed block that (a) names itself, (b) explicitly authorizes skipping
 // the process skills, (c) grounds the skip as a deliberate override of the "you
@@ -558,14 +505,15 @@ func TestKnownKindsAndValid(t *testing.T) {
 
 // TestQADefaultIsQAsJobAndNotDevs pins the two halves of the qa base that make it
 // a different agent rather than a second dev: what it owns (triage, running,
-// recording, the four human-only shapes) and what it must not do (implement, open
+// reporting, the four human-only shapes) and what it must not do (implement, open
 // the PR, report to the orchestrator).
 func TestQADefaultIsQAsJobAndNotDevs(t *testing.T) {
 	base := DefaultBase(KindQA)
 	for _, want := range []string{
 		"qa",
-		"ao smoke record",
-		"ao smoke retire",
+		"you RUN them, and you report what happened",
+		"If there is nothing here to exercise at all",
+		"say so in your handback",
 		"paint",
 		"focus",
 		"timing",
@@ -593,13 +541,17 @@ func TestCoordinationFloor_QAMustHandBackWhenItFinishes(t *testing.T) {
 		// It reaches dev by ROLE - the only address that cannot go stale, since a
 		// crew is formed after dev's runtime is already launched.
 		"ao send --crew dev --about",
-		// Always - a stand-down is a result too.
-		"passed, failed, or stood down",
+		// Always - nothing to exercise is a result too.
+		"passed, failed, or with nothing to exercise",
 		// What dev needs in order to act without re-deriving it.
 		"git rev-parse --short HEAD",
-		"ao smoke record",
-		"RETIRED",
-		"left for the human to play",
+		"the COMMIT you tested",
+		"what you SAW, check by check, and the evidence each rests on",
+		"Pass and fail cite evidence the same way",
+		// Undriveable is a finding from an attempt, never a guess.
+		"marked UNDRIVEABLE with the reason from an attempt",
+		"never a guess made before trying",
+		"what is left for a person to check by hand, and why a machine cannot",
 		// The stopping rule, reusing the cap AO already has rather than a new one -
 		// and it is now MECHANISM, so the prompt says what actually happens.
 		"One message per finish",
@@ -645,8 +597,9 @@ func TestQABase_TellsItToHandBackRatherThanJustStop(t *testing.T) {
 	}
 }
 
-// MISSING 1 - the record -> flow -> retire loop was NOBODY's. The tooling shipped
-// long ago and no prompt said whose job it was, so the checklist never shrank.
+// MISSING 1 - the record -> flow -> commit loop was NOBODY's. The tooling shipped
+// long ago and no prompt said whose job it was, so what was left for a person
+// never shrank.
 // This holds the loop to the commands that actually exist (verified against the
 // real `ao` binary): a prompt naming a flag the CLI does not have is worse than
 // no prompt.
@@ -659,13 +612,12 @@ func TestRecordedFlowLoop_IsQAsAndTeachesTheWholeLoop(t *testing.T) {
 		"ao sim flow record stop --entry",
 		"ao sim flow check",
 		"ao sim flow run",
-		`ao smoke retire "$AO_CREW_ID" --case <id> --reason`,
 		// The fact that makes one human play usable at all: the recorder hooks
 		// the hold, so their tap and qa's command are captured identically.
 		"Device tab",
 		"captured identically",
-		// The loop only pays off if the case comes OFF the human's list.
-		"retire the case",
+		// The loop only pays off if the check comes OFF the human's list.
+		"Commit the flow; the next run of this check is the flow, not a person",
 	} {
 		if !strings.Contains(loop, want) {
 			t.Fatalf("the recorded-flow loop is missing %q:\n%s", want, loop)
@@ -685,26 +637,21 @@ func TestRecordedFlowLoop_IsQAsAndTeachesTheWholeLoop(t *testing.T) {
 // So the test is now about the SUFFICIENCY OF THE EVIDENCE, not the category of
 // the case, and this pins the three parts that keep that latitude from drifting
 // back into "looks fine to me": the same bar for pass and fail (an asymmetric
-// one was proposed and rejected), a citation requirement, and leaving the case
-// to the human as a first-class outcome rather than a failure to decide.
+// one was proposed and rejected), a citation requirement, and reporting what it
+// saw without concluding when the capture cannot settle the check.
 func TestQADefault_JudgesBySufficiencyOfEvidenceNotByCategory(t *testing.T) {
 	base := DefaultBase(KindQA)
 	for _, want := range []string{
-		// Driving a human's case is ALLOWED - it is how the evidence gets captured.
-		"re-drive ANY case",
+		// Driving a person's check is ALLOWED - it is how the evidence gets captured.
+		"You may drive any check, including one meant for a person",
 		// The test that replaced the blanket prohibition.
-		"not the case's category",
-		"does this evidence actually answer what the case asks?",
+		"does this evidence answer what the check asks?",
 		// Symmetric, deliberately.
-		"pass and fail carry the SAME bar",
+		"Pass and fail carry the SAME bar",
 		// The guard that has to come with the latitude.
 		"a verdict must cite what in the evidence supports it",
-		"on your own authority",
-		// And the shape of the record that leaves it to the human.
-		"--evidence <file>",
-		"NO `--verdict`",
-		"without concluding",
-		"not a failure to decide",
+		// And what is left when the capture cannot settle it.
+		"report what you SAW without concluding",
 	} {
 		if !strings.Contains(base, want) {
 			t.Fatalf("the qa base does not state judge-when-the-evidence-answers-it: missing %q:\n%s", want, base)
@@ -762,92 +709,47 @@ func TestCrewProtocol_DevIsToldHowToSummonItsQA(t *testing.T) {
 	}
 }
 
-// The checklist is SHARED, and this test carries the reversal.
-//
-// It used to pin the opposite: dev was told "do not author or edit the
-// checklist" and that `ao smoke set` from it was REFUSED, and qa was checked for
-// the ABSENCE of that. The human reversed it after watching a real iOS task
-// where qa wrote two cases while several places needed checking - dev is the
-// member that knows what the change touched, and qa reconstructs it from
-// outside. The refusal is gone from the daemon, so a prompt asserting it would
-// now be a lie, and "hand the brief to qa" would send dev to refuse work it is
-// allowed to do.
-//
-// What replaces it is not a softer version of the same rule. It is a different
-// kind of instruction - a capability plus the ONE mechanical trap in it - so the
-// assertions below are about the trap, not about permission.
-func TestCrewProtocol_ChecklistIsSharedPerCase(t *testing.T) {
+// A solo worker is in no crew, so it renders no crew block at all; both members
+// name a message's subject as a commit or a Testiny id, never a removed case id.
+func TestCrewProtocol_SoloRendersNothingAndAboutNamesAnArtifact(t *testing.T) {
+	if CrewProtocol("") != "" {
+		t.Fatalf("a solo worker must render no crew block:\n%s", CrewProtocol(""))
+	}
 	for _, role := range []string{"dev", "qa"} {
 		block := CrewProtocol(role)
-		for _, want := range []string{
-			// Both members are told the list is shared, because a rule about a
-			// shared artifact that only one member can read is the silence that
-			// lost the last argument: qa has to know dev writing cases is correct.
-			"The smoke checklist is SHARED",
-			// The per-case verbs, which are the whole safety mechanism.
-			"ao smoke add",
-			"edit --case <id>",
-			// And the trap: `set` replaces the list, so the second writer deletes
-			// the first. This is the sentence that has to survive being skimmed.
-			"Never `ao smoke set` once there are two of you",
-			"deletes the other's cases",
-		} {
-			if !strings.Contains(block, want) {
-				t.Fatalf("crew %s is not told the checklist is shared: missing %q:\n%s", role, want, block)
-			}
+		if !strings.Contains(block, "--about <commit-sha|testiny-id>") {
+			t.Fatalf("crew %s is not told what --about names:\n%s", role, block)
 		}
-		// The old refusal must not survive anywhere: a prompt that asserts an
-		// enforcement AO no longer performs is worse than one that says nothing.
-		for _, gone := range []string{
-			"do not author or edit the checklist",
-			"REFUSED by AO",
-			"that brief predates the crew",
-		} {
-			if strings.Contains(block, gone) {
-				t.Fatalf("crew %s still carries the reversed dev refusal %q:\n%s", role, gone, block)
-			}
+		if !strings.Contains(block, "`$AO_CREW_ID`"+" is the TASK (dev's id), which `ao testiny` and `ao session get` take") {
+			t.Fatalf("crew %s is not told which commands take the task id:\n%s", role, block)
 		}
 	}
 }
 
-// Cases are shared; machine RESULTS are not, and only dev needs telling.
-//
-// This is the half of the old split that survived the reversal, and it survived
-// on its own reasoning rather than by inertia: the human opened CASES to both
-// members (who says what is worth checking), which is a different act from
-// recording that a run happened. The mechanical half is that a case has ONE
-// machine lane and it carries no author, so a second writer there produces a
-// result nobody can trace - the exact failure per-case attribution exists to
-// prevent on the cases themselves.
-//
-// The qa-side assertion is the descendant of the old "qa was not handed dev's
-// negative": a line telling qa to leave `ao smoke record` to qa is nonsense, and
-// a prompt that reads as nonsense is one an agent starts discounting.
-func TestCrewProtocol_OnlyDevIsToldToLeaveResultsToQA(t *testing.T) {
-	dev := CrewProtocol("dev")
-	for _, want := range []string{
-		"Cases are shared; RESULTS are not",
-		"ao smoke record",
-		// Says WHY, so it is not read as etiquette.
-		"carries no author",
-	} {
-		if !strings.Contains(dev, want) {
-			t.Fatalf("crew dev is not told to leave machine results to qa: missing %q:\n%s", want, dev)
+// A project without Testiny renders no Testiny block, whoever the worker is; one
+// with it names its Testiny project and where drafts go in the AO project's own
+// store, for every worker kind.
+func TestTestinyProtocol_RendersOnlyForATestinyProject(t *testing.T) {
+	for _, role := range []string{"", "dev", "qa"} {
+		if got := TestinyProtocol("", "mer", role, &MobileScripts{Product: "nter", IOS: true, Store: "/store"}); got != "" {
+			t.Fatalf("role %q: a project without Testiny rendered a Testiny block:\n%s", role, got)
 		}
-	}
-	if strings.Contains(CrewProtocol("qa"), "Cases are shared; RESULTS are not") {
-		t.Fatal("qa was handed dev's carve-out, which tells qa to leave the results to qa")
-	}
-	if CrewProtocol("") != "" {
-		t.Fatalf("a solo worker must render no crew block:\n%s", CrewProtocol(""))
+		got := TestinyProtocol("MOB", "mer", role, nil)
+		for _, want := range []string{
+			"\n\n## Testiny test cases (AO)\n",
+			"Testiny project `MOB`",
+			"`~/.ao/knowledge/mer/plans/<branch>--testiny.md`",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("role %q: the Testiny block is missing %q:\n%s", role, want, got)
+			}
+		}
 	}
 }
 
 // crewProtocolBudget caps the block EVERY crew member reads on every turn. It is
-// a deliberate number, not a fence around the current text: the shared-checklist
-// rewrite had to be shorter than the restriction it replaced, because describing
-// a capability takes fewer words than arguing for a prohibition. Raise it only
-// with a reason, the way the sim guidance budget is raised.
+// a deliberate number, not a fence around the current text. Raise it only with a
+// reason, the way the sim guidance budget is raised.
 const crewProtocolBudget = 4200
 
 func TestCrewProtocol_StaysWithinItsBudget(t *testing.T) {
@@ -1010,45 +912,10 @@ func TestCheckInGate_NamesNoSkillOrPlugin(t *testing.T) {
 	}
 }
 
-// TestQADefault_ResultNoteHasAFixedShape. A qa result note is read in the app,
-// under WHAT QA SAW, on a phone-width panel - and it used to arrive as a
-// paragraph of method narrative and code analysis that no person reads at a
-// glance. "Be brief" alone makes qa cut the wrong half, so the block is pinned by
-// what must SURVIVE (what it ran on, what it saw) as much as by what must go.
-func TestQADefault_ResultNoteHasAFixedShape(t *testing.T) {
-	base := DefaultBase(KindQA)
-	for _, want := range []string{
-		// The skeleton, labels verbatim - they are the scan anchors.
-		"Saw: <one sentence",
-		"On: <what you drove it on",
-		"Full: <where the long version is",
-		"each led by its label verbatim",
-		// Survivor 1: the observation, and only the observation.
-		"is an OBSERVATION and nothing else",
-		// What must go, named so it cannot be mistaken for brevity in general.
-		"How you simulated the state, which commands you ran, which function now resolves to what",
-		"explaining the mechanism of a fix is dev's job rather than yours",
-		// Survivor 2: the build line, and WHY it is the last one to drop.
-		"catches a result recorded against the WRONG BUILD",
-		// The detail is relocated, not deleted.
-		"it belongs in the report you hand dev and in the PR body",
-		// A budget, so "short" is not left to taste.
-		"about 400 characters for the whole note",
-		// The panel already carries the verdict/sha/shots, so the note repeats none.
-		"already shows your verdict as a stamp",
-	} {
-		if !strings.Contains(base, want) {
-			t.Fatalf("the qa base does not pin the result-note shape: missing %q:\n%s", want, base)
-		}
-	}
-}
-
 // TestQADefault_StaysLanguageNeutral. qaDefault is injected for EVERY qa in every
 // language, so response-language wording must not land here - it would change the
-// prompt for every English project. The result note's labels stay English under a
-// non-English language, and that carve-out belongs in ResponseLanguageDirective,
-// which is already a no-op for English. Same rule as
-// TestSmokeChecklistProtocol_StaysLanguageNeutral.
+// prompt for every English project. Language wording belongs in
+// ResponseLanguageDirective, which is already a no-op for English.
 func TestQADefault_StaysLanguageNeutral(t *testing.T) {
 	base := DefaultBase(KindQA)
 	for _, forbidden := range []string{
@@ -1060,23 +927,6 @@ func TestQADefault_StaysLanguageNeutral(t *testing.T) {
 	} {
 		if strings.Contains(strings.ToLower(base), strings.ToLower(forbidden)) {
 			t.Fatalf("the qa base must stay language-neutral but mentions %q:\n%s", forbidden, base)
-		}
-	}
-}
-
-// TestCoordinationFloor_QAHandbackTakesTheDetailCutFromTheNotes. Shortening the
-// case note only works if the detail has somewhere to go: the handback to dev and
-// the PR body. The floor is where that is stated, because the note block can be
-// edited out of the base and this cannot.
-func TestCoordinationFloor_QAHandbackTakesTheDetailCutFromTheNotes(t *testing.T) {
-	qa := CoordinationFloor(KindQA)
-	for _, want := range []string{
-		"the DETAIL you kept OUT of those notes",
-		"how you simulated the state, what you ran, what you think it means",
-		"this report is where the long version belongs",
-	} {
-		if !strings.Contains(qa, want) {
-			t.Fatalf("the qa floor does not take the detail cut from the case notes: missing %q:\n%s", want, qa)
 		}
 	}
 }
@@ -1106,6 +956,8 @@ func TestCoordinationFloor_WorkerReportsAtEachMoment(t *testing.T) {
 		"**you need the human**",
 		"**you finish** - your last act before you end your turn",
 		"the knowledge-store paths you wrote",
+		// The finish report is where the manual checks live.
+		"anything a person must check by hand (what, where, and why a test cannot)",
 		"`ao orchestrator ls`",
 		"a check-in before implementing, where the project has one, is the exception",
 	} {

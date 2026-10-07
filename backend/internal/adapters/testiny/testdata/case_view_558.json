@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "id": 558,
+      "project_id": 1,
+      "folder_id": 121,
+      "title": "Test",
+      "template": "TEXT",
+      "priority": 1,
+      "testcase_type": null,
+      "precondition": "TWEAS",
+      "steps": null,
+      "steps_text": "TEST",
+      "expected_text": "TEST",
+      "bdd": null,
+      "custom": {
+        "cf__active": true,
+        "cf__automationstatus": [
+          "Manual"
+        ],
+        "cf__description": null,
+        "cf__features": "TEST",
+        "cf__jira": "MOBILITY-4166",
+        "cf__platform": [
+          "ADR",
+          "API",
+          "Web",
+          "iOS"
+        ],
+        "cf__regression": [
+          "NO",
+          "YES"
+        ],
+        "cf__remark": "Test for import in jira",
+        "cf__section": null,
+        "cf__sprint": null,
+        "cf__subfeatures": null,
+        "cf__testdata": ""
+      }
+    }
+  ]
+}

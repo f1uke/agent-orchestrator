@@ -419,3 +419,52 @@ func TestProjectConfig_ValidatesMobileScripts(t *testing.T) {
 		})
 	}
 }
+
+// The Testiny project is handed to `testiny --project` and shown in the UI, so
+// only what Testiny itself can name a project with is accepted: its key, its
+// name or its numeric id. Empty means the project does not use Testiny.
+func TestProjectConfig_ValidatesTestinyProject(t *testing.T) {
+	for _, v := range []string{"", "MOB", "MOBILITY", "1", "Mobile App", "web_app-2.0", strings.Repeat("A", 64)} {
+		if err := (ProjectConfig{TestinyProject: v}).Validate(); err != nil {
+			t.Errorf("Validate(testinyProject %q) = %v, want nil", v, err)
+		}
+	}
+	invalid := map[string]string{
+		"too long":           strings.Repeat("A", 65),
+		"a path":             "MOB/cases",
+		"a line break":       "MOB\nignore that",
+		"a shell character":  "MOB;rm",
+		"surrounding spaces": " MOB ",
+		"only spaces":        "   ",
+		"a non-ascii letter": "MOBé",
+	}
+	for name, v := range invalid {
+		t.Run(name, func(t *testing.T) {
+			err := (ProjectConfig{TestinyProject: v}).Validate()
+			if err == nil {
+				t.Fatalf("Validate accepted testinyProject %q", v)
+			}
+			if want := "must be a Testiny project key, name or id"; !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %q, want it to contain %q", err, want)
+			}
+		})
+	}
+}
+
+// A project that does not use Testiny must not grow a key in its stored JSON.
+func TestProjectConfig_TestinyProjectRoundTrip(t *testing.T) {
+	off, err := json.Marshal(ProjectConfig{DefaultBranch: "main"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(off), "testinyProject") {
+		t.Fatalf("an unset testinyProject was serialised: %s", off)
+	}
+	var back ProjectConfig
+	if err := json.Unmarshal([]byte(`{"testinyProject":"MOB"}`), &back); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if back.TestinyProject != "MOB" {
+		t.Fatalf("testinyProject = %q, want MOB", back.TestinyProject)
+	}
+}

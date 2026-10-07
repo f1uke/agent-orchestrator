@@ -84,7 +84,7 @@ type Tone = "neutral" | "running" | "success" | "danger";
  * review-comment threads nested underneath (resolve / reply / send-to-worker /
  * open-full-file), plus a select-mode batch bar, the auto-send override, and the
  * reviewer run/terminal controls. Pixel-matched to the Comments-inbox dark
- * palette (themed tokens, app accent), mirroring the sibling Tests tab.
+ * palette (themed tokens, app accent).
  * Wired to the reviews-trigger, comment-resolve/reply/dispatch, send, and
  * auto-nudge endpoints; drives the per-PR reviewer state from /reviews.
  */

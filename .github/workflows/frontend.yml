@@ -147,11 +147,10 @@ jobs:
   # ⌘Z after Return leaves no stray whitespace behind, or that a formatter's
   # refusal reaches the caret and leaves the buffer byte-for-byte alone.
   #
-  # Scoped to these specs on purpose, and NAMED rather than globbed. The rest of
-  # frontend/e2e/ still targets the `api-gateway` demo fixtures that 2cb20c23e
-  # replaced with `ao-demo`, so those six specs have been dead since — never
-  # noticed, because no workflow has ever run Playwright. Repairing them is its own
-  # task; widen this to the folder once it is done.
+  # The rest of frontend/e2e/ rides along: the specs that targeted the
+  # `api-gateway` demo fixtures 2cb20c23e replaced with `ao-demo` now read
+  # `ao-demo`, so the job runs the whole folder and a new spec is guarded the day
+  # it lands.
   glyph-legibility:
     runs-on: ubuntu-latest
     defaults:
@@ -171,10 +170,5 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Measure the status glyphs, the card header, the Done lane, the sidebar qa pip, the editor, the Files rail, the terminal's links and the pinch dots in a real browser
-        run: >-
-          npx playwright test e2e/status-glyph.spec.ts e2e/card-header.spec.ts e2e/done-lane.spec.ts e2e/sidebar-qa-pip.spec.ts
-          e2e/editor.spec.ts e2e/editor-save.spec.ts e2e/editor-semantic.spec.ts
-          e2e/editor-completion.spec.ts e2e/editor-inline-completion.spec.ts e2e/editor-next-edit.spec.ts e2e/editor-lsp-surface.spec.ts e2e/editor-formatting.spec.ts e2e/files-perf.spec.ts
-          e2e/files-state.spec.ts e2e/search-perf.spec.ts e2e/terminal-links.spec.ts
-          e2e/pinch-dots.spec.ts
+      - name: Run the Playwright e2e suite in a real browser
+        run: npx playwright test

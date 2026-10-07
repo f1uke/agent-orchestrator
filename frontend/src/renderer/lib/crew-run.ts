@@ -1,4 +1,4 @@
-// Pure helpers for the Tests-tab "Machine runs" strip: a crew member's
+// Pure helpers for the Summary tab's "Machine runs" strip: a crew member's
 // bracketed build/test runs and what the tree-write detector concluded about
 // each one.
 //
@@ -13,13 +13,34 @@
 // UNCERTIFIED, for the same reason in the other direction - if a detector that
 // misses is bad, an absent one has to be visible too.
 //
-// The palette follows the tab's rule that the machine's lane is MONOCHROME: the
-// pass/fail hues belong to the human's verdict. A discarded or uncertified run
-// therefore carries the neutral qa ink, never a verdict colour.
+// The machine's lane is MONOCHROME: only a real failure carries a verdict hue.
+// A discarded or uncertified run therefore carries the neutral qa ink.
 
 import type { components } from "../../api/schema";
 import { tint } from "./comment-inbox";
-import { PALETTE as P } from "./smoke-test";
+
+/** The strip's palette, by role. Each value is a themed token (see `styles.css`),
+ * so the strip follows the app between light and dark. Surfaces, borders and the
+ * text ramp are the --inbox-* tokens the Comments tab uses. */
+export const PALETTE = {
+	cardBg: "var(--crew-run-card-bg)",
+	pillBg: "var(--inbox-pill-bg)",
+	borderCard: "var(--inbox-border-card)",
+	borderPill: "var(--inbox-border-pill)",
+	borderExpand: "var(--crew-run-divider-expand)",
+	text: "var(--inbox-text)",
+	secondary: "var(--inbox-secondary)",
+	secondary2: "var(--inbox-secondary-2)",
+	muted2: "var(--inbox-muted-2)",
+	refChip: "var(--viewer-chrome-fg)",
+	fail: "var(--crew-run-fail)",
+	failFg: "var(--crew-run-fail-fg)",
+	/** A flat, neutral block. Deliberately not accent-tinted (that is the app's
+	 * own voice) and never a verdict hue. */
+	qaBg: "var(--crew-run-qa-bg)",
+	qaBorder: "var(--crew-run-qa-border)",
+	qaFg: "var(--crew-run-qa-fg)",
+} as const;
 
 export type CrewRun = components["schemas"]["CrewRun"];
 
@@ -49,44 +70,44 @@ export const CREW_RUN_META: Record<CrewRunState, CrewRunMeta> = {
 	running: {
 		label: "Running",
 		caption: "This member is running something right now.",
-		color: P.qaFg,
-		pillBg: P.qaBg,
-		pillBorder: P.qaBorder,
+		color: PALETTE.qaFg,
+		pillBg: PALETTE.qaBg,
+		pillBorder: PALETTE.qaBorder,
 	},
 	passed: {
 		label: "Passed",
 		caption: "The tree did not move, so what this run saw is what the tree is.",
-		color: P.qaFg,
-		pillBg: P.qaBg,
-		pillBorder: P.qaBorder,
+		color: PALETTE.qaFg,
+		pillBg: PALETTE.qaBg,
+		pillBorder: PALETTE.qaBorder,
 	},
 	failed: {
 		label: "Failed",
 		caption: "The tree did not move, so this failure is real.",
-		color: "var(--smoke-fail-fg)",
-		pillBg: tint("var(--smoke-fail)", 14),
-		pillBorder: tint("var(--smoke-fail)", 40),
+		color: PALETTE.failFg,
+		pillBg: tint(PALETTE.fail, 14),
+		pillBorder: tint(PALETTE.fail, 40),
 	},
 	discarded: {
 		label: "Discarded",
 		caption: "The tree changed under this run, so its result was thrown away - not passed, not failed.",
-		color: P.qaFg,
-		pillBg: P.qaBg,
-		pillBorder: P.qaBorder,
+		color: PALETTE.qaFg,
+		pillBg: PALETTE.qaBg,
+		pillBorder: PALETTE.qaBorder,
 	},
 	uncertified: {
 		label: "Uncertified",
 		caption: "Nothing was watching the tree, so this result cannot be vouched for.",
-		color: P.qaFg,
-		pillBg: P.qaBg,
-		pillBorder: P.qaBorder,
+		color: PALETTE.qaFg,
+		pillBg: PALETTE.qaBg,
+		pillBorder: PALETTE.qaBorder,
 	},
 	finished: {
 		label: "Finished",
 		caption: "The tree did not move. The run recorded no pass or fail of its own.",
-		color: P.qaFg,
-		pillBg: P.qaBg,
-		pillBorder: P.qaBorder,
+		color: PALETTE.qaFg,
+		pillBg: PALETTE.qaBg,
+		pillBorder: PALETTE.qaBorder,
 	},
 };
 
@@ -108,9 +129,10 @@ export function crewRunDuration(run: CrewRun, now: number): string {
 }
 
 /**
- * The CURRENT streak of discarded runs, counted from the newest backwards.
- * Mirrors the daemon's ConsecutiveCrewRunDiscards, which is what the card's lane
- * is derived from, so the strip and the board never disagree.
+ * The CURRENT streak of discarded runs in ONE member's runs, counted from the
+ * newest backwards. Mirrors the daemon's ConsecutiveCrewRunDiscards, which is
+ * what the card's lane is derived from, so the strip and the board never
+ * disagree.
  *
  * Only a TRUSTED run ends the streak. Two states are SKIPPED rather than
  * counted or treated as a clear:
@@ -137,9 +159,20 @@ export function discardStreak(runs: CrewRun[]): number {
  * The backend's domain.CappedRepeat; kept here so the copy can name it. */
 export const CREW_RUN_MAX_ATTEMPTS = 3;
 
-/** Whether the streak has spent the automatic retry and parked at NEEDS YOU. */
-export function crewRunEscalated(runs: CrewRun[]): boolean {
-	return discardStreak(runs) >= CREW_RUN_MAX_ATTEMPTS;
+/**
+ * The member whose streak has spent the automatic retry and parked the task at
+ * NEEDS YOU, if one has. A crew's strip mixes both members' runs, newest first,
+ * but a streak is one member's: dev's quiet runs between qa's discards are no
+ * evidence that qa ever got a quiet tree.
+ */
+export function crewRunEscalation(runs: CrewRun[]): { streak: number; role?: CrewRun["role"] } | undefined {
+	const members = new Map<string, CrewRun[]>();
+	for (const run of runs) members.set(run.sessionId, [...(members.get(run.sessionId) ?? []), run]);
+	for (const memberRuns of members.values()) {
+		const streak = discardStreak(memberRuns);
+		if (streak >= CREW_RUN_MAX_ATTEMPTS) return { streak, role: memberRuns[0].role };
+	}
+	return undefined;
 }
 
 /** The label line for one run: its kind, and the command if the member named one. */

@@ -8,6 +8,7 @@ import {
 	sessionScmSummaryQueryOptions,
 	type SessionPRSummary,
 } from "../hooks/useSessionScmSummary";
+import { tasksFrom } from "../lib/crew";
 import { comparePRDisplaySummaries, prDiffSummary, prRef, sessionPRDisplaySummaries } from "../lib/pr-display";
 import type { WorkspaceSession } from "../types/workspace";
 import { DashboardSubhead } from "./DashboardSubhead";
@@ -40,7 +41,9 @@ type PRRow = {
 export function PullRequestsPage() {
 	const navigate = useNavigate();
 	const workspaceQuery = useWorkspaceQuery();
-	const sessions = (workspaceQuery.data ?? []).flatMap((w) => w.sessions);
+	// One row source per TASK: the /pr route answers a crew's qa with dev's pull
+	// request, so asking every member would list each crew PR twice.
+	const sessions = tasksFrom((workspaceQuery.data ?? []).flatMap((w) => w.sessions)).map((task) => task.dev);
 	const prQueries = useQueries({
 		queries: sessions.map((session) => sessionScmSummaryQueryOptions(session.id)),
 	});

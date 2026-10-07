@@ -3,10 +3,12 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PullRequestsPage } from "./PullRequestsPage";
+import { mockSessionScmSummaries } from "../lib/mock-data";
 import type { PRState, PullRequestFacts, WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 
-const { navigateMock, postMock, useWorkspaceQueryMock } = vi.hoisted(() => ({
+const { navigateMock, getMock, postMock, useWorkspaceQueryMock } = vi.hoisted(() => ({
 	navigateMock: vi.fn(),
+	getMock: vi.fn(),
 	postMock: vi.fn(),
 	useWorkspaceQueryMock: vi.fn(),
 }));
@@ -17,7 +19,10 @@ vi.mock("../hooks/useWorkspaceQuery", () => ({
 	workspaceQueryKey: ["workspaces"],
 }));
 vi.mock("../lib/api-client", () => ({
-	apiClient: { POST: (...args: unknown[]) => postMock(...args) },
+	apiClient: {
+		GET: (...args: unknown[]) => getMock(...args),
+		POST: (...args: unknown[]) => postMock(...args),
+	},
 	apiErrorMessage: (e: unknown) => (e instanceof Error ? e.message : "error"),
 }));
 
@@ -50,16 +55,19 @@ function setWorkspaces(sessions: WorkspaceSession[]) {
 	useWorkspaceQueryMock.mockReturnValue({ data, isError: false, isLoading: false });
 }
 
-function renderPage() {
+function renderPage(): QueryClient {
+	const client = new QueryClient();
 	render(
-		<QueryClientProvider client={new QueryClient()}>
+		<QueryClientProvider client={client}>
 			<PullRequestsPage />
 		</QueryClientProvider>,
 	);
+	return client;
 }
 
 beforeEach(() => {
 	navigateMock.mockReset();
+	getMock.mockReset().mockResolvedValue({ data: { prs: [] }, error: undefined });
 	postMock.mockReset().mockResolvedValue({ data: { method: "squash" }, error: undefined });
 });
 
@@ -73,6 +81,27 @@ describe("PullRequestsPage", () => {
 		const rows = screen.getAllByRole("row").slice(1); // drop header
 		const numbers = rows.map((r) => within(r).getByText(/^#\d+$/).textContent);
 		expect(numbers).toEqual(["#41", "#42", "#40"]);
+	});
+
+	it("lists a crew's pull request once, though both members answer for it", async () => {
+		// The daemon's /pr route is task-scoped: asked about qa, it answers with
+		// dev's pull request, which qa's own row does not carry.
+		const shared = {
+			...mockSessionScmSummaries["demo-ready"][0],
+			provider: "github" as const,
+			number: 41,
+			url: "https://example.com/pr/41",
+		};
+		getMock.mockResolvedValue({ data: { prs: [shared] }, error: undefined });
+		setWorkspaces([
+			{ ...session("auth", [pr(41, "open")]), crew: { id: "auth", role: "dev", hasRun: true } },
+			{ ...session("auth-qa", []), crew: { id: "auth", role: "qa", hasRun: true } },
+		]);
+		const client = renderPage();
+
+		await waitFor(() => expect(getMock).toHaveBeenCalled());
+		await waitFor(() => expect(client.isFetching()).toBe(0));
+		expect(screen.getAllByText("#41")).toHaveLength(1);
 	});
 
 	it("merges the PR by its own number, not the session's", async () => {

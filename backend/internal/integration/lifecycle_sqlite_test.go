@@ -45,7 +45,8 @@ type stubRuntime struct {
 	createErr error
 	// lastCfg is the config the most recent Create was asked for. It is how a test
 	// reads the ENVIRONMENT an agent is launched with - AO_CREW_ID in particular,
-	// which decides whose card a smoke checklist lands on.
+	// which decides whose task `ao session get "$AO_CREW_ID"`, a handback and the
+	// task-scoped reads reach.
 	lastCfg ports.RuntimeConfig
 }
 

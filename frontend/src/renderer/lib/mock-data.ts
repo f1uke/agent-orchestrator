@@ -2,6 +2,7 @@ import type { PRState, PullRequestFacts, WorkspaceSummary } from "../types/works
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { components } from "../../api/schema";
 import type { SessionChild } from "./children";
+import { withResult, type TestinyWrite } from "./testiny";
 
 type WorkspaceChangesResponse = components["schemas"]["WorkspaceChangesResponse"];
 type WorkspaceFilesResponse = components["schemas"]["WorkspaceFilesResponse"];
@@ -71,6 +72,10 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 		// tab and the member switcher's device pip. Without it the Device tab does
 		// not render here at all and neither can be looked at.
 		hasIOSSimulator: true,
+		// Its tasks get the Testiny tab (Summary, Reviews, Files, Testiny, Device,
+		// Browser: the widest strip). docs-site leaves it unset, so its rail shows
+		// the strip without it.
+		testinyProject: "MOB",
 		orchestratorAgent: "codex",
 		accentColor: "#6ee7b7",
 		sessions: [
@@ -349,8 +354,8 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				crew: { id: "demo-ready", role: "dev", hasRun: true },
 			},
 			{
-				// qa has had its turn here (hasRun), so this task's card is held out of
-				// Ready to Merge by the CHECKLIST rather than by an unwoken agent.
+				// qa ran its pass, handed back to dev and went to sleep, so with dev's
+				// PR green this task reads Ready to merge.
 				id: "demo-ready-qa",
 				workspaceId: "ao-demo",
 				workspaceName: "ao-demo",
@@ -364,7 +369,12 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				activity: { state: "idle", lastActivityAt: minutesAgo(12) },
 				prs: [],
 				taskSize: "standard",
-				crew: { id: "demo-ready", role: "qa", hasRun: true },
+				crew: {
+					id: "demo-ready",
+					role: "qa",
+					hasRun: true,
+					lastHandback: { at: minutesAgo(12), about: "4f2c9e1" },
+				},
 			},
 			{
 				// THE STALL, on the demo board so the lane can be looked at: a crew
@@ -385,14 +395,14 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				createdAt: hoursAgo(6),
 				updatedAt: hoursAgo(1),
 				activity: { state: "parked", lastActivityAt: hoursAgo(1) },
-				prs: [demoPr(324, "open", "passing", "approved")],
+				prs: [demoPr(328, "open", "passing", "approved")],
 				taskSize: "standard",
 				crew: { id: "demo-stalled", role: "dev", hasRun: true },
 			},
 			{
-				// qa ran, found nothing a person has to play, and parked. Its turn is
-				// over and it never told dev - which is the other half of the same
-				// failure, and why qa's floor now obliges it to hand back.
+				// qa ran and parked without handing anything back. Its turn is over and
+				// it never told dev - which is the other half of the same failure, and
+				// why qa's floor now obliges it to hand back.
 				id: "demo-stalled-qa",
 				workspaceId: "ao-demo",
 				workspaceName: "ao-demo",
@@ -407,6 +417,40 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				prs: [],
 				taskSize: "standard",
 				crew: { id: "demo-stalled", role: "qa", hasRun: true },
+			},
+			{
+				// dev's PR is green, but qa is still mid-pass: the card names qa at work
+				// and stays out of Ready to merge until qa hands back and stops.
+				id: "demo-qa-testing",
+				workspaceId: "ao-demo",
+				workspaceName: "ao-demo",
+				title: "Tighten the share sheet's empty state",
+				provider: "claude-code",
+				branch: "demo/share-empty-state",
+				status: "mergeable",
+				displayStatus: "mergeable",
+				createdAt: hoursAgo(5),
+				updatedAt: minutesAgo(8),
+				activity: { state: "idle", lastActivityAt: minutesAgo(8) },
+				prs: [demoPr(327, "open", "passing", "approved")],
+				taskSize: "standard",
+				issueId: "jira:DEMO-150",
+				crew: { id: "demo-qa-testing", role: "dev", hasRun: true },
+			},
+			{
+				id: "demo-qa-testing-qa",
+				workspaceId: "ao-demo",
+				workspaceName: "ao-demo",
+				title: "Tighten the share sheet's empty state",
+				provider: "claude-code",
+				branch: "demo/share-empty-state",
+				status: "working",
+				createdAt: hoursAgo(5),
+				updatedAt: minutesAgo(1),
+				activity: { state: "active", lastActivityAt: minutesAgo(1) },
+				prs: [],
+				taskSize: "standard",
+				crew: { id: "demo-qa-testing", role: "qa", hasRun: true },
 			},
 			{
 				// PARKED HOLDING WORK NO PR CARRIES: its card wears the widest chip on
@@ -671,12 +715,11 @@ const prSummary = (sessionId: string, number: number, overrides: Partial<Session
  * The TASK a mock session belongs to - the harness's stand-in for the daemon's
  * `TaskScoped` middleware (#242).
  *
- * A crew's two members share one worktree, one branch, one pull request and one
- * smoke checklist, and the daemon resolves any member to its dev before it
- * answers those four surfaces. The mock fixtures are keyed by session, so
- * without this the harness would show a qa an empty Summary and an empty
- * checklist - the very bug the daemon no longer has, reintroduced by the fake
- * data and easy to mistake for a real one.
+ * A crew's two members share one worktree, one branch and one pull request, and
+ * the daemon resolves any member to its dev before it answers those surfaces.
+ * The mock fixtures are keyed by session, so without this the harness would show
+ * a qa an empty Summary - the very bug the daemon no longer has, reintroduced by
+ * the fake data and easy to mistake for a real one.
  *
  * A solo session is its own task, so this is the identity for every session
  * without a crew.
@@ -844,8 +887,6 @@ export const mockSessionScmSummaries: Record<string, SessionPRSummary[]> = {
 	"demo-in-review": [
 		prSummary("demo-in-review", 322, {
 			provider: "gitlab",
-			// A real head commit, so the Tests tab can compare a machine result's
-			// `agentSha` against it and mark the older run stale.
 			headSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
 			review: {
 				decision: "none",
@@ -1013,6 +1054,22 @@ export const mockSessionJiraContexts: Record<string, components["schemas"]["Jira
 					],
 				},
 			],
+		},
+	},
+	// The Testiny demo task: its cases are linked to this issue as a requirement.
+	"demo-qa-testing": {
+		sessionId: "demo-qa-testing",
+		linked: true,
+		issue: {
+			key: "DEMO-150",
+			url: "https://example.atlassian.net/browse/DEMO-150",
+			type: "Story",
+			title: "Tighten the share sheet's empty state",
+			status: "In QA",
+			statusCategory: "indeterminate",
+			statusColor: "yellow",
+			priority: "Medium",
+			assignee: "Alex Rivera",
 		},
 	},
 };
@@ -1332,478 +1389,6 @@ export function mockSimDevices(): components["schemas"]["ListSimDevicesResponse"
 				available: true,
 				default: false,
 				lease: { state: "unknown", reason: "no AO session holds this device" },
-			},
-		],
-	};
-}
-
-// Mock smoke checklist for the VITE_NO_ELECTRON renderer harness (no daemon).
-// Only the primary demo worker has a checklist; other sessions render the empty
-// state (not every worker authors one). Shared by useSessionSmokeChecks so the
-// Tests tab and the Summary readiness strip read the same mock.
-export function mockSmokeChecks(sessionId: string, worker?: string): components["schemas"]["ListSmokeChecksResponse"] {
-	if (sessionId === "demo-in-review") return mockAgentSmokeChecks(sessionId, worker);
-	// demo-ready is a CREW task whose dev can land and whose qa has already run:
-	// what holds it out of Ready to Merge is a case only a person can judge, which
-	// is the AND this feature exists to make visible.
-	if (sessionId === "demo-ready") {
-		return {
-			worker: worker || "readme assets",
-			checks: [
-				{
-					id: "asset-renders",
-					sessionId,
-					projectId: "agent-orchestrator",
-					seq: 1,
-					name: "The new screenshot renders crisply at 2x",
-					why: "Only a person can say whether an image looks right; a machine can only say the file loaded.",
-					steps: ["Open docs/readme.md in the preview.", "Look at the dashboard screenshot at 200%."],
-					expected: "No blur, no banding, text in the screenshot is legible.",
-					prNum: 323,
-					fileRef: "docs/assets/readme/dashboard.png:1",
-					verdict: "pending",
-					note: "",
-					evidence: [],
-					agentVerdict: "pass",
-					agentNote: "Image loads and is 2560x1600.",
-					agentRanAt: minutesAgo(12),
-					agentEvidence: [],
-					runs: [],
-					authoredBy: "agent-orchestrator-88",
-					authoredByRole: "qa",
-					authoredAt: minutesAgo(20),
-					createdAt: minutesAgo(20),
-					updatedAt: minutesAgo(12),
-				},
-			],
-		} as components["schemas"]["ListSmokeChecksResponse"];
-	}
-	// demo-stalled is the crew whose qa ran, found nothing a person has to play,
-	// and parked. That answer used to be invisible: its Tests tab rendered the
-	// same empty panel as a task nobody had triaged yet. A recorded stand-down is
-	// what lets the two be told apart.
-	if (sessionId === "demo-stalled") {
-		return {
-			worker: worker || "retry flag rename",
-			checks: [],
-			standDown: {
-				sessionId,
-				at: minutesAgo(70),
-				by: "demo-stalled-qa",
-				byRole: "qa",
-				reason:
-					"The rename is compile-time only - every call site is covered by TestExportRetryFlag, and no screen renders the flag's name. Nothing here needs your eyes.",
-				createdAt: minutesAgo(70),
-				updatedAt: minutesAgo(70),
-			},
-		} as components["schemas"]["ListSmokeChecksResponse"];
-	}
-	if (sessionId !== "demo-working") {
-		return { worker: worker || "worker", checks: [] };
-	}
-	return {
-		worker: worker || "fix gl note render",
-		checks: [
-			{
-				id: "gitlab-mr-appears",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 1,
-				name: "A fresh GitLab MR shows up in Reviews on its own",
-				why: "The fix broadens re-polling to every open MR; this confirms one appears without a manual refresh.",
-				steps: [
-					"Open the gitlab-mr-review project and go to the Reviews tab.",
-					"On GitLab, open a brand-new MR against the tracked branch.",
-					"Wait one review interval (~60s) without touching the app.",
-				],
-				expected: "The new MR appears in Reviews automatically, with CI + review status filled in.",
-				prNum: 36,
-				fileRef: "scmobserver.go:936",
-				verdict: "pass",
-				note: "Appeared after ~55s, statuses correct.",
-				evidence: [],
-				agentEvidence: [],
-				runs: [],
-				decidedAt: now,
-				authoredBy: "agent-orchestrator-42",
-				authoredByRole: "qa",
-				authoredAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "canceling-pipeline",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 2,
-				name: 'A canceling pipeline reads as "In progress", never "Unknown"',
-				why: "A canceling GitLab pipeline briefly reported Unknown before; this verifies it stays In progress.",
-				steps: ["Trigger a pipeline then cancel it.", "Watch the badge during the cancel."],
-				expected: 'The badge shows "In progress" then the terminal state — never "Unknown".',
-				prNum: 36,
-				fileRef: "normalize.go:451",
-				verdict: "fail",
-				note: "Flashed Unknown for ~1s before In progress.",
-				evidence: [
-					{
-						id: "ev_demo1",
-						checkId: "canceling-pipeline",
-						sessionId,
-						kind: "image",
-						filename: "unknown-flash.png",
-						mime: "image/png",
-						sizeBytes: 84213,
-						createdAt: now,
-						source: "user",
-					},
-				],
-				agentEvidence: [],
-				runs: [],
-				authoredBy: "agent-orchestrator-42",
-				authoredByRole: "qa",
-				authoredAt: now,
-				decidedAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "reviewers-unchanged",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 3,
-				name: "GitHub PRs still review exactly as before",
-				why: "The change only touches the GitLab path; GitHub review flow must be untouched.",
-				steps: ["Open a GitHub-backed session with an open PR.", "Trigger a review and watch it complete."],
-				expected: "GitHub review behaves identically to before the change.",
-				prNum: 34,
-				fileRef: "observer.go:201",
-				verdict: "skip",
-				note: "No GitHub project handy right now.",
-				evidence: [],
-				agentEvidence: [],
-				runs: [],
-				decidedAt: now,
-				authoredBy: "agent-orchestrator-41",
-				authoredByRole: "dev",
-				authoredAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-			{
-				id: "ios-sim",
-				sessionId,
-				projectId: "agent-orchestrator",
-				seq: 4,
-				name: "iOS simulator smoke of the share sheet",
-				why: "Native share-sheet timing can't be unit-tested.",
-				steps: ["Open the app in the iOS simulator.", "Tap Share."],
-				expected: "The share sheet opens without a frame drop.",
-				prNum: 31,
-				fileRef: "ShareView.swift:88",
-				verdict: "pending",
-				note: "",
-				evidence: [],
-				agentEvidence: [],
-				runs: [],
-				authoredBy: "agent-orchestrator-41",
-				authoredByRole: "dev",
-				authoredAt: now,
-				createdAt: now,
-				updatedAt: now,
-			},
-		],
-	};
-}
-
-/**
- * The Tests tab with a MACHINE result beside the human's: one case in each
- * state the tab has to keep apart, since jsdom cannot show whether the screen
- * reads honestly and only looking at it can:
- *
- *  1. human-only, no machine run at all (renders exactly as it always has)
- *  2. ONE machine run, judged pass, human hasn't played it
- *  3. THREE machine runs whose verdict INVERTED - the case failed at one commit
- *     and passes at another, with each round's captures under its own verdict.
- *     This is what a single overwritten result could never show.
- *  4. machine ran and DECLINED to judge: evidence captured, judgement left to a
- *     person, plus captures from BEFORE run history existed - grouped as an
- *     unknown run rather than filed under the verdict showing now
- *  5. stale, ran against a commit that is no longer head
- *  6. DECLARED UNDRIVEABLE: qa tried, could not run it, and said why. It is the
- *     state that tells "nothing could reach this" apart from case 1's "nobody
- *     looked" - which used to be the same blank row.
- *  7. retired, out of the checklist, kept with its reason
- */
-function mockAgentSmokeChecks(sessionId: string, worker?: string): components["schemas"]["ListSmokeChecksResponse"] {
-	const base = {
-		sessionId,
-		projectId: "agent-orchestrator",
-		note: "",
-		evidence: [],
-		agentEvidence: [],
-		runs: [],
-		createdAt: now,
-		updatedAt: now,
-	};
-	// runId "" is a capture that belongs to no run: taken before AO kept a run
-	// history, when the result it was taken for could be overwritten out of
-	// existence. The tab has to say so rather than file it under the newest one.
-	const shot = (checkId: string, id: string, filename: string, runId = "") => ({
-		id,
-		checkId,
-		sessionId,
-		kind: "image",
-		filename,
-		mime: "image/png",
-		sizeBytes: 71204,
-		createdAt: now,
-		source: "agent",
-		runId,
-	});
-	const run = (checkId: string, seq: number, verdict: string, note: string, sha: string, at: string) => ({
-		id: `run_${checkId}_${seq}`,
-		checkId,
-		sessionId,
-		seq,
-		verdict,
-		note,
-		sha,
-		recordedAt: at,
-		createdAt: at,
-		updatedAt: at,
-	});
-	return {
-		worker: worker || "settings copy",
-		checks: [
-			{
-				...base,
-				id: "settings-copy-paint",
-				seq: 1,
-				name: "The settings pane still paints in one frame on open",
-				why: "The copy change re-renders the whole pane; a person has to see whether it flashes.",
-				steps: ["Open Project settings.", "Close it and open it again, watching the first frame."],
-				expected: "No flash of unstyled or half-laid-out content.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:140",
-				verdict: "pending",
-			},
-			{
-				...base,
-				id: "settings-copy-saves",
-				seq: 2,
-				name: "Editing the project name saves and survives a reopen",
-				why: "The save path was touched by the copy refactor.",
-				steps: ["Open Project settings.", "Rename the project.", "Close and reopen the pane."],
-				expected: "The new name is there, and the daemon has it.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:212",
-				verdict: "pending",
-				agentVerdict: "pass",
-				agentNote: "Typed a new name, reopened the pane twice; the value came back both times.",
-				agentRanAt: minutesAgo(24),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				runs: [
-					run(
-						"settings-copy-saves",
-						1,
-						"pass",
-						"Typed a new name, reopened the pane twice; the value came back both times.",
-						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-						minutesAgo(24),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-validation",
-				seq: 3,
-				name: "An empty project name is refused with a message",
-				why: "The validation string moved; the refusal must still reach the user.",
-				steps: ["Clear the project name field.", "Press Save."],
-				expected: "Save is refused and the field explains why.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:233",
-				verdict: "pending",
-				agentVerdict: "fail",
-				agentNote: "Save went through with an empty name; no message appeared.",
-				agentRanAt: minutesAgo(24),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				agentEvidence: [
-					shot("settings-copy-validation", "ev_agent_val1", "empty-name-saved.png", "run_settings-copy-validation_1"),
-					shot("settings-copy-validation", "ev_agent_val2", "refusal-message.png", "run_settings-copy-validation_2"),
-					shot(
-						"settings-copy-validation",
-						"ev_agent_val3",
-						"empty-name-saved-again.png",
-						"run_settings-copy-validation_3",
-					),
-				],
-				runs: [
-					run(
-						"settings-copy-validation",
-						1,
-						"fail",
-						"Empty name saved without a word; the field stayed as it was.",
-						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
-						hoursAgo(6),
-					),
-					run(
-						"settings-copy-validation",
-						2,
-						"pass",
-						"Refused with \u201cName cannot be empty\u201d after the fix.",
-						"c30f1b8e5a2947d6b1e08c73f5a2d914b6e70c8a",
-						hoursAgo(3),
-					),
-					run(
-						"settings-copy-validation",
-						3,
-						"fail",
-						"Save went through with an empty name; no message appeared.",
-						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-						minutesAgo(24),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-focus",
-				seq: 4,
-				name: "Focus lands in the name field, and the ring is visible",
-				why: "Keyboard users open this pane and type immediately; paint and focus are not machine-judgeable.",
-				steps: ["Open Project settings with ⌘,.", "Do not touch the mouse."],
-				expected: "The name field holds focus with a visible ring.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:118",
-				verdict: "pending",
-				agentRanAt: minutesAgo(23),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				agentEvidence: [
-					shot("settings-copy-focus", "ev_agent_focus", "settings-open-focus.png", "run_settings-copy-focus_2"),
-					// No run: captured before AO kept a history, and the result it was
-					// taken for is gone. It must NOT read as evidence for the run above.
-					shot("settings-copy-focus", "ev_agent_focus_old", "settings-open-old.png"),
-				],
-				runs: [
-					run(
-						"settings-copy-focus",
-						1,
-						"pass",
-						"Tabbed to the field and read document.activeElement; it was the input.",
-						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
-						hoursAgo(7),
-					),
-					run("settings-copy-focus", 2, "", "", "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118", minutesAgo(23)),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-scroll",
-				seq: 5,
-				name: "The long settings list scrolls without stutter",
-				why: "The pane grew; drag-scroll feel is exactly what a machine cannot report.",
-				steps: ["Open Project settings.", "Drag the list quickly from top to bottom."],
-				expected: "Scrolling tracks the pointer with no jump or stall.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:301",
-				verdict: "pending",
-				agentVerdict: "pass",
-				agentNote: "Scrolled the container to the end programmatically; no error, all rows rendered.",
-				agentRanAt: hoursAgo(6),
-				agentSha: "9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
-				runs: [
-					run(
-						"settings-copy-scroll",
-						1,
-						"pass",
-						"Scrolled the container to the end programmatically; no error, all rows rendered.",
-						"9f0c2ad41b77e3b5c8d6a0f21e4c7b9038a1d6e5",
-						hoursAgo(6),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-press-hold",
-				seq: 6,
-				name: "Press and hold on a row opens the context menu",
-				why: "The gesture handler moved with the copy refactor.",
-				steps: ["Press and hold a settings row for a second.", "Read the menu that opens."],
-				expected: "The context menu opens under the finger.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:355",
-				verdict: "pending",
-				agentVerdict: "skip",
-				agentNote:
-					"Tried a 1.2s ao sim drag with no movement, twice; the menu never opened and the row took the tap instead, so nothing here was exercised.",
-				agentRanAt: minutesAgo(20),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				runs: [
-					run(
-						"settings-copy-press-hold",
-						1,
-						"skip",
-						"Tried a 1.2s ao sim drag with no movement, twice; the menu never opened and the row took the tap instead, so nothing here was exercised.",
-						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-						minutesAgo(20),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-reset",
-				seq: 7,
-				name: "Reset to defaults restores every field",
-				why: "Reset writes through the same path the copy refactor touched.",
-				steps: ["Change three fields.", "Press Reset to defaults."],
-				expected: "All three come back to their defaults.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:355",
-				// The user AGREED with qa's second run rather than re-deriving it. The
-				// verdict is theirs - "by you", counted as verified - and the row says
-				// which run they confirmed, which matters because run 1 said the
-				// opposite.
-				verdict: "pass",
-				decidedAt: minutesAgo(9),
-				agreedRunId: "run_settings-copy-reset_2",
-				agentVerdict: "pass",
-				agentNote: "Reset restored all three fields; read them back after the write.",
-				agentRanAt: minutesAgo(19),
-				agentSha: "4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-				runs: [
-					run(
-						"settings-copy-reset",
-						1,
-						"fail",
-						"The third field kept its edited value after Reset.",
-						"c30f1b8e5a2947d6b1e08c73f5a2d914b6e70c8a",
-						hoursAgo(4),
-					),
-					run(
-						"settings-copy-reset",
-						2,
-						"pass",
-						"Reset restored all three fields; read them back after the write.",
-						"4b21e07c9a5d1f6083e2b7c4419af6d2e0d5c118",
-						minutesAgo(19),
-					),
-				],
-			},
-			{
-				...base,
-				id: "settings-copy-legacy-toggle",
-				seq: 8,
-				name: "The legacy settings toggle still writes the old key",
-				why: "Kept while the old key was read anywhere.",
-				steps: ["Flip the legacy toggle.", "Read the config file."],
-				expected: "The old key flips with it.",
-				prNum: 322,
-				fileRef: "ProjectSettings.tsx:410",
-				verdict: "pass",
-				note: "Old key flipped, checked the file by hand.",
-				decidedAt: hoursAgo(20),
-				retiredAt: hoursAgo(5),
-				retiredReason: "The legacy key was deleted in this PR, and a Go test now covers the migration.",
 			},
 		],
 	};
@@ -2179,20 +1764,26 @@ function windowMockDiff(lines: DiffContextResponse["lines"]): DiffContextRespons
 }
 
 /**
- * Bracketed machine runs for the Tests tab's "Machine runs" strip.
+ * Bracketed machine runs for the Summary tab's "Machine runs" strip, by task
+ * (dev's session id), as `?scope=task` answers them: every member's runs, each
+ * tagged with its role because all three demo tasks have a crew.
  *
- * `demo-working` is the interesting one: three runs discarded in a row, which is
- * the state the escalation exists for. `demo-ready` shows the ordinary case - a
- * clean run whose result can be believed - and every other session returns
- * NOTHING, because a session that never brackets a run must get exactly the
- * Tests tab it had before this existed.
+ * `demo-working` is the interesting one: three of dev's runs discarded in a
+ * row, which is the state the escalation exists for. `demo-ready` shows the
+ * ordinary case - a clean run whose result can be believed - and
+ * `demo-qa-testing` shows both members on one strip: dev's build passed, qa's
+ * device pass was discarded because dev wrote mid-run. Every other task returns
+ * NOTHING, because a task that never brackets a run must get exactly the Summary
+ * tab it had before this existed.
  */
-export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrewRunsResponse"] {
+export function mockCrewRuns(taskId: string): components["schemas"]["ListCrewRunsResponse"] {
 	const run = (over: Partial<components["schemas"]["CrewRun"]>): components["schemas"]["CrewRun"] =>
 		({
-			id: `${sessionId}-${over.id ?? "r"}`,
-			sessionId,
+			id: `${taskId}-${over.id ?? "r"}`,
+			sessionId: taskId,
 			projectId: "agent-orchestrator",
+			crewId: taskId,
+			role: "dev",
 			attempt: 1,
 			detector: "live",
 			genAtStart: 0,
@@ -2204,7 +1795,35 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
 			...over,
 		}) as components["schemas"]["CrewRun"];
 
-	if (sessionId === "demo-working") {
+	if (taskId === "demo-qa-testing") {
+		return {
+			runs: [
+				run({
+					id: "q1",
+					sessionId: "demo-qa-testing-qa",
+					role: "qa",
+					kind: "device",
+					label: "maestro test share-sheet-empty.yaml",
+					startedAt: minutesAgo(6),
+					endedAt: minutesAgo(4),
+					outcome: "discarded",
+					result: "pass",
+					changedPaths: ["ShareSheet/EmptyStateView.swift"],
+				}),
+				run({
+					id: "d1",
+					kind: "build",
+					label: "xcodebuild -scheme App build",
+					startedAt: minutesAgo(12),
+					endedAt: minutesAgo(9),
+					outcome: "trusted",
+					result: "pass",
+				}),
+			],
+		};
+	}
+
+	if (taskId === "demo-working") {
 		return {
 			runs: [
 				run({
@@ -2262,7 +1881,7 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
 			],
 		};
 	}
-	if (sessionId === "demo-ready") {
+	if (taskId === "demo-ready") {
 		return {
 			runs: [
 				run({
@@ -2278,6 +1897,261 @@ export function mockCrewRuns(sessionId: string): components["schemas"]["ListCrew
 		};
 	}
 	return { runs: [] };
+}
+
+/**
+ * The Testiny tab in `ao preview`, where there is no daemon and no Testiny.
+ * "Tighten the share sheet's empty state" carries every state a card can be in:
+ * an iOS run with a failure, unplayed cases and some cases a Maestro script
+ * plays; an Android run all passed with its evidence folder; and a run whose
+ * latest read Testiny refused, still showing what it read 12 minutes ago. Every
+ * other task has none, which is the empty state.
+ *
+ * Results set from the tab are kept here for as long as the page lives, so a
+ * refresh still shows them.
+ */
+export function mockTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResponse"] {
+	let runs = mockTestinyStore.get(taskId);
+	if (!runs) {
+		runs = demoTestinyRuns(taskId);
+		mockTestinyStore.set(taskId, runs);
+	}
+	return structuredClone(runs);
+}
+
+/** A case or step result set from the tab in the preview: written into the demo run, as the person, and read back. */
+export function mockRecordTestinyResult(
+	taskId: string,
+	runId: number,
+	write: TestinyWrite,
+): components["schemas"]["TestinyRunView"] {
+	const data = mockTestinyRuns(taskId);
+	const run = data.runs.find((r) => r.link.runId === runId);
+	if (!run) throw new Error(`run ${runId} is not linked to this task`);
+	const written = withResult(run, write, new Date().toISOString());
+	mockTestinyStore.set(taskId, { ...data, runs: data.runs.map((r) => (r === run ? written : r)) });
+	return structuredClone(written);
+}
+
+/**
+ * A case's details in the preview, FAKE data only (the real field holds int/uat
+ * accounts). TC-7102 is a STEPS case with every section, linked to the task's
+ * Jira issue; TC-7104 a TEXT case not linked to it yet; TC-7106 one Testiny
+ * would not answer for; every other demo case gets a short STEPS case so any
+ * title opens something.
+ */
+export function mockTestinyCase(taskId: string, caseId: number): components["schemas"]["DomainTestinyCaseDetail"] {
+	const found = mockTestinyRuns(taskId)
+		.runs.flatMap((r) => r.cases)
+		.find((c) => c.id === caseId);
+	if (!found) throw new Error(`TC-${caseId} is in none of the runs linked to ${taskId} (TESTINY_CASE_NOT_IN_TASK)`);
+	if (caseId === 7106) throw new Error("Testiny did not answer in time, try again (TESTINY_UNAVAILABLE)");
+	const base: components["schemas"]["DomainTestinyCaseDetail"] = {
+		id: caseId,
+		title: found.title,
+		priority: { level: 3, label: "Medium" },
+		type: "FUNCTIONAL",
+		template: "STEPS",
+		platforms: ["iOS"],
+		jira: "DEMO-150",
+		features: "Share",
+		subFeatures: "Empty state",
+		section: "",
+		testData: "qa@example.com / fake-password",
+		precondition: "Logged in with the test account",
+		description: "",
+		remark: "",
+		automation: ["Manual"],
+		steps: [
+			{
+				n: 1,
+				rid: `s${caseId}-1`,
+				action: "Play the case as its title says",
+				expected: found.title.replace(/^\[\w+\] /, ""),
+			},
+		],
+		stepsText: "",
+		expectedText: "",
+		bdd: "",
+		requirements: [],
+	};
+	if (caseId === 7102) {
+		return {
+			...base,
+			priority: { level: 2, label: "High" },
+			subFeatures: "Empty state when the account has never shared a fund",
+			section: "Fund page > Share sheet",
+			automation: ["Automated"],
+			testData: "qa@example.com / fake-password\nPIN 000000",
+			precondition: [
+				"- Logged in with the test account above",
+				"- The account has never shared a fund",
+				"- แอปเป็นเวอร์ชัน 4.12 ขึ้นไป และเปิดการแจ้งเตือนไว้แล้ว",
+			].join("\n"),
+			steps: [
+				{
+					n: 1,
+					rid: "s7102-1",
+					action: "Open any fund page",
+					expected: "The fund page shows the Share button in the top bar",
+				},
+				{ n: 2, rid: "s7102-2", action: "Tap Share", expected: "The share sheet opens from the bottom" },
+				{
+					n: 3,
+					rid: "s7102-3",
+					action: "ดูรายการในหน้าแชร์",
+					expected: "เห็นข้อความแจ้งว่ายังไม่มีรายการที่แชร์ แทนรายการว่างเปล่า",
+				},
+				{
+					n: 4,
+					rid: "s7102-4",
+					action: "Tap outside the sheet",
+					expected: "The sheet closes and the fund page shows again",
+				},
+			],
+			description: "Covers the share sheet for an account that has nothing to share yet.",
+			remark: 'Design: Share sheet v3, frame "Empty".',
+			requirements: [
+				{ key: "DEMO-150", summary: "Tighten the share sheet's empty state", status: "In QA" },
+				{ key: "UX-42", summary: "Empty state copy and illustration", status: "Done" },
+			],
+		};
+	}
+	if (caseId === 7104) {
+		return {
+			...base,
+			template: "TEXT",
+			precondition: "The account has never shared a fund.",
+			steps: [],
+			stepsText: [
+				"1. Open the share sheet once and close it",
+				"2. Kill the app from the app switcher",
+				"3. Open the app and the share sheet again",
+			].join("\n"),
+			expectedText: "The empty state still shows, with the same copy as before the cold launch.",
+		};
+	}
+	return base;
+}
+
+const mockTestinyStore = new Map<string, components["schemas"]["TestinyRunsResponse"]>();
+
+type DemoCase = Omit<components["schemas"]["TestinyCaseResult"], "steps"> &
+	Partial<Pick<components["schemas"]["TestinyCaseResult"], "steps">>;
+type DemoRun = Omit<components["schemas"]["TestinyRunView"], "cases"> & { cases: DemoCase[] };
+
+/** Every demo case Testiny holds no step results for has none. */
+function demoTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResponse"] {
+	const runs = demoRuns(taskId);
+	return { project: "MOB", runs: runs.map((r) => ({ ...r, cases: r.cases.map((c) => ({ steps: [], ...c })) })) };
+}
+
+/**
+ * TC-7102 failed at its third step, with its fourth never reached; TC-7101
+ * passed its one step.
+ */
+function demoRuns(taskId: string): DemoRun[] {
+	if (taskId !== "demo-qa-testing") return [];
+	const link = (runId: number, linkedBy: string, minutes: number) => ({
+		sessionId: taskId,
+		runId,
+		linkedBy,
+		createdAt: minutesAgo(minutes),
+	});
+	const url = (runId: number) => `https://app.testiny.io/MOB/testruns/tr/${runId}`;
+	const plan = { id: 193, title: "Share sheet" };
+	const milestone = { id: 41, title: "MOBILITY 2026-19" };
+	const script = (name: string) => `projects/nter/cases/share/${name}.yaml`;
+	return [
+		{
+			link: link(632, "demo-qa-testing-qa", 130),
+			title: "MOBILITY-4839 Share sheet empty state - iOS",
+			url: url(632),
+			closed: false,
+			plan,
+			milestone,
+			counts: { PASSED: 5, FAILED: 1, NOTRUN: 2 },
+			cases: [
+				{
+					id: 7101,
+					title: "[Share] Sheet opens from the fund page",
+					status: "PASSED",
+					script: script("sheet_opens"),
+					steps: [{ n: 1, rid: "s7101-1", status: "PASSED" }],
+				},
+				{
+					id: 7102,
+					title: "[Share] Empty state shows when there is nothing to share",
+					status: "FAILED",
+					script: script("empty_state"),
+					steps: [
+						{ n: 1, rid: "s7102-1", status: "PASSED" },
+						{ n: 2, rid: "s7102-2", status: "PASSED" },
+						{ n: 3, rid: "s7102-3", status: "FAILED" },
+					],
+					recorded: {
+						status: "FAILED",
+						comment: "เปิดหน้าแชร์ตอนไม่มีรายการ แล้วยังเห็นรายการว่างแทนข้อความแจ้ง",
+						by: "demo-qa-testing-qa",
+						byRole: "qa",
+						sha: "4f2c9e1a7b3d",
+						at: minutesAgo(5),
+					},
+				},
+				{
+					id: 7103,
+					title: "[Share] Empty state copy matches the design",
+					status: "PASSED",
+					script: script("empty_copy"),
+				},
+				{ id: 7104, title: "[Share] Empty state survives a cold launch", status: "NOTRUN" },
+				{ id: 7105, title: "[Share] Dismissing the sheet returns to the fund page", status: "PASSED" },
+				{ id: 7106, title: "[Share] VoiceOver reads the empty state", status: "NOTRUN" },
+				{ id: 7107, title: "[Share] Dark mode empty state", status: "PASSED", script: script("empty_dark") },
+				{ id: 7108, title: "[Share] Large text does not clip the empty state", status: "PASSED" },
+			],
+			evidenceDir: "/Users/demo/Desktop/QA Evidence/MOBILITY/2026/MOBILITY 2026-19/TP-193 Share sheet/TR-632 - iOS",
+			fetchedAt: minutesAgo(0),
+		},
+		{
+			link: link(633, "demo-qa-testing-qa", 95),
+			title: "MOBILITY-4839 Share sheet empty state - Android",
+			url: url(633),
+			closed: true,
+			plan,
+			milestone,
+			counts: { PASSED: 4 },
+			cases: [
+				{
+					id: 7201,
+					title: "[Share] Sheet opens from the fund page",
+					status: "PASSED",
+					script: script("sheet_opens"),
+				},
+				{ id: 7202, title: "[Share] Empty state shows when there is nothing to share", status: "PASSED" },
+				{ id: 7203, title: "[Share] Empty state copy matches the design", status: "PASSED" },
+				{ id: 7204, title: "[Share] Back button closes the sheet", status: "PASSED" },
+			],
+			evidenceDir: "/Users/demo/Desktop/QA Evidence/MOBILITY/2026/MOBILITY 2026-19/TP-193 Share sheet/TR-633 - Android",
+			fetchedAt: minutesAgo(0),
+		},
+		{
+			link: link(640, "", 20),
+			title: "MOBILITY-4839 Share sheet regression - iPad",
+			url: url(640),
+			closed: false,
+			plan,
+			counts: { PASSED: 2, BLOCKED: 1 },
+			cases: [
+				{ id: 7301, title: "[Share] Sheet anchors to the share button on iPad", status: "BLOCKED" },
+				{ id: 7302, title: "[Share] Empty state in split view", status: "PASSED" },
+				{ id: 7303, title: "[Share] Empty state in slide over", status: "PASSED" },
+			],
+			evidenceDir: "",
+			fetchedAt: minutesAgo(12),
+			fetchError: { kind: "auth", message: "Testiny refused the API key (403 AUTH_ACCESS_DENIED)" },
+		},
+	];
 }
 
 /**
@@ -2305,7 +2179,7 @@ export function mockWorkspaceFiles(sessionId: string): WorkspaceFilesResponse {
 			"package-lock.json",
 			"backend/cmd/ao/main.go",
 			"backend/internal/cli/session.go",
-			"backend/internal/cli/smoke.go",
+			"backend/internal/cli/crew.go",
 			"backend/internal/domain/session.go",
 			"backend/internal/httpd/controllers/sessions.go",
 			"backend/internal/httpd/controllers/reviews.go",

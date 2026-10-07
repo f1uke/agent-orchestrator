@@ -181,7 +181,7 @@ func (f *fakeSessionService) SendFrom(context.Context, domain.SessionID, string,
 }
 
 func (f *fakeSessionService) SendToCrewmate(_ context.Context, from domain.SessionID, in sessionsvc.CrewSend) (sessionsvc.CrewSendResult, error) {
-	return sessionsvc.CrewSendResult{Peer: domain.SessionID(string(from) + "-" + string(in.Role)), Message: in.Message}, nil
+	return sessionsvc.CrewSendResult{Peer: domain.SessionID(string(from) + "-" + string(in.Role))}, nil
 }
 
 func (f *fakeSessionService) DispatchCommentToWorker(context.Context, domain.SessionID, string, string, string) error {

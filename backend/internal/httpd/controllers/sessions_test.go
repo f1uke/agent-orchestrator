@@ -48,11 +48,9 @@ type fakeSessionService struct {
 	sentFrom         domain.SessionID
 	sentAbout        string
 	sentRole         domain.CrewRole
-	sentStillWorking bool
 	// sentWire is the per-send delivery override the handler put on the context,
 	// which is the only place it travels: the transport reads it from there.
 	sentWire              msgdelivery.Wire
-	handback              sessionsvc.HandbackCompleteness
 	crewSendErr           error
 	dispatchedPR          string
 	dispatchedThread      string
@@ -417,12 +415,9 @@ func (f *fakeSessionService) SendToCrewmate(ctx context.Context, from domain.Ses
 	f.sentFrom = from
 	f.sentAbout = in.Subject
 	f.sentRole = in.Role
-	f.sentStillWorking = in.StillWorking
 	return sessionsvc.CrewSendResult{
-		Peer:     domain.SessionID(string(from) + "-" + string(in.Role)),
-		Outcome:  f.sendOutcome,
-		Message:  in.Message,
-		Handback: f.handback,
+		Peer:    domain.SessionID(string(from) + "-" + string(in.Role)),
+		Outcome: f.sendOutcome,
 	}, nil
 }
 
@@ -2733,6 +2728,48 @@ func TestSessionsAPI_AddCrewMemberReturnsTheNewMember(t *testing.T) {
 	}
 }
 
+// qa's handback reaches the board on the crew object, and only when there is
+// one: an empty object would read as "qa handed back about nothing".
+func TestSessionsAPI_CrewCarriesQAsLastHandback(t *testing.T) {
+	svc := newFakeSessionService()
+	at := time.Date(2026, 10, 6, 9, 30, 0, 0, time.UTC)
+	qa := domain.Session{SessionRecord: domain.SessionRecord{ID: "ao-2", CrewID: "ao-1", CrewRole: domain.CrewRoleQA}}
+	qa.LastHandback = &domain.CrewHandback{At: at, About: "1a2b3c4"}
+	dev := domain.Session{SessionRecord: domain.SessionRecord{ID: "ao-1", CrewID: "ao-1", CrewRole: domain.CrewRoleDev}}
+	svc.sessions = map[domain.SessionID]domain.Session{qa.ID: qa, dev.ID: dev}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/ao-2", "")
+	if status != http.StatusOK {
+		t.Fatalf("get qa = %d; body=%s", status, body)
+	}
+	var got struct {
+		Session struct {
+			Crew *struct {
+				LastHandback *struct {
+					At    time.Time `json:"at"`
+					About string    `json:"about"`
+				} `json:"lastHandback"`
+			} `json:"crew"`
+		} `json:"session"`
+	}
+	mustJSON(t, body, &got)
+	if got.Session.Crew == nil || got.Session.Crew.LastHandback == nil {
+		t.Fatalf("qa's crew object has no lastHandback: %s", body)
+	}
+	if h := got.Session.Crew.LastHandback; !h.At.Equal(at) || h.About != "1a2b3c4" {
+		t.Fatalf("lastHandback = %+v, want {%v 1a2b3c4}", h, at)
+	}
+
+	body, status, _ = doRequest(t, srv, "GET", "/api/v1/sessions/ao-1", "")
+	if status != http.StatusOK {
+		t.Fatalf("get dev = %d; body=%s", status, body)
+	}
+	if strings.Contains(string(body), "lastHandback") {
+		t.Fatalf("a member with no handback carried one: %s", body)
+	}
+}
+
 // TestSessionsAPI_RequestCrewReviewNamesTheCallerAndTakesNoBody. The session in
 // the path IS the caller here, not a task it points at, and there is nothing else
 // on the wire: the join reason is durable data the board's line and the new
@@ -2843,64 +2880,6 @@ func TestSessionsAPI_AddCrewMemberForwardsTheCallerID(t *testing.T) {
 				t.Fatalf("service saw from %v, want exactly [%q]", svc.crewAddedFrom, tc.want)
 			}
 		})
-	}
-}
-
-// THE HANDBACK, OVER THE WIRE. qa's own CLI learns what it left behind from the
-// send response, so the field has to survive the boundary - and the flag that
-// says "I am not finished yet" has to reach the daemon, which is the only thing
-// that can decide whether to look at the checklist at all.
-func TestSessionsAPI_CrewSendCarriesTheHandbackVerdict(t *testing.T) {
-	svc := newFakeSessionService()
-	svc.handback = sessionsvc.HandbackCompleteness{
-		Checked: true, Cases: 4, NotDriven: []string{"tab-stays-live", "drag-scroll"},
-	}
-	srv := newSessionTestServer(t, svc)
-
-	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-2/crew/send",
-		`{"role":"dev","message":"run done","about":"4a1b2c3"}`)
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", status, body)
-	}
-	var got struct {
-		Handback *struct {
-			Cases     int      `json:"cases"`
-			NotDriven []string `json:"notDriven"`
-		} `json:"handback"`
-	}
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatalf("decode: %v (body %s)", err, body)
-	}
-	if got.Handback == nil || got.Handback.Cases != 4 || len(got.Handback.NotDriven) != 2 {
-		t.Fatalf("handback = %+v, want 2 of 4 cases named", got.Handback)
-	}
-	if svc.sentStillWorking {
-		t.Fatal("a plain handback was forwarded as still-working")
-	}
-
-	body, status, _ = doRequest(t, srv, "POST", "/api/v1/sessions/ao-2/crew/send",
-		`{"role":"dev","message":"still going","about":"4a1b2c3","stillWorking":true}`)
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", status, body)
-	}
-	if !svc.sentStillWorking {
-		t.Fatal("stillWorking did not reach the service")
-	}
-}
-
-// A checklist with nothing left behind must not render an empty gap object that
-// a reader could mistake for a gap.
-func TestSessionsAPI_CrewSendOmitsTheHandbackWhenNothingWasChecked(t *testing.T) {
-	svc := newFakeSessionService()
-	srv := newSessionTestServer(t, svc)
-
-	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/ao-1/crew/send",
-		`{"role":"qa","message":"pushed the fix","about":"4a1b2c3"}`)
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", status, body)
-	}
-	if strings.Contains(string(body), "handback") {
-		t.Fatalf("an unchecked send carried a handback: %s", body)
 	}
 }
 

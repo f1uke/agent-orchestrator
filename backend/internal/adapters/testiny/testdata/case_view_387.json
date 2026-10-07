@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "id": 387,
+      "project_id": 4,
+      "folder_id": 32,
+      "title": "กรณีค้นหาคูปองด้วย Code ที่ถูกต้อง และคูปองยัง active ( IDLE -123 )",
+      "template": "TEXT",
+      "priority": null,
+      "testcase_type": null,
+      "precondition": "1.คูปอง is_secret = 1\n2.coupon_status = IDLE",
+      "steps": null,
+      "steps_text": "",
+      "expected_text": "แสดงรายละเอียดคูปอง",
+      "bdd": null,
+      "custom": {
+        "cf__active": true,
+        "cf__automationstatus": null,
+        "cf__description": null,
+        "cf__features": "eCoupon",
+        "cf__jira": "STAR-2253",
+        "cf__platform": [
+          "API"
+        ],
+        "cf__regression": [
+          "NO",
+          "YES"
+        ],
+        "cf__remark": "",
+        "cf__section": null,
+        "cf__sprint": "2026-13",
+        "cf__subfeatures": "Search and Validate",
+        "cf__testdata": "INT\nCoupon code: FAKE-CODE-123"
+      }
+    }
+  ]
+}
