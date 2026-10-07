@@ -85,7 +85,7 @@ func (s *Store) ListOrphanSimClones(ctx context.Context) ([]domain.SimClone, err
 	}
 	out := make([]domain.SimClone, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, simCloneFromRow(gen.SimClone(row)))
+		out = append(out, simCloneFromRow(row))
 	}
 	return out, nil
 }

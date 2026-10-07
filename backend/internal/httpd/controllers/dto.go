@@ -2031,6 +2031,20 @@ type SetSimTrustSettingsRequest struct {
 	CAFiles []string `json:"caFiles"`
 }
 
+// SimBootSettingsResponse is the body of GET/PUT /api/v1/settings/sim-boot: the
+// machine-wide cap on simulators up or coming up at once.
+type SimBootSettingsResponse struct {
+	MaxBooted int `json:"maxBooted" description:"How many simulators may be up or coming up on this Mac at once. A boot past it is refused, except that ao sim boot first shuts down AO's least recently booted idle clones."`
+	// DefaultMaxBooted is the shipped cap, so a surface can offer to put it
+	// back.
+	DefaultMaxBooted int `json:"defaultMaxBooted" description:"The shipped cap."`
+}
+
+// SetSimBootSettingsRequest is the body of PUT /api/v1/settings/sim-boot.
+type SetSimBootSettingsRequest struct {
+	MaxBooted int `json:"maxBooted" description:"At least 1."`
+}
+
 // SetRefLinksSettingsRequest is the body of PUT /api/v1/settings/ref-links. It
 // replaces every field; send an empty string (or an empty map) to clear one.
 type SetRefLinksSettingsRequest struct {

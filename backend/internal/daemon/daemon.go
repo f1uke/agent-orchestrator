@@ -60,6 +60,7 @@ import (
 	testinysvc "github.com/aoagents/agent-orchestrator/backend/internal/service/testiny"
 	wikisvc "github.com/aoagents/agent-orchestrator/backend/internal/service/wiki"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
@@ -328,6 +329,16 @@ func Run() error {
 		}
 		return fmt.Errorf("sim-trust settings: %w", err)
 	}
+	// The machine-wide boot cap. A missing/corrupt file degrades to the
+	// default cap.
+	simBootSettings, err := simpower.NewSettingsStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("sim-boot settings: %w", err)
+	}
 
 	// loopReg tracks each fixed-interval background loop's last-run time so the
 	// API can surface a live countdown to each loop's next run. In-memory only:
@@ -568,6 +579,7 @@ func Run() error {
 		RefLinks:           refLinkSettings,
 		QAEvidence:         qaEvidenceSettings,
 		SimTrust:           simTrustSettings,
+		SimBoot:            simBootSettings,
 		SimAssignments:     store,
 		SimFleet:           simFleet,
 		Wiki:               wikiSvc,

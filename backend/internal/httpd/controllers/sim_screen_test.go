@@ -61,6 +61,9 @@ type fakeScreen struct {
 	powerOps    []powerCall
 	powerStatus map[string]simpower.Status
 	cleared     []string
+	// settle finishes every operation the moment it starts, the way a real
+	// one finishes later: the boot cap waits on a shutdown it started.
+	settle bool
 
 	// truster is the root-CA installer boots and claims share. nil, the
 	// default, trusts nothing - what every test not about trust wants.
@@ -82,8 +85,8 @@ type powerCall struct {
 
 func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, setup *simpower.Setup, done func()) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.powerErr != nil {
+		f.mu.Unlock()
 		return f.powerErr
 	}
 	call := powerCall{UDID: udid, Op: op, Setup: setup, Done: done}
@@ -91,6 +94,11 @@ func (f *fakeScreen) StartPower(_ context.Context, udid string, op simpower.Op, 
 		call.Req = setup.Profile
 	}
 	f.powerOps = append(f.powerOps, call)
+	settle := f.settle
+	f.mu.Unlock()
+	if settle && done != nil {
+		done()
+	}
 	return nil
 }
 

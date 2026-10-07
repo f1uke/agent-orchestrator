@@ -12,15 +12,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 )
 
 // The boot half of `ao sim`. It is the only command here that changes a
 // device's power state, and every test below is about a rule that keeps it the
-// ONLY one: it never shuts anything down, it never boots past the memory cap,
-// and it never guesses which of a machine's simulators to spend 4 GB starting.
+// ONLY one: it only ever asks for booted, the memory cap is the daemon's to
+// apply (and any idle clone it shuts down to make room is reported), and it
+// never guesses which of a machine's simulators to spend 4 GB starting.
 
 // simPowerDaemon fakes the two daemon routes `ao sim boot` uses: the device
 // listing it waits on, and the power route it asks. The device table is the
@@ -40,6 +40,9 @@ type simPowerDaemon struct {
 	// onStart is the power entry a started boot leaves on the device, so a test
 	// can make the daemon's boot fail the way a real one does.
 	onStart *simDevicePowerListing
+	// accepted overrides the 202 body, so a test can serve a boot that made
+	// room under the cap.
+	accepted string
 
 	polls  int
 	powers []string // the JSON body of every power request, in order
@@ -97,7 +100,7 @@ func newSimPowerDaemon(t *testing.T, cfg testConfig, devices ...simDeviceListing
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/power"):
 			d.mu.Lock()
 			d.powers = append(d.powers, string(body))
-			status, refusal := d.powerStatus, d.powerBody
+			status, refusal, accepted := d.powerStatus, d.powerBody, d.accepted
 			if status == 0 || status == http.StatusAccepted {
 				udid := r.URL.Path[strings.Index(r.URL.Path, "/sim-devices/")+len("/sim-devices/"):]
 				udid = strings.TrimSuffix(udid, "/power")
@@ -117,8 +120,11 @@ func newSimPowerDaemon(t *testing.T, cfg testConfig, devices ...simDeviceListing
 				_, _ = io.WriteString(w, refusal)
 				return
 			}
+			if accepted == "" {
+				accepted = `{"udid":"x","state":"booted","detail":"boot"}`
+			}
 			w.WriteHeader(http.StatusAccepted)
-			_, _ = io.WriteString(w, `{"udid":"x","state":"booted","detail":"boot"}`)
+			_, _ = io.WriteString(w, accepted)
 		default:
 			http.NotFound(w, r)
 		}
@@ -394,56 +400,91 @@ func TestSimBoot_NoUDIDWithSeveralBootedRefusesToGuess(t *testing.T) {
 	}
 }
 
-func TestSimBoot_RefusesToMakeTheThirdBootedSimulator(t *testing.T) {
+// The cap is the daemon's to apply - the Device tab's boots go through the
+// same route and must get the same answer - so the CLI's part is to ask for
+// room and to relay the refusal whole: which devices hold the cap and whose
+// they are is the part an agent can act on.
+func TestSimBoot_AtTheCapRelaysWhoHoldsItAndWhatAnAgentCanDo(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "mer-9")
 	cfg := setConfigEnv(t)
 	daemon := newSimPowerDaemon(t, cfg,
 		bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
-		bootListing(simUDIDPro, "iPhone 17 Pro", "Booted"),
 		bootListing(simUDIDAir, "iPhone Air", "Shutdown"),
 	)
+	daemon.powerStatus = http.StatusConflict
+	daemon.powerBody = `{"code":"SIM_BOOT_CAP_REACHED","message":"iPhone Air was not booted: 1 simulators are already up ` +
+		`or coming up and this machine's boot cap is 1. Holding the cap:\n  iPhone 17 Pro Max (iOS 26.3, X) - AO clone of @mer-3, leased by @mer-3"}`
 	deps := simBootDeps(t,
 		simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
-		simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Booted"),
 		simDeviceFixture(simUDIDAir, "iPhone Air", "Shutdown"),
 	)
 
 	_, _, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDAir)
 	if err == nil {
-		t.Fatal("three booted simulators have already OOM'd this machine once; an agent must not be the cause")
+		t.Fatal("a boot the daemon refused at the cap reported success")
 	}
-	// Naming what is already up is what makes the refusal actionable: the
-	// agent can see whether one of them is the device it actually wanted.
-	if !strings.Contains(err.Error(), "iPhone 17 Pro Max") || !strings.Contains(err.Error(), "iPhone 17 Pro") {
-		t.Errorf("error = %q, want the already-booted devices named", err)
+	for _, want := range []string{"leased by @mer-3", "boot cap is 1", "ao sim release"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to carry %q", err, want)
+		}
 	}
-	if !strings.Contains(err.Error(), "Device tab") {
-		t.Errorf("error = %q, want the human's way past the cap", err)
-	}
-	if reqs := daemon.powerRequests(); len(reqs) != 0 {
-		t.Errorf("the cap must refuse before anything is started: %v", reqs)
+	if reqs := daemon.powerRequests(); len(reqs) != 1 {
+		t.Fatalf("power requests = %v, want exactly the one refused boot", reqs)
 	}
 }
 
-func TestSimBoot_CapCountsTheDeviceItWouldMakeNotTheOnesAlreadyUp(t *testing.T) {
+// An agent has no Device tab to free a slot from, so it always asks the daemon
+// to make room - and never for anything but booted.
+func TestSimBoot_AsksTheDaemonToMakeRoom(t *testing.T) {
 	t.Setenv("AO_SESSION_ID", "mer-9")
 	cfg := setConfigEnv(t)
-	daemon := newSimPowerDaemon(t, cfg,
-		bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
-		bootListing(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
-	)
-	deps := simBootDeps(t,
-		simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
-		simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
-	)
+	daemon := newSimPowerDaemon(t, cfg, bootListing(simUDIDPro, "iPhone 17 Pro", "Shutdown"))
+	deps := simBootDeps(t, simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"))
 
-	// One booted is the ordinary case - a human's working device up, and the
-	// agent wanting a scratch one. The cap must not stand in the way of that.
 	if _, errOut, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDPro); err != nil {
-		t.Fatalf("a second booted device is allowed: %v\nstderr=%s", err, errOut)
+		t.Fatalf("sim boot failed: %v\nstderr=%s", err, errOut)
 	}
-	if reqs := daemon.powerRequests(); len(reqs) != 1 {
-		t.Fatalf("power requests = %v, want the boot to have gone through", reqs)
+	reqs := daemon.powerRequests()
+	if len(reqs) != 1 {
+		t.Fatalf("power requests = %v, want one", reqs)
+	}
+	var sent simPowerRequest
+	if err := json.Unmarshal([]byte(reqs[0]), &sent); err != nil {
+		t.Fatalf("power body %q: %v", reqs[0], err)
+	}
+	if sent.State != "booted" || !sent.MakeRoom {
+		t.Fatalf("power body = %+v, want booted with makeRoom", sent)
+	}
+}
+
+// A clone that went down so this boot could happen belongs to another session,
+// so it is never shut down silently.
+func TestSimBoot_SaysWhichIdleCloneWentDownToMakeRoom(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	cfg := setConfigEnv(t)
+	daemon := newSimPowerDaemon(t, cfg, bootListing(simUDIDPro, "iPhone 17 Pro", "Shutdown"))
+	daemon.accepted = `{"udid":"x","state":"booted","detail":"boot",` +
+		`"madeRoom":[{"udid":"` + simUDIDAir + `","name":"AO mer-3 primary","sessionId":"mer-3"}]}`
+	deps := simBootDeps(t, simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"))
+
+	out, errOut, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDPro, "--json")
+	if err != nil {
+		t.Fatalf("sim boot failed: %v\nstderr=%s", err, errOut)
+	}
+	var result simBootResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode %q: %v", out, err)
+	}
+	if len(result.MadeRoom) != 1 || result.MadeRoom[0].SessionID != "mer-3" || result.MadeRoom[0].UDID != simUDIDAir {
+		t.Fatalf("madeRoom = %+v, want the clone of mer-3", result.MadeRoom)
+	}
+
+	var text bytes.Buffer
+	if err := writeSimBoot(&text, result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text.String(), "Shut down AO mer-3 primary ("+simUDIDAir+"), @mer-3's idle clone") {
+		t.Fatalf("output does not name the clone that went down:\n%s", text.String())
 	}
 }
 
@@ -651,80 +692,6 @@ func TestParseSimBootTimeout_DefaultOutlastsTheDaemonsWholeOperation(t *testing.
 		t.Fatalf("default wait %s does not outlast the daemon's own worst case %s; a boot that "+
 			"succeeded slowly would fail here with our timeout and its STOCK warning would never print",
 			got, simpower.BootTimeout+simpower.ProfileTimeout)
-	}
-}
-
-// The cap counts a device the daemon is still booting, and this is the case it
-// was blind to: `simslim on` REBOOTS the device, so through the slimming phase
-// an AO-booted simulator is not Booted while its several GB are allocated. A
-// crewmate booting in that window would be waved through to a third device -
-// the OOM the cap exists to prevent, in the dev-and-qa case slimming is for.
-func TestSimBoot_CapCountsADeviceTheDaemonIsStillBooting(t *testing.T) {
-	t.Setenv("AO_SESSION_ID", "mer-9")
-	cfg := setConfigEnv(t)
-	inFlight := bootListing(simUDIDPro, "iPhone 17 Pro", "Shutdown")
-	inFlight.Power = &simDevicePowerListing{Op: "boot", State: "running", Phase: "slimming"}
-	daemon := newSimPowerDaemon(t, cfg,
-		bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
-		inFlight,
-		bootListing(simUDIDAir, "iPhone Air", "Shutdown"),
-	)
-	daemon.bootsAfter = -1 // the in-flight boot is still slimming, not landing
-	deps := simBootDeps(t,
-		simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
-		// simctl says Shutdown for the device that is mid-reboot, which is
-		// exactly why counting simctl alone undercounts.
-		simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
-		simDeviceFixture(simUDIDAir, "iPhone Air", "Shutdown"),
-	)
-
-	_, _, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDAir)
-	if err == nil {
-		t.Fatal("a device mid-boot is a device holding several GB; booting a third must be refused")
-	}
-	if !strings.Contains(err.Error(), "iPhone 17 Pro Max") || !strings.Contains(err.Error(), "iPhone 17 Pro") {
-		t.Errorf("error = %q, want both the booted and the still-coming-up device named", err)
-	}
-	if !strings.Contains(err.Error(), "coming up") {
-		t.Errorf("error = %q, want it to say one of them is not up yet", err)
-	}
-	if reqs := daemon.powerRequests(); len(reqs) != 0 {
-		t.Errorf("the cap must refuse before anything is started: %v", reqs)
-	}
-}
-
-// The cap is machine-wide: a boot still coming up in ANOTHER AO daemon on this
-// machine - a sandbox daemon a worker verifies its branch with - counts exactly
-// like one of this daemon's, and the refusal says where it is running.
-func TestSimBoot_CapCountsABootInAnotherDaemon(t *testing.T) {
-	t.Setenv("AO_SESSION_ID", "mer-9")
-	cfg := setConfigEnv(t)
-	inFlight := bootListing(simUDIDPro, "iPhone 17 Pro", "Shutdown")
-	inFlight.Power = &simDevicePowerListing{
-		Op: "boot", State: "running", Phase: "slimming",
-		OtherDaemon: &domain.SimDaemon{DataDir: "/tmp/ao-sandbox", PID: 4242, Port: 3399},
-	}
-	daemon := newSimPowerDaemon(t, cfg,
-		bootListing(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
-		inFlight,
-		bootListing(simUDIDAir, "iPhone Air", "Shutdown"),
-	)
-	daemon.bootsAfter = -1
-	deps := simBootDeps(t,
-		simDeviceFixture(simUDIDProMax, "iPhone 17 Pro Max", "Booted"),
-		simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
-		simDeviceFixture(simUDIDAir, "iPhone Air", "Shutdown"),
-	)
-
-	_, _, err := executeCLI(t, deps, "sim", "boot", "--udid", simUDIDAir)
-	if err == nil {
-		t.Fatal("a boot in another daemon holds several GB too; booting a third must be refused")
-	}
-	if !strings.Contains(err.Error(), "still coming up in the AO daemon on port 3399") {
-		t.Errorf("error = %q, want the other daemon's boot named with where it runs", err)
-	}
-	if reqs := daemon.powerRequests(); len(reqs) != 0 {
-		t.Errorf("the cap must refuse before anything is started: %v", reqs)
 	}
 }
 

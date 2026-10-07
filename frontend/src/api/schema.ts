@@ -1626,7 +1626,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Boot a simulator or shut one down from the desktop app's Device tab */
+        /** Boot a simulator (within the machine-wide boot cap) or shut one down */
         post: operations["setSimDevicePower"];
         delete?: never;
         options?: never;
@@ -2270,6 +2270,24 @@ export interface paths {
         get: operations["getResponseLanguageSettings"];
         /** Replace the global default human-facing response language */
         put: operations["setResponseLanguageSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/sim-boot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the machine-wide cap on simulators up or coming up at once */
+        get: operations["getSimBootSettings"];
+        /** Replace the machine-wide cap on simulators up or coming up at once */
+        put: operations["setSimBootSettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3440,14 +3458,24 @@ export interface components {
             /** @description Shift was held. Part of the key press, not of the character. */
             shift?: boolean;
         };
+        ControllersSimMadeRoomView: {
+            name: string;
+            /** @description The session the clone belongs to. */
+            sessionId: string;
+            udid: string;
+        };
         ControllersSimPowerInput: {
             /** @description The session that currently leases the device. Required, and must match, when another session holds it. */
             confirmHolder?: string;
+            /** @description When the boot cap is reached, shut down AO's least recently booted idle clones (AO-made, booted, leased by nobody) to make room instead of refusing. Boot only. */
+            makeRoom?: boolean;
             /** @description booted or shutdown. */
             state: string;
         };
         ControllersSimPowerResponse: {
             detail: string;
+            /** @description Idle AO clones shut down to make room under the boot cap, least recently booted first. */
+            madeRoom?: components["schemas"]["ControllersSimMadeRoomView"][];
             /** @description The state the device is being taken to. */
             state: string;
             udid: string;
@@ -4561,6 +4589,10 @@ export interface components {
         SetSessionTargetRequest: {
             targetBranch: string;
         };
+        SetSimBootSettingsRequest: {
+            /** @description At least 1. */
+            maxBooted: number;
+        };
         SetSimTrustSettingsRequest: {
             caFiles: string[];
         };
@@ -4594,6 +4626,12 @@ export interface components {
             problem?: string;
             /** @description Empty when the base is missing. */
             udid?: string;
+        };
+        SimBootSettingsResponse: {
+            /** @description The shipped cap. */
+            defaultMaxBooted: number;
+            /** @description How many simulators may be up or coming up on this Mac at once. A boot past it is refused, except that ao sim boot first shuts down AO's least recently booted idle clones. */
+            maxBooted: number;
         };
         SimCloneResponse: {
             clone: components["schemas"]["SimCloneView"];
@@ -14427,6 +14465,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResponseLanguageSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getSimBootSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimBootSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setSimBootSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSimBootSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimBootSettingsResponse"];
                 };
             };
             /** @description Bad Request */
