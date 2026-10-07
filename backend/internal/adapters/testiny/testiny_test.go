@@ -2,6 +2,7 @@ package testiny
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,7 +16,8 @@ import (
 )
 
 // The fixtures under testdata are real outputs of the testiny CLI, recorded
-// read-only: stdout of a successful call, stderr of a failed one.
+// read-only: stdout of a successful call, stderr of a failed one. Every case's
+// Test Data is replaced with fake values.
 
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
@@ -349,8 +351,8 @@ func TestSetResultsStopsAtTheFirstFailureAndSaysWhatWasWritten(t *testing.T) {
 	}
 }
 
-func TestCaseReadsAStepsCaseInFull(t *testing.T) {
-	f := &fakeCLI{answers: map[string]Output{"case show 7166": ok(t, "case_show_7166.json")}}
+func TestCaseReadsAStepsCaseInOneCall(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{"case view 7166": ok(t, "case_view_7166.json")}}
 	got, err := newClient(f, time.Now).Case(context.Background(), 7166)
 	if err != nil {
 		t.Fatalf("Case: %v", err)
@@ -379,65 +381,133 @@ func TestCaseReadsAStepsCaseInFull(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Case =\n%+v\nwant\n%+v", got, want)
 	}
-	if f.count("case bdd 7166") != 0 {
-		t.Fatalf("a STEPS case read its BDD feature file: %v", f.calls)
+	if len(f.calls) != 1 {
+		t.Fatalf("calls = %q, want one case view", f.calls)
 	}
 }
 
-func TestCaseReadsATextCaseAndRichTestData(t *testing.T) {
+func TestCaseReadsTextCases(t *testing.T) {
 	f := &fakeCLI{answers: map[string]Output{
-		"case show 548": ok(t, "case_show_548.json"),
-		"case show 558": ok(t, "case_show_558.json"),
+		"case view 548": ok(t, "case_view_548.json"),
+		"case view 558": ok(t, "case_view_558.json"),
 	}}
 	c := newClient(f, time.Now)
 	got, err := c.Case(context.Background(), 548)
 	if err != nil {
 		t.Fatalf("Case: %v", err)
 	}
-	if got.Priority != nil || got.Template != domain.TestinyTemplateText {
-		t.Fatalf("priority %v template %q, want none and TEXT", got.Priority, got.Template)
+	if got.Priority != nil || got.Template != domain.TestinyTemplateText || got.Type != "" || got.Jira != "" {
+		t.Fatalf("priority %v template %q type %q jira %q, want none, TEXT and empty", got.Priority, got.Template, got.Type, got.Jira)
 	}
-	if got.TestData != "INT\n\nAdvisor: advisor@example.com | fake-password\n\nCustomer: customer@example.com | fake-password" {
+	if got.TestData != "INT\nAdvisor: advisor@example.com | fake-password\nCustomer: customer@example.com | fake-password" {
 		t.Fatalf("TestData = %q", got.TestData)
 	}
 	if got.Precondition != "1. Login user customer" || got.StepsText != "1. Advisor text to customer" ||
 		got.ExpectedText != "1. Advisor profile shows on notification correctly" {
 		t.Fatalf("precondition %q, steps %q, expected %q", got.Precondition, got.StepsText, got.ExpectedText)
 	}
-	if got.Platforms == nil || len(got.Platforms) != 0 || got.Automation == nil || got.Steps == nil || len(got.Steps) != 0 {
-		t.Fatalf("empty lists must be empty, not nil: platforms %#v automation %#v steps %#v", got.Platforms, got.Automation, got.Steps)
+	if got.Platforms == nil || len(got.Platforms) != 0 || got.Steps == nil || len(got.Steps) != 0 {
+		t.Fatalf("empty lists must be empty, not nil: platforms %#v steps %#v", got.Platforms, got.Steps)
 	}
 
 	got, err = c.Case(context.Background(), 558)
 	if err != nil {
 		t.Fatalf("Case: %v", err)
 	}
-	if got.Remark != "Test for import in jira" || got.TestData != "" {
-		t.Fatalf("remark %q, test data %q; want the remark rendered and an empty test data", got.Remark, got.TestData)
+	if got.Remark != "Test for import in jira" || got.TestData != "" || got.Description != "" {
+		t.Fatalf("remark %q, test data %q, description %q", got.Remark, got.TestData, got.Description)
+	}
+	if !reflect.DeepEqual(got.Platforms, []string{"ADR", "API", "Web", "iOS"}) {
+		t.Fatalf("platforms = %q", got.Platforms)
 	}
 }
 
-func TestCaseReadsABDDCasesFeatureFile(t *testing.T) {
-	// No MOB case uses the BDD template, so this show output is the 7166
-	// fixture with its template changed; `case bdd` prints the raw file.
-	show := strings.Replace(string(fixture(t, "case_show_7166.json")), `"template": "STEPS"`, `"template": "BDD"`, 1)
-	feature := "Feature: Chat\n  Scenario: Disclaimer\n    Given a chat room\n"
-	f := &fakeCLI{answers: map[string]Output{
-		"case show 7166": {Stdout: []byte(show)},
-		"case bdd 7166":  {Stdout: []byte(feature)},
-	}}
+// caseView is the 7166 fixture with its case changed by edit, for shapes no
+// MOB case has.
+func caseView(t *testing.T, edit func(c map[string]any)) Output {
+	t.Helper()
+	var env struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(fixture(t, "case_view_7166.json"), &env); err != nil {
+		t.Fatal(err)
+	}
+	edit(env.Data[0])
+	b, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Output{Stdout: b}
+}
+
+func TestCaseReadsABDDCase(t *testing.T) {
+	feature := "Feature: Chat\n  Scenario: Disclaimer\n    Given a chat room"
+	f := &fakeCLI{answers: map[string]Output{"case view 7166": caseView(t, func(c map[string]any) {
+		c["template"], c["steps"], c["bdd"] = "BDD", nil, feature
+	})}}
 	got, err := newClient(f, time.Now).Case(context.Background(), 7166)
 	if err != nil {
 		t.Fatalf("Case: %v", err)
 	}
-	if got.Template != domain.TestinyTemplateBDD || got.BDD != strings.TrimSpace(feature) || len(got.Steps) != 0 {
-		t.Fatalf("template %q bdd %q steps %v", got.Template, got.BDD, got.Steps)
+	if got.Template != domain.TestinyTemplateBDD || got.BDD != feature || got.Steps == nil || len(got.Steps) != 0 {
+		t.Fatalf("template %q bdd %q steps %#v", got.Template, got.BDD, got.Steps)
+	}
+}
+
+// Custom fields are the project's own: any of them may hold a value of another
+// type, and fields AO does not know come and go.
+func TestCaseToleratesCustomFieldsOfAnyShape(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{"case view 7166": caseView(t, func(c map[string]any) {
+		c["a_key_testiny_added_later"] = map[string]any{"x": 1}
+		c["custom"] = map[string]any{
+			"cf__jira":             []any{"MOBILITY-4839", "MOBILITY-4840"},
+			"cf__platform":         "iOS",
+			"cf__automationstatus": true,
+			"cf__section":          false,
+			"cf__features":         7,
+			"cf__description":      "What the case covers",
+			"cf__remark":           "- first\n- second",
+			"cf__newfield":         map[string]any{"nested": []any{1, 2}},
+		}
+	})}}
+	got, err := newClient(f, time.Now).Case(context.Background(), 7166)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	if got.Jira != "MOBILITY-4839, MOBILITY-4840" || got.Section != "false" || got.Features != "7" || got.SubFeatures != "" || got.TestData != "" {
+		t.Fatalf("jira %q section %q features %q subfeatures %q test data %q", got.Jira, got.Section, got.Features, got.SubFeatures, got.TestData)
+	}
+	if !reflect.DeepEqual(got.Platforms, []string{"iOS"}) || got.Automation == nil || len(got.Automation) != 0 {
+		t.Fatalf("platforms %#v automation %#v", got.Platforms, got.Automation)
+	}
+	if got.Description != "What the case covers" || got.Remark != "- first\n- second" {
+		t.Fatalf("description %q remark %q", got.Description, got.Remark)
 	}
 }
 
 func TestAMissingCaseIsNotFound(t *testing.T) {
-	f := &fakeCLI{answers: map[string]Output{"case show 99999999": failed(t, "case_show_99999999.stderr.json", 3)}}
+	f := &fakeCLI{answers: map[string]Output{"case view 99999999": failed(t, "case_view_99999999.stderr.json", 3)}}
 	if _, err := newClient(f, time.Now).Case(context.Background(), 99999999); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Case err = %v, want ErrNotFound", err)
+	}
+}
+
+// A CLI built before `case view` existed refuses the subcommand. The person
+// must update it; retrying never helps.
+func TestACLIWithoutCaseViewIsTooOld(t *testing.T) {
+	for name, out := range map[string]Output{
+		"recorded":   failed(t, "case_view_old_cli.stderr.json", 2),
+		"bare cobra": {Stderr: []byte("Error: unknown command \"view\" for \"testiny case\"\nRun 'testiny case --help' for usage.\n"), ExitCode: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &fakeCLI{answers: map[string]Output{"case view 7166": out}}
+			_, err := newClient(f, time.Now).Case(context.Background(), 7166)
+			if !errors.Is(err, ErrCLITooOld) {
+				t.Fatalf("err = %v, want ErrCLITooOld", err)
+			}
+			if want := "Update the testiny CLI: cd ~/Documents/Projects/testiny-cli && git pull && go install ./cmd/testiny"; !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %q, want it to say %q", err, want)
+			}
+		})
 	}
 }

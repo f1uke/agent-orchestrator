@@ -74,9 +74,11 @@ ao testiny runs <task> [flags]
 Show a case in full, read from Testiny: its title, one meta line (priority, type, platforms,
 Jira, features), then each section the case fills in: Test data, Precondition, Steps (each
 action numbered, with its expected result under it), Description and Remark. A TEXT case shows
-its Steps and Expected result as two texts, and a BDD case its Scenarios. Rich text keeps its
-lists and paragraphs. The case is its id (`7166`) or `TC-7166`, and it must be in a run linked
-to the task. A case read in the last minute is served from memory.
+its Steps and Expected result as two texts, and a BDD case its Scenarios. Rich text comes as
+the testiny CLI renders it (`testiny case view`): one block per line, lists as `- ` and `1. `,
+a table row on one line with its cells joined by ` | `. The case is its id (`7166`) or
+`TC-7166`, and it must be in a run linked to the task. A case read in the last minute is served
+from memory.
 
 Read the case before you play it: its Test data names the int/uat test account and data the
 case needs.
@@ -146,6 +148,7 @@ ao testiny result <task> <run> --from-file <path|->
 | `TESTINY_AUTH` | 1 | Testiny refused the API key: run `testiny auth status` in a terminal |
 | `TESTINY_UNAVAILABLE` | 1 | Testiny could not be reached or answered with an error |
 | `TESTINY_CLI_MISSING` | 1 | The `testiny` CLI is not installed (on PATH or in `~/go/bin`) |
+| `TESTINY_CLI_TOO_OLD` | 1 | The `testiny` CLI predates a command AO uses: `cd ~/Documents/Projects/testiny-cli && git pull && go install ./cmd/testiny` |
 
 ## Examples
 

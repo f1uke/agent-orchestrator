@@ -747,7 +747,7 @@ function JiraKeys({ value }: { value: string }) {
 	);
 }
 
-/** A rich-text field as the daemon renders it: "- " and "1. " runs as lists, the rest as the lines it has. */
+/** A rich-text field as the testiny CLI renders it: "- " and "1. " runs as lists, the rest as the lines it has. */
 function RichTextSection({ title, text }: { title: string; text: string }) {
 	const blocks = textBlocks(text);
 	if (blocks.length === 0) return null;

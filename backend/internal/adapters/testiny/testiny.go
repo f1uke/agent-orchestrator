@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +41,7 @@ var (
 	ErrNotFound      = errors.New("not found in testiny")
 	ErrUnavailable   = errors.New("testiny unavailable")
 	ErrRejected      = errors.New("testiny rejected the request")
+	ErrCLITooOld     = errors.New("testiny CLI too old")
 )
 
 // Output is what one CLI run printed, and how it exited.
@@ -217,86 +219,105 @@ func (c *Client) SetResults(ctx context.Context, run domain.TestinyRunID, projec
 	return append(written, batch...), nil
 }
 
-// Case reads one test case in full, its rich text rendered to plain text. A
-// STEPS case's steps come from its table; a BDD case's feature file is a second
-// call. A case that does not exist is ErrNotFound.
+// Case reads one test case in full through `testiny case view`, which renders
+// its rich text as plain text that keeps its structure. A case that does not
+// exist is ErrNotFound.
 func (c *Client) Case(ctx context.Context, id int64) (domain.TestinyCaseDetail, error) {
-	var raw struct {
-		ID           int64    `json:"id"`
-		Title        string   `json:"title"`
-		Priority     *int     `json:"priority"`
-		Type         string   `json:"testcase_type"`
-		Template     string   `json:"template"`
-		Precondition string   `json:"precondition_text"`
-		Content      string   `json:"content_text"`
-		StepsText    string   `json:"steps_text"`
-		ExpectedText string   `json:"expected_result_text"`
-		Description  string   `json:"description"`
-		Platforms    []string `json:"cf__platform"`
-		Jira         string   `json:"cf__jira"`
-		Features     string   `json:"cf__features"`
-		SubFeatures  string   `json:"cf__subfeatures"`
-		Section      string   `json:"cf__section"`
-		TestData     string   `json:"cf__testdata"`
-		CfDesc       string   `json:"cf__description"`
-		Remark       string   `json:"cf__remark"`
-		Automation   []string `json:"cf__automationstatus"`
+	var raw []struct {
+		ID           int64        `json:"id"`
+		Title        string       `json:"title"`
+		Priority     *int         `json:"priority"`
+		Type         string       `json:"testcase_type"`
+		Template     string       `json:"template"`
+		Precondition string       `json:"precondition"`
+		Steps        []caseStep   `json:"steps"`
+		StepsText    string       `json:"steps_text"`
+		ExpectedText string       `json:"expected_text"`
+		BDD          string       `json:"bdd"`
+		Custom       customFields `json:"custom"`
 	}
-	if err := c.call(ctx, &raw, "case", "show", idArg(id)); err != nil {
+	if err := c.call(ctx, &raw, "case", "view", idArg(id)); err != nil {
 		return domain.TestinyCaseDetail{}, err
 	}
+	if len(raw) != 1 {
+		return domain.TestinyCaseDetail{}, fmt.Errorf("%w: testiny case view %d returned %d cases", ErrUnavailable, id, len(raw))
+	}
+	r := raw[0]
 	d := domain.TestinyCaseDetail{
-		ID:           raw.ID,
-		Title:        raw.Title,
-		Type:         raw.Type,
-		Template:     domain.TestinyCaseTemplate(raw.Template),
-		Platforms:    nonNil(raw.Platforms),
-		Jira:         raw.Jira,
-		Features:     raw.Features,
-		SubFeatures:  raw.SubFeatures,
-		Section:      raw.Section,
-		TestData:     richText(raw.TestData),
-		Precondition: richText(raw.Precondition),
-		Description:  joinNonEmpty(richText(raw.Description), richText(raw.CfDesc)),
-		Remark:       richText(raw.Remark),
-		Automation:   nonNil(raw.Automation),
-		Steps:        []domain.TestinyCaseStep{},
+		ID:           r.ID,
+		Title:        r.Title,
+		Type:         r.Type,
+		Template:     domain.TestinyCaseTemplate(r.Template),
+		Platforms:    r.Custom.list("cf__platform"),
+		Jira:         r.Custom.text("cf__jira"),
+		Features:     r.Custom.text("cf__features"),
+		SubFeatures:  r.Custom.text("cf__subfeatures"),
+		Section:      r.Custom.text("cf__section"),
+		TestData:     r.Custom.text("cf__testdata"),
+		Precondition: r.Precondition,
+		Description:  r.Custom.text("cf__description"),
+		Remark:       r.Custom.text("cf__remark"),
+		Automation:   r.Custom.list("cf__automationstatus"),
+		Steps:        make([]domain.TestinyCaseStep, len(r.Steps)),
+		StepsText:    r.StepsText,
+		ExpectedText: r.ExpectedText,
+		BDD:          r.BDD,
 	}
-	if raw.Priority != nil {
-		p := domain.NewTestinyCasePriority(*raw.Priority)
+	for i, s := range r.Steps {
+		d.Steps[i] = domain.TestinyCaseStep(s)
+	}
+	if r.Priority != nil {
+		p := domain.NewTestinyCasePriority(*r.Priority)
 		d.Priority = &p
-	}
-	switch d.Template {
-	case domain.TestinyTemplateSteps:
-		d.Steps = stepsTable(raw.Content)
-	case domain.TestinyTemplateText:
-		d.StepsText, d.ExpectedText = richText(raw.StepsText), richText(raw.ExpectedText)
-	case domain.TestinyTemplateBDD:
-		feature, err := c.output(ctx, "case", "bdd", idArg(id))
-		if err != nil {
-			return domain.TestinyCaseDetail{}, err
-		}
-		d.BDD = strings.TrimSpace(string(feature))
 	}
 	return d, nil
 }
 
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
+type caseStep struct {
+	N        int    `json:"n"`
+	Action   string `json:"action"`
+	Expected string `json:"expected"`
 }
 
-// joinNonEmpty joins the texts that are not empty, a blank line apart.
-func joinNonEmpty(texts ...string) string {
-	var kept []string
-	for _, t := range texts {
-		if t != "" {
-			kept = append(kept, t)
+// customFields are a case's cf__ fields. Each project defines its own, so a
+// field may be missing, null, or of a type other than the one AO reads it as.
+type customFields map[string]json.RawMessage
+
+// text reads a field as one string: a list's strings are joined by ", ", and
+// a boolean or number is its JSON text.
+func (f customFields) text(key string) string {
+	var v any
+	_ = json.Unmarshal(f[key], &v)
+	switch v := v.(type) {
+	case string:
+		return v
+	case bool, float64:
+		return string(f[key])
+	case []any:
+		return strings.Join(f.list(key), ", ")
+	}
+	return ""
+}
+
+// list reads a field as a list of its strings: a lone string is a list of
+// one, and anything else is empty.
+func (f customFields) list(key string) []string {
+	var v any
+	_ = json.Unmarshal(f[key], &v)
+	out := []string{}
+	switch v := v.(type) {
+	case string:
+		if v != "" {
+			out = append(out, v)
+		}
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
 		}
 	}
-	return strings.Join(kept, "\n\n")
+	return out
 }
 
 // Plan reads a test plan's title.
@@ -422,7 +443,7 @@ func (c *Client) output(ctx context.Context, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: run testiny %s: %w", ErrUnavailable, strings.Join(args, " "), err)
 	}
 	if res.ExitCode != 0 {
-		return nil, cliError(res)
+		return nil, cliError(res, args)
 	}
 	return res.Stdout, nil
 }
@@ -440,8 +461,15 @@ func (c *Client) binary() (string, error) {
 	return "", fmt.Errorf("%w: %s is not on PATH and %s does not exist", ErrBinaryMissing, Binary, fallback)
 }
 
+// unknownCommand is how the CLI refuses a subcommand it does not have, in its
+// own usage report or in cobra's plain one. AO only calls subcommands the
+// current CLI has, so this means the installed one is older than AO.
+var unknownCommand = regexp.MustCompile(`unknown (command|[\w ]*subcommand) "`)
+
+const updateCLI = "Update the testiny CLI: cd ~/Documents/Projects/testiny-cli && git pull && go install ./cmd/testiny"
+
 // cliError maps a failed run's error report to a sentinel.
-func cliError(res Output) error {
+func cliError(res Output, args []string) error {
 	var report struct {
 		Error *struct {
 			Message string `json:"message"`
@@ -449,8 +477,17 @@ func cliError(res Output) error {
 			Status  int    `json:"status"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(lastJSONLine(res.Stderr), &report); err != nil || report.Error == nil {
-		return fmt.Errorf("%w: testiny exited %d: %s", ErrUnavailable, res.ExitCode, strings.TrimSpace(string(res.Stderr)))
+	stderr := strings.TrimSpace(string(res.Stderr))
+	reported := json.Unmarshal(lastJSONLine(res.Stderr), &report) == nil && report.Error != nil
+	refusal, _, _ := strings.Cut(stderr, "\n")
+	if reported {
+		refusal = report.Error.Message
+	}
+	if unknownCommand.MatchString(refusal) {
+		return fmt.Errorf("%w: it cannot run `testiny %s`. %s", ErrCLITooOld, strings.Join(args, " "), updateCLI)
+	}
+	if !reported {
+		return fmt.Errorf("%w: testiny exited %d: %s", ErrUnavailable, res.ExitCode, stderr)
 	}
 	msg := report.Error.Message
 	if report.Error.Code != "" {

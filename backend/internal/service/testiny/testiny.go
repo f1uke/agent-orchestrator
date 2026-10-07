@@ -433,6 +433,8 @@ func fetchErrorKind(err error) domain.TestinyFetchErrorKind {
 		return domain.TestinyErrRejected
 	case errors.Is(err, testinyadapter.ErrBinaryMissing):
 		return domain.TestinyErrBinaryMissing
+	case errors.Is(err, testinyadapter.ErrCLITooOld):
+		return domain.TestinyErrCLITooOld
 	default:
 		return domain.TestinyErrUnavailable
 	}

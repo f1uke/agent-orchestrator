@@ -12,7 +12,7 @@ import (
 )
 
 func (f *fakeTestiny) Case(_ context.Context, id int64) (domain.TestinyCaseDetail, error) {
-	if err := f.note(fmt.Sprintf("case show %d", id)); err != nil {
+	if err := f.note(fmt.Sprintf("case view %d", id)); err != nil {
 		return domain.TestinyCaseDetail{}, err
 	}
 	return domain.TestinyCaseDetail{ID: id, Title: fmt.Sprintf("case %d", id), TestData: "qa@example.com / fake-password"}, nil
@@ -41,15 +41,15 @@ func TestCaseReadsACaseInALinkedRunAndKeepsItAMinute(t *testing.T) {
 	if _, err := r.svc.Case(ctx, "app-1", 7167); err != nil {
 		t.Fatal(err)
 	}
-	if n := r.tny.count("case show"); n != 1 {
-		t.Fatalf("case show ran %d times within a minute, want 1", n)
+	if n := r.tny.count("case view"); n != 1 {
+		t.Fatalf("case view ran %d times within a minute, want 1", n)
 	}
 	r.clock.advance(2 * time.Second)
 	if _, err := r.svc.Case(ctx, "app-1", 7167); err != nil {
 		t.Fatal(err)
 	}
-	if n := r.tny.count("case show"); n != 2 {
-		t.Fatalf("an expired case was served: case show ran %d times", n)
+	if n := r.tny.count("case view"); n != 2 {
+		t.Fatalf("an expired case was served: case view ran %d times", n)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestCaseRefusesACaseNotInTheTasksRuns(t *testing.T) {
 			t.Fatalf("Case(%d) err = %v, want ErrCaseNotInTask", id, err)
 		}
 	}
-	if n := r.tny.count("case show"); n != 0 {
+	if n := r.tny.count("case view"); n != 0 {
 		t.Fatalf("a case outside the task was read from Testiny %d times", n)
 	}
 	if _, err := r.svc.Case(ctx, "app-2", 3818); err != nil {

@@ -13344,6 +13344,7 @@ components:
           - unavailable
           - rejected
           - binary_missing
+          - cli_too_old
           type: string
         message:
           type: string

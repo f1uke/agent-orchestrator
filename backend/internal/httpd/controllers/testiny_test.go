@@ -200,6 +200,7 @@ func TestTestinyErrorsMapToCodes(t *testing.T) {
 		{testinyadapter.ErrUnavailable, http.StatusBadGateway, "TESTINY_UNAVAILABLE"},
 		{testinyadapter.ErrRejected, http.StatusBadGateway, "TESTINY_UNAVAILABLE"},
 		{testinyadapter.ErrBinaryMissing, http.StatusBadGateway, "TESTINY_CLI_MISSING"},
+		{testinyadapter.ErrCLITooOld, http.StatusBadGateway, "TESTINY_CLI_TOO_OLD"},
 		{testinyadapter.ErrNotFound, http.StatusBadGateway, "TESTINY_UNAVAILABLE"},
 	} {
 		srv := newTestinyServer(t, &fakeTestiny{err: tc.err}, nil)

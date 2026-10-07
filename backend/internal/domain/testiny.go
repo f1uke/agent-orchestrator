@@ -223,11 +223,13 @@ const (
 	TestinyErrRejected TestinyFetchErrorKind = "rejected"
 	// TestinyErrBinaryMissing: the testiny CLI is not installed.
 	TestinyErrBinaryMissing TestinyFetchErrorKind = "binary_missing"
+	// TestinyErrCLITooOld: the testiny CLI lacks a command AO uses.
+	TestinyErrCLITooOld TestinyFetchErrorKind = "cli_too_old"
 )
 
 // TestinyFetchError is a failed read of one run.
 type TestinyFetchError struct {
-	Kind    TestinyFetchErrorKind `json:"kind" enum:"auth,not_found,unavailable,rejected,binary_missing"`
+	Kind    TestinyFetchErrorKind `json:"kind" enum:"auth,not_found,unavailable,rejected,binary_missing,cli_too_old"`
 	Message string                `json:"message"`
 }
 
@@ -311,9 +313,10 @@ type TestinyCaseStep struct {
 	Expected string `json:"expected"`
 }
 
-// TestinyCaseDetail is a Testiny case in full, read live. Rich text is
-// rendered to plain text that keeps its lists, paragraphs and tables. A field
-// the case leaves empty is "" (or an empty list).
+// TestinyCaseDetail is a Testiny case in full, read live. Rich text is plain
+// text as the testiny CLI renders it: one block per line, lists as "- " and
+// "1. " with nested content indented, a table row on one line. A field the
+// case leaves empty is "" (or an empty list).
 type TestinyCaseDetail struct {
 	ID    int64  `json:"id"`
 	Title string `json:"title"`

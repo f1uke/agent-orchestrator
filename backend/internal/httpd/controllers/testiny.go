@@ -215,6 +215,8 @@ func writeTestinyError(w http.ResponseWriter, r *http.Request, err error) {
 		write(http.StatusBadGateway, "bad_gateway", "TESTINY_AUTH")
 	case errors.Is(err, testinyadapter.ErrBinaryMissing):
 		write(http.StatusBadGateway, "bad_gateway", "TESTINY_CLI_MISSING")
+	case errors.Is(err, testinyadapter.ErrCLITooOld):
+		write(http.StatusBadGateway, "bad_gateway", "TESTINY_CLI_TOO_OLD")
 	case errors.Is(err, testinyadapter.ErrUnavailable), errors.Is(err, testinyadapter.ErrRejected), errors.Is(err, testinyadapter.ErrNotFound):
 		write(http.StatusBadGateway, "bad_gateway", "TESTINY_UNAVAILABLE")
 	default:

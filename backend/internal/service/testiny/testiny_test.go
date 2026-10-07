@@ -439,6 +439,7 @@ func TestFetchErrorKinds(t *testing.T) {
 		testinyadapter.ErrUnavailable:   domain.TestinyErrUnavailable,
 		testinyadapter.ErrRejected:      domain.TestinyErrRejected,
 		testinyadapter.ErrBinaryMissing: domain.TestinyErrBinaryMissing,
+		testinyadapter.ErrCLITooOld:     domain.TestinyErrCLITooOld,
 	} {
 		r := newRig(t, on)
 		link(r, 632)

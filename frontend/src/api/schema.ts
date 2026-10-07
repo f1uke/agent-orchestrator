@@ -4807,7 +4807,7 @@ export interface components {
         };
         TestinyFetchError: {
             /** @enum {string} */
-            kind: "auth" | "not_found" | "unavailable" | "rejected" | "binary_missing";
+            kind: "auth" | "not_found" | "unavailable" | "rejected" | "binary_missing" | "cli_too_old";
             message: string;
         };
         TestinyRef: {

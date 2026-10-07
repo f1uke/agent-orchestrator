@@ -125,6 +125,7 @@ export function sharedBlocker(runs: TestinyRun[]): "auth" | "binary_missing" | n
 const FETCH_REASON: Record<TestinyFetchErrorKind, string> = {
 	auth: "Testiny rejected the key",
 	binary_missing: "testiny CLI not found",
+	cli_too_old: "testiny CLI needs an update",
 	unavailable: "Testiny did not answer",
 	rejected: "Testiny refused the read",
 	not_found: "Run not found in Testiny (deleted?)",
@@ -244,7 +245,7 @@ export type TextBlock =
 const LIST_LINE = /^(?:(\d+)\.|-) (.*)$/;
 
 /**
- * Splits the daemon's plain-text rendering of a rich-text field into blocks, so
+ * Splits the testiny CLI's plain-text rendering of a rich-text field into blocks, so
  * "- " and "1. " runs show as real lists. Text with an indented line (a nested
  * list, or an item that wraps onto its own lines) is kept whole, as written: a
  * flat list would lose its shape. A blank line ends a block.
