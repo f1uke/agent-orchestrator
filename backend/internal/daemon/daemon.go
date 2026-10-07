@@ -537,6 +537,7 @@ func Run() error {
 		WikiSettings:       wikiSettings,
 		RefLinks:           refLinkSettings,
 		SimTrust:           simTrustSettings,
+		SimAssignments:     store,
 		Wiki:               wikiSvc,
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
