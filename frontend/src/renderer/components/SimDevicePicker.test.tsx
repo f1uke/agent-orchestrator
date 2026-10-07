@@ -85,7 +85,7 @@ describe("SimDevicePicker", () => {
 
 	// Two already booted is the count this machine actually died at, so the
 	// question stops being about memory in general and names what happened.
-	it("names the OOM once two are already booted", async () => {
+	it("names the memory cost and the boot cap once two are already booted", async () => {
 		open([
 			device({ udid: "UDID-A", state: "Booted" }),
 			device({ udid: "UDID-B", name: "iPhone 17 Pro", state: "Booted" }),
@@ -94,7 +94,9 @@ describe("SimDevicePicker", () => {
 		await openPicker();
 		await userEvent.click(within(screen.getByTestId("sim-device-UDID-C")).getByRole("button", { name: /^boot$/i }));
 
-		expect(screen.getByTestId("sim-power-confirm")).toHaveTextContent(/run this machine out of memory/i);
+		expect(screen.getByTestId("sim-power-confirm")).toHaveTextContent(
+			/2 are already up, each about 4 GB. Past the boot cap/i,
+		);
 	});
 
 	it("cancelling the warning boots nothing", async () => {
@@ -373,5 +375,76 @@ describe("SimDevicePicker", () => {
 		open([]);
 		await openPicker();
 		expect(screen.getByText(/no iOS Simulators installed/i)).toBeInTheDocument();
+	});
+});
+
+describe("SimDevicePicker with cloned devices", () => {
+	const clone = (sessionId: string, label: string, overrides: Partial<SimDevice> = {}) =>
+		device({
+			udid: `${sessionId}-${label}`,
+			name: `AO ${sessionId} ${label}`,
+			role: "clone",
+			clone: {
+				udid: `${sessionId}-${label}`,
+				sessionId,
+				label,
+				primary: label === "primary",
+				base: "iPhone 17 Pro Max",
+				name: `AO ${sessionId} ${label}`,
+				createdAt: "2026-10-07T00:00:00Z",
+			},
+			state: "Shutdown",
+			...overrides,
+		});
+
+	// A base is a template: booting it would stop AO cloning from it, and the
+	// daemon refuses the boot anyway.
+	it("marks a base and offers no way to boot or watch it", async () => {
+		open([device({ udid: "BASE", name: "iPhone SE (3rd generation)", role: "base", state: "Shutdown" })]);
+		await openPicker();
+
+		const row = screen.getByTestId("sim-device-BASE");
+		expect(within(row).getByTestId("sim-base-tag")).toHaveTextContent("Base");
+		expect(within(row).queryByRole("button", { name: /^boot$/i })).not.toBeInTheDocument();
+		expect(within(row).getByRole("button", { name: /base AO clones from/i })).toBeDisabled();
+	});
+
+	it("still lets a booted base be shut down, since that is what unblocks cloning", async () => {
+		open([device({ udid: "BASE", role: "base", state: "Booted" })]);
+		await openPicker();
+		const row = screen.getByTestId("sim-device-BASE");
+		expect(within(row).getByRole("button", { name: /^shut down$/i })).toBeVisible();
+		expect(within(row).getByRole("button", { name: /base AO clones from/i })).toBeDisabled();
+	});
+
+	it("lists this session's devices first, primary marked apart, and lets a shut-down one be chosen", async () => {
+		const { onChoose } = open([clone("other", "primary"), clone("p-1", "iphone-se"), clone("p-1", "primary")]);
+		await openPicker();
+
+		const rows = screen.getAllByTestId(/^sim-device-/);
+		expect(rows.map((row) => row.dataset.testid)).toEqual([
+			"sim-device-p-1-primary",
+			"sim-device-p-1-iphone-se",
+			"sim-device-other-primary",
+		]);
+		const labels = screen.getAllByTestId("sim-clone-label");
+		expect(labels.map((label) => label.textContent)).toEqual(["primary", "iphone-se"]);
+		expect(labels[0].className).not.toEqual(labels[1].className);
+
+		await userEvent.click(within(rows[1]).getByRole("button", { name: /watch iPhone 17 Pro Max, iphone-se/i }));
+		expect(onChoose).toHaveBeenCalledWith("p-1-iphone-se");
+	});
+
+	it("names another session's clone by its owner and label", async () => {
+		open([clone("other", "small", { state: "Booted" })], { holderNames: new Map([["other", "fix login"]]) });
+		await openPicker();
+		expect(screen.getByTestId("sim-device-other-small")).toHaveTextContent(/fix login · small · iOS 26\.3/);
+	});
+
+	it("titles the trigger with the model and the label, not the clone's bookkeeping name", () => {
+		open([clone("p-1", "primary")], { chosen: "p-1-primary" });
+		const trigger = screen.getByRole("button", { name: /simulator to watch/i });
+		expect(trigger).toHaveTextContent("iPhone 17 Pro Maxprimary");
+		expect(trigger).not.toHaveTextContent("AO p-1");
 	});
 });

@@ -11,6 +11,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simchrome"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simclone"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simkeyboard"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simpaste"
@@ -195,6 +196,28 @@ func (s *Screen) forgetListing() {
 	s.listMu.Lock()
 	s.listedAt = time.Time{}
 	s.listMu.Unlock()
+}
+
+// CloneDevice copies a shut-down device under a new name and returns the copy's
+// udid. Through the screen because the screen owns the listing cache, and a
+// device made behind its back would stay invisible to every caller of Devices
+// for as long as the cache lives.
+func (s *Screen) CloneDevice(ctx context.Context, sourceUDID, name string) (string, error) {
+	defer s.forgetListing()
+	return simclone.Clone(ctx, s.lookPath, s.run, sourceUDID, name)
+}
+
+// DeleteDevice removes a device. See simclone.Delete; the screen only adds the
+// cache invalidation.
+func (s *Screen) DeleteDevice(ctx context.Context, udid string) error {
+	defer s.forgetListing()
+	return simclone.Delete(ctx, s.lookPath, s.run, udid)
+}
+
+// FreshDevices reads the machine now, never the cache: for a caller about to
+// conclude that a device is gone.
+func (s *Screen) FreshDevices(ctx context.Context) (simctl.Listing, error) {
+	return s.refresh(ctx)
 }
 
 // StartPower boots or shuts down a device, returning as soon as the work is

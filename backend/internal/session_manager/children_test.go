@@ -103,7 +103,7 @@ func TestSpawn_ChildWorktreesSwitchHooksEnvAndFloorTogether(t *testing.T) {
 
 func TestRuntimeEnv_ProjectCannotTurnChildWorktreesOn(t *testing.T) {
 	m, _, _, _ := newChildManager(false, &fakeChildren{})
-	env := m.runtimeEnv(ctx, "mer-1", "mer", "", domain.KindWorker, "", "", "/work", map[string]string{EnvChildWorktrees: "1"}, false, "")
+	env := m.runtimeEnv(ctx, "mer-1", "mer", "", domain.KindWorker, "", "", "/work", map[string]string{EnvChildWorktrees: "1"}, false, "", false)
 	if _, ok := env[EnvChildWorktrees]; ok {
 		t.Fatalf("a project env turned %s on for a worker AO did not enable", EnvChildWorktrees)
 	}

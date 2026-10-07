@@ -55,23 +55,25 @@ type MobileScripts struct {
 // catalog's is.
 //
 // A project with a verify skill gets a short block instead, holding only what
-// AO owns (which device is yours, the lease, power, CA trust, the health check
+// AO owns (which devices are yours, the lease, power, CA trust, the health check
 // and the store worktree) and pointing at the skill for the rest: two sources
 // that both teach how to build and drive the app drift apart, and the skill is
 // the one its project maintains.
+//
+// Both iOS shapes end with simAPIMocks, the human's rule for when a run may use
+// a mock, which no verify skill overrides. Android has no `bin/flow --mocks`, so
+// its blocks carry none.
 func MobileScriptGuidance(ms MobileScripts) string {
 	if ms.Skill != "" {
-		body := mobileScriptSkillAndroid
 		if ms.IOS {
-			body = mobileScriptSkillIOS
+			return ms.fill(mobileScriptSkillIOS + ms.storeRule() + simAPIMocks(mockToolsScripts))
 		}
-		return ms.fill(body + ms.storeRule())
+		return ms.fill(mobileScriptSkillAndroid + ms.storeRule())
 	}
-	body, closing := mobileScriptAndroid, mobileScriptAndroidClosing
 	if ms.IOS {
-		body, closing = mobileScriptIOS, mobileScriptIOSClosing
+		return ms.fill(mobileScriptIOS + mobileScriptShared + ms.storeRule() + mobileScriptIOSClosing + simAPIMocks(mockToolsScripts))
 	}
-	return ms.fill(body + mobileScriptShared + ms.storeRule() + closing)
+	return ms.fill(mobileScriptAndroid + mobileScriptShared + ms.storeRule() + mobileScriptAndroidClosing)
 }
 
 // storeRule is where an agent writes scripts and how they reach other
@@ -103,18 +105,28 @@ func (ms MobileScripts) storeRule() string {
 // qa only, like the loop it replaces: dev hands verification over, and a solo
 // worker has nobody to play cases for.
 //
-// With a verify skill, qa sets up its device and build the way the skill says,
-// the same route dev and a solo worker take; the cases layer is what qa adds.
+// On iOS it opens with simQADevBuild: qa plays on its own device, with the
+// build dev handed over rather than one it builds itself, so with a verify
+// skill qa takes only the skill's health check, not its build step. Android
+// qa sets up its device and build the way the skill says.
 func MobileScriptPlay(ms MobileScripts) string {
-	record, device, setup := "", " --platform android --device <serial>", ""
+	devBuild, record, device, mocks, oneShot, setup := "", "", " --platform android --device <serial>", "", " "+oneShotOrder, ""
 	if ms.IOS {
+		devBuild = simQADevBuild
 		record = " When nobody knows the route, ask the human to play it ONCE in your Device tab while `ao sim flow record` runs: that one play becomes the script."
 		device = ""
+		mocks = " Add `--mocks <set>` only where \"Real API or mock\" above allows it."
+		oneShot = " A step that cannot be undone follows the one-shot order in \"Real API or mock\" above."
 	}
 	if ms.Skill != "" {
 		setup = "Set up your device and your build the way the verify skill says (Launch, Doctor), then play every case as below. "
+		if ms.IOS {
+			setup = "Check your device the way the verify skill says (Doctor), with dev's build installed as above, then play every case as below. "
+		}
 	}
-	return ms.fill(strings.NewReplacer("{{record}}", record, "{{device}}", device, "{{setup}}", setup).Replace(mobileScriptPlay))
+	return ms.fill(devBuild + strings.NewReplacer(
+		"{{record}}", record, "{{device}}", device, "{{mocks}}", mocks, "{{oneshot}}", oneShot, "{{setup}}", setup,
+	).Replace(mobileScriptPlay))
 }
 
 func (ms MobileScripts) fill(s string) string {
@@ -135,8 +147,8 @@ const mobileScriptIOS = "\n\n" + `## Driving the iOS Simulator: scripts only (AO
 
 On this project a simulator is driven ONLY by running a reusable Maestro script from the scripts store at ` + "`{{store}}`" + ` (product ` + "`{{product}}`" + `). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on.
 
-` + "```bash\n" + `ao sim list                     # what exists, and what is booted
-ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
+` + "```bash\n" + `ao sim list                     # every device, its role (base, or whose clone) and whether it is booted
+ao sim boot                     # power yours ON; already booted is a no-op
 ao sim run --scheme <name>      # put YOUR build on the device first: a script resets the app it finds installed
 ao sim doctor --app <bundle id> # read-only health check: device, lease, installed build, proxy CA
 {{store}}/bin/flow list {{product}}
@@ -149,8 +161,8 @@ ao sim log                      # what the app printed, when the screen does not
 ao sim release                  # when you are done with the device` + "\n```" + `
 
 - **Reading is how you judge; a script is how you move.** ` + "`ao sim shot`" + `, ` + "`ao sim ax`" + ` and ` + "`ao sim log`" + ` are fine at any time. Gestures - ` + "`ao sim tap`" + `, ` + "`ao sim type`" + `, ` + "`ao sim drag`" + ` and the rest - are not, except while authoring a missing script (below).
-- **The device that is yours is ` + "`$AO_SIM_UDID`" + `**, and ` + "`bin/flow`" + ` and ` + "`ao sim`" + ` already mean it. Unset means none was free: name a scratch device (` + "`--device`" + ` / ` + "`--udid`" + `), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase.
-- **A lease guards the device, not the command.** ` + "`ao sim run`" + ` and ` + "`ao sim install`" + ` take it as they install; a raw ` + "`xcrun simctl`" + ` or ` + "`xcodebuild -destination`" + ` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
+` + simDevices + `
+- **A lease guards the device, not the command.** ` + "`ao sim run`" + ` and ` + "`ao sim install`" + ` take it as they install; a raw ` + "`xcrun simctl`" + ` or ` + "`xcodebuild -destination`" + ` never asks it, and aimed at a device that is not yours it overwrites whoever is on it. A refusal names the holder - wait, or say so.
 - **A screenshot says which build it was of.** Compare its ` + "`Build:`" + ` line before the pictures.
 - **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: ` + "`ao sim claim`" + `, ` + "`ao sim flow record start --name <screen>`" + `, drive the route once, ` + "`ao sim flow record stop --out {{store}}/projects/{{product}}/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE`" + ` (every typed or tapped VALUE becomes ` + "`${MAESTRO_NAME}`" + `; a password is pasted, never recorded) - or write the YAML yourself.`
 
@@ -187,19 +199,20 @@ const mobileScriptPlay = "\n\n" + `## Playing test cases with Maestro scripts (A
 
 1. **Find the case's script** in the Cases table of ` + "`{{store}}/projects/{{product}}/INDEX.md`" + `. On a Testiny project it is listed by its Testiny case id.
 2. **No script yet: write one**, then use it. It lives at ` + "`{{store}}/projects/{{product}}/cases/<area>/<behaviour>.yaml`" + `, named after the behaviour the case checks, never after a ticket. Its header carries one ` + "`# testiny: <project_key> TC-<id>`" + ` line per Testiny case it plays. It starts from ` + "`start/`" + `, reaches the screen through ` + "`reach/`" + ` and ` + "`common/`" + ` scripts, then runs the case's own steps and ASSERTS the case's expected result, taking a screenshot at every screen the case judges, named ` + "`{{product}}-case-<behaviour>-<step>`" + `. Verify it like any other script: ` + "`bin/flow check {{product}}`" + ` and two green runs from fresh. Then add its row to the Cases table, and only then trust its result.{{record}}
-3. **Play the case:** ` + "`{{store}}/bin/flow run {{product}} cases/<area>/<behaviour>{{device}} --param KEY=VALUE --account <id>`" + `. The assertions prove the DATA and the BEHAVIOUR: a failed assertion is a failed case, with the Maestro debug folder as the evidence.
+3. **Play the case:** ` + "`{{store}}/bin/flow run {{product}} cases/<area>/<behaviour>{{device}} --param KEY=VALUE --account <id>`" + `.{{mocks}} The assertions prove the DATA and the BEHAVIOUR: a failed assertion is a failed case, with the Maestro debug folder as the evidence.
 4. **Compare the screen with the DESIGN**, which no assertion proves. For every case that shows UI, compare each screenshot the case judges with the case's Figma frame - layout, spacing, copy, colour, components and states - and cite the frame you compared against. Find the frame from the ticket or the case. If neither links one, say so in your handback and leave the visual check for a person rather than guessing. A visual difference fails the case: name what differs and where.
 5. **The case PASSES only when both hold:** every assertion, and the screen against the design.
 6. **Keep the screenshots as the case's evidence.** On a Testiny project they go in the run's evidence folder: "Playing a run, start to finish" in the Testiny block below says how it goes to Drive and onto each case's result. Otherwise give their path in your handback.
 
-A case whose script you cannot make pass, or whose next step cannot be undone (submit, buy, delete), is UNDRIVEABLE for that step: the script stops before it, and you say so in your handback with the reason from your attempt. A person plays that step. Never finish a case by hand. The case scripts you write follow the store rule in the device block above.`
+A case whose script you cannot make pass is UNDRIVEABLE: say so in your handback with the reason from your attempt, and a person plays it. Never finish a case by hand.{{oneshot}} The case scripts you write follow the store rule in the device block above.`
 
 const mobileScriptSkillIOS = "\n\n" + `## Driving the iOS Simulator: the project's verify skill (AO)
 
 On this project a simulator is driven ONLY by Maestro scripts from the scripts store, and the project's ` + "`verify`" + ` skill is the one guide for building the app, health-checking the device, driving it, mocks and evidence: use it (` + "`.claude/skills/verify`" + `, or read ` + "`{{skill}}/SKILL.md`" + `). This block holds only what AO owns, and nothing in the skill overrides it.
 
-- **The device that is yours is ` + "`$AO_SIM_UDID`" + `**, and ` + "`bin/flow`" + ` and ` + "`ao sim`" + ` already mean it. Unset means none was free: name a scratch device (` + "`--device`" + ` / ` + "`--udid`" + `), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase. AO makes the device trust the proxy's CA every time it boots or a session claims it.
-- **A lease guards the device, not the command.** ` + "`ao sim run`" + ` and ` + "`ao sim install`" + ` take it as they install; a raw ` + "`xcrun simctl`" + ` or ` + "`xcodebuild -destination`" + ` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
+` + simDevices + `
+- **AO makes each device trust the proxy's CA** every time it boots or a session claims it.
+- **A lease guards the device, not the command.** ` + "`ao sim run`" + ` and ` + "`ao sim install`" + ` take it as they install; a raw ` + "`xcrun simctl`" + ` or ` + "`xcodebuild -destination`" + ` never asks it, and aimed at a device that is not yours it overwrites whoever is on it. A refusal names the holder - wait, or say so.
 - **` + "`ao sim doctor --app <bundle id> --expect <your .app>`" + ` is the health check** of your device: booted, whose lease, whether the installed build is the one you built, and whether the proxy CA is trusted. It only reads: run it before the first drive and after every failed run.`
 
 const mobileScriptSkillAndroid = "\n\n" + `## Driving the Android emulator: the project's verify skill (AO)

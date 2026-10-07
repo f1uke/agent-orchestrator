@@ -47,7 +47,7 @@ const (
 	// simPowerNote is repeated wherever power comes up, because the asymmetry
 	// is the part an agent has to be told: it may bring a device UP, and
 	// nothing here takes one down.
-	simPowerNote = "`ao sim boot` powers a simulator on; no `ao sim` command shuts one down, reboots or erases one - the desktop app's Device tab is where a human does that."
+	simPowerNote = "`ao sim boot` powers a simulator on, and at the boot cap shuts down AO's least recently booted idle clone to make room; no `ao sim` command otherwise shuts one down, reboots or erases one - the desktop app's Device tab is where a human does that."
 	// simShotStampLayout keeps millisecond precision so two captures from one
 	// session cannot collide on a filename.
 	simShotStampLayout = "20060102-150405.000"
@@ -69,6 +69,10 @@ type simDevice struct {
 	// agent looking at a machine with several booted simulators can tell its own
 	// from its crewmate's without having to remember anything.
 	Assigned bool `json:"assigned"`
+	// Base marks one of the base simulators AO clones from and never drives.
+	Base bool `json:"base,omitempty"`
+	// Clone is set on a device AO cloned for a session: whose, and its label.
+	Clone *simCloneClient `json:"clone,omitempty"`
 	// BootUnreadable is why a BOOTED device cannot be touched: AO could not
 	// name the run it would be touching. Empty is the normal case, including for
 	// every shut-down device - a device that is down is not a device AO has lost
@@ -86,6 +90,9 @@ type simListResult struct {
 	Devices       []simDevice `json:"devices"`
 	DefaultUDID   *string     `json:"defaultUdid"`
 	DefaultReason string      `json:"defaultReason"`
+	// BaseProblems are the bases AO cannot clone from right now, each with
+	// what to do about it.
+	BaseProblems []string `json:"baseProblems,omitempty"`
 }
 
 type simShotResult struct {
@@ -148,8 +155,23 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 			"destroy data or take a device away from whoever is using it - a human " +
 			"does them from the desktop app's Device tab. Simulators are shared with " +
 			"other AO sessions and with any human using Xcode, so a captured frame " +
-			"may be mid-interaction.",
+			"may be mid-interaction.\n\n" +
+			"Each iOS worker session has its own simulators, clones AO makes from base " +
+			"devices: a primary one ($AO_SIM_UDID) and any extra ones `ao sim claim " +
+			"--model/--device` makes. --device <label> names one of them on any command.",
+		// Cobra runs only the nearest persistent hook, so the root's is chained
+		// explicitly rather than replaced.
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if root := cmd.Root(); root.PersistentPreRunE != nil {
+				if err := root.PersistentPreRunE(cmd, args); err != nil {
+					return err
+				}
+			}
+			return ctx.applySimLabel(cmd)
+		},
 	}
+	cmd.PersistentFlags().String(simLabelFlag, "", "Act on this session's device with this label instead of its primary one (made with ao sim claim --device)")
+	cmd.AddCommand(newSimUDIDCommand(ctx))
 	cmd.AddCommand(
 		newSimListCommand(ctx), newSimShotCommand(ctx), newSimBootCommand(ctx),
 		newSimClaimCommand(ctx), newSimReleaseCommand(ctx),
@@ -179,6 +201,8 @@ func newSimListCommand(ctx *commandContext) *cobra.Command {
 			}
 			result := simList(devices)
 			result.attachLeases(ctx.simLeaseViews(cmd.Context()))
+			clones, err := ctx.fetchSimClones(cmd.Context())
+			result.attachClones(clones, err == nil)
 			if asJSON {
 				return writeJSON(cmd.OutOrStdout(), result)
 			}
@@ -555,7 +579,8 @@ func writeSimList(out io.Writer, result simListResult, now time.Time) error {
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "UDID\tSTATE\tRUNTIME\tLEASE\tNAME"); err != nil {
+	self := strings.TrimSpace(os.Getenv("AO_SESSION_ID"))
+	if _, err := fmt.Fprintln(tw, "UDID\tSTATE\tRUNTIME\tLEASE\tROLE\tNAME"); err != nil {
 		return err
 	}
 	for _, d := range result.Devices {
@@ -569,7 +594,7 @@ func writeSimList(out io.Writer, result simListResult, now time.Time) error {
 		if d.Default {
 			name += "  <- default for `ao sim shot`"
 		}
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", d.UDID, d.State, d.Runtime, d.Lease.column(now), name); err != nil {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", d.UDID, d.State, d.Runtime, d.Lease.column(now), simRole(d, self), name); err != nil {
 			return err
 		}
 	}
@@ -581,6 +606,14 @@ func writeSimList(out io.Writer, result simListResult, now time.Time) error {
 	// unknown, and printing the wrong one states something AO never checked.
 	if _, err := fmt.Fprintf(out, "\nLEASE is only what AO knows: `unknown` means %s.\n", result.unknownReason()); err != nil {
 		return err
+	}
+	if _, err := fmt.Fprintln(out, "ROLE: `base` is a template AO clones from and never drives; `yours: <label>` is a device of this session (--device <label>)."); err != nil {
+		return err
+	}
+	for _, problem := range result.BaseProblems {
+		if _, err := fmt.Fprintf(out, "Warning: %s\n", problem); err != nil {
+			return err
+		}
 	}
 	for _, d := range result.Devices {
 		if d.BootUnreadable == "" {

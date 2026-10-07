@@ -84,12 +84,18 @@ type APIDeps struct {
 	// boot and claim. nil trusts nothing and leaves the settings route
 	// answering 501.
 	SimTrust *simtrust.Store
+	// SimBoot is the machine-wide boot cap. nil applies the default cap and
+	// leaves the settings route answering 501.
+	SimBoot controllers.SimBootSettingsService
 	// SimTrustFiles resolves a session's root CAs. Left nil, the router builds
 	// one over Sessions, Projects and SimTrust.
 	SimTrustFiles controllers.SimTrustResolver
 	// SimAssignments is which simulator each session was given at spawn, read
 	// by `ao sim doctor`. nil reads every session as having none.
-	SimAssignments     SimAssignments
+	SimAssignments SimAssignments
+	// SimFleet makes and removes the simulators AO clones for sessions. nil
+	// answers its routes 501 and marks no device as a base or a clone.
+	SimFleet           controllers.SimFleet
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
@@ -146,6 +152,7 @@ type API struct {
 	simHierarchy   *controllers.SimHierarchyController
 	simType        *controllers.SimTypeController
 	simDoctor      *controllers.SimDoctorController
+	simClones      *controllers.SimClonesController
 	notifications  *controllers.NotificationsController
 	activity       *controllers.ActivityController
 	imports        *controllers.ImportController
@@ -194,14 +201,15 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		sim:            &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
 		simFlows:       &controllers.SimFlowsController{DataDir: cfg.DataDir},
 		simVideo:       &controllers.SimVideoController{Svc: deps.SimVideo},
-		simScreen:      &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver},
+		simScreen:      &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver, Fleet: deps.SimFleet, BootCap: deps.SimBoot},
 		simHierarchy:   &controllers.SimHierarchyController{Runner: deps.SimRunner},
 		simType:        &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim, Screen: screenProvider(deps.SimScreen)},
 		simDoctor:      &controllers.SimDoctorController{Sessions: deps.Sessions, Readers: simDoctorReaders(deps, simTrustResolver)},
+		simClones:      &controllers.SimClonesController{Fleet: deps.SimFleet},
 		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:        &controllers.ImportController{Svc: deps.Import},
-		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, QAEvidence: deps.QAEvidence, SimTrust: simTrustSettings(deps.SimTrust), SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, QAEvidence: deps.QAEvidence, SimTrust: simTrustSettings(deps.SimTrust), SimBoot: deps.SimBoot, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:           &controllers.WikiController{Svc: deps.Wiki},
 		daemon:         &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		learning:       &controllers.LearningController{Svc: deps.Learning},
@@ -264,6 +272,9 @@ func (a *API) Register(root chi.Router) {
 			// DerivedData - that hazard is `ao crew run`'s to warn about, and
 			// turning it into a silent one-pane-per-task rule here would hide it.
 			a.iosRun.Register(r)
+			// Agent-scoped for the same reason: qa's devices are qa's own
+			// clones, never dev's.
+			a.simClones.Register(r)
 			a.daemon.Register(r)
 			// Agent-scoped: a transcript belongs to the session whose hook
 			// reported it, never to its crewmate.

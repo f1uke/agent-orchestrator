@@ -24,6 +24,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/storetree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemonlog"
@@ -59,6 +60,7 @@ import (
 	testinysvc "github.com/aoagents/agent-orchestrator/backend/internal/service/testiny"
 	wikisvc "github.com/aoagents/agent-orchestrator/backend/internal/service/wiki"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
@@ -184,7 +186,7 @@ func Run() error {
 		defer func() { _ = simOwners.Close() }()
 		simScreen.SetBootLedger(simOwners)
 	}
-	simOwnerLeaseOpts, simOwnerAssignOpts := simOwnershipOptions(simOwners)
+	simOwnerLeaseOpts := simOwnershipOptions(simOwners)
 	// The touches the desktop pane currently holds down. A drag spans several
 	// requests, so it outlives any one of them - and a finger left down wedges a
 	// device's input until it is rebooted, so the daemon lifts them on the way
@@ -326,6 +328,16 @@ func Run() error {
 			log.Error("cdc pipeline shutdown", "err", cdcErr)
 		}
 		return fmt.Errorf("sim-trust settings: %w", err)
+	}
+	// The machine-wide boot cap. A missing/corrupt file degrades to the
+	// default cap.
+	simBootSettings, err := simpower.NewSettingsStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("sim-boot settings: %w", err)
 	}
 
 	// loopReg tracks each fixed-interval background loop's last-run time so the
@@ -483,15 +495,15 @@ func Run() error {
 		}
 	}()
 
-	// One simulator per session, exported into the agent's environment at spawn.
-	// Wired here rather than in startSession because the assigner needs the
-	// daemon's resident device listing (simScreen), which is built for the Device
-	// tab and whose cache means a spawn pays a map lookup rather than a `simctl
-	// list` subprocess.
-	simAssigner := simsvc.NewAssigner(store, simScreen, func() time.Time { return time.Now().UTC() }, simOwnerAssignOpts...)
+	// Every iOS worker's simulators are clones of a base, made for it and
+	// deleted when it ends (see service/sim/fleet.go). Wired here rather than in
+	// startSession because the fleet needs the daemon's resident device listing
+	// (simScreen), whose cache means a restored session finds its clone with a
+	// map lookup rather than a `simctl list` subprocess.
+	simFleet := simsvc.NewFleet(store, simScreen, func() time.Time { return time.Now().UTC() })
 	sessMgr.SetSimDeviceAssigner(func(ctx context.Context, id domain.SessionID) (string, error) {
-		assignment, err := simAssigner.AssignDevice(ctx, id)
-		return assignment.UDID, err
+		clone, err := simFleet.Primary(ctx, id)
+		return clone.UDID, err
 	})
 
 	// sessionSvc is the Jira SessionGateway (read + set the after-the-fact binding).
@@ -523,7 +535,7 @@ func Run() error {
 	// live.
 	iosRunSvc := newIOSRunService(cfg.DataDir, store, runtimeAdapter)
 
-	simSvc := newSimService(store, simScreen, sessMgr, append(simLeaseNudge, simOwnerLeaseOpts...)...)
+	simSvc := newSimService(store, simScreen, sessMgr, append(append(simLeaseNudge, simOwnerLeaseOpts...), simsvc.WithBaseGuard(simFleet.IsBase))...)
 	// Before anything is served: this daemon's leases go back into the
 	// machine-wide registry under this process's pid, and any another daemon
 	// took while this one was down are given up.
@@ -567,7 +579,9 @@ func Run() error {
 		RefLinks:           refLinkSettings,
 		QAEvidence:         qaEvidenceSettings,
 		SimTrust:           simTrustSettings,
+		SimBoot:            simBootSettings,
 		SimAssignments:     store,
+		SimFleet:           simFleet,
 		Wiki:               wikiSvc,
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
@@ -742,6 +756,39 @@ func Run() error {
 		}, log)
 	}
 
+	// Delete the simulators AO cloned for sessions that have ended: on boot
+	// (sessions that ended while the daemon was down), the moment a session
+	// ends, and on a slow tick as the backstop for anything both missed.
+	simFleetRec := loopReg.Register(looptelemetry.Spec{
+		Name:        "sim-clone-sweep",
+		Display:     "Simulator clean-up",
+		Description: "Deletes the simulators AO cloned for sessions that have ended.",
+		Interval:    simCloneSweepInterval,
+	})
+	sweepSimClones := func(ctx context.Context) error {
+		simFleetRec.Tick()
+		report, err := simFleet.Sweep(ctx)
+		logSimSweep(log, report)
+		return err
+	}
+	if err := sweepSimClones(ctx); err != nil {
+		log.Warn("simulator clean-up on boot failed", "err", err)
+	}
+	stopSimEndings := cdcPipe.Broadcaster.Subscribe(func(e cdc.Event) {
+		if !sessionEnded(e) {
+			return
+		}
+		go func() {
+			report, err := simFleet.SweepSession(context.WithoutCancel(ctx), domain.SessionID(e.SessionID))
+			logSimSweep(log, report)
+			if err != nil {
+				log.Warn("deleting an ended session's simulators failed; the periodic clean-up retries", "session", e.SessionID, "err", err)
+			}
+		}()
+	})
+	defer stopSimEndings()
+	simCloneSweepDone := startTickerSweep(ctx, "simulator clean-up", simCloneSweepInterval, sweepSimClones, log)
+
 	// Keep every live orchestrator's worktree on its project's default branch.
 	// Spawn and restore already sync at startup; this covers the drift in
 	// between, because an orchestrator session runs for days while the default
@@ -783,6 +830,7 @@ func Run() error {
 	<-scriptsRefreshDone
 	<-queueSweepDone
 	<-simOwnerSyncDone
+	<-simCloneSweepDone
 	<-orchSyncDone
 	<-knowledgeMigrationDone
 	<-legacySmokeCleanupDone

@@ -322,6 +322,12 @@ var schemaNames = map[string]string{
 	"ControllersSimDoctorCheckView":            "SimDoctorCheckView",
 	"ControllersSimDeviceLeaseView":            "SimDeviceLeaseView",
 	"ControllersListSimDevicesResponse":        "ListSimDevicesResponse",
+	"ControllersSimCloneView":                  "SimCloneView",
+	"ControllersSimBaseView":                   "SimBaseView",
+	"ControllersListSimClonesResponse":         "ListSimClonesResponse",
+	"ControllersClaimSimCloneInput":            "ClaimSimCloneInput",
+	"ControllersSimCloneResponse":              "SimCloneResponse",
+	"ControllersSimCloneParam":                 "SimCloneParam",
 	"ControllersSimGestureInput":               "SimGestureInput",
 	"ControllersSimGestureResponse":            "SimGestureResponse",
 	"ControllersSimKeyboardView":               "SimKeyboardView",
@@ -391,6 +397,8 @@ var schemaNames = map[string]string{
 	"ControllersSetQAEvidenceSettingsRequest":       "SetQAEvidenceSettingsRequest",
 	"ControllersSimTrustSettingsResponse":           "SimTrustSettingsResponse",
 	"ControllersSetSimTrustSettingsRequest":         "SetSimTrustSettingsRequest",
+	"ControllersSimBootSettingsResponse":            "SimBootSettingsResponse",
+	"ControllersSetSimBootSettingsRequest":          "SetSimBootSettingsRequest",
 	"ControllersWikiStatusResponse":                 "WikiStatusResponse",
 	"ControllersStartWikiAgentRequest":              "StartWikiAgentRequest",
 	"ControllersWikiFilesResponse":                  "WikiFilesResponse",
@@ -509,6 +517,7 @@ func operations() []operation {
 	ops = append(ops, scriptsOperations()...)
 	ops = append(ops, iosRunOperations()...)
 	ops = append(ops, simOperations()...)
+	ops = append(ops, simCloneOperations()...)
 	ops = append(ops, notificationOperations()...)
 	ops = append(ops, activityOperations()...)
 	ops = append(ops, importOperations()...)
@@ -1258,6 +1267,49 @@ func testinyOperations() []operation {
 	}
 }
 
+// simCloneOperations declares the routes SimClonesController.Register mounts.
+func simCloneOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sim/clones", id: "listSimClones", tag: "sim",
+			summary: "List the simulators AO cloned for sessions, and the base devices it clones from",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ListSimClonesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-clones", id: "claimSimClone", tag: "sim",
+			summary:    "Get one of this session's simulators by label, cloning a base for it when it has none",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.ClaimSimCloneInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimCloneResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/sessions/{sessionId}/sim-clones/{label}", id: "removeSimClone", tag: "sim",
+			summary:    "Delete one of this session's extra simulators now",
+			pathParams: []any{controllers.SimCloneParam{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimCloneResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
+}
+
 // simOperations declares the simulator device-lease operations. Must stay 1:1
 // with the routes SimController.Register mounts (enforced by the parity test).
 func simOperations() []operation {
@@ -1361,7 +1413,7 @@ func simOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-devices/{udid}/power", id: "setSimDevicePower", tag: "sim",
-			summary:    "Boot a simulator or shut one down from the desktop app's Device tab",
+			summary:    "Boot a simulator (within the machine-wide boot cap) or shut one down",
 			pathParams: []any{controllers.SimSessionDeviceParam{}},
 			reqBody:    controllers.SimPowerInput{},
 			resps: []respUnit{
@@ -2437,6 +2489,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetSimTrustSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SimTrustSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/sim-boot", id: "getSimBootSettings", tag: "settings",
+			summary: "Fetch the machine-wide cap on simulators up or coming up at once",
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimBootSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/sim-boot", id: "setSimBootSettings", tag: "settings",
+			summary: "Replace the machine-wide cap on simulators up or coming up at once",
+			reqBody: controllers.SetSimBootSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimBootSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},

@@ -1352,29 +1352,58 @@ export function mockJiraProjects(query: string): components["schemas"]["JiraProj
 // about to press a row and the harness is where that is looked at. The holder of
 // MOCK-UDID-B is a session on OTHER work, with a name long enough to prove the
 // row survives one.
+//
+// Every iOS worker's devices are clones AO made from the three bases at the end
+// of the list. demo-working has a booted primary and a shut-down SE, so the
+// Device tab's switcher and its boot prompt both show; demo-ready's primary is
+// the other session's clone the picker names by owner.
 export function mockSimDevices(): components["schemas"]["ListSimDevicesResponse"] {
+	const clone = (udid: string, sessionId: string, label: string, base: string) => ({
+		udid,
+		sessionId,
+		label,
+		primary: label === "primary",
+		base,
+		name: label === "primary" ? `AO ${sessionId} (${base})` : `AO ${sessionId} ${label} (${base})`,
+		createdAt: "2026-10-07T09:00:00Z",
+	});
+	const base = (udid: string, name: string, runtime: string) => ({
+		udid,
+		name,
+		runtime,
+		runtimeIdentifier: `com.apple.CoreSimulator.SimRuntime.${runtime.replace(/[ .]/g, "-")}`,
+		state: "Shutdown",
+		available: true,
+		default: false,
+		role: "base" as const,
+		lease: { state: "unknown", reason: "no AO session holds this device" },
+	});
 	return {
 		defaultUdid: null,
 		defaultReason: "two simulators are booted, so an unqualified command has no default",
 		devices: [
 			{
 				udid: "MOCK-UDID-A",
-				name: "iPhone 16 Pro",
+				name: "AO demo-working (iPhone 17 Pro Max)",
 				runtime: "iOS 26.3",
 				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
 				state: "Booted",
 				available: true,
 				default: false,
+				role: "clone",
+				clone: clone("MOCK-UDID-A", "demo-working", "primary", "iPhone 17 Pro Max"),
 				lease: { state: "held", holder: "demo-working" },
 			},
 			{
 				udid: "MOCK-UDID-B",
-				name: "iPhone 17 Pro Max",
+				name: "AO demo-ready (iPhone 17 Pro Max)",
 				runtime: "iOS 26.3",
 				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
 				state: "Booted",
 				available: true,
 				default: false,
+				role: "clone",
+				clone: clone("MOCK-UDID-B", "demo-ready", "primary", "iPhone 17 Pro Max"),
 				lease: { state: "held", holder: "demo-ready" },
 			},
 			{
@@ -1389,14 +1418,19 @@ export function mockSimDevices(): components["schemas"]["ListSimDevicesResponse"
 			},
 			{
 				udid: "MOCK-UDID-D",
-				name: "iPhone SE (3rd generation)",
-				runtime: "iOS 18.2",
-				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+				name: "AO demo-working iphone-se (iPhone SE (3rd generation))",
+				runtime: "iOS 26.3",
+				runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
 				state: "Shutdown",
 				available: true,
 				default: false,
+				role: "clone",
+				clone: clone("MOCK-UDID-D", "demo-working", "iphone-se", "iPhone SE (3rd generation)"),
 				lease: { state: "unknown", reason: "no AO session holds this device" },
 			},
+			base("MOCK-BASE-PRO-MAX", "iPhone 17 Pro Max", "iOS 26.3"),
+			base("MOCK-BASE-SE", "iPhone SE (3rd generation)", "iOS 26.3"),
+			base("MOCK-BASE-IPAD", "iPad Pro 11-inch (M5)", "iOS 26.3"),
 		],
 	};
 }

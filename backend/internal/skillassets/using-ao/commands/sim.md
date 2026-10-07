@@ -8,7 +8,11 @@ Simulators are shared: another AO session, or a human working in Xcode, may be d
 
 **Claim a device before you drive it.** A simulator has one finger and no per-caller state, so two sessions interacting at once merge into a single teleporting touch, and one session's release lifts the other's finger. A lost release wedges the device's input until somebody reboots it - which breaks whoever else is mid-test. The commands that touch the screen refuse to run unless this session holds the device, and refuse again while another gesture is in flight. Reading (`ao sim list`, `ao sim shot`, `ao sim ax`) never needs a claim.
 
-**The simulator that is yours is `$AO_SIM_UDID`.** AO gives each crew member its own device and puts the udid in your environment, so `ao sim` with no `--udid` means YOUR device even when several are booted, and `ao sim list` marks it `<- yours`. Every other tool has to be told: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. When the variable is unset this machine had no device to spare - then the old rule applies, and anything that installs or mutates belongs on a scratch device you name with `--udid` rather than on whichever one happens to be booted.
+**Your simulators are clones AO made for you, and `$AO_SIM_UDID` is your primary one.** Every iOS worker session - dev and qa alike - is given its own device at spawn: a clone of the base "iPhone 17 Pro Max", deleted when the session ends. `ao sim` with no `--udid` means it even when several devices are booted. Other tools have to be told: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. When the variable is unset AO could not make one: run `ao sim claim`, which makes it now or says exactly what is missing. Never fall back to whichever device happens to be booted.
+
+**Need another size, or a second device?** `ao sim claim --model "iPhone SE"` (or `--model "iPad Pro 11-inch"`) clones that base for you and claims it; its label is the model's (`iphone-se`, `ipad-pro-11`). `ao sim claim --device advisor` makes a second device of the default model under that label - the other side of a chat, a second account. Then `--device <label>` on ANY `ao sim` command acts on that device, `ao sim udid --device <label>` prints its udid for other tools, and `ao sim release --device <label>` deletes it. Several devices can run Maestro flows at the same time: one run per device.
+
+**Bases are templates, never work devices.** "iPhone 17 Pro Max", "iPhone SE (3rd generation)" and "iPad Pro 11-inch (M5)" are what AO clones from; `ao sim list` marks them `base` and AO refuses to claim or boot one. Anything run on a base would be in every clone made after it.
 
 **Never attach a pipe to an app's stdout.** `xcrun simctl launch --console-pipe` looks like the way to read an app's output. It is a trap: as soon as anything stops draining that pipe the 64 KB buffer fills and the app blocks in `write()` **on its main thread**. The app is then wedged - `ao sim ax` returns nothing, `ao sim tap` reports success and changes nothing, the screen looks frozen - and none of those symptoms points back at your capture. Use `ao sim log`, which reads the unified log and cannot block the app.
 
@@ -28,6 +32,7 @@ ao sim ax      [flags]
 ao sim log     [flags]
 ao sim claim   [flags]
 ao sim release [flags]
+ao sim udid    [flags]
 ao sim doctor  [flags]
 ao sim run     [flags]
 ao sim install <path/to/App.app> [flags]
@@ -48,6 +53,8 @@ ao sim record start            [flags]
 ao sim record status           [flags]
 ao sim record stop             [flags]
 ```
+
+Every subcommand that acts on a device also takes `--device <label>`: one of this session's devices by its label, instead of the primary one. It cannot be combined with `--udid`.
 
 **Two different recorders, and the names say which is which.** `ao sim record`
 records the **screen**, as a video file. `ao sim flow record` records the
@@ -70,7 +77,9 @@ ao sim release               # when you are done
 
 ### ao sim list
 
-List every simulator `xcrun simctl` reports, with its udid, state, runtime, name and lease, and say which one `ao sim shot` would pick.
+List every simulator `xcrun simctl` reports, with its udid, state, runtime, lease, role and name, and say which one `ao sim shot` would pick.
+
+The ROLE column says what AO uses each device for: `base` (a template AO clones from and never drives), `yours: <label>` (one of this session's devices; `--device <label>` names it), `@<session>: <label>` (another session's), or `-` (not AO's). A base AO cannot clone from - missing, or booted - is reported under the table with what to do about it.
 
 **Flags:**
 
@@ -108,6 +117,15 @@ JSON shape:
 				"holder": "your-project-12",
 				"acquiredAt": "2026-08-13T07:41:02Z",
 				"expiresAt": "2026-08-13T07:51:02Z"
+			},
+			"clone": {
+				"udid": "00000000-0000-0000-0000-000000000000",
+				"sessionId": "your-project-12",
+				"label": "primary",
+				"primary": true,
+				"base": "iPhone 17 Pro Max",
+				"name": "AO your-project-12 (iPhone 17 Pro Max)",
+				"createdAt": "2026-08-13T07:30:00Z"
 			}
 		}
 	],
@@ -150,7 +168,7 @@ Power a simulator on and wait until it can actually be driven. This is what you 
 
 **Booting an already-booted device is a no-op, so retrying is always safe.** So is racing: if another session is booting the same device, this waits for their boot instead of failing.
 
-**It stops at two booted simulators.** Each is a virtual machine of several GB, and three at once has run this kind of machine out of memory. Past two, `ao sim boot` refuses and names what is already up - drive one of those, or ask the human, who can boot another from the desktop app's Device tab. The count is machine-wide: every booted device, plus every boot still coming up in ANY AO daemon on the machine (a sandbox daemon's included - a slimming boot reboots the device, so for tens of seconds it is not `Booted` while its memory is very much in use).
+**It stops at a machine-wide cap of booted simulators, 4 by default** (the global setting `/api/v1/settings/sim-boot`, `maxBooted`). Each is a virtual machine of several GB. At the cap, `ao sim boot` shuts down AO's least recently booted IDLE clone - one AO made, booted, and leased by nobody - and says which; it never touches a base, a device AO did not make, or a leased one. With no idle clone it refuses and names who holds each slot: drive one of those, `ao sim release --device <label>` a device you are done with, or ask the human. The count is machine-wide: every booted device, plus every boot still coming up in ANY AO daemon on the machine (a sandbox daemon's included - a slimming boot reboots the device, so for tens of seconds it is not `Booted` while its memory is very much in use).
 
 **It needs a running daemon and an AO session** (`AO_SESSION_ID`), unlike `ao sim list` and `ao sim shot`. So does `ao sim claim`, which is what you run next.
 
@@ -395,17 +413,19 @@ So an empty `ao sim log` for a `print` you expected is the command working corre
 
 ### ao sim claim
 
-Claim a booted simulator for this session, or renew a claim it already holds. Do this before any interaction that changes the device; skip it when you are only reading.
+Claim one of this session's simulators, or renew a claim it already holds. Do this before any interaction that changes the device; skip it when you are only reading.
 
 **Flags:**
 
-| Flag               | Description                                                   |
-| ------------------ | ------------------------------------------------------------- |
-| `--udid <udid>`    | Claim this simulator instead of the booted one                |
-| `--ttl <duration>` | How long to hold it (`30s`, `10m`, `1h`). Default 10m, max 1h |
-| `--json`           | Output the claim as JSON                                      |
+| Flag                 | Description                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------- |
+| `--device <label>`   | One of this session's devices by label; made (cloned) when the session has none under that label   |
+| `--model <model>`    | The model to clone for a new device: `"iPhone SE"`, `"iPad Pro 11-inch"`; unique prefix, any case   |
+| `--udid <udid>`      | Claim this simulator instead of one of this session's own                                           |
+| `--ttl <duration>`   | How long to hold it (`30s`, `10m`, `1h`). Default 10m, max 1h                                       |
+| `--json`             | Output the claim as JSON                                                                            |
 
-The device is resolved exactly like `ao sim shot` (see the table above): with several booted simulators it never guesses.
+With no `--udid` it claims one of your own devices: the primary one (`$AO_SIM_UDID`), or the one `--device` / `--model` names, cloning it from its base the first time (about five seconds). `--model` alone labels the device after the model (`iphone-se`, `ipad-pro-11`). A missing base is reported with the `xcrun simctl create` command that makes it, and nothing else is claimed instead.
 
 - **Renewal:** claiming a device you already hold extends it, so calling `ao sim claim` again before a long stretch of work is safe and is the intended way to keep a device.
 - **Automatic release:** the lease lapses on its own after the TTL, and is released the moment this session ends. You can never permanently poison a device by crashing.
@@ -440,24 +460,47 @@ ao sim claim
 ao sim claim --ttl 30s
 ```
 
+```bash
+# The same case on a small screen: an SE of your own, then act on it by label
+ao sim claim --model "iPhone SE"
+ao sim shot --device iphone-se
+ao sim release --device iphone-se     # deletes it
+```
+
 ---
 
 ### ao sim release
 
-Hand back the simulator this session holds, immediately.
+Hand back the simulator this session holds, immediately - or delete one of its extra devices.
 
 **Flags:**
 
-| Flag            | Description                                                  |
-| --------------- | ------------------------------------------------------------ |
-| `--udid <udid>` | Release this simulator instead of the one this session holds |
-| `--json`        | Output the release as JSON                                   |
+| Flag               | Description                                                     |
+| ------------------ | --------------------------------------------------------------- |
+| `--device <label>` | DELETE this extra device of this session now                    |
+| `--udid <udid>`    | Release this simulator instead of the one this session holds    |
+| `--json`           | Output the release as JSON                                      |
 
-With no `--udid` it releases the one device you hold, and fails if you hold none or hold several. You cannot release someone else's lease. Releasing does not touch the simulator, so it works even if the device was shut down in the meantime.
+With no flag it releases the one device you hold, and fails if you hold none or hold several. You cannot release someone else's lease. Releasing does not touch the simulator, so it works even if the device was shut down in the meantime.
+
+`--device <label>` deletes that device instead, rather than waiting for the session to end; it is refused while another session holds it. The primary device is never deleted this way.
 
 ```bash
 # Done driving the device
 ao sim release
+# Done with the extra iPad
+ao sim release --device ipad-pro-11
+```
+
+---
+
+### ao sim udid
+
+Print the udid of one of this session's devices: the primary one, or with `--device <label>` another. For the tools that take a udid, not a label:
+
+```bash
+bin/flow run nter reach/<script> --device "$(ao sim udid --device iphone-se)"
+xcodebuild -destination "id=$(ao sim udid --device advisor)" ...
 ```
 
 ---

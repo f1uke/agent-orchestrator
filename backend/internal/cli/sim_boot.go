@@ -30,8 +30,15 @@ import (
 // What did NOT change, and why the reversal is safe: shutdown, reboot and erase
 // stay human-only, in the desktop app's Device tab. Erase wipes a device's data,
 // and a shutdown takes a device out from under whoever is on it - neither is
-// additive, and neither is what the deadlock needed. Boot only ever brings
-// something up.
+// additive, and neither is what the deadlock needed.
+//
+// The one exception is the boot cap's. When the machine already has its cap of
+// simulators up, boot asks the daemon to make room, and the daemon shuts down
+// AO's own clones that nobody holds a lease on - least recently booted first.
+// Nobody is on such a device, so it is taken from nobody. A base, a device AO
+// did not make, and a leased device are never shut down; with none idle, the
+// boot is refused and the daemon says who holds each slot. internal/simpower
+// carries the full rule.
 //
 // It goes through the daemon rather than shelling out to simctl here, unlike
 // the read-only half of `ao sim`. Three reasons, in order of weight:
@@ -53,23 +60,6 @@ import (
 // this exists to unblock - already needs both.
 
 const (
-	// simBootMaxBooted is the memory guard, and the number is not a round one:
-	// three booted simulators have caused a true OOM on the machine this was
-	// built for, which is the evidence the original human-only decision rested
-	// on. Each device is a virtual machine of several GB that outlives the
-	// session that started it, and a lease serialises DRIVING one device - it
-	// does nothing whatever about how many exist.
-	//
-	// Two is what the ordinary case needs: the human's working device up, and
-	// a scratch device for the agent to install onto. The third is where the
-	// Device tab's escalating confirmation earns its keep, and an agent has no
-	// dialog to escalate to - so this is where it stops and says so.
-	//
-	// It is a guard rail in the CLI, not an enforcement boundary: the daemon
-	// route is shared with the Device tab, which must be able to go past it
-	// with a human behind it.
-	simBootMaxBooted = 2
-
 	// simBootPollInterval is how often the device listing is asked whether the
 	// boot has landed - the same second the Device tab polls at while an
 	// operation is in flight.
@@ -122,12 +112,32 @@ type simBootResult struct {
 	// listing. Absent on a device that was already up: the claim that follows
 	// is what trusts those.
 	Trust *simTrustClient `json:"trust,omitempty"`
+	// MadeRoom is the idle clones shut down to stay within the boot cap.
+	// Reported because they belong to other sessions.
+	MadeRoom []simMadeRoom `json:"madeRoom,omitempty"`
 }
 
-// simPowerRequest mirrors controllers.SimPowerInput. Only the state is sent:
-// confirmHolder belongs to shutdown, which this command does not have.
+// simPowerRequest mirrors controllers.SimPowerInput. confirmHolder is never
+// sent: it belongs to shutdown, which this command does not have.
 type simPowerRequest struct {
 	State string `json:"state"`
+	// MakeRoom is always set: an agent has no Device tab to free a slot from,
+	// so at the cap the only ways forward are an idle clone going down or a
+	// refusal that says who holds each slot.
+	MakeRoom bool `json:"makeRoom"`
+}
+
+// simPowerResponse mirrors controllers.SimPowerResponse.
+type simPowerResponse struct {
+	MadeRoom []simMadeRoom `json:"madeRoom,omitempty"`
+}
+
+// simMadeRoom mirrors controllers.SimMadeRoomView: an idle AO clone the boot
+// cap shut down so this boot could happen.
+type simMadeRoom struct {
+	UDID      string `json:"udid"`
+	Name      string `json:"name"`
+	SessionID string `json:"sessionId"`
 }
 
 // simDevicePowerListing mirrors controllers.SimDevicePowerView.
@@ -179,10 +189,11 @@ func newSimBootCommand(ctx *commandContext) *cobra.Command {
 			"installed and none booted it fails and lists them rather than choosing which " +
 			"multi-gigabyte device to start. A device that is already booted is a no-op, " +
 			"not an error, so retrying is safe.\n\n" +
-			"It stops at " + fmt.Sprint(simBootMaxBooted) + " booted simulators. Each is a virtual machine of " +
-			"several GB and three at once has run this kind of machine out of memory, so " +
-			"past that the answer is to drive one that is already up - or to ask a human, " +
-			"who can boot another from the desktop app's Device tab.\n\n" +
+			"It stays within the machine's boot cap (" + fmt.Sprint(simpower.DefaultMaxBooted) + " simulators up at once " +
+			"unless the human changed it). Each is a virtual machine of several GB and too many at once " +
+			"runs the machine out of memory. At the cap it shuts down AO's least recently booted clone " +
+			"that no session holds a lease on, and says which; a base, a simulator AO did not make, or a " +
+			"leased one is never shut down. With none idle it fails and lists who holds each slot.\n\n" +
 			simPowerNote,
 		Example: `  ao sim boot
   ao sim boot --udid 00000000-0000-0000-0000-000000000000
@@ -242,25 +253,26 @@ func (c *commandContext) bootSimDevice(ctx context.Context, udid string, timeout
 	if err != nil {
 		return simBootResult{}, err
 	}
-	// The daemon's listing as well as simctl's, because it is the only one that
-	// carries an in-flight operation and a finished boot's profile - and both
-	// of the answers below need one of those. Its failure is the command's:
-	// everything past this point goes through the daemon anyway, so reporting
-	// that it cannot be reached here is the same news one step earlier.
-	listings, err := c.fetchSimDeviceListings(ctx)
-	if err != nil {
-		return simBootResult{}, err
-	}
 	if device.Booted() {
-		return simBootedResult(device, true, findSimDeviceListing(listings, device.UDID)), nil
-	}
-	if err := checkSimBootBudget(devices, listings, device); err != nil {
-		return simBootResult{}, err
+		// The daemon's listing as well as simctl's, because it is the only one
+		// that carries a finished boot's profile. Its failure is the command's:
+		// a device AO left stock must not read as fine because the daemon
+		// could not be asked.
+		listing, err := c.fetchSimDeviceListing(ctx, device.UDID)
+		if err != nil {
+			return simBootResult{}, err
+		}
+		return simBootedResult(device, true, &listing), nil
 	}
 
 	path := "sessions/" + url.PathEscape(sessionID) + "/sim-devices/" + url.PathEscape(device.UDID) + "/power"
-	switch err := c.postJSON(ctx, path, simPowerRequest{State: "booted"}, nil); {
+	var started simPowerResponse
+	switch err := c.postJSON(ctx, path, simPowerRequest{State: "booted", MakeRoom: true}, &started); {
 	case err == nil:
+	case simPowerCode(err) == "SIM_BOOT_CAP_REACHED":
+		return simBootResult{}, fmt.Errorf("%s\nAs an agent: drive one of the devices above that you can claim, or "+
+			"`ao sim release` a clone you are done with - an idle clone is what the next `ao sim boot` makes room from",
+			simPowerMessage(err))
 	case simPowerCode(err) == "SIM_POWER_ALREADY":
 		// The device came up between our listing and the request - somebody
 		// else's boot, or a human in Xcode. That is the state we asked for.
@@ -287,7 +299,9 @@ func (c *commandContext) bootSimDevice(ctx context.Context, udid string, timeout
 	if err != nil {
 		return simBootResult{}, err
 	}
-	return simBootedResult(device, false, &listing), nil
+	result := simBootedResult(device, false, &listing)
+	result.MadeRoom = started.MadeRoom
+	return result, nil
 }
 
 // resolveSimBootTarget decides which device an unqualified boot means.
@@ -361,59 +375,6 @@ func resolveSimBootTarget(devices []simDevice, udid, command string) (simDevice,
 		}
 		return simDevice{}, errors.New(b.String())
 	}
-}
-
-// checkSimBootBudget is the memory guard. See simBootMaxBooted for the number
-// and the reasoning; this is only where it is applied.
-//
-// ⚠ A device the daemon is still booting counts, and that is not a nicety.
-// simctl reports Booted, so counting only what simctl says would be enough if a
-// boot were only a boot - but `simslim on` REBOOTS the device, so for the tens
-// of seconds of the slimming phase an AO-booted simulator is not Booted while
-// its several GB are very much allocated. A crewmate running `ao sim boot` in
-// that window would be shown headroom that does not exist and would take the
-// machine to three, which is the OOM this cap exists to prevent, in precisely
-// the dev-and-qa-hold-a-device-each case slimming was built for.
-func checkSimBootBudget(devices []simDevice, listings []simDeviceListing, target simDevice) error {
-	type charge struct {
-		device  simDevice
-		booting bool
-		// elsewhere is the AO daemon running the boot, when it is not ours.
-		elsewhere *domain.SimDaemon
-	}
-	var booted []charge
-	for _, d := range devices {
-		if d.UDID == target.UDID {
-			continue
-		}
-		switch listing := findSimDeviceListing(listings, d.UDID); {
-		case d.Booted():
-			booted = append(booted, charge{device: d})
-		case listing != nil && listing.Power != nil &&
-			listing.Power.Op == string(simpower.Boot) && listing.Power.State == string(simpower.Running):
-			booted = append(booted, charge{device: d, booting: true, elsewhere: listing.Power.OtherDaemon})
-		}
-	}
-	if len(booted) < simBootMaxBooted {
-		return nil
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d simulators are already up or coming up and each is a virtual machine of several GB - "+
-		"three at once has run this machine out of memory, so `ao sim boot` stops at %d. Already counted:",
-		len(booted), simBootMaxBooted)
-	for _, c := range booted {
-		state := "booted"
-		switch {
-		case c.booting && c.elsewhere != nil:
-			state = "still coming up in " + c.elsewhere.Describe()
-		case c.booting:
-			state = "still coming up"
-		}
-		fmt.Fprintf(&b, "\n  %s (%s, %s) - %s", c.device.Name, c.device.Runtime, c.device.UDID, state)
-	}
-	fmt.Fprintf(&b, "\nDrive one of those instead, or ask the human to boot %s from the desktop app's Device tab, "+
-		"where booting past this point is a button they press.", target.Name)
-	return errors.New(b.String())
 }
 
 // waitForSimBoot blocks until the device is up, the daemon says the boot
@@ -504,6 +465,16 @@ func simPowerCode(err error) string {
 	return apiErr.ErrorBody.Code
 }
 
+// simPowerMessage is the daemon's own sentence for a refused power request,
+// without the code and request id the generic rendering appends to it.
+func simPowerMessage(err error) string {
+	var apiErr apiResponseError
+	if !errors.As(err, &apiErr) || apiErr.ErrorBody.Message == "" {
+		return err.Error()
+	}
+	return apiErr.ErrorBody.Message
+}
+
 // simBootedResult reports a device that is up, carrying whatever the daemon
 // still has to say about its profile.
 //
@@ -542,6 +513,12 @@ func writeSimBoot(out io.Writer, result simBootResult) error {
 	verb := "Booted"
 	if result.AlreadyBooted {
 		verb = "Already booted:"
+	}
+	for _, m := range result.MadeRoom {
+		if _, err := fmt.Fprintf(out, "Shut down %s (%s), @%s's idle clone, to stay within the boot cap\n",
+			m.Name, m.UDID, m.SessionID); err != nil {
+			return err
+		}
 	}
 	if _, err := fmt.Fprintf(out, "%s %s (%s, %s)\n", verb, result.Name, result.Runtime, result.UDID); err != nil {
 		return err

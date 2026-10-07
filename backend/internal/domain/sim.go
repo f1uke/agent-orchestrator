@@ -237,22 +237,136 @@ func NormalizeSimUDID(udid string) string {
 	return strings.ToUpper(strings.TrimSpace(udid))
 }
 
-// SimDeviceAssignment is the device that belongs to one session. It is NOT a
-// lease and does not do a lease's job: a lease says who may drive a device for
-// the next few minutes and expires; an assignment says which device is yours
-// and lasts as long as your session does.
+// SimBase is one of the simulators AO clones a session's devices from. A base
+// is a template and never a work device: it is never handed to a session,
+// leased fresh or booted through AO, because anything that ran on it - an
+// installed app, a keychain entry, a login - would leak into every clone made
+// after it.
 //
-// It exists because the lease already refused to share and that was not enough.
-// Nothing told an agent which device was supposed to be its own, so with one
-// device booted every session reached for that one - including a crewmate's,
-// mid-verification. The assignment is exported into the agent's environment at
-// spawn (AO_SIM_UDID, AO_SIM_DESTINATION) precisely so that `ao sim` and a raw
-// `xcodebuild -destination` land on the same device without the agent having to
-// remember anything.
-type SimDeviceAssignment struct {
-	SessionID  SessionID `json:"sessionId"`
-	UDID       string    `json:"udid"`
-	AssignedAt time.Time `json:"assignedAt"`
+// A base is found by its simctl NAME, which is what a person creates it with
+// and sees in Xcode. DeviceType is what `xcrun simctl create` needs to make a
+// missing one.
+type SimBase struct {
+	// Key is the label a clone of this base gets when the session names none.
+	Key        string
+	Name       string
+	DeviceType string
+}
+
+// SimBases is every base AO clones from. The first is the default: the device
+// every iOS worker is given at spawn. The others are for checking a layout at
+// another size, and a session asks for them by model.
+var SimBases = []SimBase{
+	{Key: "iphone-17-pro-max", Name: "iPhone 17 Pro Max", DeviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max"},
+	{Key: "iphone-se", Name: "iPhone SE (3rd generation)", DeviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"},
+	{Key: "ipad-pro-11", Name: "iPad Pro 11-inch (M5)", DeviceType: "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-11-inch-M5-12GB"},
+}
+
+// DefaultSimBase is the base a session's own device ($AO_SIM_UDID) is cloned
+// from.
+func DefaultSimBase() SimBase { return SimBases[0] }
+
+// SimBaseNamed is the base with this exact simctl name.
+func SimBaseNamed(name string) (SimBase, bool) {
+	for _, base := range SimBases {
+		if base.Name == name {
+			return base, true
+		}
+	}
+	return SimBase{}, false
+}
+
+// MatchSimBase resolves what an agent typed after --model to a base: the exact
+// name ignoring case, else the one base whose name starts with it, so "iPhone
+// SE" and "iPad Pro 11-inch" are enough. Empty means the default. Anything that
+// names no base, or more than one, is refused with the names it could have
+// meant.
+func MatchSimBase(model string) (SimBase, error) {
+	want := strings.ToLower(strings.TrimSpace(model))
+	if want == "" {
+		return DefaultSimBase(), nil
+	}
+	var matches []SimBase
+	for _, base := range SimBases {
+		name := strings.ToLower(base.Name)
+		if name == want {
+			return base, nil
+		}
+		if strings.HasPrefix(name, want) {
+			matches = append(matches, base)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		return SimBase{}, fmt.Errorf("%q names no simulator model AO clones; the models are %s", model, simBaseList())
+	default:
+		return SimBase{}, fmt.Errorf("%q names more than one simulator model; the models are %s", model, simBaseList())
+	}
+}
+
+func simBaseList() string {
+	names := make([]string, 0, len(SimBases))
+	for _, base := range SimBases {
+		names = append(names, fmt.Sprintf("%q", base.Name))
+	}
+	return strings.Join(names, ", ")
+}
+
+// SimPrimaryLabel is the label of a session's primary device: the clone of
+// DefaultSimBase made at spawn and exported as AO_SIM_UDID / AO_SIM_DESTINATION.
+const SimPrimaryLabel = "primary"
+
+// SimClone is a simulator AO made for one session by cloning a base, and the
+// only kind of device AO ever deletes.
+//
+// It outlives nothing: when its session ends AO deletes the device and then
+// this row. The row is what proves AO made the device, so a device with no row
+// - a human's, another daemon's - is never touched.
+//
+// A session holds one primary clone and any number of extra ones, each under a
+// label unique within the session: an SE for a layout check, a second iPhone
+// for the other side of a chat. Commands address an extra device by its label.
+type SimClone struct {
+	UDID      string    `json:"udid"`
+	SessionID SessionID `json:"sessionId"`
+	Label     string    `json:"label"`
+	// Base is the name of the base it was cloned from.
+	Base string `json:"base"`
+	// Name is the clone's own simctl name, which says whose it is.
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// Primary reports whether this is the session's AO_SIM_UDID device.
+func (c SimClone) Primary() bool { return c.Label == SimPrimaryLabel }
+
+// SimCloneName is what a clone is called on this machine: enough for a person
+// looking at Xcode's device list to tell whose it is and what it is a copy of.
+func SimCloneName(sessionID SessionID, label string, base SimBase) string {
+	if label == SimPrimaryLabel {
+		return fmt.Sprintf("AO %s (%s)", sessionID, base.Name)
+	}
+	return fmt.Sprintf("AO %s %s (%s)", sessionID, label, base.Name)
+}
+
+// ParseSimLabel validates a label an agent typed. Labels end up in device
+// names and on command lines, so they are kept to what needs no quoting.
+func ParseSimLabel(raw string) (string, error) {
+	label := strings.ToLower(strings.TrimSpace(raw))
+	if label == "" {
+		return "", fmt.Errorf("a device label cannot be empty")
+	}
+	if len(label) > 32 {
+		return "", fmt.Errorf("device label %q is longer than 32 characters", raw)
+	}
+	for _, r := range label {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return "", fmt.Errorf("device label %q may hold only letters, digits, '-' and '_'", raw)
+		}
+	}
+	return label, nil
 }
 
 // SimDestination renders a udid the way `xcodebuild -destination` wants it, so

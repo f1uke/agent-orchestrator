@@ -89,6 +89,11 @@ type simDaemon struct {
 	// calls booted while simctl still calls it shut down is not writable.
 	onPower func()
 
+	// clones are the devices the clone routes report and hand out. nil means
+	// the routes are not served at all: a daemon from before clones existed.
+	clones []simCloneClient
+	bases  []simBaseClient
+
 	mu          sync.Mutex
 	calls       []string // "METHOD path"
 	body        string   // last request body
@@ -214,6 +219,37 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 				onPower()
 			}
 			_, _ = io.WriteString(w, `{"started":true}`)
+		case d.clones != nil && r.Method == http.MethodGet && r.URL.Path == "/api/v1/sim/clones":
+			_ = json.NewEncoder(w).Encode(listSimClonesResponse{Clones: d.clones, Bases: append([]simBaseClient{}, d.bases...)})
+		case d.clones != nil && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/sim-clones"):
+			var in claimSimCloneRequest
+			_ = json.Unmarshal(body, &in)
+			label := in.Label
+			if label == "" {
+				label = "primary"
+				if in.Model != "" {
+					label = "iphone-se"
+				}
+			}
+			for _, c := range d.clones {
+				if c.Label == label {
+					_ = json.NewEncoder(w).Encode(simCloneResponse{Clone: c})
+					return
+				}
+			}
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = io.WriteString(w, `{"error":"unprocessable","code":"SIM_BASE_MISSING","message":"the base simulator \"iPhone SE (3rd generation)\" is missing"}`)
+		case d.clones != nil && r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/sim-clones/"):
+			label := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			for i, c := range d.clones {
+				if c.Label == label {
+					d.clones = append(d.clones[:i], d.clones[i+1:]...)
+					_ = json.NewEncoder(w).Encode(simCloneResponse{Clone: c})
+					return
+				}
+			}
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":"not_found","code":"SIM_NOT_FOUND","message":"this session has no device labelled `+label+`"}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sim/leases":
 			leases := []simLeaseClient{}
 			for _, l := range d.leases {

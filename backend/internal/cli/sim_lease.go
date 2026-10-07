@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 )
 
 // The lease half of `ao sim`. A lease is bookkeeping held by the daemon, never
@@ -108,19 +110,27 @@ type simClaimResult struct {
 	// trust this Mac's debugging-proxy CA, because a device booted from Xcode
 	// never went through `ao sim boot`.
 	Trust *simTrustClient `json:"trust,omitempty"`
+	// Clone is the session's own device that was claimed, when it was one.
+	Clone *simCloneClient `json:"clone,omitempty"`
+	// State is the device's simctl state when it was claimed.
+	State string `json:"state,omitempty"`
 }
 
 // simReleaseResult is the `ao sim release --json` payload.
 type simReleaseResult struct {
 	UDID     string `json:"udid"`
 	Released bool   `json:"released"`
+	// Deleted says the device itself is gone: an extra device released by
+	// label.
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 func newSimClaimCommand(ctx *commandContext) *cobra.Command {
 	var opts struct {
-		udid string
-		ttl  string
-		json bool
+		udid  string
+		model string
+		ttl   string
+		json  bool
 	}
 	cmd := &cobra.Command{
 		Use:   "claim",
@@ -132,13 +142,26 @@ func newSimClaimCommand(ctx *commandContext) *cobra.Command {
 			"rebooted. A claim is what keeps that from happening.\n\n" +
 			"The claim lapses on its own after --ttl (10 minutes by default) and is " +
 			"released automatically when this session ends, so a crashed holder can " +
-			"never keep a device forever. Claiming again renews it. " + simPowerNote,
+			"never keep a device forever. Claiming again renews it. " + simPowerNote + "\n\n" +
+			"With no --udid it claims one of this session's own devices, which AO clones " +
+			"from a base the first time it is asked for: the primary one ($AO_SIM_UDID), " +
+			"or with --model another model (its label defaults to the model's, e.g. " +
+			"iphone-se), or with --device another device under that label - a second " +
+			"iPhone for the other side of a chat. `ao sim release --device <label>` deletes " +
+			"an extra device; every one is deleted when the session ends.",
 		Example: `  ao sim claim
+  ao sim claim --model "iPhone SE"
+  ao sim claim --model "iPad Pro 11-inch" --device tablet
+  ao sim claim --device advisor
   ao sim claim --ttl 30m
   ao sim claim --udid 00000000-0000-0000-0000-000000000000 --json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result, err := ctx.claimSimDevice(cmd.Context(), opts.udid, opts.ttl)
+			label, _ := cmd.Flags().GetString(simLabelFlag)
+			if opts.udid != "" && (label != "" || opts.model != "") {
+				return usageError{errors.New("--udid names a device, so it takes neither --device nor --model")}
+			}
+			result, err := ctx.claimSimDevice(cmd.Context(), opts.udid, label, opts.model, opts.ttl)
 			if err != nil {
 				return err
 			}
@@ -149,7 +172,8 @@ func newSimClaimCommand(ctx *commandContext) *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&opts.udid, "udid", "", "Claim this simulator instead of the booted one")
+	f.StringVar(&opts.udid, "udid", "", "Claim this simulator instead of one of this session's own")
+	f.StringVar(&opts.model, "model", "", `Model of the device to clone for --device, e.g. "iPhone SE" or "iPad Pro 11-inch"`)
 	f.StringVar(&opts.ttl, "ttl", "", "How long to hold it (e.g. 30s, 10m, 1h). Default 10m")
 	f.BoolVar(&opts.json, "json", false, "Output the claim as JSON")
 	return cmd
@@ -165,12 +189,31 @@ func newSimReleaseCommand(ctx *commandContext) *cobra.Command {
 		Short: "Release this session's claim on a simulator",
 		Long: "Release the simulator this session holds, handing it back immediately.\n\n" +
 			"With no --udid it releases the one device this session holds. It never " +
-			"touches the simulator itself, and it cannot release someone else's claim.",
+			"touches the simulator itself, and it cannot release someone else's claim.\n\n" +
+			"With --device it DELETES that extra device of this session now, rather than " +
+			"when the session ends. The primary device is never deleted this way.",
 		Example: `  ao sim release
+  ao sim release --device iphone-se
   ao sim release --udid 00000000-0000-0000-0000-000000000000`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result, err := ctx.releaseSimDevice(cmd.Context(), opts.udid)
+			label, _ := cmd.Flags().GetString(simLabelFlag)
+			label = strings.ToLower(strings.TrimSpace(label))
+			if label != "" && opts.udid != "" {
+				return usageError{errors.New("--device and --udid both name a device; pass one")}
+			}
+			if label != "" && label != domain.SimPrimaryLabel {
+				return ctx.deleteSimDevice(cmd, label, opts.json)
+			}
+			udid := opts.udid
+			if label == domain.SimPrimaryLabel {
+				primary, err := ctx.simLabelUDID(cmd.Context(), label)
+				if err != nil {
+					return err
+				}
+				udid = primary
+			}
+			result, err := ctx.releaseSimDevice(cmd.Context(), udid)
 			if err != nil {
 				return err
 			}
@@ -187,7 +230,7 @@ func newSimReleaseCommand(ctx *commandContext) *cobra.Command {
 	return cmd
 }
 
-func (c *commandContext) claimSimDevice(ctx context.Context, udid, rawTTL string) (simClaimResult, error) {
+func (c *commandContext) claimSimDevice(ctx context.Context, udid, label, model, rawTTL string) (simClaimResult, error) {
 	sessionID, err := simSessionID("ao sim claim")
 	if err != nil {
 		return simClaimResult{}, err
@@ -196,11 +239,35 @@ func (c *commandContext) claimSimDevice(ctx context.Context, udid, rawTTL string
 	if err != nil {
 		return simClaimResult{}, err
 	}
+	var clone *simCloneClient
+	if strings.TrimSpace(udid) == "" {
+		// The session's own device, made now if it has none: this is also how
+		// a session spawned while a base was missing gets its primary device
+		// once the base exists - or learns exactly what is missing.
+		made, err := c.claimSimClone(ctx, sessionID, label, model)
+		switch {
+		case err == nil:
+			clone, udid = &made, made.UDID
+		case label != "" || model != "" || !daemonLacksSimClones(err):
+			return simClaimResult{}, err
+		}
+	}
 	devices, err := c.listSimDevices(ctx)
 	if err != nil {
 		return simClaimResult{}, err
 	}
-	device, err := resolveSimDevice(devices, udid)
+	var device simDevice
+	if clone != nil {
+		// The session's own device is claimed whether or not it is up: a
+		// clone made a moment ago is always shut down, and the lease is
+		// bookkeeping that does not need it running.
+		device, err = ownSimDevice(devices, clone.UDID)
+	} else {
+		if err := c.refuseSimBase(ctx, udid); err != nil {
+			return simClaimResult{}, err
+		}
+		device, err = resolveSimDevice(devices, udid)
+	}
 	if err != nil {
 		return simClaimResult{}, err
 	}
@@ -221,6 +288,8 @@ func (c *commandContext) claimSimDevice(ctx context.Context, udid, rawTTL string
 		ExpiresAt:         res.Lease.ExpiresAt.UTC(),
 		Note:              simLeaseScopeNote,
 		Trust:             res.Trust,
+		Clone:             clone,
+		State:             device.State,
 	}, nil
 }
 
@@ -247,6 +316,65 @@ func (c *commandContext) releaseSimDevice(ctx context.Context, udid string) (sim
 	return simReleaseResult{UDID: key, Released: true}, nil
 }
 
+// refuseSimBase says a named device is a base before anything else is said
+// about it - "it is not booted, boot it" would send the caller to a boot that
+// is refused too. A daemon that cannot be asked leaves the lease to refuse it.
+func (c *commandContext) refuseSimBase(ctx context.Context, udid string) error {
+	if strings.TrimSpace(udid) == "" {
+		return nil
+	}
+	clones, err := c.fetchSimClones(ctx)
+	if err != nil {
+		return nil //nolint:nilerr // the daemon's own lease check refuses a base too
+	}
+	for _, base := range clones.Bases {
+		if base.UDID != "" && domain.NormalizeSimUDID(base.UDID) == domain.NormalizeSimUDID(udid) {
+			return fmt.Errorf("%s (%s) is a base AO clones devices from, and is never driven: claim your own device with `ao sim claim`, or another model with `ao sim claim --model %q`", base.Name, base.UDID, base.Name)
+		}
+	}
+	return nil
+}
+
+// ownSimDevice finds one of this session's devices in a listing.
+func ownSimDevice(devices []simDevice, udid string) (simDevice, error) {
+	for _, d := range devices {
+		if domain.NormalizeSimUDID(d.UDID) == domain.NormalizeSimUDID(udid) {
+			return d, nil
+		}
+	}
+	return simDevice{}, fmt.Errorf("simulator %s is not on this machine", udid)
+}
+
+// daemonLacksSimClones is a daemon that cannot clone simulators - no Xcode on
+// its machine, or a daemon older than this CLI: a plain claim then falls back
+// to the booted device, as it always did. A 404 the clone route itself raised
+// (an unknown session) carries its own code and is not this.
+func daemonLacksSimClones(err error) bool {
+	var apiErr apiResponseError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.StatusCode == http.StatusNotImplemented ||
+		apiErr.StatusCode == http.StatusNotFound && !strings.HasPrefix(apiErr.ErrorBody.Code, "SIM_")
+}
+
+// deleteSimDevice deletes one of this session's extra devices.
+func (c *commandContext) deleteSimDevice(cmd *cobra.Command, label string, asJSON bool) error {
+	sessionID, err := simSessionID("ao sim release --device")
+	if err != nil {
+		return err
+	}
+	removed, err := c.removeSimClone(cmd.Context(), sessionID, label)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return writeJSON(cmd.OutOrStdout(), simReleaseResult{UDID: removed.UDID, Released: true, Deleted: true})
+	}
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "Deleted %s (%s), this session's device labelled %s.\n", removed.Name, removed.UDID, removed.Label)
+	return err
+}
+
 // sessionHeldSimUDID finds the single device this session holds, and refuses to
 // guess when there is not exactly one.
 func (c *commandContext) sessionHeldSimUDID(ctx context.Context, sessionID string) (string, error) {
@@ -261,9 +389,20 @@ func (c *commandContext) sessionHeldSimUDID(ctx context.Context, sessionID strin
 			mine = append(mine, lease)
 		}
 	}
-	switch len(mine) {
-	case 1:
+	if len(mine) == 1 {
 		return mine[0].UDID, nil
+	}
+	// Holding several is ordinary now that a session has more than one
+	// device; with no flag the command means the primary one, as every other
+	// command does.
+	if primary := domain.NormalizeSimUDID(assignedSimUDID()); primary != "" {
+		for _, lease := range mine {
+			if domain.NormalizeSimUDID(lease.UDID) == primary {
+				return primary, nil
+			}
+		}
+	}
+	switch len(mine) {
 	case 0:
 		return "", errors.New("this session holds no simulator lease; run `ao sim list` to see who holds what")
 	default:
@@ -455,6 +594,21 @@ func writeSimClaim(out io.Writer, result simClaimResult) error {
 	if _, err := fmt.Fprintf(out, "Claimed %s (%s, %s) for @%s until %s.\n",
 		result.Name, result.Runtime, result.UDID, result.Holder, result.ExpiresAt.Format(time.RFC3339)); err != nil {
 		return err
+	}
+	if result.State != simctl.BootedState && result.State != "" {
+		boot := "ao sim boot"
+		if result.Clone != nil && !result.Clone.Primary {
+			boot += " --device " + result.Clone.Label
+		}
+		if _, err := fmt.Fprintf(out, "It is not booted (%s): `%s` powers it on.\n", result.State, boot); err != nil {
+			return err
+		}
+	}
+	if result.Clone != nil && !result.Clone.Primary {
+		if _, err := fmt.Fprintf(out, "It is this session's device labelled %s, a clone of %s: pass --device %s to any `ao sim` command, or its udid to other tools.\n",
+			result.Clone.Label, result.Clone.Base, result.Clone.Label); err != nil {
+			return err
+		}
 	}
 	if err := writeSimTrust(out, result.Trust); err != nil {
 		return err

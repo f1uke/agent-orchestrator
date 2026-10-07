@@ -25,6 +25,14 @@ func TestStripEnvKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("drops an inherited simulator so only AO decides who gets one", func(t *testing.T) {
+		in := []string{"PATH=/usr/bin", "AO_SIM_UDID=C1ADF56E", "AO_SIM_DESTINATION=id=C1ADF56E"}
+		got := stripEnvKeys(in, execEnvDropKeys)
+		if want := []string{"PATH=/usr/bin"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("stripEnvKeys = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("does not mutate the input slice", func(t *testing.T) {
 		in := []string{"AO_OWNER=app", "PATH=/usr/bin"}
 		_ = stripEnvKeys(in, daemonOnlyEnvKeys)

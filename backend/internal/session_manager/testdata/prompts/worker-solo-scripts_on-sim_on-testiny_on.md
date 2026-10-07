@@ -71,8 +71,8 @@ Never write a bare session number — always `@…` or the full `<project>-<num>
 On this project a simulator is driven ONLY by running a reusable Maestro script from the scripts store at `$AO_SCRIPTS_STORE` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on.
 
 ```bash
-ao sim list                     # what exists, and what is booted
-ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
+ao sim list                     # every device, its role (base, or whose clone) and whether it is booted
+ao sim boot                     # power yours ON; already booted is a no-op
 ao sim run --scheme <name>      # put YOUR build on the device first: a script resets the app it finds installed
 ao sim doctor --app <bundle id> # read-only health check: device, lease, installed build, proxy CA
 $AO_SCRIPTS_STORE/bin/flow list nter
@@ -86,8 +86,12 @@ ao sim release                  # when you are done with the device
 ```
 
 - **Reading is how you judge; a script is how you move.** `ao sim shot`, `ao sim ax` and `ao sim log` are fine at any time. Gestures - `ao sim tap`, `ao sim type`, `ao sim drag` and the rest - are not, except while authoring a missing script (below).
-- **The device that is yours is `$AO_SIM_UDID`**, and `bin/flow` and `ao sim` already mean it. Unset means none was free: name a scratch device (`--device` / `--udid`), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase.
-- **A lease guards the device, not the command.** `ao sim run` and `ao sim install` take it as they install; a raw `xcrun simctl` or `xcodebuild -destination` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
+- **Your device is `$AO_SIM_UDID`**, cloned from the iPhone 17 Pro Max base for this session alone. `ao sim` means it by default; other tools need it named: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. Unset: run `ao sim claim`, which makes it or says what is missing. Never fall back to whichever device is booted.
+- **More devices, each under a label:** `ao sim claim --model "iPhone SE"` (label `iphone-se`; `"iPad Pro 11-inch"` is `ipad-pro-11`), or `ao sim claim --device <label>` for a second iPhone 17 Pro Max; `--model X --device Y` combines them. Any `ao sim` command takes `--device <label>` (`ao sim install <app> --device iphone-se`); other tools take `"$(ao sim udid --device <label>)"`. `ao sim release --device <label>` deletes that device; plain `ao sim release` only drops your lease. All of them are deleted when the session ends.
+- **Never claim, boot, install on or drive a base** (iPhone 17 Pro Max, iPhone SE (3rd generation), iPad Pro 11-inch (M5)): they are templates. `ao sim list` shows each device's role: `base`, `yours: <label>` or `@<session>: <label>`.
+- **Power on, nothing else** - no shutdown, reboot or erase. `ao sim boot` allows 4 booted machine-wide; at the cap AO shuts down the least recently used idle AO clone, or names the devices holding it. Boot only what you use; release extra devices when done.
+- **Run in parallel:** one Maestro run per device, on several at once (the same case on 17 Pro Max, SE and iPad; both sides of a chat; two accounts at once). Never wait for another device's run.
+- **A lease guards the device, not the command.** `ao sim run` and `ao sim install` take it as they install; a raw `xcrun simctl` or `xcodebuild -destination` never asks it, and aimed at a device that is not yours it overwrites whoever is on it. A refusal names the holder - wait, or say so.
 - **A screenshot says which build it was of.** Compare its `Build:` line before the pictures.
 - **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: `ao sim claim`, `ao sim flow record start --name <screen>`, drive the route once, `ao sim flow record stop --out $AO_SCRIPTS_STORE/projects/nter/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE` (every typed or tapped VALUE becomes `${MAESTRO_NAME}`; a password is pasted, never recorded) - or write the YAML yourself. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
@@ -95,6 +99,13 @@ ao sim release                  # when you are done with the device
 - **The store is yours: `$AO_SCRIPTS_STORE`** is this task's own git worktree of the scripts store, on its own branch. Run `bin/flow` from there and commit there, then run `ao scripts publish` so other sessions get your scripts. A refused publish names the files: merge `main` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: `git -C "$AO_SCRIPTS_STORE" merge main`. `ao scripts status` shows what is not committed or not published yet. Accounts stay in the main checkout, `/scripts/accounts/`, where `bin/flow` reads them from any worktree. Nothing in the store goes into your pull request.
 
 Everything else - the store's layout and rules, the full `ao sim` catalog, running several flows in one Maestro start-up - is in the store's README and the ao skill this prompt already points you at.
+
+### Real API or mock (AO)
+
+- **Run against the real int/uat API by default.** Do not reach for Proxyman Map Local or `bin/flow --mocks` by habit. Mock only when the feature's backend is not ready yet, or when the case can be played against the real API only once (redeem, buy, submit, delete), so repeat plays need a mock.
+- **No API doc: build fixtures from real responses**, carefully: int/uat only, never production; prefer read-only calls; fire a one-shot action deliberately and once; strip tokens, cookies and personal data; note where each fixture came from.
+- **A one-shot action: failures first, success last.** Play every failure case against the real API first (validation error, insufficient balance, expired, unauthorized), then fire the success case exactly once, capturing its request and response: that capture is the fixture for every repeat play.
+- **Say per case** in your report or handback whether it ran against the real API or which mock set, and why it needed the mock.
 
 ## Testiny test cases (AO)
 
@@ -111,7 +122,7 @@ This project keeps its manual test cases in Testiny. It is not tied to one Testi
 
 1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, the plan, and a run of that plan on the sprint's milestone (the evidence folder needs both), get the human's yes, create them, and link the run.
 2. **Link each case to this task's Jira issue** as a requirement: every case you create, right after you create it, and every case in a run linked to this task. Run `testiny case link <case-id> <JIRA-KEY>`, with the key from the `issue` field of `ao session get "$AO_CREW_ID"` (`jira:<KEY>`). If the task has no Jira issue, skip this step and say so in your report.
-3. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.
+3. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. **A one-shot action: failures first, success last.** Play every failure case against the real API first (validation error, insufficient balance, expired, unauthorized), then fire the success case exactly once, capturing its request and response: that capture is the fixture for every repeat play.
    - **Test Data** names the int/uat test account and data the case needs: use it to play the case.
 4. **Record each case and its steps:** `ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"] [--step <n>=<STATUS> ...]`, or a whole run at once with `--from-file`.
    - **Steps:** when the case has steps, add `--step <n>=<STATUS>` for each step you played, numbered as `ao testiny case` prints them, in the same call as the case. A step you never reached gets none.
@@ -125,7 +136,7 @@ This project keeps its manual test cases in Testiny. It is not tied to one Testi
    - **Refused for a name or a file:** fix every problem it lists and run it again.
    - **Refused because the run has no plan or no milestone:** adding one is a Testiny write, so draft it and ask the human, then run it again once it is added.
    - **Any other refusal** (a closed run, no Drive folder set, Drive sign-in): report it with its message, and never work around it.
-6. **Your finish report names** the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the run's evidence folder and its Drive folder, whether every case's evidence is linked on its result (or what `ao testiny evidence` refused and why), and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
+6. **Your finish report names** the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), whether each case ran against the real API or which mock set and why, the run's evidence folder and its Drive folder, whether every case's evidence is linked on its result (or what `ao testiny evidence` refused and why), and what is left for a person: visual checks with no Figma frame, steps you could not play, and cases a person had already set.
 
 ## Using the ao CLI
 

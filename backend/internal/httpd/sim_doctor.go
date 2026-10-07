@@ -10,10 +10,10 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/simhealth"
 )
 
-// SimAssignments reads the simulator a session was given at spawn (the udid
-// its AO_SIM_UDID carries). *sqlite.Store satisfies it.
+// SimAssignments reads the devices AO cloned for a session; its primary one is
+// the udid its AO_SIM_UDID carries. *sqlite.Store satisfies it.
 type SimAssignments interface {
-	GetSimDeviceAssignment(ctx context.Context, id domain.SessionID) (domain.SimDeviceAssignment, bool, error)
+	GetSimClone(ctx context.Context, id domain.SessionID, label string) (domain.SimClone, bool, error)
 }
 
 // simDoctorReaders wires `ao sim doctor` to the daemon's own state. nil, and
@@ -35,8 +35,8 @@ func simDoctorReaders(deps APIDeps, trust controllers.SimTrustResolver) *simheal
 			if deps.SimAssignments == nil {
 				return "", nil
 			}
-			assignment, _, err := deps.SimAssignments.GetSimDeviceAssignment(ctx, id)
-			return assignment.UDID, err
+			clone, _, err := deps.SimAssignments.GetSimClone(ctx, id, domain.SimPrimaryLabel)
+			return clone.UDID, err
 		},
 		Leases: deps.Sim.List,
 		CAFiles: func(ctx context.Context, id domain.SessionID) ([]string, error) {
