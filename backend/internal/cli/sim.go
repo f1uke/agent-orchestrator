@@ -183,6 +183,7 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 		newSimInstallCommand(ctx), newSimLaunchCommand(ctx), newSimRunCommand(ctx),
 		newSimFlowCommand(ctx),
 		newSimRecordCommand(ctx),
+		newSimPIDCommand(ctx), newSimLLDBCommand(ctx),
 	)
 	return cmd
 }
