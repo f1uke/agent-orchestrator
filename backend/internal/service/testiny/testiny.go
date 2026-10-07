@@ -3,10 +3,11 @@
 // them asks for, recording a case's result in one, and uploading a run's QA
 // evidence to Google Drive with each file's link posted on its case's result.
 //
-// AO stores the links and a log of the results and evidence it wrote. Every title, case and
-// result is read live from Testiny through the adapter, held in memory for a
-// few seconds, and kept as the last good read when a later read fails, so a
-// Testiny outage shows as "data from 3 min ago" rather than an empty tab.
+// AO stores the links and a log of the results and evidence it wrote. Every
+// title, case and result is read live from Testiny through the adapter, held
+// in memory for a few seconds, and kept as the last good read when a later
+// read fails, so a Testiny outage shows as "data from 3 min ago" rather than
+// an empty tab.
 package testiny
 
 import (
@@ -58,7 +59,7 @@ var (
 	ErrSetByPerson     = errors.New("a person set this result")
 	ErrEvidenceOff     = errors.New("QA evidence upload is off: set the Google Drive folder first, as an rclone path such as finnomena:QA (AO Settings, or PUT /api/v1/settings/qa-evidence)")
 	ErrRunClosed       = errors.New("the run is closed")
-	ErrDriveDuplicate  = errors.New("Google Drive holds two files with one name")
+	ErrDriveDuplicate  = errors.New("two files in the Google Drive folder have one name")
 )
 
 // RunReader reads Testiny. Satisfied by *adapters/testiny.Client.

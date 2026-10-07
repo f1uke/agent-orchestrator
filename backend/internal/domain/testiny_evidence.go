@@ -54,9 +54,9 @@ const TestinyEvidenceNaming = `"TC-<id> pass[ - <device>].<ext>" or "TC-<id> FAI
 const TestinyEvidenceReadme = "README.md"
 
 var (
-	testinyEvidenceCase = regexp.MustCompile(`^TC-([1-9][0-9]*)$`)
+	testinyEvidenceCase = regexp.MustCompile(`^TC-([1-9]\d*)$`)
 	testinyEvidenceExt  = regexp.MustCompile(`^[A-Za-z0-9]+$`)
-	jiraKeyPattern      = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
+	jiraKeyPattern      = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9]\d*$`)
 )
 
 // ParseTestinyEvidenceFile reads an evidence file's name:
@@ -188,25 +188,26 @@ func NewTestinyEvidenceTree(project string, year int, milestone, plan TestinyRef
 		{fmt.Sprintf("plan TP-%d's title", plan.ID), plan.Title},
 		{run.String() + "'s title", runTitle},
 	} {
-		if err := folderName(part.name); err != nil {
-			return TestinyEvidenceTree{}, fmt.Errorf("%w: %s %s; change it in Testiny", ErrBadTestinyEvidence, part.what, err)
+		if why := notAFolderName(part.name); why != "" {
+			return TestinyEvidenceTree{}, fmt.Errorf("%w: %s %s; change it in Testiny", ErrBadTestinyEvidence, part.what, why)
 		}
 	}
 	return t, nil
 }
 
-func folderName(name string) error {
+// notAFolderName says why a name cannot be one folder, or "" when it can.
+func notAFolderName(name string) string {
 	switch {
 	case strings.TrimSpace(name) == "":
-		return errors.New("is empty, so it cannot name a folder")
+		return "is empty, so it cannot name a folder"
 	case strings.Contains(name, "/"):
-		return fmt.Errorf("(%q) has a '/', which would split it into two folders", name)
+		return fmt.Sprintf("(%q) has a '/', which would split it into two folders", name)
 	case strings.ContainsRune(name, 0):
-		return fmt.Errorf("(%q) has a NUL character", name)
+		return fmt.Sprintf("(%q) has a NUL character", name)
 	case strings.HasPrefix(name, "."):
-		return fmt.Errorf("(%q) starts with '.', which hides the folder", name)
+		return fmt.Sprintf("(%q) starts with '.', which hides the folder", name)
 	}
-	return nil
+	return ""
 }
 
 // Rel is the run folder's path from the root of the tree, '/'-separated:
@@ -229,7 +230,7 @@ func TestinyEvidenceYear(startAt, createdAt time.Time, zone *time.Location) int 
 const driveHost = "drive.google.com"
 
 var (
-	driveFilePath = regexp.MustCompile(`^/file(?:/u/[0-9]+)?/d/([A-Za-z0-9_-]+)(?:/|$)`)
+	driveFilePath = regexp.MustCompile(`^/file(?:/u/\d+)?/d/([A-Za-z0-9_-]+)(?:/|$)`)
 	driveIDValue  = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 )
 
