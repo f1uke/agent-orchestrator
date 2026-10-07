@@ -35,6 +35,14 @@ const waitingInputGrace = 45 * time.Second
 // so a real between-signals lull never trips it.
 const activeStaleGrace = 10 * time.Minute
 
+// backgroundStaleGrace is how long an agent waiting on its own background work
+// still reads as working without a new turn. Claude Code wakes the agent as each
+// piece reports (a Monitor event, a finished shell or subagent), so a long quiet
+// stretch means what is left is something it set running and moved on from - a
+// server, a watcher - rather than work it is blocked on, and a long-lived one
+// would otherwise hold the card on "working" for as long as it runs.
+const backgroundStaleGrace = 30 * time.Minute
+
 // statusResult is the full outcome of the status derivation: the display Status
 // plus WHY it was chosen and, for timeout-based readings, when/what it will flip
 // to next. All fields are derived on read from durable facts; none is stored.

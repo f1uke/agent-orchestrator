@@ -63,6 +63,9 @@ const (
 	// CoarseIdleTTL mirrors waitingInputGrace: past it AO would promote the
 	// idle to needs-input, which is a timeout GUESS the feed must not make.
 	CoarseIdleTTL = 45 * time.Second
+	// CoarseBackgroundTTL mirrors backgroundStaleGrace: past it AO stops
+	// reading the agent's background work as work.
+	CoarseBackgroundTTL = 30 * time.Minute
 )
 
 // ActivityDetail is the curated, whitelisted description of one agent action.
