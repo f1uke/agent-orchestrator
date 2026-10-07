@@ -210,6 +210,15 @@ func ParseChildHook(agent, event string, payload []byte) (ports.ChildHook, bool)
 	return parse(event, payload)
 }
 
+// HookAgentPIDEnv maps the agent token in `ao hooks <agent> <event>` to the
+// variable its harness sets, in every hook's environment, to the pid of the
+// agent process running that hook. `ao hooks` compares that process's parent
+// with ports.EnvAgentParentPID to drop callbacks from an agent that is not the
+// session's own. A harness missing here is never fenced.
+var HookAgentPIDEnv = map[string]string{
+	"claude-code": claudecode.HookAgentPIDEnv,
+}
+
 // SupportsHarness reports whether a harness has an activity pipeline at all:
 // a registered deriver here means its adapter installs `ao hooks <harness>`
 // callbacks that can reach the daemon. Status derivation uses this to decide
