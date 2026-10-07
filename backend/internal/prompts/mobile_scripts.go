@@ -10,8 +10,22 @@ type MobileScripts struct {
 	Product string
 	// IOS is true for an iOS repository and false for an Android one.
 	IOS bool
-	// Store is the scripts store checkout.
+	// Store is the checkout the agent runs and writes scripts in: its task's
+	// own worktree of the store when Isolated, else the main checkout.
 	Store string
+	// Root is the store's main checkout. accounts/ is git-ignored, so it lives
+	// only there, and a worktree's bin/flow reads it from there too.
+	Root string
+	// Isolated is true when Store is the task's own worktree of the store, on
+	// Branch, published into Base with `ao scripts publish`. False when AO could
+	// not make one (the store is not a git checkout on a branch): Store is then
+	// the one checkout every session shares.
+	Isolated     bool
+	Branch, Base string
+	// Skill is the folder of the project's verify skill (holding SKILL.md),
+	// or "" when the project names none. When set, the device block defers to
+	// the skill instead of restating how to build, drive and check the app.
+	Skill string
 }
 
 // MobileScriptGuidance is the device block a worker on a SCRIPT-ONLY mobile
@@ -39,12 +53,36 @@ type MobileScripts struct {
 // commands the iOS block names is a reviewed decision held by
 // cli.TestMobileScriptGuidance_DecidesEverySubcommand, the same way the
 // catalog's is.
+//
+// A project with a verify skill gets a short block instead, holding only what
+// AO owns (which device is yours, the lease, power, CA trust, the health check
+// and the store worktree) and pointing at the skill for the rest: two sources
+// that both teach how to build and drive the app drift apart, and the skill is
+// the one its project maintains.
 func MobileScriptGuidance(ms MobileScripts) string {
+	if ms.Skill != "" {
+		body := mobileScriptSkillAndroid
+		if ms.IOS {
+			body = mobileScriptSkillIOS
+		}
+		return ms.fill(body + ms.storeRule())
+	}
 	body, closing := mobileScriptAndroid, mobileScriptAndroidClosing
 	if ms.IOS {
 		body, closing = mobileScriptIOS, mobileScriptIOSClosing
 	}
-	return ms.fill(body + mobileScriptShared + closing)
+	return ms.fill(body + mobileScriptShared + ms.storeRule() + closing)
+}
+
+// storeRule is where an agent writes scripts and how they reach other
+// sessions. A task's own worktree is published with `ao scripts publish`; the
+// shared checkout (AO could not make a worktree) keeps the old rule of
+// committing only your own files by path.
+func (ms MobileScripts) storeRule() string {
+	if ms.Isolated {
+		return mobileScriptStoreIsolated
+	}
+	return mobileScriptStoreShared
 }
 
 // MobileScriptPlay is how qa plays test cases on a script-only project, Testiny
@@ -64,17 +102,34 @@ func MobileScriptGuidance(ms MobileScripts) string {
 //
 // qa only, like the loop it replaces: dev hands verification over, and a solo
 // worker has nobody to play cases for.
+//
+// With a verify skill, qa sets up its device and build the way the skill says,
+// the same route dev and a solo worker take; the cases layer is what qa adds.
 func MobileScriptPlay(ms MobileScripts) string {
-	record, device := "", " --platform android --device <serial>"
+	record, device, setup := "", " --platform android --device <serial>", ""
 	if ms.IOS {
 		record = " When nobody knows the route, ask the human to play it ONCE in your Device tab while `ao sim flow record` runs: that one play becomes the script."
 		device = ""
 	}
-	return ms.fill(strings.NewReplacer("{{record}}", record, "{{device}}", device).Replace(mobileScriptPlay))
+	if ms.Skill != "" {
+		setup = "Set up your device and your build the way the verify skill says (Launch, Doctor), then play every case as below. "
+	}
+	return ms.fill(strings.NewReplacer("{{record}}", record, "{{device}}", device, "{{setup}}", setup).Replace(mobileScriptPlay))
 }
 
 func (ms MobileScripts) fill(s string) string {
-	return strings.NewReplacer("{{store}}", ms.Store, "{{product}}", ms.Product).Replace(s)
+	root := ms.Root
+	if root == "" {
+		root = ms.Store
+	}
+	return strings.NewReplacer(
+		"{{store}}", ms.Store,
+		"{{root}}", root,
+		"{{product}}", ms.Product,
+		"{{branch}}", ms.Branch,
+		"{{base}}", ms.Base,
+		"{{skill}}", ms.Skill,
+	).Replace(s)
 }
 
 const mobileScriptIOS = "\n\n" + `## Driving the iOS Simulator: scripts only (AO)
@@ -84,6 +139,7 @@ On this project a simulator is driven ONLY by running a reusable Maestro script 
 ` + "```bash\n" + `ao sim list                     # what exists, and what is booted
 ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
 ao sim run --scheme <name>      # put YOUR build on the device first: a script resets the app it finds installed
+ao sim doctor --app <bundle id> # read-only health check: device, lease, installed build, proxy CA
 {{store}}/bin/flow list {{product}}
                                 # INDEX.md: which script reaches which screen, its params, what it leaves behind
 {{store}}/bin/flow run {{product}} reach/<script> --param KEY=VALUE --account <id>
@@ -118,7 +174,7 @@ adb -s <serial> logcat -d -t 500              # what the app printed, when the s
 
 // mobileScriptShared finishes the authoring bullet both platforms open, and adds
 // the two rules that do not depend on the device.
-const mobileScriptShared = ` Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from ` + "`start/`" + `, no value typed into the script, end with an assertion and ` + "`takeScreenshot`" + `, stop before anything irreversible. Then ` + "`bin/flow check {{product}}`" + `, run it twice green from fresh, and add its row to ` + "`projects/{{product}}/INDEX.md`" + `. The store is outside this repository: nothing there goes into your pull request.
+const mobileScriptShared = ` Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from ` + "`start/`" + `, no value typed into the script, end with an assertion and ` + "`takeScreenshot`" + `, stop before anything irreversible. Then ` + "`bin/flow check {{product}}`" + `, run it twice green from fresh, and add its row to ` + "`projects/{{product}}/INDEX.md`" + `.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
 - **Accounts are referred to by id.** ` + "`bin/flow accounts {{product}}`" + ` lists them and ` + "`--account <id>`" + ` passes one. They are int/uat test accounts, safe to use and to store; production credentials never go anywhere.`
 
@@ -128,15 +184,37 @@ const mobileScriptAndroidClosing = "\n\n" + `Everything else - the store's layou
 
 const mobileScriptPlay = "\n\n" + `## Playing test cases with Maestro scripts (AO)
 
-Every test case you play on a device, you play by running ONE case script - never by gestures, and never by running reach scripts one after another by hand. A case script is the case written down so a machine can replay it: today it is how you play the case, later it is how the case becomes an automated UI test. The store's README section "Case scripts (` + "`cases/`" + `)" is the full standard.
+{{setup}}Every test case you play on a device, you play by running ONE case script - never by gestures, and never by running reach scripts one after another by hand. A case script is the case written down so a machine can replay it: today it is how you play the case, later it is how the case becomes an automated UI test. The store's README section "Case scripts (` + "`cases/`" + `)" is the full standard.
 
 1. **Find the case's script** in the Cases table of ` + "`{{store}}/projects/{{product}}/INDEX.md`" + `. On a Testiny project it is listed by its Testiny case id.
-2. **No script yet: write one**, then use it. It lives at ` + "`{{store}}/projects/{{product}}/cases/<area>/<behaviour>.yaml`" + `, named after the behaviour the case checks, never after a ticket. Its header carries one ` + "`# testiny: <project_key> TC-<id>`" + ` line per Testiny case it plays. It starts from ` + "`start/`" + `, reaches the screen through ` + "`reach/`" + ` and ` + "`common/`" + ` scripts, then runs the case's own steps and ASSERTS the case's expected result, taking a screenshot at every screen the case judges, named ` + "`{{product}}-case-<behaviour>-<step>`" + `. Verify it like any other script (above): ` + "`bin/flow check {{product}}`" + ` and two green runs from fresh. Then add its row to the Cases table, and only then trust its result.{{record}}
+2. **No script yet: write one**, then use it. It lives at ` + "`{{store}}/projects/{{product}}/cases/<area>/<behaviour>.yaml`" + `, named after the behaviour the case checks, never after a ticket. Its header carries one ` + "`# testiny: <project_key> TC-<id>`" + ` line per Testiny case it plays. It starts from ` + "`start/`" + `, reaches the screen through ` + "`reach/`" + ` and ` + "`common/`" + ` scripts, then runs the case's own steps and ASSERTS the case's expected result, taking a screenshot at every screen the case judges, named ` + "`{{product}}-case-<behaviour>-<step>`" + `. Verify it like any other script: ` + "`bin/flow check {{product}}`" + ` and two green runs from fresh. Then add its row to the Cases table, and only then trust its result.{{record}}
 3. **Play the case:** ` + "`{{store}}/bin/flow run {{product}} cases/<area>/<behaviour>{{device}} --param KEY=VALUE --account <id>`" + `. The assertions prove the DATA and the BEHAVIOUR: a failed assertion is a failed case, with the Maestro debug folder as the evidence.
 4. **Compare the screen with the DESIGN**, which no assertion proves. For every case that shows UI, compare each screenshot the case judges with the case's Figma frame - layout, spacing, copy, colour, components and states - and cite the frame you compared against. Find the frame from the ticket or the case. If neither links one, say so in your handback and leave the visual check for a person rather than guessing. A visual difference fails the case: name what differs and where.
 5. **The case PASSES only when both hold:** every assertion, and the screen against the design.
 6. **Keep the screenshots as the case's evidence.** On a Testiny project they go in the evidence folder the ` + "`managing-testiny-qa`" + ` skill names; otherwise give their path in your handback.
 
-A case whose script you cannot make pass, or whose next step cannot be undone (submit, buy, delete), is UNDRIVEABLE for that step: the script stops before it, and you say so in your handback with the reason from your attempt. A person plays that step. Never finish a case by hand.
+A case whose script you cannot make pass, or whose next step cannot be undone (submit, buy, delete), is UNDRIVEABLE for that step: the script stops before it, and you say so in your handback with the reason from your attempt. A person plays that step. Never finish a case by hand. The case scripts you write follow the store rule in the device block above.`
 
-The store is shared with other sessions: commit only the files you added or changed, by path (` + "`git -C {{store}} commit <paths>`" + `), and name them in your handback.`
+const mobileScriptSkillIOS = "\n\n" + `## Driving the iOS Simulator: the project's verify skill (AO)
+
+On this project a simulator is driven ONLY by Maestro scripts from the scripts store, and the project's ` + "`verify`" + ` skill is the one guide for building the app, health-checking the device, driving it, mocks and evidence: use it (` + "`.claude/skills/verify`" + `, or read ` + "`{{skill}}/SKILL.md`" + `). This block holds only what AO owns, and nothing in the skill overrides it.
+
+- **The device that is yours is ` + "`$AO_SIM_UDID`" + `**, and ` + "`bin/flow`" + ` and ` + "`ao sim`" + ` already mean it. Unset means none was free: name a scratch device (` + "`--device`" + ` / ` + "`--udid`" + `), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase. AO makes the device trust the proxy's CA every time it boots or a session claims it.
+- **A lease guards the device, not the command.** ` + "`ao sim run`" + ` and ` + "`ao sim install`" + ` take it as they install; a raw ` + "`xcrun simctl`" + ` or ` + "`xcodebuild -destination`" + ` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
+- **` + "`ao sim doctor --app <bundle id>`" + ` is the health check** of your device: booted, whose lease, which build is installed (` + "`--expect <your .app>`" + ` compares it with what you built) and whether the proxy CA is trusted. It only reads: run it before the first drive and after every failed run.`
+
+const mobileScriptSkillAndroid = "\n\n" + `## Driving the Android emulator: the project's verify skill (AO)
+
+On this project an emulator is driven ONLY by Maestro scripts from the scripts store, and the project's ` + "`verify`" + ` skill is the one guide for building the app, checking the device, driving it, mocks and evidence: use it (` + "`.claude/skills/verify`" + `, or read ` + "`{{skill}}/SKILL.md`" + `). This block holds only what AO owns, and nothing in the skill overrides it.
+
+- **Nothing leases an emulator.** Two sessions on one emulator break each other's runs and AO cannot stop it, so use the serial your brief or the human gives you (` + "`bin/flow`" + ` falls back to ` + "`$ANDROID_SERIAL`" + `), and never wipe or kill an emulator - it may be someone else's.`
+
+// mobileScriptStoreIsolated is the store rule when the task has its own
+// worktree of the store. Publishing is an explicit command so the agent that
+// wrote a script sees a refused merge at once and can fix it in its worktree;
+// AO publishes again when the session ends, as the safety net.
+const mobileScriptStoreIsolated = "\n" + `- **The store is yours: ` + "`$AO_SCRIPTS_STORE`" + `** (` + "`{{store}}`" + `) is this task's own git worktree of the scripts store, on branch ` + "`{{branch}}`" + `. Run ` + "`bin/flow`" + ` from there and commit there, then run ` + "`ao scripts publish`" + ` so other sessions get your scripts. A refused publish names the files: merge ` + "`{{base}}`" + ` into your branch, resolve, commit and publish again. Scripts other sessions published after you started: ` + "`git -C \"$AO_SCRIPTS_STORE\" merge {{base}}`" + `. ` + "`ao scripts status`" + ` shows what is not committed or not published yet. Accounts stay in the main checkout, ` + "`{{root}}/accounts/`" + `, where ` + "`bin/flow`" + ` reads them from any worktree. Nothing in the store goes into your pull request.`
+
+// mobileScriptStoreShared is the store rule when AO could not give the task a
+// worktree, so every session writes into the one checkout.
+const mobileScriptStoreShared = "\n" + `- **The store is one checkout shared with other sessions** (` + "`{{store}}`" + `): commit only the files you added or changed, by path (` + "`git -C {{store}} commit <paths>`" + `), never another session's uncommitted work, and name them in your report. Nothing in the store goes into your pull request.`
