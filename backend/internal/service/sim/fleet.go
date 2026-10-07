@@ -77,11 +77,11 @@ func (e *BaseBootedError) Error() string {
 		e.Base.Name, e.UDID)
 }
 
-// ErrPrimaryNotRemovable: a session's primary device goes when the session
-// does, because $AO_SIM_UDID in its environment names it.
+// ErrPrimaryNotRemovable is the refusal to delete a primary device early: it
+// goes when the session does, because $AO_SIM_UDID in its environment names it.
 var ErrPrimaryNotRemovable = errors.New("the primary device is deleted when the session ends, not before")
 
-// ErrBaseDevice: the device is one of the bases, which are never driven.
+// ErrBaseDevice is the refusal to drive one of the bases.
 var ErrBaseDevice = errors.New("that simulator is a base AO clones devices from, and is never driven")
 
 // Fleet makes, finds and deletes sessions' clones.
@@ -129,7 +129,7 @@ func (f *Fleet) Ensure(ctx context.Context, sessionID domain.SessionID, label, m
 	if model != "" || label == domain.SimPrimaryLabel {
 		matched, err := domain.MatchSimBase(model)
 		if err != nil {
-			return domain.SimClone{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+			return domain.SimClone{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 		}
 		base = matched
 	}
@@ -211,7 +211,7 @@ func (f *Fleet) Claim(ctx context.Context, sessionID domain.SessionID, label, mo
 		if strings.TrimSpace(model) != "" {
 			base, err := domain.MatchSimBase(model)
 			if err != nil {
-				return domain.SimClone{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+				return domain.SimClone{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 			}
 			if base != domain.DefaultSimBase() {
 				label = base.Key
@@ -220,7 +220,7 @@ func (f *Fleet) Claim(ctx context.Context, sessionID domain.SessionID, label, mo
 	}
 	parsed, err := domain.ParseSimLabel(label)
 	if err != nil {
-		return domain.SimClone{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+		return domain.SimClone{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	rec, ok, err := f.store.GetSession(ctx, sessionID)
 	if err != nil {

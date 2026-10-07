@@ -85,7 +85,7 @@ describe("SimDevicePicker", () => {
 
 	// Two already booted is the count this machine actually died at, so the
 	// question stops being about memory in general and names what happened.
-	it("names the OOM once two are already booted", async () => {
+	it("names the memory cost and the boot cap once two are already booted", async () => {
 		open([
 			device({ udid: "UDID-A", state: "Booted" }),
 			device({ udid: "UDID-B", name: "iPhone 17 Pro", state: "Booted" }),
@@ -94,7 +94,7 @@ describe("SimDevicePicker", () => {
 		await openPicker();
 		await userEvent.click(within(screen.getByTestId("sim-device-UDID-C")).getByRole("button", { name: /^boot$/i }));
 
-		expect(screen.getByTestId("sim-power-confirm")).toHaveTextContent(/run this machine out of memory/i);
+		expect(screen.getByTestId("sim-power-confirm")).toHaveTextContent(/2 are already up, each about 4 GB. Past the boot cap/i);
 	});
 
 	it("cancelling the warning boots nothing", async () => {

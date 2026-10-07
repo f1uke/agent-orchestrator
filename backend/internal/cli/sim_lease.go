@@ -389,8 +389,7 @@ func (c *commandContext) sessionHeldSimUDID(ctx context.Context, sessionID strin
 			mine = append(mine, lease)
 		}
 	}
-	switch len(mine) {
-	case 1:
+	if len(mine) == 1 {
 		return mine[0].UDID, nil
 	}
 	// Holding several is ordinary now that a session has more than one

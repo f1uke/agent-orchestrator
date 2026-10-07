@@ -540,8 +540,8 @@ function Confirm({
 			: `Shut ${name} down? Everything running on it is lost.`;
 	} else if (bootedCount >= 2) {
 		question =
-			`Boot ${name} as well? ${bootedCount} are already up. Three booted at once has run this machine out of ` +
-			`memory before - tooling starts failing with "resource temporarily unavailable".`;
+			`Boot ${name} as well? ${bootedCount} are already up, each about 4 GB. Past the boot cap AO refuses and ` +
+			`names which devices hold it.`;
 	} else {
 		question = `Boot ${name} as well? One is already up, and each takes about 4 GB.`;
 	}

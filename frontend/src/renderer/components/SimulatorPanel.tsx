@@ -1242,7 +1242,7 @@ function BootPrompt({ bootedCount, device, onBoot }: { bootedCount: number; devi
 			? ""
 			: bootedCount === 1
 				? "One simulator is already up, and each takes about 4 GB."
-				: `${bootedCount} are already up. Three booted at once has run this machine out of memory before.`;
+				: `${bootedCount} are already up, each about 4 GB. Past the boot cap AO refuses and names which devices hold it.`;
 
 	return (
 		<div className="flex max-w-[36ch] flex-col items-center gap-2 px-4 text-center" data-testid="sim-boot-prompt">

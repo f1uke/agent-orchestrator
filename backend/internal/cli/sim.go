@@ -47,7 +47,7 @@ const (
 	// simPowerNote is repeated wherever power comes up, because the asymmetry
 	// is the part an agent has to be told: it may bring a device UP, and
 	// nothing here takes one down.
-	simPowerNote = "`ao sim boot` powers a simulator on; no `ao sim` command shuts one down, reboots or erases one - the desktop app's Device tab is where a human does that."
+	simPowerNote = "`ao sim boot` powers a simulator on, and at the boot cap shuts down AO's least recently booted idle clone to make room; no `ao sim` command otherwise shuts one down, reboots or erases one - the desktop app's Device tab is where a human does that."
 	// simShotStampLayout keeps millisecond precision so two captures from one
 	// session cannot collide on a filename.
 	simShotStampLayout = "20060102-150405.000"
