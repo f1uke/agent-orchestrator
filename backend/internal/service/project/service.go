@@ -425,7 +425,9 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 		}
 	}
 
-	row.Config = next
+	// Normalized again after the merge so a write of any field also tidies
+	// what an older daemon stored.
+	row.Config = normalizeConfig(next)
 	if err := m.store.UpsertProject(ctx, row); err != nil {
 		return Project{}, apierr.Internal("PROJECT_CONFIG_UPDATE_FAILED", "Failed to update project config")
 	}
@@ -434,10 +436,24 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 
 // normalizeConfig trims the config fields a person types as free text, so a
 // stray space from a paste is stored as the value meant rather than refused, and
-// a blank is stored as unset.
+// a blank is stored as unset. A blank list entry names no path and no command:
+// `set-config --symlink ""` means "no symlinks", not a list holding "".
 func normalizeConfig(c domain.ProjectConfig) domain.ProjectConfig {
 	c.TestinyProject = strings.TrimSpace(c.TestinyProject)
+	c.Symlinks = withoutBlanks(c.Symlinks)
+	c.PostCreate = withoutBlanks(c.PostCreate)
 	return c
+}
+
+// withoutBlanks returns entries minus the blank ones, nil when none are left.
+func withoutBlanks(entries []string) []string {
+	var kept []string
+	for _, e := range entries {
+		if strings.TrimSpace(e) != "" {
+			kept = append(kept, e)
+		}
+	}
+	return kept
 }
 
 // resolveGitOriginURL returns the URL of the repository at path, by the one
@@ -519,7 +535,7 @@ func (m *Service) projectFromRow(row domain.ProjectRecord) Project {
 		DefaultBranch: row.Config.WithDefaults().DefaultBranch,
 		Agent:         string(m.defaultHarness),
 	}
-	p.Config = projectConfigPtr(row.Config)
+	p.Config = projectConfigPtr(normalizeConfig(row.Config))
 	return p
 }
 

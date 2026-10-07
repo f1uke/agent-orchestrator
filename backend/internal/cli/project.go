@@ -300,9 +300,9 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.permission, "permission", "", "Permission mode: default, accept-edits, auto, bypass-permissions")
 	f.StringVar(&opts.workerAgent, "worker-agent", "", "Harness override for worker sessions")
 	f.StringVar(&opts.orchestratorAgent, "orchestrator-agent", "", "Harness override for orchestrator sessions")
-	f.StringArrayVar(&opts.env, "env", nil, "Env var KEY=VALUE forwarded into sessions (repeatable)")
-	f.StringArrayVar(&opts.symlink, "symlink", nil, "Repo-relative path to symlink into workspaces (repeatable)")
-	f.StringArrayVar(&opts.postCreate, "post-create", nil, "Command to run after workspace creation (repeatable)")
+	f.StringArrayVar(&opts.env, "env", nil, "Env var KEY=VALUE forwarded into sessions (repeatable). \"\" clears the env")
+	f.StringArrayVar(&opts.symlink, "symlink", nil, "Repo-relative path to symlink into workspaces (repeatable). \"\" clears the symlinks")
+	f.StringArrayVar(&opts.postCreate, "post-create", nil, "Command to run after workspace creation (repeatable). \"\" clears the commands")
 	f.BoolVar(&opts.trackerIntake, "tracker-intake", false, "Enable issue-tracker intake for matching issues (see --tracker-provider)")
 	f.BoolVar(&opts.hasWebUI, "web-ui", false, "This project has a web UI, so sessions get the Browser tab")
 	f.BoolVar(&opts.hasIOSSimulator, "ios-simulator", false, "This project targets iOS, so sessions get the Device tab")
@@ -564,13 +564,18 @@ func resolveTrackerProvider(opts projectSetConfigOptions) (string, error) {
 	}
 }
 
-// parseEnvPairs turns repeated KEY=VALUE flags into a map.
+// parseEnvPairs turns repeated KEY=VALUE flags into a map. A blank pair is
+// skipped, so `--env ""` clears the project's env the way `--symlink ""` clears
+// its symlinks.
 func parseEnvPairs(pairs []string) (map[string]string, error) {
-	if len(pairs) == 0 {
-		return nil, nil
-	}
-	env := make(map[string]string, len(pairs))
+	var env map[string]string
 	for _, pair := range pairs {
+		if strings.TrimSpace(pair) == "" {
+			continue
+		}
+		if env == nil {
+			env = make(map[string]string, len(pairs))
+		}
 		key, value, ok := strings.Cut(pair, "=")
 		key = strings.TrimSpace(key)
 		if !ok || key == "" {

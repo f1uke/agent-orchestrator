@@ -633,3 +633,23 @@ func TestProjectSetConfig_CarriesPauseBeforeImplementing(t *testing.T) {
 		})
 	}
 }
+
+// `--env ""` clears the project's env the way `--symlink ""` clears its
+// symlinks: it names the field and sends no entries, instead of failing as a
+// malformed KEY=VALUE.
+func TestProjectSetConfig_BlankEnvClears(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := projectServer(t, http.StatusOK, `{"project":{"id":"demo","path":"/repo/demo"}}`)
+	writeRunFileFor(t, cfg, srv)
+
+	if _, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, "project", "set-config", "demo", "--env", ""); err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var got projectsvc.SetConfigInput
+	if err := json.Unmarshal(capture.body, &got); err != nil {
+		t.Fatalf("decode request: %v\nbody=%s", err, capture.body)
+	}
+	if got.Config.Env != nil || !slices.Equal(got.MergeFields, []string{"env"}) {
+		t.Fatalf("env = %#v, mergeFields = %v; want no env and mergeFields [env]", got.Config.Env, got.MergeFields)
+	}
+}
