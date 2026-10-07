@@ -146,7 +146,7 @@ export function SimDevicePicker({
 				</button>
 			</PopoverTrigger>
 
-			<PopoverContent align="start" className="w-[320px] p-0">
+			<PopoverContent align="start" collisionPadding={12} className="w-[320px] p-0">
 				<BootedCount count={bootedCount} />
 
 				<div className="max-h-[320px] overflow-y-auto p-1">
