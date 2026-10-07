@@ -313,6 +313,8 @@ var schemaNames = map[string]string{
 	"ControllersSimDeviceView":                 "SimDeviceView",
 	"ControllersSimTrustView":                  "SimTrustView",
 	"ControllersSimTrustFailureView":           "SimTrustFailureView",
+	"ControllersSimDoctorResponse":             "SimDoctorResponse",
+	"ControllersSimDoctorCheckView":            "SimDoctorCheckView",
 	"ControllersSimDeviceLeaseView":            "SimDeviceLeaseView",
 	"ControllersListSimDevicesResponse":        "ListSimDevicesResponse",
 	"ControllersSimGestureInput":               "SimGestureInput",
@@ -1287,6 +1289,17 @@ func simOperations() []operation {
 			resps: []respUnit{
 				{http.StatusOK, controllers.ReleaseSimHoldResponse{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/sim-doctor", id: "simDoctor", tag: "sim",
+			summary:    "Check, without changing anything, whether a session's simulator is worth driving: device, lease, installed build and proxy root CA",
+			pathParams: []any{controllers.SessionIDParam{}, controllers.SimDoctorQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimDoctorResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

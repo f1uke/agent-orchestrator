@@ -4894,6 +4894,68 @@ paths:
         as characters, and prove it arrived
       tags:
       - sim
+  /api/v1/sessions/{sessionId}/sim-doctor:
+    get:
+      operationId: simDoctor
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator to check. Omit for the session's assigned one.
+        in: query
+        name: udid
+        schema:
+          description: Simulator to check. Omit for the session's assigned one.
+          type: string
+      - description: Bundle id whose installed build to check. Omit to skip the build
+          check.
+        in: query
+        name: app
+        schema:
+          description: Bundle id whose installed build to check. Omit to skip the
+            build check.
+          type: string
+      - description: Absolute path of a .app on this Mac that the installed app must
+          be. Requires app.
+        in: query
+        name: expect
+        schema:
+          description: Absolute path of a .app on this Mac that the installed app
+            must be. Requires app.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimDoctorResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Check, without changing anything, whether a session''s simulator is
+        worth driving: device, lease, installed build and proxy root CA'
+      tags:
+      - sim
   /api/v1/sessions/{sessionId}/sim-flows:
     get:
       operationId: listSimFlows
@@ -12462,6 +12524,36 @@ components:
       - available
       - default
       - lease
+      type: object
+    SimDoctorCheckView:
+      properties:
+        message:
+          type: string
+        name:
+          description: device, lease, app or proxy CA.
+          type: string
+        status:
+          description: OK, WARN or FAIL. Only FAIL makes the report not ok.
+          type: string
+      required:
+      - name
+      - status
+      - message
+      type: object
+    SimDoctorResponse:
+      properties:
+        checks:
+          description: Every check that applied, in order. Only the device line is
+            present when there is no device to check.
+          items:
+            $ref: '#/components/schemas/SimDoctorCheckView'
+          type: array
+        ok:
+          description: True when no check is FAIL.
+          type: boolean
+      required:
+      - checks
+      - ok
       type: object
     SimGestureInput:
       properties:

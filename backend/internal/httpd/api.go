@@ -83,7 +83,10 @@ type APIDeps struct {
 	SimTrust *simtrust.Store
 	// SimTrustFiles resolves a session's root CAs. Left nil, the router builds
 	// one over Sessions, Projects and SimTrust.
-	SimTrustFiles      controllers.SimTrustResolver
+	SimTrustFiles controllers.SimTrustResolver
+	// SimAssignments is which simulator each session was given at spawn, read
+	// by `ao sim doctor`. nil reads every session as having none.
+	SimAssignments     SimAssignments
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
@@ -137,6 +140,7 @@ type API struct {
 	simScreen      *controllers.SimScreenController
 	simHierarchy   *controllers.SimHierarchyController
 	simType        *controllers.SimTypeController
+	simDoctor      *controllers.SimDoctorController
 	notifications  *controllers.NotificationsController
 	activity       *controllers.ActivityController
 	imports        *controllers.ImportController
@@ -187,6 +191,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		simScreen:      &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver},
 		simHierarchy:   &controllers.SimHierarchyController{Runner: deps.SimRunner},
 		simType:        &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim, Screen: screenProvider(deps.SimScreen)},
+		simDoctor:      &controllers.SimDoctorController{Sessions: deps.Sessions, Readers: simDoctorReaders(deps, simTrustResolver)},
 		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:        &controllers.ImportController{Svc: deps.Import},
@@ -238,6 +243,7 @@ func (a *API) Register(root chi.Router) {
 			a.simScreen.Register(r)
 			a.simHierarchy.Register(r)
 			a.simType.Register(r)
+			a.simDoctor.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)
