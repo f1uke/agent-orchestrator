@@ -243,8 +243,8 @@ func TestLease(t *testing.T) {
 		status   Status
 		contains []string
 	}{
-		{"free warns", nil, StatusWarn, []string{"free", "a run will claim it"}},
-		{"another device's lease is not this one's", []domain.SimLease{{UDID: udidOther, SessionID: "proj-9", ExpiresAt: expires}}, StatusWarn, []string{"free"}},
+		{"unheld warns", nil, StatusWarn, []string{"no AO session holds it", "a run will claim it"}},
+		{"another device's lease is not this one's", []domain.SimLease{{UDID: udidOther, SessionID: "proj-9", ExpiresAt: expires}}, StatusWarn, []string{"no AO session holds it"}},
 		{"held by this session", []domain.SimLease{{UDID: strings.ToLower(udidBooted), SessionID: session, ExpiresAt: expires}}, StatusOK, []string{"held by this session until 2026-10-07T09:30:00Z"}},
 		{"held by another session", []domain.SimLease{{UDID: udidBooted, SessionID: "proj-9", ExpiresAt: expires}}, StatusFail, []string{"held by @proj-9 until 2026-10-07T09:30:00Z"}},
 		// The same session id through another daemon is somebody else.

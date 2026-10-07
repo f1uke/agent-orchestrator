@@ -176,8 +176,9 @@ func checkDevice(ctx context.Context, r Readers, req Request) (Check, simctl.Dev
 	return fail(CheckDevice, "%s: no such simulator - `ao sim list` shows what this machine has", want), simctl.Device{}, false
 }
 
-// checkLease says who holds the device. A device nobody holds is a warning,
-// not a failure: the next run claims it.
+// checkLease says who holds the device. A device no AO session holds is a
+// warning, not a failure: the next run claims it. It is never called free,
+// because AO cannot see a human driving it from Xcode.
 func checkLease(ctx context.Context, r Readers, req Request, d simctl.Device) Check {
 	leases, err := r.Leases(ctx)
 	if err != nil {
@@ -198,7 +199,7 @@ func checkLease(ctx context.Context, r Readers, req Request, d simctl.Device) Ch
 			return fail(CheckLease, "held by @%s until %s - wait for it, or use another simulator", l.SessionID, until)
 		}
 	}
-	return warn(CheckLease, "free: no AO session holds it, so a run will claim it")
+	return warn(CheckLease, "no AO session holds it, so a run will claim it")
 }
 
 // checkApp says which build of the app is installed and, given a bundle to
