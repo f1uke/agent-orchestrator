@@ -40,10 +40,32 @@ export type UndeliveredChild = {
 	detail: string;
 };
 
-/** Everything a refused kill named: the worktree's files and the subagents' work. */
+/**
+ * The daemon's machine code for "this workspace's scripts store worktree holds
+ * work the store does not have": files nobody committed there, or commits the
+ * store's main checkout refused. A discard deletes that worktree and its branch.
+ */
+export const UNPUBLISHED_SCRIPTS_CODE = "SESSION_HAS_UNPUBLISHED_SCRIPTS";
+
+/** The workspace's scripts store worktree, as a refused kill names it. */
+export type ScriptsStoreRefusal = {
+	path: string;
+	branch: string;
+	baseBranch: string;
+	/** Files in the worktree nobody committed. */
+	uncommitted: string[];
+	/** Set when teardown's publish was refused: why, and the files it named. */
+	publishRefused?: { hold: string; detail: string; files: string[] };
+};
+
+/**
+ * Everything a refused kill named: the worktree's files, the subagents' work,
+ * and the scripts store worktree's.
+ */
 export type UndeliveredWork = {
 	files: UncommittedFile[];
 	subagents: UndeliveredChild[];
+	scriptsStore?: ScriptsStoreRefusal;
 };
 
 /**
@@ -54,16 +76,23 @@ export type UndeliveredWork = {
 export class UndeliveredWorkError extends Error {
 	readonly files: UncommittedFile[];
 	readonly subagents: UndeliveredChild[];
+	readonly scriptsStore?: ScriptsStoreRefusal;
 
-	constructor(message: string, files: UncommittedFile[], subagents: UndeliveredChild[] = []) {
+	constructor(
+		message: string,
+		files: UncommittedFile[],
+		subagents: UndeliveredChild[] = [],
+		scriptsStore?: ScriptsStoreRefusal,
+	) {
 		super(message);
 		this.name = "UndeliveredWorkError";
 		this.files = files;
 		this.subagents = subagents;
+		this.scriptsStore = scriptsStore;
 	}
 
 	get work(): UndeliveredWork {
-		return { files: this.files, subagents: this.subagents };
+		return { files: this.files, subagents: this.subagents, scriptsStore: this.scriptsStore };
 	}
 }
 
@@ -96,11 +125,13 @@ export async function killSession(
 	if (error) {
 		const files = undeliveredWorkFrom(error);
 		const subagents = unmergedChildrenFrom(error);
-		if (files || subagents) {
+		const scriptsStore = scriptsStoreFrom(error);
+		if (files || subagents || scriptsStore) {
 			throw new UndeliveredWorkError(
 				apiErrorMessage(error, "Unable to end this session"),
 				files ?? [],
 				subagents ?? [],
+				scriptsStore ?? undefined,
 			);
 		}
 		throw new Error(apiErrorMessage(error, "Unable to end this session"));
@@ -166,4 +197,40 @@ export function unmergedChildrenFrom(error: unknown): UndeliveredChild[] | null 
 			},
 		];
 	});
+}
+
+/**
+ * Pull the scripts store worktree out of any refusal that carries it: the one
+ * for it alone, and the files and subagents refusals, which carry it alongside
+ * so a discard is never confirmed against part of what it deletes. Returns
+ * null for every other failure, and for a refusal that does not name one.
+ */
+export function scriptsStoreFrom(error: unknown): ScriptsStoreRefusal | null {
+	if (typeof error !== "object" || error === null) return null;
+	const body = error as { code?: unknown; details?: unknown };
+	const codes: unknown[] = [UNPUBLISHED_SCRIPTS_CODE, UNDELIVERED_WORK_CODE, UNMERGED_CHILDREN_CODE];
+	if (!codes.includes(body.code)) return null;
+	const raw = (body.details as { scriptsStore?: unknown } | undefined)?.scriptsStore;
+	const text = (value: unknown) => (typeof value === "string" ? value : "");
+	const list = (value: unknown) =>
+		Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+	if (typeof raw !== "object" || raw === null) {
+		// The refusal over the store alone IS about the store, even unnamed.
+		return body.code === UNPUBLISHED_SCRIPTS_CODE ? { path: "", branch: "", baseBranch: "", uncommitted: [] } : null;
+	}
+	const store = raw as Record<string, unknown>;
+	const publish = (typeof store.publish === "object" && store.publish !== null ? store.publish : {}) as Record<
+		string,
+		unknown
+	>;
+	return {
+		path: text(store.path),
+		branch: text(store.branch),
+		baseBranch: text(store.baseBranch),
+		uncommitted: list(store.uncommitted),
+		publishRefused:
+			publish.outcome === "refused"
+				? { hold: text(publish.hold), detail: text(publish.detail), files: list(publish.files) }
+				: undefined,
+	};
 }

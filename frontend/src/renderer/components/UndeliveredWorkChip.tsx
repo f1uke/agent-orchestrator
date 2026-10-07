@@ -97,6 +97,7 @@ export function UndeliveredWorkChip({
 					sessionTitle={session.title}
 					files={refused.files}
 					subagents={refused.subagents}
+					scriptsStore={refused.scriptsStore}
 					onOpenSession={onOpenSession}
 				/>
 			)}

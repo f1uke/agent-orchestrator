@@ -137,6 +137,8 @@ type sessionLifecycle interface {
 	// prepares a child the way the manager prepares a worker and which the
 	// manager consults at teardown and on a relaunch.
 	SetChildren(c sessionmanager.ChildWork)
+	// SetScriptsStore meets the scripts store worktree service the same way.
+	SetScriptsStore(s sessionmanager.ScriptsStore)
 	ProvisionWorkspace(ctx context.Context, project domain.ProjectRecord, workspacePath string) error
 	// ReapOrphanedPromptFiles removes the private prompt files of sessions that
 	// ended while the daemon was down; the boot half of the reap every ending

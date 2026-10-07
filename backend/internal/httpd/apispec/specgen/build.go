@@ -188,6 +188,7 @@ var schemaNames = map[string]string{
 	"ControllersSessionTokenUsage":                "SessionTokenUsage",
 	"ControllersSessionTermination":               "SessionTermination",
 	"ControllersSessionCrew":                      "SessionCrew",
+	"ControllersSessionScriptsStore":              "SessionScriptsStore",
 	"ControllersSessionEndPayload":                "SessionEndPayload",
 	"ControllersSessionPRSummary":                 "SessionPRSummary",
 	"ControllersSessionPRCISummary":               "SessionPRCISummary",
@@ -347,22 +348,25 @@ var schemaNames = map[string]string{
 	"DomainSimRecording":     "SimRecording",
 	"DomainSimRecordingStep": "SimRecordingStep",
 	// httpd/controllers — crew-run (tree-write detector) wire envelopes
-	"ControllersStartCrewRunInput":    "StartCrewRunInput",
-	"ControllersStartCrewRunResponse": "StartCrewRunResponse",
-	"ControllersEndCrewRunInput":      "EndCrewRunInput",
-	"ControllersEndCrewRunResponse":   "EndCrewRunResponse",
-	"ControllersListCrewRunsResponse": "ListCrewRunsResponse",
-	"ControllersListCrewRunsQuery":    "ListCrewRunsQuery",
-	"DomainCrewRun":                   "CrewRun",
-	"ControllersCreateChildInput":     "CreateChildInput",
-	"ControllersChildResponse":        "ChildResponse",
-	"ControllersListChildrenResponse": "ListChildrenResponse",
-	"ControllersChildBriefResponse":   "ChildBriefResponse",
-	"ControllersStopChildResponse":    "StopChildResponse",
-	"ControllersDescribeChildInput":   "DescribeChildInput",
-	"ControllersChildNotesResponse":   "ChildNotesResponse",
-	"DomainSessionChild":              "SessionChild",
-	"DomainChildState":                "ChildState",
+	"ControllersStartCrewRunInput":        "StartCrewRunInput",
+	"ControllersStartCrewRunResponse":     "StartCrewRunResponse",
+	"ControllersEndCrewRunInput":          "EndCrewRunInput",
+	"ControllersEndCrewRunResponse":       "EndCrewRunResponse",
+	"ControllersListCrewRunsResponse":     "ListCrewRunsResponse",
+	"ControllersListCrewRunsQuery":        "ListCrewRunsQuery",
+	"DomainCrewRun":                       "CrewRun",
+	"ControllersCreateChildInput":         "CreateChildInput",
+	"ControllersScriptsStoreWorktreeView": "ScriptsStoreWorktreeView",
+	"ControllersScriptsStatusResponse":    "ScriptsStatusResponse",
+	"ControllersScriptsPublishResponse":   "ScriptsPublishResponse",
+	"ControllersChildResponse":            "ChildResponse",
+	"ControllersListChildrenResponse":     "ListChildrenResponse",
+	"ControllersChildBriefResponse":       "ChildBriefResponse",
+	"ControllersStopChildResponse":        "StopChildResponse",
+	"ControllersDescribeChildInput":       "DescribeChildInput",
+	"ControllersChildNotesResponse":       "ChildNotesResponse",
+	"DomainSessionChild":                  "SessionChild",
+	"DomainChildState":                    "ChildState",
 	// httpd/controllers: import wire envelopes
 	"ControllersImportStatusResponse": "ImportStatusResponse",
 	"ControllersImportRunResponse":    "ImportRunResponse",
@@ -496,6 +500,7 @@ func operations() []operation {
 	ops = append(ops, testinyOperations()...)
 	ops = append(ops, crewRunOperations()...)
 	ops = append(ops, childOperations()...)
+	ops = append(ops, scriptsOperations()...)
 	ops = append(ops, iosRunOperations()...)
 	ops = append(ops, simOperations()...)
 	ops = append(ops, notificationOperations()...)
@@ -1604,6 +1609,30 @@ func childOperations() []operation {
 			reqBody:    controllers.DescribeChildInput{},
 			resps: withErrs(respUnit{http.StatusNoContent, nil},
 				respUnit{http.StatusBadRequest, envelope.APIError{}}),
+		},
+	}
+}
+
+// scriptsOperations are a session's scripts store worktree routes. Must stay
+// 1:1 with the routes ScriptsController.Register mounts.
+func scriptsOperations() []operation {
+	errs := []respUnit{
+		{http.StatusNotFound, envelope.APIError{}},
+		{http.StatusInternalServerError, envelope.APIError{}},
+		{http.StatusNotImplemented, envelope.APIError{}},
+	}
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/sessions/{sessionId}/scripts", id: "getSessionScripts", tag: "sessions",
+			summary:    "Read the session's scripts store worktree: uncommitted files, unpublished commits, and the main checkout's own dirty files",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps:      append([]respUnit{{http.StatusOK, controllers.ScriptsStatusResponse{}}}, errs...),
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/scripts/publish", id: "publishSessionScripts", tag: "sessions",
+			summary:    "Publish the committed scripts of the session's store worktree into the store's main checkout",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps:      append([]respUnit{{http.StatusOK, controllers.ScriptsPublishResponse{}}}, errs...),
 		},
 	}
 }

@@ -516,7 +516,8 @@ func (c *commandContext) killSession(ctx context.Context, cmd *cobra.Command, id
 	}
 	files, refused := undeliveredWorkFromError(err)
 	children, childrenRefused := unmergedChildrenFromError(err)
-	if !refused && !childrenRefused {
+	store, storeRefused := scriptsStoreFromError(err)
+	if !refused && !childrenRefused && !storeRefused {
 		return err
 	}
 	out := cmd.OutOrStdout()
@@ -529,6 +530,9 @@ func (c *commandContext) killSession(ctx context.Context, cmd *cobra.Command, id
 		}
 		if len(children) > 0 {
 			what.WriteString("subagents whose work is not on the branch yet (a discard keeps each one's work on its own branch):\n" + renderUndeliveredChildren(children) + "\n")
+		}
+		if store != nil {
+			fmt.Fprintf(&what, "scripts store worktree %s (branch %s) holds work the store does not have (a discard deletes it and its branch):\n%s\n", store.Path, store.Branch, renderScriptsStore(*store))
 		}
 		return fmt.Errorf("%w\n\n%sTo end it anyway:\n  ao session kill %s --discard-uncommitted", err, what.String(), id)
 	}
@@ -544,11 +548,85 @@ func (c *commandContext) killSession(ctx context.Context, cmd *cobra.Command, id
 			return werr
 		}
 	}
+	if store != nil {
+		if _, werr := fmt.Fprintf(out, "deleting the scripts store worktree %s and its branch %s:\n%s\n", store.Path, store.Branch, renderScriptsStore(*store)); werr != nil {
+			return werr
+		}
+	}
 	res, err = c.postKill(ctx, id, true)
 	if err != nil {
 		return err
 	}
 	return writeKillResult(cmd, res)
+}
+
+// scriptsStoreDTO is the refused scripts store worktree a kill refusal
+// carries, whichever refusal carried it. refused is true only for the refusal
+// over the worktree alone.
+type scriptsStoreDTO struct {
+	Path, Branch, BaseBranch string
+	Uncommitted              []string
+	PublishHold              string
+	PublishDetail            string
+	PublishFiles             []string
+}
+
+func scriptsStoreFromError(err error) (*scriptsStoreDTO, bool) {
+	var apiErr apiResponseError
+	if !errors.As(err, &apiErr) {
+		return nil, false
+	}
+	code := apiErr.ErrorBody.Code
+	if code != sessionsvc.ErrUnpublishedScripts && code != sessionsvc.ErrUnmergedChildren && code != sessionsvc.ErrUndeliveredWork {
+		return nil, false
+	}
+	refused := code == sessionsvc.ErrUnpublishedScripts
+	m, ok := apiErr.ErrorBody.Details["scriptsStore"].(map[string]any)
+	if !ok {
+		if refused {
+			return &scriptsStoreDTO{}, true
+		}
+		return nil, false
+	}
+	var d scriptsStoreDTO
+	d.Path, _ = m["path"].(string)
+	d.Branch, _ = m["branch"].(string)
+	d.BaseBranch, _ = m["baseBranch"].(string)
+	d.Uncommitted = anyStrings(m["uncommitted"])
+	if pub, ok := m["publish"].(map[string]any); ok {
+		d.PublishHold, _ = pub["hold"].(string)
+		d.PublishDetail, _ = pub["detail"].(string)
+		d.PublishFiles = anyStrings(pub["files"])
+	}
+	return &d, refused
+}
+
+func renderScriptsStore(d scriptsStoreDTO) string {
+	var lines []string
+	for _, f := range d.Uncommitted {
+		lines = append(lines, "  uncommitted  "+f)
+	}
+	if d.PublishHold != "" {
+		lines = append(lines, fmt.Sprintf("  publish refused (%s): %s", d.PublishHold, d.PublishDetail))
+		for _, f := range d.PublishFiles {
+			lines = append(lines, "    "+f)
+		}
+	}
+	if len(lines) == 0 {
+		return "  (the daemon named no files)"
+	}
+	return strings.Join(lines, "\n")
+}
+
+func anyStrings(v any) []string {
+	raw, _ := v.([]any)
+	out := make([]string, 0, len(raw))
+	for _, e := range raw {
+		if s, ok := e.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (c *commandContext) postKill(ctx context.Context, id string, discard bool) (killSessionResponse, error) {

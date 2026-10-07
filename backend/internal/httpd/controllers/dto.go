@@ -150,6 +150,17 @@ type DiffContextParams struct {
 	Mode  string `query:"mode" description:"hunk (default) or file." enum:"hunk,file"`
 }
 
+// SessionScriptsStore is the board's summary of a workspace's scripts store
+// worktree: how much of its work the store does not have yet, and why a
+// teardown kept it, if one did.
+type SessionScriptsStore struct {
+	Uncommitted int                     `json:"uncommitted" description:"Files in the worktree nobody committed."`
+	Unpublished int                     `json:"unpublished" description:"Commits the store's base branch does not have."`
+	HeldReason  domain.ScriptsStoreHold `json:"heldReason,omitempty" enum:"uncommitted,publish_conflict,store_dirty_overlap,store_off_base,publish_failed" description:"Why a teardown kept the worktree."`
+	// Files are the uncommitted files, then any further files the hold names.
+	Files []string `json:"files" description:"The uncommitted files, then the files a teardown's hold named."`
+}
+
 // SessionView is the session wire shape: the domain read model plus the
 // display-safe branch name and the session's attributed pull requests in the
 // curated SessionPRFacts shape. One session can own many PRs (e.g. a stack), so
@@ -213,6 +224,10 @@ type SessionView struct {
 	// merged into the worker's branch, held, in conflict, or preserved on a
 	// kept branch). Omitted for a session that never ran one.
 	Children []domain.SessionChild `json:"children,omitempty"`
+	// ScriptsStore is what the workspace's scripts store worktree holds that
+	// the store does not, for the board's unpublished-scripts chip. On the
+	// owner's card only; omitted when the session has no worktree.
+	ScriptsStore *SessionScriptsStore `json:"scriptsStore,omitempty"`
 	// TaskSize is the ceremony level chosen at spawn. It is surfaced because it
 	// now decides the SHAPE of the task (mechanical = dev alone; standard/deep =
 	// dev + qa), so the board can say which choice was made on a card whose crew

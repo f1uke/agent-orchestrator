@@ -213,6 +213,10 @@ func (f *fakeStore) ListSessionChildren(context.Context, domain.SessionID) ([]do
 	return nil, nil
 }
 
+func (f *fakeStore) GetScriptsStoreWorktree(context.Context, domain.SessionID) (domain.ScriptsStoreWorktree, bool, error) {
+	return domain.ScriptsStoreWorktree{}, false, nil
+}
+
 func (f *fakeStore) InsertCrewMessage(_ context.Context, msg domain.CrewMessage) error {
 	f.crewMessages = append(f.crewMessages, msg)
 	return nil

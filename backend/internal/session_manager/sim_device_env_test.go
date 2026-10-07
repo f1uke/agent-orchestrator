@@ -21,7 +21,7 @@ func TestRuntimeEnv_ExportsTheSessionsOwnSimulator(t *testing.T) {
 		return "087df306-1fc9-4e5a-b9ed-ad36d6a1a0f1", nil
 	})
 
-	env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", nil, false)
+	env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", nil, false, "")
 
 	// Normalized, because simctl reports udids upper-cased and half the tools
 	// an agent pastes this into compare them as strings.
@@ -52,7 +52,7 @@ func TestRuntimeEnv_NoDeviceExportsNothing(t *testing.T) {
 			if assigner != nil {
 				m.SetSimDeviceAssigner(assigner)
 			}
-			env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", nil, false)
+			env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", nil, false, "")
 			if _, ok := env[EnvSimUDID]; ok {
 				t.Fatalf("%s was exported as %q", EnvSimUDID, env[EnvSimUDID])
 			}
@@ -76,7 +76,7 @@ func TestRuntimeEnv_ProjectCannotOverrideTheAssignedDevice(t *testing.T) {
 	})
 
 	env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work",
-		map[string]string{EnvSimUDID: "SOMEBODY-ELSES-DEVICE"}, false)
+		map[string]string{EnvSimUDID: "SOMEBODY-ELSES-DEVICE"}, false, "")
 
 	if got := env[EnvSimUDID]; got != "087DF306-1FC9-4E5A-B9ED-AD36D6A1A0F1" {
 		t.Fatalf("%s = %q; a project override took another session's device", EnvSimUDID, got)

@@ -54,6 +54,7 @@ import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergedChip } from "./MergedChip";
 import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
+import { UnpublishedScriptsChip } from "./UnpublishedScriptsChip";
 import { UndeliveredWorkDialog } from "./UndeliveredWorkDialog";
 import { killSession, UndeliveredWorkError, type UndeliveredWork } from "../lib/kill-session";
 import { TokenUsageChip } from "./TokenUsageChip";
@@ -936,6 +937,7 @@ function SessionCardMenu({ session, onOpenSession }: { session: WorkspaceSession
 					sessionTitle={session.title}
 					files={refused.files}
 					subagents={refused.subagents}
+					scriptsStore={refused.scriptsStore}
 					onOpenSession={onOpenSession}
 				/>
 			)}
@@ -1305,6 +1307,7 @@ function SessionCard({
 							</span>
 						)}
 						<QueuedMessagesChip session={session} />
+						<UnpublishedScriptsChip session={session} />
 						{isMergedAwaitingNext(session) ? (
 							<MergedChip session={session} />
 						) : isUndeliveredParked(session) ? (
