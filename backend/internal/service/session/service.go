@@ -17,6 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgorigin"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/scriptstore"
 	sessionmanager "github.com/aoagents/agent-orchestrator/backend/internal/session_manager"
 	"github.com/aoagents/agent-orchestrator/backend/internal/telemetrymeta"
 )
@@ -756,6 +757,11 @@ const ErrUndeliveredWork = "SESSION_HAS_UNDELIVERED_WORK"
 // worktrees answers with.
 const ErrUnmergedChildren = "SESSION_HAS_UNMERGED_CHILDREN"
 
+// ErrUnpublishedScripts is the code a kill refused for the workspace's scripts
+// store worktree answers with: files nobody committed there, or commits the
+// store's main checkout refused to take.
+const ErrUnpublishedScripts = "SESSION_HAS_UNPUBLISHED_SCRIPTS"
+
 // Kill ends one session on a person's order.
 //
 // It REFUSES when the worktree holds work that exists nowhere else - no commit,
@@ -778,6 +784,9 @@ func (s *Service) Kill(ctx context.Context, id domain.SessionID, in KillInput) (
 	}
 	if res.Reason == sessionmanager.ReasonChildrenUndelivered && !res.Terminated {
 		return KillOutcome{}, unmergedChildrenError(id, res)
+	}
+	if res.Reason == sessionmanager.ReasonScriptsStoreDirty && !res.Terminated {
+		return KillOutcome{}, unpublishedScriptsError(id, res)
 	}
 	out := KillOutcome{
 		Terminated:   res.Terminated,
@@ -811,6 +820,9 @@ func undeliveredWorkError(id domain.SessionID, res sessionmanager.TeardownResult
 	if len(res.UndeliveredChildren) > 0 {
 		details["children"] = childDetails(res.UndeliveredChildren)
 	}
+	if res.ScriptsStore != nil {
+		details["scriptsStore"] = scriptsStoreDetails(res.ScriptsStore)
+	}
 	return apierr.Conflict(ErrUndeliveredWork, fmt.Sprintf(
 		"%s still holds %d uncommitted %s that no pull request carries, so it was not killed and nothing was torn down. Finish and deliver the work, or discard it deliberately.",
 		id, len(res.Undelivered), noun,
@@ -821,14 +833,70 @@ func undeliveredWorkError(id domain.SessionID, res sessionmanager.TeardownResult
 // work its branch does not have yet. It names each child and says what a
 // discard would do, which is to keep that work rather than lose it.
 func unmergedChildrenError(id domain.SessionID, res sessionmanager.TeardownResult) error {
-	return apierr.Conflict(ErrUnmergedChildren, fmt.Sprintf(
-		"%s has %d child worktree(s) whose work is not on its branch yet, so it was not killed and nothing was torn down. Wait for them to finish and merge, or kill with discard: AO then commits each child's work onto its own branch, keeps that branch, and removes its folder.",
-		id, len(res.UndeliveredChildren),
-	), map[string]any{
+	details := map[string]any{
 		"reason":    res.Reason,
 		"sessionId": string(id),
 		"children":  childDetails(res.UndeliveredChildren),
-	})
+	}
+	if res.ScriptsStore != nil {
+		details["scriptsStore"] = scriptsStoreDetails(res.ScriptsStore)
+	}
+	return apierr.Conflict(ErrUnmergedChildren, fmt.Sprintf(
+		"%s has %d child worktree(s) whose work is not on its branch yet, so it was not killed and nothing was torn down. Wait for them to finish and merge, or kill with discard: AO then commits each child's work onto its own branch, keeps that branch, and removes its folder.",
+		id, len(res.UndeliveredChildren),
+	), details)
+}
+
+// unpublishedScriptsError refuses a kill while the workspace's scripts store
+// worktree holds work the store does not have. Teardown already published
+// what was committed, so what is left is exactly what a discard would lose.
+func unpublishedScriptsError(id domain.SessionID, res sessionmanager.TeardownResult) error {
+	var what []string
+	if res.ScriptsStore != nil {
+		if n := len(res.ScriptsStore.Worktree.Uncommitted); n > 0 {
+			what = append(what, fmt.Sprintf("%d uncommitted file(s)", n))
+		}
+		if res.ScriptsStore.Publish.Outcome == ports.PublishRefused {
+			what = append(what, "commits the store refused: "+res.ScriptsStore.Publish.Detail)
+		}
+	}
+	if len(what) == 0 {
+		what = append(what, "work AO could not read")
+	}
+	details := map[string]any{"reason": res.Reason, "sessionId": string(id)}
+	if res.ScriptsStore != nil {
+		details["scriptsStore"] = scriptsStoreDetails(res.ScriptsStore)
+	}
+	return apierr.Conflict(ErrUnpublishedScripts, fmt.Sprintf(
+		"%s's scripts store worktree holds %s, so it was not killed and nothing was torn down. Commit the scripts there and run `ao scripts publish`, or kill with discard: AO then deletes the worktree and its branch.",
+		id, strings.Join(what, " and "),
+	), details)
+}
+
+// scriptsStoreDetails is the wire shape of a refused scripts store worktree,
+// shared by every refusal so the CLI and the app read one shape.
+func scriptsStoreDetails(s *scriptstore.Settlement) map[string]any {
+	publish := map[string]any{"outcome": string(s.Publish.Outcome)}
+	if s.Publish.Outcome == ports.PublishRefused {
+		publish["hold"] = string(s.Publish.Hold)
+		publish["detail"] = s.Publish.Detail
+		publish["files"] = nonNilStrings(s.Publish.Files)
+	}
+	return map[string]any{
+		"path":        s.Worktree.Path,
+		"branch":      s.Worktree.Branch,
+		"baseBranch":  s.Worktree.BaseBranch,
+		"store":       s.Worktree.Store,
+		"uncommitted": nonNilStrings(s.Worktree.Uncommitted),
+		"publish":     publish,
+	}
+}
+
+func nonNilStrings(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
 }
 
 // childDetails is the wire list of a worker's undelivered children, shared by

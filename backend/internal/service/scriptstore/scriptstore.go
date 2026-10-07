@@ -94,9 +94,6 @@ func New(opts Options) *Service {
 	return &Service{store: opts.Store, trees: opts.Trees, dataDir: opts.DataDir, now: now, log: log, locks: map[string]*sync.Mutex{}}
 }
 
-// DataDir is the data dir worktrees are laid out under (see Layout).
-func (s *Service) DataDir() string { return s.dataDir }
-
 // lock serializes everything that writes into one store or reads-then-writes a
 // row of it: two publishes into one main checkout run one after the other, and
 // a refresh never writes back a row a teardown just changed.
@@ -362,32 +359,6 @@ func (s *Service) readFacts(ctx context.Context, w *domain.ScriptsStoreWorktree)
 func (s *Service) save(ctx context.Context, w domain.ScriptsStoreWorktree) error {
 	w.UpdatedAt = s.now()
 	return s.store.UpsertScriptsStoreWorktree(ctx, w)
-}
-
-// Run refreshes on every tick until ctx ends. onTick, when set, reports each
-// pass to the loop telemetry.
-func (s *Service) Run(ctx context.Context, interval time.Duration, onTick func(error)) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				err := s.Refresh(ctx)
-				if err != nil && ctx.Err() == nil {
-					s.log.Warn("scriptstore: refresh", "error", err)
-				}
-				if onTick != nil {
-					onTick(err)
-				}
-			}
-		}
-	}()
-	return done
 }
 
 // Reconcile runs at daemon start, before any session is restored. An active
