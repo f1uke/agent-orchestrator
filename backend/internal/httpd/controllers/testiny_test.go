@@ -24,9 +24,10 @@ import (
 // fakeTestiny records which task each call reached and what it was given.
 type fakeTestiny struct {
 	err      error
-	runs     testinysvc.Runs
+	runs     []domain.TestinyRunView
 	asked    []string
 	linkRef  string
+	linkProj string
 	linkBy   string
 	refresh  bool
 	unlinked domain.TestinyRunID
@@ -62,9 +63,9 @@ type recordCall struct {
 	by, sha string
 }
 
-func (f *fakeTestiny) Link(_ context.Context, task domain.SessionID, ref, by string) (domain.TestinyRunView, error) {
+func (f *fakeTestiny) Link(_ context.Context, task domain.SessionID, ref, project, by string) (domain.TestinyRunView, error) {
 	f.asked = append(f.asked, "link "+string(task))
-	f.linkRef, f.linkBy = ref, by
+	f.linkRef, f.linkProj, f.linkBy = ref, project, by
 	if f.err != nil {
 		return domain.TestinyRunView{}, f.err
 	}
@@ -77,7 +78,7 @@ func (f *fakeTestiny) Unlink(_ context.Context, task domain.SessionID, id domain
 	return f.err
 }
 
-func (f *fakeTestiny) Runs(_ context.Context, task domain.SessionID, refresh bool) (testinysvc.Runs, error) {
+func (f *fakeTestiny) Runs(_ context.Context, task domain.SessionID, refresh bool) ([]domain.TestinyRunView, error) {
 	f.asked = append(f.asked, "runs "+string(task))
 	f.refresh = refresh
 	return f.runs, f.err
@@ -118,7 +119,7 @@ func newTestinyServer(t *testing.T, svc *fakeTestiny, crew map[domain.SessionID]
 
 func TestTestinyRunsList(t *testing.T) {
 	at := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
-	svc := &fakeTestiny{runs: testinysvc.Runs{Project: "MOB", Runs: []domain.TestinyRunView{{
+	svc := &fakeTestiny{runs: []domain.TestinyRunView{{
 		Link:       domain.TestinyRunLink{SessionID: "solo-1", RunID: 632, CreatedAt: at},
 		Title:      "Chat notice",
 		URL:        "https://app.testiny.io/MOB/testruns/tr/632",
@@ -126,7 +127,7 @@ func TestTestinyRunsList(t *testing.T) {
 		Cases:      []domain.TestinyCaseResult{{ID: 7166, Title: "Fund disclaimer", Status: "PASSED", Script: "projects/nter/cases/chat/fund.yaml"}},
 		FetchedAt:  &at,
 		FetchError: &domain.TestinyFetchError{Kind: domain.TestinyErrAuth, Message: "Unauthenticated user"},
-	}}}}
+	}}}
 	srv := newTestinyServer(t, svc, nil)
 
 	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/runs?refresh=1", "")
@@ -137,8 +138,7 @@ func TestTestinyRunsList(t *testing.T) {
 		t.Fatal("refresh=1 did not reach the service")
 	}
 	var got struct {
-		Project string `json:"project"`
-		Runs    []struct {
+		Runs []struct {
 			Link struct {
 				RunID int64 `json:"runId"`
 			} `json:"link"`
@@ -156,7 +156,7 @@ func TestTestinyRunsList(t *testing.T) {
 		t.Fatalf("decode: %v (%s)", err, body)
 	}
 	r := got.Runs[0]
-	if got.Project != "MOB" || r.Link.RunID != 632 || r.Counts["PASSED"] != 6 || r.FetchError.Kind != "auth" ||
+	if r.Link.RunID != 632 || r.Counts["PASSED"] != 6 || r.FetchError.Kind != "auth" ||
 		r.Cases[0].Script != "projects/nter/cases/chat/fund.yaml" || r.URL == "" {
 		t.Fatalf("body = %s", body)
 	}
@@ -167,7 +167,7 @@ func TestTestinyRunsList(t *testing.T) {
 }
 
 func TestTestinyEmptyListIsAnArray(t *testing.T) {
-	srv := newTestinyServer(t, &fakeTestiny{runs: testinysvc.Runs{Project: "MOB"}}, nil)
+	srv := newTestinyServer(t, &fakeTestiny{}, nil)
 	body, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/runs", "")
 	if status != http.StatusOK || !strings.Contains(string(body), `"runs":[]`) {
 		t.Fatalf("status %d body %s", status, body)
@@ -187,8 +187,11 @@ func TestTestinyLinkAndUnlink(t *testing.T) {
 	if !strings.Contains(string(body), `"title":"Chat notice"`) {
 		t.Fatalf("link body = %s", body)
 	}
-	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs", `{"ref":"632"}`); status != http.StatusOK || svc.linkBy != "" {
-		t.Fatalf("link from the app: status %d, by %q", status, svc.linkBy)
+	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs", `{"ref":"632"}`); status != http.StatusOK || svc.linkBy != "" || svc.linkProj != "" {
+		t.Fatalf("link from the app: status %d, by %q, project %q", status, svc.linkBy, svc.linkProj)
+	}
+	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs", `{"ref":"700","project":" STAR "}`); status != http.StatusOK || svc.linkProj != "STAR" {
+		t.Fatalf("link with a project: status %d, project %q", status, svc.linkProj)
 	}
 
 	if body, status, _ := doRequest(t, srv, "DELETE", "/api/v1/sessions/solo-1/testiny/runs/TR-632", ""); status != http.StatusNoContent {
@@ -241,7 +244,7 @@ func TestTestinyErrorsMapToCodes(t *testing.T) {
 // A run links to the TASK. qa's link, list and unlink must all reach dev's
 // task, or the tab dev and the person look at never shows qa's runs.
 func TestTestinyRoutesResolveToTheTasksDev(t *testing.T) {
-	svc := &fakeTestiny{runs: testinysvc.Runs{Project: "MOB"}}
+	svc := &fakeTestiny{}
 	srv := newTestinyServer(t, svc, map[domain.SessionID]domain.SessionID{scopeQA: scopeDev})
 	qa := "/api/v1/sessions/" + string(scopeQA) + "/testiny/runs"
 	for _, req := range [][3]string{

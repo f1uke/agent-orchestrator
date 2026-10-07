@@ -276,8 +276,8 @@ func TestCommentOnResultRefusedForACaseNotInTheRun(t *testing.T) {
 func TestProjectResolvesKeyNameOrIDIgnoringCase(t *testing.T) {
 	f := &fakeCLI{answers: map[string]Output{"project ls": ok(t, "project_ls.json")}}
 	c := newClient(f, time.Now)
-	mob := Project{ID: 1, Name: "MOBILITY", Key: "MOB"}
-	for ref, want := range map[string]Project{
+	mob := domain.TestinyProject{ID: 1, Name: "MOBILITY", Key: "MOB"}
+	for ref, want := range map[string]domain.TestinyProject{
 		"MOB":      mob,
 		"mob":      mob,
 		"Mobility": mob,

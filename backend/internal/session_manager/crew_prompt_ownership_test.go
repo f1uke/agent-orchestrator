@@ -182,14 +182,14 @@ func TestAttachCrewMember_SaysNothingToADevThatAskedForIt(t *testing.T) {
 // On a Testiny project a qa takes over the Testiny drafts, runs and results, so dev is
 // told to hand over any draft it wrote, and the arriving qa reads the runs
 // already linked to the task. A project without Testiny hears neither.
-func TestAttachCrewMember_HandsTheTestinyWorkToQAOnATestinyProject(t *testing.T) {
+func TestAttachCrewMember_HandsTheTestinyWorkToQAWhereTheProjectUsesTestiny(t *testing.T) {
 	const handover = "qa now owns the Testiny drafts, runs and results for this task. Give it the path of any draft you wrote."
 	const runs = "`ao testiny runs \"$AO_CREW_ID\"`"
 	for _, testiny := range []bool{false, true} {
 		m, st, _, _, msgr := newManagerWithMessenger()
 		if testiny {
 			p := st.projects["mer"]
-			p.Config.TestinyProject = "MOB"
+			p.Config.UsesTestiny = true
 			st.projects["mer"] = p
 		}
 		dev := spawnMechanical(t, m)

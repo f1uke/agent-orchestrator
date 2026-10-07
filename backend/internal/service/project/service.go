@@ -127,7 +127,7 @@ func (m *Service) List(ctx context.Context) ([]Summary, error) {
 			HasWebUI:          row.Config.HasWebUI,
 			HasIOSSimulator:   row.Config.HasIOSSimulator,
 			DisableAutoCrew:   row.Config.DisableAutoCrew,
-			TestinyProject:    row.Config.TestinyProject,
+			UsesTestiny:       row.Config.UsesTestiny,
 		})
 	}
 	return out, nil
@@ -434,12 +434,10 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 	return m.projectFromRow(row), nil
 }
 
-// normalizeConfig trims the config fields a person types as free text, so a
-// stray space from a paste is stored as the value meant rather than refused, and
-// a blank is stored as unset. A blank list entry names no path and no command:
-// `set-config --symlink ""` means "no symlinks", not a list holding "".
+// normalizeConfig drops the blank entries of the config's lists. A blank list
+// entry names no path and no command: `set-config --symlink ""` means "no
+// symlinks", not a list holding "".
 func normalizeConfig(c domain.ProjectConfig) domain.ProjectConfig {
-	c.TestinyProject = strings.TrimSpace(c.TestinyProject)
 	c.Symlinks = withoutBlanks(c.Symlinks)
 	c.PostCreate = withoutBlanks(c.PostCreate)
 	return c

@@ -129,9 +129,9 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--learn-from-sessions"},
 		want: domain.ProjectConfig{LearnFromSessions: true},
 	},
-	"testiny-project": {
-		args: []string{"--testiny-project", "MOB"},
-		want: domain.ProjectConfig{TestinyProject: "MOB"},
+	"testiny": {
+		args: []string{"--testiny"},
+		want: domain.ProjectConfig{UsesTestiny: true},
 	},
 }
 
@@ -215,7 +215,7 @@ func TestSetConfigFieldFlagsCoverEveryFieldFlag(t *testing.T) {
 // because what counts is that the caller named the flag - not what it named it
 // with.
 func TestProjectSetConfig_BoolFlagCanBeTurnedOff(t *testing.T) {
-	for _, flag := range []string{"web-ui", "ios-simulator", "no-auto-crew", "tracker-intake", "pause-before-implementing"} {
+	for _, flag := range []string{"web-ui", "ios-simulator", "no-auto-crew", "tracker-intake", "pause-before-implementing", "testiny"} {
 		t.Run(flag, func(t *testing.T) {
 			got := captureSetConfig(t, "--"+flag+"=false")
 			if len(got.MergeFields) != 1 {
@@ -237,18 +237,6 @@ func TestProjectSetConfig_StringFlagCanBeCleared(t *testing.T) {
 	}
 	if got.Config.DefaultBranch != "" {
 		t.Errorf("defaultBranch = %q, want empty", got.Config.DefaultBranch)
-	}
-}
-
-// `--testiny-project ""` is how a project stops using Testiny, so the empty
-// value has to arrive as a named write of that one field.
-func TestProjectSetConfig_TestinyProjectCanBeCleared(t *testing.T) {
-	got := captureSetConfig(t, "--testiny-project", "")
-	if want := []string{"testinyProject"}; !reflect.DeepEqual(got.MergeFields, want) {
-		t.Fatalf("mergeFields = %v, want %v", got.MergeFields, want)
-	}
-	if !reflect.DeepEqual(got.Config, domain.ProjectConfig{}) {
-		t.Errorf("config = %#v, want every field at its zero value", got.Config)
 	}
 }
 

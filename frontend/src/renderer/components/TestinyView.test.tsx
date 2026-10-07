@@ -55,8 +55,11 @@ const tc = (id: number, status: string, title = `case ${id}`, script?: string): 
 	...(script ? { script } : {}),
 });
 
+const mob = { id: 1, key: "MOB", name: "MOBILITY" };
+const star = { id: 3, key: "STAR", name: "STAR" };
+
 const run = (runId: number, over: Partial<TestinyRun> = {}): TestinyRun => ({
-	link: { sessionId: "task-1", runId, linkedBy: "task-1-qa", createdAt: minutesAgo(120) },
+	link: { sessionId: "task-1", runId, project: mob, linkedBy: "task-1-qa", createdAt: minutesAgo(120) },
 	title: `Run ${runId}`,
 	url: `https://app.testiny.io/MOB/testruns/tr/${runId}`,
 	closed: false,
@@ -67,15 +70,15 @@ const run = (runId: number, over: Partial<TestinyRun> = {}): TestinyRun => ({
 	...over,
 });
 
-function serve(runs: TestinyRun[], project = "MOB") {
-	getMock.mockResolvedValue({ data: { project, runs }, error: undefined });
+function serve(runs: TestinyRun[]) {
+	getMock.mockResolvedValue({ data: { runs }, error: undefined });
 }
 
 function renderView(session: WorkspaceSession = dev) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 	return render(
 		<QueryClientProvider client={client}>
-			<TestinyView session={session} project="MOB" />
+			<TestinyView session={session} />
 		</QueryClientProvider>,
 	);
 }
@@ -94,14 +97,30 @@ afterEach(() => {
 });
 
 describe("TestinyView runs", () => {
-	it("shows a card per run in the order they were linked, under the project eyebrow", async () => {
+	it("shows a card per run in the order they were linked, under a Testiny eyebrow", async () => {
 		serve([run(633, { title: "Android" }), run(632, { title: "iOS" })]);
 		renderView();
 
 		const cards = await screen.findAllByRole("article");
 		expect(cards.map((c) => within(c).getByText(/^TR-\d+$/).textContent)).toEqual(["TR-633", "TR-632"]);
 		expect(within(cards[0]).getByText("Android")).toBeInTheDocument();
-		expect(screen.getByText("Testiny · MOB")).toBeInTheDocument();
+		expect(screen.getByText("Testiny")).toBeInTheDocument();
+	});
+
+	it("names each run's own Testiny project beside its id, the key else the name", async () => {
+		const sandbox = { id: 4, key: "", name: "Sandbox" };
+		serve([
+			run(632),
+			run(700, { link: { sessionId: "task-1", runId: 700, project: star, linkedBy: "", createdAt: minutesAgo(5) } }),
+			run(800, { link: { sessionId: "task-1", runId: 800, project: sandbox, linkedBy: "", createdAt: minutesAgo(4) } }),
+		]);
+		renderView();
+
+		await waitFor(() => card(632));
+		expect(within(card(632)).getByText("MOB")).toHaveAttribute("title", "MOBILITY");
+		expect(within(card(700)).getByText("STAR")).toBeInTheDocument();
+		expect(within(card(700)).queryByText("MOB")).not.toBeInTheDocument();
+		expect(within(card(800)).getByText("Sandbox")).toBeInTheDocument();
 	});
 
 	it("reads the task's runs whichever member is open", async () => {
@@ -226,8 +245,10 @@ describe("TestinyView runs", () => {
 
 	it("says who linked each run and when", async () => {
 		serve([
-			run(632, { link: { sessionId: "task-1", runId: 632, linkedBy: "task-1-qa", createdAt: minutesAgo(125) } }),
-			run(633, { link: { sessionId: "task-1", runId: 633, linkedBy: "", createdAt: minutesAgo(3) } }),
+			run(632, {
+				link: { sessionId: "task-1", runId: 632, project: mob, linkedBy: "task-1-qa", createdAt: minutesAgo(125) },
+			}),
+			run(633, { link: { sessionId: "task-1", runId: 633, project: mob, linkedBy: "", createdAt: minutesAgo(3) } }),
 		]);
 		renderView();
 
@@ -264,7 +285,7 @@ describe("TestinyView runs", () => {
 		});
 		expect(screen.getByRole("article")).toBeInTheDocument();
 
-		answer({ data: { project: "MOB", runs: [run(632, { title: "Renamed" })] }, error: undefined });
+		answer({ data: { runs: [run(632, { title: "Renamed" })] }, error: undefined });
 		expect(await screen.findByText("Renamed")).toBeInTheDocument();
 	});
 });
@@ -276,7 +297,7 @@ describe("TestinyView link run", () => {
 		postMock.mockResolvedValue({ data: run(632), error: undefined });
 		renderView();
 
-		const field = await screen.findByPlaceholderText("Run id or Testiny URL");
+		const field = await screen.findByPlaceholderText("Run URL, or run id");
 		await user.type(field, " https://app.testiny.io/MOB/testruns/tr/632 {Enter}");
 		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/testiny/runs", {
 			params: { path: { sessionId: "task-1" } },
@@ -291,13 +312,13 @@ describe("TestinyView link run", () => {
 		serve([]);
 		postMock.mockResolvedValue({
 			data: undefined,
-			error: { code: "TESTINY_RUN_WRONG_PROJECT", message: "run 632 belongs to KERN; this project uses MOB" },
+			error: { code: "TESTINY_RUN_WRONG_PROJECT", message: "TR-632 is in KERN, not MOB" },
 		});
 		renderView();
 
-		const field = await screen.findByPlaceholderText("Run id or Testiny URL");
+		const field = await screen.findByPlaceholderText("Run URL, or run id");
 		await user.type(field, "632{Enter}");
-		expect(await screen.findByRole("alert")).toHaveTextContent("run 632 belongs to KERN; this project uses MOB");
+		expect(await screen.findByRole("alert")).toHaveTextContent("TR-632 is in KERN, not MOB");
 		expect(field).toHaveValue("632");
 	});
 
@@ -305,7 +326,7 @@ describe("TestinyView link run", () => {
 		const user = userEvent.setup();
 		serve([]);
 		renderView();
-		await user.type(await screen.findByPlaceholderText("Run id or Testiny URL"), "   {Enter}");
+		await user.type(await screen.findByPlaceholderText("Run URL, or run id"), "   {Enter}");
 		expect(postMock).not.toHaveBeenCalled();
 	});
 });
@@ -360,9 +381,9 @@ describe("TestinyView errors", () => {
 
 		expect(await screen.findByText("No test runs linked")).toBeInTheDocument();
 		expect(
-			screen.getByText("Agents link a run after you approve it. You can also paste a run id or URL above."),
+			screen.getByText("Agents link a run after you approve it. You can also paste a run URL or id above."),
 		).toBeInTheDocument();
-		expect(screen.getByPlaceholderText("Run id or Testiny URL")).toBeInTheDocument();
+		expect(screen.getByPlaceholderText("Run URL, or run id")).toBeInTheDocument();
 	});
 
 	it("says why the list could not load instead of rendering nothing", async () => {
@@ -686,7 +707,7 @@ describe("TestinyView case details", () => {
 			if (path === REF_LINKS) {
 				return { data: { jiraBaseUrl, gitlabBaseUrl: "", gitlabDefaultRepo: "", gitlabRepoAliases: {} } };
 			}
-			return { data: { project: "MOB", runs: [run(632, { cases })] } };
+			return { data: { runs: [run(632, { cases })] } };
 		});
 	}
 

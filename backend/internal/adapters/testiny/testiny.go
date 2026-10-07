@@ -79,7 +79,7 @@ type Client struct {
 	callTimeout time.Duration
 
 	mu         sync.Mutex
-	projects   []Project
+	projects   []domain.TestinyProject
 	projectsAt time.Time
 }
 
@@ -132,13 +132,6 @@ type Results struct {
 type Ref struct {
 	ID    int64
 	Title string
-}
-
-// Project is a Testiny project. Key is "" for a project that has none.
-type Project struct {
-	ID   int64
-	Name string
-	Key  string
 }
 
 // Run reads one test run, with the step results of its cases. A run that
@@ -608,16 +601,16 @@ func (c *Client) ref(ctx context.Context, entity string, id int64) (Ref, error) 
 // Project resolves what a person typed for a project (its key, name or id) to
 // the project, matching without regard to case, key first. The list of
 // projects is read at most once every ten minutes.
-func (c *Client) Project(ctx context.Context, ref string) (Project, error) {
+func (c *Client) Project(ctx context.Context, ref string) (domain.TestinyProject, error) {
 	projects, err := c.listProjects(ctx)
 	if err != nil {
-		return Project{}, err
+		return domain.TestinyProject{}, err
 	}
 	ref = strings.TrimSpace(ref)
-	for _, match := range []func(Project) bool{
-		func(p Project) bool { return p.Key != "" && strings.EqualFold(p.Key, ref) },
-		func(p Project) bool { return strings.EqualFold(p.Name, ref) },
-		func(p Project) bool { return strconv.FormatInt(p.ID, 10) == ref },
+	for _, match := range []func(domain.TestinyProject) bool{
+		func(p domain.TestinyProject) bool { return p.Key != "" && strings.EqualFold(p.Key, ref) },
+		func(p domain.TestinyProject) bool { return strings.EqualFold(p.Name, ref) },
+		func(p domain.TestinyProject) bool { return strconv.FormatInt(p.ID, 10) == ref },
 	} {
 		for _, p := range projects {
 			if match(p) {
@@ -625,15 +618,15 @@ func (c *Client) Project(ctx context.Context, ref string) (Project, error) {
 			}
 		}
 	}
-	return Project{}, fmt.Errorf("%w: no Testiny project has the key, name or id %q", ErrNotFound, ref)
+	return domain.TestinyProject{}, fmt.Errorf("%w: no Testiny project has the key, name or id %q", ErrNotFound, ref)
 }
 
 // ProjectByID finds a project by its id in the same cached list.
-func (c *Client) ProjectByID(ctx context.Context, id int64) (Project, error) {
+func (c *Client) ProjectByID(ctx context.Context, id int64) (domain.TestinyProject, error) {
 	return c.Project(ctx, strconv.FormatInt(id, 10))
 }
 
-func (c *Client) listProjects(ctx context.Context) ([]Project, error) {
+func (c *Client) listProjects(ctx context.Context) ([]domain.TestinyProject, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.projects != nil && c.now().Sub(c.projectsAt) < projectsTTL {
@@ -647,9 +640,9 @@ func (c *Client) listProjects(ctx context.Context) ([]Project, error) {
 	if err := c.call(ctx, &raw, "project", "ls"); err != nil {
 		return nil, err
 	}
-	projects := make([]Project, len(raw))
+	projects := make([]domain.TestinyProject, len(raw))
 	for i, r := range raw {
-		projects[i] = Project{ID: r.ID, Name: r.Name}
+		projects[i] = domain.TestinyProject{ID: r.ID, Name: r.Name}
 		if r.Key != nil {
 			projects[i].Key = *r.Key
 		}

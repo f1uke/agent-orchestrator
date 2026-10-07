@@ -75,7 +75,7 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 		// Its tasks get the Testiny tab (Summary, Reviews, Files, Testiny, Device,
 		// Browser: the widest strip). docs-site leaves it unset, so its rail shows
 		// the strip without it.
-		testinyProject: "MOB",
+		usesTestiny: true,
 		orchestratorAgent: "codex",
 		accentColor: "#6ee7b7",
 		sessions: [
@@ -2052,7 +2052,6 @@ type DemoRun = Omit<components["schemas"]["TestinyRunView"], "cases"> & { cases:
 function demoTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResponse"] {
 	const runs = demoRuns(taskId);
 	return {
-		project: "MOB",
 		runs: runs.map((r) => ({ ...r, cases: r.cases.map((c) => ({ steps: [], evidence: [], ...c })) })),
 	};
 }
@@ -2117,13 +2116,17 @@ export function mockUploadTestinyEvidence(
  */
 function demoRuns(taskId: string): DemoRun[] {
 	if (taskId !== "demo-qa-testing") return [];
-	const link = (runId: number, linkedBy: string, minutes: number) => ({
+	// One task may hold runs from several Testiny projects: TR-640 is STAR's.
+	const mob = { id: 1, key: "MOB", name: "MOBILITY" };
+	const star = { id: 3, key: "STAR", name: "STAR" };
+	const link = (runId: number, linkedBy: string, minutes: number, project = mob) => ({
 		sessionId: taskId,
 		runId,
+		project,
 		linkedBy,
 		createdAt: minutesAgo(minutes),
 	});
-	const url = (runId: number) => `https://app.testiny.io/MOB/testruns/tr/${runId}`;
+	const url = (runId: number, project = mob) => `https://app.testiny.io/${project.key}/testruns/tr/${runId}`;
 	const plan = { id: 193, title: "Share sheet" };
 	const milestone = { id: 41, title: "MOBILITY 2026-19" };
 	const script = (name: string) => `projects/nter/cases/share/${name}.yaml`;
@@ -2212,9 +2215,9 @@ function demoRuns(taskId: string): DemoRun[] {
 			fetchedAt: minutesAgo(0),
 		},
 		{
-			link: link(640, "", 20),
-			title: "MOBILITY-4839 Share sheet regression - iPad",
-			url: url(640),
+			link: link(640, "", 20, star),
+			title: "STAR-1207 Share sheet regression - iPad",
+			url: url(640, star),
 			closed: false,
 			plan,
 			counts: { PASSED: 2, BLOCKED: 1 },

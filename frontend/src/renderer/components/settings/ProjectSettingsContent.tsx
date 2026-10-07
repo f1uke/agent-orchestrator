@@ -670,22 +670,20 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 				)}
 
 				<SettingRow
-					name="Testiny project"
-					summary="Agents keep this project's manual test cases in Testiny, and tasks get a Testiny tab. Empty turns it off."
-					detail="The Testiny project key, the project_key column of testiny project ls (e.g. MOB). Its name or numeric id work too. AO does not check it against Testiny when you save. The tab appears straight away; the guidance in an agent's prompt only reaches the next worker."
+					name="Uses Testiny"
+					summary="Agents keep this project's manual test cases in Testiny, and tasks get a Testiny tab."
+					detail="Not tied to one Testiny project: agents pick it from each task's Jira key, and one task may hold runs from several. The tab appears straight away; the guidance in an agent's prompt only reaches the next worker."
 					ownership={{ kind: "project-only" }}
 					timing="live"
-					value={draft.testinyProject.trim() || "not set"}
-					modified={isFieldDirty("testinyProject")}
-					controlId="testinyProject"
+					value={draft.usesTestiny ? "On" : "Off"}
+					modified={isFieldDirty("usesTestiny")}
 				>
-					<input
-						id="testinyProject"
-						className={INPUT_CLASS}
-						value={draft.testinyProject}
-						onChange={(e) => setField("testinyProject", e.target.value)}
-						placeholder="MOB"
-					/>
+					<div className="flex items-center gap-3">
+						<Switch id="usesTestiny" checked={draft.usesTestiny} onCheckedChange={(v) => setField("usesTestiny", v)} />
+						<label htmlFor="usesTestiny" className="text-[12px] text-muted-foreground">
+							This project keeps its manual test cases in Testiny
+						</label>
+					</div>
 				</SettingRow>
 			</SettingRows>
 		</>

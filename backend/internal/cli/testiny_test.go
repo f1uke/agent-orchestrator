@@ -17,7 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 )
 
-const testinyRunJSON = `{"link":{"sessionId":"app-1","runId":632,"linkedBy":"app-2","createdAt":"2026-10-06T09:00:00Z"},
+const testinyRunJSON = `{"link":{"sessionId":"app-1","runId":632,"project":{"id":1,"key":"MOB","name":"MOBILITY"},"linkedBy":"app-2","createdAt":"2026-10-06T09:00:00Z"},
 "title":"MOBILITY-4839 Chat notice disclaimer - iOS","url":"https://app.testiny.io/MOB/testruns/tr/632","closed":false,
 "counts":{"PASSED":6},"cases":[],"evidenceDir":"","fetchedAt":"2026-10-06T09:00:00Z"}`
 
@@ -41,7 +41,7 @@ func TestTestinyLinkSendsTheCallerAndPrintsTheRun(t *testing.T) {
 	if body["ref"] != "https://app.testiny.io/MOB/testruns/tr/632" || body["from"] != "app-2" {
 		t.Fatalf("body = %s", capture.body)
 	}
-	if want := `linked TR-632 "MOBILITY-4839 Chat notice disclaimer - iOS" (6 cases: 6 passed)` + "\n"; out != want {
+	if want := `linked MOB TR-632 "MOBILITY-4839 Chat notice disclaimer - iOS" (6 cases: 6 passed)` + "\n"; out != want {
 		t.Fatalf("output = %q, want %q", out, want)
 	}
 }
@@ -54,8 +54,26 @@ func TestTestinyLinkFromAPersonsShellSendsNoCaller(t *testing.T) {
 	if _, _, err := executeCLI(t, aliveDeps(), "testiny", "link", "app-1", "632"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(capture.body, "from") {
-		t.Fatalf("body = %s, want no from", capture.body)
+	if strings.Contains(capture.body, "from") || strings.Contains(capture.body, "project") {
+		t.Fatalf("body = %s, want no from and no project", capture.body)
+	}
+}
+
+// --project names the Testiny project a run given by id must be in, so the
+// daemon can refuse a typo'd id that lands in another project.
+func TestTestinyLinkSendsTheProject(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := reviewServer(t, http.StatusOK, testinyRunJSON)
+	writeRunFileFor(t, cfg, srv)
+	if _, _, err := executeCLI(t, aliveDeps(), "testiny", "link", "app-1", "632", "--project", "MOB"); err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]string
+	if err := json.Unmarshal([]byte(capture.body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["ref"] != "632" || body["project"] != "MOB" {
+		t.Fatalf("body = %s, want ref 632 in project MOB", capture.body)
 	}
 }
 
@@ -97,8 +115,8 @@ func TestTestinyUnlink(t *testing.T) {
 	}
 }
 
-const testinyRunsJSON = `{"project":"MOB","runs":[
-{"link":{"sessionId":"app-1","runId":632,"linkedBy":"","createdAt":"2026-10-06T09:00:00Z"},
+const testinyRunsJSON = `{"runs":[
+{"link":{"sessionId":"app-1","runId":632,"project":{"id":1,"key":"MOB","name":"MOBILITY"},"linkedBy":"","createdAt":"2026-10-06T09:00:00Z"},
  "title":"MOBILITY-4839 Chat notice disclaimer - iOS","url":"https://app.testiny.io/MOB/testruns/tr/632","closed":false,
  "plan":{"id":193,"title":"Chat session logout"},"milestone":{"id":80,"title":"Sprint 2026-20"},
  "counts":{"PASSED":4,"FAILED":1,"NOTRUN":1},
@@ -108,7 +126,7 @@ const testinyRunsJSON = `{"project":"MOB","runs":[
  "evidenceDir":"/Users/me/Desktop/QA Evidence/MOBILITY/2026/Sprint 2026-20/TP-193 - Chat/TR-632 - Chat",
  "fetchedAt":"2026-10-06T09:00:00Z",
  "fetchError":{"kind":"auth","message":"Unauthenticated user (AUTH_ACCESS_DENIED)"}},
-{"link":{"sessionId":"app-1","runId":999,"linkedBy":"","createdAt":"2026-10-06T09:01:00Z"},
+{"link":{"sessionId":"app-1","runId":999,"project":{"id":4,"key":"","name":"Sandbox"},"linkedBy":"","createdAt":"2026-10-06T09:01:00Z"},
  "title":"","url":"","closed":false,"counts":{},"cases":[],"evidenceDir":"",
  "fetchError":{"kind":"not_found","message":"The entity with id 999 was not found."}}]}`
 
@@ -123,7 +141,7 @@ func TestTestinyRunsPrintsOneBlockPerRun(t *testing.T) {
 	if capture.method != http.MethodGet || capture.path != "/api/v1/sessions/app-1/testiny/runs" {
 		t.Fatalf("request = %s %s", capture.method, capture.path)
 	}
-	want := `TR-632 "MOBILITY-4839 Chat notice disclaimer - iOS" (6 cases: 4 passed, 1 failed, 1 not run)
+	want := `MOB TR-632 "MOBILITY-4839 Chat notice disclaimer - iOS" (6 cases: 4 passed, 1 failed, 1 not run)
   https://app.testiny.io/MOB/testruns/tr/632
   plan: Chat session logout, milestone: Sprint 2026-20
   FAILED  TC-7167 Bond disclaimer
@@ -131,7 +149,7 @@ func TestTestinyRunsPrintsOneBlockPerRun(t *testing.T) {
   evidence: /Users/me/Desktop/QA Evidence/MOBILITY/2026/Sprint 2026-20/TP-193 - Chat/TR-632 - Chat
   could not read it now (auth): Unauthenticated user (AUTH_ACCESS_DENIED). Showing the read from 2026-10-06T09:00:00Z.
 
-TR-999 (no data)
+Sandbox TR-999 (no data)
   could not read it now (not_found): The entity with id 999 was not found.
 `
 	if out != want {
@@ -148,15 +166,14 @@ func TestTestinyRunsJSONAndEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got struct {
-		Project string            `json:"project"`
-		Runs    []json.RawMessage `json:"runs"`
+		Runs []json.RawMessage `json:"runs"`
 	}
-	if err := json.Unmarshal([]byte(out), &got); err != nil || got.Project != "MOB" || len(got.Runs) != 2 {
+	if err := json.Unmarshal([]byte(out), &got); err != nil || len(got.Runs) != 2 {
 		t.Fatalf("--json output = %s (%v)", out, err)
 	}
 
 	cfg = setConfigEnv(t)
-	srv, _ = reviewServer(t, http.StatusOK, `{"project":"MOB","runs":[]}`)
+	srv, _ = reviewServer(t, http.StatusOK, `{"runs":[]}`)
 	writeRunFileFor(t, cfg, srv)
 	out, _, err = executeCLI(t, aliveDeps(), "testiny", "runs", "app-1")
 	if err != nil || out != "no Testiny runs linked to app-1\n" {

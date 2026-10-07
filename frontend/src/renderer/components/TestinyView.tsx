@@ -94,7 +94,7 @@ const EYEBROW = "font-mono text-[10px] font-semibold uppercase tracking-[0.12em]
  * AO stores only which runs belong to the task; titles, cases and results are
  * Testiny's, so this tab can lag Testiny by one read and never disagree with it.
  */
-export function TestinyView({ session, project }: { session: WorkspaceSession; project: string }) {
+export function TestinyView({ session }: { session: WorkspaceSession }) {
 	const taskId = taskKeyOf(session);
 	const query = useSessionTestinyRuns(taskId);
 	const refresh = useRefreshTestinyRuns(taskId);
@@ -110,7 +110,7 @@ export function TestinyView({ session, project }: { session: WorkspaceSession; p
 		<div role="tabpanel" className="flex flex-col gap-3">
 			<div className="flex flex-col gap-2">
 				<div className="flex h-7 items-center justify-between gap-2">
-					<span className={EYEBROW}>Testiny · {query.data?.project || project}</span>
+					<span className={EYEBROW}>Testiny</span>
 					<Button
 						variant="ghost"
 						size="sm"
@@ -174,7 +174,7 @@ function LinkRunField({ taskId }: { taskId: string }) {
 				<Input
 					aria-label="Link a Testiny run"
 					className="h-7 text-xs"
-					placeholder="Run id or Testiny URL"
+					placeholder="Run URL, or run id"
 					value={ref}
 					onChange={(event) => {
 						setRef(event.target.value);
@@ -217,7 +217,7 @@ function EmptyState() {
 			<CircleDashed className="size-[30px] text-passive" strokeWidth={1.5} aria-hidden="true" />
 			<p className="text-[12.5px] text-foreground">No test runs linked</p>
 			<p className="max-w-[260px] text-[11.5px] leading-normal text-muted-foreground">
-				Agents link a run after you approve it. You can also paste a run id or URL above.
+				Agents link a run after you approve it. You can also paste a run URL or id above.
 			</p>
 		</div>
 	);
@@ -250,6 +250,7 @@ function RunCard({
 	provenance: (testCase: TestinyCase) => string | null;
 }) {
 	const id = `TR-${run.link.runId}`;
+	const project = run.link.project.key || run.link.project.name;
 	const unlink = useUnlinkTestinyRun(taskId);
 	const counts = summaryCounts(run);
 	const coverage = scriptCoverage(run.cases);
@@ -261,6 +262,11 @@ function RunCard({
 			<div className="flex flex-col gap-2 p-3">
 				<div className="flex flex-wrap items-center gap-1.5">
 					<span className="font-mono text-[11.5px] font-semibold text-foreground">{id}</span>
+					{project ? (
+						<span className="font-mono text-[11px] text-muted-foreground" title={run.link.project.name}>
+							{project}
+						</span>
+					) : null}
 					{counts.length > 0 ? (
 						<ul aria-label="Results" className="flex flex-wrap items-center gap-1">
 							{counts.map(({ status, count }) => {

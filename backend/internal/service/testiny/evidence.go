@@ -151,7 +151,7 @@ func (s *Service) evidenceTree(ctx context.Context, run testinyadapter.Run) (dom
 	var (
 		plan      testinyadapter.Ref
 		milestone testinyadapter.Milestone
-		project   testinyadapter.Project
+		project   domain.TestinyProject
 		results   testinyadapter.Results
 		g         errgroup.Group
 	)
