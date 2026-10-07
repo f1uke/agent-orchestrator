@@ -1,5 +1,5 @@
 import type { components } from "../../api/schema";
-import type { WorkspaceSession } from "../types/workspace";
+import { jiraKeyFromIssueId, type WorkspaceSession } from "../types/workspace";
 
 export type TestinyRun = components["schemas"]["TestinyRunView"];
 export type TestinyCase = components["schemas"]["TestinyCaseResult"];
@@ -229,6 +229,17 @@ export function caseFacts(detail: TestinyCaseDetail): [string, string][] {
 	if (feature) facts.push(["Feature", feature]);
 	if (detail.section) facts.push(["Section", detail.section]);
 	return facts;
+}
+
+/**
+ * The task's Jira key while the case is not linked to it as a requirement, so
+ * the panel can say what qa still has to link; null once it is, or when the
+ * task (`issueId`, e.g. "jira:MOBILITY-4839") has no Jira issue.
+ */
+export function unlinkedTaskIssue(detail: TestinyCaseDetail, issueId: string | undefined): string | null {
+	const key = jiraKeyFromIssueId(issueId);
+	if (!key) return null;
+	return detail.requirements.some((r) => r.key.toUpperCase() === key.toUpperCase()) ? null : key;
 }
 
 /** Testiny's FUNCTIONAL or NON_FUNCTIONAL, as a person writes it. */

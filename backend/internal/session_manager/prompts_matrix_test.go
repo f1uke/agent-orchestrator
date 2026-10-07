@@ -206,13 +206,22 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 				t.Errorf("%s: dev is not told results are qa's, missing %q:\n%s", c.name(), s, block)
 			}
 		}
-		if strings.Contains(block, "ao testiny result") {
-			t.Errorf("%s: dev is taught the command that records results:\n%s", c.name(), block)
+		for _, s := range []string{"ao testiny result", "testiny case link"} {
+			if strings.Contains(block, s) {
+				t.Errorf("%s: dev is taught %q, which is qa's:\n%s", c.name(), s, block)
+			}
 		}
 		return
 	}
 	for _, s := range []string{
-		"**Recording a result needs no yes**",
+		"**Recording a result or linking a case to this task's Jira issue needs no yes.**",
+		// Every case qa creates for the task, and every case in its linked runs,
+		// is linked to the task's Jira issue as a requirement.
+		"`testiny case link <case-id> <JIRA-KEY>`",
+		"every case you create, right after you create it, and every case in a run linked to this task",
+		"`issue` field of `ao session get \"$AO_CREW_ID\"`",
+		"no Jira issue, skip this step and say so in your report",
+		"the cases you linked to the Jira issue",
 		"never with `testiny run results set` directly",
 		`ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"]`,
 		"**PASSED** only when both checks hold, with no comment",

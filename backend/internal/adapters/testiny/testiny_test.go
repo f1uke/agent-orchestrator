@@ -351,8 +351,11 @@ func TestSetResultsStopsAtTheFirstFailureAndSaysWhatWasWritten(t *testing.T) {
 	}
 }
 
-func TestCaseReadsAStepsCaseInOneCall(t *testing.T) {
-	f := &fakeCLI{answers: map[string]Output{"case view 7166": ok(t, "case_view_7166.json")}}
+func TestCaseReadsAStepsCase(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{
+		"case view 7166":                 ok(t, "case_view_7166.json"),
+		"case show 7166 --with workitem": ok(t, "case_show_7166_workitem.json"),
+	}}
 	got, err := newClient(f, time.Now).Case(context.Background(), 7166)
 	if err != nil {
 		t.Fatalf("Case: %v", err)
@@ -377,19 +380,95 @@ func TestCaseReadsAStepsCaseInOneCall(t *testing.T) {
 			{N: 3, Action: "Look at the fund disclaimer message", Expected: "Disclaimer is shown as a notice message (not a normal chat bubble) with the full fund disclaimer text, readable and not truncated"},
 			{N: 4, Action: "If the disclaimer has a header image, check it", Expected: "Header image loads at the correct width, with no broken-image icon inside the text"},
 		},
+		Requirements: []domain.TestinyRequirement{},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Case =\n%+v\nwant\n%+v", got, want)
 	}
-	if len(f.calls) != 1 {
-		t.Fatalf("calls = %q, want one case view", f.calls)
+	if f.count("case view 7166") != 1 || f.count("case show 7166 --with workitem") != 1 || len(f.calls) != 2 {
+		t.Fatalf("calls = %q, want one case view and one case show", f.calls)
+	}
+}
+
+// A case's Jira links come from `case show --with workitem`, which `case view`
+// does not carry. Case 387 is linked to three issues.
+func TestCaseReadsItsRequirements(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{
+		"case view 387":                 ok(t, "case_view_387.json"),
+		"case show 387 --with workitem": ok(t, "case_show_387_workitem.json"),
+	}}
+	got, err := newClient(f, time.Now).Case(context.Background(), 387)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	want := []domain.TestinyRequirement{
+		{Key: "STAR-2254", Summary: "QA: Web - E-Coupon 3.0 - Search & Validate coupon by code API - Test", Status: "Done"},
+		{Key: "STAR-2253", Summary: "QA: Web - E-Coupon 3.0 -  Search & Validate coupon by code API - Design Test Case", Status: "Ready for UAT"},
+		{Key: "MOBILITY-4166", Summary: "[MOBILITY] Chat and notification tab adjustment", Status: "Discovering"},
+	}
+	if !reflect.DeepEqual(got.Requirements, want) {
+		t.Fatalf("Requirements =\n%+v\nwant\n%+v", got.Requirements, want)
+	}
+}
+
+// caseShow is the 387 `case show --with workitem` fixture with its links
+// changed by edit.
+func caseShow(t *testing.T, edit func(links []any) any) Output {
+	t.Helper()
+	var env struct {
+		Data map[string]any `json:"data"`
+		Meta any            `json:"meta"`
+	}
+	if err := json.Unmarshal(fixture(t, "case_show_387_workitem.json"), &env); err != nil {
+		t.Fatal(err)
+	}
+	env.Data["wi_tc_values"] = edit(env.Data["wi_tc_values"].([]any))
+	b, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Output{Stdout: b}
+}
+
+// A defect link is a bug found against the case, not what the case tests, and
+// a link whose issue Testiny could not name says nothing a person can act on.
+func TestCaseRequirementsLeaveOutDefectsAndUnnamedIssues(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{
+		"case view 387": ok(t, "case_view_387.json"),
+		"case show 387 --with workitem": caseShow(t, func(links []any) any {
+			links[0].(map[string]any)["workitem_type"] = "DEFECT"
+			links[1].(map[string]any)["workitem_key"] = nil
+			return links
+		}),
+	}}
+	got, err := newClient(f, time.Now).Case(context.Background(), 387)
+	if err != nil {
+		t.Fatalf("Case: %v", err)
+	}
+	if len(got.Requirements) != 1 || got.Requirements[0].Key != "MOBILITY-4166" {
+		t.Fatalf("Requirements = %+v, want only MOBILITY-4166", got.Requirements)
+	}
+}
+
+// The CLI reports a relation it could not read as null rather than failing the
+// read. Shown as no links, it would tell a person the case is not linked when
+// nobody knows, so the read is unavailable instead and can be retried.
+func TestCaseWhoseLinksCannotBeReadIsUnavailable(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{
+		"case view 387":                 ok(t, "case_view_387.json"),
+		"case show 387 --with workitem": caseShow(t, func([]any) any { return nil }),
+	}}
+	if _, err := newClient(f, time.Now).Case(context.Background(), 387); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("Case err = %v, want ErrUnavailable", err)
 	}
 }
 
 func TestCaseReadsTextCases(t *testing.T) {
 	f := &fakeCLI{answers: map[string]Output{
-		"case view 548": ok(t, "case_view_548.json"),
-		"case view 558": ok(t, "case_view_558.json"),
+		"case view 548":                 ok(t, "case_view_548.json"),
+		"case show 548 --with workitem": noLinks,
+		"case view 558":                 ok(t, "case_view_558.json"),
+		"case show 558 --with workitem": noLinks,
 	}}
 	c := newClient(f, time.Now)
 	got, err := c.Case(context.Background(), 548)
@@ -444,7 +523,7 @@ func TestCaseReadsABDDCase(t *testing.T) {
 	feature := "Feature: Chat\n  Scenario: Disclaimer\n    Given a chat room"
 	f := &fakeCLI{answers: map[string]Output{"case view 7166": caseView(t, func(c map[string]any) {
 		c["template"], c["steps"], c["bdd"] = "BDD", nil, feature
-	})}}
+	}), "case show 7166 --with workitem": noLinks}}
 	got, err := newClient(f, time.Now).Case(context.Background(), 7166)
 	if err != nil {
 		t.Fatalf("Case: %v", err)
@@ -469,7 +548,7 @@ func TestCaseToleratesCustomFieldsOfAnyShape(t *testing.T) {
 			"cf__remark":           "- first\n- second",
 			"cf__newfield":         map[string]any{"nested": []any{1, 2}},
 		}
-	})}}
+	}), "case show 7166 --with workitem": noLinks}}
 	got, err := newClient(f, time.Now).Case(context.Background(), 7166)
 	if err != nil {
 		t.Fatalf("Case: %v", err)
@@ -484,6 +563,9 @@ func TestCaseToleratesCustomFieldsOfAnyShape(t *testing.T) {
 		t.Fatalf("description %q remark %q", got.Description, got.Remark)
 	}
 }
+
+// noLinks is a `case show --with workitem` of a case with no Jira links.
+var noLinks = Output{Stdout: []byte(`{"data":{"id":1,"wi_tc_values":[]},"meta":null}`)}
 
 func TestAMissingCaseIsNotFound(t *testing.T) {
 	f := &fakeCLI{answers: map[string]Output{"case view 99999999": failed(t, "case_view_99999999.stderr.json", 3)}}

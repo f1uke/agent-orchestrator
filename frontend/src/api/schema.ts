@@ -3537,6 +3537,7 @@ export interface components {
             precondition: string;
             priority?: components["schemas"]["DomainTestinyCasePriority"];
             remark: string;
+            requirements: components["schemas"]["DomainTestinyRequirement"][];
             section: string;
             steps: components["schemas"]["DomainTestinyCaseStep"][];
             stepsText: string;
@@ -3556,6 +3557,13 @@ export interface components {
             action: string;
             expected: string;
             n: number;
+        };
+        DomainTestinyRequirement: {
+            /** @description The Jira issue key, e.g. MOBILITY-4839. */
+            key: string;
+            /** @description The issue's Jira status name, e.g. In Progress. */
+            status: string;
+            summary: string;
         };
         EndCrewRunInput: {
             /**

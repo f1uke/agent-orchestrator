@@ -40,6 +40,7 @@ import {
 	type TestinyFetchErrorKind,
 	type TestinyRun,
 	type TestinyStatus,
+	unlinkedTaskIssue,
 } from "../lib/testiny";
 import { cn } from "../lib/utils";
 import type { WorkspaceSession } from "../types/workspace";
@@ -76,6 +77,8 @@ export function TestinyView({ session, project }: { session: WorkspaceSession; p
 	const version = useTestinyRunsVersion(taskId);
 	const sessions = (useWorkspaceQuery().data ?? []).flatMap((w) => w.sessions);
 	const runs = query.data?.runs ?? [];
+	// The task's issue is the dev session's, which a qa's own may not carry.
+	const taskIssueId = sessions.find((s) => s.id === taskId)?.issueId ?? session.issueId;
 	const banner = sharedBlocker(runs);
 	const now = Date.now();
 
@@ -122,6 +125,7 @@ export function TestinyView({ session, project }: { session: WorkspaceSession; p
 						notice={runNotice(run, now, banner)}
 						linkedBy={`linked by ${linkedByLabel(run.link.linkedBy, sessions)} · ${ageLabel(run.link.createdAt, now)}`}
 						taskId={taskId}
+						taskIssueId={taskIssueId}
 						version={version}
 						provenance={(c) => provenanceLabel(c, now, sessions)}
 					/>
@@ -198,6 +202,7 @@ function EmptyState() {
 /** What every case row of one card needs to show and set its result. */
 type RowContext = {
 	taskId: string;
+	taskIssueId: string | undefined;
 	runId: number;
 	hold: ResultWriteHold;
 	provenance: (testCase: TestinyCase) => string | null;
@@ -208,6 +213,7 @@ function RunCard({
 	notice,
 	linkedBy,
 	taskId,
+	taskIssueId,
 	version,
 	provenance,
 }: {
@@ -215,6 +221,7 @@ function RunCard({
 	notice: string | null;
 	linkedBy: string;
 	taskId: string;
+	taskIssueId: string | undefined;
 	version: number;
 	provenance: (testCase: TestinyCase) => string | null;
 }) {
@@ -223,7 +230,7 @@ function RunCard({
 	const counts = summaryCounts(run);
 	const coverage = scriptCoverage(run.cases);
 	const { open, passed, hold } = useHeldOrder(run.cases, version);
-	const row: RowContext = { taskId, runId: run.link.runId, hold, provenance };
+	const row: RowContext = { taskId, taskIssueId, runId: run.link.runId, hold, provenance };
 
 	return (
 		<Card role="article" aria-label={`${id} ${run.title}`.trim()} className="gap-0 py-0 shadow-none">
@@ -568,7 +575,7 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 					{record.error.message}
 				</p>
 			) : null}
-			{expanded ? <CaseDetails id={detailsId} taskId={row.taskId} testCase={testCase} /> : null}
+			{expanded ? <CaseDetails id={detailsId} row={row} testCase={testCase} /> : null}
 		</li>
 	);
 }
@@ -621,8 +628,8 @@ function CommentField({
 }
 
 /** A case read in full from Testiny the first time its title is opened, under the title's own edge. */
-function CaseDetails({ id, taskId, testCase }: { id: string; taskId: string; testCase: TestinyCase }) {
-	const query = useTestinyCase(taskId, testCase.id);
+function CaseDetails({ id, row, testCase }: { id: string; row: RowContext; testCase: TestinyCase }) {
+	const query = useTestinyCase(row.taskId, testCase.id);
 	return (
 		<section
 			id={id}
@@ -647,7 +654,7 @@ function CaseDetails({ id, taskId, testCase }: { id: string; taskId: string; tes
 					</Button>
 				</div>
 			) : (
-				<CaseDetailBody detail={query.data} />
+				<CaseDetailBody detail={query.data} taskIssueId={row.taskIssueId} />
 			)}
 		</section>
 	);
@@ -656,12 +663,13 @@ function CaseDetails({ id, taskId, testCase }: { id: string; taskId: string; tes
 const DETAIL_TEXT = "text-[11.5px] leading-relaxed text-foreground [overflow-wrap:anywhere]";
 
 /** Every section the case fills, in the order a tester plays it; an empty one is left out. */
-function CaseDetailBody({ detail }: { detail: TestinyCaseDetail }) {
+function CaseDetailBody({ detail, taskIssueId }: { detail: TestinyCaseDetail; taskIssueId: string | undefined }) {
 	const chips = caseChips(detail);
 	return (
 		<>
 			{chips.length > 0 ? <CaseChips chips={chips} /> : null}
 			<CaseFacts facts={caseFacts(detail)} />
+			<Requirements detail={detail} taskIssueId={taskIssueId} />
 			{detail.testData ? (
 				<DetailSection title="Test data">
 					<p className={cn(DETAIL_TEXT, "font-mono text-[11px] whitespace-pre-wrap select-text")}>{detail.testData}</p>
@@ -720,6 +728,49 @@ function CaseChips({ chips }: { chips: CaseChip[] }) {
 				</li>
 			))}
 		</ul>
+	);
+}
+
+/**
+ * The Jira issues the case is linked to as a requirement, key beside summary
+ * and status the way the facts above sit beside their labels, and a quiet line
+ * while the task's own issue is not among them yet: qa links it.
+ */
+function Requirements({ detail, taskIssueId }: { detail: TestinyCaseDetail; taskIssueId: string | undefined }) {
+	const missing = unlinkedTaskIssue(detail, taskIssueId);
+	if (detail.requirements.length === 0 && !missing) return null;
+	return (
+		<DetailSection title="Requirements">
+			{detail.requirements.length > 0 ? (
+				<ul aria-label="Requirements" className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1">
+					{detail.requirements.map((r, index) => (
+						<li
+							key={index}
+							className="col-span-2 grid grid-cols-subgrid items-baseline text-[11.5px] text-muted-foreground [overflow-wrap:anywhere]"
+						>
+							<span className="font-mono text-[11px]">
+								<JiraKeys value={r.key} />
+							</span>
+							<span>
+								<span className="text-foreground">{r.summary}</span>{" "}
+								<span className="whitespace-nowrap">
+									<span className="text-passive" aria-hidden="true">
+										·
+									</span>{" "}
+									{r.status}
+								</span>
+							</span>
+						</li>
+					))}
+				</ul>
+			) : null}
+			{missing ? (
+				<p className="flex items-center gap-1.5 text-[11px] leading-snug text-muted-foreground">
+					<TriangleAlert className="size-3 shrink-0 text-warning" aria-hidden="true" />
+					Not linked to {missing} yet
+				</p>
+			) : null}
+		</DetailSection>
 	);
 }
 

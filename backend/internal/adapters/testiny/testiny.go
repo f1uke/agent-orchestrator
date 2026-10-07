@@ -220,9 +220,34 @@ func (c *Client) SetResults(ctx context.Context, run domain.TestinyRunID, projec
 }
 
 // Case reads one test case in full through `testiny case view`, which renders
-// its rich text as plain text that keeps its structure. A case that does not
-// exist is ErrNotFound.
+// its rich text as plain text that keeps its structure, and the Jira issues it
+// is linked to as a requirement through `testiny case show --with workitem`,
+// which view does not carry. The two are read at the same time. A case that
+// does not exist is ErrNotFound.
 func (c *Client) Case(ctx context.Context, id int64) (domain.TestinyCaseDetail, error) {
+	var (
+		reqs    []domain.TestinyRequirement
+		reqsErr error
+		wg      sync.WaitGroup
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		reqs, reqsErr = c.requirements(ctx, id)
+	}()
+	d, err := c.caseView(ctx, id)
+	wg.Wait()
+	if err != nil {
+		return domain.TestinyCaseDetail{}, err
+	}
+	if reqsErr != nil {
+		return domain.TestinyCaseDetail{}, reqsErr
+	}
+	d.Requirements = reqs
+	return d, nil
+}
+
+func (c *Client) caseView(ctx context.Context, id int64) (domain.TestinyCaseDetail, error) {
 	var raw []struct {
 		ID           int64        `json:"id"`
 		Title        string       `json:"title"`
@@ -271,6 +296,34 @@ func (c *Client) Case(ctx context.Context, id int64) (domain.TestinyCaseDetail, 
 		d.Priority = &p
 	}
 	return d, nil
+}
+
+// requirements reads the Jira issues a case is linked to as a requirement. A
+// defect link is left out, and so is a link whose issue Testiny could not name.
+func (c *Client) requirements(ctx context.Context, id int64) ([]domain.TestinyRequirement, error) {
+	var raw struct {
+		Links *[]struct {
+			Type    string `json:"workitem_type"`
+			Key     string `json:"workitem_key"`
+			Summary string `json:"workitem_summary"`
+			Status  string `json:"workitem_status"`
+		} `json:"wi_tc_values"`
+	}
+	if err := c.call(ctx, &raw, "case", "show", idArg(id), "--with", "workitem"); err != nil {
+		return nil, err
+	}
+	// The CLI reports a relation it could not read as null, and no links would
+	// then claim the case is unlinked when nobody knows.
+	if raw.Links == nil {
+		return nil, fmt.Errorf("%w: testiny case show %d could not read the case's Jira links", ErrUnavailable, id)
+	}
+	reqs := []domain.TestinyRequirement{}
+	for _, l := range *raw.Links {
+		if l.Type == "REQUIREMENT" && l.Key != "" {
+			reqs = append(reqs, domain.TestinyRequirement{Key: l.Key, Summary: l.Summary, Status: l.Status})
+		}
+	}
+	return reqs, nil
 }
 
 type caseStep struct {

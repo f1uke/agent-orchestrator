@@ -35,8 +35,13 @@ const dev: WorkspaceSession = {
 };
 const qa: WorkspaceSession = { ...dev, id: "task-1-qa", crew: { id: "task-1", role: "qa", hasRun: true } };
 
+/** The task's tracker issue, as the dev session carries it. */
+let taskIssueId: string | undefined;
+
 vi.mock("../hooks/useWorkspaceQuery", () => ({
-	useWorkspaceQuery: () => ({ data: [{ id: "mobile", sessions: [dev, qa] } as unknown as WorkspaceSummary] }),
+	useWorkspaceQuery: () => ({
+		data: [{ id: "mobile", sessions: [{ ...dev, issueId: taskIssueId }, qa] } as unknown as WorkspaceSummary],
+	}),
 }));
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
@@ -76,6 +81,7 @@ function renderView(session: WorkspaceSession = dev) {
 const card = (runId: number) => screen.getByRole("article", { name: new RegExp(`^TR-${runId}\\b`) });
 
 beforeEach(() => {
+	taskIssueId = undefined;
 	getMock.mockReset();
 	postMock.mockReset();
 	deleteMock.mockReset();
@@ -646,6 +652,7 @@ describe("TestinyView case details", () => {
 		stepsText: "",
 		expectedText: "",
 		bdd: "",
+		requirements: [],
 		...over,
 	});
 
@@ -664,6 +671,7 @@ describe("TestinyView case details", () => {
 		],
 		description: "Covers the sheet with nothing in it",
 		remark: "Found on 4.12",
+		requirements: [{ key: "MOBILITY-4839", summary: "Share sheet empty state", status: "In Progress" }], // a Jira key, not a secret: gitleaks:allow
 	});
 
 	/** The runs list, case details by id (a string is the daemon's refusal), and the Jira address setting. */
@@ -742,7 +750,7 @@ describe("TestinyView case details", () => {
 		expect(caseReads()).toEqual([[CASE, { params: { path: { sessionId: "task-1", caseId: "1" } } }]]);
 	});
 
-	it("shows the case's facts, test data, precondition, steps, description and remark in that order", async () => {
+	it("shows the case's facts, requirements, test data, precondition, steps, description and remark in that order", async () => {
 		const user = userEvent.setup();
 		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
 		renderView();
@@ -752,6 +760,7 @@ describe("TestinyView case details", () => {
 		await details.findByText("Open a fund page");
 
 		expect(details.getAllByRole("heading").map((h) => h.textContent)).toEqual([
+			"Requirements",
 			"Test data",
 			"Precondition",
 			"Steps",
@@ -854,7 +863,8 @@ describe("TestinyView case details", () => {
 		renderView();
 
 		await user.click(await titleButton("disclaimer"));
-		const link = await within(await panel("disclaimer")).findByRole("link", { name: "MOBILITY-4839" });
+		const chips = await within(await panel("disclaimer")).findByRole("list", { name: "About this case" });
+		const link = within(chips).getByRole("link", { name: "MOBILITY-4839" });
 		expect(link).toHaveAttribute("href", "https://example.atlassian.net/browse/MOBILITY-4839");
 	});
 
@@ -865,8 +875,62 @@ describe("TestinyView case details", () => {
 
 		await user.click(await titleButton("disclaimer"));
 		const details = within(await panel("disclaimer"));
-		expect(await details.findByText("MOBILITY-4839")).toBeInTheDocument();
+		const chips = await details.findByRole("list", { name: "About this case" });
+		expect(within(chips).getByText("MOBILITY-4839")).toBeInTheDocument();
+		expect(within(details.getByRole("list", { name: "Requirements" })).getByText("MOBILITY-4839")).toBeInTheDocument();
 		expect(details.queryByRole("link")).toBeNull();
+	});
+
+	it("lists the Jira issues the case is linked to as requirements, each key linked to the Jira address", async () => {
+		const user = userEvent.setup();
+		taskIssueId = "jira:MOBILITY-4839";
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full }, "https://example.atlassian.net");
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		const details = within(await panel("disclaimer"));
+		const list = await details.findByRole("list", { name: "Requirements" });
+		const items = within(list).getAllByRole("listitem");
+		expect(items).toHaveLength(1);
+		expect(items[0].firstElementChild).toHaveTextContent("MOBILITY-4839");
+		expect(items[0].lastElementChild).toHaveTextContent("Share sheet empty state · In Progress");
+		expect(within(list).getByRole("link", { name: "MOBILITY-4839" })).toHaveAttribute(
+			"href",
+			"https://example.atlassian.net/browse/MOBILITY-4839",
+		);
+		expect(details.queryByText(/Not linked to/)).toBeNull();
+	});
+
+	it("warns when the case is not linked to the task's Jira issue yet, whichever member is open", async () => {
+		const user = userEvent.setup();
+		taskIssueId = "jira:MOBILITY-4839";
+		const other = { key: "MOBILITY-4166", summary: "Chat tab adjustment", status: "Discovering" };
+		serveCases([tc(1, "FAILED", "disclaimer"), tc(2, "NOTRUN", "cold launch")], {
+			1: detail(1, { requirements: [other] }),
+			2: detail(2),
+		});
+		renderView(qa);
+
+		await user.click(await titleButton("disclaimer"));
+		await user.click(await titleButton("cold launch"));
+		const linkedElsewhere = within(await panel("disclaimer"));
+		expect(await linkedElsewhere.findByText("Not linked to MOBILITY-4839 yet")).toBeInTheDocument();
+		expect(linkedElsewhere.getByRole("list", { name: "Requirements" })).toHaveTextContent("MOBILITY-4166");
+		const unlinked = within(await panel("cold launch"));
+		expect(await unlinked.findByText("Not linked to MOBILITY-4839 yet")).toBeInTheDocument();
+		expect(unlinked.queryByRole("list", { name: "Requirements" })).toBeNull();
+	});
+
+	it("has no requirements section when the case has none and the task has no Jira issue", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "NOTRUN", "cold launch")], { 1: detail(1, { testData: "uat account" }) });
+		renderView();
+
+		await user.click(await titleButton("cold launch"));
+		const details = within(await panel("cold launch"));
+		await details.findByText("uat account");
+		expect(details.queryByRole("heading", { name: "Requirements" })).toBeNull();
+		expect(details.queryByText(/Not linked to/)).toBeNull();
 	});
 
 	it("says why a case could not be read, and reads it again on Retry", async () => {

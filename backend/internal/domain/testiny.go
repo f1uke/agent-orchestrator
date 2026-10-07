@@ -345,4 +345,15 @@ type TestinyCaseDetail struct {
 	ExpectedText string `json:"expectedText"`
 	// BDD is a BDD case's Gherkin feature file.
 	BDD string `json:"bdd"`
+	// Requirements are the Jira issues the case is linked to as a requirement,
+	// in Testiny's order.
+	Requirements []TestinyRequirement `json:"requirements"`
+}
+
+// TestinyRequirement is a Jira issue a case is linked to as a requirement, as
+// Testiny last read it from Jira.
+type TestinyRequirement struct {
+	Key     string `json:"key" description:"The Jira issue key, e.g. MOBILITY-4839."`
+	Summary string `json:"summary"`
+	Status  string `json:"status" description:"The issue's Jira status name, e.g. In Progress."`
 }

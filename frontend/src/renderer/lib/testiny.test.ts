@@ -12,6 +12,7 @@ import {
 	sharedBlocker,
 	summaryCounts,
 	textBlocks,
+	unlinkedTaskIssue,
 	withCase,
 	withResult,
 	type TestinyCase,
@@ -303,6 +304,7 @@ const detail = (over: Partial<TestinyCaseDetail> = {}): TestinyCaseDetail => ({
 	stepsText: "",
 	expectedText: "",
 	bdd: "",
+	requirements: [],
 	...over,
 });
 
@@ -350,6 +352,26 @@ describe("caseFacts", () => {
 	it("leaves out what the case does not set", () => {
 		expect(caseFacts(detail())).toEqual([]);
 		expect(caseFacts(detail({ subFeatures: "Empty state" }))).toEqual([["Feature", "Empty state"]]);
+	});
+});
+
+describe("unlinkedTaskIssue", () => {
+	const linkedTo = (...keys: string[]) =>
+		detail({ requirements: keys.map((key) => ({ key, summary: `summary of ${key}`, status: "In Progress" })) });
+
+	it("names the task's Jira issue while the case is not linked to it", () => {
+		expect(unlinkedTaskIssue(linkedTo(), "jira:MOBILITY-4839")).toBe("MOBILITY-4839");
+		expect(unlinkedTaskIssue(linkedTo("MOBILITY-4166"), "jira:MOBILITY-4839")).toBe("MOBILITY-4839");
+	});
+
+	it("is null once the case is linked to it, whatever the key's case", () => {
+		expect(unlinkedTaskIssue(linkedTo("MOBILITY-4166", "MOBILITY-4839"), "jira:MOBILITY-4839")).toBeNull();
+		expect(unlinkedTaskIssue(linkedTo("mobility-4839"), "jira:MOBILITY-4839")).toBeNull();
+	});
+
+	it("is null when the task has no Jira issue", () => {
+		expect(unlinkedTaskIssue(linkedTo(), undefined)).toBeNull();
+		expect(unlinkedTaskIssue(linkedTo(), "gh:123")).toBeNull();
 	});
 });
 

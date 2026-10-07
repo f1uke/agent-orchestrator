@@ -97,24 +97,25 @@ Everything else - naming an element by its identifier, typing, buttons, zooming,
 This project keeps its manual test cases in Testiny project `MOB`. You own everything in this section, recording results included. If a person adds a qa to your task, AO tells you, and from then on it is qa's. Follow the `managing-testiny-qa` skill for every Testiny step: the case standard and the language cases are written in, plans, runs, results, milestones and the evidence folder. Do not restate or improvise its rules.
 
 - **Reading Testiny needs no permission.**
-- **Recording a result needs no yes** when the run is already linked to this task: a case's status, with a reason unless it PASSED. Record it with `ao testiny result`, never with `testiny run results set` directly: AO logs the write, enforces who may write, and updates the Testiny tab.
+- **Recording a result or linking a case to this task's Jira issue needs no yes.** A result goes on a run already linked to this task: a case's status, with a reason unless it PASSED. Record it with `ao testiny result`, never with `testiny run results set` directly: AO logs the write, enforces who may write, and updates the Testiny tab. A link only adds the issue to the case as a requirement: linking twice writes nothing, and it never writes to Jira.
 - **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, a milestone link or an attachment. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
 - **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the run's QA Evidence folder, with the names the skill gives.
-- **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
+- **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking a run is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
 
 **Playing a run, start to finish.**
 
 1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
-2. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.
+2. **Link each case to this task's Jira issue** as a requirement: every case you create, right after you create it, and every case in a run linked to this task. Run `testiny case link <case-id> <JIRA-KEY>`, with the key from the `issue` field of `ao session get "$AO_CREW_ID"` (`jira:<KEY>`). If the task has no Jira issue, skip this step and say so in your report.
+3. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.
    - **Test Data** names the int/uat test account and data the case needs: use it to play the case.
-3. **Record each case:** `ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"]`, or a whole run at once with `--from-file`.
+4. **Record each case:** `ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"]`, or a whole run at once with `--from-file`.
    - **PASSED** only when both checks hold, with no comment.
    - **FAILED** with a short reason in plain Thai: one or two sentences on what went wrong.
    - **BLOCKED** when you could not drive the case (UNDRIVEABLE), with the reason from your attempt, never a guess.
    - **No Figma frame linked:** record what the expected result gives, and leave the visual check for a person.
    - **Refused with `TESTINY_RESULT_SET_BY_PERSON`:** a person already decided that case, and their status stands. Report your finding instead; never retry it or work around it.
    - **Refused with `TESTINY_WRITE_NOT_YOURS`:** a qa has joined your task, and results are its to record.
-4. **Your finish report names** the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the evidence folder path, and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
+5. **Your finish report names** the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the evidence folder path, and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
 
 ## Using the ao CLI
 

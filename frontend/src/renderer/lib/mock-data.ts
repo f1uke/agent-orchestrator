@@ -434,6 +434,7 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				activity: { state: "idle", lastActivityAt: minutesAgo(8) },
 				prs: [demoPr(327, "open", "passing", "approved")],
 				taskSize: "standard",
+				issueId: "jira:DEMO-150",
 				crew: { id: "demo-qa-testing", role: "dev", hasRun: true },
 			},
 			{
@@ -1053,6 +1054,22 @@ export const mockSessionJiraContexts: Record<string, components["schemas"]["Jira
 					],
 				},
 			],
+		},
+	},
+	// The Testiny demo task: its cases are linked to this issue as a requirement.
+	"demo-qa-testing": {
+		sessionId: "demo-qa-testing",
+		linked: true,
+		issue: {
+			key: "DEMO-150",
+			url: "https://example.atlassian.net/browse/DEMO-150",
+			type: "Story",
+			title: "Tighten the share sheet's empty state",
+			status: "In QA",
+			statusCategory: "indeterminate",
+			statusColor: "yellow",
+			priority: "Medium",
+			assignee: "Alex Rivera",
 		},
 	},
 };
@@ -1918,9 +1935,10 @@ export function mockRecordTestinyResult(
 
 /**
  * A case's details in the preview, FAKE data only (the real field holds int/uat
- * accounts). TC-7102 is a STEPS case with every section, TC-7104 a TEXT case,
- * TC-7106 one Testiny would not answer for; every other demo case gets a short
- * STEPS case so any title opens something.
+ * accounts). TC-7102 is a STEPS case with every section, linked to the task's
+ * Jira issue; TC-7104 a TEXT case not linked to it yet; TC-7106 one Testiny
+ * would not answer for; every other demo case gets a short STEPS case so any
+ * title opens something.
  */
 export function mockTestinyCase(taskId: string, caseId: number): components["schemas"]["DomainTestinyCaseDetail"] {
 	const found = mockTestinyRuns(taskId)
@@ -1935,7 +1953,7 @@ export function mockTestinyCase(taskId: string, caseId: number): components["sch
 		type: "FUNCTIONAL",
 		template: "STEPS",
 		platforms: ["iOS"],
-		jira: "MOBILITY-4839",
+		jira: "DEMO-150",
 		features: "Share",
 		subFeatures: "Empty state",
 		section: "",
@@ -1948,6 +1966,7 @@ export function mockTestinyCase(taskId: string, caseId: number): components["sch
 		stepsText: "",
 		expectedText: "",
 		bdd: "",
+		requirements: [],
 	};
 	if (caseId === 7102) {
 		return {
@@ -1974,6 +1993,10 @@ export function mockTestinyCase(taskId: string, caseId: number): components["sch
 			],
 			description: "Covers the share sheet for an account that has nothing to share yet.",
 			remark: 'Design: Share sheet v3, frame "Empty".',
+			requirements: [
+				{ key: "DEMO-150", summary: "Tighten the share sheet's empty state", status: "In QA" },
+				{ key: "UX-42", summary: "Empty state copy and illustration", status: "Done" },
+			],
 		};
 	}
 	if (caseId === 7104) {

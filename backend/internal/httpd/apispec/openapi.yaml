@@ -10277,6 +10277,10 @@ components:
           $ref: '#/components/schemas/DomainTestinyCasePriority'
         remark:
           type: string
+        requirements:
+          items:
+            $ref: '#/components/schemas/DomainTestinyRequirement'
+          type: array
         section:
           type: string
         steps:
@@ -10317,6 +10321,7 @@ components:
       - stepsText
       - expectedText
       - bdd
+      - requirements
       type: object
     DomainTestinyCasePriority:
       properties:
@@ -10340,6 +10345,21 @@ components:
       - "n"
       - action
       - expected
+      type: object
+    DomainTestinyRequirement:
+      properties:
+        key:
+          description: The Jira issue key, e.g. MOBILITY-4839.
+          type: string
+        status:
+          description: The issue's Jira status name, e.g. In Progress.
+          type: string
+        summary:
+          type: string
+      required:
+      - key
+      - summary
+      - status
       type: object
     EndCrewRunInput:
       properties:

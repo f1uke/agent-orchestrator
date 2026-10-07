@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 
 // dev:web (VITE_NO_ELECTRON=1) serves lib/mock-data.ts. ao-demo sets
 // testinyProject MOB, and its "demo-qa-testing" crew has three linked runs
-// (mockTestinyRuns). docs-site sets no Testiny project, so its tasks get no tab.
+// (mockTestinyRuns) and the Jira issue DEMO-150. docs-site sets no Testiny
+// project, so its tasks get no tab.
 // The preview has no daemon: linking a run posts nowhere, and a result set from
 // the tab is written into the mock run in memory (mockRecordTestinyResult).
 
@@ -101,6 +102,7 @@ test("a case's title opens its test data, precondition and steps under it", asyn
 
 	const details = run.getByRole("region", { name: "[Share] Empty state shows when there is nothing to share details" });
 	await expect(details.getByRole("heading")).toHaveText([
+		"Requirements",
 		"Test data",
 		"Precondition",
 		"Steps",
@@ -122,6 +124,37 @@ test("a case's title opens its test data, precondition and steps under it", asyn
 
 	await title.click();
 	await expect(details).toHaveCount(0);
+});
+
+test("a case lists the Jira issues it is linked to, and says when the task's is not one yet", async ({ page }) => {
+	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing-qa");
+
+	const inspector = page.locator("#inspector");
+	await inspector.getByRole("tab", { name: "Testiny" }).click();
+	const run = inspector.getByRole("article").first();
+
+	const linkedTitle = "[Share] Empty state shows when there is nothing to share";
+	await run.getByRole("button", { name: linkedTitle }).click();
+	const linked = run.getByRole("region", { name: `${linkedTitle} details` });
+	const requirements = linked.getByRole("list", { name: "Requirements" }).getByRole("listitem");
+	await expect(requirements).toHaveText([
+		"DEMO-150Tighten the share sheet's empty state · In QA",
+		"UX-42Empty state copy and illustration · Done",
+	]);
+	// Each summary starts on one edge, past the widest key, as the facts above do.
+	const summaryX = async (n: number) =>
+		(await requirements
+			.nth(n)
+			.getByText(/^(Tighten|Empty)/)
+			.boundingBox())!.x;
+	expect(await summaryX(0)).toBe(await summaryX(1));
+	await expect(linked.getByText(/Not linked to/)).toHaveCount(0);
+
+	const unlinkedTitle = "[Share] Empty state survives a cold launch";
+	await run.getByRole("button", { name: unlinkedTitle }).click();
+	const unlinked = run.getByRole("region", { name: `${unlinkedTitle} details` });
+	await expect(unlinked.getByText("Not linked to DEMO-150 yet")).toBeVisible();
+	await expect(unlinked.getByRole("list", { name: "Requirements" })).toHaveCount(0);
 });
 
 test("a case Testiny would not answer for says why and offers a retry", async ({ page }) => {
