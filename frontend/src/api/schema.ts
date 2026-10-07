@@ -4693,7 +4693,7 @@ export interface components {
         };
         SimDoctorCheckView: {
             message: string;
-            /** @description device, lease, app or proxy CA. */
+            /** @description device, lease, app, debugger or proxy CA. */
             name: string;
             /** @description OK, WARN or FAIL. Only FAIL makes the report not ok. */
             status: string;

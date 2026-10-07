@@ -15,6 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simhealth"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simproc"
 )
 
 const doctorUDID = "AAAAAAAA-0000-0000-0000-000000000001"
@@ -48,7 +49,8 @@ func doctorReaders(t *testing.T, asked *[]domain.SessionID) *simhealth.Readers {
 			*asked = append(*asked, id)
 			return nil, nil
 		},
-		Trusted: simhealth.TrustStoreHas,
+		Trusted:   simhealth.TrustStoreHas,
+		Processes: func(context.Context) (simproc.Table, error) { return nil, nil },
 	}
 }
 
@@ -77,7 +79,7 @@ func TestSimDoctor_ReportsEveryLineForTheSessionInThePath(t *testing.T) {
 		t.Fatalf("decode %s: %v", rec.Body.String(), err)
 	}
 	want := []struct{ name, status string }{
-		{"device", "OK"}, {"lease", "OK"}, {"app", "WARN"}, {"proxy CA", "WARN"},
+		{"device", "OK"}, {"lease", "OK"}, {"app", "WARN"}, {"debugger", "OK"}, {"proxy CA", "WARN"},
 	}
 	if len(got.Checks) != len(want) {
 		t.Fatalf("checks = %+v, want %d lines", got.Checks, len(want))
@@ -107,7 +109,7 @@ func TestSimDoctor_TheQueryReachesTheChecks(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode %s: %v", rec.Body.String(), err)
 	}
-	if got.OK || len(got.Checks) != 4 || got.Checks[1].Status != "FAIL" || got.Checks[2].Status != "FAIL" {
+	if got.OK || len(got.Checks) != 5 || got.Checks[1].Status != "FAIL" || got.Checks[2].Status != "FAIL" {
 		t.Fatalf("want the lease (another session's) and app (not installed) lines failing, got %+v", got)
 	}
 }

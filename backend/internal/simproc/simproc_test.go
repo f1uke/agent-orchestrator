@@ -149,8 +149,11 @@ func TestHold_SIGSTOPSaysContinue(t *testing.T) {
 	if !held || hold.Kind != HeldBySIGSTOP {
 		t.Fatalf("a T app is not held by SIGSTOP: %+v %v", hold, held)
 	}
-	if got := hold.Describe(); !strings.Contains(got, "stopped by SIGSTOP") || !strings.Contains(got, "`kill -CONT 601`") {
-		t.Fatalf("Describe() = %q", got)
+	got := hold.Describe()
+	for _, want := range []string{"stopped by SIGSTOP", "`kill -CONT 601`", "an lldb expression that was interrupted", "`process detach --keep-stopped`"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Describe() = %q, missing %q", got, want)
+		}
 	}
 }
 
@@ -213,7 +216,9 @@ func TestRead_RunsPsOnceAndParsesIt(t *testing.T) {
 		t.Fatal("the table read has no Nimbus")
 	}
 
-	failing := func(context.Context, string, ...string) ([]byte, error) { return []byte("ps: boom"), errors.New("exit 1") }
+	failing := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("ps: boom"), errors.New("exit 1")
+	}
 	if _, err := Read(t.Context(), failing); err == nil || !strings.Contains(err.Error(), "ps: boom") {
 		t.Fatalf("a failed ps is not an error naming what it said: %v", err)
 	}

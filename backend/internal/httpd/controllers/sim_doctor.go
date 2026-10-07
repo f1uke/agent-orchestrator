@@ -23,7 +23,7 @@ type SimDoctorQuery struct {
 
 // SimDoctorCheckView is one line of the report.
 type SimDoctorCheckView struct {
-	Name    string `json:"name" description:"device, lease, app or proxy CA."`
+	Name    string `json:"name" description:"device, lease, app, debugger or proxy CA."`
 	Status  string `json:"status" description:"OK, WARN or FAIL. Only FAIL makes the report not ok."`
 	Message string `json:"message"`
 }

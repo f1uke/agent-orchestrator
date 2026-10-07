@@ -199,7 +199,10 @@ const xcodeDebugger = "lldb-rpc-server"
 // (lldb 900)" or "stopped by SIGSTOP".
 func (h Hold) State() string {
 	if h.Kind == HeldBySIGSTOP {
-		return "stopped by SIGSTOP"
+		// Measured: an lldb expression that timed out left the app `Ts` after
+		// lldb detached, and bringing it to the foreground did not clear it.
+		return "stopped by SIGSTOP (most likely an lldb expression that was interrupted, " +
+			"or `process detach --keep-stopped`)"
 	}
 	if h.Debugserver == nil {
 		return fmt.Sprintf("attached by a debugger (pid %d)", h.App.PPID)
