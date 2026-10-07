@@ -14,10 +14,13 @@ func (s *Store) InsertTestinyRunLink(ctx context.Context, l domain.TestinyRunLin
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if err := s.qr.InsertTestinyRunLink(ctx, gen.InsertTestinyRunLinkParams{
-		SessionID: l.SessionID,
-		RunID:     l.RunID,
-		LinkedBy:  l.LinkedBy,
-		CreatedAt: l.CreatedAt,
+		SessionID:   l.SessionID,
+		RunID:       l.RunID,
+		ProjectID:   l.Project.ID,
+		ProjectKey:  l.Project.Key,
+		ProjectName: l.Project.Name,
+		LinkedBy:    l.LinkedBy,
+		CreatedAt:   l.CreatedAt,
 	}); err != nil {
 		return fmt.Errorf("link %s to %s: %w", l.RunID, l.SessionID, err)
 	}
@@ -43,7 +46,26 @@ func (s *Store) ListTestinyRunLinks(ctx context.Context, sessionID domain.Sessio
 	}
 	links := make([]domain.TestinyRunLink, len(rows))
 	for i, r := range rows {
-		links[i] = domain.TestinyRunLink{SessionID: r.SessionID, RunID: r.RunID, LinkedBy: r.LinkedBy, CreatedAt: r.CreatedAt.UTC()}
+		links[i] = domain.TestinyRunLink{
+			SessionID: r.SessionID,
+			RunID:     r.RunID,
+			Project:   domain.TestinyProject{ID: r.ProjectID, Key: r.ProjectKey, Name: r.ProjectName},
+			LinkedBy:  r.LinkedBy,
+			CreatedAt: r.CreatedAt.UTC(),
+		}
 	}
 	return links, nil
+}
+
+// FillTestinyRunLinkProject records the run's Testiny project on every link of
+// the run made before AO stored it. A link that has its project keeps it.
+func (s *Store) FillTestinyRunLinkProject(ctx context.Context, runID domain.TestinyRunID, p domain.TestinyProject) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.qr.FillTestinyRunLinkProject(ctx, gen.FillTestinyRunLinkProjectParams{
+		ProjectID: p.ID, ProjectKey: p.Key, ProjectName: p.Name, RunID: runID,
+	}); err != nil {
+		return fmt.Errorf("fill the project of %s: %w", runID, err)
+	}
+	return nil
 }

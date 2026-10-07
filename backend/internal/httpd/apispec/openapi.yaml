@@ -10657,6 +10657,20 @@ components:
       - action
       - expected
       type: object
+    DomainTestinyProject:
+      properties:
+        id:
+          format: int64
+          type: integer
+        key:
+          type: string
+        name:
+          type: string
+      required:
+      - id
+      - key
+      - name
+      type: object
     DomainTestinyRequirement:
       properties:
         key:
@@ -14035,6 +14049,8 @@ components:
           type: string
         linkedBy:
           type: string
+        project:
+          $ref: '#/components/schemas/DomainTestinyProject'
         runId:
           $ref: '#/components/schemas/TestinyRunID'
         sessionId:
@@ -14042,6 +14058,7 @@ components:
       required:
       - sessionId
       - runId
+      - project
       - linkedBy
       - createdAt
       type: object
