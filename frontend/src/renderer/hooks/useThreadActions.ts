@@ -11,9 +11,7 @@ function patchGroups(
 	fn: (thread: PRCommentGroup["threads"][number]) => PRCommentGroup["threads"][number],
 ): PRCommentGroup[] {
 	return (groups ?? []).map((g) =>
-		g.prUrl !== prUrl
-			? g
-			: { ...g, threads: g.threads.map((t) => (t.threadId === threadId ? fn(t) : t)) },
+		g.prUrl !== prUrl ? g : { ...g, threads: g.threads.map((t) => (t.threadId === threadId ? fn(t) : t)) },
 	);
 }
 
