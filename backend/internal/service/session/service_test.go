@@ -538,6 +538,11 @@ type fakeCommander struct {
 	preparedTodo     bool
 	startedTodo      []domain.SessionID
 	updatedTodo      []domain.SessionID
+	// liveAgents are the terminated sessions whose agent still runs; adopting one
+	// marks it live in adoptStore. adoptAsked is every session asked.
+	liveAgents map[domain.SessionID]bool
+	adoptStore *fakeStore
+	adoptAsked []domain.SessionID
 }
 
 func (f *fakeCommander) Spawn(_ context.Context, cfg ports.SpawnConfig) (domain.SessionRecord, error) {
@@ -651,6 +656,16 @@ func (f *fakeCommander) Restart(_ context.Context, id domain.SessionID) (domain.
 	}
 	f.restarted = append(f.restarted, id)
 	return f.restartRecord, nil
+}
+func (f *fakeCommander) AdoptLiveAgent(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
+	f.adoptAsked = append(f.adoptAsked, id)
+	if !f.liveAgents[id] {
+		return domain.SessionRecord{}, false, nil
+	}
+	rec := f.adoptStore.sessions[id]
+	rec.IsTerminated = false
+	f.adoptStore.sessions[id] = rec
+	return rec, true, nil
 }
 func (f *fakeCommander) RetireForReplacement(_ context.Context, id domain.SessionID) error {
 	if f.retireErr != nil {

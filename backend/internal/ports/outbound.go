@@ -151,6 +151,15 @@ type RuntimeConfig struct {
 	ExitStatusFile string
 }
 
+// EnvAgentParentPID names the variable a runtime exports into the agent's
+// environment holding the pid of the process that launches the agent: the
+// pane's leader shell, whose direct child the agent is. Everything the agent
+// starts inherits the same value, so a process whose parent is NOT that pid is
+// not the session's agent - a `claude` run from the agent's own shell tool, a
+// background session another daemon hosts, or an agent orphaned when its pane
+// was destroyed. `ao hooks` uses it to ignore their callbacks.
+const EnvAgentParentPID = "AO_AGENT_PARENT_PID"
+
 // RuntimeHandle identifies a live runtime instance. Its ID is opaque outside
 // the concrete runtime adapter.
 type RuntimeHandle struct {
