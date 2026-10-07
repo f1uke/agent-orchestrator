@@ -120,6 +120,13 @@ var simPromptDecisions = map[string]bool{
 	// agent driving by hand gets wrong unprompted; the commands it would name
 	// (boot, claim, install) are already taught here.
 	"doctor": false,
+	// The debugging surface: the dev prompt points at it, and each command
+	// states its own hazards (a held app, a relaunch that ends a capture) at
+	// the moment of use.
+	"pid":     false,
+	"lldb":    false,
+	"console": false,
+	"crashes": false,
 
 	// Flags, keyed "<command> --<flag>", for prompt-worthy commands only: a
 	// flag on an omitted command is covered by the command's own decision.
@@ -164,6 +171,9 @@ var simPromptDecisions = map[string]bool{
 	"install --ttl": false,
 	"launch --ttl":  false,
 	"run --ttl":     false,
+	// `--console` is debugging surface too; the dev prompt points at it.
+	"launch --console": false,
+	"run --console":    false,
 	// `run --scheme` IS in the prompt because on a real project it is not
 	// optional: several schemes is the normal shape of an iOS app (Dev, Staging,
 	// Release), and `ao sim run` refuses rather than guesses between them. An
@@ -286,6 +296,13 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	"run --scheme":        scriptTeaches,
 	"run --configuration": scriptOmits,
 	"run --ttl":           scriptOmits,
+	// Debugging an app is not how a script-only project reads it; the ao
+	// skill page covers it for the developer who needs it.
+	"run --console": scriptOmits,
+	"pid":           scriptOmits,
+	"lldb":          scriptOmits,
+	"console":       scriptOmits,
+	"crashes":       scriptOmits,
 	// `install` is named where the lease bullet says which commands take the
 	// lease as they install - the alternative an agent reaches for is a raw
 	// `simctl install`.

@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simproc"
@@ -32,6 +34,31 @@ func (c *commandContext) heldSimApp(ctx context.Context, pid int) (simproc.Hold,
 		return simproc.Hold{}, false
 	}
 	return table.HoldOf(app)
+}
+
+// refuseHeldSimApps refuses a flow run while any app on the device is held by
+// a debugger or a SIGSTOP: a held app answers no accessibility query, so the
+// flow would fail for a reason it cannot name, and a breakpoint hit mid-flow
+// freezes it. A table that cannot be read is said and does not block the run.
+func (c *commandContext) refuseHeldSimApps(ctx context.Context, errOut io.Writer, device simDevice) error {
+	if device.DataPath == "" {
+		return nil
+	}
+	table, err := c.readSimProcesses(ctx)
+	if err != nil {
+		_, werr := fmt.Fprintf(errOut, "Warning: could not check whether an app on %s is held by a debugger: %v\n", device.Name, err)
+		return werr
+	}
+	holds := table.Holds(device.DataPath)
+	if len(holds) == 0 {
+		return nil
+	}
+	described := make([]string, 0, len(holds))
+	for _, h := range holds {
+		described = append(described, "  "+h.Describe())
+	}
+	return fmt.Errorf("not running the flow: an app on %s is held, so it answers no accessibility query and the flow "+
+		"would fail for a reason it cannot name.\n%s", device.Label(), strings.Join(described, "\n"))
 }
 
 // heldSimAppReport is blockedSimAppReport for an app that is not running at

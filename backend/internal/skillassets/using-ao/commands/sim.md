@@ -14,7 +14,7 @@ Simulators are shared: another AO session, or a human working in Xcode, may be d
 
 **Bases are templates, never work devices.** "iPhone 17 Pro Max", "iPhone SE (3rd generation)" and "iPad Pro 11-inch (M5)" are what AO clones from; `ao sim list` marks them `base` and AO refuses to claim or boot one. Anything run on a base would be in every clone made after it.
 
-**Never attach a pipe to an app's stdout.** `xcrun simctl launch --console-pipe` looks like the way to read an app's output. It is a trap: as soon as anything stops draining that pipe the 64 KB buffer fills and the app blocks in `write()` **on its main thread**. The app is then wedged - `ao sim ax` returns nothing, `ao sim tap` reports success and changes nothing, the screen looks frozen - and none of those symptoms points back at your capture. Use `ao sim log`, which reads the unified log and cannot block the app.
+**Never attach a pipe to an app's stdout.** `xcrun simctl launch --console-pipe` looks like the way to read an app's output. It is a trap: as soon as anything stops draining that pipe the 64 KB buffer fills and the app blocks in `write()` **on its main thread**. The app is then wedged - `ao sim ax` returns nothing, `ao sim tap` reports success and changes nothing, the screen looks frozen - and none of those symptoms points back at your capture. Use `ao sim log`, which reads the unified log and cannot block the app, and for `print` output `ao sim launch --console` with `ao sim console`, which put stdout in a file - a file never blocks the app.
 
 **Read the screen, then act on what you read - never on what you expect.** `ao sim ax` gives every element that is actually on the screen a `tap` point in the same 0..1 coordinates `ao sim tap` takes, so acting on a screen is copy-the-number, not estimate-from-a-picture. An element that has scrolled out of view is still listed, marked `off screen`, and carries **no** tap point - scroll it into view with `ao sim drag` and read again. An element that is on the screen but drawn under something else - a row under the tab bar, a button under the keyboard's `^ v Done` bar - is marked `covered by ...`: it has no tap point when no part of it left to touch, and a point in the part still showing when something does. After any interaction, read again: a tap that reports success has not necessarily changed anything.
 
@@ -52,6 +52,10 @@ ao sim flow record stop        [flags]
 ao sim record start            [flags]
 ao sim record status           [flags]
 ao sim record stop             [flags]
+ao sim pid     [bundle-id]     [flags]
+ao sim lldb    [bundle-id]     [flags] -- <lldb args>...
+ao sim console [bundle-id]     [flags]
+ao sim crashes [bundle-id]     [flags]
 ```
 
 Every subcommand that acts on a device also takes `--device <label>`: one of this session's devices by its label, instead of the primary one. It cannot be combined with `--udid`.
@@ -393,19 +397,19 @@ ao sim log --follow --process Nimbus --grep "checkout|payment"
 ao sim log --since 10m --process Nimbus --json
 ```
 
-**⚠ `print` and `debugPrint` are NOT in this log, and never will be.** They write to the app's stdout, and an app launched by SpringBoard (tapped on the home screen, or started with `simctl launch`) has its stdout **discarded**. The output does not exist anywhere on the device. If you can see it in Xcode's console that is because Xcode drains the pipe itself - nothing else does.
+**⚠ `print` and `debugPrint` are NOT in this log.** They write to the app's stdout, and an app launched by SpringBoard (tapped on the home screen, or started with a plain `simctl launch`) has its stdout **discarded**. If you can see it in Xcode's console that is because Xcode drains the pipe itself. So an empty `ao sim log` for a `print` you expected is the command working correctly.
 
-So an empty `ao sim log` for a `print` you expected is the command working correctly. To read a payload:
+`print` IS reachable, through a different command: `ao sim launch --console` (or `ao sim run --console`) relaunches the app with stdout and stderr in a file, and `ao sim console` reads it - see [Debugging an app](#debugging-an-app). Only that launch is captured: a Maestro `launchApp` or the home screen relaunches the app with stdout on `/dev/null` again.
 
-| What the app uses      | Reaches `ao sim log`                   |
-| ---------------------- | -------------------------------------- |
-| `NSLog(...)`           | yes                                    |
-| `os_log` / `Logger`    | yes                                    |
-| `print` / `debugPrint` | **no** - goes to a stdout nobody keeps |
+| What the app uses      | Reaches `ao sim log` | Reaches `ao sim console`                  |
+| ---------------------- | -------------------- | ----------------------------------------- |
+| `NSLog(...)`           | yes                  | yes (stderr)                              |
+| `os_log` / `Logger`    | yes                  | no                                        |
+| `print` / `debugPrint` | **no**               | yes, until something else relaunches it   |
 
-**Add a temporary `NSLog("resp: \(body)")` probe, run the flow, read it here, and take the probe out again.** That is the supported way to see a body, and it costs one line.
+**For a payload you need across a Maestro flow, add a temporary `NSLog("resp: \(body)")` probe, run the flow, read it here, and take the probe out again.** The unified log survives any relaunch; a console capture does not survive the flow's `launchApp`.
 
-**There is no `--stdout` mode, on purpose.** The only way to capture stdout is to launch the app with a pipe attached, and a pipe nobody drains wedges the app's main thread (see the warning at the top of this page). AO will not ship a mode whose failure mode is a hung app under test.
+**There is no stdout PIPE mode, on purpose.** A pipe nobody drains wedges the app's main thread (see the warning at the top of this page), and AO will not ship a mode whose failure mode is a hung app under test. The `--console` file has no such failure: a regular file never blocks the app that writes to it.
 
 **Nothing matched?** The command says so and lists which processes _did_ log in that window with their entry counts - a `--process` that matches nothing is nearly always the bundle id instead of the executable name. It exits 0: an empty log is an answer, not a failure.
 
@@ -514,6 +518,7 @@ Check, without changing anything, whether a simulator is ready to drive. One lin
 | `device`   | it exists and is booted                           | `--udid` names a device that is not your `$AO_SIM_UDID`   | no device named or assigned, no such udid, or not booted       |
 | `lease`    | this session holds it                             | no AO session holds it (a run will claim it)              | another session, or a session of another AO daemon, holds it   |
 | `app`      | with `--expect`, the installed build is that .app | not checked (no `--app`), or installed with no `--expect` | not installed, or a different build from `--expect`            |
+| `debugger` | no app on the device is held (or it is shut down) | -                                                         | an app is attached by a debugger or stopped by SIGSTOP; names who holds it and the fix |
 | `proxy CA` | every configured root CA on this Mac is trusted   | no root CA configured, or none of them is on this Mac     | a root CA on this Mac is missing from the device's trust store |
 
 **Flags:**
@@ -558,6 +563,7 @@ Build this project from source, install what it produced, and launch it - the wh
 | `--configuration <cfg>` | Build configuration. Debug when the project has one; asked about when not |
 | `--udid <udid>`         | Run on this simulator instead of this session's own                      |
 | `--ttl <dur>`           | How long to hold the device afterwards (default 30m)                     |
+| `--console`             | Launch with stdout and stderr in a file `ao sim console` reads           |
 | `--json`                | Output the result as JSON                                                |
 
 The project is whatever `.xcworkspace` or `.xcodeproj` sits at the **root of the current directory**; a workspace wins over a project when both are there. Only the top level is searched, so a monorepo that keeps its app in a subdirectory has to be run from that subdirectory. The schemes come from `xcodebuild -list` at the moment you run it - there is nothing to configure, and a scheme added to the project today is offered today.
@@ -637,6 +643,7 @@ Start an installed app on a simulator, taking the device's lease the same way `a
 | `--udid <udid>`     | Launch on this simulator instead of this session's own                       |
 | `--ttl <dur>`       | How long to hold the device afterwards (default 10m)                         |
 | `--terminate-first` | Terminate the app first, so the launch runs the code that is installed NOW   |
+| `--console`         | Relaunch with stdout and stderr in a file `ao sim console` reads             |
 | `--json`            | Output the result as JSON                                                    |
 
 With no bundle id it launches the most recently installed app - straight after an `ao sim install`, that is the one you just put there - and says in its output when it chose between several. `AO_SIM_APP` pins it, and a bundle id as an argument settles one command.
@@ -894,6 +901,81 @@ ao sim flow record stop --entry ../flows/sign-in.yaml
 Run what comes out the same way as any other flow - see `ao sim flow` below.
 
 **It used to be `ao sim record`.** That name now belongs to the screen recorder, and there is no alias: the old spelling fails with an unknown-command error.
+
+---
+
+## Debugging an app
+
+These act **only on this session's own simulators**: the primary one (`$AO_SIM_UDID`), or with `--device <label>` one you claimed. A base, or another session's device, is refused by name - there is no `--udid`. Each one picks the app the same way: the bundle id you pass, else `$AO_SIM_APP`, else the newest installed app (and it says so when it chose). They must run inside an AO session (`AO_SESSION_ID`).
+
+### ao sim pid
+
+Print the app's pid on stdout and **nothing else**, so `lldb -p "$(ao sim pid)"` works. One line on stderr says its state: running, attached by a debugger (naming the debugserver and lldb pids and how to detach), or stopped by SIGSTOP (with the `kill -CONT <pid>` that resumes it). An app that is not running exits 1 and names `ao sim launch`. `--json` prints the whole result on stdout instead.
+
+```bash
+ao sim pid
+ao sim pid com.example.MyApp --device dbg --json
+```
+
+### ao sim lldb
+
+Run a **bounded** `lldb --batch` against the app and make sure it is running and detached afterwards.
+
+| Flag               | Description                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------- |
+| `--timeout <dur>`  | End lldb after this long if it has not finished (default 2m)                                          |
+| `--continue-for <dur>` | Log and continue for this long, then interrupt and detach (for breakpoints with `-G true`); shorter than `--timeout` |
+| `--resume`         | If lldb leaves the app stopped by SIGSTOP, send it SIGCONT                                            |
+
+```bash
+# Stop at a breakpoint, print, and detach
+ao sim lldb -- -o "breakpoint set -n ForecastStore.load" -o continue -o "frame variable" -o "bt 8"
+
+# A logpoint: print a value every time it is hit, for 10 seconds, without stopping the app
+ao sim lldb --continue-for 10s -- -o "breakpoint set -n VC.tick -C 'frame variable self.count' -G true"
+```
+
+- **Detach, always.** lldb in batch mode detaches when its commands end - but `continue` with no breakpoint that stops waits for ever and keeps the app attached, and a breakpoint hit inside it freezes the app for as long as that lldb lives. So `--timeout` ends the lldb this command started, by its own pid (never by name - that could be a crewmate's lldb); killing lldb takes its debugserver with it and the kernel resumes the app.
+- **A second attach is refused,** naming the debugger that already holds the app.
+- **After lldb exits the app is read again.** Running and detached is the normal end. Still attached, or stopped by SIGSTOP, fails loudly with the fix: an lldb expression that timed out can leave the app SIGSTOPped after detach, and `--resume` (or `kill -CONT <pid>`) resumes it.
+- The exit code is lldb's own, or non-zero on a timeout or an app still held.
+
+### ao sim launch --console, ao sim run --console
+
+Launch the app with its stdout and stderr in a file under this session's artifact directory, so `print` output is kept. The output line `Console: <path>` names it.
+
+- **A file never blocks the app**, unlike a pipe: a capture nobody reads costs nothing.
+- **It is relaunched** (`--terminate-running-process`): an app that was already running keeps the stdout it had otherwise.
+- **A relaunch by anything else loses it.** A Maestro `launchApp` (without `stopApp: false`), the home screen, or `ao sim launch` without `--console` gives the new process `/dev/null` again. For output you need across a flow, use an `NSLog` probe and `ao sim log`.
+
+### ao sim console
+
+Read the file `--console` made: the last `--max-lines` lines (default 200), only those matching `--grep` when given. `--follow` (`-f`) keeps printing what is appended until Ctrl-C. When the app has been relaunched since the capture - or is not running - it says so **above the lines**, with `ao sim launch --console` to capture again. No file says how to make one.
+
+```bash
+ao sim launch --console && ao sim console --follow
+ao sim console --grep "resp:" --max-lines 50
+```
+
+### ao sim crashes
+
+List the crash reports apps on your device left on this Mac (`~/Library/Logs/DiagnosticReports`), newest first: time, version and build, exception and signal, termination, and the `.ips` path. A bundle id (or `$AO_SIM_APP`) narrows it to that app; otherwise every app on the device is listed. Reports from other simulators are never shown.
+
+| Flag          | Description                                                       |
+| ------------- | ----------------------------------------------------------------- |
+| `--show <n>`  | Print report n (1 is the newest) readably                         |
+| `--limit <n>` | List at most this many of the newest reports (default 10)         |
+| `--json`      | Output the list, or with `--show` the report, as JSON             |
+
+`--show 1` prints the exception, the termination, the app-specific information (a Swift `fatalError` message is there), the last exception backtrace for an NSException, and the crashed thread's frames as `#i image  symbol + offset  (file:line)` - then the path of the full report.
+
+### A stopped app breaks the next script run
+
+A debugged or SIGSTOPped app answers no accessibility query and processes no touch. So:
+
+- `ao sim doctor` has a `debugger` line that FAILs while any app on the device is held, naming the debugserver and lldb pids (or the SIGSTOP) and the fix.
+- `ao sim flow run` refuses to start Maestro while an app on the device is held, with the same message.
+- `ao sim ax` on an empty tree names a held foreground app at once instead of sampling it.
 
 ---
 
