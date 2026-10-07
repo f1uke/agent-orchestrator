@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 )
 
 // The lease half of `ao sim`. A lease is bookkeeping held by the daemon, never
@@ -111,6 +112,8 @@ type simClaimResult struct {
 	Trust *simTrustClient `json:"trust,omitempty"`
 	// Clone is the session's own device that was claimed, when it was one.
 	Clone *simCloneClient `json:"clone,omitempty"`
+	// State is the device's simctl state when it was claimed.
+	State string `json:"state,omitempty"`
 }
 
 // simReleaseResult is the `ao sim release --json` payload.
@@ -245,7 +248,15 @@ func (c *commandContext) claimSimDevice(ctx context.Context, udid, label, model,
 	if err != nil {
 		return simClaimResult{}, err
 	}
-	device, err := resolveSimDevice(devices, udid)
+	var device simDevice
+	if clone != nil {
+		// The session's own device is claimed whether or not it is up: a
+		// clone made a moment ago is always shut down, and the lease is
+		// bookkeeping that does not need it running.
+		device, err = ownSimDevice(devices, clone.UDID)
+	} else {
+		device, err = resolveSimDevice(devices, udid)
+	}
 	if err != nil {
 		return simClaimResult{}, err
 	}
@@ -267,6 +278,7 @@ func (c *commandContext) claimSimDevice(ctx context.Context, udid, label, model,
 		Note:              simLeaseScopeNote,
 		Trust:             res.Trust,
 		Clone:             clone,
+		State:             device.State,
 	}, nil
 }
 
@@ -291,6 +303,16 @@ func (c *commandContext) releaseSimDevice(ctx context.Context, udid string) (sim
 		return simReleaseResult{}, err
 	}
 	return simReleaseResult{UDID: key, Released: true}, nil
+}
+
+// ownSimDevice finds one of this session's devices in a listing.
+func ownSimDevice(devices []simDevice, udid string) (simDevice, error) {
+	for _, d := range devices {
+		if domain.NormalizeSimUDID(d.UDID) == domain.NormalizeSimUDID(udid) {
+			return d, nil
+		}
+	}
+	return simDevice{}, fmt.Errorf("simulator %s is not on this machine", udid)
 }
 
 // daemonLacksSimClones is a daemon that cannot clone simulators - no Xcode on
@@ -531,6 +553,15 @@ func writeSimClaim(out io.Writer, result simClaimResult) error {
 	if _, err := fmt.Fprintf(out, "Claimed %s (%s, %s) for @%s until %s.\n",
 		result.Name, result.Runtime, result.UDID, result.Holder, result.ExpiresAt.Format(time.RFC3339)); err != nil {
 		return err
+	}
+	if result.State != simctl.BootedState && result.State != "" {
+		boot := "ao sim boot"
+		if result.Clone != nil && !result.Clone.Primary {
+			boot += " --device " + result.Clone.Label
+		}
+		if _, err := fmt.Fprintf(out, "It is %s: `%s` powers it on.\n", strings.ToLower(result.State), boot); err != nil {
+			return err
+		}
 	}
 	if result.Clone != nil && !result.Clone.Primary {
 		if _, err := fmt.Fprintf(out, "It is this session's device labelled %s, a clone of %s: pass --device %s to any `ao sim` command, or its udid to other tools.\n",

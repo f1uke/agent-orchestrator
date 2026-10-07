@@ -36,10 +36,15 @@ var simPromptDecisions = map[string]bool{
 	"list":    true,
 	"claim":   true,
 	"release": true,
-	"ax":      true,
-	"tap":     true,
-	"drag":    true,
-	"shot":    true,
+	// A session's extra devices: how to get one at another size, and how to
+	// hand one to a tool that takes a udid. Both are named because the only
+	// alternative an agent finds by itself is a base, or whichever is booted.
+	"claim --model": true,
+	"udid":          true,
+	"ax":            true,
+	"tap":           true,
+	"drag":          true,
+	"shot":          true,
 	// `log` is here because it is the app's own account of what a gesture did,
 	// which the screen often cannot give, and because the blocked-main-thread
 	// diagnosis sends an agent straight to it.
@@ -306,9 +311,11 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	// `bin/flow run` claims the device for a script; `claim` is taught for the
 	// one case that needs it by hand - authoring - and `release` for giving
 	// the device back either way.
-	"claim":       scriptTeaches,
-	"claim --ttl": scriptOmits,
-	"release":     scriptTeaches,
+	"claim":         scriptTeaches,
+	"claim --ttl":   scriptOmits,
+	"claim --model": scriptTeaches,
+	"udid":          scriptTeaches,
+	"release":       scriptTeaches,
 	// The three gestures an agent reaches for first are named to rule them
 	// out; the rest are covered by "and the rest" without spending a name on
 	// each. All of them stay allowed while authoring a missing script, which

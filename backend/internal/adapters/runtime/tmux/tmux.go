@@ -139,8 +139,15 @@ var daemonOnlyEnvKeys = []string{"AO_SESSION_IDLE_CLOSE", "AO_OWNER"}
 // server's identity, and so `attach-session` does not refuse as "nested".
 var tmuxClientEnvKeys = []string{"TMUX", "TMUX_PANE"}
 
+// sessionOnlyEnvKeys are per-session vars that are exported only when AO decides
+// a session gets them, so an inherited value is always somebody else's. A daemon
+// started from inside an AO session (a sandbox daemon) carries that session's
+// simulator, and without this an orchestrator it spawned would be told the
+// device was its own.
+var sessionOnlyEnvKeys = []string{"AO_SIM_UDID", "AO_SIM_DESTINATION"}
+
 // execEnvDropKeys is everything the tmux client's environment drops.
-var execEnvDropKeys = append(append([]string(nil), daemonOnlyEnvKeys...), tmuxClientEnvKeys...)
+var execEnvDropKeys = append(append(append([]string(nil), daemonOnlyEnvKeys...), tmuxClientEnvKeys...), sessionOnlyEnvKeys...)
 
 // stripEnvKeys returns env (a KEY=VALUE slice) without any entry whose key is in
 // keys. The input slice is not mutated.
