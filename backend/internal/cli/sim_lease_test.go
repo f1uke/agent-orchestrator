@@ -92,6 +92,7 @@ type simDaemon struct {
 	// clones are the devices the clone routes report and hand out. nil means
 	// the routes are not served at all: a daemon from before clones existed.
 	clones []simCloneClient
+	bases  []simBaseClient
 
 	mu          sync.Mutex
 	calls       []string // "METHOD path"
@@ -219,7 +220,7 @@ func newSimDaemon(t *testing.T, cfg testConfig) *simDaemon {
 			}
 			_, _ = io.WriteString(w, `{"started":true}`)
 		case d.clones != nil && r.Method == http.MethodGet && r.URL.Path == "/api/v1/sim/clones":
-			_ = json.NewEncoder(w).Encode(listSimClonesResponse{Clones: d.clones, Bases: []simBaseClient{}})
+			_ = json.NewEncoder(w).Encode(listSimClonesResponse{Clones: d.clones, Bases: append([]simBaseClient{}, d.bases...)})
 		case d.clones != nil && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/sim-clones"):
 			var in claimSimCloneRequest
 			_ = json.Unmarshal(body, &in)

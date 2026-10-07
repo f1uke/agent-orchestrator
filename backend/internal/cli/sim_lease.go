@@ -205,7 +205,15 @@ func newSimReleaseCommand(ctx *commandContext) *cobra.Command {
 			if label != "" && label != domain.SimPrimaryLabel {
 				return ctx.deleteSimDevice(cmd, label, opts.json)
 			}
-			result, err := ctx.releaseSimDevice(cmd.Context(), opts.udid)
+			udid := opts.udid
+			if label == domain.SimPrimaryLabel {
+				primary, err := ctx.simLabelUDID(cmd.Context(), label)
+				if err != nil {
+					return err
+				}
+				udid = primary
+			}
+			result, err := ctx.releaseSimDevice(cmd.Context(), udid)
 			if err != nil {
 				return err
 			}
@@ -255,6 +263,9 @@ func (c *commandContext) claimSimDevice(ctx context.Context, udid, label, model,
 		// bookkeeping that does not need it running.
 		device, err = ownSimDevice(devices, clone.UDID)
 	} else {
+		if err := c.refuseSimBase(ctx, udid); err != nil {
+			return simClaimResult{}, err
+		}
 		device, err = resolveSimDevice(devices, udid)
 	}
 	if err != nil {
@@ -303,6 +314,25 @@ func (c *commandContext) releaseSimDevice(ctx context.Context, udid string) (sim
 		return simReleaseResult{}, err
 	}
 	return simReleaseResult{UDID: key, Released: true}, nil
+}
+
+// refuseSimBase says a named device is a base before anything else is said
+// about it - "it is not booted, boot it" would send the caller to a boot that
+// is refused too. A daemon that cannot be asked leaves the lease to refuse it.
+func (c *commandContext) refuseSimBase(ctx context.Context, udid string) error {
+	if strings.TrimSpace(udid) == "" {
+		return nil
+	}
+	clones, err := c.fetchSimClones(ctx)
+	if err != nil {
+		return nil //nolint:nilerr // the daemon's own lease check refuses a base too
+	}
+	for _, base := range clones.Bases {
+		if base.UDID != "" && domain.NormalizeSimUDID(base.UDID) == domain.NormalizeSimUDID(udid) {
+			return fmt.Errorf("%s (%s) is a base AO clones devices from, and is never driven: claim your own device with `ao sim claim`, or another model with `ao sim claim --model %q`", base.Name, base.UDID, base.Name)
+		}
+	}
+	return nil
 }
 
 // ownSimDevice finds one of this session's devices in a listing.
@@ -362,6 +392,18 @@ func (c *commandContext) sessionHeldSimUDID(ctx context.Context, sessionID strin
 	switch len(mine) {
 	case 1:
 		return mine[0].UDID, nil
+	}
+	// Holding several is ordinary now that a session has more than one
+	// device; with no flag the command means the primary one, as every other
+	// command does.
+	if primary := domain.NormalizeSimUDID(assignedSimUDID()); primary != "" {
+		for _, lease := range mine {
+			if domain.NormalizeSimUDID(lease.UDID) == primary {
+				return primary, nil
+			}
+		}
+	}
+	switch len(mine) {
 	case 0:
 		return "", errors.New("this session holds no simulator lease; run `ao sim list` to see who holds what")
 	default:
@@ -559,7 +601,7 @@ func writeSimClaim(out io.Writer, result simClaimResult) error {
 		if result.Clone != nil && !result.Clone.Primary {
 			boot += " --device " + result.Clone.Label
 		}
-		if _, err := fmt.Fprintf(out, "It is %s: `%s` powers it on.\n", strings.ToLower(result.State), boot); err != nil {
+		if _, err := fmt.Fprintf(out, "It is not booted (%s): `%s` powers it on.\n", result.State, boot); err != nil {
 			return err
 		}
 	}

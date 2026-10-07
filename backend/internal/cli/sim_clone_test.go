@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 const simUDIDClone = "C10E0000-0000-0000-0000-000000000001"
@@ -125,6 +126,44 @@ func TestSimList_ShowsWhoseCloneEachDeviceIs(t *testing.T) {
 	for _, want := range []string{"ROLE", "yours: primary", "yours: iphone-se"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("list missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSimClaim_ABaseIsRefusedBeforeAnythingElse(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	daemon := newSimDaemon(t, setConfigEnv(t))
+	daemon.clones = []simCloneClient{}
+	daemon.bases = []simBaseClient{{Name: "iPhone 17 Pro Max", UDID: simUDIDPro}}
+
+	_, _, err := executeCLI(t, simLeaseDeps(t, bootedProMaxOnly(t), fakePNG), "sim", "claim", "--udid", simUDIDPro)
+	if err == nil || !strings.Contains(err.Error(), "is a base") {
+		t.Fatalf("err = %v, want the base refused by name", err)
+	}
+	if simCalled(daemon, "POST /api/v1/sessions/mer-9/sim-leases") {
+		t.Fatal("asked for a lease on a base")
+	}
+}
+
+func TestSimRelease_WithSeveralHeldReleasesThePrimary(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "mer-9")
+	t.Setenv("AO_SIM_UDID", simUDIDProMax)
+	daemon := newSimDaemon(t, setConfigEnv(t))
+	daemon.clones = cloneFixtures()
+	for _, udid := range []string{simUDIDProMax, simUDIDClone} {
+		daemon.leases[udid] = simLeaseClient{UDID: udid, SessionID: "mer-9", AcquiredAt: simFixedNow, ExpiresAt: simFixedNow.Add(10 * time.Minute)}
+	}
+
+	for _, args := range [][]string{{"sim", "release"}, {"sim", "release", "--device", "primary"}} {
+		daemon.leases[simUDIDProMax] = simLeaseClient{UDID: simUDIDProMax, SessionID: "mer-9", AcquiredAt: simFixedNow, ExpiresAt: simFixedNow.Add(10 * time.Minute)}
+		if _, errOut, err := executeCLI(t, simLeaseDeps(t, seClonedAndBooted(t), fakePNG), args...); err != nil {
+			t.Fatalf("%v: %v\nstderr=%s", args, err, errOut)
+		}
+		if _, held := daemon.leases[simUDIDProMax]; held {
+			t.Fatalf("%v left the primary leased", args)
+		}
+		if _, held := daemon.leases[simUDIDClone]; !held {
+			t.Fatalf("%v released the extra device too", args)
 		}
 	}
 }

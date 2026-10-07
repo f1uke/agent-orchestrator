@@ -170,7 +170,7 @@ func newSimCommand(ctx *commandContext) *cobra.Command {
 			return ctx.applySimLabel(cmd)
 		},
 	}
-	cmd.PersistentFlags().String(simLabelFlag, "", "Act on this session's device with this label instead of its primary one (see `ao sim claim --device`)")
+	cmd.PersistentFlags().String(simLabelFlag, "", "Act on this session's device with this label instead of its primary one (made with ao sim claim --device)")
 	cmd.AddCommand(newSimUDIDCommand(ctx))
 	cmd.AddCommand(
 		newSimListCommand(ctx), newSimShotCommand(ctx), newSimBootCommand(ctx),
