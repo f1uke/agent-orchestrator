@@ -223,8 +223,11 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 		"no Jira issue, skip this step and say so in your report",
 		"the cases you linked to the Jira issue",
 		"never with `testiny run results set` directly",
-		`ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"]`,
-		"**PASSED** only when both checks hold, with no comment",
+		`ao testiny result "$AO_CREW_ID" <run-id> <case-id> --status <STATUS> [--comment "<reason>"] [--step <n>=<STATUS> ...]`,
+		// A case with steps records each step it played on the case's own call.
+		"add `--step <n>=<STATUS>` for each step you played",
+		"in the same call as the case",
+		"**PASSED** only when every step passed and both checks hold, with no comment",
 		"plain Thai",
 		"UNDRIVEABLE",
 		"No Figma frame linked",

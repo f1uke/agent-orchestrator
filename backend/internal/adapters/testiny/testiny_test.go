@@ -74,19 +74,68 @@ func newClient(f *fakeCLI, now func() time.Time) *Client {
 }
 
 func TestRunReadsARunWithoutPlanOrMilestone(t *testing.T) {
-	f := &fakeCLI{answers: map[string]Output{"run show 632": ok(t, "run_show_632.json")}}
+	f := &fakeCLI{answers: map[string]Output{"run show 632 --with case": ok(t, "run_show_632.json")}}
 	run, err := newClient(f, time.Now).Run(context.Background(), 632)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	want := Run{ID: 632, Title: "MOBILITY-4839 Chat notice disclaimer - iOS", ProjectID: 1}
-	if run != want {
+	want := Run{ID: 632, Title: "MOBILITY-4839 Chat notice disclaimer - iOS", ProjectID: 1, Steps: map[int64][]domain.TestinyRunStep{}}
+	if !reflect.DeepEqual(run, want) {
 		t.Fatalf("Run = %+v, want %+v", run, want)
 	}
 }
 
+func TestRunReadsEachCasesStepResults(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{"run show 625 --with case": ok(t, "run_show_625.json")}}
+	run, err := newClient(f, time.Now).Run(context.Background(), 625)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := map[int64][]domain.TestinyRunStep{
+		6544: {
+			{N: 1, RID: "TlKNJNxnUS", Status: "PASSED"},
+			{N: 2, RID: "ywmnkYOylj", Status: "PASSED"},
+			{N: 3, RID: "Pa3mFn9Zko", Status: "PASSED"},
+			{N: 4, RID: "QLmk5OGCY3", Status: "PASSED"},
+			{N: 5, RID: "QQv0Xsgeij", Status: "PASSED"},
+		},
+	}
+	if !reflect.DeepEqual(run.Steps, want) {
+		t.Fatalf("Steps = %+v, want %+v", run.Steps, want)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("calls = %q, want the one run show", f.calls)
+	}
+}
+
+func TestRunStepResultsTolerateEveryShapeOfTheMapping(t *testing.T) {
+	for name, values := range map[string]string{
+		"one case as an object": `{"testcase_id":9,"result_per_step":[{"idx":1,"rid":"b","res":"FAILED"},{"idx":0,"rid":"","res":"PASSED"}]}`,
+		"a list":                `[{"testcase_id":9,"result_per_step":[{"idx":1,"rid":"b","res":"FAILED"},{"idx":0,"rid":"","res":"PASSED"}]},{"testcase_id":10,"result_per_step":null}]`,
+	} {
+		out := Output{Stdout: []byte(`{"data":{"id":5,"title":"t","project_id":1,"testrun_testcase_values":` + values + `}}`)}
+		f := &fakeCLI{answers: map[string]Output{"run show 5 --with case": out}}
+		run, err := newClient(f, time.Now).Run(context.Background(), 5)
+		if err != nil {
+			t.Fatalf("%s: Run: %v", name, err)
+		}
+		want := map[int64][]domain.TestinyRunStep{9: {{N: 1, Status: "PASSED"}, {N: 2, RID: "b", Status: "FAILED"}}}
+		if !reflect.DeepEqual(run.Steps, want) {
+			t.Fatalf("%s: Steps = %+v, want %+v", name, run.Steps, want)
+		}
+	}
+	for name, values := range map[string]string{"no cases": `null`, "an empty list": `[]`} {
+		out := Output{Stdout: []byte(`{"data":{"id":5,"title":"t","project_id":1,"testrun_testcase_values":` + values + `}}`)}
+		f := &fakeCLI{answers: map[string]Output{"run show 5 --with case": out}}
+		run, err := newClient(f, time.Now).Run(context.Background(), 5)
+		if err != nil || len(run.Steps) != 0 {
+			t.Fatalf("%s: Run = %+v, %v; want no step results", name, run, err)
+		}
+	}
+}
+
 func TestRunReadsPlanAndMilestoneIDs(t *testing.T) {
-	f := &fakeCLI{answers: map[string]Output{"run show 625": ok(t, "run_show_625.json")}}
+	f := &fakeCLI{answers: map[string]Output{"run show 625 --with case": ok(t, "run_show_625.json")}}
 	run, err := newClient(f, time.Now).Run(context.Background(), 625)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -202,7 +251,7 @@ func TestCLIErrorsMapToSentinels(t *testing.T) {
 		{"unparseable data", Output{Stdout: []byte("<html>")}, ErrUnavailable, "unreadable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakeCLI{answers: map[string]Output{"run show 999999": tc.out}}
+			f := &fakeCLI{answers: map[string]Output{"run show 999999 --with case": tc.out}}
 			_, err := newClient(f, time.Now).Run(context.Background(), 999999)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
@@ -238,7 +287,7 @@ func TestACallThatOutlivesItsCapIsUnavailable(t *testing.T) {
 func TestBinaryFallsBackToGoBin(t *testing.T) {
 	home := t.TempDir()
 	notOnPath := func(string) (string, error) { return "", errors.New("not found") }
-	f := &fakeCLI{answers: map[string]Output{"run show 632": ok(t, "run_show_632.json")}}
+	f := &fakeCLI{answers: map[string]Output{"run show 632 --with case": ok(t, "run_show_632.json")}}
 
 	c := New(Options{LookPath: notOnPath, Runner: f.run, Home: home, Now: time.Now})
 	if _, err := c.Run(context.Background(), 632); !errors.Is(err, ErrBinaryMissing) {
@@ -258,7 +307,7 @@ func TestBinaryFallsBackToGoBin(t *testing.T) {
 	if _, err := c.Run(context.Background(), 632); err != nil {
 		t.Fatalf("Run with the go/bin fallback: %v", err)
 	}
-	if want := bin + " run show 632"; f.calls[0] != want {
+	if want := bin + " run show 632 --with case"; f.calls[0] != want {
 		t.Fatalf("call = %q, want %q", f.calls[0], want)
 	}
 }
@@ -312,6 +361,33 @@ func TestSetResultsSendsEachCommentedResultAloneAndTheRestInOneBatch(t *testing.
 		t.Fatalf("argv =\n%q\nwant\n%q", f.argvs, wantArgv)
 	}
 	if !reflect.DeepEqual(written, []domain.TestinyResult{results[1], results[3], results[0], results[2]}) {
+		t.Fatalf("written = %+v", written)
+	}
+}
+
+func TestSetResultsSendsStepsOnTheCasesOwnCall(t *testing.T) {
+	steps := "run results set --run=632 --case=7166 --status=PASSED --step=1=PASSED --step=2=FAILED"
+	commented := "run results set --run=632 --project-id=1 --case=7167 --status=FAILED --comment=step 2 --step=2=FAILED"
+	batch := "run results set --run=632 --result=7168=NOTRUN"
+	f := &fakeCLI{answers: map[string]Output{steps: {}, commented: {}, batch: {}}}
+	results := []domain.TestinyResult{
+		{CaseID: 7166, Status: domain.TestinyPassed, Steps: []domain.TestinyStepResult{{N: 1, Status: domain.TestinyPassed}, {N: 2, Status: domain.TestinyFailed}}},
+		{CaseID: 7167, Status: domain.TestinyFailed, Comment: "step 2", Steps: []domain.TestinyStepResult{{N: 2, Status: domain.TestinyFailed}}},
+		{CaseID: 7168, Status: domain.TestinyNotRun},
+	}
+	written, err := newClient(f, time.Now).SetResults(context.Background(), 632, 1, results)
+	if err != nil {
+		t.Fatalf("SetResults: %v", err)
+	}
+	wantArgv := [][]string{
+		{"run", "results", "set", "--run=632", "--case=7166", "--status=PASSED", "--step=1=PASSED", "--step=2=FAILED"},
+		{"run", "results", "set", "--run=632", "--project-id=1", "--case=7167", "--status=FAILED", "--comment=step 2", "--step=2=FAILED"},
+		{"run", "results", "set", "--run=632", "--result=7168=NOTRUN"},
+	}
+	if !reflect.DeepEqual(f.argvs, wantArgv) {
+		t.Fatalf("argv =\n%q\nwant\n%q", f.argvs, wantArgv)
+	}
+	if !reflect.DeepEqual(written, results) {
 		t.Fatalf("written = %+v", written)
 	}
 }
@@ -375,10 +451,10 @@ func TestCaseReadsAStepsCase(t *testing.T) {
 			"- A chat room exists where a fund disclaimer notice message has been sent",
 		Automation: []string{"Manual"},
 		Steps: []domain.TestinyCaseStep{
-			{N: 1, Action: "Open the Main app and go to Finnomena Chat", Expected: "Chat list is displayed"},
-			{N: 2, Action: "Open the chat room that contains the fund disclaimer message", Expected: "Chat room opens and scrolls to the latest messages"},
-			{N: 3, Action: "Look at the fund disclaimer message", Expected: "Disclaimer is shown as a notice message (not a normal chat bubble) with the full fund disclaimer text, readable and not truncated"},
-			{N: 4, Action: "If the disclaimer has a header image, check it", Expected: "Header image loads at the correct width, with no broken-image icon inside the text"},
+			{N: 1, RID: "5quWOzIAc5", Action: "Open the Main app and go to Finnomena Chat", Expected: "Chat list is displayed"},
+			{N: 2, RID: "g0Gf9X8Vbe", Action: "Open the chat room that contains the fund disclaimer message", Expected: "Chat room opens and scrolls to the latest messages"},
+			{N: 3, RID: "pCqV0Dbrt8", Action: "Look at the fund disclaimer message", Expected: "Disclaimer is shown as a notice message (not a normal chat bubble) with the full fund disclaimer text, readable and not truncated"},
+			{N: 4, RID: "HEcuShOZ5K", Action: "If the disclaimer has a header image, check it", Expected: "Header image loads at the correct width, with no broken-image icon inside the text"},
 		},
 		Requirements: []domain.TestinyRequirement{},
 	}

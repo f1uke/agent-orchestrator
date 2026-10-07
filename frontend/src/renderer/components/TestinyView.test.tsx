@@ -50,6 +50,7 @@ const tc = (id: number, status: string, title = `case ${id}`, script?: string): 
 	id,
 	title,
 	status,
+	steps: [],
 	...(script ? { script } : {}),
 });
 
@@ -666,8 +667,8 @@ describe("TestinyView case details", () => {
 		testData: "qa@example.com / fake-password\nPIN 000000",
 		precondition: "- Logged in\n- Nothing shared yet",
 		steps: [
-			{ n: 1, action: "Open a fund page", expected: "The fund page shows" },
-			{ n: 2, action: "Tap Share", expected: "The empty state shows" },
+			{ n: 1, rid: "r1", action: "Open a fund page", expected: "The fund page shows" },
+			{ n: 2, rid: "r2", action: "Tap Share", expected: "The empty state shows" },
 		],
 		description: "Covers the sheet with nothing in it",
 		remark: "Found on 4.12",
@@ -812,10 +813,93 @@ describe("TestinyView case details", () => {
 		});
 	});
 
+	const stepButton = (n: number, word: string) => screen.findByRole("button", { name: `Step ${n} result: ${word}` });
+	const RESULTS = "/api/v1/sessions/{sessionId}/testiny/runs/{runId}/results";
+
+	it("shows each step's result in the run on the step's first line, Not run when it has none", async () => {
+		const user = userEvent.setup();
+		serveCases([{ ...tc(1, "FAILED", "disclaimer"), steps: [{ n: 1, rid: "r1", status: "PASSED" }] }], { 1: full });
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		const steps = within(await within(await panel("disclaimer")).findByRole("list", { name: "Steps" }));
+		const [first, second] = steps.getAllByRole("listitem");
+		const passed = within(first).getByRole("button", { name: "Step 1 result: Passed" });
+		expect(within(second).getByRole("button", { name: "Step 2 result: Not run" })).toBeInTheDocument();
+		// On the action's line, not under the expected result.
+		const expected = within(first).getByText("The fund page shows");
+		expect(passed.compareDocumentPosition(expected) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+	});
+
+	it("saves a step's result at once with no comment, keeps the case's status, then shows the fresh run", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		let answer: (value: unknown) => void = () => undefined;
+		postMock.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		await user.click(await stepButton(2, "Not run"));
+		const items = await screen.findAllByRole("menuitemradio");
+		expect(items.map((i) => i.textContent)).toEqual(["Passed", "Failed", "Blocked", "Skipped", "Not run"]);
+		await user.click(await screen.findByRole("menuitemradio", { name: "Failed" }));
+
+		expect(postMock).toHaveBeenCalledWith(RESULTS, {
+			params: { path: { sessionId: "task-1", runId: "632" } },
+			body: { results: [{ caseId: 1, steps: [{ n: 2, status: "FAILED" }] }] },
+		});
+		expect(await stepButton(2, "Failed")).toBeInTheDocument();
+		expect(screen.queryByRole("textbox", { name: "What went wrong" })).toBeNull();
+		expect(screen.getByRole("button", { name: "Result: Failed" })).toBeInTheDocument();
+
+		answer({
+			data: run(632, {
+				cases: [
+					{
+						...tc(1, "FAILED", "disclaimer"),
+						steps: [
+							{ n: 1, rid: "r1", status: "PASSED" },
+							{ n: 2, rid: "r2", status: "FAILED" },
+						],
+					},
+				],
+			}),
+			error: undefined,
+		});
+		expect(await stepButton(1, "Passed")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Step 2 result: Failed" })).toBeInTheDocument();
+	});
+
+	it("puts a refused step back and says why under that step", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		postMock.mockResolvedValue({ error: { message: "Testiny did not answer (TESTINY_UNAVAILABLE)" } });
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		await user.click(await stepButton(2, "Not run"));
+		await user.click(await screen.findByRole("menuitemradio", { name: "Passed" }));
+
+		const alert = await screen.findByRole("alert");
+		expect(alert).toHaveTextContent("Testiny did not answer (TESTINY_UNAVAILABLE)");
+		expect(alert.closest("li")).toBe((await stepButton(2, "Not run")).closest("li"));
+	});
+
+	it("does not write a step set to the result it already has", async () => {
+		const user = userEvent.setup();
+		serveCases([{ ...tc(1, "FAILED", "disclaimer"), steps: [{ n: 1, rid: "r1", status: "PASSED" }] }], { 1: full });
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		await user.click(await stepButton(1, "Passed"));
+		await user.click(await screen.findByRole("menuitemradio", { name: "Passed" }));
+		expect(postMock).not.toHaveBeenCalled();
+	});
+
 	it("leaves out every section the case does not fill", async () => {
 		const user = userEvent.setup();
 		serveCases([tc(1, "FAILED", "disclaimer")], {
-			1: detail(1, { steps: [{ n: 1, action: "Open a fund page", expected: "" }] }),
+			1: detail(1, { steps: [{ n: 1, rid: "r1", action: "Open a fund page", expected: "" }] }),
 		});
 		renderView();
 

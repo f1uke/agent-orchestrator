@@ -84,6 +84,7 @@ type LinkStore interface {
 	ListTestinyRunLinks(ctx context.Context, sessionID domain.SessionID) ([]domain.TestinyRunLink, error)
 	AppendTestinyResults(ctx context.Context, entries []domain.TestinyResultEntry) error
 	LatestTestinyResults(ctx context.Context, sessionID domain.SessionID, runID domain.TestinyRunID) ([]domain.TestinyResultEntry, error)
+	TestinyStepResultLog(ctx context.Context, sessionID domain.SessionID, runID domain.TestinyRunID) ([]domain.TestinyResultEntry, error)
 }
 
 // SessionGateway finds a task's project, its settings and its crew. Satisfied
@@ -375,7 +376,11 @@ func (s *Service) complete(ctx context.Context, run testinyadapter.Run, res test
 		v.Counts[domain.TestinyCaseStatus(status)] = n
 	}
 	for i, c := range res.Cases {
-		v.Cases[i] = domain.TestinyCaseResult{ID: c.ID, Title: c.Title, Status: domain.TestinyCaseStatus(c.Status)}
+		steps := run.Steps[c.ID]
+		if steps == nil {
+			steps = []domain.TestinyRunStep{}
+		}
+		v.Cases[i] = domain.TestinyCaseResult{ID: c.ID, Title: c.Title, Status: domain.TestinyCaseStatus(c.Status), Steps: steps}
 	}
 	return v, nil
 }

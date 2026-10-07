@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -258,6 +259,16 @@ func TestTestinyRecordResults(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"counts":{"FAILED":1}`) {
 		t.Fatalf("body = %s, want the fresh run view", body)
+	}
+
+	// A step result rides on its case; with no status, the case keeps its own.
+	if body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/632/results",
+		`{"results":[{"caseId":7166,"steps":[{"n":2,"status":"FAILED"},{"n":3,"status":"PASSED"}]}]}`); status != http.StatusOK {
+		t.Fatalf("steps: status %d body %s", status, body)
+	}
+	wantSteps := []domain.TestinyResult{{CaseID: 7166, Steps: []domain.TestinyStepResult{{N: 2, Status: "FAILED"}, {N: 3, Status: "PASSED"}}}}
+	if !reflect.DeepEqual(svc.recorded.results, wantSteps) {
+		t.Fatalf("service got %+v, want %+v", svc.recorded.results, wantSteps)
 	}
 
 	if _, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/632/results", `{"results":[{"caseId":7166,"status":"PASSED"}]}`); status != http.StatusOK || svc.recorded.by != "" {

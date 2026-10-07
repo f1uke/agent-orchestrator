@@ -45,9 +45,16 @@ type LinkTestinyRunInput struct {
 
 // TestinyResultInput is one case's result in RecordTestinyResultsInput.
 type TestinyResultInput struct {
-	CaseID  int64  `json:"caseId" description:"The Testiny case id (7166 for TC-7166)."`
-	Status  string `json:"status" description:"PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN."`
-	Comment string `json:"comment,omitempty" description:"What happened, at most 300 characters. FAILED, BLOCKED and SKIPPED need one; PASSED and NOTRUN take none."`
+	CaseID  int64                    `json:"caseId" description:"The Testiny case id (7166 for TC-7166)."`
+	Status  string                   `json:"status,omitempty" description:"PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. Empty when only steps are given: the case keeps its status."`
+	Comment string                   `json:"comment,omitempty" description:"What happened, at most 300 characters. FAILED, BLOCKED and SKIPPED need one; PASSED and NOTRUN take none."`
+	Steps   []TestinyStepResultInput `json:"steps,omitempty" description:"Results for steps of a STEPS case. Every other step keeps the result it has."`
+}
+
+// TestinyStepResultInput is one step's result in TestinyResultInput.
+type TestinyStepResultInput struct {
+	N      int    `json:"n" description:"The step's number, counting from 1."`
+	Status string `json:"status" description:"PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. A step takes no comment."`
 }
 
 // RecordTestinyResultsInput is the body of POST /api/v1/sessions/{sessionId}/testiny/runs/{runId}/results.
@@ -155,6 +162,9 @@ func (c *TestinyController) recordResults(w http.ResponseWriter, r *http.Request
 	results := make([]domain.TestinyResult, len(in.Results))
 	for i, res := range in.Results {
 		results[i] = domain.TestinyResult{CaseID: res.CaseID, Status: domain.TestinyCaseStatus(res.Status), Comment: res.Comment}
+		for _, step := range res.Steps {
+			results[i].Steps = append(results[i].Steps, domain.TestinyStepResult{N: step.N, Status: domain.TestinyCaseStatus(step.Status)})
+		}
 	}
 	view, err := c.Svc.RecordResults(r.Context(), sessionID(r), id, results, strings.TrimSpace(in.From), strings.TrimSpace(in.SHA))
 	if err != nil {

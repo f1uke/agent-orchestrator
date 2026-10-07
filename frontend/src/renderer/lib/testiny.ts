@@ -6,7 +6,10 @@ export type TestinyCase = components["schemas"]["TestinyCaseResult"];
 export type TestinyRunsResponse = components["schemas"]["TestinyRunsResponse"];
 export type TestinyFetchErrorKind = components["schemas"]["TestinyFetchError"]["kind"];
 export type TestinyCaseDetail = components["schemas"]["DomainTestinyCaseDetail"];
+export type TestinyCaseStep = TestinyCaseDetail["steps"][number];
 type TestinyRecord = components["schemas"]["TestinyResultRecord"];
+type TestinyRunStep = components["schemas"]["DomainTestinyRunStep"];
+type TestinyResultInput = components["schemas"]["TestinyResultInput"];
 
 /** The statuses Testiny records, in the order the summary chips and the status menu show them. */
 export const TESTINY_STATUSES = ["PASSED", "FAILED", "BLOCKED", "SKIPPED", "NOTRUN"] as const;
@@ -23,6 +26,35 @@ export const TESTINY_COMMENT_MAX = 300;
 export type TestinyResultWrite =
 	| { caseId: number; status: "PASSED" | "NOTRUN" }
 	| { caseId: number; status: "FAILED" | "BLOCKED" | "SKIPPED"; comment: string };
+
+/**
+ * One step's result a person sets from the tab. A step takes no comment, and
+ * the case keeps its own status. The step's row id only places the result on
+ * screen until the run is read again.
+ */
+export type TestinyStepWrite = { caseId: number; step: Pick<TestinyCaseStep, "n" | "rid">; status: TestinyStatus };
+
+export type TestinyWrite = TestinyResultWrite | TestinyStepWrite;
+
+export function isStepWrite(write: TestinyWrite): write is TestinyStepWrite {
+	return "step" in write;
+}
+
+/** A write as the daemon takes it: a step's result rides on its case, with no case status. */
+export function resultInput(write: TestinyWrite): TestinyResultInput {
+	if (isStepWrite(write)) return { caseId: write.caseId, steps: [{ n: write.step.n, status: write.status }] };
+	return write;
+}
+
+/** Whether a result Testiny holds is this step's: by row id when both have one, else by number, as the daemon matches them. */
+function sameStep(result: Pick<TestinyRunStep, "n" | "rid">, step: Pick<TestinyCaseStep, "n" | "rid">): boolean {
+	return result.rid && step.rid ? result.rid === step.rid : result.n === step.n;
+}
+
+/** The result Testiny holds for one step of a case in the run, NOTRUN when it holds none. */
+export function stepStatus(testCase: TestinyCase, step: Pick<TestinyCaseStep, "n" | "rid">): string {
+	return testCase.steps.find((r) => sameStep(r, step))?.status ?? "NOTRUN";
+}
 
 export function needsComment(status: TestinyStatus): status is "FAILED" | "BLOCKED" | "SKIPPED" {
 	return status === "FAILED" || status === "BLOCKED" || status === "SKIPPED";
@@ -81,9 +113,16 @@ export function withCase(run: TestinyRun, next: TestinyCase): TestinyRun {
 }
 
 /** The run as it will read once the person's result is written: what the tab shows meanwhile. */
-export function withResult(run: TestinyRun, write: TestinyResultWrite, at: string): TestinyRun {
+export function withResult(run: TestinyRun, write: TestinyWrite, at: string): TestinyRun {
 	const prev = run.cases.find((c) => c.id === write.caseId);
 	if (!prev) return run;
+	if (isStepWrite(write)) {
+		const steps = [
+			...prev.steps.filter((r) => !sameStep(r, write.step)),
+			{ n: write.step.n, rid: write.step.rid, status: write.status },
+		].sort((a, b) => a.n - b.n);
+		return withCase(run, { ...prev, steps });
+	}
 	const comment = "comment" in write ? write.comment : "";
 	return withCase(run, {
 		...prev,

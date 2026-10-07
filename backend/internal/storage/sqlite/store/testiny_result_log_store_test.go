@@ -97,3 +97,48 @@ func TestTestinyResultLog(t *testing.T) {
 		t.Fatalf("log outlived its task: %+v", got)
 	}
 }
+
+func TestTestinyStepResultLog(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "tny")
+	task, err := s.CreateSession(ctx, sampleRecord("tny"))
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	t0 := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	if err := s.InsertTestinyRunLink(ctx, domain.TestinyRunLink{SessionID: task.ID, RunID: 632, CreatedAt: t0}); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	steps := func(n int, status domain.TestinyCaseStatus) []domain.TestinyStepResult {
+		return []domain.TestinyStepResult{{N: n, Status: status}}
+	}
+	entries := []domain.TestinyResultEntry{
+		{SessionID: task.ID, RunID: 632, SetBy: "tny-2", CreatedAt: t0,
+			TestinyResult: domain.TestinyResult{CaseID: 7166, Status: domain.TestinyFailed, Comment: "step 2", Steps: steps(2, domain.TestinyFailed)}},
+		{SessionID: task.ID, RunID: 632, SetBy: "tny-2", CreatedAt: t0,
+			TestinyResult: domain.TestinyResult{CaseID: 7167, Status: domain.TestinyPassed}},
+		{SessionID: task.ID, RunID: 632, CreatedAt: t0.Add(time.Minute),
+			TestinyResult: domain.TestinyResult{CaseID: 7166, Steps: steps(3, domain.TestinyPassed)}},
+	}
+	if err := s.AppendTestinyResults(ctx, entries); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	got, err := s.TestinyStepResultLog(ctx, task.ID, 632)
+	if err != nil {
+		t.Fatalf("step log: %v", err)
+	}
+	if want := []domain.TestinyResultEntry{entries[0], entries[2]}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("step log =\n%+v\nwant\n%+v", got, want)
+	}
+
+	// A write that set only steps leaves the case's latest status where it was.
+	latest, err := s.LatestTestinyResults(ctx, task.ID, 632)
+	if err != nil {
+		t.Fatalf("latest: %v", err)
+	}
+	if want := []domain.TestinyResultEntry{entries[0], entries[1]}; !reflect.DeepEqual(latest, want) {
+		t.Fatalf("latest =\n%+v\nwant\n%+v", latest, want)
+	}
+}

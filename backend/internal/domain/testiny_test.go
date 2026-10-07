@@ -120,6 +120,39 @@ func TestParseTestinyResults(t *testing.T) {
 	}
 }
 
+func TestParseTestinyResultsWithSteps(t *testing.T) {
+	got, err := ParseTestinyResults([]TestinyResult{
+		{CaseID: 1, Status: "failed", Comment: "step 2", Steps: []TestinyStepResult{{N: 3, Status: "passed"}, {N: 2, Status: " FAILED "}}},
+		{CaseID: 2, Steps: []TestinyStepResult{{N: 1, Status: "BLOCKED"}}},
+	})
+	if err != nil {
+		t.Fatalf("ParseTestinyResults: %v", err)
+	}
+	want := []TestinyResult{
+		{CaseID: 1, Status: TestinyFailed, Comment: "step 2", Steps: []TestinyStepResult{{N: 2, Status: TestinyFailed}, {N: 3, Status: TestinyPassed}}},
+		{CaseID: 2, Steps: []TestinyStepResult{{N: 1, Status: TestinyBlocked}}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v\nwant %+v", got, want)
+	}
+
+	for name, tc := range map[string]struct {
+		in   TestinyResult
+		says string
+	}{
+		"no status and no steps":   {TestinyResult{CaseID: 7}, "TC-7"},
+		"a comment with no status": {TestinyResult{CaseID: 7, Comment: "x", Steps: []TestinyStepResult{{N: 1, Status: "FAILED"}}}, "TC-7"},
+		"step 0":                   {TestinyResult{CaseID: 7, Steps: []TestinyStepResult{{N: 0, Status: "PASSED"}}}, "TC-7 step 0"},
+		"a step twice":             {TestinyResult{CaseID: 7, Steps: []TestinyStepResult{{N: 2, Status: "PASSED"}, {N: 2, Status: "FAILED"}}}, "TC-7 step 2"},
+		"unknown step status":      {TestinyResult{CaseID: 7, Steps: []TestinyStepResult{{N: 1, Status: "UNTESTED"}}}, "TC-7 step 1"},
+	} {
+		_, err := ParseTestinyResults([]TestinyResult{tc.in})
+		if !errors.Is(err, ErrBadTestinyResult) || !strings.Contains(err.Error(), tc.says) {
+			t.Errorf("%s: err = %v, want ErrBadTestinyResult saying %q", name, err, tc.says)
+		}
+	}
+}
+
 func TestParseTestinyCaseRef(t *testing.T) {
 	for in, want := range map[string]int64{"7166": 7166, "TC-7166": 7166, "tc-12": 12, " 7166 ": 7166} {
 		got, err := ParseTestinyCaseRef(in)

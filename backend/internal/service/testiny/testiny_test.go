@@ -37,6 +37,9 @@ type fakeTestiny struct {
 	sets     []setCall
 	// failAfter, when set, fails SetResults once that many results are written.
 	failAfter *int
+	// details are the cases Case answers with, by id; any other id gets a
+	// case with no steps.
+	details map[int64]domain.TestinyCaseDetail
 }
 
 func newFakeTestiny() *fakeTestiny {
@@ -56,6 +59,7 @@ func newFakeTestiny() *fakeTestiny {
 		projects: []testinyadapter.Project{mob, kern},
 		delay:    map[domain.TestinyRunID]time.Duration{},
 		calls:    map[string]int{},
+		details:  map[int64]domain.TestinyCaseDetail{},
 	}
 }
 

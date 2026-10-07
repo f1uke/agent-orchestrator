@@ -41,6 +41,9 @@ func (f *fakeTestiny) SetResults(_ context.Context, run domain.TestinyRunID, pro
 				res.Summary[string(r.Status)]++
 			}
 		}
+		if len(r.Steps) > 0 {
+			f.replaceSteps(run, r.CaseID, r.Steps)
+		}
 		written = append(written, r)
 	}
 	return written, nil
@@ -69,7 +72,7 @@ func (s *fakeStore) LatestTestinyResults(_ context.Context, sid domain.SessionID
 	latest := map[int64]domain.TestinyResultEntry{}
 	var order []int64
 	for _, e := range s.log {
-		if e.SessionID != sid || e.RunID != run {
+		if e.SessionID != sid || e.RunID != run || e.Status == "" {
 			continue
 		}
 		if _, ok := latest[e.CaseID]; !ok {

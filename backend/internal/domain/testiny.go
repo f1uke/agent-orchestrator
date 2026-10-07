@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -118,6 +119,27 @@ type TestinyCaseResult struct {
 	// written none. Testiny's Status can differ from it when someone changed the
 	// case in Testiny since.
 	Recorded *TestinyResultRecord `json:"recorded,omitempty"`
+	// Steps is the result Testiny holds for each step of a STEPS case that has
+	// one, by step number. A step with none has not been run.
+	Steps []TestinyRunStep `json:"steps"`
+}
+
+// TestinyRunStep is the result Testiny holds for one step of a case in a run.
+type TestinyRunStep struct {
+	N int `json:"n" description:"The step's number, counting from 1, when the result was recorded."`
+	// RID is Testiny's id for the step row, or "" when it has none. It names the
+	// step when the case's steps were reordered since; see SameTestinyStep.
+	RID    string            `json:"rid"`
+	Status TestinyCaseStatus `json:"status"`
+}
+
+// SameTestinyStep says whether a step result belongs to a step of the case:
+// by its row id when both have one, else by its number.
+func SameTestinyStep(r TestinyRunStep, s TestinyCaseStep) bool {
+	if r.RID != "" && s.RID != "" {
+		return r.RID == s.RID
+	}
+	return r.N == s.N
 }
 
 // TestinyResultRecord is a result AO wrote to Testiny, and who asked for it.
@@ -134,15 +156,25 @@ type TestinyResultRecord struct {
 	At  time.Time `json:"at"`
 }
 
-// TestinyResult is one case's result to record in a run.
+// TestinyResult is one case's result to record in a run. Status is "" when
+// only Steps are given: the case keeps the status it has.
 type TestinyResult struct {
-	CaseID  int64             `json:"caseId"`
-	Status  TestinyCaseStatus `json:"status"`
-	Comment string            `json:"comment,omitempty"`
+	CaseID  int64               `json:"caseId"`
+	Status  TestinyCaseStatus   `json:"status,omitempty"`
+	Comment string              `json:"comment,omitempty"`
+	Steps   []TestinyStepResult `json:"steps,omitempty"`
+}
+
+// TestinyStepResult is one step's result to record, N counting from 1. A step
+// takes no comment.
+type TestinyStepResult struct {
+	N      int               `json:"n"`
+	Status TestinyCaseStatus `json:"status"`
 }
 
 // TestinyResultEntry is one line of AO's log of the results it wrote to
-// Testiny. SessionID is the task's id.
+// Testiny, as the writer asked for them: Status is "" when the write set only
+// steps. SessionID is the task's id.
 type TestinyResultEntry struct {
 	SessionID SessionID
 	RunID     TestinyRunID
@@ -171,8 +203,9 @@ var testinyNeedsComment = map[TestinyCaseStatus]bool{
 }
 
 // ParseTestinyResults checks a batch of results against Testiny's rules and
-// returns it normalised: the status upper-cased, the comment trimmed. The
-// first result that breaks a rule is named in the error.
+// returns it normalised: statuses upper-cased, the comment trimmed, steps in
+// order. A result gives a case status, steps, or both. The first result that
+// breaks a rule is named in the error.
 func ParseTestinyResults(in []TestinyResult) ([]TestinyResult, error) {
 	if len(in) == 0 {
 		return nil, fmt.Errorf("%w: no results given", ErrBadTestinyResult)
@@ -188,12 +221,26 @@ func ParseTestinyResults(in []TestinyResult) ([]TestinyResult, error) {
 			return nil, fmt.Errorf("%w: %s is given twice", ErrBadTestinyResult, tc)
 		}
 		seen[r.CaseID] = true
-		status := TestinyCaseStatus(strings.ToUpper(strings.TrimSpace(string(r.Status))))
+		steps, err := parseTestinySteps(tc, r.Steps)
+		if err != nil {
+			return nil, err
+		}
+		status := normalTestinyStatus(r.Status)
+		comment := strings.TrimSpace(r.Comment)
+		if status == "" {
+			switch {
+			case len(steps) == 0:
+				return nil, fmt.Errorf("%w: %s: give a status, step results, or both", ErrBadTestinyResult, tc)
+			case comment != "":
+				return nil, fmt.Errorf("%w: %s: a comment goes with the case's status; give --status too", ErrBadTestinyResult, tc)
+			}
+			out[i] = TestinyResult{CaseID: r.CaseID, Steps: steps}
+			continue
+		}
 		needsComment, known := testinyNeedsComment[status]
 		if !known {
-			return nil, fmt.Errorf("%w: %s: status %q is not one of PASSED, FAILED, BLOCKED, SKIPPED, NOTRUN", ErrBadTestinyResult, tc, r.Status)
+			return nil, fmt.Errorf("%w: %s: status %q %s", ErrBadTestinyResult, tc, r.Status, testinyStatusList)
 		}
-		comment := strings.TrimSpace(r.Comment)
 		switch n := utf8.RuneCountInString(comment); {
 		case needsComment && n == 0:
 			return nil, fmt.Errorf("%w: %s: %s needs a comment that says what happened", ErrBadTestinyResult, tc, status)
@@ -202,8 +249,41 @@ func ParseTestinyResults(in []TestinyResult) ([]TestinyResult, error) {
 		case !needsComment && n > 0:
 			return nil, fmt.Errorf("%w: %s: %s takes no comment", ErrBadTestinyResult, tc, status)
 		}
-		out[i] = TestinyResult{CaseID: r.CaseID, Status: status, Comment: comment}
+		out[i] = TestinyResult{CaseID: r.CaseID, Status: status, Comment: comment, Steps: steps}
 	}
+	return out, nil
+}
+
+const testinyStatusList = "is not one of PASSED, FAILED, BLOCKED, SKIPPED, NOTRUN"
+
+func normalTestinyStatus(s TestinyCaseStatus) TestinyCaseStatus {
+	return TestinyCaseStatus(strings.ToUpper(strings.TrimSpace(string(s))))
+}
+
+// parseTestinySteps checks one case's step results and returns them in step
+// order, or nil for none.
+func parseTestinySteps(tc string, in []TestinyStepResult) ([]TestinyStepResult, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	out := make([]TestinyStepResult, len(in))
+	seen := make(map[int]bool, len(in))
+	for i, s := range in {
+		step := fmt.Sprintf("%s step %d", tc, s.N)
+		switch {
+		case s.N < 1:
+			return nil, fmt.Errorf("%w: %s: steps count from 1", ErrBadTestinyResult, step)
+		case seen[s.N]:
+			return nil, fmt.Errorf("%w: %s is given twice", ErrBadTestinyResult, step)
+		}
+		seen[s.N] = true
+		status := normalTestinyStatus(s.Status)
+		if _, known := testinyNeedsComment[status]; !known {
+			return nil, fmt.Errorf("%w: %s: status %q %s", ErrBadTestinyResult, step, s.Status, testinyStatusList)
+		}
+		out[i] = TestinyStepResult{N: s.N, Status: status}
+	}
+	slices.SortFunc(out, func(a, b TestinyStepResult) int { return a.N - b.N })
 	return out, nil
 }
 
@@ -308,7 +388,11 @@ func NewTestinyCasePriority(level int) TestinyCasePriority {
 
 // TestinyCaseStep is one row of a STEPS case.
 type TestinyCaseStep struct {
-	N        int    `json:"n"`
+	N int `json:"n"`
+	// RID is Testiny's id for the step row. It is "" for a step written as
+	// Markdown that nobody has saved in Testiny's web app since, and such a
+	// step cannot take a result.
+	RID      string `json:"rid"`
 	Action   string `json:"action"`
 	Expected string `json:"expected"`
 }

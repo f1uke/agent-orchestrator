@@ -75,7 +75,7 @@ const testinyOwnerDev = `Until your task has a qa you own the cases, plans and r
 
 const testinyOwnerQA = `You own everything in this section; dev does not write to Testiny.`
 
-const testinyResultsRecorded = `- **Recording a result or linking a case to this task's Jira issue needs no yes.** A result goes on a run already linked to this task: a case's status, with a reason unless it PASSED. Record it with ` + "`ao testiny result`" + `, never with ` + "`testiny run results set`" + ` directly: AO logs the write, enforces who may write, and updates the Testiny tab. A link only adds the issue to the case as a requirement: linking twice writes nothing, and it never writes to Jira.`
+const testinyResultsRecorded = `- **Recording a result or linking a case to this task's Jira issue needs no yes.** A result goes on a run already linked to this task: a case's status, with a reason unless it PASSED, and its steps' results. Record it with ` + "`ao testiny result`" + `, never with ` + "`testiny run results set`" + ` directly: AO logs the write, enforces who may write, and updates the Testiny tab. A link only adds the issue to the case as a requirement: linking twice writes nothing, and it never writes to Jira.`
 
 const testinyResultsQAs = `- **Results are qa's, never yours.** Playing the run and recording each case's result is the check you ask a qa for once the change is done, so do not record results yourself.`
 
@@ -84,12 +84,13 @@ const testinyLoop = "\n\n" + `**Playing a run, start to finish.**
 1. **Plan.** ` + "`ao testiny runs \"$AO_CREW_ID\"`" + ` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
 2. **Link each case to this task's Jira issue** as a requirement: every case you create, right after you create it, and every case in a run linked to this task. Run ` + "`testiny case link <case-id> <JIRA-KEY>`" + `, with the key from the ` + "`issue`" + ` field of ` + "`ao session get \"$AO_CREW_ID\"`" + ` (` + "`jira:<KEY>`" + `). If the task has no Jira issue, skip this step and say so in your report.
 3. **Play each case.** Read it first: ` + "`ao testiny case \"$AO_CREW_ID\" <case-id>`" + ` prints its test data, precondition, and each step with its expected result. {{play}}
-4. **Record each case:** ` + "`ao testiny result \"$AO_CREW_ID\" <run-id> <case-id> --status <STATUS> [--comment \"<reason>\"]`" + `, or a whole run at once with ` + "`--from-file`" + `.
-   - **PASSED** only when both checks hold, with no comment.
+4. **Record each case and its steps:** ` + "`ao testiny result \"$AO_CREW_ID\" <run-id> <case-id> --status <STATUS> [--comment \"<reason>\"] [--step <n>=<STATUS> ...]`" + `, or a whole run at once with ` + "`--from-file`" + `.
+   - **Steps:** when the case has steps, add ` + "`--step <n>=<STATUS>`" + ` for each step you played, numbered as ` + "`ao testiny case`" + ` prints them, in the same call as the case. A step you never reached gets none.
+   - **PASSED** only when every step passed and both checks hold, with no comment.
    - **FAILED** with a short reason in plain Thai: one or two sentences on what went wrong.
    - **BLOCKED** when you could not drive the case (UNDRIVEABLE), with the reason from your attempt, never a guess.
    - **No Figma frame linked:** record what the expected result gives, and leave the visual check for a person.
-   - **Refused with ` + "`TESTINY_RESULT_SET_BY_PERSON`" + `:** a person already decided that case, and their status stands. Report your finding instead; never retry it or work around it.`
+   - **Refused with ` + "`TESTINY_RESULT_SET_BY_PERSON`" + `:** a person already decided that case or step, and their status stands. Report your finding instead; never retry it or work around it.`
 
 // testinyNotYours is a solo worker's alone: a person may add a qa to its task
 // while it runs, and from then on the daemon refuses its results.

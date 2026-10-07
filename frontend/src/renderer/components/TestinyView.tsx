@@ -21,6 +21,7 @@ import {
 	caseChips,
 	caseFacts,
 	evidenceLabel,
+	isStepWrite,
 	linkedByLabel,
 	needsComment,
 	orderCases,
@@ -29,6 +30,7 @@ import {
 	scriptCoverage,
 	sharedBlocker,
 	standingRecord,
+	stepStatus,
 	summaryCounts,
 	TESTINY_COMMENT_MAX,
 	TESTINY_STATUSES,
@@ -37,6 +39,7 @@ import {
 	type CaseOrder,
 	type TestinyCase,
 	type TestinyCaseDetail,
+	type TestinyCaseStep,
 	type TestinyFetchErrorKind,
 	type TestinyRun,
 	type TestinyStatus,
@@ -453,7 +456,6 @@ const COMMENT_PROMPT: Record<CommentStatus, { label: string; placeholder: string
 };
 
 function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }): ReactNode {
-	const glyph = testinyCaseGlyph(testCase.status);
 	const record = useRecordTestinyResult(row.taskId, row.runId, row.hold);
 	const [draft, setDraft] = useState<{ status: CommentStatus; text: string } | null>(null);
 	const trigger = useRef<HTMLButtonElement>(null);
@@ -463,12 +465,10 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 	const detailsId = useId();
 	const reason = standingRecord(testCase)?.comment;
 	const provenance = row.provenance(testCase);
-	// One write per case at a time, so Testiny cannot land them out of order.
-	// Not `disabled`: that would drop the keyboard focus the trigger holds.
+	// One write per case at a time, its steps' included, so Testiny cannot land
+	// them out of order.
 	const busy = record.isPending;
-	const holdShut = (event: React.SyntheticEvent) => {
-		if (busy) event.preventDefault();
-	};
+	const stepFailed = record.isError && record.variables && isStepWrite(record.variables);
 
 	const choose = (status: TestinyStatus) => {
 		record.reset();
@@ -493,50 +493,19 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 
 	return (
 		<li className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 py-1 text-xs leading-snug">
-			<DropdownMenu>
-				<DropdownMenuTrigger
-					asChild
-					onPointerDown={holdShut}
-					onKeyDown={(event) => event.key !== "Tab" && holdShut(event)}
-				>
-					<button
-						ref={trigger}
-						type="button"
-						aria-label={`Result: ${glyph.label}`}
-						aria-disabled={busy || undefined}
-						className="-mx-1 -my-0.5 flex items-start gap-2 rounded px-1 py-0.5 text-left text-muted-foreground transition-colors outline-none hover:bg-raised hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 aria-disabled:opacity-60 data-[state=open]:bg-raised data-[state=open]:text-foreground"
-					>
-						<glyph.Icon
-							className={cn("mt-px size-3.5 shrink-0", TONE[glyph.tone])}
-							strokeWidth={2.2}
-							aria-hidden="true"
-						/>
-						<span className="w-12 shrink-0">{glyph.label}</span>
-					</button>
-				</DropdownMenuTrigger>
-				<DropdownMenuContent
-					align="start"
-					className="min-w-36"
-					onCloseAutoFocus={(event) => {
-						if (!focusFieldOnClose.current) return;
-						focusFieldOnClose.current = false;
-						event.preventDefault();
-						field.current?.focus();
-					}}
-				>
-					<DropdownMenuRadioGroup value={testCase.status}>
-						{TESTINY_STATUSES.map((status) => {
-							const option = testinyCaseGlyph(status);
-							return (
-								<DropdownMenuRadioItem key={status} value={status} onSelect={() => choose(status)}>
-									<option.Icon className={TONE[option.tone]} strokeWidth={2.2} aria-hidden="true" />
-									{option.label}
-								</DropdownMenuRadioItem>
-							);
-						})}
-					</DropdownMenuRadioGroup>
-				</DropdownMenuContent>
-			</DropdownMenu>
+			<ResultMenu
+				ref={trigger}
+				label="Result"
+				status={testCase.status}
+				busy={busy}
+				onChoose={choose}
+				onCloseAutoFocus={(event) => {
+					if (!focusFieldOnClose.current) return;
+					focusFieldOnClose.current = false;
+					event.preventDefault();
+					field.current?.focus();
+				}}
+			/>
 			<button
 				type="button"
 				aria-expanded={expanded}
@@ -582,13 +551,83 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 					onCancel={cancel}
 				/>
 			) : null}
-			{record.isError ? (
+			{record.isError && !stepFailed ? (
 				<p className="col-span-2 col-start-2 mt-0.5 text-[11px] leading-snug text-error" role="alert">
 					{record.error.message}
 				</p>
 			) : null}
-			{expanded ? <CaseDetails id={detailsId} row={row} testCase={testCase} /> : null}
+			{expanded ? <CaseDetails id={detailsId} row={row} testCase={testCase} record={record} /> : null}
 		</li>
+	);
+}
+
+const MENU_TRIGGER =
+	"flex items-start gap-2 rounded px-1 py-0.5 text-left text-muted-foreground transition-colors outline-none hover:bg-raised hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 aria-disabled:opacity-60 data-[state=open]:bg-raised data-[state=open]:text-foreground";
+
+/**
+ * A result's glyph and word, which opens the five statuses to set it to. While
+ * a write is in flight it stays shut but keeps the focus: `disabled` would drop
+ * it.
+ */
+function ResultMenu({
+	ref,
+	label,
+	status,
+	busy,
+	onChoose,
+	align = "start",
+	className,
+	onCloseAutoFocus,
+}: {
+	ref?: React.Ref<HTMLButtonElement>;
+	label: string;
+	status: string;
+	busy: boolean;
+	onChoose: (status: TestinyStatus) => void;
+	align?: "start" | "end";
+	className?: string;
+	onCloseAutoFocus?: (event: Event) => void;
+}) {
+	const glyph = testinyCaseGlyph(status);
+	const holdShut = (event: React.SyntheticEvent) => {
+		if (busy) event.preventDefault();
+	};
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				asChild
+				onPointerDown={holdShut}
+				onKeyDown={(event) => event.key !== "Tab" && holdShut(event)}
+			>
+				<button
+					ref={ref}
+					type="button"
+					aria-label={`${label}: ${glyph.label}`}
+					aria-disabled={busy || undefined}
+					className={cn(MENU_TRIGGER, "-mx-1 -my-0.5", className)}
+				>
+					<glyph.Icon
+						className={cn("mt-px size-3.5 shrink-0", TONE[glyph.tone])}
+						strokeWidth={2.2}
+						aria-hidden="true"
+					/>
+					<span className="w-12 shrink-0">{glyph.label}</span>
+				</button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align={align} className="min-w-36" onCloseAutoFocus={onCloseAutoFocus}>
+				<DropdownMenuRadioGroup value={status}>
+					{TESTINY_STATUSES.map((option) => {
+						const g = testinyCaseGlyph(option);
+						return (
+							<DropdownMenuRadioItem key={option} value={option} onSelect={() => onChoose(option)}>
+								<g.Icon className={TONE[g.tone]} strokeWidth={2.2} aria-hidden="true" />
+								{g.label}
+							</DropdownMenuRadioItem>
+						);
+					})}
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 
@@ -639,8 +678,20 @@ function CommentField({
 	);
 }
 
+type RecordResult = ReturnType<typeof useRecordTestinyResult>;
+
 /** A case read in full from Testiny the first time its title is opened, under the title's own edge. */
-function CaseDetails({ id, row, testCase }: { id: string; row: RowContext; testCase: TestinyCase }) {
+function CaseDetails({
+	id,
+	row,
+	testCase,
+	record,
+}: {
+	id: string;
+	row: RowContext;
+	testCase: TestinyCase;
+	record: RecordResult;
+}) {
 	const query = useTestinyCase(row.taskId, testCase.id);
 	return (
 		<section
@@ -666,7 +717,7 @@ function CaseDetails({ id, row, testCase }: { id: string; row: RowContext; testC
 					</Button>
 				</div>
 			) : (
-				<CaseDetailBody detail={query.data} taskIssueId={row.taskIssueId} />
+				<CaseDetailBody detail={query.data} taskIssueId={row.taskIssueId} testCase={testCase} record={record} />
 			)}
 		</section>
 	);
@@ -675,7 +726,17 @@ function CaseDetails({ id, row, testCase }: { id: string; row: RowContext; testC
 const DETAIL_TEXT = "text-[11.5px] leading-relaxed text-foreground [overflow-wrap:anywhere]";
 
 /** Every section the case fills, in the order a tester plays it; an empty one is left out. */
-function CaseDetailBody({ detail, taskIssueId }: { detail: TestinyCaseDetail; taskIssueId: string | undefined }) {
+function CaseDetailBody({
+	detail,
+	taskIssueId,
+	testCase,
+	record,
+}: {
+	detail: TestinyCaseDetail;
+	taskIssueId: string | undefined;
+	testCase: TestinyCase;
+	record: RecordResult;
+}) {
 	const chips = caseChips(detail);
 	return (
 		<>
@@ -690,7 +751,7 @@ function CaseDetailBody({ detail, taskIssueId }: { detail: TestinyCaseDetail; ta
 			<RichTextSection title="Precondition" text={detail.precondition} />
 			{detail.steps.length > 0 ? (
 				<DetailSection title="Steps">
-					<StepList steps={detail.steps} />
+					<StepList steps={detail.steps} testCase={testCase} record={record} />
 				</DetailSection>
 			) : null}
 			<RichTextSection title="Steps" text={detail.stepsText} />
@@ -843,21 +904,44 @@ const LIST = "flex flex-col gap-0.5 pl-4 marker:text-passive";
 
 /**
  * A STEPS case's table as one row per step, the expected result under its
- * action. Three columns left each text under 100 px in the rail and wrapped
- * most steps onto four lines.
+ * action, and the step's result in the run beside it: a menu that saves at
+ * once, since a step takes no comment. Three columns left each text under
+ * 100 px in the rail and wrapped most steps onto four lines.
  */
-function StepList({ steps }: { steps: TestinyCaseDetail["steps"] }) {
+function StepList({
+	steps,
+	testCase,
+	record,
+}: {
+	steps: TestinyCaseStep[];
+	testCase: TestinyCase;
+	record: RecordResult;
+}) {
+	const failed = record.isError && record.variables && isStepWrite(record.variables) ? record.variables.step.n : null;
+	const choose = (step: TestinyCaseStep, status: TestinyStatus) => {
+		record.reset();
+		if (status !== stepStatus(testCase, step))
+			record.mutate({ caseId: testCase.id, step: { n: step.n, rid: step.rid }, status });
+	};
 	return (
 		<ol aria-label="Steps" className="flex flex-col text-[11.5px] leading-relaxed">
 			{steps.map((step) => (
 				<li
 					key={step.n}
-					className="grid grid-cols-[1rem_minmax(0,1fr)] gap-y-0.5 border-t border-border py-1.5 first:border-t-0 first:pt-0 last:pb-0"
+					className="grid grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-0.5 border-t border-border py-1.5 first:border-t-0 first:pt-0 last:pb-0"
 				>
 					<span className="font-mono text-[11px] text-passive tabular-nums">{step.n}</span>
 					<p className="whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{step.action}</p>
+					<ResultMenu
+						label={`Step ${step.n} result`}
+						status={stepStatus(testCase, step)}
+						busy={record.isPending}
+						onChoose={(status) => choose(step, status)}
+						align="end"
+						className="-mr-1 self-start"
+					/>
 					{step.expected ? (
-						<p className="col-start-2 grid grid-cols-[1rem_minmax(0,1fr)] whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">
+						<p className="col-span-2 col-start-2 grid grid-cols-[1rem_minmax(0,1fr)] whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">
 							<span className="text-passive" aria-hidden="true">
 								→
 							</span>
@@ -865,6 +949,11 @@ function StepList({ steps }: { steps: TestinyCaseDetail["steps"] }) {
 								<span className="sr-only">Expected: </span>
 								{step.expected}
 							</span>
+						</p>
+					) : null}
+					{failed === step.n ? (
+						<p className="col-span-2 col-start-2 text-[11px] leading-snug text-error" role="alert">
+							{record.error?.message}
 						</p>
 					) : null}
 				</li>

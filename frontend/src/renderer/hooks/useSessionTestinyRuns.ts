@@ -2,12 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { mockRecordTestinyResult, mockTestinyCase, mockTestinyRuns } from "../lib/mock-data";
 import {
+	resultInput,
 	withCase,
 	withResult,
 	type TestinyCaseDetail,
-	type TestinyResultWrite,
 	type TestinyRun,
 	type TestinyRunsResponse,
+	type TestinyWrite,
 } from "../lib/testiny";
 
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
@@ -134,19 +135,20 @@ export function useTestinyRunsVersion(taskId: string): number {
 export type ResultWriteHold = { start: () => void; end: (version: number) => void };
 
 /**
- * Sets one case's result in a linked run, as the person (no `from`). The row
- * shows the new status at once; a refused write puts the case back as it was,
- * and a written one swaps the run for the fresh view the daemon read back.
+ * Sets one case's result, or one of its steps', in a linked run, as the person
+ * (no `from`). The row shows the new status at once; a refused write puts the
+ * case back as it was, and a written one swaps the run for the fresh view the
+ * daemon read back.
  */
 export function useRecordTestinyResult(taskId: string, runId: number, hold?: ResultWriteHold) {
 	const qc = useQueryClient();
 	const key = sessionTestinyQueryKey(taskId);
 	return useMutation({
-		mutationFn: async (write: TestinyResultWrite): Promise<TestinyRun> => {
+		mutationFn: async (write: TestinyWrite): Promise<TestinyRun> => {
 			if (usePreviewData) return mockRecordTestinyResult(taskId, runId, write);
 			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/testiny/runs/{runId}/results", {
 				params: { path: { sessionId: taskId, runId: String(runId) } },
-				body: { results: [write] },
+				body: { results: [resultInput(write)] },
 			});
 			if (error || !data) throw new Error(apiErrorMessage(error, "Couldn't set the result"));
 			return data;

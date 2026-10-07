@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -219,18 +220,21 @@ func indentLines(s, prefix string) string {
 
 func newTestinyResultCommand(ctx *commandContext) *cobra.Command {
 	var status, comment, fromFile string
+	var steps []string
 	cmd := &cobra.Command{
-		Use:   "result <task> <run> [case] (--status <status> [--comment <text>] | --from-file <path|->)",
-		Short: "Record case results in a Testiny run linked to a task",
-		Long: "Records one case's result (--status, with --comment for FAILED, BLOCKED and SKIPPED), " +
-			"or a batch read from --from-file as a JSON array of {caseId, status, comment}. " +
-			"The run must be linked to the task. When the task has a qa, only qa may record, and an " +
-			"agent never overwrites a status a person set: that is refused (exit 2), so report it in " +
-			"the handback instead. Sends $AO_SESSION_ID and the checkout's HEAD commit with the results.",
+		Use:   "result <task> <run> [case] (--status <status> [--comment <text>] [--step <n>=<status>]... | --from-file <path|->)",
+		Short: "Record case and step results in a Testiny run linked to a task",
+		Long: "Records one case's result (--status, with --comment for FAILED, BLOCKED and SKIPPED) and " +
+			"the result of any of its steps (--step 2=FAILED, counting from 1; steps alone keep the case's " +
+			"status), or a batch read from --from-file as a JSON array of {caseId, status, comment, " +
+			"steps: [{n, status}]}. The run must be linked to the task. When the task has a qa, only qa " +
+			"may record, and an agent never overwrites a case or step status a person set: that is " +
+			"refused (exit 2), so report it in the handback instead. Sends $AO_SESSION_ID and the " +
+			"checkout's HEAD commit with the results.",
 		Args: rangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			task, run := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
-			results, err := testinyResultsFromArgs(cmd, args[2:], status, comment, fromFile)
+			results, err := testinyResultsFromArgs(cmd, args[2:], status, comment, steps, fromFile)
 			if err != nil {
 				return err
 			}
@@ -248,16 +252,17 @@ func newTestinyResultCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&status, "status", "", "PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN")
 	cmd.Flags().StringVar(&comment, "comment", "", "What happened, at most 300 characters (FAILED, BLOCKED and SKIPPED need one)")
-	cmd.Flags().StringVar(&fromFile, "from-file", "", "A JSON array of {caseId, status, comment}; - reads stdin")
+	cmd.Flags().StringArrayVar(&steps, "step", nil, "A step's result as <n>=<status>, counting from 1 (repeatable)")
+	cmd.Flags().StringVar(&fromFile, "from-file", "", "A JSON array of {caseId, status, comment, steps}; - reads stdin")
 	return cmd
 }
 
 // testinyResultsFromArgs is the one case named on the command line, or the
-// batch in --from-file. The daemon checks statuses and comments.
-func testinyResultsFromArgs(cmd *cobra.Command, caseArg []string, status, comment, fromFile string) ([]domain.TestinyResult, error) {
+// batch in --from-file. The daemon checks statuses, comments and steps.
+func testinyResultsFromArgs(cmd *cobra.Command, caseArg []string, status, comment string, stepArgs []string, fromFile string) ([]domain.TestinyResult, error) {
 	if fromFile != "" {
-		if len(caseArg) > 0 || status != "" || comment != "" {
-			return nil, usageError{errors.New("usage: --from-file takes no case, --status or --comment")}
+		if len(caseArg) > 0 || status != "" || comment != "" || len(stepArgs) > 0 {
+			return nil, usageError{errors.New("usage: --from-file takes no case, --status, --comment or --step")}
 		}
 		var raw []byte
 		var err error
@@ -271,18 +276,27 @@ func testinyResultsFromArgs(cmd *cobra.Command, caseArg []string, status, commen
 		}
 		var results []domain.TestinyResult
 		if err := json.Unmarshal(raw, &results); err != nil {
-			return nil, usageError{fmt.Errorf("results must be a JSON array of {caseId, status, comment}: %w", err)}
+			return nil, usageError{fmt.Errorf("results must be a JSON array of {caseId, status, comment, steps}: %w", err)}
 		}
 		return results, nil
 	}
-	if len(caseArg) != 1 || status == "" {
-		return nil, usageError{errors.New("usage: give a case and --status, or --from-file")}
+	if len(caseArg) != 1 || (status == "" && len(stepArgs) == 0) {
+		return nil, usageError{errors.New("usage: give a case with --status, --step or both, or --from-file")}
 	}
 	id, err := domain.ParseTestinyCaseRef(caseArg[0])
 	if err != nil {
 		return nil, usageError{fmt.Errorf("usage: %q is %w", caseArg[0], err)}
 	}
-	return []domain.TestinyResult{{CaseID: id, Status: domain.TestinyCaseStatus(status), Comment: comment}}, nil
+	steps := make([]domain.TestinyStepResult, len(stepArgs))
+	for i, arg := range stepArgs {
+		n, s, ok := strings.Cut(arg, "=")
+		number, err := strconv.Atoi(strings.TrimSpace(n))
+		if !ok || err != nil {
+			return nil, usageError{fmt.Errorf("usage: --step %q is not <n>=<status>, e.g. --step 2=FAILED", arg)}
+		}
+		steps[i] = domain.TestinyStepResult{N: number, Status: domain.TestinyCaseStatus(strings.TrimSpace(s))}
+	}
+	return []domain.TestinyResult{{CaseID: id, Status: domain.TestinyCaseStatus(status), Comment: comment, Steps: steps}}, nil
 }
 
 // headCommit is the short HEAD commit of the checkout the command runs in, or
@@ -295,8 +309,8 @@ func (c *commandContext) headCommit(ctx context.Context) string {
 	return strings.TrimSpace(string(out))
 }
 
-// writeTestinyRecorded prints each case recorded, as Testiny now has it, and
-// the run's new counts.
+// writeTestinyRecorded prints each case recorded, and each step recorded under
+// it, as Testiny now has them, and the run's new counts.
 func writeTestinyRecorded(w io.Writer, v domain.TestinyRunView, results []domain.TestinyResult) error {
 	cases := make(map[int64]domain.TestinyCaseResult, len(v.Cases))
 	for _, c := range v.Cases {
@@ -310,6 +324,17 @@ func writeTestinyRecorded(w io.Writer, v domain.TestinyRunView, results []domain
 			c = domain.TestinyCaseResult{ID: r.CaseID, Status: r.Status}
 		}
 		fmt.Fprintf(&b, "  %-7s TC-%d %s\n", c.Status, c.ID, c.Title)
+		if len(r.Steps) > 0 {
+			steps := make([]string, len(r.Steps))
+			for i, asked := range r.Steps {
+				status := asked.Status
+				if j := slices.IndexFunc(c.Steps, func(s domain.TestinyRunStep) bool { return s.N == asked.N }); j >= 0 {
+					status = c.Steps[j].Status
+				}
+				steps[i] = fmt.Sprintf("step %d %s", asked.N, status)
+			}
+			fmt.Fprintf(&b, "          %s\n", strings.Join(steps, ", "))
+		}
 	}
 	fmt.Fprintf(&b, "%s now has %s\n", v.Link.RunID, testinyCounts(v.Counts))
 	_, err := io.WriteString(w, b.String())

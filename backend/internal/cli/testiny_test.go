@@ -280,6 +280,50 @@ func TestTestinyResultFromAFileOutsideAGitCheckout(t *testing.T) {
 	}
 }
 
+func TestTestinyResultRecordsSteps(t *testing.T) {
+	cfg := setConfigEnv(t)
+	t.Setenv("AO_SESSION_ID", "app-2")
+	srv, capture := reviewServer(t, http.StatusOK, strings.Replace(testinyRecordedJSON,
+		`{"id":7202,"title":"Confirms","status":"FAILED"}`,
+		`{"id":7202,"title":"Confirms","status":"FAILED","steps":[{"n":1,"rid":"a","status":"PASSED"},{"n":2,"rid":"b","status":"FAILED"},{"n":3,"rid":"c","status":"PASSED"}]}`, 1))
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, gitHead("4f2c9e1"), "testiny", "result", "app-1", "640", "7202",
+		"--status", "FAILED", "--comment", "step 2", "--step", "2=FAILED", "--step", " 3 = passed ")
+	if err != nil {
+		t.Fatalf("result: %v\nstderr=%s", err, errOut)
+	}
+	want := `{"results":[{"caseId":7202,"status":"FAILED","comment":"step 2","steps":[{"n":2,"status":"FAILED"},{"n":3,"status":"passed"}]}],"from":"app-2","sha":"4f2c9e1"}`
+	if strings.TrimSpace(capture.body) != want {
+		t.Fatalf("body = %s\nwant %s", capture.body, want)
+	}
+	if !strings.Contains(out, "  FAILED  TC-7202 Confirms\n          step 2 FAILED, step 3 PASSED\n") {
+		t.Fatalf("output =\n%s\nwant the steps recorded, as Testiny now has them", out)
+	}
+
+	// Steps alone keep the case's status.
+	if _, errOut, err := executeCLI(t, gitHead(""), "testiny", "result", "app-1", "640", "7202", "--step", "1=PASSED"); err != nil {
+		t.Fatalf("steps alone: %v\nstderr=%s", err, errOut)
+	}
+	if want := `{"results":[{"caseId":7202,"steps":[{"n":1,"status":"PASSED"}]}],"from":"app-2"}`; strings.TrimSpace(capture.body) != want {
+		t.Fatalf("body = %s\nwant %s", capture.body, want)
+	}
+}
+
+func TestTestinyResultFromAFileCarriesSteps(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, capture := reviewServer(t, http.StatusOK, testinyRecordedJSON)
+	writeRunFileFor(t, cfg, srv)
+	deps := gitHead("")
+	deps.In = strings.NewReader(`[{"caseId":7202,"status":"FAILED","comment":"x","steps":[{"n":2,"status":"FAILED"}]}]`)
+	if _, errOut, err := executeCLI(t, deps, "testiny", "result", "app-1", "640", "--from-file", "-"); err != nil {
+		t.Fatalf("result: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(capture.body, `"steps":[{"n":2,"status":"FAILED"}]`) {
+		t.Fatalf("body = %s, want the file's steps", capture.body)
+	}
+}
+
 func TestTestinyResultUsage(t *testing.T) {
 	setConfigEnv(t)
 	for _, args := range [][]string{
@@ -288,6 +332,10 @@ func TestTestinyResultUsage(t *testing.T) {
 		{"testiny", "result", "app-1", "640", "abc", "--status", "PASSED"},
 		{"testiny", "result", "app-1", "640", "7201", "--status", "PASSED", "--from-file", "-"},
 		{"testiny", "result", "app-1", "640", "--from-file", "-", "--comment", "x"},
+		{"testiny", "result", "app-1", "640", "--from-file", "-", "--step", "1=PASSED"},
+		{"testiny", "result", "app-1", "640", "7201", "--step", "2"},
+		{"testiny", "result", "app-1", "640", "7201", "--step", "two=PASSED"},
+		{"testiny", "result", "app-1", "640", "7201", "--comment", "x"},
 	} {
 		if _, _, err := executeCLI(t, gitHead(""), args...); ExitCode(err) != 2 {
 			t.Errorf("%v: err = %v, want a usage error", args, err)

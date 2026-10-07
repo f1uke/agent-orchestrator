@@ -3359,6 +3359,12 @@ export interface components {
         ControllersStartLearningDecideResponse: {
             started: boolean;
         };
+        ControllersTestinyStepResultInput: {
+            /** @description The step's number, counting from 1. */
+            n: number;
+            /** @description PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. A step takes no comment. */
+            status: string;
+        };
         ControllersTranscriptRefRequest: {
             /** @description The harness's own conversation id. */
             claudeSessionId?: string;
@@ -3557,6 +3563,7 @@ export interface components {
             action: string;
             expected: string;
             n: number;
+            rid: string;
         };
         DomainTestinyRequirement: {
             /** @description The Jira issue key, e.g. MOBILITY-4839. */
@@ -3564,6 +3571,12 @@ export interface components {
             /** @description The issue's Jira status name, e.g. In Progress. */
             status: string;
             summary: string;
+        };
+        DomainTestinyRunStep: {
+            /** @description The step's number, counting from 1, when the result was recorded. */
+            n: number;
+            rid: string;
+            status: string;
         };
         EndCrewRunInput: {
             /**
@@ -4811,6 +4824,7 @@ export interface components {
             recorded?: components["schemas"]["TestinyResultRecord"];
             script?: string;
             status: string;
+            steps: components["schemas"]["DomainTestinyRunStep"][];
             title: string;
         };
         TestinyFetchError: {
@@ -4831,8 +4845,10 @@ export interface components {
             caseId: number;
             /** @description What happened, at most 300 characters. FAILED, BLOCKED and SKIPPED need one; PASSED and NOTRUN take none. */
             comment?: string;
-            /** @description PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. */
-            status: string;
+            /** @description PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. Empty when only steps are given: the case keeps its status. */
+            status?: string;
+            /** @description Results for steps of a STEPS case. Every other step keeps the result it has. */
+            steps?: components["schemas"]["ControllersTestinyStepResultInput"][];
         };
         TestinyResultRecord: {
             /** Format: date-time */

@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +108,9 @@ type Run struct {
 	// PlanID and MilestoneID are 0 when the run has none (Testiny ids start at 1).
 	PlanID      int64
 	MilestoneID int64
+	// Steps is the step results Testiny holds for each case that has any, by
+	// case id, in step order.
+	Steps map[int64][]domain.TestinyRunStep
 }
 
 // Case is one case in a run with the status recorded against it.
@@ -135,7 +139,8 @@ type Project struct {
 	Key  string
 }
 
-// Run reads one test run. A run that does not exist is ErrNotFound.
+// Run reads one test run, with the step results of its cases. A run that
+// does not exist is ErrNotFound.
 func (c *Client) Run(ctx context.Context, id domain.TestinyRunID) (Run, error) {
 	var raw struct {
 		ID         int64  `json:"id"`
@@ -146,8 +151,9 @@ func (c *Client) Run(ctx context.Context, id domain.TestinyRunID) (Run, error) {
 		Milestone  *struct {
 			MilestoneID int64 `json:"milestone_id"`
 		} `json:"milestone_testrun_values"`
+		Cases json.RawMessage `json:"testrun_testcase_values"`
 	}
-	if err := c.call(ctx, &raw, "run", "show", idArg(int64(id))); err != nil {
+	if err := c.call(ctx, &raw, "run", "show", idArg(int64(id)), "--with", "case"); err != nil {
 		return Run{}, err
 	}
 	run := Run{ID: domain.TestinyRunID(raw.ID), Title: raw.Title, Closed: raw.IsClosed, ProjectID: raw.ProjectID}
@@ -157,7 +163,52 @@ func (c *Client) Run(ctx context.Context, id domain.TestinyRunID) (Run, error) {
 	if raw.Milestone != nil {
 		run.MilestoneID = raw.Milestone.MilestoneID
 	}
+	steps, err := stepResults(raw.Cases)
+	if err != nil {
+		return Run{}, fmt.Errorf("%w: unreadable cases of testiny run %d: %w", ErrUnavailable, id, err)
+	}
+	run.Steps = steps
 	return run, nil
+}
+
+type runCase struct {
+	CaseID int64 `json:"testcase_id"`
+	Steps  []struct {
+		Idx int    `json:"idx"`
+		RID string `json:"rid"`
+		Res string `json:"res"`
+	} `json:"result_per_step"`
+}
+
+// stepResults reads each case's result_per_step, whose idx counts from 0.
+// Testiny gives the run's cases as a list (one case too, as read live); an
+// object is read as one case, as the CLI's own result listing reads mappings.
+func stepResults(raw json.RawMessage) (map[int64][]domain.TestinyRunStep, error) {
+	var cases []runCase
+	if trimmed := bytes.TrimSpace(raw); bytes.HasPrefix(trimmed, []byte("{")) {
+		var one runCase
+		if err := json.Unmarshal(trimmed, &one); err != nil {
+			return nil, err
+		}
+		cases = []runCase{one}
+	} else if len(trimmed) > 0 {
+		if err := json.Unmarshal(trimmed, &cases); err != nil {
+			return nil, err
+		}
+	}
+	out := map[int64][]domain.TestinyRunStep{}
+	for _, c := range cases {
+		if len(c.Steps) == 0 {
+			continue
+		}
+		steps := make([]domain.TestinyRunStep, len(c.Steps))
+		for i, s := range c.Steps {
+			steps[i] = domain.TestinyRunStep{N: s.Idx + 1, RID: s.RID, Status: domain.TestinyCaseStatus(s.Res)}
+		}
+		slices.SortFunc(steps, func(a, b domain.TestinyRunStep) int { return a.N - b.N })
+		out[c.CaseID] = steps
+	}
+	return out, nil
 }
 
 // Results reads every case in a run. A run that does not exist has no cases,
@@ -186,22 +237,34 @@ func (c *Client) Results(ctx context.Context, id domain.TestinyRunID) (Results, 
 	return res, nil
 }
 
-// SetResults records results in a run. A result with a comment is sent alone,
-// because only `--case` takes a `--comment` (and a comment needs the run's
-// project id); the rest go in one `--result` batch. Every value is its own argv
-// element, so a comment is never read as a flag. It stops at the first call
-// that fails and returns what was written before it, so a caller can account
-// for a partial write.
+// SetResults records results in a run. A result with a comment or steps is
+// sent alone, because only `--case` takes a `--comment` (and a comment needs
+// the run's project id) or `--step`; the rest go in one `--result` batch.
+// Every result needs its case status. Testiny replaces a case's step results
+// with the ones a write gives, so a result's Steps must be every step result
+// the case is to keep. Every value is its own argv element, so a comment is
+// never read as a flag. It stops at the first call that fails and returns what
+// was written before it, so a caller can account for a partial write.
 func (c *Client) SetResults(ctx context.Context, run domain.TestinyRunID, projectID int64, results []domain.TestinyResult) ([]domain.TestinyResult, error) {
 	written := make([]domain.TestinyResult, 0, len(results))
 	var batch []domain.TestinyResult
 	for _, r := range results {
-		if r.Comment == "" {
+		if r.Comment == "" && len(r.Steps) == 0 {
 			batch = append(batch, r)
 			continue
 		}
-		if err := c.exec(ctx, "run", "results", "set", "--run="+idArg(int64(run)), "--project-id="+idArg(projectID),
-			"--case="+idArg(r.CaseID), "--status="+string(r.Status), "--comment="+r.Comment); err != nil {
+		args := []string{"run", "results", "set", "--run=" + idArg(int64(run))}
+		if r.Comment != "" {
+			args = append(args, "--project-id="+idArg(projectID))
+		}
+		args = append(args, "--case="+idArg(r.CaseID), "--status="+string(r.Status))
+		if r.Comment != "" {
+			args = append(args, "--comment="+r.Comment)
+		}
+		for _, s := range r.Steps {
+			args = append(args, "--step="+strconv.Itoa(s.N)+"="+string(s.Status))
+		}
+		if err := c.exec(ctx, args...); err != nil {
 			return written, err
 		}
 		written = append(written, r)
@@ -328,6 +391,7 @@ func (c *Client) requirements(ctx context.Context, id int64) ([]domain.TestinyRe
 
 type caseStep struct {
 	N        int    `json:"n"`
+	RID      string `json:"rid"`
 	Action   string `json:"action"`
 	Expected string `json:"expected"`
 }

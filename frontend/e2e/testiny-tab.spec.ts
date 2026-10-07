@@ -126,6 +126,40 @@ test("a case's title opens its test data, precondition and steps under it", asyn
 	await expect(details).toHaveCount(0);
 });
 
+test("a step's result shows on its line, and setting one saves it at once", async ({ page }) => {
+	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing");
+
+	const inspector = page.locator("#inspector");
+	await inspector.getByRole("tab", { name: "Testiny" }).click();
+	const run = inspector.getByRole("article").first();
+	const name = "[Share] Empty state shows when there is nothing to share";
+	await run.getByRole("button", { name }).click();
+	const steps = run.getByRole("region", { name: `${name} details` }).getByRole("list", { name: "Steps" });
+	const step = (n: number) => steps.getByRole("listitem").nth(n - 1);
+
+	await expect(step(3).getByRole("button", { name: "Step 3 result: Failed" })).toBeVisible();
+	await expect(step(4).getByRole("button", { name: "Step 4 result: Not run" })).toBeVisible();
+
+	// The result sits on the step's first line, at the row's right edge.
+	const action = (await step(2).getByText("Tap Share", { exact: true }).boundingBox())!;
+	const menu = step(2).getByRole("button", { name: "Step 2 result: Passed" });
+	const menuBox = (await menu.boundingBox())!;
+	expect(Math.abs(menuBox.y + menuBox.height / 2 - (action.y + action.height / 2))).toBeLessThan(2);
+	expect(menuBox.x).toBeGreaterThan(action.x + action.width);
+
+	await menu.click();
+	await page.getByRole("menuitemradio", { name: "Failed" }).click();
+	await expect(step(2).getByRole("button", { name: "Step 2 result: Failed" })).toBeVisible();
+	await expect(step(2).getByRole("textbox")).toHaveCount(0);
+	// The case keeps its own status.
+	await expect(run.getByRole("button", { name: "Result: Failed" }).first()).toBeVisible();
+
+	// Written into the preview's run, so a fresh read still has it.
+	await inspector.getByRole("button", { name: "Refresh" }).click();
+	await expect(step(2).getByRole("button", { name: "Step 2 result: Failed" })).toBeVisible();
+	await expect(step(1).getByRole("button", { name: "Step 1 result: Passed" })).toBeVisible();
+});
+
 test("a case lists the Jira issues it is linked to, and says when the task's is not one yet", async ({ page }) => {
 	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing-qa");
 

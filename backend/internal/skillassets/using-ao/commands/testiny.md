@@ -98,27 +98,34 @@ ao testiny case <task> <case-id|TC-id> [flags]
 
 ### ao testiny result
 
-Record case results in a run linked to the task. Give one case with `--status` (and
-`--comment` for FAILED, BLOCKED and SKIPPED), or a batch with `--from-file`: a JSON array of
-`{"caseId": 7166, "status": "FAILED", "comment": "..."}`. The case is its id (`7166`) or
-`TC-7166`.
+Record case and step results in a run linked to the task. Give one case with `--status` (and
+`--comment` for FAILED, BLOCKED and SKIPPED) and a `--step <n>=<status>` for each of its steps
+you played, or a batch with `--from-file`: a JSON array of
+`{"caseId": 7166, "status": "FAILED", "comment": "...", "steps": [{"n": 2, "status": "FAILED"}]}`.
+The case is its id (`7166`) or `TC-7166`.
 
-- Statuses: `PASSED`, `FAILED`, `BLOCKED`, `SKIPPED`, `NOTRUN`.
+- Statuses, for a case and a step: `PASSED`, `FAILED`, `BLOCKED`, `SKIPPED`, `NOTRUN`.
 - FAILED, BLOCKED and SKIPPED need a comment of at most 300 characters that says what
-  happened. PASSED and NOTRUN take none.
+  happened. PASSED and NOTRUN take none. A step takes no comment: the case's comment says
+  which step went wrong.
+- Steps count from 1, as `ao testiny case` numbers them. Only a STEPS case has steps. A step
+  you do not name keeps the result it has. Steps with no `--status` keep the case's status.
 - When the task has a qa, only qa records results. A solo worker records its own task's.
-- An agent never overwrites a status a person set, in the app or in Testiny. That write is
-  refused with `TESTINY_RESULT_SET_BY_PERSON`: report your result in the handback instead,
-  and do not retry. A person sets the case back to NOTRUN to ask for a re-run.
+- An agent never overwrites a case or step status a person set, in the app or in Testiny.
+  That write is refused with `TESTINY_RESULT_SET_BY_PERSON`, which names each case
+  (`TC-7166 (PASSED)`) and step (`TC-7166 step 2 (PASSED)`): report your result in the
+  handback instead, and do not retry. A person sets the case or step back to NOTRUN to ask
+  for a re-run.
 - The whole batch is checked before anything is written.
 
 The command sends `$AO_SESSION_ID` and the checkout's `git rev-parse --short HEAD`, so the
-tab shows "set by qa on 4f2c9e1". It prints each case as Testiny now has it, and the run's
-new counts.
+tab shows "set by qa on 4f2c9e1". It prints each case, and the steps you recorded under it,
+as Testiny now has them, and the run's new counts.
 
 **Syntax:**
 ```
-ao testiny result <task> <run> <case> --status <status> [--comment <text>]
+ao testiny result <task> <run> <case> --status <status> [--comment <text>] [--step <n>=<status>]...
+ao testiny result <task> <run> <case> --step <n>=<status>...
 ao testiny result <task> <run> --from-file <path|->
 ```
 
@@ -126,8 +133,9 @@ ao testiny result <task> <run> --from-file <path|->
 
 | Flag | Meaning | Default / Required |
 |---|---|---|
-| `--status` | The case's status | Required with a case |
+| `--status` | The case's status | Required with a case, unless `--step` is given |
 | `--comment` | What happened, at most 300 characters | Required for FAILED, BLOCKED, SKIPPED |
+| `--step` | A step's result as `<n>=<status>`, counting from 1; repeatable | - |
 | `--from-file` | A JSON array of results; `-` reads stdin | Instead of a case |
 
 ## Errors
@@ -137,8 +145,8 @@ ao testiny result <task> <run> --from-file <path|->
 | `TESTINY_BAD_RUN_REF` | 2 | Not a run id, `TR-<id>`, or run URL |
 | `TESTINY_BAD_CASE_REF` | 2 | Not a case id or `TC-<id>` |
 | `TESTINY_OFF` | 2 | The project has no Testiny project set |
-| `TESTINY_RESULT_INVALID` | 2 | A result breaks a rule above, or names a case that is not in the run |
-| `TESTINY_RESULT_SET_BY_PERSON` | 2 | A person set one of the cases: report it in the handback, do not retry |
+| `TESTINY_RESULT_INVALID` | 2 | A result breaks a rule above, names a case that is not in the run, or names a step the case does not have |
+| `TESTINY_RESULT_SET_BY_PERSON` | 2 | A person set one of the cases or steps: report it in the handback, do not retry |
 | `TESTINY_WRITE_NOT_YOURS` | 2 | The task has a qa and you are not it, or you are not on the task |
 | `TESTINY_RUN_NOT_LINKED` | 1 | The run is not linked to the task: `ao testiny link` it first |
 | `TESTINY_CASE_NOT_IN_TASK` | 1 | The case is in none of the runs linked to the task |
@@ -175,6 +183,12 @@ ao testiny case "$AO_CREW_ID" TC-7166
 ```bash
 # Record one failed case
 ao testiny result "$AO_SESSION_ID" 632 TC-7167 --status FAILED --comment "ปุ่มยืนยันไม่แสดงหลังกรอก PIN"
+```
+
+```bash
+# Record a case and each of its steps in one call
+ao testiny result "$AO_SESSION_ID" 632 TC-7167 --status FAILED --comment "ขั้นที่ 2 ไม่เห็นปุ่มยืนยัน" \
+  --step 1=PASSED --step 2=FAILED --step 3=BLOCKED
 ```
 
 ```bash

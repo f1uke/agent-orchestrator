@@ -567,6 +567,7 @@ type TestinyResultLog struct {
 	SetBy     string
 	Sha       string
 	CreatedAt time.Time
+	Steps     string
 }
 
 type TestinyRunLink struct {

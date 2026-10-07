@@ -7,9 +7,11 @@ import {
 	linkedByLabel,
 	orderCases,
 	provenanceLabel,
+	resultInput,
 	runNotice,
 	scriptCoverage,
 	sharedBlocker,
+	stepStatus,
 	summaryCounts,
 	textBlocks,
 	unlinkedTaskIssue,
@@ -27,6 +29,7 @@ const tc = (id: number, status: string, script?: string): TestinyCase => ({
 	id,
 	title: `case ${id}`,
 	status,
+	steps: [],
 	...(script ? { script } : {}),
 });
 
@@ -229,6 +232,54 @@ describe("withResult", () => {
 	it("does not touch the run when the case is not in it", () => {
 		const before = run({ counts: { NOTRUN: 1 }, cases: [tc(1, "NOTRUN")] });
 		expect(withResult(before, { caseId: 9, status: "PASSED" }, at)).toBe(before);
+	});
+});
+
+describe("a step's result", () => {
+	const step = (n: number, rid: string) => ({ n, rid, action: `step ${n}`, expected: "" });
+	const held = {
+		...tc(1, "FAILED"),
+		steps: [
+			{ n: 1, rid: "b", status: "PASSED" },
+			{ n: 3, rid: "", status: "BLOCKED" },
+		],
+	};
+
+	it("is the one Testiny holds for the step's row id, wherever the step has moved", () => {
+		expect(stepStatus(held, step(2, "b"))).toBe("PASSED");
+		expect(stepStatus(held, step(1, "a"))).toBe("NOTRUN");
+	});
+
+	it("goes by number when either side has no row id, and is Not run when Testiny holds none", () => {
+		expect(stepStatus(held, step(3, "c"))).toBe("BLOCKED");
+		expect(stepStatus(tc(2, "NOTRUN"), step(1, "a"))).toBe("NOTRUN");
+	});
+
+	it("is set on screen without touching the case's own status, counts or record", () => {
+		const recorded = { status: "FAILED", comment: "x", by: "qa-1", sha: "", at: ago(5) };
+		const before = run({ counts: { FAILED: 1 }, cases: [{ ...held, recorded }] });
+		const next = withResult(before, { caseId: 1, step: { n: 2, rid: "b" }, status: "FAILED" }, ago(0));
+		expect(next.cases[0]).toEqual({
+			...held,
+			recorded,
+			steps: [
+				{ n: 2, rid: "b", status: "FAILED" },
+				{ n: 3, rid: "", status: "BLOCKED" },
+			],
+		});
+		expect(next.counts).toEqual({ FAILED: 1 });
+	});
+
+	it("is sent to the daemon as the case's steps with no case status", () => {
+		expect(resultInput({ caseId: 7, step: { n: 2, rid: "b" }, status: "FAILED" })).toEqual({
+			caseId: 7,
+			steps: [{ n: 2, status: "FAILED" }],
+		});
+		expect(resultInput({ caseId: 7, status: "BLOCKED", comment: "no device" })).toEqual({
+			caseId: 7,
+			status: "BLOCKED",
+			comment: "no device",
+		});
 	});
 });
 

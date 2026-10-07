@@ -2,7 +2,7 @@ import type { PRState, PullRequestFacts, WorkspaceSummary } from "../types/works
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
 import type { components } from "../../api/schema";
 import type { SessionChild } from "./children";
-import { withResult, type TestinyResultWrite } from "./testiny";
+import { withResult, type TestinyWrite } from "./testiny";
 
 type WorkspaceChangesResponse = components["schemas"]["WorkspaceChangesResponse"];
 type WorkspaceFilesResponse = components["schemas"]["WorkspaceFilesResponse"];
@@ -1919,11 +1919,11 @@ export function mockTestinyRuns(taskId: string): components["schemas"]["TestinyR
 	return structuredClone(runs);
 }
 
-/** A result set from the tab in the preview: written into the demo run, as the person, and read back. */
+/** A case or step result set from the tab in the preview: written into the demo run, as the person, and read back. */
 export function mockRecordTestinyResult(
 	taskId: string,
 	runId: number,
-	write: TestinyResultWrite,
+	write: TestinyWrite,
 ): components["schemas"]["TestinyRunView"] {
 	const data = mockTestinyRuns(taskId);
 	const run = data.runs.find((r) => r.link.runId === runId);
@@ -1962,7 +1962,14 @@ export function mockTestinyCase(taskId: string, caseId: number): components["sch
 		description: "",
 		remark: "",
 		automation: ["Manual"],
-		steps: [{ n: 1, action: "Play the case as its title says", expected: found.title.replace(/^\[\w+\] /, "") }],
+		steps: [
+			{
+				n: 1,
+				rid: `s${caseId}-1`,
+				action: "Play the case as its title says",
+				expected: found.title.replace(/^\[\w+\] /, ""),
+			},
+		],
 		stepsText: "",
 		expectedText: "",
 		bdd: "",
@@ -1982,14 +1989,25 @@ export function mockTestinyCase(taskId: string, caseId: number): components["sch
 				"- แอปเป็นเวอร์ชัน 4.12 ขึ้นไป และเปิดการแจ้งเตือนไว้แล้ว",
 			].join("\n"),
 			steps: [
-				{ n: 1, action: "Open any fund page", expected: "The fund page shows the Share button in the top bar" },
-				{ n: 2, action: "Tap Share", expected: "The share sheet opens from the bottom" },
+				{
+					n: 1,
+					rid: "s7102-1",
+					action: "Open any fund page",
+					expected: "The fund page shows the Share button in the top bar",
+				},
+				{ n: 2, rid: "s7102-2", action: "Tap Share", expected: "The share sheet opens from the bottom" },
 				{
 					n: 3,
+					rid: "s7102-3",
 					action: "ดูรายการในหน้าแชร์",
 					expected: "เห็นข้อความแจ้งว่ายังไม่มีรายการที่แชร์ แทนรายการว่างเปล่า",
 				},
-				{ n: 4, action: "Tap outside the sheet", expected: "The sheet closes and the fund page shows again" },
+				{
+					n: 4,
+					rid: "s7102-4",
+					action: "Tap outside the sheet",
+					expected: "The sheet closes and the fund page shows again",
+				},
 			],
 			description: "Covers the share sheet for an account that has nothing to share yet.",
 			remark: 'Design: Share sheet v3, frame "Empty".',
@@ -2018,8 +2036,22 @@ export function mockTestinyCase(taskId: string, caseId: number): components["sch
 
 const mockTestinyStore = new Map<string, components["schemas"]["TestinyRunsResponse"]>();
 
+type DemoCase = Omit<components["schemas"]["TestinyCaseResult"], "steps"> &
+	Partial<Pick<components["schemas"]["TestinyCaseResult"], "steps">>;
+type DemoRun = Omit<components["schemas"]["TestinyRunView"], "cases"> & { cases: DemoCase[] };
+
+/** Every demo case Testiny holds no step results for has none. */
 function demoTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResponse"] {
-	if (taskId !== "demo-qa-testing") return { project: "MOB", runs: [] };
+	const runs = demoRuns(taskId);
+	return { project: "MOB", runs: runs.map((r) => ({ ...r, cases: r.cases.map((c) => ({ steps: [], ...c })) })) };
+}
+
+/**
+ * TC-7102 failed at its third step, with its fourth never reached; TC-7101
+ * passed its one step.
+ */
+function demoRuns(taskId: string): DemoRun[] {
+	if (taskId !== "demo-qa-testing") return [];
 	const link = (runId: number, linkedBy: string, minutes: number) => ({
 		sessionId: taskId,
 		runId,
@@ -2030,94 +2062,96 @@ function demoTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResp
 	const plan = { id: 193, title: "Share sheet" };
 	const milestone = { id: 41, title: "MOBILITY 2026-19" };
 	const script = (name: string) => `projects/nter/cases/share/${name}.yaml`;
-	return {
-		project: "MOB",
-		runs: [
-			{
-				link: link(632, "demo-qa-testing-qa", 130),
-				title: "MOBILITY-4839 Share sheet empty state - iOS",
-				url: url(632),
-				closed: false,
-				plan,
-				milestone,
-				counts: { PASSED: 5, FAILED: 1, NOTRUN: 2 },
-				cases: [
-					{
-						id: 7101,
-						title: "[Share] Sheet opens from the fund page",
-						status: "PASSED",
-						script: script("sheet_opens"),
-					},
-					{
-						id: 7102,
-						title: "[Share] Empty state shows when there is nothing to share",
+	return [
+		{
+			link: link(632, "demo-qa-testing-qa", 130),
+			title: "MOBILITY-4839 Share sheet empty state - iOS",
+			url: url(632),
+			closed: false,
+			plan,
+			milestone,
+			counts: { PASSED: 5, FAILED: 1, NOTRUN: 2 },
+			cases: [
+				{
+					id: 7101,
+					title: "[Share] Sheet opens from the fund page",
+					status: "PASSED",
+					script: script("sheet_opens"),
+					steps: [{ n: 1, rid: "s7101-1", status: "PASSED" }],
+				},
+				{
+					id: 7102,
+					title: "[Share] Empty state shows when there is nothing to share",
+					status: "FAILED",
+					script: script("empty_state"),
+					steps: [
+						{ n: 1, rid: "s7102-1", status: "PASSED" },
+						{ n: 2, rid: "s7102-2", status: "PASSED" },
+						{ n: 3, rid: "s7102-3", status: "FAILED" },
+					],
+					recorded: {
 						status: "FAILED",
-						script: script("empty_state"),
-						recorded: {
-							status: "FAILED",
-							comment: "เปิดหน้าแชร์ตอนไม่มีรายการ แล้วยังเห็นรายการว่างแทนข้อความแจ้ง",
-							by: "demo-qa-testing-qa",
-							byRole: "qa",
-							sha: "4f2c9e1a7b3d",
-							at: minutesAgo(5),
-						},
+						comment: "เปิดหน้าแชร์ตอนไม่มีรายการ แล้วยังเห็นรายการว่างแทนข้อความแจ้ง",
+						by: "demo-qa-testing-qa",
+						byRole: "qa",
+						sha: "4f2c9e1a7b3d",
+						at: minutesAgo(5),
 					},
-					{
-						id: 7103,
-						title: "[Share] Empty state copy matches the design",
-						status: "PASSED",
-						script: script("empty_copy"),
-					},
-					{ id: 7104, title: "[Share] Empty state survives a cold launch", status: "NOTRUN" },
-					{ id: 7105, title: "[Share] Dismissing the sheet returns to the fund page", status: "PASSED" },
-					{ id: 7106, title: "[Share] VoiceOver reads the empty state", status: "NOTRUN" },
-					{ id: 7107, title: "[Share] Dark mode empty state", status: "PASSED", script: script("empty_dark") },
-					{ id: 7108, title: "[Share] Large text does not clip the empty state", status: "PASSED" },
-				],
-				evidenceDir: "/Users/demo/Desktop/QA Evidence/MOBILITY/2026/MOBILITY 2026-19/TP-193 Share sheet/TR-632 - iOS",
-				fetchedAt: minutesAgo(0),
-			},
-			{
-				link: link(633, "demo-qa-testing-qa", 95),
-				title: "MOBILITY-4839 Share sheet empty state - Android",
-				url: url(633),
-				closed: true,
-				plan,
-				milestone,
-				counts: { PASSED: 4 },
-				cases: [
-					{
-						id: 7201,
-						title: "[Share] Sheet opens from the fund page",
-						status: "PASSED",
-						script: script("sheet_opens"),
-					},
-					{ id: 7202, title: "[Share] Empty state shows when there is nothing to share", status: "PASSED" },
-					{ id: 7203, title: "[Share] Empty state copy matches the design", status: "PASSED" },
-					{ id: 7204, title: "[Share] Back button closes the sheet", status: "PASSED" },
-				],
-				evidenceDir:
-					"/Users/demo/Desktop/QA Evidence/MOBILITY/2026/MOBILITY 2026-19/TP-193 Share sheet/TR-633 - Android",
-				fetchedAt: minutesAgo(0),
-			},
-			{
-				link: link(640, "", 20),
-				title: "MOBILITY-4839 Share sheet regression - iPad",
-				url: url(640),
-				closed: false,
-				plan,
-				counts: { PASSED: 2, BLOCKED: 1 },
-				cases: [
-					{ id: 7301, title: "[Share] Sheet anchors to the share button on iPad", status: "BLOCKED" },
-					{ id: 7302, title: "[Share] Empty state in split view", status: "PASSED" },
-					{ id: 7303, title: "[Share] Empty state in slide over", status: "PASSED" },
-				],
-				evidenceDir: "",
-				fetchedAt: minutesAgo(12),
-				fetchError: { kind: "auth", message: "Testiny refused the API key (403 AUTH_ACCESS_DENIED)" },
-			},
-		],
-	};
+				},
+				{
+					id: 7103,
+					title: "[Share] Empty state copy matches the design",
+					status: "PASSED",
+					script: script("empty_copy"),
+				},
+				{ id: 7104, title: "[Share] Empty state survives a cold launch", status: "NOTRUN" },
+				{ id: 7105, title: "[Share] Dismissing the sheet returns to the fund page", status: "PASSED" },
+				{ id: 7106, title: "[Share] VoiceOver reads the empty state", status: "NOTRUN" },
+				{ id: 7107, title: "[Share] Dark mode empty state", status: "PASSED", script: script("empty_dark") },
+				{ id: 7108, title: "[Share] Large text does not clip the empty state", status: "PASSED" },
+			],
+			evidenceDir: "/Users/demo/Desktop/QA Evidence/MOBILITY/2026/MOBILITY 2026-19/TP-193 Share sheet/TR-632 - iOS",
+			fetchedAt: minutesAgo(0),
+		},
+		{
+			link: link(633, "demo-qa-testing-qa", 95),
+			title: "MOBILITY-4839 Share sheet empty state - Android",
+			url: url(633),
+			closed: true,
+			plan,
+			milestone,
+			counts: { PASSED: 4 },
+			cases: [
+				{
+					id: 7201,
+					title: "[Share] Sheet opens from the fund page",
+					status: "PASSED",
+					script: script("sheet_opens"),
+				},
+				{ id: 7202, title: "[Share] Empty state shows when there is nothing to share", status: "PASSED" },
+				{ id: 7203, title: "[Share] Empty state copy matches the design", status: "PASSED" },
+				{ id: 7204, title: "[Share] Back button closes the sheet", status: "PASSED" },
+			],
+			evidenceDir: "/Users/demo/Desktop/QA Evidence/MOBILITY/2026/MOBILITY 2026-19/TP-193 Share sheet/TR-633 - Android",
+			fetchedAt: minutesAgo(0),
+		},
+		{
+			link: link(640, "", 20),
+			title: "MOBILITY-4839 Share sheet regression - iPad",
+			url: url(640),
+			closed: false,
+			plan,
+			counts: { PASSED: 2, BLOCKED: 1 },
+			cases: [
+				{ id: 7301, title: "[Share] Sheet anchors to the share button on iPad", status: "BLOCKED" },
+				{ id: 7302, title: "[Share] Empty state in split view", status: "PASSED" },
+				{ id: 7303, title: "[Share] Empty state in slide over", status: "PASSED" },
+			],
+			evidenceDir: "",
+			fetchedAt: minutesAgo(12),
+			fetchError: { kind: "auth", message: "Testiny refused the API key (403 AUTH_ACCESS_DENIED)" },
+		},
+	];
 }
 
 /**

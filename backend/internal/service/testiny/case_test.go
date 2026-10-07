@@ -15,6 +15,11 @@ func (f *fakeTestiny) Case(_ context.Context, id int64) (domain.TestinyCaseDetai
 	if err := f.note(fmt.Sprintf("case view %d", id)); err != nil {
 		return domain.TestinyCaseDetail{}, err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if d, ok := f.details[id]; ok {
+		return d, nil
+	}
 	return domain.TestinyCaseDetail{ID: id, Title: fmt.Sprintf("case %d", id), TestData: "qa@example.com / fake-password"}, nil
 }
 

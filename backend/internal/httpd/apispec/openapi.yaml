@@ -9871,6 +9871,19 @@ components:
       required:
       - started
       type: object
+    ControllersTestinyStepResultInput:
+      properties:
+        "n":
+          description: The step's number, counting from 1.
+          type: integer
+        status:
+          description: PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. A step takes no
+            comment.
+          type: string
+      required:
+      - "n"
+      - status
+      type: object
     ControllersTranscriptRefRequest:
       properties:
         claudeSessionId:
@@ -10341,8 +10354,11 @@ components:
           type: string
         "n":
           type: integer
+        rid:
+          type: string
       required:
       - "n"
+      - rid
       - action
       - expected
       type: object
@@ -10359,6 +10375,20 @@ components:
       required:
       - key
       - summary
+      - status
+      type: object
+    DomainTestinyRunStep:
+      properties:
+        "n":
+          description: The step's number, counting from 1, when the result was recorded.
+          type: integer
+        rid:
+          type: string
+        status:
+          type: string
+      required:
+      - "n"
+      - rid
       - status
       type: object
     EndCrewRunInput:
@@ -13348,12 +13378,17 @@ components:
           type: string
         status:
           type: string
+        steps:
+          items:
+            $ref: '#/components/schemas/DomainTestinyRunStep'
+          type: array
         title:
           type: string
       required:
       - id
       - title
       - status
+      - steps
       type: object
     TestinyFetchError:
       properties:
@@ -13394,11 +13429,17 @@ components:
             SKIPPED need one; PASSED and NOTRUN take none.
           type: string
         status:
-          description: PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN.
+          description: 'PASSED, FAILED, BLOCKED, SKIPPED or NOTRUN. Empty when only
+            steps are given: the case keeps its status.'
           type: string
+        steps:
+          description: Results for steps of a STEPS case. Every other step keeps the
+            result it has.
+          items:
+            $ref: '#/components/schemas/ControllersTestinyStepResultInput'
+          type: array
       required:
       - caseId
-      - status
       type: object
     TestinyResultRecord:
       properties:
