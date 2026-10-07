@@ -330,3 +330,22 @@ func TestRemove(t *testing.T) {
 		}
 	})
 }
+
+func TestHasFile_ReadsTheRefNotTheCheckout(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.store, "projects/nter/verify-ios/SKILL.md", "uncommitted\n")
+	for path, want := range map[string]bool{
+		"projects/nter/login.yaml":          true,
+		"projects/nter":                     false,
+		"projects/nter/verify-ios/SKILL.md": false,
+		"projects/nter/missing.yaml":        false,
+	} {
+		got, err := f.trees.HasFile(context.Background(), f.store, "main", path)
+		if err != nil || got != want {
+			t.Errorf("HasFile(main, %s) = %v, %v; want %v", path, got, err, want)
+		}
+	}
+	if got, err := f.trees.HasFile(context.Background(), f.store, "no-such-branch", "README.md"); err != nil || got {
+		t.Errorf("HasFile on a missing ref = %v, %v; want false", got, err)
+	}
+}

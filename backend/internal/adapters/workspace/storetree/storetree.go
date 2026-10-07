@@ -161,6 +161,15 @@ func (t *Trees) Status(ctx context.Context, path, branch, base string) (ports.Sc
 	return ports.ScriptsTreeStatus{Uncommitted: files, Unpublished: ahead}, nil
 }
 
+// HasFile implements ports.ScriptsTrees.
+func (t *Trees) HasFile(ctx context.Context, store, ref, path string) (bool, error) {
+	res, err := t.run(ctx, store, "cat-file", "-t", ref+":"+path)
+	if err != nil {
+		return false, err
+	}
+	return res.code == 0 && strings.TrimSpace(res.stdout) == "blob", nil
+}
+
 // Dirty implements ports.ScriptsTrees. Untracked files are listed one by one,
 // not as their folder, because a new script is usually a new file in a new
 // folder and the folder alone names nothing.

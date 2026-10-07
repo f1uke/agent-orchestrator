@@ -44,7 +44,7 @@ func renderNote(child domain.SessionChild) string {
 	case domain.ChildRemoved:
 		return fmt.Sprintf("Subagent %s finished without commits, so there was nothing to merge. AO removed its worktree.", label)
 	case domain.ChildHeld:
-		return fmt.Sprintf("AO could not merge subagent %s into %s yet: %s. Its branch %s is kept, and AO retries after your next tool call. Commit or stash the files in the way to unblock it.",
+		return fmt.Sprintf("AO could not merge subagent %s into %s yet: %s. Its branch %s is kept, and AO retries after your next tool call. Commit the files in the way to unblock it, or save them as a .patch in the project's knowledge store and remove them; never use git stash.",
 			label, child.TargetBranch, child.Detail, child.Branch)
 	case domain.ChildConflict:
 		return fmt.Sprintf("Subagent %s's commits %s, and the subagent did not resolve it. Its branch %s and worktree %s are kept. Merge it yourself: `git merge %s`, resolve, commit.",

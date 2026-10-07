@@ -465,10 +465,11 @@ type MobileScriptsConfig struct {
 	// means DefaultMobileScriptsStore.
 	Store string `json:"store,omitempty"`
 	// VerifySkill is the store-relative folder of the project's verify skill
-	// (the folder holding SKILL.md, e.g. projects/nter/verify). When set, AO
+	// (the folder holding SKILL.md, e.g. projects/nter/verify-ios). When set, AO
 	// links it into every worktree as .claude/skills/verify from the task's own
 	// store worktree, and the device block of a worker's prompt defers to it
-	// instead of restating how to build, drive and check the app.
+	// instead of restating how to build, drive and check the app. Until the
+	// folder holds a SKILL.md the worker gets the full device block instead.
 	VerifySkill string `json:"verifySkill,omitempty"`
 }
 

@@ -147,7 +147,10 @@ func (c promptCell) build(t *testing.T) string {
 	st := crewPromptStore(t)
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Config: c.config()}
 	m := layeredManager(st, nil)
-	scripts := &fakeScripts{probe: ports.ScriptsStoreProbe{Base: "main", OK: c.mobileScripts != scriptsShared, Reason: "not a git repository"}}
+	scripts := &fakeScripts{
+		probe: ports.ScriptsStoreProbe{Base: "main", OK: c.mobileScripts != scriptsShared, Reason: "not a git repository"},
+		files: map[string]bool{"main:projects/nter/verify/SKILL.md": true},
+	}
 	m.SetScriptsStore(scripts)
 	got, err := m.buildSystemPrompt(ctx, systemPromptSpec{
 		Kind: c.kind, ProjectID: "mer", TaskSize: domain.TaskSizeStandard, CrewRole: c.role,

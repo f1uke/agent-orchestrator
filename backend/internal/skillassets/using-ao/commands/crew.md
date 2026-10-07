@@ -39,9 +39,12 @@ by design - or if this project is set to form no crews automatically. In each of
 those a **person** can still add one, with the `+ qa` control on the task in the
 app or `ao crew add <session-id>` in their own shell.
 
-Asking is one-way and once. A task has one qa and it keeps its id; standing it
-down (`ao session kill <qa-id>`) is the undo, and `ao session restore <qa-id>`
-brings the same member back.
+Asking is one-way and once. A task has one qa and it keeps its id, even after
+it finishes a round or is stood down (`ao session kill <qa-id>`). Asking again
+creates no second qa: `ao crew wake <qa-id>` brings the same member back into
+the task's worktree for another round, and a round needs no new commit. Only
+when every member of the task has finished is the worktree gone: then revive the
+task with `ao session restore <dev-id>` first, and wake qa after it.
 
 ## If you never ask
 
