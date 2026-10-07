@@ -53,6 +53,10 @@ Because implementation children share this worktree, run only one file-writing o
 
 Kill only a process you started, by the PID you captured when you started it (`$!`). Never kill by pattern: no `pkill -f`, `killall` or `pgrep ... | xargs kill` on a word. A pattern matches every process on this machine whose command line holds that word, other agents included, and one such kill has already ended every live session at once.
 
+## Setting work aside (AO)
+
+Never use `git stash`. Every worktree of a repository shares one stash stack, so another session can pop or drop your entry. To set work aside, commit it on your branch, or save it as a `.patch` file in the project's knowledge store (`~/.ao/knowledge/<project>/`).
+
 ## Referring to sessions, pull requests, and merge requests
 
 Prefer a work item's human-readable name in conversation, but whenever you do write an id or number, disambiguate it with a sigil so sessions, pull requests, and merge requests never get confused:

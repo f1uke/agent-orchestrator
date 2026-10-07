@@ -945,6 +945,22 @@ func TestWorkerFloorForbidsPatternKills(t *testing.T) {
 	}
 }
 
+// Every worktree of a repo shares one stash stack, so a worker that parked a
+// patch with `git stash` left it where another session could pop or drop it.
+// The rule lives in both worker floors, so no base edit or harness choice drops it.
+func TestWorkerFloorForbidsGitStash(t *testing.T) {
+	for _, k := range []Kind{KindWorker, KindQA} {
+		for _, childWorktrees := range []bool{false, true} {
+			floor := CoordinationFloorFor(k, childWorktrees)
+			for _, want := range []string{"## Setting work aside (AO)", "Never use `git stash`", "commit it on your branch", "`.patch` file", "`~/.ao/knowledge/<project>/`"} {
+				if !strings.Contains(floor, want) {
+					t.Errorf("%s floor (childWorktrees=%v) is missing %q", k, childWorktrees, want)
+				}
+			}
+		}
+	}
+}
+
 // AO does not tell the orchestrator when a worker stops, so a worker that
 // finished silently looked like one that died. The report is a FLOOR rule so it
 // survives a cleared base and no brief has to repeat it.
