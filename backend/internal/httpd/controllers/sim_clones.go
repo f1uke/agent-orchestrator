@@ -14,6 +14,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 )
 
 // SimFleet is the clones AO makes for sessions. *simsvc.Fleet satisfies it.
@@ -148,6 +149,8 @@ func writeSimCloneError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &booted):
 		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_BASE_BOOTED", err.Error(),
 			map[string]any{"base": booted.Base.Name, "udid": booted.UDID})
+	case errors.Is(err, simctl.ErrUnavailable):
+		envelope.WriteAPIError(w, r, http.StatusNotImplemented, "not_implemented", "SIM_UNAVAILABLE", "this machine cannot make simulators: "+err.Error(), nil)
 	case errors.Is(err, simsvc.ErrInvalid), errors.Is(err, simsvc.ErrNotFound), isHeld(err):
 		writeSimError(w, r, err)
 	default:
