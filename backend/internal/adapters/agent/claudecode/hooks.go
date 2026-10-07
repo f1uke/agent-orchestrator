@@ -15,6 +15,12 @@ const (
 	claudeHookTimeout       = 30
 )
 
+// HookAgentPIDEnv is set by Claude Code in a hook's environment to the pid of
+// the claude process running the hook. Measured on 2.1.292: a hook fired by a
+// `claude mcp list` run from the agent's Bash tool carries that nested
+// process's pid, not the agent's.
+const HookAgentPIDEnv = "CLAUDE_PID"
+
 // claudeStartupMatcher is referenced by pointer so SessionStart serializes with
 // its required "startup" matcher.
 var claudeStartupMatcher = "startup"

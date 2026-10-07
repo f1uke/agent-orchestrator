@@ -17,6 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon"
 	aoprocess "github.com/aoagents/agent-orchestrator/backend/internal/process"
 	"github.com/aoagents/agent-orchestrator/backend/internal/processalive"
+	"github.com/aoagents/agent-orchestrator/backend/internal/processtree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbridge"
 )
 
@@ -68,6 +69,7 @@ type Deps struct {
 	Executable         func() (string, error)
 	StartProcess       func(processStartConfig) error
 	ProcessAlive       func(pid int) bool
+	ProcessParent      func(pid int) (int, error)
 	LookPath           func(file string) (string, error)
 	CommandOutput      func(ctx context.Context, name string, args ...string) ([]byte, error)
 	CommandOutputInDir func(ctx context.Context, dir, name string, args ...string) ([]byte, error)
@@ -113,6 +115,7 @@ func DefaultDeps() Deps {
 		Executable:           os.Executable,
 		StartProcess:         startProcess,
 		ProcessAlive:         processalive.Alive,
+		ProcessParent:        processtree.Parent,
 		LookPath:             exec.LookPath,
 		CommandOutput:        commandOutput,
 		CommandOutputInDir:   commandOutputInDir,
@@ -163,6 +166,9 @@ func (d Deps) withDefaults() Deps {
 	}
 	if d.ProcessAlive == nil {
 		d.ProcessAlive = def.ProcessAlive
+	}
+	if d.ProcessParent == nil {
+		d.ProcessParent = def.ProcessParent
 	}
 	if d.LookPath == nil {
 		d.LookPath = def.LookPath
