@@ -84,6 +84,9 @@ type APIDeps struct {
 	// boot and claim. nil trusts nothing and leaves the settings route
 	// answering 501.
 	SimTrust *simtrust.Store
+	// SimBoot is the machine-wide boot cap. nil applies the default cap and
+	// leaves the settings route answering 501.
+	SimBoot controllers.SimBootSettingsService
 	// SimTrustFiles resolves a session's root CAs. Left nil, the router builds
 	// one over Sessions, Projects and SimTrust.
 	SimTrustFiles controllers.SimTrustResolver
@@ -198,7 +201,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		sim:            &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
 		simFlows:       &controllers.SimFlowsController{DataDir: cfg.DataDir},
 		simVideo:       &controllers.SimVideoController{Svc: deps.SimVideo},
-		simScreen:      &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver, Fleet: deps.SimFleet},
+		simScreen:      &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver, Fleet: deps.SimFleet, BootCap: deps.SimBoot},
 		simHierarchy:   &controllers.SimHierarchyController{Runner: deps.SimRunner},
 		simType:        &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim, Screen: screenProvider(deps.SimScreen)},
 		simDoctor:      &controllers.SimDoctorController{Sessions: deps.Sessions, Readers: simDoctorReaders(deps, simTrustResolver)},
@@ -206,7 +209,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:        &controllers.ImportController{Svc: deps.Import},
-		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, QAEvidence: deps.QAEvidence, SimTrust: simTrustSettings(deps.SimTrust), SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, QAEvidence: deps.QAEvidence, SimTrust: simTrustSettings(deps.SimTrust), SimBoot: deps.SimBoot, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:           &controllers.WikiController{Svc: deps.Wiki},
 		daemon:         &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		learning:       &controllers.LearningController{Svc: deps.Learning},

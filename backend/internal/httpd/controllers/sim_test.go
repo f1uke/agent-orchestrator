@@ -28,6 +28,8 @@ type fakeSimService struct {
 	releaseHoldErr error
 	takeOverErr    error
 	tookOver       bool
+	// released is every device given back, in order.
+	released []string
 
 	gotSession domain.SessionID
 	gotUDID    string
@@ -88,6 +90,7 @@ func (f *fakeSimService) TakeOver(_ context.Context, sessionID domain.SessionID,
 
 func (f *fakeSimService) Release(_ context.Context, sessionID domain.SessionID, udid string) error {
 	f.gotSession, f.gotUDID = sessionID, udid
+	f.released = append(f.released, udid)
 	return f.releaseErr
 }
 

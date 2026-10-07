@@ -407,43 +407,6 @@ func TestSimRun_BootsAShutDownDeviceOnTheWayThrough(t *testing.T) {
 	}
 }
 
-// The memory cap, reached. Two simulators are already up, so booting a third is
-// refused - the same guard `ao sim boot` applies, because a second cap that
-// could drift from the first is worse than none.
-func TestSimRun_RefusesToBootPastTheMemoryCap(t *testing.T) {
-	deps, daemon, calls, builds := bootableRunDeps(t, []simDeviceListing{
-		{UDID: "11111111-1111-1111-1111-111111111111", Name: "iPhone 16", State: "Booted"},
-		{UDID: "22222222-2222-2222-2222-222222222222", Name: "iPad Pro", State: "Booted"},
-	})
-	// simctl has to agree that two others are up: the budget counts real
-	// devices, not the daemon's view of them.
-	inner := deps.CommandOutput
-	deps.CommandOutput = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		if len(args) >= 3 && args[1] == "list" && args[2] == "devices" {
-			return []byte(simDevicesJSON(t,
-				simDeviceFixture("11111111-1111-1111-1111-111111111111", "iPhone 16", "Booted"),
-				simDeviceFixture("22222222-2222-2222-2222-222222222222", "iPad Pro", "Booted"),
-				simDeviceFixture(simUDIDPro, "iPhone 17 Pro", "Shutdown"),
-			)), nil
-		}
-		return inner(ctx, name, args...)
-	}
-
-	_, _, err := executeCLI(t, deps, "sim", "run", "--udid", simUDIDPro)
-	if err == nil {
-		t.Fatal("booting a third simulator must be refused")
-	}
-	if len(daemon.powerRequests()) != 0 {
-		t.Fatalf("a refused boot must not ask the daemon anyway: %v", daemon.powerRequests())
-	}
-	if len(*builds) != 0 || ranSimctl(*calls, "install") != nil {
-		t.Fatalf("nothing should have been built or installed: builds=%v calls=%+v", *builds, *calls)
-	}
-	if !strings.Contains(err.Error(), "iPhone 16") || !strings.Contains(err.Error(), "iPad Pro") {
-		t.Fatalf("the refusal must name what is already up: %v", err)
-	}
-}
-
 // 🗝 The bug this change closes, in the CLI. nter-ios-app's configurations are
 // Dev, Mock-api, Mock-local, Production, Release and UAT - there is no Debug,
 // and the `-configuration Debug` this command used to pass unconditionally

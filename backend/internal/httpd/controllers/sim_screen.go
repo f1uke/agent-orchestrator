@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -283,6 +284,13 @@ type SimScreenController struct {
 	// Fleet says which devices are bases and which are whose clones. nil
 	// reports every device as neither.
 	Fleet SimFleet
+	// BootCap is the machine-wide boot cap. nil is the default cap,
+	// simpower.DefaultMaxBooted.
+	BootCap SimBootSettingsService
+
+	// bootMu makes reading the cap and starting a boot one step, so two
+	// boots asked for at once cannot both see the last free slot.
+	bootMu sync.Mutex
 }
 
 // Register mounts the routes. The live frame stream is not here: it is a
@@ -303,10 +311,10 @@ func (c *SimScreenController) Register(r chi.Router) {
 	// gesture is: shutting a device down has to be arbitrated against whoever
 	// is driving it, and arbitration in AO is per session.
 	//
-	// ⚠ There is deliberately no `ao sim` command behind this. See
-	// internal/simpower: booting is a human capability exercised through the
-	// desktop app, because an agent that could boot devices would accumulate
-	// 4 GB virtual machines with nobody watching.
+	// ⚠ `ao sim boot` is the only command behind this, and it only ever asks
+	// for booted. What keeps an agent from accumulating 4 GB virtual machines
+	// with nobody watching is the boot cap applied here - see
+	// internal/simpower.
 	r.Post("/sessions/{sessionId}/sim-devices/{udid}/power", c.power)
 }
 
@@ -972,6 +980,10 @@ type SimPowerInput struct {
 	// that went stale seconds ago cannot shut down a device on the strength of
 	// a lease it read before somebody else took it.
 	ConfirmHolder string `json:"confirmHolder,omitempty" description:"The session that currently leases the device. Required, and must match, when another session holds it."`
+	// MakeRoom is opt-in so the shutdown it allows is always asked for: `ao
+	// sim boot` sends it, and the Device tab, where a human can see and
+	// choose what to shut down, does not.
+	MakeRoom bool `json:"makeRoom,omitempty" description:"When the boot cap is reached, shut down AO's least recently booted idle clones (AO-made, booted, leased by nobody) to make room instead of refusing. Boot only."`
 }
 
 // SimPowerResponse acknowledges that the work has started. It is not a report
@@ -982,6 +994,16 @@ type SimPowerResponse struct {
 	State string `json:"state" description:"The state the device is being taken to."`
 	// Detail says what was started, in words a person can be shown.
 	Detail string `json:"detail"`
+	// MadeRoom is never silent: a device that went down so this one could
+	// come up is somebody's clone, and they are told which.
+	MadeRoom []SimMadeRoomView `json:"madeRoom,omitempty" description:"Idle AO clones shut down to make room under the boot cap, least recently booted first."`
+}
+
+// SimMadeRoomView is one idle clone the boot cap shut down.
+type SimMadeRoomView struct {
+	UDID      string `json:"udid"`
+	Name      string `json:"name"`
+	SessionID string `json:"sessionId" description:"The session the clone belongs to."`
 }
 
 // power boots a simulator or shuts one down.
@@ -1036,13 +1058,24 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 	}
 
 	done := func() {}
-	if op == simpower.Shutdown {
+	var madeRoom []simsvc.BootSlot
+	switch op {
+	case simpower.Shutdown:
 		release, err := c.arbitrateShutdown(r.Context(), sessionID, device, in.ConfirmHolder)
 		if err != nil {
 			writeShutdownRefusal(w, r, err)
 			return
 		}
 		done = release
+	case simpower.Boot:
+		c.bootMu.Lock()
+		defer c.bootMu.Unlock()
+		freed, err := c.fitBootCap(r.Context(), sessionID, device, in.MakeRoom)
+		if err != nil {
+			writeBootCapError(w, r, err)
+			return
+		}
+		madeRoom = freed
 	}
 
 	if err := c.Screen.StartPower(r.Context(), device.UDID, op, c.setupFor(r.Context(), op, sessionID), done); err != nil {
@@ -1050,10 +1083,114 @@ func (c *SimScreenController) power(w http.ResponseWriter, r *http.Request) {
 		writePowerStartError(w, r, err)
 		return
 	}
-	envelope.WriteJSON(w, http.StatusAccepted, SimPowerResponse{
-		UDID: device.UDID, State: in.State,
-		Detail: fmt.Sprintf("%s %s", op, device.Label()),
+	res := SimPowerResponse{UDID: device.UDID, State: in.State, Detail: fmt.Sprintf("%s %s", op, device.Label())}
+	for _, slot := range madeRoom {
+		res.MadeRoom = append(res.MadeRoom, SimMadeRoomView{
+			UDID: slot.Device.UDID, Name: slot.Device.Name, SessionID: string(slot.Clone.SessionID),
+		})
+	}
+	envelope.WriteJSON(w, http.StatusAccepted, res)
+}
+
+// fitBootCap refuses a boot past the machine-wide cap or, when makeRoom is
+// set, first shuts down the idle clones the boot needs room from. It returns
+// the clones it shut down.
+func (c *SimScreenController) fitBootCap(
+	ctx context.Context, sessionID domain.SessionID, device simctl.Device, makeRoom bool,
+) ([]simsvc.BootSlot, error) {
+	listing, err := c.Screen.Devices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	in := simsvc.BootCapInput{
+		Max: simpower.DefaultMaxBooted, Target: device, Devices: listing.Devices, Power: c.Screen.PowerStatus(),
+	}
+	if c.BootCap != nil {
+		in.Max = c.BootCap.Get().MaxBooted
+	}
+	if simsvc.NewBootCap(in).Excess() == 0 {
+		return nil, nil
+	}
+	// Only a full machine needs to know whose each device is, and reading
+	// that is where this can fail: a boot with room must not be refused
+	// because the fleet or the leases could not be read.
+	if c.Fleet != nil {
+		if in.Bases, err = c.Fleet.Bases(ctx); err != nil {
+			return nil, err
+		}
+		if in.Clones, err = c.Fleet.Clones(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if in.Leases, err = c.Leases.List(ctx); err != nil {
+		return nil, fmt.Errorf("the boot cap is reached and the leases could not be read to find an idle clone: %w", err)
+	}
+	capacity := simsvc.NewBootCap(in)
+	if !makeRoom {
+		return nil, capacity.Refusal()
+	}
+	return capacity.MakeRoom(func(slot simsvc.BootSlot) error {
+		return c.shutDownIdle(ctx, sessionID, slot.Device)
 	})
+}
+
+// shutDownIdle powers an idle clone off to make room, and waits until it is
+// off: the boot that needed the room must not start while the memory is still
+// held.
+//
+// The device is leased for exactly as long as the shutdown takes. Acquire, not
+// TakeOver: a clone somebody claimed after the cap was read is no longer idle,
+// and Acquire refuses it with the *HeldError that MakeRoom skips on.
+func (c *SimScreenController) shutDownIdle(ctx context.Context, sessionID domain.SessionID, device simctl.Device) error {
+	if _, err := c.Leases.Acquire(ctx, sessionID, device.UDID, simpower.ShutdownTimeout); err != nil {
+		return err
+	}
+	detached := context.WithoutCancel(ctx)
+	release := func() { _ = c.Leases.Release(detached, sessionID, device.UDID) }
+	settled := make(chan struct{})
+	if err := c.Screen.StartPower(ctx, device.UDID, simpower.Shutdown, nil, func() {
+		release()
+		close(settled)
+	}); err != nil {
+		release()
+		return err
+	}
+	select {
+	case <-settled:
+	case <-ctx.Done():
+		return fmt.Errorf("shutting down the idle clone %s to make room did not finish in time: %w", device.Label(), ctx.Err())
+	}
+	if status, ok := c.Screen.PowerStatus()[domain.NormalizeSimUDID(device.UDID)]; ok &&
+		status.Op == simpower.Shutdown && status.State == simpower.Failed {
+		return fmt.Errorf("shutting down the idle clone %s to make room failed: %s", device.Label(), status.Reason)
+	}
+	return nil
+}
+
+// writeBootCapError keeps the cap's refusal apart from a shutdown that failed
+// while making room: the first is an answer, the second is a fault.
+func writeBootCapError(w http.ResponseWriter, r *http.Request, err error) {
+	var refused *simsvc.BootCapError
+	switch {
+	case errors.As(err, &refused):
+		holders := make([]map[string]any, 0, len(refused.Slots))
+		for _, slot := range refused.Slots {
+			holder := map[string]any{"udid": slot.Device.UDID, "name": slot.Device.Name, "idle": slot.Idle()}
+			if slot.Clone != nil {
+				holder["cloneOf"] = string(slot.Clone.SessionID)
+			}
+			if slot.Lease != nil {
+				holder["leasedBy"] = string(slot.Lease.SessionID)
+			}
+			holders = append(holders, holder)
+		}
+		envelope.WriteAPIError(w, r, http.StatusConflict, "conflict", "SIM_BOOT_CAP_REACHED", refused.Error(),
+			map[string]any{"maxBooted": refused.Max, "holders": holders})
+	case errors.Is(err, simsvc.ErrInvalid), errors.Is(err, simsvc.ErrNotFound):
+		writeSimError(w, r, err)
+	default:
+		writePowerStartError(w, r, err)
+	}
 }
 
 // setupFor works out what this boot does to the device once it is up: slim

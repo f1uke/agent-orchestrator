@@ -18,12 +18,24 @@
 // lease needs a booted device, so on a machine where nobody had left one running
 // a qa could never appear at all. `ao sim boot` (backend/internal/cli/sim_boot.go)
 // is the reversal, and it carries the memory argument with it rather than
-// dropping it: the CLI refuses to make the third booted simulator, so the number
-// that caused the OOM stays out of an agent's reach.
+// dropping it: the daemon's power route refuses a boot past the machine-wide
+// cap (Settings, default DefaultMaxBooted), for the CLI and the Device tab
+// alike.
 //
 // Shutdown keeps the original answer, because none of that applies to it: a
 // shutdown takes a device out from under whoever is on it, and it unblocks
 // nothing. It stays behind the Device tab, where a human presses the button.
+//
+// ⚠ With ONE exception, and it is narrow on purpose. When `ao sim boot` meets
+// the cap, the daemon shuts down AO's own idle clones to make room: a device
+// AO cloned for a session (it has a sim_clone record), that is booted, and
+// that no session of any daemon on this machine holds a lease on. Nobody is on
+// such a device, so taking it down takes nothing from anyone - and refusing
+// instead would leave an agent stuck behind memory nobody is using. A base, a
+// device AO did not make, and a leased device are never shut down this way;
+// with none of those idle the boot is refused and the refusal names who holds
+// each slot. The selection lives in service/sim (BootCap); the shutdown itself
+// still runs through Power, so this stays the only place power changes.
 package simpower
 
 import (
@@ -152,8 +164,8 @@ type Setup struct {
 // flight is known only to the daemon running it - and a slimming boot spends
 // tens of seconds rebooting the device, not Booted while its several GB are
 // allocated. Without this a sandbox daemon's boot in that window was invisible
-// to every other daemon's count, which is how a machine gets to the third
-// simulator the cap exists to prevent.
+// to every other daemon's count, which is how a machine gets one simulator past
+// the cap that exists to prevent exactly that.
 type BootLedger interface {
 	NoteBoot(ctx context.Context, udid, phase string, startedAt, deadline time.Time) error
 	ClearBoot(ctx context.Context, udid string) error

@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reflinks"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simpower"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 	"github.com/aoagents/agent-orchestrator/backend/internal/spawnconfirm"
 	"github.com/aoagents/agent-orchestrator/backend/internal/wikisettings"
@@ -82,6 +83,13 @@ type SimTrustSettingsService interface {
 	Set(simtrust.Settings) error
 }
 
+// SimBootSettingsService is the boot-cap settings store surface the
+// controllers need. *simpower.SettingsStore satisfies this directly.
+type SimBootSettingsService interface {
+	Get() simpower.Settings
+	Set(simpower.Settings) error
+}
+
 // SystemPromptsService is the prompt-override store surface the controller needs.
 // *promptoverrides.Store satisfies this directly.
 type SystemPromptsService interface {
@@ -110,6 +118,7 @@ type SettingsController struct {
 	RefLinks         RefLinksService
 	QAEvidence       QAEvidenceSettingsService
 	SimTrust         SimTrustSettingsService
+	SimBoot          SimBootSettingsService
 	SystemPrompts    SystemPromptsService
 	MessageTemplates MessageTemplatesService
 }
@@ -130,6 +139,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/wiki/tasks", c.setWikiTasks)
 	r.Get("/settings/sim-trust", c.getSimTrust)
 	r.Put("/settings/sim-trust", c.setSimTrust)
+	r.Get("/settings/sim-boot", c.getSimBoot)
+	r.Put("/settings/sim-boot", c.setSimBoot)
 	r.Get("/settings/ref-links", c.getRefLinks)
 	r.Put("/settings/ref-links", c.setRefLinks)
 	r.Get("/settings/qa-evidence", c.getQAEvidence)
@@ -463,6 +474,35 @@ func (c *SettingsController) setSimTrust(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, simTrustSettingsResponse(c.SimTrust.Get()))
+}
+
+func (c *SettingsController) getSimBoot(w http.ResponseWriter, r *http.Request) {
+	if c.SimBoot == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/sim-boot")
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, simBootSettingsResponse(c.SimBoot.Get()))
+}
+
+func (c *SettingsController) setSimBoot(w http.ResponseWriter, r *http.Request) {
+	if c.SimBoot == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/sim-boot")
+		return
+	}
+	var in SetSimBootSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if err := c.SimBoot.Set(simpower.Settings{MaxBooted: in.MaxBooted}); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, simBootSettingsResponse(c.SimBoot.Get()))
+}
+
+func simBootSettingsResponse(s simpower.Settings) SimBootSettingsResponse {
+	return SimBootSettingsResponse{MaxBooted: s.MaxBooted, DefaultMaxBooted: simpower.DefaultMaxBooted}
 }
 
 func simTrustSettingsResponse(s simtrust.Settings) SimTrustSettingsResponse {

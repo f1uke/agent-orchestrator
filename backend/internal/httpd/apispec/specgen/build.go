@@ -397,6 +397,8 @@ var schemaNames = map[string]string{
 	"ControllersSetQAEvidenceSettingsRequest":       "SetQAEvidenceSettingsRequest",
 	"ControllersSimTrustSettingsResponse":           "SimTrustSettingsResponse",
 	"ControllersSetSimTrustSettingsRequest":         "SetSimTrustSettingsRequest",
+	"ControllersSimBootSettingsResponse":            "SimBootSettingsResponse",
+	"ControllersSetSimBootSettingsRequest":          "SetSimBootSettingsRequest",
 	"ControllersWikiStatusResponse":                 "WikiStatusResponse",
 	"ControllersStartWikiAgentRequest":              "StartWikiAgentRequest",
 	"ControllersWikiFilesResponse":                  "WikiFilesResponse",
@@ -1411,7 +1413,7 @@ func simOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/sim-devices/{udid}/power", id: "setSimDevicePower", tag: "sim",
-			summary:    "Boot a simulator or shut one down from the desktop app's Device tab",
+			summary:    "Boot a simulator (within the machine-wide boot cap) or shut one down",
 			pathParams: []any{controllers.SimSessionDeviceParam{}},
 			reqBody:    controllers.SimPowerInput{},
 			resps: []respUnit{
@@ -2487,6 +2489,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetSimTrustSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SimTrustSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/sim-boot", id: "getSimBootSettings", tag: "settings",
+			summary: "Fetch the machine-wide cap on simulators up or coming up at once",
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimBootSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/sim-boot", id: "setSimBootSettings", tag: "settings",
+			summary: "Replace the machine-wide cap on simulators up or coming up at once",
+			reqBody: controllers.SetSimBootSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SimBootSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},
