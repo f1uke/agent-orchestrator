@@ -519,7 +519,7 @@ function SavedCaFiles({ caFiles, found }: { caFiles: string[]; found: boolean[] 
 }
 
 function ThisMacSection({ form }: { form: GlobalForm }) {
-	const { draft, setField, isFieldDirty } = form;
+	const { draft, setField, isFieldDirty, fieldErrors } = form;
 	return (
 		<>
 			<SectionHeading title="This Mac" hint={hint("mac")} />
@@ -692,6 +692,50 @@ function ThisMacSection({ form }: { form: GlobalForm }) {
 						value={draft.refGitlabAliases}
 						onChange={(e) => setField("refGitlabAliases", e.target.value)}
 					/>
+				</SettingRow>
+
+				{/* Global, not per project: the QA Evidence tree on this Mac is one, and the
+				    rclone remote is this Mac's own credential. */}
+				<SettingRow
+					name="QA evidence Drive folder"
+					summary="Where agents and the Testiny tab upload each run's ~/Desktop/QA Evidence folder with rclone, then link each file on its case's result in Testiny."
+					detail={
+						<>
+							An rclone path, <code>&lt;remote&gt;:&lt;path&gt;</code>. A run lands under it at{" "}
+							<code>
+								&lt;Project&gt;/&lt;YYYY&gt;/&lt;milestone&gt;/TP-&lt;n&gt; - &lt;plan&gt;/TR-&lt;n&gt; - &lt;run&gt;
+							</code>
+							. A link opens the file in Drive for whoever the folder is already shared with; nothing is made public.
+							Leave it empty to turn upload off.
+						</>
+					}
+					ownership={{ kind: "global-only" }}
+					timing="live"
+					value={draft.qaEvidenceDriveFolder || "Not set"}
+					modified={isFieldDirty("qaEvidenceDriveFolder")}
+					controlId="qaEvidenceDriveFolder"
+				>
+					<div className="flex flex-col gap-1.5">
+						<Input
+							id="qaEvidenceDriveFolder"
+							className="h-8 max-w-[340px] font-mono text-[12.5px]"
+							placeholder="remote:QA"
+							spellCheck={false}
+							aria-invalid={fieldErrors.qaEvidenceDriveFolder ? true : undefined}
+							aria-describedby={fieldErrors.qaEvidenceDriveFolder ? "qaEvidenceDriveFolder-error" : undefined}
+							value={draft.qaEvidenceDriveFolder}
+							onChange={(e) => setField("qaEvidenceDriveFolder", e.target.value)}
+						/>
+						{fieldErrors.qaEvidenceDriveFolder ? (
+							<p
+								id="qaEvidenceDriveFolder-error"
+								role="alert"
+								className="max-w-[62ch] text-[11.5px] leading-[1.5] [overflow-wrap:anywhere] text-error"
+							>
+								{fieldErrors.qaEvidenceDriveFolder}
+							</p>
+						) : null}
+					</div>
 				</SettingRow>
 
 				<SettingRow

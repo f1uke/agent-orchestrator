@@ -1,6 +1,20 @@
 import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowUpRight, ChevronDown, ChevronRight, CircleDashed, RefreshCw, TriangleAlert } from "lucide-react";
 import {
+	ArrowUpRight,
+	Check,
+	ChevronDown,
+	ChevronRight,
+	CircleDashed,
+	File as FileIcon,
+	FileImage,
+	FileVideo,
+	Loader2,
+	RefreshCw,
+	TriangleAlert,
+	type LucideIcon,
+} from "lucide-react";
+import {
+	EvidenceUploadError,
 	useLinkTestinyRun,
 	useRecordTestinyResult,
 	useRefreshTestinyRuns,
@@ -8,6 +22,8 @@ import {
 	useTestinyCase,
 	useTestinyRunsVersion,
 	useUnlinkTestinyRun,
+	useTestinyEvidenceUploading,
+	useUploadTestinyEvidence,
 	type ResultWriteHold,
 } from "../hooks/useSessionTestinyRuns";
 import { useRefLinkSettings } from "../hooks/useRefLinkSettings";
@@ -20,7 +36,10 @@ import {
 	ageLabel,
 	caseChips,
 	caseFacts,
+	evidenceChips,
 	evidenceLabel,
+	evidenceUploadBlock,
+	evidenceUploadSummary,
 	isStepWrite,
 	linkedByLabel,
 	needsComment,
@@ -37,9 +56,11 @@ import {
 	textBlocks,
 	type CaseChip,
 	type CaseOrder,
+	type EvidenceChip,
 	type TestinyCase,
 	type TestinyCaseDetail,
 	type TestinyCaseStep,
+	type TestinyEvidenceLink,
 	type TestinyFetchErrorKind,
 	type TestinyRun,
 	type TestinyStatus,
@@ -298,24 +319,7 @@ function RunCard({
 				</div>
 			) : null}
 
-			<div className="flex flex-col gap-0.5 border-t border-border px-3 py-2">
-				<div className="flex h-6 items-center gap-2">
-					<span className={EYEBROW}>Evidence</span>
-					{run.evidenceDir ? (
-						<Button
-							variant="ghost"
-							size="sm"
-							className="-mr-2 ml-auto h-6 px-2 text-[11px]"
-							onClick={() => void aoBridge.shell.showItemInFolder(run.evidenceDir)}
-						>
-							Reveal in Finder
-						</Button>
-					) : (
-						<span className="text-[11px] text-passive">no folder yet</span>
-					)}
-				</div>
-				{run.evidenceDir ? <EvidencePath path={run.evidenceDir} /> : null}
-			</div>
+			<EvidenceSection run={run} taskId={taskId} />
 
 			<div className="flex items-center gap-2 border-t border-border px-3 py-2">
 				<span className="text-[11px] text-passive">{linkedBy}</span>
@@ -379,6 +383,76 @@ function Closed() {
 			<span aria-hidden="true"> · </span>
 			<span>closed</span>
 		</>
+	);
+}
+
+/**
+ * The run's QA Evidence folder on this Mac, and the upload that puts it on
+ * Drive and links each file on its case. An upload outlives the card that
+ * started it, so the button stays held while one is running anywhere.
+ */
+function EvidenceSection({ run, taskId }: { run: TestinyRun; taskId: string }) {
+	const runId = run.link.runId;
+	const upload = useUploadTestinyEvidence(taskId, runId);
+	const uploading = useTestinyEvidenceUploading(taskId, runId);
+	const block = evidenceUploadBlock(run);
+	return (
+		<div className="flex flex-col gap-0.5 border-t border-border px-3 py-2">
+			<div className="flex h-6 items-center gap-2">
+				<span className={EYEBROW}>Evidence</span>
+				{run.evidenceDir ? null : <span className="text-[11px] text-passive">no folder yet</span>}
+				<div className="-mr-2 ml-auto flex items-center">
+					<Button
+						variant="ghost"
+						size="sm"
+						className="h-6 px-2 text-[11px]"
+						disabled={block !== null || uploading}
+						title={block ?? "Upload this folder to Google Drive and link each file on its case's result"}
+						onClick={() => upload.mutate()}
+					>
+						{uploading ? "Uploading…" : "Upload to Drive"}
+					</Button>
+					{run.evidenceDir ? (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-6 px-2 text-[11px]"
+							onClick={() => void aoBridge.shell.showItemInFolder(run.evidenceDir)}
+						>
+							Reveal in Finder
+						</Button>
+					) : null}
+				</div>
+			</div>
+			{run.evidenceDir ? <EvidencePath path={run.evidenceDir} /> : null}
+			{uploading ? (
+				<p role="status" className="mt-1 flex items-center gap-1.5 text-[11px] leading-snug text-muted-foreground">
+					<Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />
+					Uploading and linking. Recordings can take a few minutes.
+				</p>
+			) : upload.isSuccess ? (
+				<p role="status" className="mt-1 flex items-center gap-1.5 text-[11px] leading-snug text-muted-foreground">
+					<Check className="size-3 shrink-0 text-success" aria-hidden="true" />
+					{evidenceUploadSummary(upload.data)}
+				</p>
+			) : upload.isError ? (
+				<UploadError error={upload.error} />
+			) : null}
+		</div>
+	);
+}
+
+function UploadError({ error }: { error: Error }) {
+	const off = error instanceof EvidenceUploadError && error.code === "TESTINY_EVIDENCE_OFF";
+	return (
+		<p
+			role="alert"
+			className="mt-1 text-[11px] leading-snug [overflow-wrap:anywhere] whitespace-pre-line text-error select-text"
+		>
+			{off
+				? "Upload is off until a Google Drive folder is set: Settings › This Mac › QA evidence Drive folder."
+				: error.message}
+		</p>
 	);
 }
 
@@ -540,6 +614,7 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 					{reason}
 				</p>
 			) : null}
+			{testCase.evidence.length > 0 ? <EvidenceLinks caseId={testCase.id} links={testCase.evidence} /> : null}
 			{provenance ? <span className="col-span-2 col-start-2 mt-0.5 text-[11px] text-passive">{provenance}</span> : null}
 			{draft ? (
 				<CommentField
@@ -558,6 +633,41 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 			) : null}
 			{expanded ? <CaseDetails id={detailsId} row={row} testCase={testCase} record={record} /> : null}
 		</li>
+	);
+}
+
+const EVIDENCE_ICON: Record<EvidenceChip["kind"], LucideIcon> = { image: FileImage, video: FileVideo, file: FileIcon };
+
+/**
+ * The Drive links on a case's result, as quiet links under it in the
+ * provenance line's type. A name too long for the rail is cut before its
+ * extension. A link opens in the system browser: the main window hands every
+ * new-window URL to it.
+ */
+function EvidenceLinks({ caseId, links }: { caseId: number; links: TestinyEvidenceLink[] }) {
+	return (
+		<ul aria-label="Evidence" className="col-span-2 col-start-2 mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-0.5">
+			{evidenceChips(caseId, links).map((chip) => {
+				const Icon = EVIDENCE_ICON[chip.kind];
+				return (
+					<li key={chip.url} className="flex max-w-full min-w-0">
+						<a
+							className="group flex min-w-0 items-center gap-1 rounded-sm text-[11px] leading-4 text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
+							href={chip.url}
+							target="_blank"
+							rel="noopener noreferrer"
+							title={chip.title}
+						>
+							<Icon className="size-3 shrink-0 text-passive group-hover:text-muted-foreground" aria-hidden="true" />
+							<span className="flex min-w-0 decoration-passive underline-offset-2 group-hover:underline">
+								<span className="truncate">{chip.stem}</span>
+								<span className="shrink-0">{chip.ext}</span>
+							</span>
+						</a>
+					</li>
+				);
+			})}
+		</ul>
 	);
 }
 

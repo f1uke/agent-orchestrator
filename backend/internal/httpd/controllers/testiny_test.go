@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	rcloneadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/rclone"
 	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -31,6 +32,27 @@ type fakeTestiny struct {
 	unlinked domain.TestinyRunID
 	recorded recordCall
 	caseID   int64
+	// evidenceBy is who UploadEvidence was asked by; evidenceTook is how long
+	// it takes, and evidenceCtxErr what its context said when it finished.
+	evidenceBy     string
+	evidenceTook   time.Duration
+	evidenceCtxErr error
+}
+
+func (f *fakeTestiny) UploadEvidence(ctx context.Context, task domain.SessionID, id domain.TestinyRunID, by string) (domain.TestinyEvidenceReport, error) {
+	f.asked = append(f.asked, "evidence "+string(task))
+	f.evidenceBy = by
+	time.Sleep(f.evidenceTook)
+	f.evidenceCtxErr = ctx.Err()
+	if f.err != nil {
+		return domain.TestinyEvidenceReport{}, f.err
+	}
+	return domain.TestinyEvidenceReport{
+		Folder: "/Users/me/Desktop/QA Evidence/MOBILITY/2026/S/TP-1 - p/TR-632 - r", Drive: "finnomena:QA/MOBILITY/2026/S/TP-1 - p/TR-632 - r",
+		Uploaded: []string{"README.md", "TC-7166 pass.png"},
+		Cases:    []domain.TestinyEvidenceCaseLinks{{CaseID: 7166, Linked: []string{"TC-7166 pass.png"}, CommentID: 2601, AlreadyLinked: []string{}}},
+		Run:      domain.TestinyRunView{Link: domain.TestinyRunLink{SessionID: task, RunID: id}, Counts: map[domain.TestinyCaseStatus]int{}, Cases: []domain.TestinyCaseResult{}},
+	}, nil
 }
 
 // recordCall is what one RecordResults call was given.
@@ -228,17 +250,18 @@ func TestTestinyRoutesResolveToTheTasksDev(t *testing.T) {
 		{"DELETE", qa + "/632", ""},
 		{"POST", qa + "/632/results", `{"results":[{"caseId":7166,"status":"PASSED"}],"from":"task-qa"}`},
 		{"GET", "/api/v1/sessions/" + string(scopeQA) + "/testiny/cases/7166", ""},
+		{"POST", qa + "/632/evidence", `{"from":"task-qa"}`},
 	} {
 		if body, status, _ := doRequest(t, srv, req[0], req[1], req[2]); status >= 300 {
 			t.Fatalf("%s %s: status %d body %s", req[0], req[1], status, body)
 		}
 	}
-	want := []string{"link task-dev", "runs task-dev", "unlink task-dev", "record task-dev", "case task-dev"}
+	want := []string{"link task-dev", "runs task-dev", "unlink task-dev", "record task-dev", "case task-dev", "evidence task-dev"}
 	if strings.Join(svc.asked, ",") != strings.Join(want, ",") {
 		t.Fatalf("service asked %v, want %v", svc.asked, want)
 	}
-	if svc.linkBy != "task-qa" || svc.recorded.by != "task-qa" {
-		t.Fatalf("linked by %q, recorded by %q; want qa's own id", svc.linkBy, svc.recorded.by)
+	if svc.linkBy != "task-qa" || svc.recorded.by != "task-qa" || svc.evidenceBy != "task-qa" {
+		t.Fatalf("linked by %q, recorded by %q, uploaded by %q; want qa's own id", svc.linkBy, svc.recorded.by, svc.evidenceBy)
 	}
 }
 
@@ -356,5 +379,80 @@ func TestTestinyWithoutAServiceIsNotImplemented(t *testing.T) {
 	t.Cleanup(srv.Close)
 	if _, status, _ := doRequest(t, srv, "GET", "/api/v1/sessions/solo-1/testiny/runs", ""); status != http.StatusNotImplemented {
 		t.Fatalf("status %d, want 501", status)
+	}
+}
+
+func TestTestinyUploadEvidence(t *testing.T) {
+	svc := &fakeTestiny{}
+	srv := newTestinyServer(t, svc, nil)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/TR-632/evidence", "")
+	if status != http.StatusOK {
+		t.Fatalf("status %d body %s", status, body)
+	}
+	var got struct {
+		Folder   string   `json:"folder"`
+		Drive    string   `json:"drive"`
+		Uploaded []string `json:"uploaded"`
+		Cases    []struct {
+			CaseID        int64    `json:"caseId"`
+			Linked        []string `json:"linked"`
+			CommentID     int64    `json:"commentId"`
+			AlreadyLinked []string `json:"alreadyLinked"`
+		} `json:"cases"`
+		Run struct {
+			Link struct {
+				RunID int64 `json:"runId"`
+			} `json:"link"`
+		} `json:"run"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Drive == "" || len(got.Uploaded) != 2 || got.Cases[0].CommentID != 2601 || got.Cases[0].AlreadyLinked == nil || got.Run.Link.RunID != 632 {
+		t.Fatalf("report = %s", body)
+	}
+	if svc.evidenceBy != "" {
+		t.Fatalf("an empty body uploaded as %q, want a person", svc.evidenceBy)
+	}
+}
+
+// An upload sends screen recordings to Drive, which takes longer than the
+// REST timeout allows any other route.
+func TestTestinyUploadEvidenceOutlivesTheRequestTimeout(t *testing.T) {
+	svc := &fakeTestiny{evidenceTook: 300 * time.Millisecond}
+	sessions := &scopeSessions{fakeSessionService: newFakeSessionService()}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(httpd.NewRouterWithControl(config.Config{RequestTimeout: 50 * time.Millisecond}, log, nil,
+		httpd.APIDeps{Sessions: sessions, Testiny: svc}, httpd.ControlDeps{}))
+	t.Cleanup(srv.Close)
+	body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/632/evidence", `{}`)
+	if status != http.StatusOK || svc.evidenceCtxErr != nil {
+		t.Fatalf("status %d (ctx %v) body %s, want the upload to finish", status, svc.evidenceCtxErr, body)
+	}
+}
+
+func TestTestinyUploadEvidenceErrorsMapToCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{fmt.Errorf("%w: README.md is missing", domain.ErrBadTestinyEvidence), http.StatusUnprocessableEntity, "TESTINY_EVIDENCE_INVALID"},
+		{testinysvc.ErrEvidenceOff, http.StatusConflict, "TESTINY_EVIDENCE_OFF"},
+		{fmt.Errorf("%w: TR-632 is closed", testinysvc.ErrRunClosed), http.StatusConflict, "TESTINY_RUN_CLOSED"},
+		{fmt.Errorf("%w: TR-632 is not linked", testinysvc.ErrRunNotLinked), http.StatusNotFound, "TESTINY_RUN_NOT_LINKED"},
+		{fmt.Errorf("%w: app-9 is not on the task", testinysvc.ErrWriteNotYours), http.StatusForbidden, "TESTINY_WRITE_NOT_YOURS"},
+		{fmt.Errorf("%w: two files", testinysvc.ErrDriveDuplicate), http.StatusConflict, "DRIVE_DUPLICATE"},
+		{rcloneadapter.ErrBinaryMissing, http.StatusServiceUnavailable, "DRIVE_RCLONE_MISSING"},
+		{rcloneadapter.ErrRemoteMissing, http.StatusUnprocessableEntity, "DRIVE_REMOTE_MISSING"},
+		{fmt.Errorf("%w finnomena: run `rclone config reconnect finnomena:`", rcloneadapter.ErrAuth), http.StatusBadGateway, "DRIVE_AUTH"},
+		{rcloneadapter.ErrUnavailable, http.StatusBadGateway, "DRIVE_UNAVAILABLE"},
+		{testinyadapter.ErrUnavailable, http.StatusBadGateway, "TESTINY_UNAVAILABLE"},
+	} {
+		srv := newTestinyServer(t, &fakeTestiny{err: tc.err}, nil)
+		body, status, _ := doRequest(t, srv, "POST", "/api/v1/sessions/solo-1/testiny/runs/632/evidence", `{"from":"solo-1"}`)
+		if status != tc.status || !strings.Contains(string(body), `"code":"`+tc.code+`"`) {
+			t.Errorf("%v: status %d body %s, want %d %s", tc.err, status, body, tc.status, tc.code)
+		}
 	}
 }

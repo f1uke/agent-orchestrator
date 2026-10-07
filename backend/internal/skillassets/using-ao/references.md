@@ -27,5 +27,6 @@ Natural-language-to-command mappings for common AO tasks.
 | See what a task's Testiny runs say | `ao testiny runs <task>` |
 | Read a case in a task's runs in full (test data, precondition, steps) | `ao testiny case <task> <case-id\|TC-id>` |
 | Record a case's result and its steps' results in a linked run | `ao testiny result <task> <run> <case> --status <status> [--comment <text>] [--step <n>=<status>]...` |
+| Upload a run's QA Evidence folder to Drive and link each file on its case's result | `ao testiny evidence <task> <run>` |
 | Configure a project's default branch or model | `ao project set-config <id> --default-branch <branch> --model <model>` |
 | Import projects from a legacy AO install | `ao import --dry-run` first, then `ao import -y` |

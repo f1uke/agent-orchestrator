@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TestinyView } from "./TestinyView";
-import type { TestinyCase, TestinyCaseDetail, TestinyRun } from "../lib/testiny";
+import type { TestinyCase, TestinyCaseDetail, TestinyEvidenceReport, TestinyRun } from "../lib/testiny";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 
 const { getMock, postMock, deleteMock } = vi.hoisted(() => ({
@@ -51,6 +51,7 @@ const tc = (id: number, status: string, title = `case ${id}`, script?: string): 
 	title,
 	status,
 	steps: [],
+	evidence: [],
 	...(script ? { script } : {}),
 });
 
@@ -1031,5 +1032,141 @@ describe("TestinyView case details", () => {
 		await user.click(details.getByRole("button", { name: "Retry" }));
 		expect(await details.findByText("Open a fund page")).toBeInTheDocument();
 		expect(details.queryByRole("alert")).toBeNull();
+	});
+});
+
+describe("TestinyView evidence", () => {
+	const EVIDENCE = "/api/v1/sessions/{sessionId}/testiny/runs/{runId}/evidence";
+	const DIR = "/Users/me/Desktop/QA Evidence/MOBILITY/2026/M-19/TP-193 Chat/TR-632 - iOS";
+	const drive = (n: number, file: string) => ({
+		url: `https://drive.google.com/file/d/fake${n}/view?usp=drive_link`,
+		driveId: `fake${n}`,
+		file,
+	});
+	const withEvidence = (id: number, evidence: TestinyCase["evidence"]) => ({ ...tc(id, "FAILED"), evidence });
+	const uploadButton = (runId: number) =>
+		within(card(runId)).getByRole("button", { name: /^(Upload to Drive|Uploading…)$/ });
+	const report = (over: Partial<TestinyEvidenceReport> = {}): TestinyEvidenceReport => ({
+		folder: DIR,
+		drive: "remote:QA/MOBILITY/2026/M-19/TP-193 Chat/TR-632 - iOS",
+		uploaded: [],
+		cases: [],
+		run: run(632, { evidenceDir: DIR }),
+		...over,
+	});
+
+	it("lists a case's Drive links under it, by file name or as a Drive file, opening in the browser", async () => {
+		serve([
+			run(632, { cases: [withEvidence(1, [drive(1, "TC-1 FAIL MOB-9.png"), drive(2, "")]), withEvidence(2, [])] }),
+		]);
+		renderView();
+
+		const links = within(await screen.findByRole("list", { name: "Evidence" })).getAllByRole("link");
+		expect(links.map((l) => l.textContent)).toEqual(["FAIL MOB-9.png", "Drive file"]);
+		expect(links[0]).toHaveAttribute("href", drive(1, "").url);
+		expect(links[0]).toHaveAttribute("title", "TC-1 FAIL MOB-9.png");
+		for (const link of links) expect(link).toHaveAttribute("target", "_blank");
+		// Only the case with links gets the line.
+		expect(screen.getAllByRole("list", { name: "Evidence" })).toHaveLength(1);
+	});
+
+	it("holds the upload while the run is closed or has no folder, and says why", async () => {
+		serve([run(632, { evidenceDir: DIR, closed: true }), run(633), run(634, { evidenceDir: DIR })]);
+		renderView();
+
+		await screen.findAllByRole("article");
+		expect(uploadButton(632)).toBeDisabled();
+		expect(uploadButton(632)).toHaveAttribute("title", expect.stringMatching(/closed in Testiny/));
+		expect(uploadButton(633)).toBeDisabled();
+		expect(uploadButton(633)).toHaveAttribute("title", expect.stringMatching(/no folder/));
+		expect(uploadButton(634)).toBeEnabled();
+	});
+
+	it("says an upload can take a while, and sends it once however often it is pressed", async () => {
+		const user = userEvent.setup();
+		serve([run(632, { evidenceDir: DIR })]);
+		postMock.mockImplementation(() => new Promise(() => undefined));
+		renderView();
+
+		await user.click(await waitFor(() => uploadButton(632)));
+		expect(postMock).toHaveBeenCalledWith(EVIDENCE, {
+			params: { path: { sessionId: "task-1", runId: "632" } },
+			body: {},
+		});
+		expect(uploadButton(632)).toHaveTextContent("Uploading…");
+		expect(uploadButton(632)).toBeDisabled();
+		expect(within(card(632)).getByRole("status")).toHaveTextContent(/can take a few minutes/);
+		await user.click(uploadButton(632));
+		expect(postMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("sums up the upload and shows the run as Testiny read it back", async () => {
+		const user = userEvent.setup();
+		serve([run(632, { evidenceDir: DIR, cases: [withEvidence(1, [])] })]);
+		postMock.mockResolvedValue({
+			data: report({
+				uploaded: ["TC-1 FAIL MOB-9.png", "TC-1 FAIL MOB-9.mov", "TC-2 pass.png"],
+				cases: [
+					{ caseId: 1, linked: ["TC-1 FAIL MOB-9.mov", "TC-1 FAIL MOB-9.png"], commentId: 11, alreadyLinked: [] },
+					{ caseId: 2, linked: ["TC-2 pass.png"], commentId: 12, alreadyLinked: [] },
+				],
+				run: run(632, { evidenceDir: DIR, cases: [withEvidence(1, [drive(1, "TC-1 FAIL MOB-9.png")])] }),
+			}),
+			error: undefined,
+		});
+		renderView();
+
+		expect(await screen.findByText("case 1")).toBeInTheDocument();
+		expect(screen.queryByRole("list", { name: "Evidence" })).toBeNull();
+		await user.click(uploadButton(632));
+
+		expect(await within(card(632)).findByText("Uploaded 3 files, linked 2 cases")).toBeInTheDocument();
+		expect(within(screen.getByRole("list", { name: "Evidence" })).getByRole("link")).toHaveTextContent(
+			"FAIL MOB-9.png",
+		);
+		expect(uploadButton(632)).toBeEnabled();
+	});
+
+	it("says when there was nothing to do", async () => {
+		const user = userEvent.setup();
+		serve([run(632, { evidenceDir: DIR })]);
+		postMock.mockResolvedValue({
+			data: report({ cases: [{ caseId: 1, linked: [], commentId: 0, alreadyLinked: ["TC-1 pass.png"] }] }),
+			error: undefined,
+		});
+		renderView();
+
+		await user.click(await waitFor(() => uploadButton(632)));
+		expect(await within(card(632)).findByText("Already up to date")).toBeInTheDocument();
+	});
+
+	it("shows the daemon's refusal with its line breaks", async () => {
+		const user = userEvent.setup();
+		const message =
+			"the evidence folder breaks the naming rules:\n  TC-9 pass.png: case 9 is not in TR-632\n  notes.txt: not an evidence file name";
+		serve([run(632, { evidenceDir: DIR })]);
+		postMock.mockResolvedValue({ data: undefined, error: { code: "TESTINY_EVIDENCE_INVALID", message } });
+		renderView();
+
+		await user.click(await waitFor(() => uploadButton(632)));
+		const alert = await within(card(632)).findByRole("alert");
+		expect(alert.textContent).toBe(message);
+		expect(alert).toHaveClass("whitespace-pre-line");
+		expect(uploadButton(632)).toBeEnabled();
+	});
+
+	it("points to the setting when no Drive folder is set", async () => {
+		const user = userEvent.setup();
+		serve([run(632, { evidenceDir: DIR })]);
+		postMock.mockResolvedValue({
+			data: undefined,
+			error: { code: "TESTINY_EVIDENCE_OFF", message: "QA evidence upload is off: set the Google Drive folder first" },
+		});
+		renderView();
+
+		await user.click(await waitFor(() => uploadButton(632)));
+		expect(await within(card(632)).findByRole("alert")).toHaveTextContent(
+			"Upload is off until a Google Drive folder is set: Settings › This Mac › QA evidence Drive folder.",
+		);
 	});
 });

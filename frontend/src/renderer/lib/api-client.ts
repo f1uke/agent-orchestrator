@@ -92,7 +92,9 @@ const ROUTE_TEMPLATES = [
 
 // Resource collections whose next path segment is an identifier. Only used as a
 // defensive fallback for paths not covered by ROUTE_TEMPLATES; keeps IDs out of
-// telemetry for known collections even if a route is ever missed above.
+// telemetry for known collections even if a route is ever missed above. A
+// segment of digits alone (a Testiny run or case id) is an identifier wherever
+// it sits.
 const RESOURCE_SEGMENTS = new Set(["projects", "sessions", "notifications", "workspaces", "prs", "orchestrators"]);
 
 // Match a path against one template. `{param}` matches any single segment
@@ -134,7 +136,7 @@ function fallbackNormalize(pathname: string): string {
 			i += 1;
 		}
 	}
-	return segments.join("/");
+	return segments.map((s) => (/^\d+$/.test(s) ? ":id" : s)).join("/");
 }
 
 export function normalizeApiOperation(method: string, pathname: string): string {

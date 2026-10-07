@@ -1,11 +1,13 @@
 // Package testiny is the service behind a task's Testiny tab: which Testiny
 // test runs belong to the task, what each one says right now, what a case in
-// them asks for, and recording a case's result in one.
+// them asks for, recording a case's result in one, and uploading a run's QA
+// evidence to Google Drive with each file's link posted on its case's result.
 //
-// AO stores the links and a log of the results it wrote. Every title, case and
-// result is read live from Testiny through the adapter, held in memory for a
-// few seconds, and kept as the last good read when a later read fails, so a
-// Testiny outage shows as "data from 3 min ago" rather than an empty tab.
+// AO stores the links and a log of the results and evidence it wrote. Every
+// title, case and result is read live from Testiny through the adapter, held
+// in memory for a few seconds, and kept as the last good read when a later
+// read fails, so a Testiny outage shows as "data from 3 min ago" rather than
+// an empty tab.
 package testiny
 
 import (
@@ -23,8 +25,12 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
+	rcloneadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/rclone"
 	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/qaevidence"
 )
 
 const (
@@ -51,6 +57,9 @@ var (
 	ErrCaseNotInTask   = errors.New("the case is not in a run linked to this task")
 	ErrWriteNotYours   = errors.New("this agent may not record results on this task")
 	ErrSetByPerson     = errors.New("a person set this result")
+	ErrEvidenceOff     = errors.New("QA evidence upload is off: set the Google Drive folder first, as an rclone path such as finnomena:QA (AO Settings, or PUT /api/v1/settings/qa-evidence)")
+	ErrRunClosed       = errors.New("the run is closed")
+	ErrDriveDuplicate  = errors.New("two files in the Google Drive folder have one name")
 )
 
 // RunReader reads Testiny. Satisfied by *adapters/testiny.Client.
@@ -59,15 +68,31 @@ type RunReader interface {
 	Results(ctx context.Context, id domain.TestinyRunID) (testinyadapter.Results, error)
 	Case(ctx context.Context, id int64) (domain.TestinyCaseDetail, error)
 	Plan(ctx context.Context, id int64) (testinyadapter.Ref, error)
-	Milestone(ctx context.Context, id int64) (testinyadapter.Ref, error)
+	Milestone(ctx context.Context, id int64) (testinyadapter.Milestone, error)
+	ResultComments(ctx context.Context, run domain.TestinyRunID) ([]testinyadapter.ResultComment, error)
 	Project(ctx context.Context, ref string) (testinyadapter.Project, error)
 	ProjectByID(ctx context.Context, id int64) (testinyadapter.Project, error)
 }
 
-// ResultWriter records results in a run. Satisfied by *adapters/testiny.Client.
-// It returns the results written before any failure.
+// ResultWriter records results in a run, and comments on them. Satisfied by
+// *adapters/testiny.Client. SetResults returns the results written before any
+// failure.
 type ResultWriter interface {
 	SetResults(ctx context.Context, run domain.TestinyRunID, projectID int64, results []domain.TestinyResult) ([]domain.TestinyResult, error)
+	CommentOnResult(ctx context.Context, run domain.TestinyRunID, caseID, projectID int64, text string) (int64, error)
+}
+
+// Drive uploads files to a cloud folder and lists it. Satisfied by
+// *adapters/rclone.Client.
+type Drive interface {
+	HasRemote(ctx context.Context, name string) (bool, error)
+	Copy(ctx context.Context, src, dst string, names []string) ([]string, error)
+	List(ctx context.Context, dir string) ([]rcloneadapter.File, error)
+}
+
+// EvidenceSettings is where evidence goes. Satisfied by *qaevidence.Store.
+type EvidenceSettings interface {
+	Get() qaevidence.Settings
 }
 
 // Client is everything the service asks of Testiny.
@@ -85,6 +110,8 @@ type LinkStore interface {
 	AppendTestinyResults(ctx context.Context, entries []domain.TestinyResultEntry) error
 	LatestTestinyResults(ctx context.Context, sessionID domain.SessionID, runID domain.TestinyRunID) ([]domain.TestinyResultEntry, error)
 	TestinyStepResultLog(ctx context.Context, sessionID domain.SessionID, runID domain.TestinyRunID) ([]domain.TestinyResultEntry, error)
+	AppendTestinyEvidence(ctx context.Context, entries []domain.TestinyEvidenceEntry) error
+	TestinyEvidenceLinked(ctx context.Context, runID domain.TestinyRunID) ([]domain.TestinyEvidenceEntry, error)
 }
 
 // SessionGateway finds a task's project, its settings and its crew. Satisfied
@@ -101,6 +128,11 @@ type Options struct {
 	// Desktop, and a scripts store spelled with ~ is under it.
 	Home string
 	Now  func() time.Time
+	// Drive and Evidence upload a run's evidence; without both, upload is off.
+	Drive    Drive
+	Evidence EvidenceSettings
+	// Zone is the time zone a milestone's year is read in.
+	Zone *time.Location
 }
 
 // Runs is the Testiny tab of one task.
@@ -117,6 +149,9 @@ type Service struct {
 	sessions SessionGateway
 	home     string
 	now      func() time.Time
+	drive    Drive
+	evidence EvidenceSettings
+	zone     *time.Location
 
 	mu      sync.Mutex
 	reads   map[domain.TestinyRunID]domain.TestinyRunView
@@ -132,6 +167,7 @@ type Service struct {
 func New(reader Client, links LinkStore, sessions SessionGateway, opts Options) *Service {
 	s := &Service{
 		reader: reader, links: links, sessions: sessions, home: opts.Home, now: opts.Now,
+		drive: opts.Drive, evidence: opts.Evidence, zone: opts.Zone,
 		reads:   map[domain.TestinyRunID]domain.TestinyRunView{},
 		cases:   map[int64]caseRead{},
 		scripts: map[scriptsKey]scriptIndex{},
@@ -141,6 +177,9 @@ func New(reader Client, links LinkStore, sessions SessionGateway, opts Options) 
 	}
 	if s.now == nil {
 		s.now = time.Now
+	}
+	if s.zone == nil {
+		s.zone = time.Local
 	}
 	return s
 }
@@ -187,11 +226,20 @@ func (s *Service) Link(ctx context.Context, task domain.SessionID, ref, by strin
 	}
 	fresh, err := s.fetch(ctx, run)
 	s.remember(id, fresh, err)
+	return s.viewOf(ctx, l, cfg)
+}
+
+// viewOf is the remembered read of a link's run with AO's own facts filled in.
+func (s *Service) viewOf(ctx context.Context, l domain.TestinyRunLink, cfg domain.ProjectConfig) (domain.TestinyRunView, error) {
 	records, err := s.records(ctx, l)
 	if err != nil {
 		return domain.TestinyRunView{}, err
 	}
-	return s.view(l, s.caseScripts(ctx, cfg), records), nil
+	files, err := s.evidenceFiles(ctx, l.RunID)
+	if err != nil {
+		return domain.TestinyRunView{}, err
+	}
+	return s.view(l, s.caseScripts(ctx, cfg), records, files), nil
 }
 
 // Unlink removes a run from a task. A run that is not linked is not an error.
@@ -215,8 +263,12 @@ func (s *Service) Runs(ctx context.Context, task domain.SessionID, refresh bool)
 	scripts := s.caseScripts(ctx, cfg)
 
 	records := make([]map[int64]*domain.TestinyResultRecord, len(links))
+	files := make([]map[string]string, len(links))
 	for i, l := range links {
 		if records[i], err = s.records(ctx, l); err != nil {
+			return Runs{}, err
+		}
+		if files[i], err = s.evidenceFiles(ctx, l.RunID); err != nil {
 			return Runs{}, err
 		}
 	}
@@ -234,7 +286,7 @@ func (s *Service) Runs(ctx context.Context, task domain.SessionID, refresh bool)
 				fresh, err := s.fetchByID(ctx, l.RunID)
 				s.remember(l.RunID, fresh, err)
 			}
-			views[i] = s.view(l, scripts, records[i])
+			views[i] = s.view(l, scripts, records[i], files[i])
 		}()
 	}
 	wg.Wait()
@@ -283,40 +335,58 @@ func label(p testinyadapter.Project) string {
 	return p.Name
 }
 
-// fetchByID reads a run in full. The run and its results are asked for at the
-// same time; its plan, milestone and project need the run's ids.
+// fetchByID reads a run in full. The run, its results and the comments on
+// them are asked for at the same time; its plan, milestone and project need
+// the run's ids.
 func (s *Service) fetchByID(ctx context.Context, id domain.TestinyRunID) (domain.TestinyRunView, error) {
 	var (
-		run    testinyadapter.Run
-		runErr error
-		wg     sync.WaitGroup
+		run testinyadapter.Run
+		g   errgroup.Group
 	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		run, runErr = s.reader.Run(ctx, id)
-	}()
-	res, resErr := s.reader.Results(ctx, id)
-	wg.Wait()
-	if runErr != nil {
-		return domain.TestinyRunView{}, runErr
+	g.Go(func() (err error) {
+		run, err = s.reader.Run(ctx, id)
+		return err
+	})
+	res, comments, err := s.resultsAndComments(ctx, id)
+	if gErr := g.Wait(); gErr != nil {
+		return domain.TestinyRunView{}, gErr
 	}
-	if resErr != nil {
-		return domain.TestinyRunView{}, resErr
+	if err != nil {
+		return domain.TestinyRunView{}, err
 	}
-	return s.complete(ctx, run, res)
+	return s.complete(ctx, run, res, comments)
 }
 
 // fetch reads the rest of a run whose own fields are already in hand.
 func (s *Service) fetch(ctx context.Context, run testinyadapter.Run) (domain.TestinyRunView, error) {
-	res, err := s.reader.Results(ctx, run.ID)
+	res, comments, err := s.resultsAndComments(ctx, run.ID)
 	if err != nil {
 		return domain.TestinyRunView{}, err
 	}
-	return s.complete(ctx, run, res)
+	return s.complete(ctx, run, res, comments)
 }
 
-func (s *Service) complete(ctx context.Context, run testinyadapter.Run, res testinyadapter.Results) (domain.TestinyRunView, error) {
+// resultsAndComments reads a run's results and the comments on them at the
+// same time.
+func (s *Service) resultsAndComments(ctx context.Context, id domain.TestinyRunID) (testinyadapter.Results, []testinyadapter.ResultComment, error) {
+	var (
+		res      testinyadapter.Results
+		comments []testinyadapter.ResultComment
+		g        errgroup.Group
+	)
+	g.Go(func() (err error) {
+		res, err = s.reader.Results(ctx, id)
+		return err
+	})
+	g.Go(func() (err error) {
+		comments, err = s.reader.ResultComments(ctx, id)
+		return err
+	})
+	err := g.Wait()
+	return res, comments, err
+}
+
+func (s *Service) complete(ctx context.Context, run testinyadapter.Run, res testinyadapter.Results, comments []testinyadapter.ResultComment) (domain.TestinyRunView, error) {
 	var (
 		plan, milestone *domain.TestinyRef
 		project         testinyadapter.Project
@@ -346,8 +416,8 @@ func (s *Service) complete(ctx context.Context, run testinyadapter.Run, res test
 	}
 	if run.MilestoneID != 0 {
 		read(func() error {
-			ref, err := s.reader.Milestone(ctx, run.MilestoneID)
-			milestone = &domain.TestinyRef{ID: ref.ID, Title: ref.Title}
+			m, err := s.reader.Milestone(ctx, run.MilestoneID)
+			milestone = &domain.TestinyRef{ID: m.ID, Title: m.Title}
 			return err
 		})
 	}
@@ -375,12 +445,17 @@ func (s *Service) complete(ctx context.Context, run testinyadapter.Run, res test
 	for status, n := range res.Summary {
 		v.Counts[domain.TestinyCaseStatus(status)] = n
 	}
+	evidence := driveLinks(comments)
 	for i, c := range res.Cases {
 		steps := run.Steps[c.ID]
 		if steps == nil {
 			steps = []domain.TestinyRunStep{}
 		}
-		v.Cases[i] = domain.TestinyCaseResult{ID: c.ID, Title: c.Title, Status: domain.TestinyCaseStatus(c.Status), Steps: steps}
+		links := evidence[c.ID]
+		if links == nil {
+			links = []domain.TestinyEvidenceLink{}
+		}
+		v.Cases[i] = domain.TestinyCaseResult{ID: c.ID, Title: c.Title, Status: domain.TestinyCaseStatus(c.Status), Steps: steps, Evidence: links}
 	}
 	return v, nil
 }
@@ -410,9 +485,10 @@ func (s *Service) remember(id domain.TestinyRunID, v domain.TestinyRunView, err 
 }
 
 // view is the remembered read of a link's run, with what is not Testiny's to
-// say filled in: the link itself, the evidence folder, the case scripts and
-// the results AO recorded.
-func (s *Service) view(l domain.TestinyRunLink, scripts map[int64]string, records map[int64]*domain.TestinyResultRecord) domain.TestinyRunView {
+// say filled in: the link itself, the evidence folder, the case scripts, the
+// results AO recorded, and the file each evidence link AO posted names
+// (files, by Drive id).
+func (s *Service) view(l domain.TestinyRunLink, scripts map[int64]string, records map[int64]*domain.TestinyResultRecord, files map[string]string) domain.TestinyRunView {
 	s.mu.Lock()
 	v := s.reads[l.RunID]
 	s.mu.Unlock()
@@ -422,6 +498,14 @@ func (s *Service) view(l domain.TestinyRunLink, scripts map[int64]string, record
 	for i, c := range v.Cases {
 		c.Script = scripts[c.ID]
 		c.Recorded = records[c.ID]
+		if len(c.Evidence) > 0 {
+			links := make([]domain.TestinyEvidenceLink, len(c.Evidence))
+			for j, link := range c.Evidence {
+				link.File = files[link.DriveID]
+				links[j] = link
+			}
+			c.Evidence = links
+		}
 		cases[i] = c
 	}
 	v.Cases = cases
@@ -450,14 +534,27 @@ func fetchErrorKind(err error) domain.TestinyFetchErrorKind {
 // Only the "TR-<id> - " prefix is matched, so the skill's other naming rules
 // are not restated here.
 func (s *Service) evidenceDir(id domain.TestinyRunID) string {
-	pattern := filepath.Join(s.home, "Desktop", "QA Evidence", "*", "*", "*", "*", id.String()+" - *")
-	matches, _ := filepath.Glob(pattern)
-	for _, m := range matches {
-		if info, err := os.Stat(m); err == nil && info.IsDir() {
-			return m
-		}
+	if dirs := s.evidenceDirs(id); len(dirs) > 0 {
+		return dirs[0]
 	}
 	return ""
+}
+
+// evidenceDirs is every folder in the QA Evidence tree that is named as the
+// run's folder, wherever in the tree it sits.
+func (s *Service) evidenceDirs(id domain.TestinyRunID) []string {
+	matches, _ := filepath.Glob(filepath.Join(s.evidenceRoot(), "*", "*", "*", "*", id.String()+" - *"))
+	var dirs []string
+	for _, m := range matches {
+		if info, err := os.Stat(m); err == nil && info.IsDir() {
+			dirs = append(dirs, m)
+		}
+	}
+	return dirs
+}
+
+func (s *Service) evidenceRoot() string {
+	return filepath.Join(s.home, "Desktop", "QA Evidence")
 }
 
 type scriptsKey struct{ dir, projectKey string }

@@ -6130,6 +6130,89 @@ paths:
       summary: Unlink a Testiny run from a task
       tags:
       - testiny
+  /api/v1/sessions/{sessionId}/testiny/runs/{runId}/evidence:
+    post:
+      operationId: uploadTestinyEvidence
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Testiny run id, e.g. 632 or TR-632.
+        in: path
+        name: runId
+        required: true
+        schema:
+          description: Testiny run id, e.g. 632 or TR-632.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadTestinyEvidenceInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestinyEvidenceReport'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Upload a linked run's QA Evidence folder to Google Drive and post each
+        file's link on its case's result; runs past the REST timeout
+      tags:
+      - testiny
   /api/v1/sessions/{sessionId}/testiny/runs/{runId}/results:
     post:
       operationId: recordTestinyResults
@@ -7066,6 +7149,69 @@ paths:
                 $ref: '#/components/schemas/APIError'
           description: Internal Server Error
       summary: Set the global base override for a prompt kind
+      tags:
+      - settings
+  /api/v1/settings/qa-evidence:
+    get:
+      operationId: getQAEvidenceSettings
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QAEvidenceSettingsResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Fetch the Google Drive folder (an rclone path) QA evidence is uploaded
+        into
+      tags:
+      - settings
+    put:
+      operationId: setQAEvidenceSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetQAEvidenceSettingsRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QAEvidenceSettingsResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Set the Google Drive folder QA evidence is uploaded into (empty turns
+        upload off)
       tags:
       - settings
   /api/v1/settings/reclaim:
@@ -11478,6 +11624,16 @@ components:
       - hasIOSSimulator
       - disableAutoCrew
       type: object
+    QAEvidenceSettingsResponse:
+      properties:
+        driveFolder:
+          description: An rclone path, <remote>:<path>, e.g. finnomena:QA. A run's
+            folder goes under it at <Project>/<YYYY>/<milestone>/TP-<n> - <plan>/TR-<n>
+            - <run>. Empty turns evidence upload off.
+          type: string
+      required:
+      - driveFolder
+      type: object
     ReclaimSettingsResponse:
       properties:
         artifactPatterns:
@@ -12536,6 +12692,15 @@ components:
           type: array
       required:
       - config
+      type: object
+    SetQAEvidenceSettingsRequest:
+      properties:
+        driveFolder:
+          description: An rclone path such as finnomena:QA; empty turns evidence upload
+            off.
+          type: string
+      required:
+      - driveFolder
       type: object
     SetReclaimSettingsRequest:
       properties:
@@ -13685,6 +13850,10 @@ components:
       type: object
     TestinyCaseResult:
       properties:
+        evidence:
+          items:
+            $ref: '#/components/schemas/TestinyEvidenceLink'
+          type: array
         id:
           format: int64
           type: integer
@@ -13705,6 +13874,80 @@ components:
       - title
       - status
       - steps
+      - evidence
+      type: object
+    TestinyEvidenceCaseLinks:
+      properties:
+        alreadyLinked:
+          description: Files whose Drive link the result's comments already held,
+            by name.
+          items:
+            type: string
+          type: array
+        caseId:
+          format: int64
+          type: integer
+        commentId:
+          description: The Testiny comment this upload posted, or 0 when it posted
+            none.
+          format: int64
+          type: integer
+        linked:
+          description: Files whose links this upload posted, by name.
+          items:
+            type: string
+          type: array
+      required:
+      - caseId
+      - linked
+      - commentId
+      - alreadyLinked
+      type: object
+    TestinyEvidenceLink:
+      properties:
+        driveId:
+          description: The Drive file id the link names.
+          type: string
+        file:
+          description: The evidence file's name when AO posted the link; empty for
+            a link a person posted.
+          type: string
+        url:
+          type: string
+      required:
+      - url
+      - driveId
+      - file
+      type: object
+    TestinyEvidenceReport:
+      properties:
+        cases:
+          description: Per case with evidence files, in case id order, what was linked.
+          items:
+            $ref: '#/components/schemas/TestinyEvidenceCaseLinks'
+          type: array
+        drive:
+          description: The rclone path it was uploaded to, e.g. finnomena:QA/MOBILITY/2026/Sprint
+            2026-19/TP-7 - plan/TR-191 - run.
+          type: string
+        folder:
+          description: The run's evidence folder on this Mac.
+          type: string
+        run:
+          $ref: '#/components/schemas/TestinyRunView'
+          description: The run read fresh from Testiny after the upload.
+        uploaded:
+          description: Files rclone transferred this time, by name; a file already
+            on Drive unchanged is left out.
+          items:
+            type: string
+          type: array
+      required:
+      - folder
+      - drive
+      - uploaded
+      - cases
+      - run
       type: object
     TestinyFetchError:
       properties:
@@ -13941,6 +14184,13 @@ components:
           type:
           - "null"
           - string
+      type: object
+    UploadTestinyEvidenceInput:
+      properties:
+        from:
+          description: Session id of the agent uploading ($AO_SESSION_ID). Empty when
+            a person uploads from the app.
+          type: string
       type: object
     WakeSessionResponse:
       properties:
