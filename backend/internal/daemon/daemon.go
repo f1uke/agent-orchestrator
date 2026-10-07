@@ -18,6 +18,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
+	rcloneadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/rclone"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
@@ -40,6 +41,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
+	"github.com/aoagents/agent-orchestrator/backend/internal/qaevidence"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimlog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reflinks"
@@ -304,6 +306,16 @@ func Run() error {
 		}
 		return fmt.Errorf("ref-link settings: %w", err)
 	}
+	// The Google Drive folder (an rclone path) QA evidence is uploaded into.
+	// Global and empty by default, which turns upload off.
+	qaEvidenceSettings, err := qaevidence.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("qa-evidence settings: %w", err)
+	}
 	// Which root CAs AO makes a simulator trust on boot and claim. Defaults to
 	// wherever known debugging proxies keep theirs; a missing/corrupt file
 	// degrades to that default.
@@ -521,12 +533,14 @@ func Run() error {
 
 	learningSvc := learningService(ctx, store, cfg.DataDir, learnCollector, learnSettings, learnRules, learnDecider)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
-		Projects:           projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
-		Agents:             agentSvc,
-		Sessions:           sessionSvc,
-		Jira:               jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
-		Reviews:            reviewSvc,
-		Testiny:            testinysvc.New(testinyadapter.New(testinyadapter.Options{}), store, store, testinysvc.Options{}),
+		Projects: projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
+		Agents:   agentSvc,
+		Sessions: sessionSvc,
+		Jira:     jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
+		Reviews:  reviewSvc,
+		Testiny: testinysvc.New(testinyadapter.New(testinyadapter.Options{}), store, store, testinysvc.Options{
+			Drive: rcloneadapter.New(rcloneadapter.Options{}), Evidence: qaEvidenceSettings,
+		}),
 		CrewRuns:           crewRunSvc,
 		Children:           childSvc,
 		Scripts:            scriptsSvc,
@@ -551,6 +565,7 @@ func Run() error {
 		ResponseLanguage:   responseLangSettings,
 		WikiSettings:       wikiSettings,
 		RefLinks:           refLinkSettings,
+		QAEvidence:         qaEvidenceSettings,
 		SimTrust:           simTrustSettings,
 		SimAssignments:     store,
 		Wiki:               wikiSvc,

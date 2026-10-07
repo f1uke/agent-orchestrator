@@ -1,11 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { mockRecordTestinyResult, mockTestinyCase, mockTestinyRuns } from "../lib/mock-data";
+import { mockRecordTestinyResult, mockTestinyCase, mockTestinyRuns, mockUploadTestinyEvidence } from "../lib/mock-data";
 import {
 	resultInput,
 	withCase,
 	withResult,
 	type TestinyCaseDetail,
+	type TestinyEvidenceReport,
 	type TestinyRun,
 	type TestinyRunsResponse,
 	type TestinyWrite,
@@ -174,4 +175,54 @@ export function useRecordTestinyResult(taskId: string, runId: number, hold?: Res
 		onSuccess: (run) => qc.setQueryData<TestinyRunsResponse>(key, (data) => replaceRun(data, runId, () => run)),
 		onSettled: () => hold?.end(qc.getQueryState(key)?.dataUpdateCount ?? 0),
 	});
+}
+
+/** A refused evidence upload, with the daemon's code (e.g. TESTINY_EVIDENCE_OFF). */
+export class EvidenceUploadError extends Error {
+	constructor(
+		message: string,
+		readonly code?: string,
+	) {
+		super(message);
+	}
+}
+
+const evidenceUploadKey = (taskId: string, runId: number) => ["testiny-evidence-upload", taskId, runId] as const;
+
+/**
+ * Uploads a run's QA Evidence folder to Drive and links each file on its
+ * case's result, as the person. It can take minutes (rclone copies the
+ * recordings). The run is swapped for the view the daemon read back after
+ * linking, here rather than at the call site so it still lands when the tab
+ * was closed meanwhile.
+ */
+export function useUploadTestinyEvidence(taskId: string, runId: number) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationKey: evidenceUploadKey(taskId, runId),
+		mutationFn: async (): Promise<TestinyEvidenceReport> => {
+			if (usePreviewData) return mockUploadTestinyEvidence(taskId, runId);
+			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/testiny/runs/{runId}/evidence", {
+				params: { path: { sessionId: taskId, runId: String(runId) } },
+				body: {},
+			});
+			if (error || !data) {
+				const code = (error as { code?: string } | undefined)?.code;
+				throw new EvidenceUploadError(apiErrorMessage(error, "Couldn't upload the evidence"), code);
+			}
+			return data;
+		},
+		onSuccess: (report) =>
+			qc.setQueryData<TestinyRunsResponse>(sessionTestinyQueryKey(taskId), (data) =>
+				replaceRun(data, runId, () => report.run),
+			),
+	});
+}
+
+/**
+ * Whether an upload of this run is still running, including one started before
+ * the tab was last closed: the card it started from is gone, the upload is not.
+ */
+export function useTestinyEvidenceUploading(taskId: string, runId: number): boolean {
+	return useIsMutating({ mutationKey: evidenceUploadKey(taskId, runId) }) > 0;
 }

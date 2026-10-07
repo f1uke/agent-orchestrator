@@ -193,6 +193,15 @@ describe("normalizeApiOperation", () => {
 		expect(normalizeApiOperation("GET", "/api/v1/orchestrators/orch-abc")).toBe("GET /api/v1/orchestrators/:id");
 		expect(normalizeApiOperation("POST", "/api/v1/prs/pr-1/merge")).toBe("POST /api/v1/prs/:id/merge");
 	});
+
+	it("normalizes numeric ids under a session's nested resources", () => {
+		expect(normalizeApiOperation("POST", "/api/v1/sessions/ao-42/testiny/runs/695/evidence")).toBe(
+			"POST /api/v1/sessions/:id/testiny/runs/:id/evidence",
+		);
+		expect(normalizeApiOperation("GET", "/api/v1/sessions/ao-42/testiny/cases/7560")).toBe(
+			"GET /api/v1/sessions/:id/testiny/cases/:id",
+		);
+	});
 });
 
 describe("api error telemetry", () => {

@@ -3,7 +3,10 @@ import {
 	ageLabel,
 	caseChips,
 	caseFacts,
+	evidenceChips,
 	evidenceLabel,
+	evidenceUploadBlock,
+	evidenceUploadSummary,
 	linkedByLabel,
 	orderCases,
 	provenanceLabel,
@@ -30,6 +33,7 @@ const tc = (id: number, status: string, script?: string): TestinyCase => ({
 	title: `case ${id}`,
 	status,
 	steps: [],
+	evidence: [],
 	...(script ? { script } : {}),
 });
 
@@ -180,6 +184,100 @@ describe("evidenceLabel", () => {
 
 	it("only abbreviates the home folder of any other path", () => {
 		expect(evidenceLabel("/Users/fluke/elsewhere/TR-1 - x")).toEqual({ location: "~/elsewhere/", folder: "TR-1 - x" });
+	});
+});
+
+describe("evidenceChips", () => {
+	const link = (n: number, file: string) => ({
+		url: `https://drive.google.com/file/d/id${n}/view`,
+		driveId: `id${n}`,
+		file,
+	});
+
+	it("names a file AO uploaded without the case's own prefix, keeping the full name as its title", () => {
+		expect(evidenceChips(2124, [link(1, "TC-2124 pass - iPhone 15.mov"), link(2, "TC-2124 FAIL MOB-9.png")])).toEqual([
+			{
+				url: link(1, "").url,
+				label: "pass - iPhone 15.mov",
+				stem: "pass - iPhone 15",
+				ext: ".mov",
+				title: "TC-2124 pass - iPhone 15.mov",
+				kind: "video",
+			},
+			{
+				url: link(2, "").url,
+				label: "FAIL MOB-9.png",
+				stem: "FAIL MOB-9",
+				ext: ".png",
+				title: "TC-2124 FAIL MOB-9.png",
+				kind: "image",
+			},
+		]);
+	});
+
+	it("keeps a name with no extension whole", () => {
+		expect(evidenceChips(1, [link(1, "TC-1 pass")])[0]).toMatchObject({ stem: "pass", ext: "", kind: "file" });
+	});
+
+	it("keeps another case's prefix, which the row does not say", () => {
+		expect(evidenceChips(2124, [link(1, "TC-21245 pass.png")])[0].label).toBe("TC-21245 pass.png");
+	});
+
+	it("calls a pasted link a Drive file, numbered only when there are several", () => {
+		expect(evidenceChips(1, [link(1, "")]).map((c) => [c.label, c.title, c.kind])).toEqual([
+			["Drive file", link(1, "").url, "file"],
+		]);
+		expect(evidenceChips(1, [link(1, ""), link(2, "TC-1 pass.png"), link(3, "")]).map((c) => c.label)).toEqual([
+			"Drive file 1",
+			"pass.png",
+			"Drive file 2",
+		]);
+	});
+});
+
+describe("evidenceUploadBlock", () => {
+	it("lets an open run with a folder upload", () => {
+		expect(evidenceUploadBlock({ closed: false, evidenceDir: "/x/TR-1 - a" })).toBeNull();
+	});
+
+	it("refuses a closed run, whatever its folder", () => {
+		expect(evidenceUploadBlock({ closed: true, evidenceDir: "/x/TR-1 - a" })).toMatch(/closed in Testiny/);
+		expect(evidenceUploadBlock({ closed: true, evidenceDir: "" })).toMatch(/closed in Testiny/);
+	});
+
+	it("refuses a run with no folder yet", () => {
+		expect(evidenceUploadBlock({ closed: false, evidenceDir: "" })).toMatch(/no folder in ~\/Desktop\/QA Evidence/);
+	});
+});
+
+describe("evidenceUploadSummary", () => {
+	const linked = (caseId: number, files: string[], already: string[] = []) => ({
+		caseId,
+		linked: files,
+		commentId: files.length > 0 ? 1 : 0,
+		alreadyLinked: already,
+	});
+
+	it("counts the files uploaded and the cases that got links", () => {
+		expect(evidenceUploadSummary({ uploaded: ["a", "b", "c"], cases: [linked(1, ["a"]), linked(2, ["b", "c"])] })).toBe(
+			"Uploaded 3 files, linked 2 cases",
+		);
+		expect(evidenceUploadSummary({ uploaded: ["a"], cases: [linked(1, ["a"]), linked(2, [], ["b"])] })).toBe(
+			"Uploaded 1 file, linked 1 case",
+		);
+	});
+
+	it("says when everything was already on Drive and linked", () => {
+		expect(evidenceUploadSummary({ uploaded: [], cases: [linked(1, [], ["a"])] })).toBe("Already up to date");
+	});
+
+	it("says which half had nothing to do", () => {
+		expect(evidenceUploadSummary({ uploaded: [], cases: [linked(1, ["a"])] })).toBe(
+			"Nothing new to upload, linked 1 case",
+		);
+		expect(evidenceUploadSummary({ uploaded: ["a"], cases: [linked(1, [], ["a"])] })).toBe(
+			"Uploaded 1 file, every link was already on its case",
+		);
 	});
 });
 

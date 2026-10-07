@@ -38,6 +38,23 @@ type recordTestinyResultsRequest struct {
 	SHA     string                 `json:"sha,omitempty"`
 }
 
+// uploadTestinyEvidenceRequest mirrors controllers.UploadTestinyEvidenceInput.
+type uploadTestinyEvidenceRequest struct {
+	From string `json:"from,omitempty"`
+}
+
+// testinyEvidenceTimeout bounds an evidence upload. The daemon gives rclone 30
+// minutes to send the recordings, and this leaves it time to say it ran out.
+const testinyEvidenceTimeout = 35 * time.Minute
+
+// testinyEvidenceUsageCodes are the evidence upload's answers that the agent
+// fixes itself, on top of testinyUsageCodes: exit 2.
+var testinyEvidenceUsageCodes = map[string]bool{
+	"TESTINY_EVIDENCE_INVALID": true,
+	"TESTINY_RUN_CLOSED":       true,
+	"TESTINY_RUN_NOT_LINKED":   true,
+}
+
 // testinyUsageCodes are the daemon's answers that mean the command was asked
 // for something it can never do as typed, or that the caller must not retry:
 // exit 2, like any other misuse.
@@ -53,13 +70,14 @@ var testinyUsageCodes = map[string]bool{
 func newTestinyCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "testiny",
-		Short: "Link a task's Testiny test runs, read them and their cases back, and record case results",
+		Short: "Link a task's Testiny test runs, read them and their cases back, record case results, and upload QA evidence",
 		Long: "A task's Testiny tab lists the Testiny test runs its cases were played in. " +
-			"AO keeps the links and a log of the results it recorded; titles, cases and results " +
-			"are read live from Testiny. Recording a result is the only write AO makes to Testiny.",
+			"AO keeps the links and a log of the results and evidence it recorded; titles, cases and results " +
+			"are read live from Testiny. Recording a result and commenting evidence links on a result are " +
+			"the only writes AO makes to Testiny.",
 	}
 	cmd.AddCommand(newTestinyLinkCommand(ctx), newTestinyUnlinkCommand(ctx), newTestinyRunsCommand(ctx),
-		newTestinyCaseCommand(ctx), newTestinyResultCommand(ctx))
+		newTestinyCaseCommand(ctx), newTestinyResultCommand(ctx), newTestinyEvidenceCommand(ctx))
 	return cmd
 }
 
@@ -297,6 +315,67 @@ func testinyResultsFromArgs(cmd *cobra.Command, caseArg []string, status, commen
 		steps[i] = domain.TestinyStepResult{N: number, Status: domain.TestinyCaseStatus(strings.TrimSpace(s))}
 	}
 	return []domain.TestinyResult{{CaseID: id, Status: domain.TestinyCaseStatus(status), Comment: comment, Steps: steps}}, nil
+}
+
+func newTestinyEvidenceCommand(ctx *commandContext) *cobra.Command {
+	return &cobra.Command{
+		Use:   "evidence <task> <run>",
+		Short: "Upload a linked run's QA Evidence folder to Google Drive and link each file on its case's result",
+		Long: "Uploads the run's folder under ~/Desktop/QA Evidence/ to the Google Drive folder set in AO " +
+			"(Settings > QA evidence, an rclone path such as finnomena:QA) at the same path, then posts each " +
+			"evidence file's Drive link as a comment on its case's result. A result's status is never touched. " +
+			"The folder must be <Project>/<YYYY>/<milestone>/TP-<n> - <plan>/TR-<n> - <run> with every name as " +
+			"Testiny gives it, hold README.md, and name each file \"TC-<id> pass[ - <device>].<ext>\" or " +
+			"\"TC-<id> FAIL <JIRA-KEY>[ - <device>].<ext>\" for a case in the run; anything else is refused " +
+			"with every problem listed (exit 2). Running it again sends only what Drive lacks and links only " +
+			"what no comment on the result links yet. The run must be linked to the task and open. When the " +
+			"task has a qa, only qa may run it. Sends $AO_SESSION_ID.",
+		Args: exactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			task, run := strings.TrimSpace(args[0]), strings.TrimSpace(args[1])
+			req := uploadTestinyEvidenceRequest{From: strings.TrimSpace(os.Getenv("AO_SESSION_ID"))}
+			callCtx, cancel := context.WithTimeout(cmd.Context(), testinyEvidenceTimeout)
+			defer cancel()
+			var report domain.TestinyEvidenceReport
+			if err := ctx.postJSON(callCtx, testinyRunsPath(task)+"/"+url.PathEscape(run)+"/evidence", req, &report); err != nil {
+				var apiErr apiResponseError
+				if errors.As(err, &apiErr) && testinyEvidenceUsageCodes[apiErr.ErrorBody.Code] {
+					return usageError{err}
+				}
+				return testinyError(err)
+			}
+			return writeTestinyEvidence(cmd.OutOrStdout(), report)
+		},
+	}
+}
+
+// writeTestinyEvidence prints where the evidence went, what was sent this
+// time, and per case which files were linked now and which already were.
+func writeTestinyEvidence(w io.Writer, r domain.TestinyEvidenceReport) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "uploaded the evidence of %s %q\n", r.Run.Link.RunID, r.Run.Title)
+	fmt.Fprintf(&b, "  folder: %s\n", r.Folder)
+	fmt.Fprintf(&b, "  drive:  %s\n", r.Drive)
+	if len(r.Uploaded) == 0 {
+		b.WriteString("  sent:   nothing new, Drive had every file\n")
+	} else {
+		fmt.Fprintf(&b, "  sent:   %s\n", strings.Join(r.Uploaded, ", "))
+	}
+	if len(r.Cases) == 0 {
+		b.WriteString("  no evidence files to link, only README.md\n")
+	}
+	for _, c := range r.Cases {
+		var parts []string
+		if len(c.Linked) > 0 {
+			parts = append(parts, "linked "+strings.Join(c.Linked, ", "))
+		}
+		if len(c.AlreadyLinked) > 0 {
+			parts = append(parts, "already linked "+strings.Join(c.AlreadyLinked, ", "))
+		}
+		fmt.Fprintf(&b, "  TC-%d %s\n", c.CaseID, strings.Join(parts, "; "))
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
 }
 
 // headCommit is the short HEAD commit of the checkout the command runs in, or

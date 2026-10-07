@@ -106,6 +106,7 @@ type APIDeps struct {
 	// not a session, so it has no lifecycle wiring of its own.
 	WikiSettings     controllers.WikiSettingsService
 	RefLinks         controllers.RefLinksService
+	QAEvidence       controllers.QAEvidenceSettingsService
 	Wiki             controllers.WikiService
 	SystemPrompts    controllers.SystemPromptsService
 	MessageTemplates controllers.MessageTemplatesService
@@ -200,7 +201,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:        &controllers.ImportController{Svc: deps.Import},
-		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, SimTrust: simTrustSettings(deps.SimTrust), SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, QAEvidence: deps.QAEvidence, SimTrust: simTrustSettings(deps.SimTrust), SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:           &controllers.WikiController{Svc: deps.Wiki},
 		daemon:         &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		learning:       &controllers.LearningController{Svc: deps.Learning},
@@ -292,6 +293,15 @@ func (a *API) Register(root chi.Router) {
 				a.testiny.Register(r)
 				a.sessions.RegisterTaskScoped(r)
 			})
+		})
+		// Task-scoped work that takes minutes: the same scoping as above,
+		// without the REST timeout.
+		r.Group(func(r chi.Router) {
+			if resolver, ok := a.sessions.Svc.(controllers.SessionAliasResolver); ok {
+				r.Use(controllers.SessionAlias(resolver))
+			}
+			r.Use(controllers.TaskScoped(a.sessions.Svc))
+			a.testiny.RegisterUntimed(r)
 		})
 		// Long-lived streams intentionally bypass the REST timeout middleware.
 		a.notifications.RegisterStream(r)

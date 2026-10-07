@@ -1910,7 +1910,8 @@ export function mockCrewRuns(taskId: string): components["schemas"]["ListCrewRun
  * The Testiny tab in `ao preview`, where there is no daemon and no Testiny.
  * "Tighten the share sheet's empty state" carries every state a card can be in:
  * an iOS run with a failure, unplayed cases and some cases a Maestro script
- * plays; an Android run all passed with its evidence folder; and a run whose
+ * plays, and evidence still to upload; a closed Android run all passed with its
+ * evidence on Drive, linked by AO and pasted by people; and a run whose
  * latest read Testiny refused, still showing what it read 12 minutes ago. Every
  * other task has none, which is the empty state.
  *
@@ -2043,14 +2044,71 @@ export function mockTestinyCase(taskId: string, caseId: number): components["sch
 
 const mockTestinyStore = new Map<string, components["schemas"]["TestinyRunsResponse"]>();
 
-type DemoCase = Omit<components["schemas"]["TestinyCaseResult"], "steps"> &
-	Partial<Pick<components["schemas"]["TestinyCaseResult"], "steps">>;
+type DemoCase = Omit<components["schemas"]["TestinyCaseResult"], "steps" | "evidence"> &
+	Partial<Pick<components["schemas"]["TestinyCaseResult"], "steps" | "evidence">>;
 type DemoRun = Omit<components["schemas"]["TestinyRunView"], "cases"> & { cases: DemoCase[] };
 
-/** Every demo case Testiny holds no step results for has none. */
+/** Every demo case Testiny holds no step results or evidence links for has none. */
 function demoTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResponse"] {
 	const runs = demoRuns(taskId);
-	return { project: "MOB", runs: runs.map((r) => ({ ...r, cases: r.cases.map((c) => ({ steps: [], ...c })) })) };
+	return {
+		project: "MOB",
+		runs: runs.map((r) => ({ ...r, cases: r.cases.map((c) => ({ steps: [], evidence: [], ...c })) })),
+	};
+}
+
+/** A Drive link as AO builds it from a file id. The ids are fake. */
+function demoDriveLink(n: number, file: string): components["schemas"]["TestinyEvidenceLink"] {
+	const driveId = `1FakeDriveIdExample${String(n).padStart(4, "0")}`;
+	return { url: `https://drive.google.com/file/d/${driveId}/view?usp=drive_link`, driveId, file };
+}
+
+/** What TR-632's QA Evidence folder holds in the preview, by case. None of it is on Drive yet. */
+const DEMO_EVIDENCE_632: Record<number, string[]> = {
+	7101: ["TC-7101 pass.png"],
+	7102: ["TC-7102 FAIL DEMO-151.png", "TC-7102 FAIL DEMO-151 - iPhone 15 Pro Max iOS 18.4 dark mode.mov"],
+};
+
+/**
+ * An evidence upload in the preview. TR-632's first upload sends its three
+ * files and links them on two cases; every later one finds them all linked.
+ * The other runs never get here: one is closed, one has no folder.
+ */
+export function mockUploadTestinyEvidence(
+	taskId: string,
+	runId: number,
+): components["schemas"]["TestinyEvidenceReport"] {
+	const data = mockTestinyRuns(taskId);
+	const run = data.runs.find((r) => r.link.runId === runId);
+	if (!run) throw new Error(`run ${runId} is not linked to this task`);
+	const uploaded: string[] = [];
+	const cases: components["schemas"]["TestinyEvidenceCaseLinks"][] = [];
+	let n = 100;
+	const next = {
+		...run,
+		cases: run.cases.map((c) => {
+			const files = runId === 632 ? DEMO_EVIDENCE_632[c.id] : undefined;
+			if (!files) return c;
+			const have = new Set(c.evidence.map((e) => e.file));
+			const missing = files.filter((f) => !have.has(f));
+			uploaded.push(...missing);
+			cases.push({
+				caseId: c.id,
+				linked: missing,
+				commentId: missing.length > 0 ? 9000 + c.id : 0,
+				alreadyLinked: files.filter((f) => have.has(f)),
+			});
+			return { ...c, evidence: [...c.evidence, ...missing.map((f) => demoDriveLink((n += 1), f))] };
+		}),
+	};
+	mockTestinyStore.set(taskId, { ...data, runs: data.runs.map((r) => (r === run ? next : r)) });
+	return {
+		folder: run.evidenceDir,
+		drive: `finnomena:QA/MOBILITY/2026/MOBILITY 2026-19/TP-193 Share sheet/TR-${runId} - iOS`,
+		uploaded,
+		cases,
+		run: structuredClone(next),
+	};
 }
 
 /**
@@ -2104,6 +2162,8 @@ function demoRuns(taskId: string): DemoRun[] {
 						sha: "4f2c9e1a7b3d",
 						at: minutesAgo(5),
 					},
+					// Pasted by a person before anything was uploaded, so it has no file name.
+					evidence: [demoDriveLink(1, "")],
 				},
 				{
 					id: 7103,
@@ -2134,8 +2194,17 @@ function demoRuns(taskId: string): DemoRun[] {
 					title: "[Share] Sheet opens from the fund page",
 					status: "PASSED",
 					script: script("sheet_opens"),
+					evidence: [
+						demoDriveLink(2, "TC-7201 pass.png"),
+						demoDriveLink(3, "TC-7201 pass - Pixel 8 Pro Android 15 large text and dark mode.mp4"),
+					],
 				},
-				{ id: 7202, title: "[Share] Empty state shows when there is nothing to share", status: "PASSED" },
+				{
+					id: 7202,
+					title: "[Share] Empty state shows when there is nothing to share",
+					status: "PASSED",
+					evidence: [demoDriveLink(4, "TC-7202 pass.png"), demoDriveLink(5, ""), demoDriveLink(6, "")],
+				},
 				{ id: 7203, title: "[Share] Empty state copy matches the design", status: "PASSED" },
 				{ id: 7204, title: "[Share] Back button closes the sheet", status: "PASSED" },
 			],

@@ -1,13 +1,16 @@
 # ao testiny
 
-Link a task's Testiny test runs, read them and their cases back, and record case results in them.
+Link a task's Testiny test runs, read them and their cases back, record case results in them, and
+upload a run's QA evidence to Google Drive with each file linked on its case's result.
 
 On a project with a Testiny project set (`ao project set-config <project> --testiny-project <key>`),
 each task has a Testiny tab. It lists the Testiny test runs the task's cases were played in.
-AO keeps the links and a log of the results it recorded. Titles, cases and results are read
-live from Testiny. Recording a result with `ao testiny result` is the only write AO makes:
-create cases, plans and runs with the `testiny` CLI, as the `managing-testiny-qa` skill says,
-and never record a result with `testiny run results set` yourself, because AO cannot log it.
+AO keeps the links and a log of the results and evidence it recorded. Titles, cases and
+results are read live from Testiny. AO makes two writes: a result with `ao testiny result`, and
+a comment holding evidence links with `ao testiny evidence`. Create cases, plans and runs with
+the `testiny` CLI, as the `managing-testiny-qa` skill says, and never record a result with
+`testiny run results set` or post an evidence link with `testiny run results comment`
+yourself, because AO cannot log it.
 
 A run belongs to the TASK. Linked from a crew's qa, it lands on the task that dev and the
 person see.
@@ -138,6 +141,53 @@ ao testiny result <task> <run> --from-file <path|->
 | `--step` | A step's result as `<n>=<status>`, counting from 1; repeatable | - |
 | `--from-file` | A JSON array of results; `-` reads stdin | Instead of a case |
 
+---
+
+### ao testiny evidence
+
+Upload a linked run's QA Evidence folder to Google Drive, then post each evidence file's Drive
+link as a comment on its case's result. It never touches a result's status: record the
+verdict with `ao testiny result`, which is unchanged. On a linked run, uploading and linking
+need nobody's yes.
+
+The folder is the one the `managing-testiny-qa` skill builds, with every name read from
+Testiny, never typed:
+
+```
+~/Desktop/QA Evidence/<Project>/<YYYY>/<milestone>/TP-<n> - <plan>/TR-<n> - <run>/
+    README.md
+    TC-2124 pass.png
+    TC-2130 FAIL MOBILITY-4533.mp4
+    TC-2131 pass - iPhone 15 iOS 18.png
+```
+
+- `<Project>` is the Testiny project's name (`MOBILITY`, not `MOB`). `<YYYY>` is the year the
+  milestone starts in, local time (the year it was created when it has no start date).
+- The run needs a test plan and a milestone in Testiny. Attaching them is the human's call.
+- `README.md` is required. Every other file is `TC-<id> pass[ - <device>].<ext>` or
+  `TC-<id> FAIL <JIRA-KEY>[ - <device>].<ext>`, for a case in the run: `pass` lower case,
+  `FAIL` upper case, the Jira key of the defect. No subfolders. Dotfiles are ignored.
+- AO never renames, moves or deletes, here or on Drive. A folder that is missing, sits
+  elsewhere in the tree, or exists twice is refused with the path it must have, and every
+  problem with the files is listed at once. Fix them all, then run it again.
+- It goes to the Drive folder set in AO (Settings, an rclone path such as `finnomena:QA`) at
+  the same path, through the person's `rclone` remote. The link is the one Drive's own "Copy
+  link" gives: who can open it is whatever the shared drive grants.
+- Each case's result gets one new comment with the links of its files that no comment on that
+  result links yet, one per line, in file name order. A link a person pasted counts. Running it
+  again sends only what Drive lacks and posts nothing new, so after a failure just run it again.
+- The run must be open: a closed run takes no more links, so upload before the run is closed.
+- When the task has a qa, only qa uploads. A solo worker uploads its own task's evidence.
+
+The command sends `$AO_SESSION_ID`, waits up to 35 minutes (recordings take a while), and
+prints the local folder, the Drive path, the files sent this time, and per case the files it
+linked and those already linked.
+
+**Syntax:**
+```
+ao testiny evidence <task> <run>
+```
+
 ## Errors
 
 | Code | Exit | Meaning |
@@ -148,7 +198,15 @@ ao testiny result <task> <run> --from-file <path|->
 | `TESTINY_RESULT_INVALID` | 2 | A result breaks a rule above, names a case that is not in the run, or names a step the case does not have |
 | `TESTINY_RESULT_SET_BY_PERSON` | 2 | A person set one of the cases or steps: report it in the handback, do not retry |
 | `TESTINY_WRITE_NOT_YOURS` | 2 | The task has a qa and you are not it, or you are not on the task |
-| `TESTINY_RUN_NOT_LINKED` | 1 | The run is not linked to the task: `ao testiny link` it first |
+| `TESTINY_EVIDENCE_INVALID` | 2 | The evidence folder or a file in it breaks a rule above, or the run has no plan or milestone; the message lists every problem and the path the folder must have |
+| `TESTINY_RUN_CLOSED` | 2 | The run is closed and takes no more links: ask the human to reopen it |
+| `TESTINY_RUN_NOT_LINKED` | 1 (2 for `evidence`) | The run is not linked to the task: `ao testiny link` it first |
+| `TESTINY_EVIDENCE_OFF` | 1 | No Google Drive folder is set in AO's Settings: ask the human to set one |
+| `DRIVE_RCLONE_MISSING` | 1 | `rclone` is not installed: `brew install rclone` |
+| `DRIVE_REMOTE_MISSING` | 1 | rclone has no remote of the name the Drive folder setting gives |
+| `DRIVE_AUTH` | 1 | The remote's sign-in to Google expired or was revoked: the human runs `rclone config reconnect <remote>:` in a terminal |
+| `DRIVE_UNAVAILABLE` | 1 | rclone failed or timed out; whatever reached Drive is logged, so run it again |
+| `DRIVE_DUPLICATE` | 1 | The Drive folder holds two files with one name; AO never deletes on Drive, so the human removes the extra copy |
 | `TESTINY_CASE_NOT_IN_TASK` | 1 | The case is in none of the runs linked to the task |
 | `TESTINY_RUN_NOT_FOUND` | 1 | Testiny has no such run |
 | `TESTINY_RUN_WRONG_PROJECT` | 1 | The run is in another Testiny project |
@@ -189,6 +247,11 @@ ao testiny result "$AO_SESSION_ID" 632 TC-7167 --status FAILED --comment "ปุ
 # Record a case and each of its steps in one call
 ao testiny result "$AO_SESSION_ID" 632 TC-7167 --status FAILED --comment "ขั้นที่ 2 ไม่เห็นปุ่มยืนยัน" \
   --step 1=PASSED --step 2=FAILED --step 3=BLOCKED
+```
+
+```bash
+# Upload the run's evidence folder and link each file on its case's result
+ao testiny evidence "$AO_SESSION_ID" 632
 ```
 
 ```bash

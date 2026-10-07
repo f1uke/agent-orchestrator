@@ -2040,6 +2040,17 @@ type SetRefLinksSettingsRequest struct {
 	GitLabRepoAliases map[string]string `json:"gitlabRepoAliases"`
 }
 
+// QAEvidenceSettingsResponse is the body of GET/PUT /api/v1/settings/qa-evidence:
+// the Google Drive folder a run's QA Evidence folder is uploaded into.
+type QAEvidenceSettingsResponse struct {
+	DriveFolder string `json:"driveFolder" description:"An rclone path, <remote>:<path>, e.g. finnomena:QA. A run's folder goes under it at <Project>/<YYYY>/<milestone>/TP-<n> - <plan>/TR-<n> - <run>. Empty turns evidence upload off."`
+}
+
+// SetQAEvidenceSettingsRequest is the body of PUT /api/v1/settings/qa-evidence.
+type SetQAEvidenceSettingsRequest struct {
+	DriveFolder string `json:"driveFolder" description:"An rclone path such as finnomena:QA; empty turns evidence upload off."`
+}
+
 // WikiStatusResponse is the whole state of the Wiki page in one read: whether a
 // vault is configured, and whether an agent is live inside it.
 //

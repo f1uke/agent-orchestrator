@@ -1,5 +1,6 @@
-// Package testiny reads Testiny test runs and cases through the `testiny` CLI, and
-// records case results in a run. Results are the only thing it writes.
+// Package testiny reads Testiny test runs and cases through the `testiny` CLI,
+// records case results in a run, and comments on a result. Results and
+// comments on them are the only things it writes.
 //
 // The CLI prints {"data":...,"meta":...} on stdout, and on failure prints
 // {"error":{kind,message,code,status},"exit_code":N} on stderr with exit code
@@ -9,6 +10,7 @@ package testiny
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -442,9 +444,154 @@ func (c *Client) Plan(ctx context.Context, id int64) (Ref, error) {
 	return c.ref(ctx, "plan", id)
 }
 
-// Milestone reads a milestone's title.
-func (c *Client) Milestone(ctx context.Context, id int64) (Ref, error) {
-	return c.ref(ctx, "milestone", id)
+// Milestone is a milestone's title, and the dates its year is read from.
+type Milestone struct {
+	ID    int64
+	Title string
+	// StartAt is zero when the milestone has no start date.
+	StartAt   time.Time
+	CreatedAt time.Time
+}
+
+// Milestone reads a milestone.
+func (c *Client) Milestone(ctx context.Context, id int64) (Milestone, error) {
+	var raw struct {
+		ID        int64      `json:"id"`
+		Title     string     `json:"title"`
+		StartAt   *time.Time `json:"start_at"`
+		CreatedAt time.Time  `json:"created_at"`
+	}
+	if err := c.call(ctx, &raw, "milestone", "show", idArg(id)); err != nil {
+		return Milestone{}, err
+	}
+	m := Milestone{ID: raw.ID, Title: raw.Title, CreatedAt: raw.CreatedAt}
+	if raw.StartAt != nil {
+		m.StartAt = *raw.StartAt
+	}
+	return m, nil
+}
+
+// ResultComment is a comment on a case's result in a run.
+type ResultComment struct {
+	ID     int64
+	CaseID int64
+	// URLs is every link in the comment, in order, each once.
+	URLs []string
+}
+
+// commentPage is how many comments one find asks for. Testiny allows 2000.
+const commentPage = 1000
+
+// ResultComments reads every comment on every case's result in a run, oldest
+// first. The CLI has no command that lists them, so it asks Testiny's API
+// through `testiny raw`, a page at a time until a page comes back short.
+func (c *Client) ResultComments(ctx context.Context, run domain.TestinyRunID) ([]ResultComment, error) {
+	var out []ResultComment
+	for offset := 0; ; offset += commentPage {
+		body, err := json.Marshal(map[string]any{
+			"filter": map[string]string{"type": "TEXT"},
+			"map": map[string]any{
+				"entities": []string{"comment", "testrun", "testcase"},
+				"ids":      map[string]int64{"testrun_id": int64(run)},
+			},
+			"pagination": map[string]int{"offset": offset, "limit": commentPage},
+		})
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Data []struct {
+				ID        int64           `json:"id"`
+				DeletedAt json.RawMessage `json:"deleted_at"`
+				Text      string          `json:"text"`
+				Result    *struct {
+					CaseID int64 `json:"testcase_id"`
+				} `json:"comment_testrun_values"`
+			} `json:"data"`
+		}
+		if err := c.callEnvelope(ctx, &page, "raw", "POST", "/comment/find", "--body="+string(body)); err != nil {
+			return nil, err
+		}
+		for _, d := range page.Data {
+			if d.Result == nil || (len(d.DeletedAt) > 0 && string(d.DeletedAt) != "null") {
+				continue
+			}
+			out = append(out, ResultComment{ID: d.ID, CaseID: d.Result.CaseID, URLs: commentURLs(d.Text)})
+		}
+		if len(page.Data) < commentPage {
+			break
+		}
+	}
+	slices.SortFunc(out, func(a, b ResultComment) int { return cmp.Compare(a.ID, b.ID) })
+	return out, nil
+}
+
+// slateNode is a node of the Slate document Testiny keeps a comment's text in.
+// A link is {"t":"a","url":...} with the URL repeated in its text.
+type slateNode struct {
+	T        string      `json:"t"`
+	URL      string      `json:"url"`
+	Text     *string     `json:"text"`
+	Children []slateNode `json:"children"`
+	C        []slateNode `json:"c"`
+}
+
+// bareURL is a URL typed into text rather than made a link. Zero-width
+// characters, which the web UI leaves around pasted links, end it.
+var bareURL = regexp.MustCompile(`https?://[^\s<>"\x{200B}-\x{200D}\x{2060}\x{FEFF}]+`)
+
+// commentURLs is every URL in a comment's text: each link's url, and each
+// URL typed in its text. A text that is not a Slate document is read as plain
+// text.
+func commentURLs(text string) []string {
+	var urls []string
+	add := func(u string) {
+		if u = strings.TrimRight(u, ".,;:!?)]}'\""); u != "" && !slices.Contains(urls, u) {
+			urls = append(urls, u)
+		}
+	}
+	var doc slateNode
+	if json.Unmarshal([]byte(text), &doc) != nil || doc.T != "slate" {
+		for _, u := range bareURL.FindAllString(text, -1) {
+			add(u)
+		}
+		return urls
+	}
+	var walk func(nodes []slateNode)
+	walk = func(nodes []slateNode) {
+		for _, n := range nodes {
+			if n.T == "a" && n.URL != "" {
+				add(n.URL)
+				continue
+			}
+			if n.Text != nil {
+				for _, u := range bareURL.FindAllString(*n.Text, -1) {
+					add(u)
+				}
+			}
+			walk(n.Children)
+			walk(n.C)
+		}
+	}
+	walk(doc.C)
+	return urls
+}
+
+// CommentOnResult posts a comment on a case's result in a run, without
+// touching its status, and returns the comment's id. Each line of text is a
+// paragraph and each URL a link. projectID is the run's project.
+func (c *Client) CommentOnResult(ctx context.Context, run domain.TestinyRunID, caseID, projectID int64, text string) (int64, error) {
+	var raw struct {
+		ID int64 `json:"id"`
+	}
+	if err := c.call(ctx, &raw, "run", "results", "comment", "--run="+idArg(int64(run)), "--case="+idArg(caseID),
+		"--project-id="+idArg(projectID), "--text="+text); err != nil {
+		return 0, err
+	}
+	if raw.ID == 0 {
+		return 0, fmt.Errorf("%w: testiny run results comment printed no comment id", ErrUnavailable)
+	}
+	return raw.ID, nil
 }
 
 func (c *Client) ref(ctx context.Context, entity string, id int64) (Ref, error) {

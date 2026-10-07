@@ -122,6 +122,9 @@ type TestinyCaseResult struct {
 	// Steps is the result Testiny holds for each step of a STEPS case that has
 	// one, by step number. A step with none has not been run.
 	Steps []TestinyRunStep `json:"steps"`
+	// Evidence is every Google Drive link in the comments on the case's
+	// result, in the order they were posted, one per Drive file.
+	Evidence []TestinyEvidenceLink `json:"evidence"`
 }
 
 // TestinyRunStep is the result Testiny holds for one step of a case in a run.

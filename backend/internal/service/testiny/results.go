@@ -92,11 +92,7 @@ func (s *Service) RecordResults(ctx context.Context, task domain.SessionID, id d
 
 	fresh, err := s.fetchByID(ctx, id)
 	s.remember(id, fresh, err)
-	records, err := s.records(ctx, link)
-	if err != nil {
-		return domain.TestinyRunView{}, err
-	}
-	return s.view(link, s.caseScripts(ctx, cfg), records), nil
+	return s.viewOf(ctx, link, cfg)
 }
 
 func (s *Service) linkOf(ctx context.Context, task domain.SessionID, id domain.TestinyRunID) (domain.TestinyRunLink, error) {

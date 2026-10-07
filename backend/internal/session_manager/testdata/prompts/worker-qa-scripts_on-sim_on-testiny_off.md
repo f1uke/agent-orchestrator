@@ -126,7 +126,7 @@ Every test case you play on a device, you play by running ONE case script - neve
 3. **Play the case:** `$AO_SCRIPTS_STORE/bin/flow run nter cases/<area>/<behaviour> --param KEY=VALUE --account <id>`. The assertions prove the DATA and the BEHAVIOUR: a failed assertion is a failed case, with the Maestro debug folder as the evidence.
 4. **Compare the screen with the DESIGN**, which no assertion proves. For every case that shows UI, compare each screenshot the case judges with the case's Figma frame - layout, spacing, copy, colour, components and states - and cite the frame you compared against. Find the frame from the ticket or the case. If neither links one, say so in your handback and leave the visual check for a person rather than guessing. A visual difference fails the case: name what differs and where.
 5. **The case PASSES only when both hold:** every assertion, and the screen against the design.
-6. **Keep the screenshots as the case's evidence.** On a Testiny project they go in the evidence folder the `managing-testiny-qa` skill names; otherwise give their path in your handback.
+6. **Keep the screenshots as the case's evidence.** On a Testiny project they go in the run's evidence folder: "Playing a run, start to finish" in the Testiny block below says how it goes to Drive and onto each case's result. Otherwise give their path in your handback.
 
 A case whose script you cannot make pass, or whose next step cannot be undone (submit, buy, delete), is UNDRIVEABLE for that step: the script stops before it, and you say so in your handback with the reason from your attempt. A person plays that step. Never finish a case by hand. The case scripts you write follow the store rule in the device block above.
 

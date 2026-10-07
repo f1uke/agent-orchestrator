@@ -32,13 +32,32 @@ var staleTestinyRules = []string{
 	"Every Testiny WRITE waits for the human's explicit yes",
 }
 
-// A result written with the raw Testiny CLI skips AO's log, its policy on who
-// may write and the tab's refresh. The command may appear only as the thing
-// never to run directly: "never" (at most one word between) right before it and
-// "directly" right after, so any other mention, an instruction above all, fails.
-const directResultWrite = "testiny run results set"
+// staleEvidenceRules are what prompts said before agents uploaded evidence
+// themselves (the human's decision, 2026-10-07): that evidence is never
+// uploaded, or that a person uploads it, pastes its links or is asked first.
+// The human is a developer, not QA, so any of them stalls a run that needs no
+// yes.
+var staleEvidenceRules = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bnever upload`),
+	regexp.MustCompile(`(?i)\b(human|person|people)\b[^.]{0,60}\b(upload|paste)\w*`),
+	regexp.MustCompile(`(?i)\bpaste\w*\b[^.]{0,40}\blinks?\b`),
+}
 
-var neverDirectResultWrite = regexp.MustCompile("(?i)\\bnever(?: \\w+)? `" + directResultWrite + "` directly\\b")
+// directTestinyWrites are the commands AO runs for an agent. A result set with
+// the raw Testiny CLI skips AO's log, its policy on who may write and the tab's
+// refresh; evidence uploaded with rclone, linked with a raw comment or attached
+// to Testiny skips the name check, the log and the duplicate check. Each may
+// appear only as a thing never to run directly: "never" (at most one word
+// between) right before a list of commands that ends in "directly", so any
+// other mention, an instruction above all, fails.
+var directTestinyWrites = []string{
+	"testiny run results set",
+	"testiny run results comment",
+	"testiny attach up",
+	"rclone",
+}
+
+var neverDirectTestinyWrite = regexp.MustCompile("(?i)\\bnever(?: \\w+)? `[^`]+`(?:(?:,| or) `[^`]+`)* directly\\b")
 
 // promptCell is one point of the prompt matrix: the session facts and project
 // settings that change what buildSystemPrompt assembles.
@@ -157,7 +176,8 @@ func TestPromptMatrix_TeachesNoRemovedCommand(t *testing.T) {
 		t.Run(c.name(), func(t *testing.T) {
 			got := c.build(t)
 			assertTeachesNoRemovedCommand(t, got)
-			assertTeachesNoDirectResultWrite(t, got)
+			assertTeachesNoDirectTestinyWrite(t, got)
+			assertLetsAgentsUploadEvidence(t, got)
 			assertAllowsTestAccounts(t, got)
 			c.assertTestinyBlock(t, got)
 			c.assertCaseScriptBlock(t, got)
@@ -200,7 +220,6 @@ func (c promptCell) assertTestinyBlock(t *testing.T, got string) {
 		"`managing-testiny-qa`",
 		"~/.ao/knowledge/mer/plans/<branch>--testiny.md",
 		`ao testiny link "$AO_CREW_ID" <run-id>`,
-		"Never upload evidence",
 		"Every other Testiny write waits for the human's explicit yes",
 	} {
 		if !strings.Contains(block, s) {
@@ -215,6 +234,8 @@ func (c promptCell) assertTestinyBlock(t *testing.T, got string) {
 // it hands to qa.
 const testinyLoop = "**Playing a run, start to finish.**"
 
+const evidenceCommand = "`ao testiny evidence \"$AO_CREW_ID\" <run-id>`"
+
 func (c promptCell) assertResultRecording(t *testing.T, block string) {
 	t.Helper()
 	records := c.role != domain.CrewRoleDev
@@ -222,12 +243,12 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 		t.Fatalf("%s: the record-a-run loop is present = %v, want %v:\n%s", c.name(), has, records, block)
 	}
 	if !records {
-		for _, s := range []string{"Results are qa's", "do not record results yourself"} {
+		for _, s := range []string{"Results and evidence are qa's", "do not record results or upload evidence yourself"} {
 			if !strings.Contains(block, s) {
-				t.Errorf("%s: dev is not told results are qa's, missing %q:\n%s", c.name(), s, block)
+				t.Errorf("%s: dev is not told results and evidence are qa's, missing %q:\n%s", c.name(), s, block)
 			}
 		}
-		for _, s := range []string{"ao testiny result", "testiny case link"} {
+		for _, s := range []string{"ao testiny result", "ao testiny evidence", "testiny case link"} {
 			if strings.Contains(block, s) {
 				t.Errorf("%s: dev is taught %q, which is qa's:\n%s", c.name(), s, block)
 			}
@@ -257,10 +278,25 @@ func (c promptCell) assertResultRecording(t *testing.T, block string) {
 		"each run's link with its counts",
 		`ao testiny case "$AO_CREW_ID" <case-id>`,
 		"**Test Data** names the int/uat test account and data the case needs",
+		// Whoever records results uploads the run's evidence and links it on
+		// each result through AO, unasked, while the run is still open.
+		"**Uploading a run's evidence and linking it on each result needs no yes either.**",
+		evidenceCommand,
+		"before the run is closed",
+		"the run has no plan or no milestone",
+		"its Drive folder",
+		"what `ao testiny evidence` refused and why",
 	} {
 		if !strings.Contains(block, s) {
 			t.Errorf("%s: the record-a-run loop is missing %q:\n%s", c.name(), s, block)
 		}
+	}
+	// The evidence goes up after the results are recorded and before the report
+	// that names its Drive folder.
+	result, evidence := strings.Index(block, `ao testiny result "$AO_CREW_ID"`), strings.Index(block, evidenceCommand)
+	report := max(strings.Index(block, "**Your finish report names**"), strings.Index(block, "**Hand back**"))
+	if result < 0 || evidence <= result || report <= evidence {
+		t.Errorf("%s: the loop does not record results, then upload evidence, then report (at %d, %d, %d):\n%s", c.name(), result, evidence, report, block)
 	}
 	// Only a solo worker can be refused as not the task's qa: a person may add a
 	// qa to its task while it runs. qa is never refused that way.
@@ -382,6 +418,15 @@ func (c promptCell) assertCaseScriptBlock(t *testing.T, got string) {
 			t.Errorf("%s: case-script block is missing %q:\n%s", c.name(), s, block)
 		}
 	}
+	// On a Testiny project the screenshots are the run's evidence: the block
+	// sends qa to the Testiny block, which follows it, rather than restating
+	// how evidence reaches Drive.
+	if !strings.Contains(block, `"Playing a run, start to finish" in the Testiny block below`) {
+		t.Errorf("%s: case-script block does not point its evidence at the Testiny block:\n%s", c.name(), block)
+	}
+	if c.testiny && strings.Index(got, testinyHeading) < strings.Index(got, caseScriptHeading) {
+		t.Errorf("%s: the case-script block says the Testiny block is below it, and it is not", c.name())
+	}
 	// The script's screenshots feed the design check, so the block never sends
 	// qa back to reading the screen by hand to judge a case.
 	for _, s := range []string{"ao sim shot", "screencap"} {
@@ -397,7 +442,8 @@ func (c promptCell) assertCaseScriptBlock(t *testing.T, got string) {
 func TestPromptBlocks_TeachNoRemovedCommand(t *testing.T) {
 	for _, k := range prompts.KnownKinds() {
 		assertTeachesNoRemovedCommand(t, prompts.DefaultBase(k)+prompts.CoordinationFloor(k))
-		assertTeachesNoDirectResultWrite(t, prompts.DefaultBase(k)+prompts.CoordinationFloor(k))
+		assertTeachesNoDirectTestinyWrite(t, prompts.DefaultBase(k)+prompts.CoordinationFloor(k))
+		assertLetsAgentsUploadEvidence(t, prompts.DefaultBase(k)+prompts.CoordinationFloor(k))
 	}
 	assertTeachesNoRemovedCommand(t, prompts.ResponseLanguageDirective("Thai"))
 }
@@ -413,11 +459,23 @@ func assertTeachesNoRemovedCommand(t *testing.T, prompt string) {
 	}
 }
 
-func assertTeachesNoDirectResultWrite(t *testing.T, prompt string) {
+func assertTeachesNoDirectTestinyWrite(t *testing.T, prompt string) {
 	t.Helper()
-	rest := neverDirectResultWrite.ReplaceAllString(prompt, "")
-	if i := strings.Index(strings.ToLower(rest), directResultWrite); i >= 0 {
-		from, to := max(0, i-120), min(len(rest), i+120)
-		t.Errorf("prompt names %q other than to say never to run it directly: ...%s...", directResultWrite, rest[from:to])
+	rest := neverDirectTestinyWrite.ReplaceAllString(prompt, "")
+	for _, cmd := range directTestinyWrites {
+		if loc := regexp.MustCompile(`(?i)\b` + cmd + `\b`).FindStringIndex(rest); loc != nil {
+			from, to := max(0, loc[0]-120), min(len(rest), loc[0]+120)
+			t.Errorf("prompt names %q other than to say never to run it directly: ...%s...", cmd, rest[from:to])
+		}
+	}
+}
+
+func assertLetsAgentsUploadEvidence(t *testing.T, prompt string) {
+	t.Helper()
+	for _, rule := range staleEvidenceRules {
+		if loc := rule.FindStringIndex(prompt); loc != nil {
+			from, to := max(0, loc[0]-120), min(len(prompt), loc[1]+120)
+			t.Errorf("prompt still keeps evidence from agents (%s): ...%s...", rule, prompt[from:to])
+		}
 	}
 }

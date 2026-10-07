@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	rcloneadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/rclone"
 	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
@@ -24,6 +26,7 @@ type TestinyService interface {
 	Runs(ctx context.Context, task domain.SessionID, refresh bool) (testinysvc.Runs, error)
 	RecordResults(ctx context.Context, task domain.SessionID, id domain.TestinyRunID, results []domain.TestinyResult, by, sha string) (domain.TestinyRunView, error)
 	Case(ctx context.Context, task domain.SessionID, id int64) (domain.TestinyCaseDetail, error)
+	UploadEvidence(ctx context.Context, task domain.SessionID, id domain.TestinyRunID, by string) (domain.TestinyEvidenceReport, error)
 }
 
 // TestinyRunsResponse is the body of GET /api/v1/sessions/{sessionId}/testiny/runs.
@@ -64,6 +67,11 @@ type RecordTestinyResultsInput struct {
 	SHA     string               `json:"sha,omitempty" description:"The commit the agent tested, for the tab's provenance line."`
 }
 
+// UploadTestinyEvidenceInput is the body of POST /api/v1/sessions/{sessionId}/testiny/runs/{runId}/evidence.
+type UploadTestinyEvidenceInput struct {
+	From string `json:"from,omitempty" description:"Session id of the agent uploading ($AO_SESSION_ID). Empty when a person uploads from the app."`
+}
+
 // TestinyRunParam is the {sessionId}/{runId} path of one linked run.
 type TestinyRunParam struct {
 	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
@@ -89,6 +97,12 @@ func (c *TestinyController) Register(r chi.Router) {
 	r.Delete("/sessions/{sessionId}/testiny/runs/{runId}", c.unlink)
 	r.Post("/sessions/{sessionId}/testiny/runs/{runId}/results", c.recordResults)
 	r.Get("/sessions/{sessionId}/testiny/cases/{caseId}", c.readCase)
+}
+
+// RegisterUntimed mounts the routes that outlive the REST timeout: an
+// evidence upload sends screen recordings to Drive, which takes minutes.
+func (c *TestinyController) RegisterUntimed(r chi.Router) {
+	r.Post("/sessions/{sessionId}/testiny/runs/{runId}/evidence", c.uploadEvidence)
 }
 
 func (c *TestinyController) list(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +188,29 @@ func (c *TestinyController) recordResults(w http.ResponseWriter, r *http.Request
 	envelope.WriteJSON(w, http.StatusOK, view)
 }
 
+func (c *TestinyController) uploadEvidence(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/testiny/runs/{runId}/evidence")
+		return
+	}
+	id, _, err := domain.ParseTestinyRunRef(chi.URLParam(r, "runId"))
+	if err != nil {
+		writeTestinyError(w, r, err)
+		return
+	}
+	var in UploadTestinyEvidenceInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil && !errors.Is(err, io.EOF) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	report, err := c.Svc.UploadEvidence(r.Context(), sessionID(r), id, strings.TrimSpace(in.From))
+	if err != nil {
+		writeTestinyError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, report)
+}
+
 func (c *TestinyController) readCase(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/testiny/cases/{caseId}")
@@ -203,6 +240,22 @@ func writeTestinyError(w http.ResponseWriter, r *http.Request, err error) {
 		write(http.StatusBadRequest, "bad_request", "TESTINY_BAD_CASE_REF")
 	case errors.Is(err, domain.ErrBadTestinyResult):
 		write(http.StatusBadRequest, "bad_request", "TESTINY_RESULT_INVALID")
+	case errors.Is(err, domain.ErrBadTestinyEvidence):
+		write(http.StatusUnprocessableEntity, "unprocessable", "TESTINY_EVIDENCE_INVALID")
+	case errors.Is(err, testinysvc.ErrEvidenceOff):
+		write(http.StatusConflict, "conflict", "TESTINY_EVIDENCE_OFF")
+	case errors.Is(err, testinysvc.ErrRunClosed):
+		write(http.StatusConflict, "conflict", "TESTINY_RUN_CLOSED")
+	case errors.Is(err, testinysvc.ErrDriveDuplicate):
+		write(http.StatusConflict, "conflict", "DRIVE_DUPLICATE")
+	case errors.Is(err, rcloneadapter.ErrBinaryMissing):
+		write(http.StatusServiceUnavailable, "unavailable", "DRIVE_RCLONE_MISSING")
+	case errors.Is(err, rcloneadapter.ErrRemoteMissing):
+		write(http.StatusUnprocessableEntity, "unprocessable", "DRIVE_REMOTE_MISSING")
+	case errors.Is(err, rcloneadapter.ErrAuth):
+		write(http.StatusBadGateway, "bad_gateway", "DRIVE_AUTH")
+	case errors.Is(err, rcloneadapter.ErrUnavailable):
+		write(http.StatusBadGateway, "bad_gateway", "DRIVE_UNAVAILABLE")
 	case errors.Is(err, testinysvc.ErrRunNotLinked):
 		write(http.StatusNotFound, "not_found", "TESTINY_RUN_NOT_LINKED")
 	case errors.Is(err, testinysvc.ErrCaseNotInTask):

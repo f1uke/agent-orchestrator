@@ -5,7 +5,8 @@ import { expect, test } from "@playwright/test";
 // (mockTestinyRuns) and the Jira issue DEMO-150. docs-site sets no Testiny
 // project, so its tasks get no tab.
 // The preview has no daemon: linking a run posts nowhere, and a result set from
-// the tab is written into the mock run in memory (mockRecordTestinyResult).
+// the tab is written into the mock run in memory (mockRecordTestinyResult), as
+// is an evidence upload's Drive links (mockUploadTestinyEvidence).
 
 test("a task in a Testiny project gets the Testiny tab after Files", async ({ page }) => {
 	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing");
@@ -202,6 +203,68 @@ test("a case Testiny would not answer for says why and offers a retry", async ({
 	const details = run.getByRole("region", { name: "[Share] VoiceOver reads the empty state details" });
 	await expect(details.getByRole("alert")).toContainText("TESTINY_UNAVAILABLE");
 	await expect(details.getByRole("button", { name: "Retry" })).toBeVisible();
+});
+
+test("a case's Drive evidence sits under it as quiet links, cut before the extension", async ({ page }) => {
+	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing");
+
+	const inspector = page.locator("#inspector");
+	await inspector.getByRole("tab", { name: "Testiny" }).click();
+	const android = inspector.getByRole("article", { name: /^TR-633 / });
+	await android.getByRole("button", { name: "All 4 passed" }).click();
+
+	const opens = android.getByRole("listitem").filter({ hasText: "[Share] Sheet opens from the fund page" });
+	const links = opens.getByRole("list", { name: "Evidence" }).getByRole("link");
+	await expect(links).toHaveText(["pass.png", "pass - Pixel 8 Pro Android 15 large text and dark mode.mp4"]);
+	await expect(links.first()).toHaveAttribute("target", "_blank");
+	await expect(links.first()).toHaveAttribute("href", /^https:\/\/drive\.google\.com\/file\/d\//);
+
+	// A name too long for the rail is cut before its extension, inside the card,
+	// and keeps the whole of it as the title.
+	const long = links.nth(1);
+	await expect(long).toHaveAttribute("title", "TC-7201 pass - Pixel 8 Pro Android 15 large text and dark mode.mp4");
+	expect(await long.locator(".truncate").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+	const ext = (await long.getByText(".mp4", { exact: true }).boundingBox())!;
+	const card = (await android.boundingBox())!;
+	expect(ext.width).toBeGreaterThan(0);
+	expect(ext.x + ext.width).toBeLessThanOrEqual(card.x + card.width);
+
+	const pasted = android.getByRole("listitem").filter({ hasText: "Empty state shows when there is nothing to share" });
+	await expect(pasted.getByRole("list", { name: "Evidence" }).getByRole("link")).toHaveText([
+		"pass.png",
+		"Drive file 1",
+		"Drive file 2",
+	]);
+});
+
+test("uploading a run's evidence links each file on its case, and a second upload has nothing to do", async ({
+	page,
+}) => {
+	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing");
+
+	const inspector = page.locator("#inspector");
+	await inspector.getByRole("tab", { name: "Testiny" }).click();
+	const upload = (run: RegExp) =>
+		inspector.getByRole("article", { name: run }).getByRole("button", { name: "Upload to Drive" });
+	// TR-633 is closed and TR-640 has no evidence folder.
+	await expect(upload(/^TR-633 /)).toBeDisabled();
+	await expect(upload(/^TR-640 /)).toBeDisabled();
+
+	const ios = inspector.getByRole("article", { name: /^TR-632 / });
+	const failed = ios.getByRole("listitem").filter({ hasText: "Empty state shows when there is nothing to share" });
+	await expect(failed.getByRole("list", { name: "Evidence" }).getByRole("link")).toHaveText(["Drive file"]);
+
+	await upload(/^TR-632 /).click();
+	await expect(ios.getByRole("status")).toHaveText("Uploaded 3 files, linked 2 cases");
+	await expect(failed.getByRole("list", { name: "Evidence" }).getByRole("link")).toHaveText([
+		"Drive file",
+		"FAIL DEMO-151.png",
+		"FAIL DEMO-151 - iPhone 15 Pro Max iOS 18.4 dark mode.mov",
+	]);
+
+	await upload(/^TR-632 /).click();
+	await expect(ios.getByRole("status")).toHaveText("Already up to date");
+	await expect(failed.getByRole("list", { name: "Evidence" }).getByRole("link")).toHaveCount(3);
 });
 
 test("a task in a project without Testiny has no Testiny tab", async ({ page }) => {

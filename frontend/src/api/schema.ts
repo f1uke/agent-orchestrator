@@ -1878,6 +1878,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/testiny/runs/{runId}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload a linked run's QA Evidence folder to Google Drive and post each file's link on its case's result; runs past the REST timeout */
+        post: operations["uploadTestinyEvidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/testiny/runs/{runId}/results": {
         parameters: {
             query?: never;
@@ -2149,6 +2166,24 @@ export interface paths {
         post?: never;
         /** Reset a prompt kind to its built-in default */
         delete: operations["clearSystemPrompt"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/settings/qa-evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the Google Drive folder (an rclone path) QA evidence is uploaded into */
+        get: operations["getQAEvidenceSettings"];
+        /** Set the Google Drive folder QA evidence is uploaded into (empty turns upload off) */
+        put: operations["setQAEvidenceSettings"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4008,6 +4043,10 @@ export interface components {
             sessionPrefix: string;
             testinyProject?: string;
         };
+        QAEvidenceSettingsResponse: {
+            /** @description An rclone path, <remote>:<path>, e.g. finnomena:QA. A run's folder goes under it at <Project>/<YYYY>/<milestone>/TP-<n> - <plan>/TR-<n> - <run>. Empty turns evidence upload off. */
+            driveFolder: string;
+        };
         ReclaimSettingsResponse: {
             artifactPatterns?: string[];
             artifactsEnabled: boolean;
@@ -4421,6 +4460,10 @@ export interface components {
         SetProjectConfigInput: {
             config: components["schemas"]["ProjectConfig"];
             mergeFields?: string[];
+        };
+        SetQAEvidenceSettingsRequest: {
+            /** @description An rclone path such as finnomena:QA; empty turns evidence upload off. */
+            driveFolder: string;
         };
         SetReclaimSettingsRequest: {
             artifactPatterns?: string[];
@@ -4939,6 +4982,7 @@ export interface components {
             prompts: components["schemas"]["SystemPromptItem"][];
         };
         TestinyCaseResult: {
+            evidence: components["schemas"]["TestinyEvidenceLink"][];
             /** Format: int64 */
             id: number;
             recorded?: components["schemas"]["TestinyResultRecord"];
@@ -4946,6 +4990,38 @@ export interface components {
             status: string;
             steps: components["schemas"]["DomainTestinyRunStep"][];
             title: string;
+        };
+        TestinyEvidenceCaseLinks: {
+            /** @description Files whose Drive link the result's comments already held, by name. */
+            alreadyLinked: string[];
+            /** Format: int64 */
+            caseId: number;
+            /**
+             * Format: int64
+             * @description The Testiny comment this upload posted, or 0 when it posted none.
+             */
+            commentId: number;
+            /** @description Files whose links this upload posted, by name. */
+            linked: string[];
+        };
+        TestinyEvidenceLink: {
+            /** @description The Drive file id the link names. */
+            driveId: string;
+            /** @description The evidence file's name when AO posted the link; empty for a link a person posted. */
+            file: string;
+            url: string;
+        };
+        TestinyEvidenceReport: {
+            /** @description Per case with evidence files, in case id order, what was linked. */
+            cases: components["schemas"]["TestinyEvidenceCaseLinks"][];
+            /** @description The rclone path it was uploaded to, e.g. finnomena:QA/MOBILITY/2026/Sprint 2026-19/TP-7 - plan/TR-191 - run. */
+            drive: string;
+            /** @description The run's evidence folder on this Mac. */
+            folder: string;
+            /** @description The run read fresh from Testiny after the upload. */
+            run: components["schemas"]["TestinyRunView"];
+            /** @description Files rclone transferred this time, by name; a file already on Drive unchanged is left out. */
+            uploaded: string[];
         };
         TestinyFetchError: {
             /** @enum {string} */
@@ -5031,6 +5107,10 @@ export interface components {
             harness?: "claude-code" | "codex" | "aider" | "opencode" | "grok" | "droid" | "amp" | "agy" | "crush" | "cursor" | "qwen" | "copilot" | "goose" | "auggie" | "continue" | "devin" | "cline" | "kimi" | "kiro" | "kilocode" | "vibe" | "pi" | "autohand" | null;
             prTarget?: null | string;
             prompt?: null | string;
+        };
+        UploadTestinyEvidenceInput: {
+            /** @description Session id of the agent uploading ($AO_SESSION_ID). Empty when a person uploads from the app. */
+            from?: string;
         };
         WakeSessionResponse: {
             ok: boolean;
@@ -12697,6 +12777,107 @@ export interface operations {
             };
         };
     };
+    uploadTestinyEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+                /** @description Testiny run id, e.g. 632 or TR-632. */
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadTestinyEvidenceInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestinyEvidenceReport"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     recordTestinyResults: {
         parameters: {
             query?: never;
@@ -13709,6 +13890,95 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getQAEvidenceSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QAEvidenceSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setQAEvidenceSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetQAEvidenceSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QAEvidenceSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
