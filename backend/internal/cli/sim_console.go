@@ -208,6 +208,9 @@ func (c *commandContext) runSimConsole(cmd *cobra.Command, bundleID string, opts
 	if err != nil {
 		return err
 	}
+	if note := target.choiceNote("ao sim console"); note != "" {
+		noteProgress(cmd.ErrOrStderr(), "%s\n", note)
+	}
 	sessionID, _ := simSessionID("`ao sim console`")
 	logPath, recordPath, err := simConsolePaths(sessionID, target.device.UDID, target.app.BundleID)
 	if err != nil {

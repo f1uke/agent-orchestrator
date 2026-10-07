@@ -161,11 +161,8 @@ func (t simOwnApp) choiceNote(command string) string {
 
 // simAppStatus reads what the process table says about the app.
 func (c *commandContext) simAppStatus(ctx context.Context, target simOwnApp) (simPIDResult, error) {
-	result := simPIDResult{
-		UDID: target.device.UDID, Name: target.device.Name, BundleID: target.app.BundleID,
-		Chosen: target.chosen, Of: target.of,
-	}
 	if !target.device.Booted() {
+		result := target.result()
 		result.State = simAppNotRunning
 		result.Message = fmt.Sprintf("%s is %s, so %s is not running; `ao sim boot` starts it, then `ao sim launch %s`",
 			target.device.Label(), target.device.State, target.app.BundleID, target.app.BundleID)
@@ -175,16 +172,20 @@ func (c *commandContext) simAppStatus(ctx context.Context, target simOwnApp) (si
 	if err != nil {
 		return simPIDResult{}, err
 	}
-	return describeSimApp(result, table, target), nil
+	return describeSimApp(table, target), nil
 }
 
-// describeSimApp fills in the state of the app's main process from a table.
-func describeSimApp(result simPIDResult, table simproc.Table, target simOwnApp) simPIDResult {
+// result is the part of a status that does not depend on the process table.
+func (t simOwnApp) result() simPIDResult {
+	return simPIDResult{UDID: t.device.UDID, Name: t.device.Name, BundleID: t.app.BundleID, Chosen: t.chosen, Of: t.of}
+}
+
+// describeSimApp is the state of the app's main process in a table.
+func describeSimApp(table simproc.Table, target simOwnApp) simPIDResult {
+	result := target.result()
 	proc, running := table.Main(target.app.Path)
 	if !running {
 		result.State = simAppNotRunning
-		result.PID = 0
-		result.Hold = nil
 		result.Message = fmt.Sprintf("%s is not running on %s; start it with `ao sim launch %s` (add --console to keep its stdout)",
 			target.app.BundleID, target.device.Label(), target.app.BundleID)
 		return result
@@ -193,7 +194,6 @@ func describeSimApp(result simPIDResult, table simproc.Table, target simOwnApp) 
 	hold, held := table.HoldOf(proc)
 	if !held {
 		result.State = simAppRunning
-		result.Hold = nil
 		result.Message = fmt.Sprintf("%s is running as pid %d on %s", target.app.BundleID, proc.PID, target.device.Label())
 		return result
 	}
@@ -274,7 +274,7 @@ type simLLDBOptions struct {
 func newSimLLDBCommand(ctx *commandContext) *cobra.Command {
 	opts := simLLDBOptions{}
 	cmd := &cobra.Command{
-		Use:   "lldb [bundle-id] -- <lldb args>...",
+		Use:   "lldb [bundle-id] [flags] -- <lldb args>...",
 		Short: "Run a bounded lldb batch against an app on this session's own simulator",
 		Long: "Attach `lldb --batch` to an app on this session's own simulator, run the commands " +
 			"after `--`, and make sure the app is running and detached afterwards.\n\n" +
@@ -360,9 +360,9 @@ func (c *commandContext) runSimLLDB(cmd *cobra.Command, bundleID string, lldbArg
 		return fmt.Errorf("not attaching: %s", before.Message)
 	}
 	if note := target.choiceNote("ao sim lldb"); note != "" {
-		fmt.Fprintln(errOut, note)
+		noteProgress(errOut, "%s\n", note)
 	}
-	fmt.Fprintf(errOut, "Attaching lldb to %s (pid %d) on %s; it is ended after %s if it has not finished.\n",
+	noteProgress(errOut, "Attaching lldb to %s (pid %d) on %s; it is ended after %s if it has not finished.\n",
 		target.app.BundleID, before.PID, target.device.Label(), opts.timeout)
 
 	runCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -389,11 +389,11 @@ func (c *commandContext) runSimLLDB(cmd *cobra.Command, bundleID string, lldbArg
 	lldbErr := stream.Err()
 	_ = stream.Close()
 
-	after, settleErr := c.settleSimApp(ctx, target, before, opts.resume, errOut)
+	after, settleErr := c.settleSimApp(ctx, target, opts.resume, errOut)
 	if settleErr != nil {
 		return settleErr
 	}
-	fmt.Fprintln(errOut, simLLDBVerdict(after))
+	noteProgress(errOut, "%s\n", simLLDBVerdict(after))
 
 	switch {
 	case after.State == simAppDebugger || after.State == simAppSIGSTOP:
@@ -423,7 +423,7 @@ func (c *commandContext) runSimLLDB(cmd *cobra.Command, bundleID string, lldbArg
 // the time a debugserver takes to exit. With resume, an app left stopped by
 // SIGSTOP is sent SIGCONT once and read again.
 func (c *commandContext) settleSimApp(
-	ctx context.Context, target simOwnApp, before simPIDResult, resume bool, errOut io.Writer,
+	ctx context.Context, target simOwnApp, resume bool, errOut io.Writer,
 ) (simPIDResult, error) {
 	var after simPIDResult
 	resumed := false
@@ -435,14 +435,14 @@ func (c *commandContext) settleSimApp(
 		if err != nil {
 			return simPIDResult{}, fmt.Errorf("lldb has ended, but whether the app is free could not be read: %w", err)
 		}
-		after = describeSimApp(before, table, target)
+		after = describeSimApp(table, target)
 		if after.State == simAppSIGSTOP && resume && !resumed {
 			resumed = true
 			pid := strconv.Itoa(after.PID)
 			if out, err := c.deps.CommandOutput(ctx, "kill", "-CONT", pid); err != nil {
 				return simPIDResult{}, fmt.Errorf("`kill -CONT %s` failed: %w: %s", pid, err, strings.TrimSpace(string(out)))
 			}
-			fmt.Fprintf(errOut, "The app was left stopped by SIGSTOP; sent `kill -CONT %s`.\n", pid)
+			noteProgress(errOut, "The app was left stopped by SIGSTOP; sent `kill -CONT %s`.\n", pid)
 			continue
 		}
 		if after.State == simAppRunning || after.State == simAppNotRunning {
