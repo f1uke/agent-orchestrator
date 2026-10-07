@@ -253,6 +253,83 @@ describe("SimulatorPanel device selection", () => {
 	});
 });
 
+describe("SimulatorPanel session devices", () => {
+	const clone = (label: string, overrides: Partial<Record<string, unknown>> = {}) =>
+		device({
+			udid: `UDID-${label}`,
+			name: `AO p-1 ${label}`,
+			role: "clone",
+			clone: {
+				udid: `UDID-${label}`,
+				sessionId: "p-1",
+				label,
+				primary: label === "primary",
+				base: label === "primary" ? "iPhone 17 Pro Max" : "iPhone SE (3rd generation)",
+				name: `AO p-1 ${label}`,
+				createdAt: "2026-10-07T00:00:00Z",
+			},
+			...overrides,
+		});
+
+	// Another session's booted device is what used to make the daemon refuse a
+	// default; a session with its own devices does not need one.
+	const fleet = () =>
+		devicesPayload(
+			[
+				device({ udid: "UDID-OTHER", lease: { state: "held", holder: "p-2" } }),
+				clone("iphone-se", { state: "Shutdown" }),
+				clone("primary"),
+				device({ udid: "UDID-BASE", role: "base", state: "Shutdown" }),
+			],
+			null,
+			"2 simulators are booted, so there is no unambiguous default",
+		);
+
+	it("watches the session's primary without being asked", async () => {
+		serveDevices(fleet());
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		expect(openSockets()[0].url).toContain("/sim-stream/UDID-primary");
+	});
+
+	it("switches to another of its devices in one press, and offers to boot it when it is off", async () => {
+		serveDevices(fleet());
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+
+		const switcher = screen.getByRole("tablist", { name: /this session's devices/i });
+		expect(
+			within(switcher)
+				.getAllByRole("tab")
+				.map((tab) => tab.textContent),
+		).toEqual(["primary", "iphone-se"]);
+		await userEvent.click(within(switcher).getByRole("tab", { name: /iphone-se/i }));
+
+		// Nothing to watch on a device that is off, so nothing is captured.
+		await waitFor(() => expect(openSockets()).toHaveLength(0));
+		const prompt = screen.getByTestId("sim-boot-prompt");
+		expect(prompt).toHaveTextContent(/iPhone SE \(3rd generation\)/);
+		// The memory guard, stated before the press: the primary and the other
+		// session's device are both up.
+		expect(prompt).toHaveTextContent(/2 are already up/i);
+
+		await userEvent.click(within(prompt).getByRole("button", { name: /boot iphone-se/i }));
+		expect(postMock).toHaveBeenCalledWith(
+			"/api/v1/sessions/{sessionId}/sim-devices/{udid}/power",
+			expect.objectContaining({ params: { path: { sessionId: "p-1", udid: "UDID-iphone-se" } } }),
+		);
+	});
+
+	it("shows no switch for a session with a single device", async () => {
+		serveDevices(devicesPayload([clone("primary")], "UDID-primary", "the only booted simulator"));
+		render(<SimulatorPanel isActive sessionId="p-1" />, { wrapper });
+
+		await waitFor(() => expect(openSockets()).toHaveLength(1));
+		expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+	});
+});
+
 describe("SimulatorPanel remembering a worker", () => {
 	const leased = () =>
 		devicesPayload([device({ lease: { state: "held", holder: "p-1" } })], "UDID-A", "the only booted simulator");
