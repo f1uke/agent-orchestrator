@@ -860,7 +860,7 @@ func unpublishedScriptsError(id domain.SessionID, res sessionmanager.TeardownRes
 			what = append(what, fmt.Sprintf("%d uncommitted file(s)", n))
 		}
 		if res.ScriptsStore.Publish.Outcome == ports.PublishRefused {
-			what = append(what, "commits the store refused: "+res.ScriptsStore.Publish.Detail)
+			what = append(what, "commits the store refused ("+res.ScriptsStore.Publish.Detail+")")
 		}
 	}
 	if len(what) == 0 {

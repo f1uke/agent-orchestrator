@@ -316,10 +316,9 @@ func (s *Service) Settle(ctx context.Context, owner domain.SessionID, policy Pol
 	case policy == SettleCheck:
 	case policy == SettleKeep && out.Blocked:
 		w.State = domain.ScriptsStoreHeld
+		w.HeldReason, w.HeldFiles = out.Publish.Hold, union(w.Uncommitted, out.Publish.Files)
 		if len(w.Uncommitted) > 0 {
-			w.HeldReason, w.HeldFiles = domain.HoldUncommitted, w.Uncommitted
-		} else {
-			w.HeldReason, w.HeldFiles = out.Publish.Hold, out.Publish.Files
+			w.HeldReason = domain.HoldUncommitted
 		}
 	default:
 		if err := s.trees.Remove(ctx, w.Store, w.Path, w.Branch, policy == SettleDiscard); err != nil {
@@ -469,6 +468,21 @@ func canonical(p string) string {
 		}
 		rest = filepath.Join(filepath.Base(dir), rest)
 	}
+}
+
+// union is a, then the entries of b that a lacks.
+func union(a, b []string) []string {
+	out := append([]string{}, a...)
+	seen := map[string]bool{}
+	for _, s := range a {
+		seen[s] = true
+	}
+	for _, s := range b {
+		if !seen[s] {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func nonNil(v []string) []string {
