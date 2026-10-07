@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowUpRight, ChevronRight, CircleDashed, RefreshCw, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, ChevronDown, ChevronRight, CircleDashed, RefreshCw, TriangleAlert } from "lucide-react";
 import {
 	useLinkTestinyRun,
 	useRecordTestinyResult,
@@ -546,14 +546,26 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 			>
 				{testCase.title}
 			</button>
-			{testCase.script ? (
-				<span
-					className="shrink-0 rounded border border-border px-1 font-mono text-[10px] leading-4 text-muted-foreground"
-					title={testCase.script}
+			<div className="flex shrink-0 items-center gap-1 self-start">
+				{testCase.script ? (
+					<span
+						className="rounded border border-border px-1 font-mono text-[10px] leading-4 text-muted-foreground"
+						title={testCase.script}
+					>
+						script
+					</span>
+				) : null}
+				{/* The title is the accessible control; this only makes it visible that a case opens. */}
+				<button
+					type="button"
+					tabIndex={-1}
+					aria-hidden="true"
+					className="grid size-5 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground"
+					onClick={() => setExpanded((v) => !v)}
 				>
-					script
-				</span>
-			) : null}
+					<ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+				</button>
+			</div>
 			{reason ? (
 				<p className="col-span-2 col-start-2 mt-1 text-xs leading-relaxed [overflow-wrap:anywhere] whitespace-pre-line text-muted-foreground">
 					{reason}
