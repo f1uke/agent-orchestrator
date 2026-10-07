@@ -139,3 +139,41 @@ func TestSimCrashes_RefusesABaseDevice(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// Measured on a real simulator crash (fatalError in the app): the .ips carried
+// no app-specific information at all, while the message was in the unified log.
+// A report without it says where the message is instead of leaving a gap.
+func TestSimCrashes_ShowWithoutAppInfoPointsAtTheLogForTheMessage(t *testing.T) {
+	m := newDebugMachine(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, "Library", "Logs", "DiagnosticReports")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	header := `{"app_name":"Nimbus","timestamp":"2026-10-08 10:15:00.00 +0700","app_version":"2.4.0","build_version":"318","bundleID":"com.example.Nimbus","bug_type":"309"}`
+	body := `{"procPath" : "\/Users\/USER\/Library\/Developer\/CoreSimulator\/Devices\/` + simUDIDProMax + `\/data\/Containers\/Bundle\/Application\/X\/Nimbus.app\/Nimbus",
+  "exception" : {"type" : "EXC_BREAKPOINT", "signal" : "SIGTRAP"}, "faultingThread" : 0,
+  "threads" : [{"triggered" : true, "frames" : [{"imageOffset" : 1, "imageIndex" : 0}]}], "usedImages" : [{"name" : "Nimbus"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "Nimbus-1.ips"), []byte(header+"\n"+body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := executeCLI(t, m.deps, "sim", "crashes", "--show", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ao sim log") || !strings.Contains(out, "Fatal error") {
+		t.Fatalf("a report with no app info must say where a fatalError's message is:\n%s", out)
+	}
+}
+
+// Measured: the report of a crash appeared about 30 s after the app died. An
+// empty list right after a crash says so, or it reads as "it did not crash".
+func TestSimCrashes_NoneSaysAReportArrivesLate(t *testing.T) {
+	m := newDebugMachine(t)
+	t.Setenv("HOME", t.TempDir())
+	out, _, err := executeCLI(t, m.deps, "sim", "crashes")
+	if err != nil || !strings.Contains(out, "30 s") {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+}

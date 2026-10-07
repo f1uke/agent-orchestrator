@@ -967,15 +967,19 @@ List the crash reports apps on your device left on this Mac (`~/Library/Logs/Dia
 | `--limit <n>` | List at most this many of the newest reports (default 10)         |
 | `--json`      | Output the list, or with `--show` the report, as JSON             |
 
-`--show 1` prints the exception, the termination, the app-specific information (a Swift `fatalError` message is there), the last exception backtrace for an NSException, and the crashed thread's frames as `#i image  symbol + offset  (file:line)` - then the path of the full report.
+`--show 1` prints the exception, the termination, the app-specific information, the last exception backtrace for an NSException, and the crashed thread's frames as `#i image  symbol + offset  (file:line)` - then the path of the full report.
+
+- **A report arrives about 30 s after the app dies** (measured). An empty list right after a crash means: wait and run it again.
+- **A simulator report does not carry a Swift `fatalError` or `precondition` message** (measured: none in the `.ips`). `ao sim log --grep "Fatal error"` has it, and so does `ao sim console` when the app was launched with `--console`.
 
 ### A stopped app breaks the next script run
 
-A debugged or SIGSTOPped app answers no accessibility query and processes no touch. So:
+An app stopped at a breakpoint, or by a SIGSTOP an lldb left behind, answers no accessibility query and processes no touch - and the next script run fails for a reason it cannot name. `ps` cannot tell an app stopped at a breakpoint from one an lldb is attached to and running, so every check treats an attached debugger as the hazard. So:
 
 - `ao sim doctor` has a `debugger` line that FAILs while any app on the device is held, naming the debugserver and lldb pids (or the SIGSTOP) and the fix.
 - `ao sim flow run` refuses to start Maestro while an app on the device is held, with the same message.
-- `ao sim ax` on an empty tree names a held foreground app at once instead of sampling it.
+- `ao sim ax` and `ao sim tap --label` refuse at once, before reading, while an app on the device is SIGSTOPped (measured: the read otherwise waits about a minute and comes back empty). An app with an lldb attached and running is still read: that is how a logpoint session is driven.
+- **Wait for lldb to say `Process <pid> resuming` before you drive the app.** Attaching stops the app for several seconds while lldb loads symbols; a tap in that window reads an empty screen and does nothing.
 
 ---
 

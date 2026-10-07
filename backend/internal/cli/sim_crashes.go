@@ -54,9 +54,12 @@ func newSimCrashesCommand(ctx *commandContext) *cobra.Command {
 			"app's and every other simulator's; only reports from this device are listed. With a bundle id, " +
 			"or $AO_SIM_APP, only that app's; otherwise every app on the device.\n\n" +
 			"--show N prints report N (1 is the newest) readably: the exception, the termination, the " +
-			"app-specific information (a Swift fatalError's message is there), the last exception " +
+			"app-specific information, the last exception " +
 			"backtrace for an NSException, and the crashed thread's frames - then the .ips path for the " +
-			"full report.",
+			"full report.\n\n" +
+			"Two things measured on a simulator: a report is written about 30 s after the app dies, and it " +
+			"does not carry a Swift fatalError's message - `ao sim log --grep \"Fatal error\"`, or " +
+			"`ao sim console` after `ao sim launch --console`, has that.",
 		Example: `  ao sim crashes
   ao sim crashes com.example.MyApp --show 1
   ao sim crashes --limit 3 --json`,
@@ -128,9 +131,18 @@ func simCrashRowOf(index int, r simcrash.Report) simCrashRow {
 	}
 }
 
+const (
+	// simCrashLateNote and simCrashMessageNote are what a real simulator crash
+	// taught: the report arrived about 30 s after the app died, and it held no
+	// app-specific information, while the fatalError message was in the log.
+	simCrashLateNote    = "A report is written about 30 s after the app dies: if it just crashed, run this again in a minute."
+	simCrashMessageNote = "a simulator report does not carry a Swift fatalError or precondition message; " +
+		"`ao sim log --grep \"Fatal error\"` (or `ao sim console` after `ao sim launch --console`) has it"
+)
+
 func writeSimCrashList(out io.Writer, list simCrashList) error {
 	if list.Total == 0 {
-		_, err := fmt.Fprintf(out, "No crash reports of %s on %s (%s) in %s.\n", crashScope(list.BundleID), list.Name, list.UDID, list.Dir)
+		_, err := fmt.Fprintf(out, "No crash reports of %s on %s (%s) in %s.\n%s\n", crashScope(list.BundleID), list.Name, list.UDID, list.Dir, simCrashLateNote)
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
@@ -165,8 +177,12 @@ func writeSimCrash(out io.Writer, index int, r simcrash.Report) error {
 		if r.Body.Termination.Indicator != "" {
 			fmt.Fprintf(&b, "Termination: %s (by %s)\n", r.Body.Termination.Indicator, r.Body.Termination.ByProc)
 		}
-		for _, line := range r.ASILines() {
+		asi := r.ASILines()
+		for _, line := range asi {
 			fmt.Fprintf(&b, "App info:    %s\n", line)
+		}
+		if len(asi) == 0 {
+			fmt.Fprintf(&b, "App info:    none - %s\n", simCrashMessageNote)
 		}
 		if len(r.Body.LastExceptionBacktrace) > 0 {
 			b.WriteString("\nLast exception backtrace:\n")

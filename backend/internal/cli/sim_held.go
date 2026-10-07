@@ -69,3 +69,30 @@ func heldSimAppReport(front simbridge.Frontmost, hold simproc.Hold) string {
 		"success and change nothing, and a Maestro flow against it fails for a reason it cannot name.",
 		frontmostLabel(front), hold.Describe())
 }
+
+// refuseStoppedSimApps answers a screen read before it starts when an app on the
+// device is SIGSTOPped. Measured on a real device: the accessibility read of a
+// stopped foreground app waits about a minute and comes back empty. Only a
+// SIGSTOP counts here - an app with a debugger attached and running answers
+// normally, and reading the screen is how a logpoint session is driven. A table
+// that cannot be read says nothing, and the read goes ahead.
+func (c *commandContext) refuseStoppedSimApps(ctx context.Context, device simDevice) error {
+	if device.DataPath == "" {
+		return nil
+	}
+	table, err := c.readSimProcesses(ctx)
+	if err != nil {
+		return nil //nolint:nilerr // intentional: an unreadable table must not block a read that may work
+	}
+	var described []string
+	for _, h := range table.Holds(device.DataPath) {
+		if h.Kind == simproc.HeldBySIGSTOP {
+			described = append(described, "  "+h.Describe())
+		}
+	}
+	if len(described) == 0 {
+		return nil
+	}
+	return fmt.Errorf("not reading the screen of %s: an app on it is stopped, and a stopped app answers no "+
+		"accessibility query and processes no touch.\n%s\nResume it, then read again", device.Label(), strings.Join(described, "\n"))
+}

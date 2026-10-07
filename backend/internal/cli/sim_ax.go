@@ -206,6 +206,9 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 	if err != nil {
 		return simAXResult{}, err
 	}
+	if err := c.refuseStoppedSimApps(ctx, device); err != nil {
+		return simAXResult{}, err
+	}
 	driver, err := c.simDriverReading(device, simReadOptions{wait: simAXRunnerWait, hitTest: true})
 	if err != nil {
 		return simAXResult{}, err
