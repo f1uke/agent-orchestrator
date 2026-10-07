@@ -173,6 +173,8 @@ function mockGet(
 				return { data: { vaultPath: "", harness: "" }, error: undefined };
 			case "/api/v1/settings/sim-trust":
 				return simTrustPayload;
+			case "/api/v1/settings/qa-evidence":
+				return { data: { driveFolder: "" }, error: undefined };
 			case "/api/v1/import":
 				return importPayload;
 			default:
@@ -352,6 +354,54 @@ describe("GlobalSettingsForm", () => {
 		await userEvent.type(await screen.findByLabelText("Vault folder"), "~/Notes");
 		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 		await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["wiki", "status"] }));
+	});
+
+	it("reads the QA evidence Drive folder as not set, and saves it through the bar (PUT qa-evidence)", async () => {
+		putMock.mockImplementation(async (path: string) =>
+			path === "/api/v1/settings/qa-evidence"
+				? { data: { driveFolder: "team:QA/Evidence" }, error: undefined }
+				: { data: {}, error: undefined },
+		);
+		renderForm();
+		await goToSection("This Mac");
+		const row = screen.getByRole("button", { name: /^QA evidence Drive folder/ });
+		expect(row).toHaveTextContent("Not set");
+
+		await userEvent.type(screen.getByLabelText("QA evidence Drive folder"), " team:QA/Evidence/");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+		await waitFor(() =>
+			expect(putMock).toHaveBeenCalledWith("/api/v1/settings/qa-evidence", {
+				body: { driveFolder: " team:QA/Evidence/" },
+			}),
+		);
+		// The field shows the folder as the daemon stored it.
+		await waitFor(() => expect(screen.getByLabelText("QA evidence Drive folder")).toHaveValue("team:QA/Evidence"));
+		expect(row).toHaveTextContent("team:QA/Evidence");
+		expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+	});
+
+	it("shows the daemon's refusal of a QA evidence Drive folder at the field until it is edited", async () => {
+		const refusal = 'drive folder "QA" must be an rclone path such as finnomena:QA (<remote>:<path>)';
+		putMock.mockImplementation(async (path: string) =>
+			path === "/api/v1/settings/qa-evidence"
+				? { data: undefined, error: { code: "INVALID_SETTINGS", message: refusal } }
+				: { data: {}, error: undefined },
+		);
+		renderForm();
+		await goToSection("This Mac");
+		const field = screen.getByLabelText("QA evidence Drive folder");
+		await userEvent.type(field, "QA");
+		await userEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
+		const alert = await screen.findByRole("alert");
+		expect(alert).toHaveTextContent(refusal);
+		expect(field).toHaveAttribute("aria-invalid", "true");
+		expect(field).toHaveAccessibleDescription(refusal);
+		expect(field).toHaveValue("QA");
+
+		await userEvent.type(field, "x");
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		expect(field).not.toHaveAttribute("aria-invalid");
 	});
 
 	it("changes the update channel and saves it through the bar", async () => {

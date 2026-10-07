@@ -40,6 +40,7 @@ const autoNudgeQueryKey = ["settings", "autoNudge"] as const;
 export const responseLanguageQueryKey = ["settings", "responseLanguage"] as const;
 export const wikiSettingsQueryKey = ["settings", "wiki"] as const;
 const reclaimSettingsQueryKey = ["settings", "reclaim"] as const;
+const qaEvidenceSettingsQueryKey = ["settings", "qaEvidence"] as const;
 
 // The flat, editable Global-scope draft. Prompt/template overrides are keyed maps
 // (kind/name → effective text); the rest are the daemon/app scalar settings.
@@ -59,6 +60,8 @@ export type GlobalDraft = {
 	// The root-CA files every simulator AO boots or claims is made to trust,
 	// edited one path per line and parsed back on save.
 	simTrustCaFiles: string;
+	// The rclone path a run's QA Evidence folder is uploaded under; empty is off.
+	qaEvidenceDriveFolder: string;
 	reclaimEnabled: boolean;
 	reclaimGrace: number;
 	reclaimArtifacts: boolean;
@@ -81,6 +84,7 @@ export type GlobalScalarField =
 	| "refGitlabDefaultRepo"
 	| "refGitlabAliases"
 	| "simTrustCaFiles"
+	| "qaEvidenceDriveFolder"
 	| "reclaimEnabled"
 	| "reclaimGrace"
 	| "reclaimArtifacts"
@@ -103,6 +107,7 @@ const EMPTY_DRAFT: GlobalDraft = {
 	refGitlabDefaultRepo: "",
 	refGitlabAliases: "",
 	simTrustCaFiles: "",
+	qaEvidenceDriveFolder: "",
 	reclaimEnabled: true,
 	reclaimGrace: 24 * 60,
 	reclaimArtifacts: true,
@@ -193,6 +198,14 @@ export function useGlobalSettingsForm() {
 	// state what its override overrides, and a save writes the daemon's answer
 	// (with each file's found-on-this-Mac flag) straight into it.
 	const simTrustQuery = useQuery({ queryKey: simTrustSettingsQueryKey, queryFn: fetchSimTrustSettings });
+	const qaEvidenceQuery = useQuery({
+		queryKey: qaEvidenceSettingsQueryKey,
+		queryFn: async () => {
+			const { data, error } = await apiClient.GET("/api/v1/settings/qa-evidence", {});
+			if (error) throw new Error(apiErrorMessage(error));
+			return data as components["schemas"]["QAEvidenceSettingsResponse"];
+		},
+	});
 	const reclaimQuery = useQuery({
 		queryKey: reclaimSettingsQueryKey,
 		queryFn: async () => {
@@ -214,6 +227,9 @@ export function useGlobalSettingsForm() {
 	const [draft, setDraft] = useState<GlobalDraft>(EMPTY_DRAFT);
 	const [baseline, setBaseline] = useState<GlobalDraft>(EMPTY_DRAFT);
 	const [savedAt, setSavedAt] = useState<number | null>(null);
+	// The daemon's refusal of one field's value, shown at that field until it is
+	// edited or saved again.
+	const [fieldErrors, setFieldErrors] = useState<Partial<Record<GlobalScalarField, string>>>({});
 	// Seed each slice once, the first time its query resolves, into BOTH draft and
 	// baseline (so it starts clean). Settings queries don't auto-refetch, so a
 	// seed-once guard keeps user edits from being clobbered.
@@ -293,6 +309,14 @@ export function useGlobalSettingsForm() {
 	}, [simTrustQuery.data]);
 
 	useEffect(() => {
+		if (!qaEvidenceQuery.data || seeded.current.has("qaEvidence")) return;
+		seeded.current.add("qaEvidence");
+		const v = qaEvidenceQuery.data.driveFolder;
+		setDraft((d) => ({ ...d, qaEvidenceDriveFolder: v }));
+		setBaseline((b) => ({ ...b, qaEvidenceDriveFolder: v }));
+	}, [qaEvidenceQuery.data]);
+
+	useEffect(() => {
 		if (!reclaimQuery.data || seeded.current.has("reclaim")) return;
 		seeded.current.add("reclaim");
 		const { enabled, graceMinutes } = reclaimQuery.data;
@@ -354,6 +378,7 @@ export function useGlobalSettingsForm() {
 		draft.wikiVaultPath !== baseline.wikiVaultPath ||
 		refLinksDirty(draft, baseline) ||
 		draft.simTrustCaFiles !== baseline.simTrustCaFiles ||
+		draft.qaEvidenceDriveFolder !== baseline.qaEvidenceDriveFolder ||
 		draft.reclaimEnabled !== baseline.reclaimEnabled ||
 		draft.reclaimGrace !== baseline.reclaimGrace ||
 		draft.reclaimArtifacts !== baseline.reclaimArtifacts ||
@@ -372,15 +397,17 @@ export function useGlobalSettingsForm() {
 	};
 	const setField = <K extends GlobalScalarField>(field: K, value: GlobalDraft[K]) => {
 		touch();
+		setFieldErrors((e) => (e[field] === undefined ? e : { ...e, [field]: undefined }));
 		setDraft((d) => ({ ...d, [field]: value }));
 	};
 
 	const mutation = useMutation({
 		mutationFn: async () => {
 			const ops: Promise<void>[] = [];
+			setFieldErrors({});
 			// What the daemon stored, where it normalizes (a trailing `/` trimmed,
 			// say), so the form shows the value that is actually in effect.
-			const saved: { refLinks?: RefLinkSettingsResponse; simTrust?: SimTrustSettings } = {};
+			const saved: { refLinks?: RefLinkSettingsResponse; simTrust?: SimTrustSettings; qaEvidence?: string } = {};
 			const putPrompt = async (kind: string, base: string) => {
 				const { error } = await apiClient.PUT("/api/v1/settings/prompts/{kind}", {
 					params: { path: { kind: kind as PromptKind } },
@@ -493,6 +520,21 @@ export function useGlobalSettingsForm() {
 					})(),
 				);
 			}
+			if (draft.qaEvidenceDriveFolder !== baseline.qaEvidenceDriveFolder) {
+				ops.push(
+					(async () => {
+						const { data, error } = await apiClient.PUT("/api/v1/settings/qa-evidence", {
+							body: { driveFolder: draft.qaEvidenceDriveFolder },
+						});
+						if (error) {
+							const message = apiErrorMessage(error);
+							setFieldErrors((e) => ({ ...e, qaEvidenceDriveFolder: message }));
+							throw new Error(message);
+						}
+						saved.qaEvidence = (data as components["schemas"]["QAEvidenceSettingsResponse"]).driveFolder;
+					})(),
+				);
+			}
 			if (
 				draft.reclaimEnabled !== baseline.reclaimEnabled ||
 				draft.reclaimGrace !== baseline.reclaimGrace ||
@@ -554,6 +596,7 @@ export function useGlobalSettingsForm() {
 				next = { ...next, simTrustCaFiles: formatCaFileLines(saved.simTrust.caFiles) };
 				queryClient.setQueryData(simTrustSettingsQueryKey, saved.simTrust);
 			}
+			if (saved.qaEvidence !== undefined) next = { ...next, qaEvidenceDriveFolder: saved.qaEvidence };
 			setDraft(next);
 			setBaseline(next);
 			// The Tasks tab's copy (and the form's own, by prefix).
@@ -570,6 +613,7 @@ export function useGlobalSettingsForm() {
 			// appear — until the next app start.
 			void queryClient.invalidateQueries({ queryKey: wikiStatusQueryKey });
 			void queryClient.invalidateQueries({ queryKey: reclaimSettingsQueryKey });
+			void queryClient.invalidateQueries({ queryKey: qaEvidenceSettingsQueryKey });
 			void queryClient.invalidateQueries({ queryKey: updateSettingsQueryKey });
 			// Every open editor reads this key: a re-bound shortcut works on the
 			// next key press, without reopening the file.
@@ -580,6 +624,7 @@ export function useGlobalSettingsForm() {
 	const discard = () => {
 		setDraft(baseline);
 		setSavedAt(null);
+		setFieldErrors({});
 	};
 
 	return {
@@ -594,6 +639,7 @@ export function useGlobalSettingsForm() {
 		isPromptDirty,
 		isTemplateDirty,
 		isFieldDirty,
+		fieldErrors,
 		dirty,
 		setPrompt,
 		setTemplate,
