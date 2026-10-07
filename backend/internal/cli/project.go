@@ -102,6 +102,7 @@ type projectSetConfigOptions struct {
 	mobileScripts     string
 	mobilePlatform    string
 	mobileStore       string
+	mobileVerifySkill string
 	simTrustCAs       []string
 	noAutoCrew        bool
 	pauseBeforeImpl   bool
@@ -308,6 +309,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.mobileScripts, "mobile-scripts", "", "Drive this project's simulators/emulators ONLY through the scripts of this product (its folder in the scripts store, e.g. nter); needs --mobile-platform. \"\" turns it off")
 	f.StringVar(&opts.mobilePlatform, "mobile-platform", "", "With --mobile-scripts: the app this repo builds, ios (scripts run through `ao sim flow run`) or android (through `maestro --device`)")
 	f.StringVar(&opts.mobileStore, "mobile-scripts-store", "", "With --mobile-scripts: the scripts store checkout (default "+domain.DefaultMobileScriptsStore+")")
+	f.StringVar(&opts.mobileVerifySkill, "mobile-scripts-verify-skill", "", "With --mobile-scripts: the store-relative folder of the project's verify skill (e.g. projects/nter/verify). AO links it into each worktree as .claude/skills/verify and points the device guidance at it")
 	f.StringArrayVar(&opts.simTrustCAs, "sim-trust-ca", nil, "Root-CA file (absolute or ~/) this project's simulators trust on boot and claim, instead of the global list (repeatable). \"none\" trusts nothing here; \"\" goes back to the global list")
 	f.BoolVar(&opts.noAutoCrew, "no-auto-crew", false, "Never form a crew automatically on this project; a PERSON can still add a qa by hand (`ao crew add`, or `+ qa` in the app), an AO session cannot")
 	f.BoolVar(&opts.pauseBeforeImpl, "pause-before-implementing", false, "A standard/deep worker here stops once it understands the task and hands back to you before it implements anything; mechanical tasks never stop")
@@ -358,12 +360,13 @@ var setConfigFieldFlags = []struct {
 	{flag: "branch-prefix", path: "gitConvention.branchPrefix"},
 	{flag: "web-ui", path: "hasWebUI"},
 	{flag: "ios-simulator", path: "hasIOSSimulator"},
-	// The three mobile-scripts flags write ONE pointer field whole: merging is
+	// The four mobile-scripts flags write ONE pointer field whole: merging is
 	// never walked into a pointer (see domain.MergeConfigFields), so naming any
 	// of them states the whole setting and leaving the product out turns it off.
 	{flag: "mobile-scripts", path: "mobileScripts"},
 	{flag: "mobile-platform", path: "mobileScripts"},
 	{flag: "mobile-scripts-store", path: "mobileScripts"},
+	{flag: "mobile-scripts-verify-skill", path: "mobileScripts"},
 	{flag: "sim-trust-ca", path: "simTrust"},
 	{flag: "no-auto-crew", path: "disableAutoCrew"},
 	{flag: "pause-before-implementing", path: "pauseBeforeImplementing"},
@@ -401,7 +404,7 @@ func changedConfigFields(flags *pflag.FlagSet) []string {
 	var fields []string
 	seen := map[string]bool{}
 	for _, f := range setConfigFieldFlags {
-		// Several flags can write one field (the mobile-scripts trio); it is
+		// Several flags can write one field (the mobile-scripts flags); it is
 		// named once however many of them were given.
 		if flags.Changed(f.flag) && !seen[f.path] {
 			seen[f.path] = true
@@ -472,18 +475,19 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 	return cfg, nil
 }
 
-// buildMobileScripts turns the three mobile-scripts flags into the setting. All
-// three empty is the spelling of "off" (`--mobile-scripts ""`), which is nil -
+// buildMobileScripts turns the four mobile-scripts flags into the setting. All
+// four empty is the spelling of "off" (`--mobile-scripts ""`), which is nil -
 // the same value a project that never had the setting carries. Anything else is
 // sent as given and the daemon's validation names what is missing.
 func buildMobileScripts(opts projectSetConfigOptions) *domain.MobileScriptsConfig {
 	product := strings.TrimSpace(opts.mobileScripts)
 	platform := strings.ToLower(strings.TrimSpace(opts.mobilePlatform))
 	store := strings.TrimSpace(opts.mobileStore)
-	if product == "" && platform == "" && store == "" {
+	skill := strings.TrimSpace(opts.mobileVerifySkill)
+	if product == "" && platform == "" && store == "" && skill == "" {
 		return nil
 	}
-	return &domain.MobileScriptsConfig{Product: product, Platform: domain.MobilePlatform(platform), Store: store}
+	return &domain.MobileScriptsConfig{Product: product, Platform: domain.MobilePlatform(platform), Store: store, VerifySkill: skill}
 }
 
 // simTrustNone is the --sim-trust-ca spelling of "trust nothing on this

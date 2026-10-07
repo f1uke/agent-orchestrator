@@ -94,6 +94,7 @@ import { IdleStatusChip } from "./IdleStatusChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergedChip } from "./MergedChip";
 import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
+import { UnpublishedScriptsChip } from "./UnpublishedScriptsChip";
 import { JiraKeyBadge } from "./JiraKeyBadge";
 import { Button } from "./ui/button";
 
@@ -1156,6 +1157,7 @@ function SessionRow({
 				gap - 9px of the name column spent on a chip that is not there. */}
 				<span className="flex shrink-0 items-center gap-1 empty:hidden group-data-[collapsible=icon]:hidden">
 					<QueuedMessagesChip session={session} compact />
+					<UnpublishedScriptsChip session={session} compact />
 					{isMergedAwaitingNext(session) ? (
 						<MergedChip session={session} compact />
 					) : isUndeliveredParked(session) ? (

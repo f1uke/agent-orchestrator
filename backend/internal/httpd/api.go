@@ -54,6 +54,9 @@ type APIDeps struct {
 	// Children is the lifecycle of a worker's child worktrees, driven by the
 	// Claude Code hooks a worker's subagents fire. nil answers 501.
 	Children controllers.ChildrenService
+	// Scripts is each mobileScripts workspace's own worktree of the scripts
+	// store: its status and the publish into the store. nil answers 501.
+	Scripts controllers.ScriptsService
 	// SimScreen is the machine-local simulator surface behind the desktop app's
 	// Simulator tab: device discovery, the live frame stream, and the driver a
 	// click goes through. nil on a machine that cannot capture or touch a
@@ -83,7 +86,10 @@ type APIDeps struct {
 	SimTrust *simtrust.Store
 	// SimTrustFiles resolves a session's root CAs. Left nil, the router builds
 	// one over Sessions, Projects and SimTrust.
-	SimTrustFiles      controllers.SimTrustResolver
+	SimTrustFiles controllers.SimTrustResolver
+	// SimAssignments is which simulator each session was given at spawn, read
+	// by `ao sim doctor`. nil reads every session as having none.
+	SimAssignments     SimAssignments
 	Notifications      controllers.NotificationService
 	NotificationStream controllers.NotificationStream
 	// ActivityFeed publishes curated per-session activity events; ActivityStream
@@ -131,12 +137,14 @@ type API struct {
 	iosRun         *controllers.IOSRunController
 	crewRuns       *controllers.CrewRunsController
 	children       *controllers.ChildrenController
+	scripts        *controllers.ScriptsController
 	sim            *controllers.SimController
 	simFlows       *controllers.SimFlowsController
 	simVideo       *controllers.SimVideoController
 	simScreen      *controllers.SimScreenController
 	simHierarchy   *controllers.SimHierarchyController
 	simType        *controllers.SimTypeController
+	simDoctor      *controllers.SimDoctorController
 	notifications  *controllers.NotificationsController
 	activity       *controllers.ActivityController
 	imports        *controllers.ImportController
@@ -181,12 +189,14 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		iosRun:         &controllers.IOSRunController{Svc: deps.IOSRun},
 		crewRuns:       &controllers.CrewRunsController{Svc: deps.CrewRuns, Tasks: deps.Sessions},
 		children:       &controllers.ChildrenController{Svc: deps.Children},
+		scripts:        &controllers.ScriptsController{Svc: deps.Scripts},
 		sim:            &controllers.SimController{Svc: deps.Sim, DataDir: cfg.DataDir, Screen: screenProvider(deps.SimScreen), Trust: simTrustResolver},
 		simFlows:       &controllers.SimFlowsController{DataDir: cfg.DataDir},
 		simVideo:       &controllers.SimVideoController{Svc: deps.SimVideo},
 		simScreen:      &controllers.SimScreenController{Screen: screenProvider(deps.SimScreen), Leases: deps.Sim, Drags: deps.SimDrags, Profiles: simProfileResolver, Trust: simTrustResolver},
 		simHierarchy:   &controllers.SimHierarchyController{Runner: deps.SimRunner},
 		simType:        &controllers.SimTypeController{Runner: deps.SimRunner, Leases: deps.Sim, Screen: screenProvider(deps.SimScreen)},
+		simDoctor:      &controllers.SimDoctorController{Sessions: deps.Sessions, Readers: simDoctorReaders(deps, simTrustResolver)},
 		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:        &controllers.ImportController{Svc: deps.Import},
@@ -232,12 +242,14 @@ func (a *API) Register(root chi.Router) {
 			a.prs.Register(r)
 			a.crewRuns.Register(r)
 			a.children.Register(r)
+			a.scripts.Register(r)
 			a.sim.Register(r)
 			a.simFlows.Register(r)
 			a.simVideo.Register(r)
 			a.simScreen.Register(r)
 			a.simHierarchy.Register(r)
 			a.simType.Register(r)
+			a.simDoctor.Register(r)
 			a.notifications.Register(r)
 			a.imports.Register(r)
 			a.settings.Register(r)

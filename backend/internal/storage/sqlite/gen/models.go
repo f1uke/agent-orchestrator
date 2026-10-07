@@ -389,6 +389,23 @@ type ReviewRun struct {
 	BatchID        string
 }
 
+type ScriptsStoreWorktree struct {
+	SessionID   domain.SessionID
+	ProjectID   domain.ProjectID
+	Store       string
+	Path        string
+	Branch      string
+	BaseBranch  string
+	State       domain.ScriptsStoreState
+	HeldReason  domain.ScriptsStoreHold
+	HeldFiles   string
+	Uncommitted string
+	Unpublished int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	PublishedAt sql.NullTime
+}
+
 type Session struct {
 	ID                        domain.SessionID
 	ProjectID                 domain.ProjectID

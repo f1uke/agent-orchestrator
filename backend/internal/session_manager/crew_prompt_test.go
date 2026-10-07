@@ -309,7 +309,7 @@ func TestBuildSystemPrompt_ScriptOnlyIOSReplacesTheTapCatalog(t *testing.T) {
 		got := scriptOnlyPrompt(t, cfg, role)
 		for _, want := range []string{
 			"## Driving the iOS Simulator: scripts only (AO)",
-			domain.DefaultMobileScriptsStore + "/bin/flow run nter reach/<script>",
+			"mobile-ui-scripts/bin/flow run nter reach/<script>",
 			"never finish the run by hand",
 			"ao sim shot",
 		} {

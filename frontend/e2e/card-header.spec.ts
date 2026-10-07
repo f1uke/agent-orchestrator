@@ -105,6 +105,20 @@ test("the undelivered chip keeps its button on its line when there is room, and 
 	expect(await chipHeight()).toBeGreaterThan(36);
 });
 
+test("the unpublished-scripts chip shares the undelivered card's chip line and names the files and the command", async ({
+	page,
+}) => {
+	for (const width of WIDTHS) {
+		await openBoard(page, width);
+		const chip = page.locator("[data-card-chips] [data-unpublished-scripts]").first();
+		await expect(chip).toBeVisible();
+		await expect(chip).toHaveAttribute("title", /projects\/demo\/login\/keychain-cookie\.yaml/);
+		await expect(chip).toHaveAttribute("title", /ao scripts publish/);
+		const chips = chip.locator("xpath=ancestor::*[@data-card-chips][1]");
+		await expect(chips.locator("span[aria-label^='Undelivered']")).toBeVisible();
+	}
+});
+
 test("five lanes and folded Done fit from 1280px; at 960px the board scrolls until two lanes are folded", async ({
 	page,
 }) => {

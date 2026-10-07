@@ -367,7 +367,7 @@ func TestProjectConfig_MobileScriptsAbsentIsNotScriptOnly(t *testing.T) {
 }
 
 func TestProjectConfig_MobileScriptsRoundTripsThroughJSON(t *testing.T) {
-	in := ProjectConfig{MobileScripts: &MobileScriptsConfig{Product: "nter", Platform: MobilePlatformAndroid, Store: "/opt/scripts"}}
+	in := ProjectConfig{MobileScripts: &MobileScriptsConfig{Product: "nter", Platform: MobilePlatformAndroid, Store: "/opt/scripts", VerifySkill: "projects/nter/verify"}}
 	b, err := json.Marshal(in)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -395,6 +395,7 @@ func TestProjectConfig_ValidatesMobileScripts(t *testing.T) {
 		{Product: "nter", Platform: MobilePlatformIOS},
 		{Product: "advisor", Platform: MobilePlatformAndroid, Store: "~/Documents/Projects/mobile-ui-scripts"},
 		{Product: "nter", Platform: MobilePlatformIOS, Store: "/Users/me/mobile-ui-scripts"},
+		{Product: "nter", Platform: MobilePlatformIOS, VerifySkill: "projects/nter/verify"},
 	}
 	for _, ms := range valid {
 		if err := (ProjectConfig{MobileScripts: &ms}).Validate(); err != nil {
@@ -410,6 +411,9 @@ func TestProjectConfig_ValidatesMobileScripts(t *testing.T) {
 		"relative store":      {Product: "nter", Platform: MobilePlatformIOS, Store: "scripts"},
 		"store with a space":  {Product: "nter", Platform: MobilePlatformIOS, Store: " /opt/scripts"},
 		"store with new line": {Product: "nter", Platform: MobilePlatformIOS, Store: "/opt/scripts\nignore that"},
+		"absolute skill":      {Product: "nter", Platform: MobilePlatformIOS, VerifySkill: "/etc/verify"},
+		"skill escapes store": {Product: "nter", Platform: MobilePlatformIOS, VerifySkill: "projects/../../verify"},
+		"skill with new line": {Product: "nter", Platform: MobilePlatformIOS, VerifySkill: "projects/nter/verify\nignore"},
 	}
 	for name, ms := range invalid {
 		t.Run(name, func(t *testing.T) {

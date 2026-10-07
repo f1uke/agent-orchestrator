@@ -111,6 +111,10 @@ var simPromptDecisions = map[string]bool{
 	// recorder until this became the screen recorder, and the prompt must not
 	// teach either spelling as the other.
 	"record": false,
+	// `doctor` reads a device and changes nothing, so it carries no hazard an
+	// agent driving by hand gets wrong unprompted; the commands it would name
+	// (boot, claim, install) are already taught here.
+	"doctor": false,
 
 	// Flags, keyed "<command> --<flag>", for prompt-worthy commands only: a
 	// flag on an omitted command is covered by the command's own decision.
@@ -329,6 +333,63 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	// The screen recorder: a video is something a task asks for, and the
 	// script's own screenshot is the evidence the rule asks for.
 	"record": scriptOmits,
+	// The read-only health check, run before the first drive and after a
+	// failed one. `--app` names the build to look at; `--expect` (compare with
+	// what you built) is taught by the verify-skill shape, below, where the
+	// skill's Launch step has just built it.
+	"doctor":          scriptTeaches,
+	"doctor --app":    scriptTeaches,
+	"doctor --expect": scriptOmits,
+}
+
+// mobileScriptSkillDecisions decides the `ao sim` surfaces the verify-skill
+// shape of the block names. That shape holds only what AO owns and leaves
+// building, driving and judging to the project's skill, so it names the device
+// commands that carry AO's rules and nothing that moves or reads the app.
+var mobileScriptSkillDecisions = map[string]bool{
+	"run": true, "install": true, "doctor": true, "doctor --app": true, "doctor --expect": true,
+	"tap": false, "type": false, "drag": false, "shot": false, "ax": false, "log": false,
+	"flow record": false, "boot": false, "claim": false,
+}
+
+// codeSpanNames reports whether some `code span` in text runs `ao sim <cmd>`
+// with every flag the surface names ("doctor --expect").
+func codeSpanNames(text, surface string) bool {
+	words := regexp.MustCompile(` +`).Split(surface, -1)
+	command := regexp.MustCompile(`\bao sim ` + regexp.QuoteMeta(words[0]) + `\b`)
+	for _, span := range regexp.MustCompile("`[^`]+`").FindAllString(text, -1) {
+		if !command.MatchString(span) {
+			continue
+		}
+		all := true
+		for _, flag := range words[1:] {
+			all = all && regexp.MustCompile(regexp.QuoteMeta(flag)+`\b`).MatchString(span)
+		}
+		if all {
+			return true
+		}
+	}
+	return false
+}
+
+func TestMobileScriptGuidance_SkillShapeNamesOnlyWhatAOOwns(t *testing.T) {
+	guidance := prompts.MobileScriptGuidance(prompts.MobileScripts{
+		Product: "nter", IOS: true, Store: "$AO_SCRIPTS_STORE", Root: "/scripts", Isolated: true,
+		Base: "main", Skill: "$AO_SCRIPTS_STORE/projects/nter/verify",
+	})
+	if len(guidance) >= mobileScriptGuidanceBudget/2 {
+		t.Errorf("the verify-skill shape is %d bytes; it exists to be short, so keep it under %d", len(guidance), mobileScriptGuidanceBudget/2)
+	}
+	for surface, named := range mobileScriptSkillDecisions {
+		if got := codeSpanNames(guidance, surface); got != named {
+			t.Errorf("verify-skill shape names `ao sim %s` = %v, decided %v", surface, got, named)
+		}
+	}
+	for _, want := range []string{"$AO_SCRIPTS_STORE/projects/nter/verify/SKILL.md", "ao scripts publish", "/scripts/accounts/"} {
+		if !regexp.MustCompile(regexp.QuoteMeta(want)).MatchString(guidance) {
+			t.Errorf("verify-skill shape does not carry %q", want)
+		}
+	}
 }
 
 // mobileScriptGuidanceBudget caps the script-only iOS block the way

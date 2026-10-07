@@ -1,6 +1,6 @@
 # ao sim
 
-Local iOS Simulators on this machine: list them, boot one, read what is on a booted one's screen (as an accessibility tree or a PNG), read what an app on it SAYS (its unified log), drive it with taps, swipes, typing and hardware buttons, install and launch a build on one, and claim one so other AO sessions keep off it while you work.
+Local iOS Simulators on this machine: list them, boot one, read what is on a booted one's screen (as an accessibility tree or a PNG), read what an app on it SAYS (its unified log), drive it with taps, swipes, typing and hardware buttons, install and launch a build on one, claim one so other AO sessions keep off it while you work, and check whether one is ready to drive.
 
 **You can power a simulator ON, and nothing else.** `ao sim boot` is the only subcommand that changes a device's power state; there is no shutdown, reboot or erase, because those wipe a device's data or take a device out from under whoever is using it. A human does those from the desktop app's Device tab. Everything else here runs no background process, opens no port and polls nothing: each command runs, does its one job, and exits. Claiming a device changes nothing about the device itself - a lease is bookkeeping the AO daemon holds, not an operation on the simulator.
 
@@ -28,6 +28,7 @@ ao sim ax      [flags]
 ao sim log     [flags]
 ao sim claim   [flags]
 ao sim release [flags]
+ao sim doctor  [flags]
 ao sim run     [flags]
 ao sim install <path/to/App.app> [flags]
 ao sim launch  [bundle-id]       [flags]
@@ -457,6 +458,47 @@ With no `--udid` it releases the one device you hold, and fails if you hold none
 ```bash
 # Done driving the device
 ao sim release
+```
+
+---
+
+### ao sim doctor
+
+Check, without changing anything, whether a simulator is ready to drive. One line per check, `STATUS name: message`:
+
+| Line       | OK                                                | WARN                                                      | FAIL                                                           |
+| ---------- | ------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
+| `device`   | it exists and is booted                           | `--udid` names a device that is not your `$AO_SIM_UDID`   | no device named or assigned, no such udid, or not booted       |
+| `lease`    | this session holds it                             | no AO session holds it (a run will claim it)              | another session, or a session of another AO daemon, holds it   |
+| `app`      | with `--expect`, the installed build is that .app | not checked (no `--app`), or installed with no `--expect` | not installed, or a different build from `--expect`            |
+| `proxy CA` | every configured root CA on this Mac is trusted   | no root CA configured, or none of them is on this Mac     | a root CA on this Mac is missing from the device's trust store |
+
+**Flags:**
+
+| Flag                | Description                                                                    |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `--udid <udid>`     | Check this simulator instead of this session's own (`$AO_SIM_UDID`)            |
+| `--app <bundle-id>` | Check the installed build of this app (`$AO_SIM_APP` pins it)                  |
+| `--expect <path>`   | The `.app` the installed build must be; needs `--app`                          |
+| `--json`            | Output the report as JSON: `{"checks": [{"name", "status", "message"}], "ok"}` |
+
+- **It only reads.** It never boots, claims, installs, launches or trusts anything - each failing line names the command that does (`ao sim boot --udid <udid>`, `ao sim claim`, `ao sim install`). Run it as often as you like.
+- **Exit code:** 1 when any line is `FAIL`, else 0. `WARN` never fails it.
+- **The build check compares bytes, not version numbers.** The digest of the installed app and of `--expect` are made the same way (`cdhash:` from codesign, or `sha256:` over the bundle when it is unsigned), so a stale install with the right version still fails.
+- **The root CAs** are the ones a claim would make the device trust: the project's `--sim-trust-ca` list, else the global setting. A CA file that is not on this Mac is skipped, exactly as a claim skips it.
+- With no device to check (none named and none assigned, or an unknown udid) the `device` line is the whole report. A device that is shut down still gets the other lines: what is installed on it and what its trust store holds are files on this Mac.
+- Must run inside an AO session (`AO_SESSION_ID`): the answers are relative to its device, its lease and its project.
+
+```bash
+# Is my device ready, and is my build the one on it?
+ao sim doctor --app com.example.MyApp --expect build/Build/Products/Debug-iphonesimulator/MyApp.app
+```
+
+```text
+OK   device: iPhone 17 (00000000-0000-0000-0000-000000000000) booted
+WARN lease: no AO session holds it, so a run will claim it
+OK   app: com.example.MyApp 6.5.18 (708) cdhash:d114bed635ed2eb91f5c is the build at /path/to/MyApp.app
+FAIL proxy CA: /Users/you/Library/Application Support/com.proxyman.NSProxy/app-data/proxyman-ca.pem not trusted on this simulator - `ao sim claim` trusts it
 ```
 
 ---

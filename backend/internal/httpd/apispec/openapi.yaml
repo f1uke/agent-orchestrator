@@ -4552,6 +4552,86 @@ paths:
         output exists)
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/scripts:
+    get:
+      operationId: getSessionScripts
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScriptsStatusResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Read the session''s scripts store worktree: uncommitted files, unpublished
+        commits, and the main checkout''s own dirty files'
+      tags:
+      - sessions
+  /api/v1/sessions/{sessionId}/scripts/publish:
+    post:
+      operationId: publishSessionScripts
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScriptsPublishResponse'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Publish the committed scripts of the session's store worktree into
+        the store's main checkout
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/send:
     post:
       operationId: sendSessionMessage
@@ -4892,6 +4972,68 @@ paths:
           description: Service Unavailable
       summary: Type text into the focused field through the device's XCTest runner,
         as characters, and prove it arrived
+      tags:
+      - sim
+  /api/v1/sessions/{sessionId}/sim-doctor:
+    get:
+      operationId: simDoctor
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      - description: Simulator to check. Omit for the session's assigned one.
+        in: query
+        name: udid
+        schema:
+          description: Simulator to check. Omit for the session's assigned one.
+          type: string
+      - description: Bundle id whose installed build to check. Omit to skip the build
+          check.
+        in: query
+        name: app
+        schema:
+          description: Bundle id whose installed build to check. Omit to skip the
+            build check.
+          type: string
+      - description: Absolute path of a .app on this Mac that the installed app must
+          be. Requires app.
+        in: query
+        name: expect
+        schema:
+          description: Absolute path of a .app on this Mac that the installed app
+            must be. Requires app.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimDoctorResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Check, without changing anything, whether a session''s simulator is
+        worth driving: device, lease, installed build and proxy root CA'
       tags:
       - sim
   /api/v1/sessions/{sessionId}/sim-flows:
@@ -9571,6 +9713,8 @@ components:
           - sim
           - preview
           type: string
+        scriptsStore:
+          $ref: '#/components/schemas/SessionScriptsStore'
         sleepReason:
           enum:
           - idle
@@ -10225,6 +10369,8 @@ components:
         product:
           type: string
         store:
+          type: string
+        verifySkill:
           type: string
       required:
       - product
@@ -11604,6 +11750,114 @@ components:
       - ok
       - sessionId
       type: object
+    ScriptsPublishResponse:
+      properties:
+        commits:
+          description: Commits the branch had that the base lacked.
+          type: integer
+        detail:
+          type: string
+        files:
+          description: The conflicting files, or the main checkout's files in the
+            way.
+          items:
+            type: string
+          type: array
+        hold:
+          enum:
+          - publish_conflict
+          - store_dirty_overlap
+          - store_off_base
+          - publish_failed
+          type: string
+        outcome:
+          enum:
+          - nothing
+          - fast_forward
+          - merged
+          - refused
+          type: string
+        sha:
+          description: The base branch's new tip.
+          type: string
+        worktree:
+          $ref: '#/components/schemas/ScriptsStoreWorktreeView'
+      required:
+      - worktree
+      - outcome
+      - commits
+      type: object
+    ScriptsStatusResponse:
+      properties:
+        storeDirty:
+          description: The store main checkout's own uncommitted files, which a publish
+            cannot touch.
+          items:
+            type: string
+          type: array
+        worktree:
+          $ref: '#/components/schemas/ScriptsStoreWorktreeView'
+      required:
+      - worktree
+      - storeDirty
+      type: object
+    ScriptsStoreWorktreeView:
+      properties:
+        baseBranch:
+          description: The store branch a publish merges into.
+          type: string
+        branch:
+          type: string
+        heldFiles:
+          items:
+            type: string
+          type: array
+        heldReason:
+          enum:
+          - uncommitted
+          - publish_conflict
+          - store_dirty_overlap
+          - store_off_base
+          - publish_failed
+          type: string
+        owner:
+          description: 'The workspace owner: the solo worker, or the crew''s dev.'
+          type: string
+        path:
+          description: The worktree; AO_SCRIPTS_STORE in the session.
+          type: string
+        publishedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        state:
+          enum:
+          - active
+          - held
+          - removed
+          type: string
+        store:
+          description: The store's main checkout.
+          type: string
+        uncommitted:
+          description: Files in the worktree nobody committed; a publish leaves them.
+          items:
+            type: string
+          type: array
+        unpublished:
+          description: Commits on the branch the base branch does not have.
+          type: integer
+      required:
+      - owner
+      - store
+      - path
+      - branch
+      - baseBranch
+      - state
+      - uncommitted
+      - unpublished
+      type: object
     SendSessionMessageRequest:
       properties:
         about:
@@ -12104,6 +12358,33 @@ components:
       required:
       - session
       type: object
+    SessionScriptsStore:
+      properties:
+        files:
+          description: The uncommitted files, then the files a teardown's hold named.
+          items:
+            type: string
+          type: array
+        heldReason:
+          description: Why a teardown kept the worktree.
+          enum:
+          - uncommitted
+          - publish_conflict
+          - store_dirty_overlap
+          - store_off_base
+          - publish_failed
+          type: string
+        uncommitted:
+          description: Files in the worktree nobody committed.
+          type: integer
+        unpublished:
+          description: Commits the store's base branch does not have.
+          type: integer
+      required:
+      - uncommitted
+      - unpublished
+      - files
+      type: object
     SessionTermination:
       properties:
         at:
@@ -12460,6 +12741,36 @@ components:
       - available
       - default
       - lease
+      type: object
+    SimDoctorCheckView:
+      properties:
+        message:
+          type: string
+        name:
+          description: device, lease, app or proxy CA.
+          type: string
+        status:
+          description: OK, WARN or FAIL. Only FAIL makes the report not ok.
+          type: string
+      required:
+      - name
+      - status
+      - message
+      type: object
+    SimDoctorResponse:
+      properties:
+        checks:
+          description: Every check that applied, in order. Only the device line is
+            present when there is no device to check.
+          items:
+            $ref: '#/components/schemas/SimDoctorCheckView'
+          type: array
+        ok:
+          description: True when no check is FAIL.
+          type: boolean
+      required:
+      - checks
+      - ok
       type: object
     SimGestureInput:
       properties:

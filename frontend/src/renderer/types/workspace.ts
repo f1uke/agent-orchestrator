@@ -430,12 +430,18 @@ export type WorkspaceSession = {
 	 * one.
 	 */
 	children?: SessionChild[];
+	/**
+	 * What the workspace's own worktree of the mobile scripts store holds that
+	 * the store does not. On the owner's card only; absent without a worktree.
+	 */
+	scriptsStore?: SessionScriptsStore;
 };
 
 export type TaskSize = "mechanical" | "standard" | "deep";
 
 export type { SessionChild } from "../lib/children";
 import type { SessionChild } from "../lib/children";
+import type { SessionScriptsStore } from "../lib/scripts-store";
 
 /** A runtime surface a session drove: the simulator, or an `ao preview`. */
 export type RuntimeTouch = "sim" | "preview";

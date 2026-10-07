@@ -55,6 +55,7 @@ export type ProjectSettingsFormState = {
 	mobileScriptsPlatform: string;
 	mobileScriptsProduct: string;
 	mobileScriptsStore: string;
+	mobileScriptsVerifySkill: string;
 	// "" means the project does not use Testiny.
 	testinyProject: string;
 	simTrustMode: SimTrustMode;
@@ -98,6 +99,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		mobileScriptsPlatform: config.mobileScripts?.platform ?? "",
 		mobileScriptsProduct: config.mobileScripts?.product ?? "",
 		mobileScriptsStore: config.mobileScripts?.store ?? "",
+		mobileScriptsVerifySkill: config.mobileScripts?.verifySkill ?? "",
 		testinyProject: config.testinyProject ?? "",
 		simTrustMode: !config.simTrust ? "inherit" : (config.simTrust.caFiles ?? []).length === 0 ? "none" : "files",
 		simTrustCaFiles: formatCaFileLines(config.simTrust?.caFiles ?? []),
@@ -139,10 +141,21 @@ function buildApprovalRule(enabled: boolean, threshold: string): ApprovalRule | 
 // buildMobileScripts turns the platform select + its two fields into the typed
 // setting, or undefined when off so the field is omitted (a project that never
 // had it and one that turned it off store the same thing).
-function buildMobileScripts(platform: string, product: string, store: string): MobileScriptsConfig | undefined {
+function buildMobileScripts(
+	platform: string,
+	product: string,
+	store: string,
+	verifySkill: string,
+): MobileScriptsConfig | undefined {
 	if (platform !== "ios" && platform !== "android") return undefined;
 	const trimmedStore = store.trim();
-	return { platform, product: product.trim(), ...(trimmedStore ? { store: trimmedStore } : {}) };
+	const trimmedSkill = verifySkill.trim();
+	return {
+		platform,
+		product: product.trim(),
+		...(trimmedStore ? { store: trimmedStore } : {}),
+		...(trimmedSkill ? { verifySkill: trimmedSkill } : {}),
+	};
 }
 
 // buildSimTrust turns the three-way choice into the pointer-shaped setting:
@@ -292,6 +305,7 @@ export function useProjectSettingsForm({
 					form.mobileScriptsPlatform,
 					form.mobileScriptsProduct,
 					form.mobileScriptsStore,
+					form.mobileScriptsVerifySkill,
 				),
 				testinyProject: form.testinyProject.trim() || undefined,
 				simTrust: buildSimTrust(form.simTrustMode, form.simTrustCaFiles),
