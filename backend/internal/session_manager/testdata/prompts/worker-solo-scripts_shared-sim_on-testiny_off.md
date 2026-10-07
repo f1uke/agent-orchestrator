@@ -71,8 +71,8 @@ Never write a bare session number — always `@…` or the full `<project>-<num>
 On this project a simulator is driven ONLY by running a reusable Maestro script from the scripts store at `/scripts` (product `nter`). To see a screen, verify a change, reproduce a bug or take evidence, run the script that reaches that screen - never tap through the app step by step. On a known route a script is as reliable as an agent driving and many times faster, and it stays that way because every script starts from a fresh app, whatever the device was left on.
 
 ```bash
-ao sim list                     # what exists, and what is booted
-ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
+ao sim list                     # every device, its role (base, or whose clone) and whether it is booted
+ao sim boot                     # power yours ON; already booted is a no-op
 ao sim run --scheme <name>      # put YOUR build on the device first: a script resets the app it finds installed
 ao sim doctor --app <bundle id> # read-only health check: device, lease, installed build, proxy CA
 /scripts/bin/flow list nter
@@ -86,8 +86,12 @@ ao sim release                  # when you are done with the device
 ```
 
 - **Reading is how you judge; a script is how you move.** `ao sim shot`, `ao sim ax` and `ao sim log` are fine at any time. Gestures - `ao sim tap`, `ao sim type`, `ao sim drag` and the rest - are not, except while authoring a missing script (below).
-- **The device that is yours is `$AO_SIM_UDID`**, and `bin/flow` and `ao sim` already mean it. Unset means none was free: name a scratch device (`--device` / `--udid`), never whichever one is booted. You may power a device on and nothing else - no shutdown, reboot or erase.
-- **A lease guards the device, not the command.** `ao sim run` and `ao sim install` take it as they install; a raw `xcrun simctl` or `xcodebuild -destination` never asks it, and is how a crewmate's build gets overwritten mid-run. A refusal names the holder - wait, or say so.
+- **Your device is `$AO_SIM_UDID`**, cloned from the iPhone 17 Pro Max base for this session alone. `ao sim` means it by default; other tools need it named: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. Unset: run `ao sim claim`, which makes it or says what is missing. Never fall back to whichever device is booted.
+- **More devices, each under a label:** `ao sim claim --model "iPhone SE"` (label `iphone-se`; `"iPad Pro 11-inch"` is `ipad-pro-11`), or `ao sim claim --device <label>` for a second iPhone 17 Pro Max; `--model X --device Y` combines them. Any `ao sim` command takes `--device <label>` (`ao sim install <app> --device iphone-se`); other tools take `"$(ao sim udid --device <label>)"`. `ao sim release --device <label>` deletes that device; plain `ao sim release` only drops your lease. All of them are deleted when the session ends.
+- **Never claim, boot, install on or drive a base** (iPhone 17 Pro Max, iPhone SE (3rd generation), iPad Pro 11-inch (M5)): they are templates. `ao sim list` shows each device's role: `base`, `yours: <label>` or `@<session>: <label>`.
+- **Power on, nothing else** - no shutdown, reboot or erase. `ao sim boot` allows 4 booted machine-wide; at the cap AO shuts down the least recently used idle AO clone, or names the devices holding it. Boot only what you use; release extra devices when done.
+- **Run in parallel:** one Maestro run per device, on several at once (the same case on 17 Pro Max, SE and iPad; both sides of a chat; two accounts at once). Never wait for another device's run.
+- **A lease guards the device, not the command.** `ao sim run` and `ao sim install` take it as they install; a raw `xcrun simctl` or `xcodebuild -destination` never asks it, and aimed at a device that is not yours it overwrites whoever is on it. A refusal names the holder - wait, or say so.
 - **A screenshot says which build it was of.** Compare its `Build:` line before the pictures.
 - **No script reaches that screen yet: author one, then use it.** This is the only time step-by-step driving is allowed: `ao sim claim`, `ao sim flow record start --name <screen>`, drive the route once, `ao sim flow record stop --out /scripts/projects/nter/reach/<name>.yaml --entry ../start/<state>.yaml --param NAME=VALUE` (every typed or tapped VALUE becomes `${MAESTRO_NAME}`; a password is pasted, never recorded) - or write the YAML yourself. Follow the store's README ("Rules that keep a script reusable", "Add a script"): start from `start/`, no value typed into the script, end with an assertion and `takeScreenshot`, stop before anything irreversible. Then `bin/flow check nter`, run it twice green from fresh, and add its row to `projects/nter/INDEX.md`.
 - **A script fails: read, fix, re-run - never finish the run by hand.** The run prints Maestro's debug folder, a screenshot and hierarchy for every step. Decide whether the app or the script is wrong, fix the script or report the app bug with that folder as evidence, and run it again.
@@ -95,6 +99,13 @@ ao sim release                  # when you are done with the device
 - **The store is one checkout shared with other sessions** (`/scripts`): commit only the files you added or changed, by path (`git -C /scripts commit <paths>`), never another session's uncommitted work, and name them in your report. Nothing in the store goes into your pull request.
 
 Everything else - the store's layout and rules, the full `ao sim` catalog, running several flows in one Maestro start-up - is in the store's README and the ao skill this prompt already points you at.
+
+### Real API or mock (AO)
+
+- **Run against the real int/uat API by default.** Do not reach for Proxyman Map Local or `bin/flow --mocks` by habit. Mock only when the feature's backend is not ready yet, or when the case can be played against the real API only once (redeem, buy, submit, delete), so repeat plays need a mock.
+- **No API doc: build fixtures from real responses**, carefully: int/uat only, never production; prefer read-only calls; fire a one-shot action deliberately and once; strip tokens, cookies and personal data; note where each fixture came from.
+- **A one-shot action: failures first, success last.** Play every failure case against the real API first (validation error, insufficient balance, expired, unauthorized), then fire the success case exactly once, capturing its request and response: that capture is the fixture for every repeat play.
+- **Say per case** in your report or handback whether it ran against the real API or which mock set, and why it needed the mock.
 
 ## Using the ao CLI
 

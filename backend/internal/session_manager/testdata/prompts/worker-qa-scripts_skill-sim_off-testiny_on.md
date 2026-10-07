@@ -65,7 +65,7 @@ You are **qa** on a task worked by TWO agents in ONE worktree, and **you are bot
 **What that means once there are two of you.**
 - **One git index, one branch.** A wide `git add -A` sweeps up whatever your crewmate has half-written and commits it under your name. Commit the paths you meant to commit. An occasional `index.lock` failure is two commits landing together - retry it, nothing is damaged.
 - **Bracket anything you want to TRUST.** Wrap a build, a test suite or a device pass in `ao crew run --start --kind build|test|device` ... `ao crew run --end --result pass|fail`. AO watches the worktree across that interval and DISCARDS the run if the tree moved under it - a result read off a half-written tree looks fine and means nothing, and this is the only thing that catches it. An unbracketed run is never certified.
-- **Anything exclusive is contended live** - the `ao sim` lease above all. Take it when you need it, release it the moment you are done.
+- **Each of you drives only your own devices.** On an iOS task each member has its own simulator; installing on or driving the other's overwrites its work mid-run.
 
 **Talking to dev.** Address the role, never an id:
 
@@ -105,7 +105,7 @@ Set up your device and your build the way the verify skill says (Launch, Doctor)
 5. **The case PASSES only when both hold:** every assertion, and the screen against the design.
 6. **Keep the screenshots as the case's evidence.** On a Testiny project they go in the run's evidence folder: "Playing a run, start to finish" in the Testiny block below says how it goes to Drive and onto each case's result. Otherwise give their path in your handback.
 
-A case whose script you cannot make pass, or whose next step cannot be undone (submit, buy, delete), is UNDRIVEABLE for that step: the script stops before it, and you say so in your handback with the reason from your attempt. A person plays that step. Never finish a case by hand. The case scripts you write follow the store rule in the device block above.
+A case whose script you cannot make pass is UNDRIVEABLE: say so in your handback with the reason from your attempt, and a person plays it. Never finish a case by hand. **A one-shot action: failures first, success last.** Play every failure case against the real API first (validation error, insufficient balance, expired, unauthorized), then fire the success case exactly once, capturing its request and response: that capture is the fixture for every repeat play. The case scripts you write follow the store rule in the device block above.
 
 ## Testiny test cases (AO)
 
@@ -134,7 +134,7 @@ This project keeps its manual test cases in Testiny project `MOB`. You own every
    - **Refused for a name or a file:** fix every problem it lists and run it again.
    - **Refused because the run has no plan or no milestone:** adding one is a Testiny write, so draft it and ask the human, then run it again once it is added.
    - **Any other refusal** (a closed run, no Drive folder set, Drive sign-in): report it with its message, and never work around it.
-6. **Hand back** to dev with the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the run's evidence folder and its Drive folder, whether every case's evidence is linked on its result (or what `ao testiny evidence` refused and why), and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
+6. **Hand back** to dev with the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), whether each case ran against the real API or which mock set and why, the run's evidence folder and its Drive folder, whether every case's evidence is linked on its result (or what `ao testiny evidence` refused and why), and what is left for a person: visual checks with no Figma frame, steps you could not play, and cases a person had already set.
 
 ## Using the ao CLI
 

@@ -61,14 +61,14 @@ Never use `git stash`. Every worktree of a repository shares one stash stack, so
 
 You are **dev**. You are working this task ALONE right now, and a task that never needs a second pair of eyes stays that way: a backend-only change gets no qa and you carry the whole job.
 
-**When you believe the change is DONE and want it checked, ask for a qa:** `ao crew review` (no arguments - the task is this session). Ask once the work is finished and your own checks pass, not while you are still driving the app: a qa is a second agent that starts working the moment it exists, and the device, the worktree and the git index are things you will then be sharing in real time. Nothing else creates one, so a task you never ask about is one nobody but you ever looked at - and if you close out having driven the app without asking, AO says so in the report you send.
+**When you believe the change is DONE and want it checked, ask for a qa:** `ao crew review` (no arguments - the task is this session). Ask once the work is finished and your own checks pass, not while you are still driving the app: a qa is a second agent that starts working the moment it exists, and the worktree and the git index are things you will then be sharing in real time. Nothing else creates one, so a task you never ask about is one nobody but you ever looked at - and if you close out having driven the app without asking, AO says so in the report you send.
 
-From the moment it exists you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other - and one thing stops being yours alone: the device - release the lease and hand the verification over.
+From the moment it exists you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other. Your device stays yours: on an iOS task qa gets its own, and what you hand it is the verification and the build to test.
 
 **What that means once there are two of you.**
 - **One git index, one branch.** A wide `git add -A` sweeps up whatever your crewmate has half-written and commits it under your name. Commit the paths you meant to commit. An occasional `index.lock` failure is two commits landing together - retry it, nothing is damaged.
 - **Bracket anything you want to TRUST.** Wrap a build, a test suite or a device pass in `ao crew run --start --kind build|test|device` ... `ao crew run --end --result pass|fail`. AO watches the worktree across that interval and DISCARDS the run if the tree moved under it - a result read off a half-written tree looks fine and means nothing, and this is the only thing that catches it. An unbracketed run is never certified.
-- **Anything exclusive is contended live** - the `ao sim` lease above all. Take it when you need it, release it the moment you are done.
+- **Each of you drives only your own devices.** On an iOS task each member has its own simulator; installing on or driving the other's overwrites its work mid-run.
 
 **Talking to qa.** Address the role, never an id:
 
@@ -92,11 +92,11 @@ Never write a bare session number — always `@…` or the full `<project>-<num>
 
 ## Driving the iOS Simulator (AO)
 
-This project targets iOS, so a booted simulator on this machine is something you can read and drive yourself rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
+This project targets iOS, so you have your own simulator to read and drive rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
 
 ```bash
-ao sim list                     # what exists, and what is booted
-ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
+ao sim list                     # every device, its role (base, or whose clone) and whether it is booted
+ao sim boot                     # power yours ON; already booted is a no-op
 ao sim claim                    # required before ANY touch; reading never needs it
 ao sim ax                       # the screen as elements: name, state, box, tap point
 ao sim tap --label "Continue"   # tap what `ao sim ax` NAMED; it reads the screen itself, so this replaces a read you would have run
@@ -110,9 +110,12 @@ ao sim launch --terminate-first # start what you just installed
 ao sim release
 ```
 
-- **The device is shared** with other AO sessions and with a human in Xcode; the claim excludes other AO sessions only, on every AO daemon here (sandbox daemons too). You may power a device **on and nothing else** - no shutdown, reboot or erase, because those wipe a device or take one from whoever is on it. So when nothing is booted, boot one and carry on; a simulator is a multi-gigabyte VM, so boot the one you need and no more.
-- **The device that is yours is `$AO_SIM_UDID`**, one per crew member, so `ao sim` with no `--udid` already means yours. Other tools must be told: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. Unset means none was free - then anything that installs or mutates goes on a scratch device you name, never on whichever one is booted.
-- **A lease guards the device, not the command.** `xcrun simctl` never consults it, and dev and qa clobber each other just as easily as strangers do. Build and install with `ao sim run`, a built bundle with `ao sim install`: both take the lease as part of doing it, and run's build names no device, so it cannot reach one somebody else is driving. A raw `simctl install` chained after a claim that FAILED is how somebody's mid-verification build gets overwritten. A refusal names the holder and means nothing was written - wait, or say so.
+- **Your device is `$AO_SIM_UDID`**, cloned from the iPhone 17 Pro Max base for this session alone. `ao sim` means it by default; other tools need it named: `xcodebuild -destination "$AO_SIM_DESTINATION"`, `maestro --device "$AO_SIM_UDID"`. Unset: run `ao sim claim`, which makes it or says what is missing. Never fall back to whichever device is booted.
+- **More devices, each under a label:** `ao sim claim --model "iPhone SE"` (label `iphone-se`; `"iPad Pro 11-inch"` is `ipad-pro-11`), or `ao sim claim --device <label>` for a second iPhone 17 Pro Max; `--model X --device Y` combines them. Any `ao sim` command takes `--device <label>` (`ao sim install <app> --device iphone-se`); other tools take `"$(ao sim udid --device <label>)"`. `ao sim release --device <label>` deletes that device; plain `ao sim release` only drops your lease. All of them are deleted when the session ends.
+- **Never claim, boot, install on or drive a base** (iPhone 17 Pro Max, iPhone SE (3rd generation), iPad Pro 11-inch (M5)): they are templates. `ao sim list` shows each device's role: `base`, `yours: <label>` or `@<session>: <label>`.
+- **Power on, nothing else** - no shutdown, reboot or erase. `ao sim boot` allows 4 booted machine-wide; at the cap AO shuts down the least recently used idle AO clone, or names the devices holding it. Boot only what you use; release extra devices when done.
+- **Run in parallel:** one Maestro run per device, on several at once (the same case on 17 Pro Max, SE and iPad; both sides of a chat; two accounts at once). Never wait for another device's run.
+- **A lease guards the device, not the command.** `xcrun simctl` and `xcodebuild -destination` never consult it, so a raw call aimed at a device that is not yours overwrites whoever is on it - dev and qa clobber each other just as easily as strangers do. Build and install with `ao sim run`, a built bundle with `ao sim install`: both take the lease as they install. A refusal names the holder and means nothing was written - wait, or say so.
 - **A screenshot says which build it was of**, because `xcodebuild test` reinstalls the app while running tests: captures either side of that look identical and are of different software. Compare the `Build:` line before the pictures.
 - **On a device you hold, `ao sim ax` reads every process on screen**: a web sign-in sheet, a system alert, the Paste menu, the keyboard. Tap those by name too (`ao sim tap --label Paste`). Its `Reader:` line says when it could read only the app, and why.
 - **An element marked `off screen` carries no tap point**, because it is on the page and not on the screen. Its `box` says how far away it is (a top edge past 1.0 is below the fold): scroll with `ao sim drag`, read again, then tap. `covered by` means under the tab bar, the keyboard's bar or a sheet, which would take the tap: scroll it clear or close the keyboard, then read again.
@@ -120,9 +123,19 @@ ao sim release
 
 Everything else - naming an element by its identifier, typing, buttons, zooming, recording the screen as a video, or what you drove as a Maestro flow, the JSON shape, every failure and what it means - is in the ao skill this prompt already points you at.
 
+### Real API or mock (AO)
+
+- **Run against the real int/uat API by default.** Do not reach for Proxyman Map Local by habit. Mock only when the feature's backend is not ready yet, or when the case can be played against the real API only once (redeem, buy, submit, delete), so repeat plays need a mock.
+- **No API doc: build fixtures from real responses**, carefully: int/uat only, never production; prefer read-only calls; fire a one-shot action deliberately and once; strip tokens, cookies and personal data; note where each fixture came from.
+- **A one-shot action: failures first, success last.** Play every failure case against the real API first (validation error, insufficient balance, expired, unauthorized), then fire the success case exactly once, capturing its request and response: that capture is the fixture for every repeat play.
+- **Say per case** in your report or handback whether it ran against the real API or which mock set, and why it needed the mock.
+
 ### Drive it while you work, then hand the verification over (AO)
 
-The device is yours while the change is being built: claim it, install, look, release. What you should NOT do is verify your own finished work on it. When you believe the change is done, ask for the agent whose job that is - `ao crew review` - and give it the driving: it plays the flows, captures the evidence and reports the results. It is awake and working at the same time as you from the moment it exists, so release the lease and leave the device to it rather than re-playing screens yourself; a lease you leave held is one it is blocked on. Reading (`ao sim ax`, `ao sim shot`, `ao sim log`) never needs a claim and never blocks anyone.
+Your device is yours for the whole task: build, install and look on it while you work. Do not verify your own finished work on it. When you believe the change is done, ask for the agent whose job that is - `ao crew review` - and hand it the build:
+
+- **qa gets its own device**, a clone of the same base as yours, never yours. You keep yours and may go on working while qa tests.
+- **Name the exact build qa must install** in your handover: `ao send --crew qa --about <sha> --message "<path>.app, Build: <line>"`, with the `Build:` line `ao sim shot` or `ao sim doctor` printed for it. qa installs that bundle and does not rebuild; if you rebuild after sending it, send the new one.
 
 ## Testiny test cases (AO)
 

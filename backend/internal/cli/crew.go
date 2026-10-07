@@ -123,10 +123,12 @@ func newCrewReviewCommand(ctx *commandContext) *cobra.Command {
 			"working beside you from the moment it is created. Run it when you believe the\n" +
 			"change is finished and you want it verified: qa writes and runs what a machine\n" +
 			"can assert, records what it found, and hands the account back to you.\n\n" +
-			"Nothing else creates one. AO used to add a qa by itself the first time a task\n" +
-			"drove the app, and that fired when you were STARTING to drive it - so the qa\n" +
-			"turned up wanting the same device you were using. You are the only one who\n" +
-			"knows the work is ready, so you are the one who says so.\n\n" +
+			"Nothing else creates one: you are the only one who knows the work is ready,\n" +
+			"so you are the one who says so.\n\n" +
+			"On an iOS task qa tests on its own simulator, a clone of the same base as\n" +
+			"yours, never on yours: keep working on your device, and send qa the exact\n" +
+			"build to install - the .app path and the `Build:` line `ao sim shot` or\n" +
+			"`ao sim doctor` printed for it.\n\n" +
 			"It takes no argument: the task is this session's own. It is refused if the task\n" +
 			"already has a qa, if the task is finished (its pull request has merged), if it\n" +
 			"was tagged `--task-size mechanical` - one agent by design - or if this project\n" +
@@ -147,7 +149,8 @@ func newCrewReviewCommand(ctx *commandContext) *cobra.Command {
 			}
 			_, printErr := fmt.Fprintf(cmd.OutOrStdout(),
 				"%s (%s) is on this task and working, in your worktree. It reads the diff against the base branch, not your conversation.\n"+
-					"Message it by role: `ao send --crew %s --about <commit-sha> --message \"...\"`.\n",
+					"Message it by role: `ao send --crew %s --about <commit-sha> --message \"...\"`.\n"+
+					"On an iOS task it tests on its own simulator: send it the .app path and `Build:` line of the build to install.\n",
 				out.Session.ID, crewRoleOf(out.Session), crewRoleOf(out.Session))
 			return printErr
 		},

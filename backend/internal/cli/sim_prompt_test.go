@@ -180,9 +180,9 @@ var simPromptDecisions = map[string]bool{
 // ambientSimFlags are the two flags nearly every `ao sim` command carries, so
 // deciding them per command would be twenty entries saying the same thing:
 // `--json` is output shape, and `--udid` is device selection, which the prompt
-// settles once in prose (which device you may drive at all) rather than command
-// by command. Excluding them is itself a reviewed decision - they are named
-// here rather than filtered by a pattern so the exclusion cannot quietly widen.
+// settles once in prose (which devices are yours) rather than command by
+// command. Excluding them is itself a reviewed decision - they are named here
+// rather than filtered by a pattern so the exclusion cannot quietly widen.
 var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 
 // simGuidanceBudget caps the always-seen block. Brevity is the whole reason the
@@ -219,7 +219,15 @@ var ambientSimFlags = map[string]bool{"json": true, "udid": true}
 // an agent tapping them hit the tab bar instead - six times in twelve runs of
 // the nter study. `ao sim ax` now marks them, and an agent that meets
 // "covered by" needs the one move that clears it.
-const simGuidanceBudget = 4400
+// Raised 4400 -> 6000 for the per-session clones and the human's mock rule.
+// The device bullets replaced "one booted device, maybe the human's, pick a
+// scratch one" with the devices AO makes per session: an agent that does not
+// know it can clone an SE or a second iPhone serializes size checks and both
+// sides of a chat onto one device, and one that does not know bases are
+// templates installs on them. The mock rule is the human's: a run on a mock
+// proves the app against a fixture, so mocking needs a reason and the report
+// says which runs used one.
+const simGuidanceBudget = 6000
 
 func TestSimGuidance_DecidesEverySubcommand(t *testing.T) {
 	guidance := prompts.SimulatorGuidance()
@@ -346,10 +354,13 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 // shape of the block names. That shape holds only what AO owns and leaves
 // building, driving and judging to the project's skill, so it names the device
 // commands that carry AO's rules and nothing that moves or reads the app.
+// Which devices a session has (claim, release, list, boot) is AO's: it clones
+// them, caps how many are booted, and deletes them.
 var mobileScriptSkillDecisions = map[string]bool{
 	"run": true, "install": true, "doctor": true, "doctor --app": true, "doctor --expect": true,
+	"claim": true, "release": true, "list": true, "boot": true,
 	"tap": false, "type": false, "drag": false, "shot": false, "ax": false, "log": false,
-	"flow record": false, "boot": false, "claim": false,
+	"flow record": false,
 }
 
 // codeSpanNames reports whether some `code span` in text runs `ao sim <cmd>`
@@ -377,8 +388,8 @@ func TestMobileScriptGuidance_SkillShapeNamesOnlyWhatAOOwns(t *testing.T) {
 		Product: "nter", IOS: true, Store: "$AO_SCRIPTS_STORE", Root: "/scripts", Isolated: true,
 		Base: "main", Skill: "$AO_SCRIPTS_STORE/projects/nter/verify",
 	})
-	if len(guidance) >= mobileScriptGuidanceBudget/2 {
-		t.Errorf("the verify-skill shape is %d bytes; it exists to be short, so keep it under %d", len(guidance), mobileScriptGuidanceBudget/2)
+	if len(guidance) > mobileScriptSkillBudget {
+		t.Errorf("the verify-skill shape is %d bytes; it exists to be short, so keep it under %d", len(guidance), mobileScriptSkillBudget)
 	}
 	for surface, named := range mobileScriptSkillDecisions {
 		if got := codeSpanNames(guidance, surface); got != named {
@@ -393,8 +404,15 @@ func TestMobileScriptGuidance_SkillShapeNamesOnlyWhatAOOwns(t *testing.T) {
 }
 
 // mobileScriptGuidanceBudget caps the script-only iOS block the way
-// simGuidanceBudget caps the catalog, and for the same reason.
-const mobileScriptGuidanceBudget = 4800
+// simGuidanceBudget caps the catalog, and for the same reason. Raised
+// 4800 -> 6700 for the device bullets and mock rule the catalog carries too
+// (simGuidanceBudget says why); the blocks share them.
+const mobileScriptGuidanceBudget = 6700
+
+// mobileScriptSkillBudget caps the verify-skill shape, which holds only what AO
+// owns. It was half the full block's budget until the device bullets and the
+// mock rule became AO's to say: a verify skill cannot override either.
+const mobileScriptSkillBudget = 4400
 
 func TestMobileScriptGuidance_DecidesEverySubcommand(t *testing.T) {
 	guidance := prompts.MobileScriptGuidance(prompts.MobileScripts{Product: "nter", IOS: true, Store: "~/Documents/Projects/mobile-ui-scripts"})
