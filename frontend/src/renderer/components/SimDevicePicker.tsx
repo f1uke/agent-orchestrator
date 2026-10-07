@@ -3,6 +3,7 @@ import { AlertTriangle, ChevronDown, Loader2, Lock, Power } from "lucide-react";
 import type { SimDevice } from "../hooks/useSimDevices";
 import { type SessionNames, simLeaseHolderLabel, type Task } from "../lib/crew";
 import type { SimPowerRequest } from "../hooks/useSimPower";
+import { cloneOwner, deviceTitle, pickerGroups, type SimClone } from "../lib/sim-devices";
 import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
@@ -83,9 +84,30 @@ export function SimDevicePicker({
 	// list is how the wrong one gets answered.
 	const [confirming, setConfirming] = useState<string | null>(null);
 
-	const booted = useMemo(() => devices.filter((d) => d.state === "Booted"), [devices]);
-	const off = useMemo(() => devices.filter((d) => d.state !== "Booted"), [devices]);
+	const groups = useMemo(() => pickerGroups(devices, sessionId), [devices, sessionId]);
+	// Every booted device costs memory, a base or this session's own included.
+	const bootedCount = useMemo(() => devices.filter((d) => d.state === "Booted").length, [devices]);
 	const current = devices.find((d) => d.udid === chosen) ?? null;
+
+	const row = (device: SimDevice, kind: RowKind) => (
+		<DeviceRow
+			bootedCount={bootedCount}
+			confirming={confirming === device.udid}
+			device={device}
+			holderNames={holderNames}
+			key={device.udid}
+			kind={kind}
+			onChoose={() => {
+				onChoose(device.udid);
+				setOpen(false);
+			}}
+			onConfirm={setConfirming}
+			onPower={onPower}
+			sessionId={sessionId}
+			task={task}
+			watching={device.udid === chosen}
+		/>
+	);
 
 	// Closing the popover abandons any half-asked question rather than leaving
 	// it armed for the next time it is opened.
@@ -110,8 +132,10 @@ export function SimDevicePicker({
 						// survives a narrow rail. Truncating the pair as one string
 						// dropped it first and left "iPhone 17 Pro Max · iO…".
 						<>
-							<span className="min-w-0 flex-1 truncate text-left">{current.name}</span>
-							<span className="shrink-0 text-muted-foreground">{current.runtime}</span>
+							<span className="min-w-0 flex-1 truncate text-left">{deviceTitle(current)}</span>
+							{/* A clone's label is what tells this session's devices apart;
+							    they usually share a runtime. */}
+							<span className="shrink-0 text-muted-foreground">{current.clone?.label ?? current.runtime}</span>
 						</>
 					) : (
 						<span className="min-w-0 flex-1 truncate text-left text-muted-foreground">
@@ -123,7 +147,7 @@ export function SimDevicePicker({
 			</PopoverTrigger>
 
 			<PopoverContent align="start" className="w-[320px] p-0">
-				<BootedCount count={booted.length} />
+				<BootedCount count={bootedCount} />
 
 				<div className="max-h-[320px] overflow-y-auto p-1">
 					{devices.length === 0 ? (
@@ -132,43 +156,17 @@ export function SimDevicePicker({
 						</p>
 					) : null}
 
-					<Group label="Booted" show={booted.length > 0}>
-						{booted.map((device) => (
-							<DeviceRow
-								bootedCount={booted.length}
-								confirming={confirming === device.udid}
-								device={device}
-								holderNames={holderNames}
-								key={device.udid}
-								onChoose={() => {
-									onChoose(device.udid);
-									setOpen(false);
-								}}
-								onConfirm={setConfirming}
-								onPower={onPower}
-								sessionId={sessionId}
-								task={task}
-								watching={device.udid === chosen}
-							/>
-						))}
+					<Group label="This session" show={groups.own.length > 0}>
+						{groups.own.map((device) => row(device, "own"))}
 					</Group>
-
-					<Group label="Shut down" show={off.length > 0}>
-						{off.map((device) => (
-							<DeviceRow
-								bootedCount={booted.length}
-								confirming={confirming === device.udid}
-								device={device}
-								holderNames={holderNames}
-								key={device.udid}
-								onChoose={() => {}}
-								onConfirm={setConfirming}
-								onPower={onPower}
-								sessionId={sessionId}
-								task={task}
-								watching={false}
-							/>
-						))}
+					<Group label="Booted" show={groups.booted.length > 0}>
+						{groups.booted.map((device) => row(device, "other"))}
+					</Group>
+					<Group label="Shut down" show={groups.off.length > 0}>
+						{groups.off.map((device) => row(device, "other"))}
+					</Group>
+					<Group label="Bases" show={groups.bases.length > 0}>
+						{groups.bases.map((device) => row(device, "base"))}
 					</Group>
 				</div>
 			</PopoverContent>
@@ -206,6 +204,17 @@ function Group({ children, label, show }: { children: React.ReactNode; label: st
 }
 
 /**
+ * Which section a row sits in, which decides what it may do.
+ *
+ * - `own`: one of this session's devices. Selectable whatever its power state,
+ *   because selecting a shut-down one is how the panel offers to boot it.
+ * - `other`: anything else that is not a base. Selectable once it is booted.
+ * - `base`: a template AO clones from. Never selected and never booted; a booted
+ *   one can still be shut down, since that is what unblocks cloning from it.
+ */
+type RowKind = "own" | "other" | "base";
+
+/**
  * One simulator: what it is, whether it is up, and the single thing that can be
  * done to it from here.
  */
@@ -214,6 +223,7 @@ function DeviceRow({
 	confirming,
 	device,
 	holderNames,
+	kind,
 	onChoose,
 	onConfirm,
 	onPower,
@@ -225,6 +235,7 @@ function DeviceRow({
 	confirming: boolean;
 	device: SimDevice;
 	holderNames?: SessionNames;
+	kind: RowKind;
 	task?: Task;
 	onChoose: () => void;
 	onConfirm: (udid: string | null) => void;
@@ -254,6 +265,25 @@ function DeviceRow({
 	// is already carrying one.
 	const needsMemoryWarning = !booted && bootedCount > 0;
 
+	const selectable = kind === "own" || (kind === "other" && booted);
+	const unselectableWhy = kind === "base" ? "a base AO clones from, never booted or driven" : "shut down";
+	const title = deviceTitle(device);
+	const spokenName = device.clone
+		? `${title}, ${kind === "own" ? device.clone.label : cloneOwner(device.clone, holderNames)}`
+		: title;
+	// Another session's clone is "<session> · <label>". The session's name is the
+	// part that truncates, so a long board name cannot push the label out of view.
+	const owner =
+		kind === "other" && device.clone ? (holderNames?.get(device.clone.sessionId) ?? device.clone.sessionId) : "";
+	const meta = [
+		kind === "base" ? "Template" : null,
+		owner && device.clone ? device.clone.label : null,
+		device.runtime,
+		watching ? "watching" : null,
+	]
+		.filter(Boolean)
+		.join(" · ");
+
 	const act = () => {
 		if (booted) {
 			onPower({ udid: device.udid, state: "shutdown", confirmHolder: heldByOther ? holder : undefined });
@@ -269,10 +299,14 @@ function DeviceRow({
 				<button
 					// A booted device is chosen by pressing it; a shut-down one has
 					// nothing to look at yet, so its whole row leads to its Boot button
-					// rather than pretending to be selectable.
-					aria-label={booted ? `Watch ${device.name}${spokenLease}` : `${device.name}, shut down${spokenLease}`}
+					// rather than pretending to be selectable. This session's own
+					// devices are the exception: selecting one that is off is how the
+					// panel offers to boot it.
+					aria-label={
+						selectable ? `Watch ${spokenName}${spokenLease}` : `${spokenName}, ${unselectableWhy}${spokenLease}`
+					}
 					className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
-					disabled={!booted}
+					disabled={!selectable}
 					onClick={onChoose}
 					title={
 						holder
@@ -285,17 +319,23 @@ function DeviceRow({
 				>
 					<span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", booted ? "bg-success" : "bg-passive")} />
 					<span className="min-w-0 flex-1">
-						<span className="block truncate text-[12px] text-foreground">{device.name}</span>
-						<span className="block truncate text-[11px] text-muted-foreground">
-							{device.runtime}
-							{watching ? " · watching" : ""}
+						<span className="flex min-w-0 items-center gap-1.5">
+							<span className="min-w-0 truncate text-[12px] text-foreground">{title}</span>
+							{kind === "base" ? <Badge data-testid="sim-base-tag">Base</Badge> : null}
+							{kind === "own" && device.clone ? <CloneLabel clone={device.clone} /> : null}
+						</span>
+						<span className="flex min-w-0 text-[11px] text-muted-foreground">
+							{owner ? <span className="min-w-0 truncate">{owner}</span> : null}
+							<span className={cn("whitespace-pre", owner ? "shrink-0" : "min-w-0 truncate")}>
+								{owner ? ` · ${meta}` : meta}
+							</span>
 						</span>
 					</span>
 				</button>
 
 				{running ? (
 					<InFlight power={power} />
-				) : confirming || (booted && otherDaemon) ? null : (
+				) : confirming || (booted && otherDaemon) || (kind === "base" && !booted) ? null : (
 					<button
 						className={cn(
 							"shrink-0 rounded-full border border-border px-2.5 py-1 text-[11px] font-medium transition-colors",
@@ -319,7 +359,7 @@ function DeviceRow({
 					booted={booted}
 					bootedCount={bootedCount}
 					holder={holderLabel}
-					name={device.name}
+					name={title}
 					onCancel={() => onConfirm(null)}
 					onConfirm={act}
 				/>
@@ -354,6 +394,19 @@ function DeviceRow({
  * name and a long holder name cannot compete for the same 320px: each truncates
  * within its own line, and the word `Leased` is the part that never does.
  */
+/**
+ * A session device's label. The primary is outlined in the foreground colour so
+ * it reads apart from the extra devices at a glance: it is the one the agent's
+ * own commands go to unless told otherwise.
+ */
+export function CloneLabel({ clone }: { clone: SimClone }) {
+	return (
+		<Badge data-testid="sim-clone-label" variant={clone.primary ? "outline" : "neutral"}>
+			{clone.label}
+		</Badge>
+	);
+}
+
 function LeaseTag({ holder, mine }: { holder: string; mine: boolean }) {
 	return (
 		<Badge className="mt-1.5 max-w-full" data-testid="sim-lease-tag" variant={mine ? "accent" : "warning"}>

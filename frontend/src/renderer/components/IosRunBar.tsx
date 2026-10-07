@@ -11,6 +11,7 @@ import { useSessionNames } from "../hooks/useSessionNames";
 import { useSimDevices } from "../hooks/useSimDevices";
 import { useSimPower } from "../hooks/useSimPower";
 import type { Task } from "../lib/crew";
+import { isBase, isWatchable, sessionDevices } from "../lib/sim-devices";
 import { cn } from "../lib/utils";
 import type { TerminalTarget } from "../types/terminal";
 import { SimDevicePicker } from "./SimDevicePicker";
@@ -92,8 +93,12 @@ export function IosRunBar({
 	const schemes = useMemo(() => project?.schemes ?? [], [project?.schemes]);
 	// Same treatment, same reason: the ONE reading of the configuration list.
 	const configurations = useMemo(() => project?.configurations ?? [], [project?.configurations]);
-	const booted = useMemo(() => (devices.data?.devices ?? []).filter((d) => d.state === "Booted"), [devices.data]);
-	const allDevices = devices.data?.devices ?? [];
+	const allDevices = useMemo(() => devices.data?.devices ?? [], [devices.data]);
+	// A base is a template AO clones from and never a run target, so it takes
+	// no part in the obvious-candidate rule below.
+	const booted = useMemo(() => allDevices.filter(isWatchable), [allDevices]);
+	const runnable = useMemo(() => allDevices.filter((d) => !isBase(d)), [allDevices]);
+	const primary = sessionDevices(allDevices, sessionId)[0]?.udid ?? null;
 
 	// The scheme AO would build. A project with one scheme needs no choice made;
 	// the run that is already going wins over both, so re-pressing Run after a
@@ -103,7 +108,8 @@ export function IosRunBar({
 	// that exists rather than an assumed Debug - see defaultConfiguration.
 	const chosenConfiguration = configuration ?? run?.configuration ?? defaultConfiguration(configurations);
 	// The device, in the same order of preference: what was picked, what the last
-	// run used, then the machine's one obvious candidate.
+	// run used, this session's own primary device (the one its agent's commands
+	// go to), then the machine's one obvious candidate.
 	//
 	// "Obvious" is `resolveSimBootTarget`'s rule, not a new one: the single
 	// BOOTED device if there is exactly one, else the machine's only simulator
@@ -113,7 +119,10 @@ export function IosRunBar({
 	// `ao sim` refuses, and the wrong guess installs onto the device a crewmate
 	// is verifying on.
 	const chosenUdid =
-		udid ?? run?.udid ?? (booted.length === 1 ? booted[0].udid : allDevices.length === 1 ? allDevices[0].udid : null);
+		udid ??
+		run?.udid ??
+		primary ??
+		(booted.length === 1 ? booted[0].udid : runnable.length === 1 ? runnable[0].udid : null);
 
 	// A scheme that vanished (renamed in Xcode, or a different project checked
 	// out) must not stay selected: pressing Run would be refused by the daemon

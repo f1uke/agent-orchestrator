@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { House, Keyboard, Layers, MoreHorizontal, MousePointer2 } from "lucide-react";
+import { House, Keyboard, Layers, MoreHorizontal, MousePointer2, Power } from "lucide-react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { simDevicesQueryKey, useSimDevices, type SimDevice } from "../hooks/useSimDevices";
 import { useSessionNames } from "../hooks/useSessionNames";
@@ -24,7 +24,16 @@ import {
 	DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { SimpleTooltip, TooltipProvider } from "./ui/tooltip";
-import { SimDevicePicker } from "./SimDevicePicker";
+import { CloneLabel, SimDevicePicker } from "./SimDevicePicker";
+import {
+	type CloneDevice,
+	deviceTitle,
+	isCloneOf,
+	isWatchable,
+	resolveSelection,
+	sessionDevices,
+} from "../lib/sim-devices";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { SimRecordControls, StopSummaryNote, type StopSummary } from "./SimRecordControls";
 
 /**
@@ -202,7 +211,11 @@ export function SimulatorPanel({
 	// machine-wide resource, so its holder is usually on other work entirely.
 	const task = useSessionTask(sessionId);
 	const holderNames = useSessionNames();
-	const [chosen, setChosen] = useState<string | null>(() => recall(sessionId)?.udid ?? null);
+	// The device the human has selected. It is only watched once it is up:
+	// `chosen` below is the watched one. The two differ only for one of this
+	// session's own devices that is shut down, which stays selected so the stage
+	// can offer to boot it.
+	const [selected, setSelected] = useState<string | null>(() => recall(sessionId)?.udid ?? null);
 	// 🗝 What the human ASKED for, which is not the same as what they may do.
 	// Driving itself is derived below, from this and the lease together.
 	//
@@ -226,7 +239,7 @@ export function SimulatorPanel({
 	// needs the shut-down ones to offer them; everything else here still works
 	// off `booted`, because a device that is not up cannot be watched or driven.
 	const all = useMemo(() => devices.data?.devices ?? [], [devices.data]);
-	const booted = useMemo(() => all.filter((d) => d.state === "Booted"), [all]);
+	const booted = useMemo(() => all.filter(isWatchable), [all]);
 	const defaultUdid = devices.data?.defaultUdid ?? null;
 
 	// A device this session asked to boot, so the tab can switch to it the
@@ -236,7 +249,7 @@ export function SimulatorPanel({
 	const [booting, setBooting] = useState<string | null>(null);
 	useEffect(() => {
 		if (booting && booted.some((d) => d.udid === booting)) {
-			setChosen(booting);
+			setSelected(booting);
 			setBooting(null);
 		}
 	}, [booting, booted]);
@@ -255,17 +268,20 @@ export function SimulatorPanel({
 		[power],
 	);
 
-	// Preselect only what the daemon was willing to resolve, or what this session
-	// was last watching. With several booted the daemon hands back null, and null
-	// is what the picker shows - remembering a choice the human made is not the
-	// same as guessing one they did not.
+	// A session with devices of its own starts on its primary. Any other session
+	// preselects only what the daemon was willing to resolve, or what it was last
+	// watching. With several booted the daemon hands back null, and null is what
+	// the picker shows - remembering a choice the human made is not the same as
+	// guessing one they did not.
 	useEffect(() => {
-		if (chosen && booted.some((d) => d.udid === chosen)) return;
-		if (booted.length === 0 && !devices.isSuccess) return;
-		setChosen(defaultUdid && booted.some((d) => d.udid === defaultUdid) ? defaultUdid : null);
-	}, [chosen, booted, defaultUdid, devices.isSuccess]);
+		const next = resolveSelection({ defaultUdid, devices: all, looked: devices.isSuccess, selected, sessionId });
+		if (next !== selected) setSelected(next);
+	}, [all, defaultUdid, devices.isSuccess, selected, sessionId]);
 
-	const device = booted.find((d) => d.udid === chosen) ?? null;
+	const own = useMemo(() => sessionDevices(all, sessionId), [all, sessionId]);
+	const selectedDevice = all.find((d) => d.udid === selected) ?? null;
+	const device = selectedDevice && isWatchable(selectedDevice) ? selectedDevice : null;
+	const chosen = device?.udid ?? null;
 	const lease = device?.lease;
 	// A lease held through another AO daemon on this machine (a sandbox daemon)
 	// is never this session's, whatever its id says, and cannot be taken over
@@ -296,8 +312,8 @@ export function SimulatorPanel({
 	// remembering "was driving" would re-grant a permission the lease has to
 	// give, and the derivation above is what re-grants it.
 	useEffect(() => {
-		remember(sessionId, { udid: chosen, driving: wantsToDrive });
-	}, [sessionId, chosen, wantsToDrive]);
+		remember(sessionId, { udid: selected, driving: wantsToDrive });
+	}, [sessionId, selected, wantsToDrive]);
 
 	// `active` is the only gate, and it is passed whole rather than also being
 	// folded into the udid: two guards for one rule means a mutation can break
@@ -778,18 +794,22 @@ export function SimulatorPanel({
 			    hole rather than a surface, and it forced every label on it to use
 			    fixed colours that could not follow the theme. */}
 			<div className="relative flex h-full min-h-0 flex-col items-center gap-2 overflow-hidden bg-background py-2">
-				<DevicePill
-					chosen={chosen}
-					devices={all}
-					holderNames={holderNames}
-					loading={devices.isPending && watching}
-					onChoose={setChosen}
-					onPower={onPower}
-					paused={paused}
-					sessionId={sessionId}
-					status={stream}
-					task={task}
-				/>
+				<div className="flex shrink-0 flex-wrap items-center justify-center gap-2 px-2">
+					<DevicePill
+						devices={all}
+						holderNames={holderNames}
+						loading={devices.isPending && watching}
+						onChoose={setSelected}
+						onPower={onPower}
+						paused={paused}
+						selected={selected}
+						sessionId={sessionId}
+						status={stream}
+						task={task}
+						watched={Boolean(chosen)}
+					/>
+					{own.length > 1 ? <SessionDeviceSwitch devices={own} onSelect={setSelected} selected={selected} /> : null}
+				</div>
 
 				<div
 					className="relative flex min-h-0 w-full flex-1 items-center justify-center"
@@ -856,6 +876,12 @@ export function SimulatorPanel({
 							/>
 							{dotsShown && drawn ? <SimPinchDots inset={drawn.bezel} ref={dotsRef} screen={drawn.screen} /> : null}
 						</div>
+					) : !paused && selectedDevice && isCloneOf(selectedDevice, sessionId) ? (
+						<BootPrompt
+							bootedCount={all.filter((d) => d.state === "Booted").length}
+							device={selectedDevice}
+							onBoot={() => onPower({ udid: selectedDevice.udid, state: "booted" })}
+						/>
 					) : (
 						<p className="max-w-[36ch] px-4 text-center text-[12px] text-muted-foreground">
 							{emptyReason(paused, devices.isSuccess, booted.length, devices.data?.defaultReason ?? "", powering)}
@@ -1107,18 +1133,18 @@ function PillButton({
  * the row cannot change shape as devices come and go.
  */
 function DevicePill({
-	chosen,
 	devices,
 	holderNames,
 	loading,
 	onChoose,
 	onPower,
 	paused,
+	selected,
 	sessionId,
 	status,
 	task,
+	watched,
 }: {
-	chosen: string | null;
 	devices: SimDevice[];
 	/** Board names for every session, so a holder outside this task is named too. */
 	holderNames?: SessionNames;
@@ -1126,15 +1152,18 @@ function DevicePill({
 	onChoose: (udid: string) => void;
 	onPower: (request: SimPowerRequest) => void;
 	paused: PausedReason | null;
+	selected: string | null;
 	sessionId: string;
 	status: SimStreamStatus;
 	/** This pane's task, so a crewmate holding a device is named by its role. */
 	task?: Task;
+	/** Whether the selected device is up and being watched. */
+	watched: boolean;
 }) {
 	return (
 		<div className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-raised py-0.5 pl-1 pr-2.5">
 			<SimDevicePicker
-				chosen={chosen}
+				chosen={selected}
 				devices={devices}
 				holderNames={holderNames}
 				loading={loading}
@@ -1143,7 +1172,101 @@ function DevicePill({
 				sessionId={sessionId}
 				task={task}
 			/>
-			<Freshness chosen={Boolean(chosen)} paused={paused} status={status} />
+			<Freshness chosen={watched} paused={paused} status={status} />
+		</div>
+	);
+}
+
+/**
+ * This session's devices side by side, one press apart. Shown only when there
+ * is more than one, since a single segment would switch to nothing. The picker
+ * lists the same devices under "This session"; this is the quick way across.
+ */
+function SessionDeviceSwitch({
+	devices,
+	onSelect,
+	selected,
+}: {
+	devices: CloneDevice[];
+	onSelect: (udid: string) => void;
+	selected: string | null;
+}) {
+	return (
+		<Tabs onValueChange={onSelect} value={selected ?? ""}>
+			<TabsList aria-label="This session's devices" className="h-auto rounded-full border border-border p-0.5">
+				{devices.map((device) => (
+					<TabsTrigger
+						aria-label={`${device.clone.label}, ${deviceTitle(device)}, ${device.state === "Booted" ? "booted" : "shut down"}`}
+						className="h-7 gap-1.5 rounded-full px-2.5"
+						data-testid={`sim-session-device-${device.clone.label}`}
+						key={device.udid}
+						title={deviceTitle(device)}
+						value={device.udid}
+					>
+						<span
+							aria-hidden
+							className={cn("size-1.5 shrink-0 rounded-full", device.state === "Booted" ? "bg-success" : "bg-passive")}
+						/>
+						{/* In a span: the renderer's unlayered button reset wins over
+						    a font utility placed on the button itself. */}
+						<span className="text-[12px]">{device.clone.label}</span>
+					</TabsTrigger>
+				))}
+			</TabsList>
+		</Tabs>
+	);
+}
+
+/**
+ * What the stage shows while one of this session's own devices is selected but
+ * not up: the device, why there is nothing to see, and the press that fixes it.
+ *
+ * The memory guard the picker keeps is kept here as a sentence rather than a
+ * second question. The cost is stated next to the button before it is pressed,
+ * and the button names the device it boots, so the press is already the answer.
+ */
+function BootPrompt({ bootedCount, device, onBoot }: { bootedCount: number; device: CloneDevice; onBoot: () => void }) {
+	const power = device.power;
+	const title = deviceTitle(device);
+
+	if (power?.state === "running") {
+		return (
+			<p className="max-w-[36ch] px-4 text-center text-[12px] text-muted-foreground" role="status">
+				Booting {title} ({device.clone.label}). It takes tens of seconds.
+			</p>
+		);
+	}
+
+	const cost =
+		bootedCount === 0
+			? ""
+			: bootedCount === 1
+				? "One simulator is already up, and each takes about 4 GB."
+				: `${bootedCount} are already up. Three booted at once has run this machine out of memory before.`;
+
+	return (
+		<div className="flex max-w-[36ch] flex-col items-center gap-2 px-4 text-center" data-testid="sim-boot-prompt">
+			<span className="flex items-center gap-1.5">
+				<span className="text-[12px] text-foreground">{title}</span>
+				<CloneLabel clone={device.clone} />
+			</span>
+			<p className="text-[12px] text-muted-foreground">This device is shut down.</p>
+			{power?.state === "failed" ? (
+				<p className="text-[11px] leading-snug text-error">{power.reason ?? "The last boot did not work."}</p>
+			) : null}
+			{cost ? (
+				<p className={cn("text-[11px] leading-snug", bootedCount >= 2 ? "text-warning" : "text-muted-foreground")}>
+					{cost}
+				</p>
+			) : null}
+			<button
+				className="flex h-8 items-center gap-1.5 rounded-full border border-border bg-raised px-3 text-foreground transition-colors hover:bg-overlay"
+				onClick={onBoot}
+				type="button"
+			>
+				<Power aria-hidden className="size-3.5" />
+				<span className="text-[12px] font-medium">Boot {device.clone.label}</span>
+			</button>
 		</div>
 	);
 }

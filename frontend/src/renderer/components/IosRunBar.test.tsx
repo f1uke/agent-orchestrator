@@ -157,6 +157,56 @@ describe("IosRunBar", () => {
 		await waitFor(() => expect(run).toBeEnabled());
 	});
 
+	// The machine's one booted device is often another session's clone. A session
+	// AO cloned devices for runs on its own primary, booted or not.
+	it("runs on this session's primary device rather than somebody else's booted one", async () => {
+		const clone = (udid: string, sessionId: string, state: string) => ({
+			...device(udid, `AO ${sessionId} (iPhone 17 Pro Max)`, state),
+			role: "clone",
+			clone: {
+				udid,
+				sessionId,
+				label: "primary",
+				primary: true,
+				base: "iPhone 17 Pro Max",
+				name: `AO ${sessionId} (iPhone 17 Pro Max)`,
+				createdAt: "2026-10-07T00:00:00Z",
+			},
+		});
+		answer({
+			devices: [
+				clone("UDID-THEIRS", "other-1", "Booted"),
+				clone("UDID-MINE", SESSION, "Shutdown"),
+				{ ...device("UDID-BASE", "iPhone 17 Pro Max", "Shutdown"), role: "base" },
+			],
+			ios: { project: project({ schemes: ["Nter"] }) },
+		});
+		postMock.mockResolvedValue({ data: { run: { handleId: "h", scheme: "Nter", running: true } } });
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: "Run Nter" });
+		await waitFor(() => expect(run).toBeEnabled());
+		await userEvent.click(run);
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE" } }),
+			),
+		);
+	});
+
+	it("never takes a base as the machine's only simulator", async () => {
+		answer({
+			devices: [{ ...device("UDID-BASE", "iPhone 17 Pro Max", "Shutdown"), role: "base" }],
+			ios: { project: project({ schemes: ["Nter"] }) },
+		});
+		renderBar();
+
+		const run = await screen.findByRole("button", { name: /^Run/ });
+		await waitFor(() => expect(run.title).toMatch(/choose which simulator/i));
+		expect(run).toBeDisabled();
+	});
+
 	it("says why there is nothing to build when the project listed no schemes", async () => {
 		answer({ ios: { project: project({ schemes: [], schemesError: "xcodebuild is not installed" }) } });
 		renderBar();
