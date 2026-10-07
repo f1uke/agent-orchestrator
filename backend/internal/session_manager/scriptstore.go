@@ -16,11 +16,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/scriptstore"
 )
 
-// EnvScriptsStore is the checkout a worker on a mobileScripts project writes
-// its scripts into: its workspace's own worktree of the store when it has one,
-// otherwise the store's main checkout.
-const EnvScriptsStore = "AO_SCRIPTS_STORE"
-
 // verifySkillLink is where a worktree's agent loads the project's verify skill
 // from.
 const verifySkillLink = ".claude/skills/verify"

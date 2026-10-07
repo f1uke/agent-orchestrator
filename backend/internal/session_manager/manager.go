@@ -173,6 +173,10 @@ const (
 	// about a session without a device changes.
 	EnvSimUDID        = "AO_SIM_UDID"
 	EnvSimDestination = "AO_SIM_DESTINATION"
+	// EnvScriptsStore is the checkout a worker on a mobileScripts project
+	// writes its scripts into: its workspace's own worktree of the store when
+	// it has one, otherwise the store's main checkout.
+	EnvScriptsStore = "AO_SCRIPTS_STORE"
 )
 
 // hookBinaryName is the executable name the workspace hook commands invoke:
@@ -1708,6 +1712,22 @@ func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force b
 	if handle.ID != "" {
 		if err := m.runtime.Destroy(ctx, handle); err != nil {
 			return fmt.Errorf("purge %s: runtime: %w", id, err)
+		}
+	}
+	// The scripts store worktree is the workspace's too, and refuses the same
+	// way a dirty tree does: force is the only thing that deletes unpublished
+	// scripts.
+	if m.ownsScriptsStore(rec) {
+		policy := scriptstore.SettleKeep
+		if force {
+			policy = scriptstore.SettleDiscard
+		}
+		settled, err := m.scripts.Settle(ctx, id, policy)
+		if err != nil {
+			return fmt.Errorf("purge %s: scripts store worktree: %w", id, err)
+		}
+		if settled.Present && !settled.Removed {
+			return fmt.Errorf("purge %s: the scripts store worktree holds scripts the store does not have: %w", id, ports.ErrWorkspaceDirty)
 		}
 	}
 	if ws.Path != "" {
