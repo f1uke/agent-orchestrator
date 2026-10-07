@@ -149,6 +149,20 @@ type RuntimeConfig struct {
 	// session's own launch sets it; auxiliary panes (reviewer, wiki, iOS runs)
 	// leave it empty, since their exits are not a session ending.
 	ExitStatusFile string
+
+	// StdinFile, when set, names a file the runtime connects to the agent
+	// process's standard input. AO uses it to hand an agent its initial prompt
+	// off the command line (PromptDeliveryStdin). Only a runtime that reports
+	// StdinFileConnector honours it, so a caller sets it only after asking.
+	StdinFile string
+}
+
+// StdinFileConnector is the optional capability of a runtime that can connect
+// RuntimeConfig.StdinFile to the launched agent's standard input. A runtime
+// without it (conpty: a pseudo console owns the child's stdin) leaves callers
+// to put the prompt on the command line instead.
+type StdinFileConnector interface {
+	ConnectsStdinFile() bool
 }
 
 // RuntimeHandle identifies a live runtime instance. Its ID is opaque outside

@@ -292,7 +292,12 @@ type fakeRuntime struct {
 	// break ONE session's teardown inside a multi-session sweep. Missing = use
 	// destroyErr.
 	destroyErrByHandle map[string]error
+	// connectsStdin is what ConnectsStdinFile reports. Off by default, so a
+	// prompt stays in the launch command unless a test opts in.
+	connectsStdin bool
 }
+
+func (r *fakeRuntime) ConnectsStdinFile() bool { return r.connectsStdin }
 
 func (r *fakeRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
 	if r.createErr != nil {

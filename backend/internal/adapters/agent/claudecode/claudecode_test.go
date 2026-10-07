@@ -910,3 +910,12 @@ func TestSupportedModelsListsClaudeTiers(t *testing.T) {
 		}
 	}
 }
+
+// Interactive Claude Code reads its first prompt from stdin and stays
+// interactive, so AO can keep the task brief off argv.
+func TestGetPromptDeliveryStrategyIsStdin(t *testing.T) {
+	got, err := (&Plugin{}).GetPromptDeliveryStrategy(context.Background(), ports.LaunchConfig{})
+	if err != nil || got != ports.PromptDeliveryStdin {
+		t.Fatalf("strategy = %q, %v; want %q", got, err, ports.PromptDeliveryStdin)
+	}
+}
