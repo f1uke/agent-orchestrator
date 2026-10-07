@@ -776,7 +776,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:         runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, cfg.Kind, scriptsOwnerID)),
+		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, cfg.Kind, scriptsOwnerID), needsSimulator(cfg.Kind, project.Config)),
 		ExitStatusFile: m.exitStatusFile(),
 		StdinFile:      stdinFile,
 	})
@@ -2022,7 +2022,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:         runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, rec.Kind, scriptsOwner(rec))),
+		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, rec.Kind, scriptsOwner(rec)), needsSimulator(rec.Kind, project.Config)),
 		ExitStatusFile: m.exitStatusFile(),
 		StdinFile:      stdinFile,
 	})
@@ -3888,6 +3888,18 @@ func spawnEnv(id domain.SessionID, project domain.ProjectID, issue domain.IssueI
 	return env
 }
 
+// needsSimulator is whether a session is given a simulator of its own: a
+// worker (dev and qa alike) on a project that builds for iOS. An orchestrator
+// never drives a device, and a project that is not iOS has nothing to put on
+// one - and every device handed to either is a multi-gigabyte clone nobody
+// uses.
+func needsSimulator(kind domain.SessionKind, cfg domain.ProjectConfig) bool {
+	if kind != domain.KindWorker {
+		return false
+	}
+	return cfg.HasIOSSimulator || (cfg.MobileScripts != nil && cfg.MobileScripts.Platform == domain.MobilePlatformIOS)
+}
+
 // simDeviceEnv renders one session's assigned simulator as environment. An
 // empty udid produces no variables at all rather than empty ones: an exported
 // AO_SIM_UDID="" would read to `ao sim` as "the caller named a device" and to a
@@ -3911,7 +3923,7 @@ func simDeviceEnv(udid string) map[string]string {
 // command, which fails every callback and silently kills activity tracking).
 // When the pin cannot be applied the inherited PATH is kept and a warning is
 // logged so the degradation isn't silent.
-func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string, childWorktrees bool, scriptsStore string) map[string]string {
+func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string, childWorktrees bool, scriptsStore string, wantsSim bool) map[string]string {
 	env := spawnEnv(id, project, issue, kind, crew, m.crewIDs(ctx, id, crew, role), m.dataDir, m.runFile, projectEnv)
 	if scriptsStore != "" {
 		env[EnvScriptsStore] = scriptsStore
@@ -3924,8 +3936,10 @@ func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project d
 	for k, v := range crewGitEnv(role, m.dataDir, workspacePath) {
 		env[k] = v
 	}
-	for k, v := range simDeviceEnv(m.assignSimDevice(ctx, id)) {
-		env[k] = v
+	if wantsSim {
+		for k, v := range simDeviceEnv(m.assignSimDevice(ctx, id)) {
+			env[k] = v
+		}
 	}
 	path, err := HookPATH(m.executable, os.Getenv, projectEnv)
 	if err != nil {

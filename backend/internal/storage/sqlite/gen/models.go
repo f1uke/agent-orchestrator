@@ -514,10 +514,13 @@ type SessionWorktree struct {
 	State        string
 }
 
-type SimDeviceAssignment struct {
-	SessionID  domain.SessionID
-	Udid       string
-	AssignedAt time.Time
+type SimClone struct {
+	Udid      string
+	SessionID domain.SessionID
+	Label     string
+	Base      string
+	Name      string
+	CreatedAt time.Time
 }
 
 type SimLease struct {

@@ -207,12 +207,12 @@ func openSimOwnership(dataDir string, port int, log *slog.Logger) *simowner.Regi
 	return reg
 }
 
-// simOwnershipOptions wires the registry into the lease service and the
-// device assigner, or nothing when there is no registry. (A nil
-// *simowner.Registry must never become a non-nil interface value.)
-func simOwnershipOptions(reg *simowner.Registry) ([]simsvc.Option, []simsvc.AssignerOption) {
+// simOwnershipOptions wires the registry into the lease service, or nothing
+// when there is no registry. (A nil *simowner.Registry must never become a
+// non-nil interface value.)
+func simOwnershipOptions(reg *simowner.Registry) []simsvc.Option {
 	if reg == nil {
-		return nil, nil
+		return nil
 	}
-	return []simsvc.Option{simsvc.WithOwnership(reg)}, []simsvc.AssignerOption{simsvc.WithAssignerOwnership(reg)}
+	return []simsvc.Option{simsvc.WithOwnership(reg)}
 }

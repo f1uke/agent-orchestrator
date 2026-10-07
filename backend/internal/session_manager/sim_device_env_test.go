@@ -21,7 +21,7 @@ func TestRuntimeEnv_ExportsTheSessionsOwnSimulator(t *testing.T) {
 		return "087df306-1fc9-4e5a-b9ed-ad36d6a1a0f1", nil
 	})
 
-	env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", nil, false, "")
+	env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", nil, false, "", true)
 
 	// Normalized, because simctl reports udids upper-cased and half the tools
 	// an agent pastes this into compare them as strings.
@@ -52,7 +52,7 @@ func TestRuntimeEnv_NoDeviceExportsNothing(t *testing.T) {
 			if assigner != nil {
 				m.SetSimDeviceAssigner(assigner)
 			}
-			env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", nil, false, "")
+			env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", nil, false, "", true)
 			if _, ok := env[EnvSimUDID]; ok {
 				t.Fatalf("%s was exported as %q", EnvSimUDID, env[EnvSimUDID])
 			}
@@ -76,9 +76,46 @@ func TestRuntimeEnv_ProjectCannotOverrideTheAssignedDevice(t *testing.T) {
 	})
 
 	env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work",
-		map[string]string{EnvSimUDID: "SOMEBODY-ELSES-DEVICE"}, false, "")
+		map[string]string{EnvSimUDID: "SOMEBODY-ELSES-DEVICE"}, false, "", true)
 
 	if got := env[EnvSimUDID]; got != "087DF306-1FC9-4E5A-B9ED-AD36D6A1A0F1" {
 		t.Fatalf("%s = %q; a project override took another session's device", EnvSimUDID, got)
+	}
+}
+
+// Only an iOS worker is given a device. Every device is a clone of a
+// multi-gigabyte simulator, and before this rule orchestrators held iPhones
+// while an iOS worker was handed an iPad.
+func TestNeedsSimulator(t *testing.T) {
+	ios := domain.ProjectConfig{HasIOSSimulator: true}
+	scriptsIOS := domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS}}
+	scriptsAndroid := domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformAndroid}}
+	for _, tc := range []struct {
+		name string
+		kind domain.SessionKind
+		cfg  domain.ProjectConfig
+		want bool
+	}{
+		{"ios worker", domain.KindWorker, ios, true},
+		{"scripts-only ios worker", domain.KindWorker, scriptsIOS, true},
+		{"ios orchestrator", domain.KindOrchestrator, ios, false},
+		{"android worker", domain.KindWorker, scriptsAndroid, false},
+		{"web worker", domain.KindWorker, domain.ProjectConfig{HasWebUI: true}, false},
+	} {
+		if got := needsSimulator(tc.kind, tc.cfg); got != tc.want {
+			t.Errorf("%s: needsSimulator = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestRuntimeEnv_NoSimulatorWantedNeverMakesOne(t *testing.T) {
+	m := layeredManager(newFakeStore(), nil)
+	m.SetSimDeviceAssigner(func(context.Context, domain.SessionID) (string, error) {
+		t.Fatal("a session that needs no simulator was given one")
+		return "", nil
+	})
+	env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindOrchestrator, "", "", "/work", nil, false, "", false)
+	if _, ok := env[EnvSimUDID]; ok {
+		t.Fatalf("%s was exported as %q", EnvSimUDID, env[EnvSimUDID])
 	}
 }

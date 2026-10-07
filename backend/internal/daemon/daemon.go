@@ -184,7 +184,7 @@ func Run() error {
 		defer func() { _ = simOwners.Close() }()
 		simScreen.SetBootLedger(simOwners)
 	}
-	simOwnerLeaseOpts, simOwnerAssignOpts := simOwnershipOptions(simOwners)
+	simOwnerLeaseOpts := simOwnershipOptions(simOwners)
 	// The touches the desktop pane currently holds down. A drag spans several
 	// requests, so it outlives any one of them - and a finger left down wedges a
 	// device's input until it is rebooted, so the daemon lifts them on the way
@@ -483,15 +483,15 @@ func Run() error {
 		}
 	}()
 
-	// One simulator per session, exported into the agent's environment at spawn.
-	// Wired here rather than in startSession because the assigner needs the
-	// daemon's resident device listing (simScreen), which is built for the Device
-	// tab and whose cache means a spawn pays a map lookup rather than a `simctl
-	// list` subprocess.
-	simAssigner := simsvc.NewAssigner(store, simScreen, func() time.Time { return time.Now().UTC() }, simOwnerAssignOpts...)
+	// Every iOS worker's simulators are clones of a base, made for it and
+	// deleted when it ends (see service/sim/fleet.go). Wired here rather than in
+	// startSession because the fleet needs the daemon's resident device listing
+	// (simScreen), whose cache means a restored session finds its clone with a
+	// map lookup rather than a `simctl list` subprocess.
+	simFleet := simsvc.NewFleet(store, simScreen, func() time.Time { return time.Now().UTC() })
 	sessMgr.SetSimDeviceAssigner(func(ctx context.Context, id domain.SessionID) (string, error) {
-		assignment, err := simAssigner.AssignDevice(ctx, id)
-		return assignment.UDID, err
+		clone, err := simFleet.Primary(ctx, id)
+		return clone.UDID, err
 	})
 
 	// sessionSvc is the Jira SessionGateway (read + set the after-the-fact binding).
