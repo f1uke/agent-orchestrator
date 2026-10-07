@@ -574,6 +574,19 @@ type TelemetryEvent struct {
 	PayloadJson string
 }
 
+type TestinyEvidenceLog struct {
+	ID        int64
+	SessionID domain.SessionID
+	RunID     domain.TestinyRunID
+	Event     domain.TestinyEvidenceEvent
+	File      string
+	CaseID    int64
+	DriveID   string
+	CommentID int64
+	SetBy     string
+	CreatedAt time.Time
+}
+
 type TestinyResultLog struct {
 	ID        int64
 	SessionID domain.SessionID
