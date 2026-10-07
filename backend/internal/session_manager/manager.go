@@ -726,11 +726,17 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, prompt)
+	if err != nil {
+		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
+		disposeSeed()
+		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
+	}
 	argv, err := agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		SessionID:        string(id),
 		WorkspacePath:    ws.Path,
 		Kind:             cfg.Kind,
-		Prompt:           prompt,
+		Prompt:           commandPrompt,
 		SystemPrompt:     systemPrompt,
 		SystemPromptFile: systemPromptFile,
 		IssueID:          string(cfg.IssueID),
@@ -759,6 +765,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Argv:           argv,
 		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees),
 		ExitStatusFile: m.exitStatusFile(),
+		StdinFile:      stdinFile,
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -1893,7 +1900,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
-	argv, err := restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, systemPromptFile, agentConfig, rec.Kind)
+	argv, stdinFile, err := m.restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, systemPromptFile, agentConfig, rec.Kind)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
@@ -1905,6 +1912,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Argv:           argv,
 		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees),
 		ExitStatusFile: m.exitStatusFile(),
+		StdinFile:      stdinFile,
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w: %w", rec.ID, ErrAgentLaunchFailed, err)
@@ -4001,8 +4009,10 @@ func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id do
 // Returns ErrNotResumable only for a promptless, unresumable non-orchestrator:
 // a worker with no prompt and no native session id has nothing to restore from.
 // Orchestrators are promptless by design, so when they cannot resume they
-// relaunch fresh with the system prompt only rather than erroring.
-func restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt, systemPromptFile string, agentConfig ports.AgentConfig, kind domain.SessionKind) ([]string, error) {
+// relaunch fresh with the system prompt only rather than erroring. A fresh
+// relaunch replays the prompt the way a spawn delivers it, so stdinFile is the
+// file the runtime feeds the agent, or empty.
+func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt, systemPromptFile string, agentConfig ports.AgentConfig, kind domain.SessionKind) (argv []string, stdinFile string, err error) {
 	ref := ports.SessionRef{
 		ID:            string(id),
 		WorkspacePath: workspacePath,
@@ -4010,32 +4020,36 @@ func restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, wo
 	}
 	cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, Config: agentConfig, Permissions: agentConfig.Permissions})
 	if err != nil {
-		return nil, fmt.Errorf("restore command: %w", err)
+		return nil, "", fmt.Errorf("restore command: %w", err)
 	}
 	if ok {
-		return cmd, nil
+		return cmd, "", nil
 	}
 	// Adapter cannot resume. A saved prompt is replayed fresh. An orchestrator is
 	// promptless by design and relaunches with the system prompt only. A promptless
 	// WORKER has no task and no session id to restore from: do not blank-relaunch it.
 	if meta.Prompt == "" && kind != domain.KindOrchestrator {
-		return nil, ErrNotResumable
+		return nil, "", ErrNotResumable
+	}
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, meta.Prompt)
+	if err != nil {
+		return nil, "", err
 	}
 	// Fall through to GetLaunchCommand (replays meta.Prompt; empty for an orchestrator).
-	argv, err := agent.GetLaunchCommand(ctx, ports.LaunchConfig{
+	argv, err = agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		SessionID:        string(id),
 		WorkspacePath:    workspacePath,
 		Kind:             kind,
-		Prompt:           meta.Prompt,
+		Prompt:           commandPrompt,
 		SystemPrompt:     systemPrompt,
 		SystemPromptFile: systemPromptFile,
 		Config:           agentConfig,
 		Permissions:      agentConfig.Permissions,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("launch command: %w", err)
+		return nil, "", fmt.Errorf("launch command: %w", err)
 	}
-	return argv, nil
+	return argv, stdinFile, nil
 }
 
 // validateAgentBinary checks that argv[0] resolves via the manager's

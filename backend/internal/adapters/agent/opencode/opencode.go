@@ -114,8 +114,9 @@ func (p *Plugin) Manifest() adapters.Manifest {
 // Code and Codex). opencode has no CLI flag to set a system prompt, so
 // cfg.SystemPrompt / SystemPromptFile are intentionally ignored here — opencode
 // resolves instructions from its own config and AGENTS.md rules. The initial
-// task prompt is delivered via --prompt (its argument, so a leading "-" is not
-// read as a flag).
+// task prompt, when the caller passes one, is delivered via --prompt (its
+// argument, so a leading "-" is not read as a flag). AO normally passes none and
+// feeds the prompt on stdin instead (see GetPromptDeliveryStrategy).
 func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (cmd []string, err error) {
 	binary, err := p.opencodeBinary(ctx)
 	if err != nil {
@@ -134,6 +135,16 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 		cmd = append(cmd, "--prompt", cfg.Prompt)
 	}
 	return cmd, nil
+}
+
+// GetPromptDeliveryStrategy reports that opencode takes its initial prompt on
+// stdin: the TUI submits what it reads there as the first message and then reads
+// the keyboard from its terminal, so the task brief never has to sit on argv.
+func (p *Plugin) GetPromptDeliveryStrategy(ctx context.Context, _ ports.LaunchConfig) (ports.PromptDeliveryStrategy, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return ports.PromptDeliveryStdin, nil
 }
 
 // GetRestoreCommand rebuilds the argv that continues an existing opencode

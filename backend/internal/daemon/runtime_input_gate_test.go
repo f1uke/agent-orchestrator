@@ -80,6 +80,19 @@ func TestGatedRuntime_DefersWhileUserTyping(t *testing.T) {
 	}
 }
 
+// A wrapper that hid the stdin capability would put every task brief back on
+// the agent's argv without a single error, so pin that the runtime the session
+// manager is handed still connects stdin files.
+func TestGatedRuntimeConnectsStdinFiles(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("conpty cannot connect a stdin file; prompts stay in the command there")
+	}
+	rt := newGatedRuntime(runtimeselect.New(nil, runtimeselect.Options{}), nil)
+	if c, ok := rt.(ports.StdinFileConnector); !ok || !c.ConnectsStdinFile() {
+		t.Fatal("the daemon's runtime does not connect stdin files; task briefs would ride on argv")
+	}
+}
+
 // Agent liveness is how every consumer tells a live agent from the shell a pane
 // keeps after its agent exits. Losing it is INVISIBLE at runtime - the queue
 // waits on a timer instead of a signal, the session manager's reap-safety check
