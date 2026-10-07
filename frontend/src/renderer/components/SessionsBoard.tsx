@@ -1204,7 +1204,7 @@ function SessionCard({
 	const lane = taskLane(task, gates ?? { review: "not run" });
 	// The gutter keeps exactly ONE glyph, and it belongs to whoever holds the ball.
 	// When the lane came from a fact about the TASK rather than about a member -
-	// "the checklist is waiting for you", "nobody is working on this" - there is no
+	// "qa · No handback yet", "nobody is working on this" - there is no
 	// member to draw and the LANE's own shape stands in.
 	const holderGlyph = lane.holder ? statusGlyph(lane.holder) : undefined;
 	const Icon = holderGlyph?.Icon ?? col.Icon;

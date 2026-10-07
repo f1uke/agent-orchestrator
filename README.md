@@ -12,9 +12,9 @@ An Agentic IDE that supervises parallel AI coding agents in isolated workspaces,
 
 > **This is a fork** of [AgentWrapper/agent-orchestrator](https://github.com/AgentWrapper/agent-orchestrator).
 > It tracks upstream and adds a review-and-verify layer on top: a diff reviewer in the
-> session rail, human-played smoke-test checklists, GitLab merge-request write-back, and
-> Jira issue context. Development happens on the **`main-fluke`** branch, which is this
-> repository's default branch. Everything below describes that branch.
+> session rail, GitLab merge-request write-back, and Jira issue context. Development
+> happens on the **`main-fluke`** branch, which is this repository's default branch.
+> Everything below describes that branch.
 
 <img src="docs/assets/readme/board.png" alt="Agent Orchestrator board showing parallel coding agent sessions grouped by state" width="100%" />
 </div>
@@ -55,7 +55,7 @@ The result is a local control layer for agentic coding: agents still do the codi
 
 ## Features
 
-The desktop app is the main control surface: projects on the left, active sessions in the center, and the selected session's terminal, issue context, changed files, smoke-test checklist, review state, and browser preview in the inspector rail.
+The desktop app is the main control surface: projects on the left, active sessions in the center, and the selected session's terminal, issue context, changed files, review state, and browser preview in the inspector rail.
 
 <table>
   <tr>
@@ -70,7 +70,7 @@ The desktop app is the main control surface: projects on the left, active sessio
   <tr>
     <td width="36%">
       <h3>Terminal, status and issue context together</h3>
-      <p>Attach to the worker terminal while a readiness strip tracks the session from work through smoke, PR, CI, review and merge. A linked Jira issue renders inline, with its description, subtasks and a status move.</p>
+      <p>Attach to the worker terminal while a readiness strip tracks the session from work through PR, CI, review and merge. A linked Jira issue renders inline, with its description, subtasks and a status move.</p>
     </td>
     <td width="64%">
       <img src="docs/assets/readme/session-summary.png" alt="Session terminal beside the Summary tab showing readiness strip and linked Jira issue" />
@@ -83,15 +83,6 @@ The desktop app is the main control surface: projects on the left, active sessio
     </td>
     <td width="64%">
       <img src="docs/assets/readme/files-changes.png" alt="Files tab with a changed-file tree beside a stacked unified diff" />
-    </td>
-  </tr>
-  <tr>
-    <td width="36%">
-      <h3>Smoke tests a human actually plays</h3>
-      <p>A worker writes a short checklist for what tests cannot cover. You play each case in the Tests tab, record pass/fail/skip, attach a screenshot or clip, then send the results back to the worker or post them to the linked Jira issue.</p>
-    </td>
-    <td width="64%">
-      <img src="docs/assets/readme/smoke-tests.png" alt="Tests tab showing smoke-test cases with verdicts, steps, expected result and evidence dropzone" />
     </td>
   </tr>
   <tr>
@@ -139,14 +130,14 @@ Everything above the line is upstream's product. These are the parts this fork b
 
 **Verifying the work**
 
-- **Smoke-test checklists.** A worker is instructed to author a checklist — name, why it matters, steps, expected result, and the PR and `file:line` it covers — once its own checks pass and before it opens a PR, via `ao smoke set`. You then play the cases in the Tests tab: pass, fail or skip, a note, and evidence images or video with a zoomable lightbox. Results go back to the worker session with one button, or to the linked Jira issue as a comment with the evidence attached. Evidence is stored outside the checkout and purged after 30 days by default. The checklist is prompt-driven guidance, not a gate: nothing blocks a PR that has none, and workers are told to skip it for pure-logic changes.
+- **Testiny runs.** A project that keeps its manual test cases in Testiny names its Testiny project in settings (`ao project set-config <project> --testiny-project MOB`), and its tasks get a **Testiny** tab. The tab lists the test runs linked to the task, read live from Testiny: each case's result with the ones that did not pass first, how many cases a Maestro case script plays, the plan and milestone, and the run's QA Evidence folder with Reveal in Finder. Agents link a run with `ao testiny link`; you can paste a run id or URL in the tab. AO only reads Testiny and stores nothing but the link.
 - **Approval progress.** Where the forge reports approval counts, review surfaces show approved-of-required with a meter, and a project can require a minimum number of approvals before AO calls a session ready to merge. Approval counts come from GitLab only.
 
 **Working with forges and trackers**
 
 - **GitLab merge requests.** MR state, draft status, conflicts, mergeability, approvals, the head pipeline and its individual jobs — including failed jobs past the first page of results. Review threads are read from resolvable MR discussions, and AO can **write** back: reply to a thread, resolve it, and retarget an MR's branch. Opt in per session and a thread resolves itself once your side replies.
 - **Retargeting a PR.** A session's target branch is shown in the inspector with where it came from, and editing it retargets the open pull request or merge request on GitHub or GitLab before anything is stored locally.
-- **Jira.** Browse issues by text, key or raw JQL with assignee, type, done and active-sprint filters, grouped by sprint and nested three levels deep through epics and subtasks. A read-only detail drawer, plus a sanctioned status move. Link an issue to a session and its context renders in the Summary tab, with inline image and video previews. AO writes exactly three things to Jira: a status transition, an attachment, and a comment.
+- **Jira.** Browse issues by text, key or raw JQL with assignee, type, done and active-sprint filters, grouped by sprint and nested three levels deep through epics and subtasks. A read-only detail drawer, plus a sanctioned status move. Link an issue to a session and its context renders in the Summary tab, with inline image and video previews. The only thing AO writes to Jira is a status transition.
 - **Issue intake.** A project can poll its GitHub or GitLab tracker and start one worker session per eligible issue.
 
 **Tuning it per project**

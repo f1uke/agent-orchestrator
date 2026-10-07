@@ -38,8 +38,6 @@ type fakeStore struct {
 	openRuns      map[domain.SessionID]domain.CrewRun
 	runDiscards   map[domain.SessionID]int
 	crewMessages  []domain.CrewMessage
-	smokeChecks   map[domain.SessionID][]domain.SmokeCheck
-	smokeErr      error
 	num           int
 }
 
@@ -62,13 +60,6 @@ func (f *fakeStore) CreateSession(_ context.Context, rec domain.SessionRecord) (
 	rec.ID = domain.SessionID(fmt.Sprintf("%s-%d", rec.ProjectID, f.num))
 	f.sessions[rec.ID] = rec
 	return rec, nil
-}
-
-func (f *fakeStore) ListSmokeChecksBySession(_ context.Context, id domain.SessionID) ([]domain.SmokeCheck, error) {
-	if f.smokeErr != nil {
-		return nil, f.smokeErr
-	}
-	return f.smokeChecks[id], nil
 }
 
 func (f *fakeStore) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
@@ -251,6 +242,15 @@ func (f *fakeStore) LatestCrewMessageFrom(_ context.Context, from domain.Session
 	for i := len(f.crewMessages) - 1; i >= 0; i-- {
 		if f.crewMessages[i].From == from {
 			return f.crewMessages[i], true, nil
+		}
+	}
+	return domain.CrewMessage{}, false, nil
+}
+
+func (f *fakeStore) LatestDeliveredCrewMessageFrom(_ context.Context, from domain.SessionID, since time.Time) (domain.CrewMessage, bool, error) {
+	for i := len(f.crewMessages) - 1; i >= 0; i-- {
+		if m := f.crewMessages[i]; m.From == from && !m.Refused() && !m.CreatedAt.Before(since) {
+			return m, true, nil
 		}
 	}
 	return domain.CrewMessage{}, false, nil

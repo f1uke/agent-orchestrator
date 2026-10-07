@@ -1089,21 +1089,15 @@ func (c *SessionsController) crewSend(w http.ResponseWriter, r *http.Request) {
 	}
 	message := domain.SanitizeControlChars(in.Message)
 	sent, err := c.Svc.SendToCrewmate(ctx, sessionID(r), sessionsvc.CrewSend{
-		Role: in.Role, Message: message, Subject: in.About, StillWorking: in.StillWorking,
+		Role: in.Role, Message: message, Subject: in.About,
 	})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return
 	}
-	// Message is what was DELIVERED, which is not always what was sent: an
-	// incomplete handback carries a line of AO's own (handbackNotice), and the
-	// sender has to see the same text its crewmate got.
 	// SessionID is the RECIPIENT, as it is on every other send: the caller asked
 	// for a role and this is what the role resolved to.
-	resp := SendSessionMessageResponse{OK: true, SessionID: sent.Peer, Message: sent.Message}
-	if sent.Handback.Checked {
-		resp.Handback = &HandbackCompletenessView{Cases: sent.Handback.Cases, NotDriven: sent.Handback.NotDriven}
-	}
+	resp := SendSessionMessageResponse{OK: true, SessionID: sent.Peer, Message: message}
 	if sent.Outcome.Queued {
 		// Held, not delivered - a crewmate that has not been started yet is the
 		// common case, and its mail waits for it.
@@ -1115,7 +1109,7 @@ func (c *SessionsController) crewSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.Delivery = deliveryView(sent.Outcome.Delivery)
-	c.publishActivity(r.Context(), activityEventFromMessage(sent.Peer, sent.Message))
+	c.publishActivity(r.Context(), activityEventFromMessage(sent.Peer, message))
 	envelope.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -1437,8 +1431,8 @@ func (c *SessionsController) getOrchestrator(w http.ResponseWriter, r *http.Requ
 
 // sessionID is the session a request is ABOUT. On a route mounted task-scoped
 // (see TaskScoped) that is the task's dev, so a handler reading a task-owned
-// resource - the pull request, its comments, the review verdicts, the smoke
-// checklist - answers the same whichever crew member's id the path names. Every
+// resource - the pull request, its comments, the review verdicts - answers the
+// same whichever crew member's id the path names. Every
 // other route, and every solo session, gets the path's id unchanged.
 func sessionID(r *http.Request) domain.SessionID {
 	if id, ok := taskScopeOf(r.Context()); ok {
@@ -1622,7 +1616,11 @@ func sessionCrew(s domain.Session) *SessionCrew {
 	// A runtime handle is written by MarkSpawned on the first launch and never
 	// cleared, so it is the durable "this member has been up at least once" fact -
 	// unlike the activity state, which a suspend leaves looking like a fresh row.
-	return &SessionCrew{ID: s.CrewID, Role: s.CrewRole, HasRun: s.Metadata.RuntimeHandleID != "", JoinReason: s.CrewJoinReason}
+	crew := &SessionCrew{ID: s.CrewID, Role: s.CrewRole, HasRun: s.Metadata.RuntimeHandleID != "", JoinReason: s.CrewJoinReason}
+	if h := s.LastHandback; h != nil {
+		crew.LastHandback = &CrewHandbackView{At: h.At, About: h.About}
+	}
+	return crew
 }
 
 // sessionTermination builds the curated ending wire object. It returns nil (so

@@ -22,7 +22,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 // The Playwright web server runs `dev:web` (VITE_NO_ELECTRON=1), so the rail is
 // the deterministic preview fixture from lib/mock-data.ts, which carries one task
 // per live state: demo-stalled's qa is parked (awake), demo-ready's is suspended
-// (asleep), demo-working's never started (asleep), and every other task is solo.
+// (asleep), demo-working's never started (asleep), demo-qa-testing's is running
+// (awake), and every other task is solo.
 
 /** Rows named by their work, as the rail labels them. `Open <name>` is the row's button. */
 const ROWS = {

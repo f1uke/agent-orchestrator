@@ -5,10 +5,10 @@ import { useProjectBranches } from "../hooks/useProjectBranches";
 import { BranchCombobox } from "./BranchCombobox";
 import { formatTimeCompact } from "../lib/format-time";
 import { useSessionScmSummary, type SessionPRSummary } from "../hooks/useSessionScmSummary";
-import { useSessionSmokeChecks } from "../hooks/useSessionSmokeChecks";
-import { progressFor } from "../lib/smoke-test";
+import { useSessionCrewRuns } from "../hooks/useSessionCrewRuns";
 import { deriveReadiness } from "../lib/readiness";
 import { ReadinessStrip } from "./ReadinessStrip";
+import { CrewRunStrip } from "./CrewRunStrip";
 import {
 	isArchivedPRState,
 	prBrowserUrl,
@@ -25,8 +25,8 @@ import { ReviewsView, type FileDiffTarget } from "./ReviewsView";
 import { FilesPanel, type ChangedFileTarget, type WorktreeFile } from "./FilesPanel";
 import type { SearchHit } from "./SearchResultsList";
 import { taskKeyOf } from "../lib/task-key";
-import { SmokeTestView } from "./SmokeTestView";
 import { SimulatorPanel } from "./SimulatorPanel";
+import { TestinyView } from "./TestinyView";
 import { JiraIssueSection } from "./JiraIssueSection";
 import { ProviderBadge } from "./ProviderBadge";
 import { Badge } from "./ui/badge";
@@ -35,7 +35,7 @@ import { PRSummaryMeta, PRSummaryParts } from "./PRSummaryDisplay";
 
 type OpenReviewerTerminal = (target: { handleId: string; harness: string }) => void;
 
-export type InspectorView = "summary" | "reviews" | "files" | "tests" | "browser" | "simulator";
+export type InspectorView = "summary" | "reviews" | "files" | "testiny" | "browser" | "simulator";
 
 const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 	{
@@ -73,11 +73,13 @@ const VIEWS: { id: InspectorView; label: string; icon: ReactNode }[] = [
 		),
 	},
 	{
-		id: "tests",
-		label: "Tests",
+		id: "testiny",
+		label: "Testiny",
 		icon: (
 			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-				<path d="M20 6 9 17l-5-5" />
+				<rect x="5" y="4" width="14" height="17" rx="2" />
+				<path d="M9 4V3h6v1" />
+				<path d="m9 12.5 2 2 4-4" />
 			</svg>
 		),
 	},
@@ -115,13 +117,14 @@ const prStateTone: Record<SessionPRSummary["state"], string> = {
 };
 
 /**
- * Tabbed inspector rail beside the terminal (Summary · Reviews · Browser).
+ * Tabbed inspector rail beside the terminal (Summary · Reviews · Files · Testiny · Device · Browser).
  */
 export function SessionInspector({
 	session,
 	onOpenReviewerTerminal,
 	hasWebUI = false,
 	hasIOSSimulator = false,
+	testinyProject,
 	browserPoppedOut = false,
 	isInspectorVisible = true,
 	onToggleBrowserPopOut,
@@ -154,6 +157,11 @@ export function SessionInspector({
 	 * ever be empty.
 	 */
 	hasIOSSimulator?: boolean;
+	/**
+	 * The project's Testiny project (ProjectConfig.testinyProject). Only a project
+	 * that keeps its manual test cases in Testiny gets the Testiny tab.
+	 */
+	testinyProject?: string;
 	browserPoppedOut?: boolean;
 	isInspectorVisible?: boolean;
 	onToggleBrowserPopOut?: (next: boolean) => void;
@@ -197,6 +205,7 @@ export function SessionInspector({
 		if (v.id === "files") return showFiles;
 		if (v.id === "browser") return hasWebUI;
 		if (v.id === "simulator") return hasIOSSimulator;
+		if (v.id === "testiny") return Boolean(testinyProject);
 		return true;
 	});
 	// The requested tab can name a view this session does not show: a remembered
@@ -252,8 +261,6 @@ export function SessionInspector({
 					// reviewer strip + auto-send, scrolling per-PR list, pinned batch
 					// bar), so it renders flush.
 					view === "reviews" && "session-inspector__body--reviews",
-					// The Tests tab (smoke checklist) owns the same full-height layout.
-					view === "tests" && "session-inspector__body--tests",
 					// Files owns its own scroll (segmented control + summary pinned,
 					// list scrolling beneath), so it renders flush too.
 					view === "files" && "session-inspector__body--files",
@@ -286,8 +293,8 @@ export function SessionInspector({
 						reveal={revealInTree}
 					/>
 				) : null}
-				{view === "tests" ? (
-					<SmokeTestView sessionId={session.id} worker={session.title} issueId={session.issueId} />
+				{view === "testiny" && testinyProject ? (
+					<TestinyView key={taskKeyOf(session)} project={testinyProject} session={session} />
 				) : null}
 				{/* The Simulator panel stays mounted while its tab is off so the chosen
 				    device survives a trip to another tab - with two simulators booted
@@ -347,15 +354,13 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 	const query = useSessionScmSummary(session.id);
 	const prSummaries = sessionPRDisplaySummaries(session, query.data);
 	// Readiness strip: the "how far along, ready to merge?" verdict + gate row,
-	// derived purely from the PR summaries + the smoke rollup + session activity.
+	// derived purely from the PR summaries + session activity.
 	// Skipped for prepared TODOs and orchestrator sessions (no merge pipeline).
-	const smokeQuery = useSessionSmokeChecks(session.id, session.title);
-	const readiness = deriveReadiness(
-		session,
-		prSummaries,
-		progressFor(smokeQuery.data?.checks ?? []),
-		smokeQuery.data?.standDown ?? null,
-	);
+	const readiness = deriveReadiness(session, prSummaries);
+	// Machine runs answer "can this task's build/test results be trusted", a
+	// merge-readiness question, so they sit right under the strip. They are the
+	// whole task's, so dev sees qa's runs and qa sees dev's.
+	const crewRuns = useSessionCrewRuns(taskKeyOf(session));
 	const showReadiness = session.kind !== "orchestrator" && !session.isTodo;
 	// Pin the still-actionable PRs/MRs (open, draft) to the top — they're what
 	// needs attention — and sink merged/closed ones into a de-emphasized "archive"
@@ -377,6 +382,8 @@ function SummaryView({ session }: { session: WorkspaceSession }) {
 	return (
 		<div role="tabpanel">
 			{showReadiness ? <ReadinessStrip readiness={readiness} /> : null}
+
+			<CrewRunStrip runs={crewRuns.data?.runs ?? []} />
 
 			<EndingSection termination={session.termination} />
 

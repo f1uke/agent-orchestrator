@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test";
 
+// The titlebar arrows exist only on macOS (TitlebarNav renders nothing
+// elsewhere), and CI runs on Linux: present as a Mac so the spec tests the
+// arrows wherever it runs instead of failing to find them.
+test.use({
+	userAgent:
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+});
+
 // Repro for the titlebar history arrows: navigate home → project → back,
 // then the forward arrow must be enabled and actually traverse forward.
 test("titlebar back/forward arrows traverse history", async ({ page }) => {

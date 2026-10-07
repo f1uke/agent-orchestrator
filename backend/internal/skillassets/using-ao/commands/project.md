@@ -160,6 +160,7 @@ ao project set-config <id> [flags]
 | `--post-create stringArray` | Command to run after workspace creation (repeatable) | - |
 | `--session-prefix string` | Displayed session-id prefix | - |
 | `--symlink stringArray` | Repo-relative path to symlink into workspaces (repeatable) | - |
+| `--testiny-project string` | The Testiny project that holds this project's manual test cases: its key (`project_key` in `testiny project ls`, e.g. `MOB`), name or id; `""` turns it off | off |
 | `--tracker-assignee string` | Issue assignee required for intake eligibility | - |
 | `--tracker-intake` | Enable issue-tracker intake for matching issues | off |
 | `--tracker-provider string` | Issue-tracker provider: `github` or `gitlab` | `github` |
@@ -188,4 +189,4 @@ ao project set-config nter-android-app --mobile-scripts nter --mobile-platform a
 ao project set-config nter-ios-app --mobile-scripts ""     # turn it off
 ```
 
-The setting reaches the NEXT worker spawned (or restored) in that project: its prompt then teaches the script workflow in place of step-by-step `ao sim` driving, and its qa plays smoke cases with scripts. A project that does not set it is unchanged.
+The setting reaches the NEXT worker spawned (or restored) in that project: its prompt then teaches the script workflow in place of step-by-step `ao sim` driving, and its qa drives its checks with scripts. A project that does not set it is unchanged.

@@ -6,8 +6,8 @@
 // below (the pattern native-notifications.ts uses), so every rule here — off by
 // default, click-through, the band above the Dock, one window not two, letting go
 // of a window that closed itself — is unit-testable without launching Electron.
-// What CANNOT be proven from here is that macOS honours the flags; that is what
-// the human smoke checklist is for.
+// What CANNOT be proven from here is that macOS honours the flags; that takes a
+// person looking at the real overlay.
 
 import { COMPANION_CONTENT_HEIGHT } from "../companion/layout";
 

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { CrewRunStrip } from "./CrewRunStrip";
@@ -25,7 +25,7 @@ const discarded = (id: string, over: Partial<CrewRun> = {}) =>
 describe("CrewRunStrip", () => {
 	// The "must not change" guarantee, on screen: a session that has never
 	// bracketed a run - every solo session, and every project that does not use
-	// the bracket - gets exactly the Tests tab it had before this existed.
+	// the bracket - gets exactly the Summary tab it had before this existed.
 	it("renders nothing at all when the session never bracketed a run", () => {
 		const { container } = render(<CrewRunStrip runs={[]} />);
 		expect(container).toBeEmptyDOMElement();
@@ -72,6 +72,38 @@ describe("CrewRunStrip", () => {
 		rerender(<CrewRunStrip runs={[discarded("c"), discarded("b"), discarded("a")]} />);
 		expect(screen.getByText(/3 runs discarded in a row/)).toBeInTheDocument();
 		expect(screen.getByText(/Pause the other member/)).toBeInTheDocument();
+	});
+
+	it("tags each run with the member that made it when the task has a crew", () => {
+		render(
+			<CrewRunStrip
+				runs={[
+					discarded("q1", { sessionId: "s1-qa", crewId: "s1", role: "qa", label: "maestro test" }),
+					run({ id: "d1", endedAt: "2026-08-21T10:01:00Z", outcome: "trusted", result: "pass", role: "dev" }),
+				]}
+			/>,
+		);
+		const rows = screen.getAllByTestId("crew-run-row");
+		expect(rows.map((row) => within(row).getByTestId("crew-run-role").textContent)).toEqual(["qa", "dev"]);
+	});
+
+	it("draws no member tag on a solo task's runs", () => {
+		render(<CrewRunStrip runs={[run({ id: "a", endedAt: "2026-08-21T10:01:00Z", outcome: "trusted" })]} />);
+		expect(screen.getByTestId("crew-run-row")).toBeInTheDocument();
+		expect(screen.queryByTestId("crew-run-role")).not.toBeInTheDocument();
+	});
+
+	it("names the member whose runs keep being discarded, not the other one's quiet runs", () => {
+		const qa = { sessionId: "s1-qa", role: "qa" as const };
+		const devPass = (id: string) =>
+			run({ id, endedAt: "2026-08-21T10:01:00Z", outcome: "trusted", result: "pass", role: "dev" });
+		render(
+			<CrewRunStrip
+				runs={[discarded("q3", qa), devPass("d2"), discarded("q2", qa), devPass("d1"), discarded("q1", qa)]}
+			/>,
+		);
+		expect(screen.getByText(/3 of qa's runs discarded in a row/)).toBeInTheDocument();
+		expect(screen.getByText(/so qa gets a quiet tree/)).toBeInTheDocument();
 	});
 
 	it("shows an open run as running", () => {

@@ -160,9 +160,9 @@ func TestSessionCrew_OneDevPerCrewIsEnforcedByTheDatabase(t *testing.T) {
 // caller can step around - so the invariant lives in the database.
 //
 // A TERMINATED qa still holds the seat: standing qa down is how an attach is
-// undone, and its id stays referenced by smoke_check rows, their evidence
-// directories and review_run rows. A second qa row would leave those pointing at
-// a stranger; `ao session restore` brings the SAME id back instead.
+// undone, and its id stays referenced by review_run rows. A second qa row would
+// leave those pointing at a stranger; `ao session restore` brings the SAME id
+// back instead.
 func TestSessionCrew_OneMemberPerRoleIsEnforcedByTheDatabase(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -5,8 +5,7 @@
 // its worktree and its stored runtime handle, but its tmux is gone. Handing
 // that handle to the runtime types the message at a pane that no longer exists,
 // which fails the send and loses the message - and the senders that hurt most
-// are not humans. The comment nudge, the CI nudge and the smoke report-back fire
-// once and move on.
+// are not humans. The comment nudge and the CI nudge fire once and move on.
 //
 // Two properties do the real work here:
 //

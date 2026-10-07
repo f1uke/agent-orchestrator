@@ -122,21 +122,6 @@ func (c *commandContext) doJSONPath(ctx context.Context, method, path string, bo
 	return c.sendDaemonRequest(req, out)
 }
 
-// postBytes streams a raw body to POST /api/v1/<path> with an explicit content
-// type - the daemon's non-multipart upload path (see readEvidenceUpload). The
-// CLI uses it rather than multipart because it has one file and no form.
-func (c *commandContext) postBytes(ctx context.Context, path, contentType, filename string, body io.Reader, out any) error {
-	req, err := c.newDaemonRequest(ctx, http.MethodPost, "/api/v1/"+path, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", contentType)
-	if filename != "" {
-		req.Header.Set("X-Filename", filename)
-	}
-	return c.sendDaemonRequest(req, out)
-}
-
 // newDaemonRequest resolves the running daemon and builds a request against it,
 // failing with the "not running" guidance rather than a connection dump.
 func (c *commandContext) newDaemonRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {

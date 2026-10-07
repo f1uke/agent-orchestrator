@@ -1,18 +1,17 @@
 package controllers
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
-	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
@@ -68,27 +67,11 @@ type RefLinksService interface {
 	Set(reflinks.Settings) error
 }
 
-// EvidenceRetentionService is the evidence-retention settings store surface the
-// controller needs. *evidenceretention.Store satisfies this directly.
-type EvidenceRetentionService interface {
-	Get() evidenceretention.Settings
-	Set(evidenceretention.Settings) error
-}
-
 // SimTrustSettingsService is the sim-trust settings store surface the controller
 // needs. *simtrust.Store satisfies this directly.
 type SimTrustSettingsService interface {
 	Get() simtrust.Settings
 	Set(simtrust.Settings) error
-}
-
-// EvidenceSweeper runs the age-based evidence retention sweep on demand (the
-// manual trigger), reading the current TTL and purging expired blobs + rows. It
-// returns how many items were removed and how many bytes that freed. The daemon
-// provides a concrete implementation that shares the exact sweep the periodic
-// background job runs.
-type EvidenceSweeper interface {
-	SweepEvidenceNow(ctx context.Context) (purged int, freedBytes int64, err error)
 }
 
 // SystemPromptsService is the prompt-override store surface the controller needs.
@@ -111,17 +94,15 @@ type MessageTemplatesService interface {
 // routes registered but returns OpenAPI-backed 501s, matching every other
 // controller in this package.
 type SettingsController struct {
-	Svc               SettingsService
-	SpawnConfirm      SpawnConfirmService
-	AutoNudge         AutoNudgeService
-	ResponseLanguage  ResponseLanguageService
-	Wiki              WikiSettingsService
-	RefLinks          RefLinksService
-	SimTrust          SimTrustSettingsService
-	EvidenceRetention EvidenceRetentionService
-	EvidenceSweeper   EvidenceSweeper
-	SystemPrompts     SystemPromptsService
-	MessageTemplates  MessageTemplatesService
+	Svc              SettingsService
+	SpawnConfirm     SpawnConfirmService
+	AutoNudge        AutoNudgeService
+	ResponseLanguage ResponseLanguageService
+	Wiki             WikiSettingsService
+	RefLinks         RefLinksService
+	SimTrust         SimTrustSettingsService
+	SystemPrompts    SystemPromptsService
+	MessageTemplates MessageTemplatesService
 }
 
 // Register mounts the settings routes on the supplied router.
@@ -142,9 +123,6 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/sim-trust", c.setSimTrust)
 	r.Get("/settings/ref-links", c.getRefLinks)
 	r.Put("/settings/ref-links", c.setRefLinks)
-	r.Get("/settings/evidence-retention", c.getEvidenceRetention)
-	r.Put("/settings/evidence-retention", c.setEvidenceRetention)
-	r.Post("/settings/evidence-retention/sweep", c.sweepEvidenceRetention)
 	r.Get("/settings/prompts", c.getPrompts)
 	r.Put("/settings/prompts/{kind}", c.setPrompt)
 	r.Delete("/settings/prompts/{kind}", c.clearPrompt)
@@ -470,46 +448,6 @@ func refLinksSettingsResponse(s reflinks.Settings) RefLinksSettingsResponse {
 	}
 }
 
-func (c *SettingsController) getEvidenceRetention(w http.ResponseWriter, r *http.Request) {
-	if c.EvidenceRetention == nil {
-		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/evidence-retention")
-		return
-	}
-	s := c.EvidenceRetention.Get()
-	envelope.WriteJSON(w, http.StatusOK, EvidenceRetentionSettingsResponse{Enabled: s.Enabled, MaxAgeDays: s.MaxAgeDays})
-}
-
-func (c *SettingsController) setEvidenceRetention(w http.ResponseWriter, r *http.Request) {
-	if c.EvidenceRetention == nil {
-		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/evidence-retention")
-		return
-	}
-	var in SetEvidenceRetentionSettingsRequest
-	if err := decodeJSON(r, &in); err != nil {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
-		return
-	}
-	next := evidenceretention.Settings{Enabled: in.Enabled, MaxAgeDays: in.MaxAgeDays}
-	if err := c.EvidenceRetention.Set(next); err != nil {
-		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
-		return
-	}
-	envelope.WriteJSON(w, http.StatusOK, EvidenceRetentionSettingsResponse{Enabled: next.Enabled, MaxAgeDays: next.MaxAgeDays})
-}
-
-func (c *SettingsController) sweepEvidenceRetention(w http.ResponseWriter, r *http.Request) {
-	if c.EvidenceSweeper == nil {
-		apispec.NotImplemented(w, r, "POST", "/api/v1/settings/evidence-retention/sweep")
-		return
-	}
-	purged, freed, err := c.EvidenceSweeper.SweepEvidenceNow(r.Context())
-	if err != nil {
-		envelope.WriteAPIError(w, r, http.StatusInternalServerError, "internal", "EVIDENCE_SWEEP_FAILED", "Evidence retention sweep failed", nil)
-		return
-	}
-	envelope.WriteJSON(w, http.StatusOK, EvidenceRetentionSweepResponse{Purged: purged, FreedBytes: freed})
-}
-
 func (c *SettingsController) getPrompts(w http.ResponseWriter, r *http.Request) {
 	if c.SystemPrompts == nil {
 		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/prompts")
@@ -522,10 +460,23 @@ func (c *SettingsController) getPrompts(w http.ResponseWriter, r *http.Request) 
 		if v, ok := ov.Base[k]; ok {
 			v := v
 			item.Override = &v
+			if mentionsRemovedCommand(v) {
+				item.Warnings = []string{"This saved prompt mentions commands AO no longer has. Reset it or edit it."}
+			}
 		}
 		items = append(items, item)
 	}
 	envelope.WriteJSON(w, http.StatusOK, SystemPromptsResponse{Prompts: items})
+}
+
+// removedCommandMarkers are phrases only the removed smoke system taught. A
+// saved override is a copy of an old default, so it keeps teaching them until
+// the human resets or edits it.
+var removedCommandMarkers = []string{"ao smoke", "tests tab", "--still-working", "stand-down"}
+
+func mentionsRemovedCommand(prompt string) bool {
+	lower := strings.ToLower(prompt)
+	return slices.ContainsFunc(removedCommandMarkers, func(m string) bool { return strings.Contains(lower, m) })
 }
 
 func (c *SettingsController) setPrompt(w http.ResponseWriter, r *http.Request) {

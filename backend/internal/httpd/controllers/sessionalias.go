@@ -30,7 +30,7 @@ type SessionAliasResolver interface {
 // Claude Code names every session after its worktree directory plus a random
 // suffix and shows the agent THAT name, so an agent asked to identify itself
 // answers with something like "mobility-4734-chat-unsafe-url-whitelist-f5".
-// Pasted into `ao send` or `ao smoke list` it resolves to nothing, and the
+// Pasted into `ao send` or `ao session get` it resolves to nothing, and the
 // message goes nowhere. This resolves it to the AO session that owns the same
 // tmux pane and rewrites the path parameter, so every session route - and
 // TaskScoped, which runs after this - sees an ordinary AO id.

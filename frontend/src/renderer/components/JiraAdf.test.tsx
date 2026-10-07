@@ -165,7 +165,7 @@ describe("JiraAdf inline media (with JiraMediaProvider)", () => {
 	it("opens the shared lightbox on click", async () => {
 		renderWithProvider([{ id: "173517", filename: "shot.png", mimeType: "image/png" }]);
 		fireEvent.click(await screen.findByRole("button", { name: /View shot\.png/i }));
-		expect(await screen.findByLabelText(/Evidence viewer/i)).toBeInTheDocument();
+		expect(await screen.findByLabelText(/Media viewer/i)).toBeInTheDocument();
 	});
 
 	it("falls back to the filename chip when no attachment matches", () => {

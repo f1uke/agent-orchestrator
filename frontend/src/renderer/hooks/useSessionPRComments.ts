@@ -4,6 +4,8 @@ import { apiClient, apiErrorMessage } from "../lib/api-client";
 
 export type PRCommentGroup = components["schemas"]["SessionPRCommentGroup"];
 
+const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
+
 /**
  * Shared prefix for the per-session PR-comments query key. Invalidating this
  * prefix (via the CDC event transport) matches every session's comment query so
@@ -14,7 +16,8 @@ export const sessionPRCommentsQueryPrefix = ["session-pr-comments"] as const;
 export function useSessionPRComments(sessionId: string) {
 	return useQuery({
 		queryKey: [...sessionPRCommentsQueryPrefix, sessionId],
-		enabled: Boolean(sessionId),
+		// The preview has no daemon to ask; ReviewsView draws its mock threads.
+		enabled: Boolean(sessionId) && !usePreviewData,
 		queryFn: async () => {
 			const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}/pr-comments", {
 				params: { path: { sessionId } },

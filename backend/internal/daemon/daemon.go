@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/activity"
 	jiraadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
+	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
@@ -26,7 +27,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemonlog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
-	"github.com/aoagents/agent-orchestrator/backend/internal/evidenceretention"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/inputgate"
@@ -51,6 +51,7 @@ import (
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
+	testinysvc "github.com/aoagents/agent-orchestrator/backend/internal/service/testiny"
 	wikisvc "github.com/aoagents/agent-orchestrator/backend/internal/service/wiki"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simgesture"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simstream"
@@ -357,11 +358,9 @@ func Run() error {
 		return fmt.Errorf("spawn-confirm settings: %w", err)
 	}
 
-	// One jira client backs the display read, the status transitions, cross-project
-	// search, AND the smoke-results comment/attachment write — all over Jira Cloud
-	// REST v3 (a single API-token auth path). It satisfies IssueReader,
-	// TransitionMover, IssueSearcher, and smoke's JiraPoster. Built before the
-	// session service so the smoke service can take it as its Jira write seam.
+	// One jira client backs the display read, the status transitions and
+	// cross-project search, all over Jira Cloud REST v3 (a single API-token auth
+	// path). It satisfies IssueReader, TransitionMover and IssueSearcher.
 	jiraClient := jiraadapter.NewClient()
 
 	// Wire the controller-facing session service over the same store + LCM, the
@@ -387,7 +386,7 @@ func Run() error {
 	// counter per worktree: qa's `ao crew run` bracket, and a review pass over a
 	// crew's shared checkout.
 	treeWatchers := treewatch.NewRegistry(treewatch.Options{Logger: log})
-	sessionSvc, reviewSvc, smokeSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, jiraClient, reclaimSettings.Get, treeWatchers, log)
+	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, reclaimSettings.Get, treeWatchers, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -425,27 +424,6 @@ func Run() error {
 		return fmt.Errorf("reclaim log: %w", err)
 	}
 	reclaimerDone := startReclaimer(ctx, sessionSvc, reclaimSettings, reclaimAudit, filepath.Join(cfg.DataDir, "worktrees"), loopReg, log)
-
-	// Evidence retention: a settings-backed store + sweeper that purges smoke-test
-	// evidence blobs older than the configured TTL (default 30 days, from each
-	// row's created_at). Constructed here so a settings-store failure is cleaned up
-	// the same way as above. The sweeper is shared by the manual-trigger endpoint
-	// and the periodic background sweep started below.
-	evidenceRetentionSettings, err := evidenceretention.NewStore(cfg.DataDir)
-	if err != nil {
-		stop()
-		lcStack.Stop()
-		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
-			log.Error("cdc pipeline shutdown", "err", cdcErr)
-		}
-		return fmt.Errorf("evidence retention settings: %w", err)
-	}
-	evidenceSweep := &evidenceSweeper{
-		settings: evidenceRetentionSettings,
-		purge:    smokeSvc.PurgeEvidenceOlderThan,
-		clock:    func() time.Time { return time.Now().UTC() },
-		log:      log,
-	}
 
 	// The run bracket that reads the tree-write detector. Runs left open by a
 	// previous process are closed as UNCERTIFIED at boot: their watchers died with
@@ -534,7 +512,7 @@ func Run() error {
 		Sessions:           sessionSvc,
 		Jira:               jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
 		Reviews:            reviewSvc,
-		Smoke:              smokeSvc,
+		Testiny:            testinysvc.New(testinyadapter.New(testinyadapter.Options{}), store, store, testinysvc.Options{}),
 		CrewRuns:           crewRunSvc,
 		Children:           childSvc,
 		Sim:                simSvc,
@@ -560,8 +538,6 @@ func Run() error {
 		RefLinks:           refLinkSettings,
 		SimTrust:           simTrustSettings,
 		Wiki:               wikiSvc,
-		EvidenceRetention:  evidenceRetentionSettings,
-		EvidenceSweeper:    evidenceSweep,
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
 		LoopTelemetry:      loopReg,
@@ -733,24 +709,12 @@ func Run() error {
 		return sessMgr.SyncOrchestratorWorkspaces(ctx)
 	}, log)
 
-	// Age-based evidence retention: periodic sweep (plus an immediate first run)
-	// that purges evidence past the configured TTL. Self-disables via settings, so
-	// it always starts; a disabled policy just makes each tick a no-op.
-	evidenceRec := loopReg.Register(looptelemetry.Spec{
-		Name:        "evidence-sweep",
-		Display:     "Evidence TTL purge",
-		Description: "Purges smoke-test evidence blobs older than the retention TTL.",
-		Interval:    evidenceSweepIntervalDefault,
-	})
-	evidenceSweepDone := startEvidenceRetentionSweep(ctx, evidenceSweepIntervalDefault, func(ctx context.Context) error {
-		evidenceRec.Tick()
-		_, _, err := evidenceSweep.SweepEvidenceNow(ctx)
-		return err
-	}, log)
-
 	// One-off, idempotent: move the planning docs the old data-dir-relative
 	// knowledge store stranded under <dataDir>/knowledge into the real store.
 	knowledgeMigrationDone := startKnowledgeMigration(ctx, cfg, store, log)
+	// One-off, idempotent: delete the evidence tree and retention settings the
+	// removed smoke system left in the data dir.
+	legacySmokeCleanupDone := startLegacySmokeCleanup(cfg, log)
 
 	runErr := srv.Run(ctx)
 
@@ -770,8 +734,8 @@ func Run() error {
 	<-queueSweepDone
 	<-simOwnerSyncDone
 	<-orchSyncDone
-	<-evidenceSweepDone
 	<-knowledgeMigrationDone
+	<-legacySmokeCleanupDone
 	<-reclaimerDone
 	<-tokenUsageDone
 	<-learnCaptureDone

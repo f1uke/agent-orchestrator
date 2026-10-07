@@ -8,7 +8,7 @@ import { useWorkspaceQuery } from "./useWorkspaceQuery";
  *
  * The session view is addressed by SESSION (the route names one), but almost
  * everything it draws around the terminal is a fact about the TASK: one
- * worktree, one branch, one pull request, one checklist. This is the bridge
+ * worktree, one branch, one pull request. This is the bridge
  * between the two, and it answers a solo session with a task of one — the same
  * identity `CrewDevOf` relies on in the daemon — so every caller can be written
  * once and be correct for both.

@@ -16,6 +16,16 @@ SELECT id, session_id, project_id, crew_id, role, worktree_path, kind, label, at
     head_sha, created_at, updated_at
 FROM crew_run WHERE session_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?;
 
+-- name: ListCrewRunsByTask :many
+-- Every member's runs for one task, newest first. A crew stamps the task id
+-- (dev's session id) on each run as crew_id; dev's runs from before the crew
+-- formed carry none, so they are matched by dev's own session id.
+SELECT id, session_id, project_id, crew_id, role, worktree_path, kind, label, attempt, detector,
+    detector_reason, gen_at_start, gen_at_end, started_at, ended_at, outcome, result, changed_paths,
+    head_sha, created_at, updated_at
+FROM crew_run WHERE session_id = sqlc.arg(task_id) OR crew_id = sqlc.arg(task_id)
+ORDER BY started_at DESC, rowid DESC LIMIT sqlc.arg(row_limit);
+
 -- name: GetOpenCrewRunForSession :one
 -- The newest still-open run. This IS the "qa is running right now" signal.
 SELECT id, session_id, project_id, crew_id, role, worktree_path, kind, label, attempt, detector,

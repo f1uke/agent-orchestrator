@@ -33,7 +33,7 @@ var (
 	ErrNotFound = errors.New("crewrun: not found")
 )
 
-// historyDepth is how many runs the Tests tab is shown.
+// historyDepth is how many runs the Summary tab's Machine runs list shows.
 const historyDepth = 20
 
 // Store is the persistence surface this service owns.
@@ -43,6 +43,7 @@ type Store interface {
 	EndCrewRun(ctx context.Context, run domain.CrewRun) (domain.CrewRun, bool, error)
 	GetCrewRun(ctx context.Context, id string) (domain.CrewRun, bool, error)
 	ListCrewRunsForSession(ctx context.Context, id domain.SessionID, limit int) ([]domain.CrewRun, error)
+	ListCrewRunsForTask(ctx context.Context, taskID domain.SessionID, limit int) ([]domain.CrewRun, error)
 	OpenCrewRunForSession(ctx context.Context, id domain.SessionID) (domain.CrewRun, bool, error)
 	ConsecutiveCrewRunDiscards(ctx context.Context, id domain.SessionID) (int, error)
 	OpenCrewRunsForCrewmates(ctx context.Context, crewID, self domain.SessionID) ([]domain.CrewRun, error)
@@ -59,6 +60,7 @@ type Manager interface {
 	Start(ctx context.Context, sessionID domain.SessionID, in StartInput) (StartResult, error)
 	End(ctx context.Context, sessionID domain.SessionID, in EndInput) (EndResult, error)
 	List(ctx context.Context, sessionID domain.SessionID) ([]domain.CrewRun, error)
+	ListTask(ctx context.Context, taskID domain.SessionID) ([]domain.CrewRun, error)
 }
 
 // StartInput is what the member says about the run it is about to make.
@@ -450,6 +452,33 @@ func (s *Service) headSHA(ctx context.Context, worktree string) string {
 // List returns the session's runs, newest first.
 func (s *Service) List(ctx context.Context, sessionID domain.SessionID) ([]domain.CrewRun, error) {
 	return s.store.ListCrewRunsForSession(ctx, sessionID, historyDepth)
+}
+
+// ListTask returns the runs of every member of the task whose id is taskID
+// (dev's session id), newest first. The depth is shared across members: the
+// strip is one timeline of the task's machine, and the newest runs are what a
+// person reads whichever member made them.
+//
+// In a crew every run names its member. Dev's runs from before qa joined were
+// stamped with no role, because dev was solo then; they are dev's all the same.
+func (s *Service) ListTask(ctx context.Context, taskID domain.SessionID) ([]domain.CrewRun, error) {
+	runs, err := s.store.ListCrewRunsForTask(ctx, taskID, historyDepth)
+	if err != nil {
+		return nil, err
+	}
+	task, ok, err := s.store.GetSession(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || !task.InCrew() {
+		return runs, nil
+	}
+	for i := range runs {
+		if runs[i].Role == "" {
+			runs[i].Role = domain.CrewRoleDev
+		}
+	}
+	return runs, nil
 }
 
 // ReconcileOpenRuns closes brackets left open by a previous process. Called once

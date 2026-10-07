@@ -13,7 +13,9 @@ const buttonVariants = cva(
 				primary: "border border-primary bg-primary text-primary-foreground hover:opacity-90",
 				outline: "border border-border bg-background text-foreground hover:bg-surface",
 				secondary: "bg-raised text-muted-foreground hover:text-foreground",
-				ghost: "text-muted-foreground hover:bg-surface hover:text-foreground",
+				// A translucent wash, not a surface colour: ghost buttons sit on the page,
+				// on cards and in dialogs, and an opaque one vanishes on the surface it equals.
+				ghost: "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
 			},
 			size: {
 				default: "h-8 px-3",

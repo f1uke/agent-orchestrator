@@ -80,6 +80,20 @@ func (f *fakeStore) ListCrewRunsForSession(_ context.Context, id domain.SessionI
 	return out, nil
 }
 
+// Mirrors the real query: dev's own runs (from before the crew formed too) and
+// every run stamped with the task's crew id.
+func (f *fakeStore) ListCrewRunsForTask(_ context.Context, task domain.SessionID, _ int) ([]domain.CrewRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []domain.CrewRun{}
+	for i := len(f.runs) - 1; i >= 0; i-- {
+		if f.runs[i].SessionID == task || f.runs[i].CrewID == task {
+			out = append(out, f.runs[i])
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) OpenCrewRunForSession(_ context.Context, id domain.SessionID) (domain.CrewRun, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -560,5 +574,48 @@ func TestConcurrentStartsLeaveExactlyOneRunOpen(t *testing.T) {
 	store.mu.Unlock()
 	if open != 1 {
 		t.Fatalf("%d runs left open out of %d, want exactly 1", open, total)
+	}
+}
+
+// A crew's Machine runs read the same from either member, and every run names
+// the member that made it - dev's runs from before qa joined included, which
+// were stamped with no role because dev was solo then.
+func TestListTaskTagsEveryRunWithItsMember(t *testing.T) {
+	dev := domain.SessionRecord{ID: "ao-230", CrewID: "ao-230", CrewRole: domain.CrewRoleDev}
+	store := newFakeStore(dev)
+	store.runs = []domain.CrewRun{
+		{ID: "dev-solo", SessionID: "ao-230"},
+		{ID: "qa-1", SessionID: "ao-231", CrewID: "ao-230", Role: domain.CrewRoleQA},
+		{ID: "elsewhere", SessionID: "ao-300"},
+	}
+	svc := New(Options{Store: store})
+
+	runs, err := svc.ListTask(context.Background(), "ao-230")
+	if err != nil {
+		t.Fatalf("ListTask: %v", err)
+	}
+	got := map[string]domain.CrewRole{}
+	for _, r := range runs {
+		got[r.ID] = r.Role
+	}
+	want := map[string]domain.CrewRole{"qa-1": domain.CrewRoleQA, "dev-solo": domain.CrewRoleDev}
+	if len(got) != len(want) || got["qa-1"] != want["qa-1"] || got["dev-solo"] != want["dev-solo"] {
+		t.Fatalf("task runs = %v, want %v", got, want)
+	}
+}
+
+// A solo task has no members to tell apart, so its runs carry no role and the
+// strip draws no tags.
+func TestListTaskLeavesASoloTaskUntagged(t *testing.T) {
+	store := newFakeStore(domain.SessionRecord{ID: "ao-40"})
+	store.runs = []domain.CrewRun{{ID: "r1", SessionID: "ao-40"}}
+	svc := New(Options{Store: store})
+
+	runs, err := svc.ListTask(context.Background(), "ao-40")
+	if err != nil {
+		t.Fatalf("ListTask: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Role != "" {
+		t.Fatalf("solo runs = %+v, want one untagged run", runs)
 	}
 }

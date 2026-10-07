@@ -115,36 +115,11 @@ type SessionIDParam struct {
 	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
 }
 
-// SmokeCheckParam is the {sessionId}/{checkId} path parameters for the
-// per-case smoke routes.
-type SmokeCheckParam struct {
-	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
-	CheckID   string `path:"checkId" description:"Smoke-check case identifier."`
-}
-
-// SmokeEvidenceUploadParam is SmokeCheckParam plus the provenance of the file
-// being attached. It rides on the query string because the upload has two body
-// shapes (multipart and raw bytes); a provenance carried in only one of them
-// would be a hole.
-type SmokeEvidenceUploadParam struct {
-	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
-	CheckID   string `path:"checkId" description:"Smoke-check case identifier."`
-	Source    string `query:"source,omitempty" description:"Who attached it: user (default) or agent. Agent files land in the case's separate agentEvidence list so provenance is never ambiguous."`
-}
-
 // SimLeaseParam is the {sessionId}/{udid} path parameters for releasing a
 // simulator device lease.
 type SimLeaseParam struct {
 	SessionID string `path:"sessionId" description:"Session identifier, e.g. project-1."`
 	UDID      string `path:"udid" description:"Simulator udid (matched case-insensitively)."`
-}
-
-// SmokeEvidenceParam is the {sessionId}/{checkId}/{evidenceId} path parameters
-// for serving a stored evidence blob.
-type SmokeEvidenceParam struct {
-	SessionID  string `path:"sessionId" description:"Session identifier, e.g. project-1."`
-	CheckID    string `path:"checkId" description:"Smoke-check case identifier."`
-	EvidenceID string `path:"evidenceId" description:"Evidence blob identifier."`
 }
 
 // ListSessionsQuery is the query string accepted by GET /api/v1/sessions.
@@ -266,7 +241,7 @@ type SessionCrew struct {
 	//
 	// It is on the wire because absence of evidence and evidence of absence look
 	// identical without it: a qa that ran and found nothing worth a human's time
-	// leaves the same EMPTY smoke checklist as a qa nobody has woken. Reading the
+	// leaves the same silence as a qa nobody has woken. Reading the
 	// first as the second would keep a finished task out of Ready to Merge
 	// forever; reading the second as the first would let a card claim it was
 	// tested by an agent that has never opened its eyes - which is the exact lie
@@ -284,6 +259,17 @@ type SessionCrew struct {
 	//
 	// Omitted for dev, and for a member created before this was recorded.
 	JoinReason domain.CrewJoinReason `json:"joinReason,omitempty" enum:"sim,preview,manual" description:"What created this member: dev took the simulator lease, dev pointed ao preview at the app, or a human asked for it."`
+	// LastHandback is the latest message this qa DELIVERED to its crewmate in the
+	// current round. The board reads it as "qa has handed back": once qa is idle
+	// with one, the task can move to merge. Omitted for dev and for a qa that has
+	// not handed back this round.
+	LastHandback *CrewHandbackView `json:"lastHandback,omitempty"`
+}
+
+// CrewHandbackView is a crew member's latest delivered message to its crewmate.
+type CrewHandbackView struct {
+	At    time.Time `json:"at"`
+	About string    `json:"about" description:"The message's --about subject: a commit SHA, or on a Testiny project a case or run id."`
 }
 
 // SessionTermination is the wire shape of a session's ending.
@@ -616,9 +602,10 @@ type SendSessionMessageRequest struct {
 	// conversation that can run away with nobody watching - and cap it. Empty for
 	// a human, the orchestrator, or any tool, all of which are uncapped.
 	From domain.SessionID `json:"from,omitempty"`
-	// About is the commit SHA or smoke case id this message concerns. Required
-	// between crewmates (a message with no subject is refused, so there is no
-	// "what do you think?" to answer) and ignored otherwise.
+	// About is the commit SHA, or on a Testiny project the case or run id, this
+	// message concerns. Required between crewmates (a message with no subject is
+	// refused, so there is no "what do you think?" to answer) and ignored
+	// otherwise.
 	About string `json:"about,omitempty"`
 	// Wire pins THIS message to one delivery path, overriding the daemon-wide
 	// AO_CLAUDE_NATIVE_SEND for this send and nothing else. Absent is the
@@ -634,10 +621,6 @@ type CrewSendRequest struct {
 	Role    domain.CrewRole `json:"role" enum:"dev,qa"`
 	Message string          `json:"message" minLength:"1" maxLength:"131072"`
 	About   string          `json:"about,omitempty"`
-	// StillWorking is qa saying this message is NOT the end of its run, which is
-	// what exempts it from the handback completeness check. Absent means the
-	// message is a handback, because that is the shape qa is told to use.
-	StillWorking bool `json:"stillWorking,omitempty" description:"qa only: this message is a mid-run update, not the end of the run, so the handback completeness check does not apply."`
 	// Wire pins THIS message to one delivery path; see
 	// SendSessionMessageRequest.Wire. A crewmate message is an ordinary send once
 	// the caps have had their say, so it takes the same override.
@@ -661,11 +644,6 @@ type SendSessionMessageResponse struct {
 	// PendingMessages is how many messages this session now has waiting,
 	// including this one; absent unless queued.
 	PendingMessages int `json:"pendingMessages,omitempty"`
-	// Handback is the checklist's state when qa ended its run, present only on a
-	// qa -> dev message that did not claim to be still working. The message is
-	// delivered either way - see handbackNotice for why this warns rather than
-	// refuses - so this is how the sender is told what it left behind.
-	Handback *HandbackCompletenessView `json:"handback,omitempty"`
 	// Unreviewed is present only when a WORKER reported to an orchestrator on a
 	// task that drove the app and never had a qa. The message is delivered either
 	// way, carrying the same fact as an [AO] line - see
@@ -702,16 +680,6 @@ type MessageDeliveryView struct {
 // qa on it: it took the simulator, or it opened a preview.
 type UnreviewedRuntimeView struct {
 	Touch domain.RuntimeTouch `json:"touch" enum:"sim,preview" description:"What this task did with the running app: took the simulator lease, or pointed ao preview at it."`
-}
-
-// HandbackCompletenessView is what the task's smoke checklist said at the moment
-// qa handed back: how many active cases the person still has, and which of them
-// carry nothing from any machine. A case that a machine genuinely cannot drive is
-// NOT in NotDriven - declaring it is `ao smoke record --verdict skip --note
-// "<why>"`, which is a recorded run.
-type HandbackCompletenessView struct {
-	Cases     int      `json:"cases"`
-	NotDriven []string `json:"notDriven"`
 }
 
 // DispatchCommentRequest is the body of POST /api/v1/sessions/{sessionId}/comment-dispatch.
@@ -1912,27 +1880,6 @@ type SetReclaimSettingsRequest struct {
 	reclaimsettings.Settings
 }
 
-// EvidenceRetentionSettingsResponse mirrors evidenceretention.Settings on the
-// wire. It is the body of GET/PUT /api/v1/settings/evidence-retention.
-type EvidenceRetentionSettingsResponse struct {
-	Enabled    bool `json:"enabled" description:"Whether the age-based evidence retention sweep runs at all."`
-	MaxAgeDays int  `json:"maxAgeDays" description:"Purge evidence older than this many days (from its created_at). 0/disabled = keep forever."`
-}
-
-// SetEvidenceRetentionSettingsRequest is the body of PUT
-// /api/v1/settings/evidence-retention.
-type SetEvidenceRetentionSettingsRequest struct {
-	Enabled    bool `json:"enabled"`
-	MaxAgeDays int  `json:"maxAgeDays"`
-}
-
-// EvidenceRetentionSweepResponse is the body of POST
-// /api/v1/settings/evidence-retention/sweep (the manual trigger).
-type EvidenceRetentionSweepResponse struct {
-	Purged     int   `json:"purged" description:"Number of evidence items removed."`
-	FreedBytes int64 `json:"freedBytes" description:"On-disk bytes freed by the sweep."`
-}
-
 // SpawnConfirmSettingsResponse mirrors spawnconfirm.Settings on the wire. It is
 // the body of GET/PUT /api/v1/settings/spawn-confirm.
 type SpawnConfirmSettingsResponse struct {
@@ -1969,11 +1916,13 @@ type SetResponseLanguageSettingsRequest struct {
 }
 
 // SystemPromptItem is one editable prompt kind on the wire: its built-in default
-// (for the editor + Reset) and the current override (null when using the default).
+// (for the editor + Reset), the current override (null when using the default),
+// and warnings about that override for the settings row to show.
 type SystemPromptItem struct {
-	Kind     string  `json:"kind"`
-	Default  string  `json:"default"`
-	Override *string `json:"override"`
+	Kind     string   `json:"kind"`
+	Default  string   `json:"default"`
+	Override *string  `json:"override"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // SystemPromptsResponse is the body of GET /api/v1/settings/prompts.

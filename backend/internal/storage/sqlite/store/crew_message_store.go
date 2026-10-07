@@ -63,11 +63,27 @@ func (s *Store) CrewMessagesSince(ctx context.Context, crewID domain.SessionID, 
 // status derivation reads it and asks one question: was it refused?
 func (s *Store) LatestCrewMessageFrom(ctx context.Context, from domain.SessionID) (domain.CrewMessage, bool, error) {
 	row, err := s.qw.GetLatestCrewMessageBySender(ctx, string(from))
+	return crewMessageRow(row, err, "latest crew message")
+}
+
+// LatestDeliveredCrewMessageFrom returns the latest message this session
+// DELIVERED at or after `since`, the start of its current round (the zero time
+// for a member that was never restored). It is how the board tells that qa has
+// handed back this round.
+func (s *Store) LatestDeliveredCrewMessageFrom(ctx context.Context, from domain.SessionID, since time.Time) (domain.CrewMessage, bool, error) {
+	row, err := s.qw.GetLatestDeliveredCrewMessageBySenderSince(ctx, gen.GetLatestDeliveredCrewMessageBySenderSinceParams{
+		FromSession: string(from),
+		CreatedAt:   since,
+	})
+	return crewMessageRow(row, err, "latest delivered crew message")
+}
+
+func crewMessageRow(row gen.CrewMessage, err error, what string) (domain.CrewMessage, bool, error) {
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.CrewMessage{}, false, nil
 		}
-		return domain.CrewMessage{}, false, fmt.Errorf("latest crew message: %w", err)
+		return domain.CrewMessage{}, false, fmt.Errorf("%s: %w", what, err)
 	}
 	return domain.CrewMessage{
 		ID:            row.ID,

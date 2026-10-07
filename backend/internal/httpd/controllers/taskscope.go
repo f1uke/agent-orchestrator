@@ -24,10 +24,8 @@ type taskScopeKey struct{}
 // process, its messages, its preview, its device lease, the brackets it puts
 // around its own runs. The rest belongs to the TASK the agent is on, and is the
 // SAME object for every member of it: the branch's pull request, that PR's
-// comment threads, AO's review verdicts on it, and the smoke checklist (which
-// `ao smoke set` files under $AO_CREW_ID - dev's id - whichever member writes
-// it). Read the second kind with a member's own id and a crew's qa gets an empty
-// answer: an empty Tests tab beside dev's full one, and a readiness strip
+// comment threads, and AO's review verdicts on it. Read the second kind with a
+// member's own id and a crew's qa gets an empty answer: a readiness strip
 // computing a merge verdict for a task that appears to have no pull request.
 //
 // Scope is a property of the RESOURCE, so it is declared once where that

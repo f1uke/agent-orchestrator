@@ -127,6 +127,7 @@ func (m *Service) List(ctx context.Context) ([]Summary, error) {
 			HasWebUI:          row.Config.HasWebUI,
 			HasIOSSimulator:   row.Config.HasIOSSimulator,
 			DisableAutoCrew:   row.Config.DisableAutoCrew,
+			TestinyProject:    row.Config.TestinyProject,
 		})
 	}
 	return out, nil
@@ -284,10 +285,10 @@ func (m *Service) Add(ctx context.Context, in AddInput) (Project, error) {
 
 	var projectConfig domain.ProjectConfig
 	if in.Config != nil {
-		if err := in.Config.Validate(); err != nil {
+		projectConfig = normalizeConfig(*in.Config)
+		if err := projectConfig.Validate(); err != nil {
 			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
 		}
-		projectConfig = *in.Config
 	}
 
 	registeredAt := time.Now()
@@ -389,6 +390,7 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 	if err := validateProjectID(id); err != nil {
 		return Project{}, err
 	}
+	in.Config = normalizeConfig(in.Config)
 	merging := len(in.MergeFields) > 0
 	if !merging {
 		// A replace carries the entire config, so it can be judged before the
@@ -428,6 +430,14 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 		return Project{}, apierr.Internal("PROJECT_CONFIG_UPDATE_FAILED", "Failed to update project config")
 	}
 	return m.projectFromRow(row), nil
+}
+
+// normalizeConfig trims the config fields a person types as free text, so a
+// stray space from a paste is stored as the value meant rather than refused, and
+// a blank is stored as unset.
+func normalizeConfig(c domain.ProjectConfig) domain.ProjectConfig {
+	c.TestinyProject = strings.TrimSpace(c.TestinyProject)
+	return c
 }
 
 // resolveGitOriginURL returns the URL of the repository at path, by the one

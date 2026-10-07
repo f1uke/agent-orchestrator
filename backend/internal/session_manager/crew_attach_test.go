@@ -110,11 +110,9 @@ func TestAttachCrewMember_LeavesDevRunning(t *testing.T) {
 }
 
 // TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow. Every qa now arrives
-// after dev started work, and dev did not know it would get one: dev has been
-// authoring the checklist alone and goes on co-authoring it, so a checklist may
-// already be there, possibly already carrying the human's verdicts - and
-// replacing the whole list (or re-sending a case under a new name, #226's id
-// trap) is what destroys them.
+// after dev started work, and dev did not know it would get one: the branch, its
+// tests and any PR are work in progress the member must read before it adds to
+// them.
 func TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow(t *testing.T) {
 	m, _, _, _ := newManager()
 	dev := spawnMechanical(t, m)
@@ -122,7 +120,7 @@ func TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AttachCrewMember: %v", err)
 	}
-	for _, want := range []string{"A HUMAN added you", "dev has been working alone until now", "ao smoke list", "ao smoke add", "never `ao smoke set`"} {
+	for _, want := range []string{"A HUMAN added you", "dev has been working alone until now", "read the PR and the branch's diff BEFORE you write anything"} {
 		if !strings.Contains(qa.Metadata.Prompt, want) {
 			t.Fatalf("an attached member's kickoff is missing %q:\n%s", want, qa.Metadata.Prompt)
 		}
@@ -151,7 +149,7 @@ func TestAttachCrewMember_TellsTheArrivalWhatDevDidNotKnow(t *testing.T) {
 
 // TestAttachCrewMember_RefusesASecondMemberInTheSameRole. One qa per task is the
 // invariant; a stood-down qa still holds its seat, because standing it down is
-// how an attach is undone and its id is what smoke_check / review_run rows name.
+// how an attach is undone and its id is what review_run rows name.
 func TestAttachCrewMember_RefusesASecondMemberInTheSameRole(t *testing.T) {
 	t.Run("attached twice", func(t *testing.T) {
 		m, st, _, _ := newManager()

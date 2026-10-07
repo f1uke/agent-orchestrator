@@ -17,7 +17,6 @@ import (
 //   - A plain send is the human's - the app's send box, or `ao send` typed in a
 //     terminal outside any session - unless it carries the "[from @<id>]" prefix
 //     `ao send` adds inside a session, which makes it another agent's.
-//   - The Tests tab's report carries the human's verdicts and notes.
 //   - Everything else (nudges, crew notices, forwarded review comments) is AO's.
 func DeliveryAuthorFor(trigger, body string) domain.DeliveryAuthor {
 	switch trigger {
@@ -25,8 +24,6 @@ func DeliveryAuthorFor(trigger, body string) domain.DeliveryAuthor {
 		if strings.HasPrefix(strings.TrimSpace(body), "[from @") {
 			return domain.DeliveryAuthorAgent
 		}
-		return domain.DeliveryAuthorHuman
-	case msgdelivery.TriggerSmokeReport:
 		return domain.DeliveryAuthorHuman
 	default:
 		return domain.DeliveryAuthorAO

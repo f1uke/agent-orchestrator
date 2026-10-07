@@ -43,7 +43,7 @@ func serve(t *testing.T, path string, mw ...func(http.Handler) http.Handler) (se
 		for _, m := range mw {
 			r.Use(m)
 		}
-		r.Get("/sessions/{sessionId}/smoke-checks", func(w http.ResponseWriter, r *http.Request) {
+		r.Get("/sessions/{sessionId}/reviews", func(w http.ResponseWriter, r *http.Request) {
 			seen = string(sessionID(r))
 			w.WriteHeader(http.StatusOK)
 		})
@@ -59,7 +59,7 @@ func serve(t *testing.T, path string, mw ...func(http.Handler) http.Handler) (se
 
 func TestSessionAliasRewritesThePathAndSaysSo(t *testing.T) {
 	res := &fakeAliasResolver{to: "advisor-ios-app-9", handle: "advisor-ios-app-feature-MOBILITY-4734"}
-	seen, rec := serve(t, "/sessions/mobility-4734-chat-unsafe-url-whitelist-f5/smoke-checks", SessionAlias(res))
+	seen, rec := serve(t, "/sessions/mobility-4734-chat-unsafe-url-whitelist-f5/reviews", SessionAlias(res))
 
 	if seen != "advisor-ios-app-9" {
 		t.Fatalf("handler saw %q, want the resolved AO id", seen)
@@ -72,7 +72,7 @@ func TestSessionAliasRewritesThePathAndSaysSo(t *testing.T) {
 
 func TestSessionAliasLeavesAKnownIDAlone(t *testing.T) {
 	res := &fakeAliasResolver{to: "advisor-ios-app-9"}
-	seen, rec := serve(t, "/sessions/advisor-ios-app-9/smoke-checks", SessionAlias(res))
+	seen, rec := serve(t, "/sessions/advisor-ios-app-9/reviews", SessionAlias(res))
 
 	if seen != "advisor-ios-app-9" {
 		t.Fatalf("handler saw %q", seen)
@@ -98,7 +98,7 @@ func TestSessionAliasIsANoOpWithoutASessionID(t *testing.T) {
 }
 
 func TestSessionAliasNilResolverIsANoOp(t *testing.T) {
-	seen, _ := serve(t, "/sessions/whatever/smoke-checks", SessionAlias(nil))
+	seen, _ := serve(t, "/sessions/whatever/reviews", SessionAlias(nil))
 	if seen != "whatever" {
 		t.Fatalf("handler saw %q, want the path's id unchanged", seen)
 	}
@@ -106,17 +106,17 @@ func TestSessionAliasNilResolverIsANoOp(t *testing.T) {
 
 // Order matters: TaskScoped reads the same parameter, so the alias has to be
 // resolved before it runs or a crew member's alias would never reach dev's
-// checklist.
+// reviews.
 func TestSessionAliasResolvesBeforeTaskScope(t *testing.T) {
 	alias := &fakeAliasResolver{to: "advisor-ios-app-10", handle: "advisor-ios-app-10"}
 	seen, rec := serve(t,
-		"/sessions/mobility-4734-chat-unsafe-url-whitelist-b7/smoke-checks",
+		"/sessions/mobility-4734-chat-unsafe-url-whitelist-b7/reviews",
 		SessionAlias(alias),
 		TaskScoped(fakeDevResolver{dev: "advisor-ios-app-9"}),
 	)
 
 	if seen != "advisor-ios-app-9" {
-		t.Fatalf("handler saw %q; the alias should resolve to qa and task scope should then hand it dev's checklist", seen)
+		t.Fatalf("handler saw %q; the alias should resolve to qa and task scope should then hand it dev's reviews", seen)
 	}
 	if rec.Header().Get(SessionResolvedHeader) == "" {
 		t.Fatal("the substitution was not announced")

@@ -6,13 +6,13 @@ import {
 	crewJoinLine,
 	neverStarted,
 	qaPresence,
+	type ReviewGateState,
 	reviewGateState,
 	taskLane,
 	tasksFrom,
 	workerTasks,
 } from "./crew";
-import type { SmokeProgress } from "./smoke-test";
-import { attentionZone, type SessionStatus, type WorkspaceSession } from "../types/workspace";
+import { attentionZone, type SessionCrew, type SessionStatus, type WorkspaceSession } from "../types/workspace";
 
 function session(id: string, over: Partial<WorkspaceSession> = {}): WorkspaceSession {
 	return {
@@ -34,6 +34,8 @@ function session(id: string, over: Partial<WorkspaceSession> = {}): WorkspaceSes
 const running = { state: "active", lastActivityAt: "2026-08-21T00:00:00Z" } as const;
 /** The activity reading of a member that has ENDED its turn and sits at its prompt. */
 const parked = { state: "parked", lastActivityAt: "2026-08-21T00:00:00Z" } as const;
+/** qa's report to dev this round. */
+const handback = { at: "2026-08-21T00:00:00Z", about: "1a2b3c4d5e6f" };
 
 /**
  * dev + the qa the trigger created beside it. `hasRun: false` is the state a
@@ -54,22 +56,6 @@ function crew(devOver: Partial<WorkspaceSession> = {}, qaOver: Partial<Workspace
 	});
 	return { dev, qa, sessions: [dev, qa] };
 }
-
-const smoke = (over: Partial<SmokeProgress> = {}): SmokeProgress => ({
-	total: 0,
-	pass: 0,
-	fail: 0,
-	skip: 0,
-	pending: 0,
-	checked: 0,
-	retired: 0,
-	agentPass: 0,
-	agentFail: 0,
-	agentCaptured: 0,
-	agentSkip: 0,
-	agentNotDriven: 0,
-	...over,
-});
 
 describe("qaPresence — what a task's row may claim about its qa", () => {
 	const qa = (over: Partial<WorkspaceSession> = {}) =>
@@ -315,16 +301,13 @@ describe("taskLane — nobody is working on this", () => {
 				status: "needs_input",
 				statusReason: "idle_aged",
 				activity: parked,
-				crew: { id: "demo-1", role: "qa", hasRun: true },
+				crew: { id: "demo-1", role: "qa", hasRun: true, lastHandback: handback },
 			},
 		);
 
 	it("says so when qa has parked after its pass and dev is asleep", () => {
 		const { dev, qa } = stalled();
-		const lane = taskLane(
-			{ dev, qa, members: [dev, qa], isCrew: true },
-			{ review: "not run", smoke: smoke({ total: 1, pass: 1, checked: 1 }) },
-		);
+		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "not run" });
 		expect(lane.zone).toBe("action");
 		expect(lane.note).toBe("Nobody is working on this");
 		// A fact about the TASK, not about a member: drawing a sleeping dev's glyph
@@ -332,13 +315,12 @@ describe("taskLane — nobody is working on this", () => {
 		expect(lane.holder).toBeUndefined();
 	});
 
-	it("says so however the checklist happens to stand", () => {
+	it("says so whether or not qa handed anything back", () => {
 		const { dev, qa } = stalled();
-		const task = { dev, qa, members: [dev, qa], isCrew: true };
-		// Not loaded; qa stood down and recorded nothing (an empty checklist reads
-		// as settled, which is what made the incident read Ready); all green.
-		for (const gate of [undefined, smoke(), smoke({ total: 1, pass: 1, checked: 1 })]) {
-			expect(taskLane(task, { review: "not run", smoke: gate }).note).toBe("Nobody is working on this");
+		const silent = { ...qa, crew: { id: "demo-1", role: "qa" as const, hasRun: true } };
+		for (const member of [qa, silent]) {
+			const task = { dev, qa: member, members: [dev, member], isCrew: true };
+			expect(taskLane(task, { review: "not run" }).note).toBe("Nobody is working on this");
 		}
 	});
 
@@ -357,9 +339,9 @@ describe("taskLane — nobody is working on this", () => {
 		const live = { ...qa, activity: running, status: "working" as SessionStatus, statusReason: undefined };
 		const lane = taskLane({ dev, qa: live, members: [dev, live], isCrew: true }, { review: "not run" });
 		expect(lane.zone).not.toBe("action");
-		// dev can land and the checklist has not been played, so the card keeps
-		// saying exactly that - what it must not say is that nothing is running.
-		expect(lane.note).toBe("qa · Not played yet");
+		// dev can land and qa is mid-pass, so the card names qa at work - what it
+		// must not say is that nothing is running.
+		expect(lane.note).toBe("qa · Working");
 	});
 
 	it("stays quiet for a member merely idle BETWEEN turns", () => {
@@ -398,10 +380,6 @@ describe("taskLane — nobody is working on this", () => {
 	it("does not overwrite an ask the board already names", () => {
 		const { dev, qa } = stalled();
 		const task = { dev, qa, members: [dev, qa], isCrew: true };
-		// The human's play is the only thing left, and rule 3 says which cases.
-		expect(taskLane(task, { review: "not run", smoke: smoke({ total: 2, pending: 2, agentPass: 2 }) }).note).toBe(
-			"qa · Play the cases",
-		);
 		// AO's reviewer objected at this head, and that is dev's to answer.
 		expect(taskLane(task, { review: "changes" }).note).toBe("review · Changes requested");
 	});
@@ -430,68 +408,56 @@ describe("taskLane — nobody is working on this", () => {
 	});
 });
 
-describe("taskLane — READY TO MERGE is an AND", () => {
+describe("taskLane - READY TO MERGE is an AND", () => {
 	const mergeable = { status: "mergeable" as SessionStatus, statusReason: "pr_pipeline" as const };
+	const qaCrew = (over: Partial<SessionCrew> = {}): Partial<WorkspaceSession> => ({
+		crew: { id: "demo-1", role: "qa", hasRun: true, ...over },
+	});
+	const lane = (qaOver: Partial<WorkspaceSession>, review: ReviewGateState = "approved") => {
+		const { dev, qa } = crew(mergeable, qaOver);
+		return { dev, qa, lane: taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review }) };
+	};
 
 	it("does not read ready while qa has not been woken at all", () => {
-		const { dev, qa } = crew(mergeable);
-		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "approved", smoke: smoke() });
-		expect(lane.zone).toBe("pending");
-		expect(lane.note).toBe("qa · Not started yet");
+		const { lane: l } = lane({});
+		expect(l.zone).toBe("pending");
+		expect(l.note).toBe("qa · Not started yet");
 	});
 
-	it("does not read ready while a person has not played the cases", () => {
-		const { dev, qa } = crew(mergeable, { crew: { id: "demo-1", role: "qa", hasRun: true } });
-		const lane = taskLane(
-			{ dev, qa, members: [dev, qa], isCrew: true },
-			{ review: "approved", smoke: smoke({ total: 2, pending: 2 }) },
-		);
-		expect(lane.zone).toBe("pending");
-		expect(lane.note).toBe("qa · Not played yet");
+	it("does not read ready while qa is still testing, even with an earlier handback", () => {
+		const { qa, lane: l } = lane({
+			isSuspended: false,
+			status: "working",
+			activity: running,
+			...qaCrew({ lastHandback: handback }),
+		});
+		expect(l.zone).toBe("pending");
+		expect(l.note).toBe("qa · Working");
+		expect(l.holder).toBe(qa);
 	});
 
-	it("asks the human to play once the machine has run and only their judgement is left", () => {
-		const { dev, qa } = crew(mergeable, { crew: { id: "demo-1", role: "qa", hasRun: true } });
-		const lane = taskLane(
-			{ dev, qa, members: [dev, qa], isCrew: true },
-			{ review: "approved", smoke: smoke({ total: 2, pending: 2, agentPass: 2 }) },
-		);
-		expect(lane.zone).toBe("action");
-		expect(lane.note).toBe("qa · Play the cases");
+	it("does not read ready while qa has handed nothing back this round", () => {
+		const { lane: l } = lane(qaCrew());
+		expect(l.zone).toBe("pending");
+		expect(l.note).toBe("qa · No handback yet");
 	});
 
-	it("reads ready only when dev can land, qa has played, and review has not objected", () => {
-		const { dev, qa } = crew(mergeable, { crew: { id: "demo-1", role: "qa", hasRun: true } });
-		const lane = taskLane(
-			{ dev, qa, members: [dev, qa], isCrew: true },
-			{ review: "approved", smoke: smoke({ total: 2, pass: 2, checked: 2 }) },
-		);
-		expect(lane.zone).toBe("merge");
+	it("reads ready once qa handed back and stopped, and review has not objected", () => {
+		const { dev, lane: l } = lane(qaCrew({ lastHandback: handback }));
+		expect(l.zone).toBe("merge");
+		expect(l.note).toBe("");
+		expect(l.holder).toBe(dev);
 	});
 
 	it("a review that asked for changes blocks, whoever is awake", () => {
-		const { dev, qa } = crew(mergeable, { crew: { id: "demo-1", role: "qa", hasRun: true } });
-		const lane = taskLane(
-			{ dev, qa, members: [dev, qa], isCrew: true },
-			{ review: "changes", smoke: smoke({ total: 2, pass: 2, checked: 2 }) },
-		);
-		expect(lane.zone).toBe("action");
-		expect(lane.note).toBe("review · Changes requested");
+		const { lane: l } = lane(qaCrew({ lastHandback: handback }), "changes");
+		expect(l.zone).toBe("action");
+		expect(l.note).toBe("review · Changes requested");
 	});
 
-	it("a review that never ran does not block — nothing starts one automatically yet", () => {
-		const { dev, qa } = crew(mergeable, { crew: { id: "demo-1", role: "qa", hasRun: true } });
-		const lane = taskLane(
-			{ dev, qa, members: [dev, qa], isCrew: true },
-			{ review: "not run", smoke: smoke({ total: 1, pass: 1, checked: 1 }) },
-		);
-		expect(lane.zone).toBe("merge");
-	});
-
-	it("waits rather than guessing while the checklist has not loaded", () => {
-		const { dev, qa } = crew(mergeable, { crew: { id: "demo-1", role: "qa", hasRun: true } });
-		const lane = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "approved" });
-		expect(lane.zone).toBe("pending");
+	it("a review that never ran does not block - nothing starts one automatically yet", () => {
+		const { lane: l } = lane(qaCrew({ lastHandback: handback }), "not run");
+		expect(l.zone).toBe("merge");
 	});
 });
 
@@ -557,21 +523,15 @@ describe("canAttachRole", () => {
 
 describe("taskLane — a task with NO qa is a pass, not a pending", () => {
 	// Lazy creation makes this the common shape, not an edge case: a change with
-	// nothing to drive never gets a qa, so a smoke gate that waited for a verdict
-	// nobody will ever record would hold it out of Ready to merge for ever.
+	// nothing to drive never gets a qa, so a gate that waited for a handback
+	// nobody will ever send would hold it out of Ready to merge for ever.
 	const mergeable = { status: "mergeable" as SessionStatus, statusReason: "pr_pipeline" as const };
 
-	it("reads ready to merge with no qa and no checklist at all", () => {
+	it("reads ready to merge with no qa and no handback at all", () => {
 		const dev = session("demo-1", { ...mergeable, activity: running });
 		const lane = taskLane({ dev, members: [dev], isCrew: false }, { review: "approved" });
 		expect(lane.zone).toBe("merge");
 		expect(lane.note).toBe("");
-	});
-
-	it("still reads ready when the checklist loaded and is empty", () => {
-		const dev = session("demo-1", { ...mergeable, activity: running });
-		const lane = taskLane({ dev, members: [dev], isCrew: false }, { review: "approved", smoke: smoke() });
-		expect(lane.zone).toBe("merge");
 	});
 
 	it("is what a standard task reads before its qa exists", () => {
@@ -588,12 +548,9 @@ describe("taskLane — a task with NO qa is a pass, not a pending", () => {
 		expect(taskLane({ dev: before, members: [before], isCrew: false }, { review: "approved" }).zone).toBe("merge");
 
 		const { dev, qa } = crew(mergeable, { crew: { id: "demo-1", role: "qa", hasRun: true, joinReason: "sim" } });
-		const after = taskLane(
-			{ dev, qa, members: [dev, qa], isCrew: true },
-			{ review: "approved", smoke: smoke({ total: 2, pending: 2 }) },
-		);
+		const after = taskLane({ dev, qa, members: [dev, qa], isCrew: true }, { review: "approved" });
 		expect(after.zone).toBe("pending");
-		expect(after.note).toBe("qa · Not played yet");
+		expect(after.note).toBe("qa · No handback yet");
 	});
 });
 

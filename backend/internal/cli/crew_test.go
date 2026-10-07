@@ -415,12 +415,15 @@ func TestCrewReview_PostsToTheReviewRouteAsItself(t *testing.T) {
 	if len(bodies) != 1 || strings.TrimSpace(bodies[0]) != "" {
 		t.Fatalf("body = %q, want none: the route decides the reason, not the caller", bodies)
 	}
-	// What dev is told back: the member exists, the checklist rules changed, and
-	// how to talk to it. Its own prompt cannot have said the first of those.
-	for _, wantOut := range []string{"demo-9", "qa", "ao smoke add", "never `ao smoke set`", "ao send --crew qa"} {
+	// What dev is told back: the member exists, and how to talk to it. Its own
+	// prompt cannot have said the first of those.
+	for _, wantOut := range []string{"demo-9", "qa", "ao send --crew qa"} {
 		if !strings.Contains(out, wantOut) {
 			t.Fatalf("output is missing %q: %q", wantOut, out)
 		}
+	}
+	if strings.Contains(out, "ao smoke") {
+		t.Fatalf("output points dev at the removed `ao smoke` command: %q", out)
 	}
 }
 

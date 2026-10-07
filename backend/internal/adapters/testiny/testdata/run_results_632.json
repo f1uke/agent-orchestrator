@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "id": 7166,
+      "title": "[Finno Chat] Fund disclaimer is displayed in chat",
+      "status": "PASSED"
+    },
+    {
+      "id": 7167,
+      "title": "[Finno Chat] Definit disclaimer is displayed in chat",
+      "status": "PASSED"
+    },
+    {
+      "id": 7168,
+      "title": "[Finno Chat] Chat list shows last message normally when disclaimer is the last message",
+      "status": "PASSED"
+    },
+    {
+      "id": 7169,
+      "title": "[Advisor Chat] Fund disclaimer is displayed in chat",
+      "status": "PASSED"
+    },
+    {
+      "id": 7170,
+      "title": "[Advisor Chat] Definit disclaimer is displayed in chat",
+      "status": "PASSED"
+    },
+    {
+      "id": 7171,
+      "title": "[Advisor Chat] Chat list shows last message normally when disclaimer is the last message",
+      "status": "PASSED"
+    }
+  ],
+  "meta": {
+    "count": 6,
+    "summary": {
+      "PASSED": 6
+    }
+  }
+}

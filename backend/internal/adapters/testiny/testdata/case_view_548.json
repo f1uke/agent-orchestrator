@@ -1,0 +1,37 @@
+{
+  "data": [
+    {
+      "id": 548,
+      "project_id": 1,
+      "folder_id": 120,
+      "title": "[ฝั่ง Customer] Notification แสดงรูป Advisor Default Profile กรณีที่ Advosir ไม่ Setting Profile ",
+      "template": "TEXT",
+      "priority": null,
+      "testcase_type": null,
+      "precondition": "1. Login user customer",
+      "steps": null,
+      "steps_text": "1. Advisor text to customer",
+      "expected_text": "1. Advisor profile shows on notification correctly",
+      "bdd": null,
+      "custom": {
+        "cf__active": null,
+        "cf__automationstatus": [
+          "Manual"
+        ],
+        "cf__description": null,
+        "cf__features": "Chat",
+        "cf__jira": null,
+        "cf__platform": null,
+        "cf__regression": [
+          "NO",
+          "YES"
+        ],
+        "cf__remark": null,
+        "cf__section": null,
+        "cf__sprint": null,
+        "cf__subfeatures": "Notification",
+        "cf__testdata": "INT\nAdvisor: advisor@example.com | fake-password\nCustomer: customer@example.com | fake-password"
+      }
+    }
+  ]
+}

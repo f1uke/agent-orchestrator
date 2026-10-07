@@ -1,15 +1,14 @@
 import type { SessionPRSummary } from "../hooks/useSessionScmSummary";
-import type { SmokeProgress, SmokeStandDown } from "./smoke-test";
 import { approvalLabel, approvalProgress, prTitleLabel } from "./pr-display";
 import type { SessionActivityState, SessionStatus, SessionTermination } from "../types/workspace";
 
 /**
  * The Summary-tab "readiness / gating" strip derivation.
  *
- * A session's work travels the AO merge pipeline — Work → Smoke → PR → CI →
- * Review → Merge — and the strip answers "how far along, and is it ready?" at a
+ * A session's work travels the AO merge pipeline - Work → PR → CI → Review →
+ * Merge - and the strip answers "how far along, and is it ready?" at a
  * glance. Everything here is a PURE function of data already on the wire (PR
- * summaries + the smoke rollup + session activity); it invents no new backend
+ * summaries + session activity); it invents no new backend
  * facts. The verdict and the gate row are derived from the SAME inputs so the
  * headline can never contradict the gates it summarizes.
  *
@@ -24,7 +23,7 @@ export type ReadinessTone = "pass" | "wait" | "block" | "idle";
 /** Verdict hue → the sanctioned board lane palette. */
 export type ReadinessHue = "working" | "review" | "needs" | "merge" | "todo";
 
-export type ReadinessGateKey = "work" | "smoke" | "pr" | "ci" | "review" | "merge";
+export type ReadinessGateKey = "work" | "pr" | "ci" | "review" | "merge";
 
 export type ReadinessGate = {
 	key: ReadinessGateKey;
@@ -176,43 +175,6 @@ function reviewGate(pr: SessionPRSummary | undefined): ReadinessGate {
 	}
 }
 
-/**
- * The smoke gate is `pass` only when a PERSON has judged every active case.
- *
- * A case can also carry a machine's result, and that result may move this
- * label or make the tone STRICTER - it may never stand in for the human's
- * verdict. The two answer different questions, and every regression a person has
- * caught by hand (recording latency, dead drag-scroll, keystrokes never
- * arriving, a tab pausing when unfocused, control lost after a lease lapse)
- * lives in the gap between them; a machine pass opening the merge gate would let
- * a card read green with nobody having touched the app. So this is AND-more,
- * never OR-instead: the `pass` return below is reachable only from
- * `pending === 0`, which counts human verdicts alone.
- *
- * Retired cases are excluded upstream (see progressFor) - a checklist that has
- * legitimately shrunk must not hold the gate open forever.
- *
- * An EMPTY checklist has two meanings and this strip could not tell them apart
- * either: "not run" reads as an absence, and it was shown just as readily when a
- * member had looked and concluded there was nothing here for a person. A
- * recorded stand-down says which, so the label says which. The TONE is idle in
- * both cases - a stand-down is a reason not to wait, never a reason to call
- * something verified.
- */
-function smokeGate(smoke: SmokeProgress, standDown?: SmokeStandDown | null): ReadinessGate {
-	if (smoke.fail > 0) return gate("smoke", "Smoke", "block", "failed");
-	if (smoke.total === 0) return gate("smoke", "Smoke", "idle", standDown ? "stood down" : "not run");
-	if (smoke.pending > 0) {
-		// A machine says the steps did not even run. That is real information and
-		// it is counted only over cases nobody has judged, so a person's verdict
-		// always overrules it rather than being shouted down by a stale run.
-		if (smoke.agentFail > 0) return gate("smoke", "Smoke", "block", "qa failed");
-		if (smoke.agentPass > 0) return gate("smoke", "Smoke", "wait", `qa ${smoke.agentPass}/${smoke.pending}`);
-		return gate("smoke", "Smoke", "wait", "running");
-	}
-	return gate("smoke", "Smoke", "pass", "passed");
-}
-
 function mergeGate(pr: SessionPRSummary | undefined): ReadinessGate {
 	if (!pr) return gate("merge", "Merge", "idle", "—");
 	if (pr.state === "merged") return gate("merge", "Merge", "pass", "merged");
@@ -267,8 +229,8 @@ function deriveVerdict(
 	if (pr?.state === "closed")
 		return { hue: "todo", word: "Closed", caption: "This pull request was closed without merging." };
 
-	// No PR yet — the merge pipeline isn't active, so pipeline blockers (a failed
-	// smoke check, etc.) never headline over the fact that work is still underway.
+	// No PR yet - the merge pipeline isn't active, so pipeline blockers (failing
+	// CI, etc.) never headline over the fact that work is still underway.
 	const hasPR = pr?.state === "open" || pr?.state === "draft";
 	if (!hasPR) {
 		// ...unless the session has ENDED. It opened no PR and it is not coming
@@ -293,21 +255,13 @@ function deriveVerdict(
 		return { hue: "needs", word: "CI Failing", caption: "One or more checks are failing." };
 	if (gates.merge.tone === "block")
 		return { hue: "needs", word: "Merge Conflict", caption: "Resolve conflicts with the base branch." };
-	if (gates.smoke.tone === "block")
-		return { hue: "needs", word: "Smoke Failed", caption: "A smoke check didn’t pass." };
 
-	// Ready — every applicable gate is green. A smoke checklist that was never
-	// authored ("not run", idle) does not block; an authored-but-pending one does.
-	// Review gets no such pass: a checklist nobody wrote means there was nothing to
-	// check, while a review nobody gave means nobody has looked. On an open PR the
-	// review gate is never idle anyway (idle survives only for "no PR" and
-	// "closed"), so requiring `pass` is the whole claim "all gates pass" makes.
+	// Ready - every gate is green. A review nobody gave means nobody has looked,
+	// so it does not pass. On an open PR the review gate is never idle anyway
+	// (idle survives only for "no PR" and "closed"), so requiring `pass` is the
+	// whole claim "all gates pass" makes.
 	const ready =
-		pr!.state === "open" &&
-		gates.ci.tone === "pass" &&
-		gates.review.tone === "pass" &&
-		(gates.smoke.tone === "pass" || gates.smoke.tone === "idle") &&
-		gates.merge.tone === "pass";
+		pr!.state === "open" && gates.ci.tone === "pass" && gates.review.tone === "pass" && gates.merge.tone === "pass";
 	if (ready) return { hue: "merge", word: "Ready to Merge", caption: "All gates pass — you can merge.", pulse: true };
 
 	// In-flight — surface the earliest gate still in motion.
@@ -322,29 +276,19 @@ function deriveVerdict(
 	if (gates.review.tone === "wait" && gates.review.state === REVIEW_AWAITING)
 		return { hue: "review", word: "Waiting on Review", caption: "No one has reviewed this yet. Merging is your call." };
 	if (gates.review.tone === "wait") return { hue: "review", word: "In Review", caption: "Waiting on review approval." };
-	if (gates.smoke.tone === "wait")
-		return { hue: "review", word: "Waiting on Smoke", caption: "Play the smoke checks to confirm." };
 	return { hue: "review", word: "In Review", caption: "Waiting on the merge pipeline." };
 }
 
-export function deriveReadiness(
-	session: SessionFacts,
-	prs: SessionPRSummary[],
-	smoke: SmokeProgress,
-	standDown?: SmokeStandDown | null,
-): Readiness {
+export function deriveReadiness(session: SessionFacts, prs: SessionPRSummary[]): Readiness {
 	const pr = primaryPR(prs);
 	const hasPR = pr?.state === "open" || pr?.state === "draft" || pr?.state === "merged";
 	const merged = pr?.state === "merged";
 
-	// Order mirrors the real flow: Work → Smoke → PR → CI → Review → Merge. Smoke
-	// is authored before the PR is opened, so it sits right after Work. This array
+	// Order mirrors the real flow: Work → PR → CI → Review → Merge. This array
 	// order is also what currentGate() walks to pick the ring (first block, else
-	// first wait), so a pre-PR session with an authored-but-pending smoke check
-	// lights Smoke — the earliest live gate — rather than an idle downstream one.
+	// first wait), so the earliest live gate wins.
 	const list: ReadinessGate[] = [
 		workGate(session, hasPR, merged),
-		smokeGate(smoke, standDown),
 		prGate(pr),
 		ciGate(pr),
 		reviewGate(pr),

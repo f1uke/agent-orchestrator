@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,5 +187,53 @@ func TestCrewRunReadsAreEmptyForASessionThatNeverBrackets(t *testing.T) {
 	runs, err := s.ListCrewRunsForSession(ctx, rec.ID, 10)
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("runs = %v err=%v", runs, err)
+	}
+}
+
+// A task's Machine runs are every member's: dev's (including the ones from
+// before the crew formed, which carry no crew id), qa's, and nobody else's.
+func TestListCrewRunsForTaskReadsEveryMemberOfTheTask(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "crw")
+	create := func() domain.SessionRecord {
+		rec, err := s.CreateSession(ctx, sampleRecord("crw"))
+		if err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+		return rec
+	}
+	dev, qa, other := create(), create(), create()
+	now := time.Now().UTC().Truncate(time.Second)
+	insert := func(id string, rec domain.SessionRecord, crew domain.SessionID, role domain.CrewRole, at time.Time) {
+		run := openRun(id, rec, at, 1)
+		run.CrewID, run.Role = crew, role
+		if err := s.InsertCrewRun(ctx, run); err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+	insert("dev-solo", dev, "", "", now)
+	insert("dev-crew", dev, dev.ID, domain.CrewRoleDev, now.Add(time.Minute))
+	insert("qa-1", qa, dev.ID, domain.CrewRoleQA, now.Add(2*time.Minute))
+	insert("other", other, "", "", now.Add(3*time.Minute))
+
+	runs, err := s.ListCrewRunsForTask(ctx, dev.ID, 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var ids []string
+	for _, r := range runs {
+		ids = append(ids, r.ID)
+	}
+	if got, want := strings.Join(ids, ","), "qa-1,dev-crew,dev-solo"; got != want {
+		t.Fatalf("task runs = %s, want %s", got, want)
+	}
+	if runs[0].Role != domain.CrewRoleQA || runs[0].SessionID != qa.ID {
+		t.Fatalf("qa's run lost its member: %+v", runs[0])
+	}
+
+	capped, err := s.ListCrewRunsForTask(ctx, dev.ID, 2)
+	if err != nil || len(capped) != 2 || capped[1].ID != "dev-crew" {
+		t.Fatalf("capped = %+v err=%v, want the 2 newest across members", capped, err)
 	}
 }

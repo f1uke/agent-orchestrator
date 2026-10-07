@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import { cn } from "../../lib/utils";
 import { useOverlayDismissFocus } from "../../lib/overlay-focus";
@@ -13,6 +14,7 @@ export function DropdownMenu(props: React.ComponentProps<typeof DropdownMenuPrim
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 export const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 export const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
+export const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
 export function DropdownMenuContent({
 	className,
@@ -57,6 +59,30 @@ export function DropdownMenuItem({
 			)}
 			{...props}
 		/>
+	);
+}
+
+/** A DropdownMenuItem that is one choice of a DropdownMenuRadioGroup, ticked on the right when chosen. */
+export function DropdownMenuRadioItem({
+	className,
+	children,
+	...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
+	return (
+		<DropdownMenuPrimitive.RadioItem
+			className={cn(
+				"relative flex cursor-default select-none items-center gap-2.5 rounded-md py-1.5 pr-7 pl-2 text-[13px] outline-none transition-colors",
+				"text-muted-foreground focus:bg-surface focus:text-foreground data-[state=checked]:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+				"[&_svg]:size-[15px] [&_svg]:shrink-0",
+				className,
+			)}
+			{...props}
+		>
+			{children}
+			<DropdownMenuPrimitive.ItemIndicator className="absolute right-2 flex items-center">
+				<Check aria-hidden="true" />
+			</DropdownMenuPrimitive.ItemIndicator>
+		</DropdownMenuPrimitive.RadioItem>
 	);
 }
 
