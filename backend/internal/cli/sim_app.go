@@ -107,8 +107,10 @@ type simLaunchResult struct {
 	Chosen bool `json:"chosen,omitempty"`
 	Of     int  `json:"of,omitempty"`
 	// PID is what simctl reported the app started as, when it said.
-	PID          string        `json:"pid,omitempty"`
-	Terminated   bool          `json:"terminated"`
+	PID        string `json:"pid,omitempty"`
+	Terminated bool   `json:"terminated"`
+	// Console is the file the app's stdout and stderr go to, with --console.
+	Console      string        `json:"console,omitempty"`
 	Build        *simBuildView `json:"build,omitempty"`
 	BuildUnknown string        `json:"buildUnknown,omitempty"`
 	Lease        simLeaseView  `json:"lease"`
@@ -159,6 +161,7 @@ func newSimLaunchCommand(ctx *commandContext) *cobra.Command {
 		udid      string
 		ttl       string
 		terminate bool
+		console   bool
 		json      bool
 	}
 	cmd := &cobra.Command{
@@ -170,9 +173,14 @@ func newSimLaunchCommand(ctx *commandContext) *cobra.Command {
 			"between several; $AO_SIM_APP pins it for good. Like `ao sim install`, the " +
 			"lease is part of the operation rather than a step to remember: another AO " +
 			"session holding the device refuses the launch.\n\n" +
+			"--console relaunches the app with its stdout and stderr - where `print` goes - in a " +
+			"file under this session's artifact directory, and `ao sim console` reads it. A file " +
+			"never blocks the app the way a pipe does. Only this launch is captured: a relaunch by " +
+			"anything else (a Maestro `launchApp`, the home screen) sends stdout back to /dev/null.\n\n" +
 			"With no --udid it uses the simulator assigned to this session ($AO_SIM_UDID), " +
 			"falling back to the one booted device. " + simPowerNote,
 		Example: `  ao sim launch
+  ao sim launch --console && ao sim console --follow
   ao sim launch com.example.MyApp --terminate-first
   ao sim launch --udid 00000000-0000-0000-0000-000000000000 --json`,
 		Args: cobra.MaximumNArgs(1),
@@ -181,7 +189,7 @@ func newSimLaunchCommand(ctx *commandContext) *cobra.Command {
 			if len(args) == 1 {
 				bundleID = args[0]
 			}
-			result, err := ctx.launchSimApp(cmd.Context(), opts.udid, bundleID, opts.ttl, opts.terminate)
+			result, err := ctx.launchSimApp(cmd.Context(), opts.udid, bundleID, opts.ttl, opts.terminate, opts.console)
 			if err != nil {
 				return err
 			}
@@ -195,6 +203,7 @@ func newSimLaunchCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.udid, "udid", "", "Launch on this simulator instead of this session's own")
 	f.StringVar(&opts.ttl, "ttl", "", "How long to hold the device afterwards (e.g. 30s, 10m, 1h). Default 10m")
 	f.BoolVar(&opts.terminate, "terminate-first", false, "Terminate the app if it is already running, so the launch runs the code that is installed now")
+	f.BoolVar(&opts.console, "console", false, "Relaunch with stdout and stderr in a file that ao sim console reads (implies --terminate-first)")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
 	return cmd
 }
@@ -234,7 +243,7 @@ func (c *commandContext) installSimApp(ctx context.Context, udid, source, rawTTL
 	return result, nil
 }
 
-func (c *commandContext) launchSimApp(ctx context.Context, udid, bundleID, rawTTL string, terminate bool) (simLaunchResult, error) {
+func (c *commandContext) launchSimApp(ctx context.Context, udid, bundleID, rawTTL string, terminate, console bool) (simLaunchResult, error) {
 	device, lease, err := c.takeSimDeviceFor(ctx, "`ao sim launch`", udid, rawTTL)
 	if err != nil {
 		return simLaunchResult{}, err
@@ -259,6 +268,18 @@ func (c *commandContext) launchSimApp(ctx context.Context, udid, bundleID, rawTT
 	}
 	if chosen {
 		result.Of = len(apps)
+	}
+	if console {
+		// --terminate-running-process is part of the console launch: an app
+		// already running would only be brought to the front, keeping the
+		// stdout it had.
+		pid, path, err := c.launchSimConsole(ctx, device, app.BundleID)
+		if err != nil {
+			return simLaunchResult{}, err
+		}
+		result.PID, result.Console, result.Terminated = pid, path, true
+		result.Build, result.BuildUnknown = c.readSimBuild(ctx, device, app.BundleID)
+		return result, nil
 	}
 	if terminate {
 		// A terminate that finds nothing running is a success, not a failure:
@@ -425,6 +446,9 @@ func writeSimLaunch(out io.Writer, result simLaunchResult) error {
 		return err
 	}
 	if err := writeSimBuildLine(out, result.Build, result.BuildUnknown); err != nil {
+		return err
+	}
+	if err := writeSimConsoleLine(out, result.Console); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "Lease: held by @%s until %s. %s\n",

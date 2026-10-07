@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simproc"
 )
 
 const (
@@ -52,12 +54,13 @@ func newFixture(t *testing.T) *fixture {
 		f.data[devices[i].UDID] = devices[i].DataPath
 	}
 	f.readers = Readers{
-		Devices:  func(context.Context) ([]simctl.Device, error) { return devices, nil },
-		Assigned: func(context.Context, domain.SessionID) (string, error) { return "", nil },
-		Leases:   func(context.Context) ([]domain.SimLease, error) { return nil, nil },
-		CAFiles:  func(context.Context, domain.SessionID) ([]string, error) { return nil, nil },
-		Run:      unsignedRunner,
-		Trusted:  TrustStoreHas,
+		Devices:   func(context.Context) ([]simctl.Device, error) { return devices, nil },
+		Assigned:  func(context.Context, domain.SessionID) (string, error) { return "", nil },
+		Leases:    func(context.Context) ([]domain.SimLease, error) { return nil, nil },
+		CAFiles:   func(context.Context, domain.SessionID) ([]string, error) { return nil, nil },
+		Run:       unsignedRunner,
+		Trusted:   TrustStoreHas,
+		Processes: func(context.Context) (simproc.Table, error) { return nil, nil },
 	}
 	return f
 }
@@ -203,7 +206,7 @@ func TestDevice_NotBootedFailsWithTheBootCommandAndStillReadsTheDisk(t *testing.
 	f := newFixture(t)
 	r := Diagnose(t.Context(), f.readers, Request{SessionID: session, UDID: udidShutdown})
 	expect(t, line(t, r, CheckDevice), StatusFail, "iPhone 16e ("+udidShutdown+") is Shutdown", "`ao sim boot --udid "+udidShutdown+"`")
-	if len(r.Checks) != 4 {
+	if len(r.Checks) != 5 {
 		t.Errorf("a shut-down device's installs and trust store are still on disk, so every line applies; got %+v", r.Checks)
 	}
 	if r.OK {
@@ -306,6 +309,73 @@ func TestApp_ExpectComparesDigestsMadeTheSameWay(t *testing.T) {
 	}
 }
 
+// running is a process table holding these `ps` rows.
+func running(rows ...string) func(context.Context) (simproc.Table, error) {
+	return func(context.Context) (simproc.Table, error) {
+		return simproc.Parse([]byte(strings.Join(rows, "\n"))), nil
+	}
+}
+
+func appRow(pid, ppid int, stat, dataPath, inBundle string) string {
+	return fmt.Sprintf("%d %d %s %s/Containers/Bundle/Application/C0FFEE/%s", pid, ppid, stat, dataPath, inBundle)
+}
+
+func TestDebugger_AnAppAttachedOnThisDeviceFailsNamingTheChainAndTheFix(t *testing.T) {
+	f := newFixture(t)
+	f.readers.Processes = running(
+		"900 880 S+ /usr/bin/lldb",
+		"950 900 S /Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver",
+		appRow(601, 950, "SXs", f.data[udidBooted], "Nimbus.app/Nimbus"),
+	)
+	r := Diagnose(t.Context(), f.readers, Request{SessionID: session, UDID: udidBooted})
+	expect(t, line(t, r, CheckDebugger), StatusFail,
+		"Nimbus.app/Nimbus (pid 601)", "debugserver 950 (lldb 900)", "`process detach`", "end that lldb (pid 900)")
+	if r.OK {
+		t.Error("a frozen app is a failing report")
+	}
+}
+
+func TestDebugger_ASIGSTOPdExtensionFailsToo(t *testing.T) {
+	f := newFixture(t)
+	f.readers.Processes = running(
+		appRow(601, 500, "Ss", f.data[udidBooted], "Nimbus.app/Nimbus"),
+		appRow(602, 500, "T", f.data[udidBooted], "Nimbus.app/PlugIns/Widget.appex/Widget"),
+	)
+	r := Diagnose(t.Context(), f.readers, Request{SessionID: session, UDID: udidBooted})
+	c := line(t, r, CheckDebugger)
+	expect(t, c, StatusFail, "Widget.appex/Widget (pid 602) is stopped by SIGSTOP", "`kill -CONT 602`")
+	if strings.Contains(c.Message, "pid 601") {
+		t.Errorf("the running app is reported as held: %q", c.Message)
+	}
+}
+
+func TestDebugger_AnotherDevicesHeldAppIsNotThisOnesProblem(t *testing.T) {
+	f := newFixture(t)
+	f.readers.Processes = running(
+		appRow(601, 500, "Ss", f.data[udidBooted], "Nimbus.app/Nimbus"),
+		appRow(701, 950, "SXs", f.data[udidOther], "Nimbus.app/Nimbus"),
+	)
+	r := Diagnose(t.Context(), f.readers, Request{SessionID: session, UDID: udidBooted})
+	expect(t, line(t, r, CheckDebugger), StatusOK, "no app on this device is held by a debugger")
+}
+
+func TestDebugger_AShutDownDeviceRunsNothing(t *testing.T) {
+	f := newFixture(t)
+	f.readers.Processes = func(context.Context) (simproc.Table, error) {
+		t.Error("the process table was read for a device that is not booted")
+		return nil, nil
+	}
+	r := Diagnose(t.Context(), f.readers, Request{SessionID: session, UDID: udidShutdown})
+	expect(t, line(t, r, CheckDebugger), StatusOK, "not booted")
+}
+
+func TestDebugger_AnUnreadableProcessTableFails(t *testing.T) {
+	f := newFixture(t)
+	f.readers.Processes = func(context.Context) (simproc.Table, error) { return nil, errors.New("ps: boom") }
+	r := Diagnose(t.Context(), f.readers, Request{SessionID: session, UDID: udidBooted})
+	expect(t, line(t, r, CheckDebugger), StatusFail, "could not read", "ps: boom")
+}
+
 func TestProxyCA_NothingConfiguredOrPresentWarns(t *testing.T) {
 	f := newFixture(t)
 	r := Diagnose(t.Context(), f.readers, Request{SessionID: session, UDID: udidBooted})
@@ -401,8 +471,8 @@ func TestDiagnose_RunsOnlyReadCommandsAndWritesNothing(t *testing.T) {
 	f.readers.CAFiles = func(context.Context, domain.SessionID) ([]string, error) { return []string{caPath}, nil }
 
 	r := Diagnose(t.Context(), f.readers, Request{SessionID: session, UDID: udidBooted, App: appID, Expect: want})
-	if len(r.Checks) != 4 || r.OK {
-		t.Fatalf("expected four lines with the app and CA failing, got %+v", r)
+	if len(r.Checks) != 5 || r.OK {
+		t.Fatalf("expected five lines with the app and CA failing, got %+v", r)
 	}
 
 	reads := [][]string{

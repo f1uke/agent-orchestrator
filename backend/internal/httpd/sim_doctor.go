@@ -8,6 +8,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simhealth"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simproc"
 )
 
 // SimAssignments reads the devices AO cloned for a session; its primary one is
@@ -47,6 +48,9 @@ func simDoctorReaders(deps APIDeps, trust controllers.SimTrustResolver) *simheal
 		},
 		Run:     commandOutput,
 		Trusted: simhealth.TrustStoreHas,
+		Processes: func(ctx context.Context) (simproc.Table, error) {
+			return simproc.Read(ctx, commandOutput)
+		},
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simbuild"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simctl"
+	"github.com/aoagents/agent-orchestrator/backend/internal/simproc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/simtrust"
 )
 
@@ -40,10 +41,11 @@ const (
 
 // Check names, in the order a report lists them.
 const (
-	CheckDevice  = "device"
-	CheckLease   = "lease"
-	CheckApp     = "app"
-	CheckProxyCA = "proxy CA"
+	CheckDevice   = "device"
+	CheckLease    = "lease"
+	CheckApp      = "app"
+	CheckDebugger = "debugger"
+	CheckProxyCA  = "proxy CA"
 )
 
 // Check is one line of a report.
@@ -89,6 +91,9 @@ type Readers struct {
 	// Trusted reports whether a device trust store holds a root with this
 	// SHA-256. TrustStoreHas is the real one.
 	Trusted func(ctx context.Context, store string, sum [sha256.Size]byte) (bool, error)
+	// Processes is the host's process table, where a simulator app's state
+	// under a debugger shows.
+	Processes func(ctx context.Context) (simproc.Table, error)
 }
 
 // deviceCheck is a check that needs the device the device line found. A
@@ -97,7 +102,7 @@ type Readers struct {
 type deviceCheck func(ctx context.Context, r Readers, req Request, d simctl.Device) Check
 
 // deviceChecks are the lines after `device`, in report order.
-var deviceChecks = []deviceCheck{checkLease, checkApp, checkProxyCA}
+var deviceChecks = []deviceCheck{checkLease, checkApp, checkDebugger, checkProxyCA}
 
 // Diagnose runs every check that applies. A device line that found no device
 // is the whole report, because every other line is about that device.
@@ -235,6 +240,29 @@ func checkApp(ctx context.Context, r Readers, req Request, d simctl.Device) Chec
 			installed.ID(), req.Expect, expected.Digest, req.Expect)
 	}
 	return ok(CheckApp, "%s is the build at %s", installed.ID(), req.Expect)
+}
+
+// checkDebugger fails when any app on the device is held by a debugger or a
+// SIGSTOP. A held app answers no accessibility query and no touch, so every
+// script run against it fails for a reason the script cannot name - and a
+// breakpoint hit mid-run freezes it for as long as that debugger lives.
+func checkDebugger(ctx context.Context, r Readers, _ Request, d simctl.Device) Check {
+	if !d.Booted() {
+		return ok(CheckDebugger, "%s is not booted, so no app on it can be held by a debugger", d.Name)
+	}
+	table, err := r.Processes(ctx)
+	if err != nil {
+		return fail(CheckDebugger, "could not read the process table: %v", err)
+	}
+	holds := table.Holds(d.DataPath)
+	if len(holds) == 0 {
+		return ok(CheckDebugger, "no app on this device is held by a debugger")
+	}
+	described := make([]string, 0, len(holds))
+	for _, h := range holds {
+		described = append(described, h.Describe())
+	}
+	return fail(CheckDebugger, "%s", strings.Join(described, "; "))
 }
 
 // trustedCA is one configured root CA that exists on this Mac.

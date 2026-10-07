@@ -1,0 +1,10 @@
+    1     0 Ss   /sbin/launchd
+  500     1 Ss   /Library/Developer/PrivateFrameworks/CoreSimulator.framework/Resources/bin/launchd_sim
+  602   500 Ss   /Users/someone/Library/Developer/CoreSimulator/Devices/AAAAAAAA-0000-0000-0000-000000000001/data/Containers/Bundle/Application/1111AAAA-0000-0000-0000-000000000000/Nimbus.app/PlugIns/NimbusWidget.appex/NimbusWidget
+  601   500 Ss   /Users/someone/Library/Developer/CoreSimulator/Devices/AAAAAAAA-0000-0000-0000-000000000001/data/Containers/Bundle/Application/1111AAAA-0000-0000-0000-000000000000/Nimbus.app/Nimbus
+  603   500 Ss   /Users/someone/Library/Developer/CoreSimulator/Devices/AAAAAAAA-0000-0000-0000-000000000001/data/Containers/Bundle/Application/2222BBBB-0000-0000-0000-000000000000/Cloud Atlas.app/Cloud Atlas
+  700   500 SXs  /Users/someone/Library/Developer/CoreSimulator/Devices/BBBBBBBB-0000-0000-0000-000000000002/data/Containers/Bundle/Application/3333CCCC-0000-0000-0000-000000000000/Nimbus.app/Nimbus
+  801   500 S    /Users/someone/Library/Developer/CoreSimulator/Devices/AAAAAAAA-0000-0000-0000-000000000001/data/Containers/Data/Application/4444DDDD-0000-0000-0000-000000000000/tmp/helper
+  880   870 Ss   -zsh
+  900   880 S+   /Applications/Xcode.app/Contents/Developer/usr/bin/lldb
+  950   900 S    /Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver

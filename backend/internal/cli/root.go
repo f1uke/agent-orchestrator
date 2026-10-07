@@ -45,8 +45,19 @@ type usageError struct{ err error }
 func (e usageError) Error() string { return e.err.Error() }
 func (e usageError) Unwrap() error { return e.err }
 
-// ExitCode maps a CLI error to a process exit code: 2 for usage errors, 1 for
-// any other failure, 0 for success.
+// exitStatusError ends the process with the status of a child a command ran
+// on the caller's behalf, so a wrapper is as scriptable as the tool it wraps.
+type exitStatusError struct {
+	code int
+	err  error
+}
+
+func (e exitStatusError) Error() string { return e.err.Error() }
+func (e exitStatusError) Unwrap() error { return e.err }
+
+// ExitCode maps a CLI error to a process exit code: 2 for usage errors, a
+// wrapped child's own status where a command passes one through, 1 for any
+// other failure, 0 for success.
 func ExitCode(err error) int {
 	if err == nil {
 		return 0
@@ -54,6 +65,10 @@ func ExitCode(err error) int {
 	var ue usageError
 	if errors.As(err, &ue) {
 		return 2
+	}
+	var status exitStatusError
+	if errors.As(err, &status) && status.code > 0 {
+		return status.code
 	}
 	return 1
 }

@@ -39,6 +39,7 @@ func newSimDoctorCommand(ctx *commandContext) *cobra.Command {
 			"  device    it exists and is booted (and is this session's own, $AO_SIM_UDID)\n" +
 			"  lease     this session holds it, nobody does, or someone else does\n" +
 			"  app       which build of --app is installed, and with --expect whether it is that .app\n" +
+			"  debugger  no app on the device is attached by a debugger or stopped by SIGSTOP\n" +
 			"  proxy CA  the device trusts every root CA this project makes simulators trust\n\n" +
 			"It only reads: it never boots, claims, installs, launches or trusts anything, " +
 			"and each failing line names the command that fixes it. WARN is something a run " +

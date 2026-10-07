@@ -69,6 +69,9 @@ func (c *commandContext) runSimTapByName(cmd *cobra.Command, opts simTouchOption
 	if err != nil {
 		return err
 	}
+	if err := c.refuseStoppedSimApps(ctx, device); err != nil {
+		return err
+	}
 	// Hit-tested: a tap by name acts on the point it reads, and a point under
 	// the tab bar or the keyboard is a tap on the tab bar or the keyboard.
 	driver, err := c.simDriverReading(device, simReadOptions{hitTest: true})

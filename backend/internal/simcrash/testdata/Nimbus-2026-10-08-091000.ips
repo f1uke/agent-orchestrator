@@ -1,0 +1,21 @@
+{"app_name":"Nimbus","timestamp":"2026-10-08 09:10:00.00 +0700","app_version":"2.4.0","build_version":"317","bundleID":"com.example.Nimbus","bug_type":"309","name":"Nimbus","incident_id":"0000AAAA-0000-0000-0000-000000000002"}
+{
+  "procPath" : "\/Users\/USER\/Library\/Developer\/CoreSimulator\/Devices\/AAAAAAAA-0000-0000-0000-000000000001\/data\/Containers\/Bundle\/Application\/1111AAAA-0000-0000-0000-000000000000\/Nimbus.app\/Nimbus",
+  "exception" : {"type" : "EXC_CRASH", "signal" : "SIGABRT"},
+  "termination" : {"namespace" : "SIGNAL", "indicator" : "Abort trap: 6", "byProc" : "Nimbus"},
+  "lastExceptionBacktrace" : [
+    {"imageOffset" : 1200, "symbol" : "__exceptionPreprocess", "symbolLocation" : 164, "imageIndex" : 1},
+    {"imageOffset" : 5300, "symbol" : "-[RadarView setNilValueForKey:]", "symbolLocation" : 12, "imageIndex" : 0}
+  ],
+  "faultingThread" : 0,
+  "threads" : [
+    {"triggered" : true, "id" : 200, "queue" : "com.apple.main-thread", "frames" : [
+      {"imageOffset" : 3000, "symbol" : "__pthread_kill", "symbolLocation" : 8, "imageIndex" : 2}
+    ]}
+  ],
+  "usedImages" : [
+    {"name" : "Nimbus", "path" : "\/x\/Nimbus.app\/Nimbus"},
+    {"name" : "CoreFoundation", "path" : "\/System\/Library\/Frameworks\/CoreFoundation.framework\/CoreFoundation"},
+    {"name" : "libsystem_kernel.dylib", "path" : "\/usr\/lib\/system\/libsystem_kernel.dylib"}
+  ]
+}

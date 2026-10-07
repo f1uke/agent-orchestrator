@@ -91,7 +91,10 @@ func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
 			"is whichever one a human is using.\n\n" +
 			"A claim is required. A flow relaunches the app under test and resets its " +
 			"privacy permissions; that is what a regression test wants on a device set " +
-			"aside for it, and damage anywhere else. " + simPowerNote,
+			"aside for it, and damage anywhere else.\n\n" +
+			"A run is refused while an app on the device is held by a debugger or stopped by SIGSTOP, " +
+			"naming what holds it: a held app answers no accessibility query, so the flow would fail " +
+			"for a reason it cannot name. " + simPowerNote,
 		Example: `  ao sim claim --udid <test-device>
   ao sim flow run flow.yaml --udid <test-device>
   ao sim flow run reach/port.yaml reach/fund_detail.yaml --udid <test-device>`,
@@ -102,6 +105,9 @@ func newSimFlowRunCommand(ctx *commandContext) *cobra.Command {
 				return err
 			}
 			if err := ctx.requireSimLeaseForFlow(cmd.Context(), device); err != nil {
+				return err
+			}
+			if err := ctx.refuseHeldSimApps(cmd.Context(), cmd.ErrOrStderr(), device); err != nil {
 				return err
 			}
 			return ctx.runMaestroStream(cmd.Context(), cmd.OutOrStdout(), args, "test", "--device", device.UDID)

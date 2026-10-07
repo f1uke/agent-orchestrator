@@ -54,9 +54,14 @@ type simCloneResponse struct {
 const simLabelFlag = "device"
 
 // simLabelOwnCommands interpret --device themselves: claim makes the device it
-// names, release deletes it, udid prints it. Every other command is handed the
-// labelled device's udid as its --udid.
-var simLabelOwnCommands = map[string]bool{"claim": true, "release": true, "udid": true}
+// names, release deletes it, udid prints it, and the debugging commands
+// (sim_debug.go) act only on this session's own devices, so they have no
+// --udid to be handed. Every other command is handed the labelled device's
+// udid as its --udid.
+var simLabelOwnCommands = map[string]bool{
+	"claim": true, "release": true, "udid": true,
+	"pid": true, "lldb": true, "console": true, "crashes": true,
+}
 
 // applySimLabel turns `--device X` into `--udid <X's udid>` on the command
 // being run, so one lookup serves every subcommand without any of them having
