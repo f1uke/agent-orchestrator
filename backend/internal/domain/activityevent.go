@@ -162,8 +162,8 @@ func DetailTTL(kind ActivityEventKind) time.Duration {
 }
 
 // CoarseFromActivityState maps a reported activity state onto the coarse level
-// and its validity. The states that hold until the next signal (background,
-// waiting_input, parked, exited) map to a zero TTL: a pending prompt is pending until answered,
+// and its validity. The states that hold until the next signal (waiting_input,
+// parked, exited) map to a zero TTL: a pending prompt is pending until answered,
 // a parked turn is over, and an exit is terminal.
 func CoarseFromActivityState(s ActivityState) (ActivityCoarse, time.Duration) {
 	switch s {
@@ -178,9 +178,7 @@ func CoarseFromActivityState(s ActivityState) (ActivityCoarse, time.Duration) {
 		// stays true until the next signal rather than expiring on its own.
 		return CoarseIdle, 0
 	case ActivityBackground:
-		// The agent's own background work runs on until it wakes the agent, so
-		// the reading holds until the next signal instead of expiring.
-		return CoarseWorking, 0
+		return CoarseWorking, CoarseBackgroundTTL
 	case ActivityWaitingInput:
 		return CoarseWaiting, 0
 	case ActivityExited:

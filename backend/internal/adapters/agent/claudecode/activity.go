@@ -152,15 +152,24 @@ func sessionEndState(payload []byte) (domain.ActivityState, bool) {
 	}
 }
 
+// awaitedTaskTypes are the background_tasks types that are work the agent set
+// running itself and that wake it when they end: a background shell (the
+// Monitor tool is one too), a background subagent, a workflow. The list also
+// carries Claude Code's own housekeeping, which the agent is not waiting on: an
+// Artifact comment monitor ("monitor") watches for as long as the session
+// lives, and "dream", "auto-mode scan" and "memory import" run beside any turn.
+var awaitedTaskTypes = map[string]bool{"shell": true, "subagent": true, "workflow": true}
+
 // hasRunningBackgroundTask reports whether a Stop payload's background_tasks
-// lists any work still running. A malformed payload reads as none.
+// lists work the agent is waiting on that has not finished. Claude Code lists
+// queued work as pending. A malformed payload reads as none.
 func hasRunningBackgroundTask(payload []byte) bool {
 	var p struct {
 		BackgroundTasks []backgroundTask `json:"background_tasks"`
 	}
 	_ = json.Unmarshal(payload, &p)
 	for _, task := range p.BackgroundTasks {
-		if task.Status == "running" {
+		if awaitedTaskTypes[task.Type] && (task.Status == "running" || task.Status == "pending") {
 			return true
 		}
 	}

@@ -127,7 +127,8 @@ export function neverStarted(member: WorkspaceSession): boolean {
  *  - The agent's own last word about its turn. `parked` is the harness saying
  *    outright that the turn ENDED and it is sitting at an empty prompt; `exited`
  *    is the pane being gone. Neither is work, however alive the row looks.
- *  - `idle_aged` - the daemon has already decided a quiet idle is "assumed
+ *  - `idle_aged` / `background_aged` - the daemon has already decided a quiet
+ *    idle, or background work that stopped waking the agent, is "assumed
  *    waiting". Below that line an `idle` member is merely BETWEEN TURNS, which is
  *    not the same thing as stopped, and it counts as working.
  *
@@ -147,7 +148,7 @@ function isWorking(member: WorkspaceSession): boolean {
 	if (crewChipState(member) !== "working") return false;
 	const state = member.activity?.state;
 	if (state === "parked" || state === "exited") return false;
-	return member.statusReason !== "idle_aged";
+	return !turnSimplyEnded(member);
 }
 
 /**
@@ -456,7 +457,8 @@ export type TaskLane = {
  *   - `waiting_input` - a prompt is OPEN in the agent's pane and it is blocked on
  *     a person answering it.
  *   - `idle_aged`     - the agent's turn simply ENDED. Nothing is open and nobody
- *     is blocked.
+ *     is blocked. `background_aged` is the same, with background work it left
+ *     running.
  *
  * On a SOLO task those mean the same thing, because you are the only other party
  * - which is exactly why solo behaviour must not change, and does not. On a CREW
@@ -466,7 +468,7 @@ export type TaskLane = {
  * would become the biggest lane on the board and stop meaning anything.
  */
 function isBlockedOnAPerson(member: WorkspaceSession): boolean {
-	return attentionZone(member) === "action" && member.statusReason !== "idle_aged";
+	return attentionZone(member) === "action" && !turnSimplyEnded(member);
 }
 
 /**
@@ -624,4 +626,9 @@ function crewLane(task: Task, qa: WorkspaceSession, gates: TaskGates): TaskLane 
 /** Every worker task on the board, already grouped and laned. */
 export function workerTasks(sessions: WorkspaceSession[]): Task[] {
 	return tasksFrom(sessions.filter((session) => !isOrchestratorSession(session)));
+}
+
+/** The daemon's timeout guess that a quiet member's turn is over, with or without background work it left running. */
+function turnSimplyEnded(member: WorkspaceSession): boolean {
+	return member.statusReason === "idle_aged" || member.statusReason === "background_aged";
 }

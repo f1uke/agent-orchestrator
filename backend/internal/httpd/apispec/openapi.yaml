@@ -9746,6 +9746,7 @@ components:
           - waiting_input
           - active_stale
           - idle_aged
+          - background_aged
           - idle
           - no_signal
           - pr_pipeline
