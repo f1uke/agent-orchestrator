@@ -455,7 +455,9 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 			{
 				// PARKED HOLDING WORK NO PR CARRIES: its card wears the widest chip on
 				// the board ("Undelivered · Move to Done"), which is what the card
-				// header has to fit at the app's 960px minimum without clipping.
+				// header has to fit at the app's 960px minimum without clipping. It
+				// also holds scripts its store worktree has not published, so the
+				// two chips share one chip line.
 				id: "demo-undelivered",
 				workspaceId: "ao-demo",
 				workspaceName: "ao-demo",
@@ -470,6 +472,11 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				updatedAt: hoursAgo(2),
 				activity: { state: "parked", lastActivityAt: hoursAgo(2) },
 				prs: [],
+				scriptsStore: {
+					uncommitted: 1,
+					unpublished: 1,
+					files: ["projects/demo/login/keychain-cookie.yaml"],
+				},
 			},
 			{
 				// The widest chip AND the longest status on one card: a stalled crew
