@@ -522,7 +522,7 @@ func (c MobileScriptsConfig) Validate() error {
 			return fmt.Errorf("mobileScripts.verifySkill: %q has surrounding whitespace or a line break", c.VerifySkill)
 		}
 		if err := validateRepoRelative(c.VerifySkill); err != nil {
-			return fmt.Errorf("mobileScripts.verifySkill: %q: store-relative path required, without ..", c.VerifySkill)
+			return fmt.Errorf("mobileScripts.verifySkill: %q: a store-relative path without \"..\" is required", c.VerifySkill)
 		}
 	}
 	if c.Store != "" {

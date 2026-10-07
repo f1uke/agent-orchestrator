@@ -301,7 +301,7 @@ func (s *Service) Settle(ctx context.Context, owner domain.SessionID, policy Pol
 	if out.Publish, err = s.publishLocked(ctx, &w); err != nil {
 		return Settlement{}, err
 	}
-	if _, statErr := os.Stat(w.Path); statErr == nil {
+	if exists(w.Path) {
 		st, err := s.trees.Status(ctx, w.Path, w.Branch, w.BaseBranch)
 		if err != nil {
 			return Settlement{}, fmt.Errorf("scriptstore: read %s: %w", w.Path, err)
@@ -364,7 +364,7 @@ func (s *Service) refreshLocked(ctx context.Context, stale domain.ScriptsStoreWo
 	if err != nil || !ok {
 		return err
 	}
-	if _, err := os.Stat(w.Path); err != nil {
+	if !exists(w.Path) {
 		return nil
 	}
 	before := w
@@ -423,7 +423,7 @@ func (s *Service) reconcileStore(ctx context.Context, store string, rows []domai
 	var errs []error
 	for _, w := range rows {
 		owned[canonical(w.Path)] = true
-		if _, statErr := os.Stat(w.Path); statErr != nil && w.State == domain.ScriptsStoreActive && s.sessionLive(ctx, w.SessionID) {
+		if !exists(w.Path) && w.State == domain.ScriptsStoreActive && s.sessionLive(ctx, w.SessionID) {
 			if err := s.trees.Ensure(ctx, w.Store, w.Path, w.Branch, w.BaseBranch); err != nil {
 				errs = append(errs, fmt.Errorf("scriptstore: recreate %s: %w", w.Path, err))
 				continue
@@ -468,6 +468,11 @@ func canonical(p string) string {
 		}
 		rest = filepath.Join(filepath.Base(dir), rest)
 	}
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // union is a, then the entries of b that a lacks.

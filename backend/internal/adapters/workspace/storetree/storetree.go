@@ -83,7 +83,7 @@ func (t *Trees) must(ctx context.Context, dir string, args ...string) (string, e
 
 // Probe implements ports.ScriptsTrees.
 func (t *Trees) Probe(ctx context.Context, store string) (ports.ScriptsStoreProbe, error) {
-	if info, err := os.Stat(store); err != nil || !info.IsDir() {
+	if !isDir(store) {
 		return ports.ScriptsStoreProbe{Reason: fmt.Sprintf("the scripts store %s does not exist", store)}, nil
 	}
 	top, err := t.run(ctx, store, "rev-parse", "--show-toplevel")
@@ -133,7 +133,7 @@ func (t *Trees) Ensure(ctx context.Context, store, path, branch, base string) er
 	if _, err := t.must(ctx, store, "worktree", "prune"); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("storetree: create %s: %w", filepath.Dir(path), err)
 	}
 	exists, err := t.branchExists(ctx, store, branch)
@@ -398,6 +398,11 @@ func (t *Trees) inProgressOp(ctx context.Context, dir string) string {
 		}
 	}
 	return ""
+}
+
+func isDir(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }
 
 // samePath compares two paths after resolving symlinks, so /var and

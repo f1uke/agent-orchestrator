@@ -532,7 +532,7 @@ func (c *commandContext) killSession(ctx context.Context, cmd *cobra.Command, id
 			what.WriteString("subagents whose work is not on the branch yet (a discard keeps each one's work on its own branch):\n" + renderUndeliveredChildren(children) + "\n")
 		}
 		if store != nil {
-			what.WriteString(fmt.Sprintf("scripts store worktree %s (branch %s) holds work the store does not have (a discard deletes it and its branch):\n%s\n", store.Path, store.Branch, renderScriptsStore(*store)))
+			fmt.Fprintf(&what, "scripts store worktree %s (branch %s) holds work the store does not have (a discard deletes it and its branch):\n%s\n", store.Path, store.Branch, renderScriptsStore(*store))
 		}
 		return fmt.Errorf("%w\n\n%sTo end it anyway:\n  ao session kill %s --discard-uncommitted", err, what.String(), id)
 	}

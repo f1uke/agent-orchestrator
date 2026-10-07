@@ -175,7 +175,7 @@ func (m *Manager) linkVerifySkill(ctx context.Context, project domain.ProjectRec
 	} else if _, statErr := os.Lstat(target); !errors.Is(statErr, fs.ErrNotExist) {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		m.logger.Warn("scripts store: create the skills folder", "path", filepath.Dir(target), "error", err)
 		return
 	}
@@ -225,10 +225,10 @@ func excludeFromGit(ctx context.Context, workspacePath, rel string) error {
 			return nil
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(exclude), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(exclude), 0o750); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(exclude, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(exclude, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
