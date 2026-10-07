@@ -123,7 +123,8 @@ func (c *Client) HasRemote(ctx context.Context, name string) (bool, error) {
 
 // Copy uploads the named files of the local folder src into the remote folder
 // dst ("remote:path"), creating it as needed. A file the remote already has
-// unchanged is not sent again. It returns the names rclone transferred.
+// unchanged is not sent again. It returns the names rclone transferred, also
+// when the copy fails partway.
 func (c *Client) Copy(ctx context.Context, src, dst string, names []string) ([]string, error) {
 	for _, n := range names {
 		if n == "" || strings.ContainsAny(n, "\n\r") {
@@ -144,10 +145,7 @@ func (c *Client) Copy(ctx context.Context, src, dst string, names []string) ([]s
 	}
 	out, err := c.output(ctx, c.copyTimeout, remoteOf(dst),
 		"copy", src, dst, "--files-from-raw", list.Name(), "--use-json-log", "-v")
-	if err != nil {
-		return nil, err
-	}
-	return copied(out.Stderr), nil
+	return copied(out.Stderr), err
 }
 
 // copied is the files rclone's JSON log says it transferred: "Copied (new)",
@@ -208,12 +206,12 @@ func (c *Client) output(ctx context.Context, timeout time.Duration, remote strin
 	res, err := c.run(ctx, bin, args...)
 	if err != nil {
 		if ctx.Err() != nil {
-			return Output{}, fmt.Errorf("%w: rclone %s timed out after %s", ErrUnavailable, args[0], timeout)
+			return res, fmt.Errorf("%w: rclone %s timed out after %s", ErrUnavailable, args[0], timeout)
 		}
-		return Output{}, fmt.Errorf("%w: run rclone %s: %w", ErrUnavailable, args[0], err)
+		return res, fmt.Errorf("%w: run rclone %s: %w", ErrUnavailable, args[0], err)
 	}
 	if res.ExitCode != 0 {
-		return Output{}, runError(res, remote, args[0])
+		return res, runError(res, remote, args[0])
 	}
 	return res, nil
 }
@@ -300,8 +298,5 @@ func execRunner(ctx context.Context, name string, args ...string) (Output, error
 	if errors.As(err, &exitErr) && ctx.Err() == nil {
 		return Output{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), ExitCode: exitErr.ExitCode()}, nil
 	}
-	if err != nil {
-		return Output{}, err
-	}
-	return Output{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, nil
+	return Output{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}, err
 }

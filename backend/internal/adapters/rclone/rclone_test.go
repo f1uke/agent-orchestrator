@@ -115,6 +115,19 @@ func slicesIndex(s []string, v string) int {
 	return -1
 }
 
+func TestACopyThatFailsPartwayReportsWhatItCopied(t *testing.T) {
+	log := `{"level":"info","msg":"Copied (new)","object":"README.md"}
+{"level":"error","msg":"Failed to copy: googleapi: Error 503: backend error","object":"TC-1 pass.mp4"}`
+	f := &fakeRclone{answer: func([]string) (Output, error) { return Output{Stderr: []byte(log), ExitCode: 5}, nil }}
+	got, err := client(f).Copy(context.Background(), "/src", "finnomena:QA", []string{"README.md", "TC-1 pass.mp4"})
+	if !errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "Error 503") {
+		t.Fatalf("err = %v, want ErrUnavailable naming the failure", err)
+	}
+	if !reflect.DeepEqual(got, []string{"README.md"}) {
+		t.Fatalf("copied = %q, want README.md", got)
+	}
+}
+
 func TestCopyOfNothingNewReportsNothing(t *testing.T) {
 	f := &fakeRclone{answer: func([]string) (Output, error) { return Output{Stderr: []byte(jsonNotice + "\n")}, nil }}
 	got, err := client(f).Copy(context.Background(), "/src", "finnomena:QA", []string{"README.md"})

@@ -41,6 +41,11 @@ type fakeTestiny struct {
 	// details are the cases Case answers with, by id; any other id gets a
 	// case with no steps.
 	details map[int64]domain.TestinyCaseDetail
+	// comments are the comments on each run's results; posted is every
+	// comment AO posted, and commentFail fails posting on a case.
+	comments    map[domain.TestinyRunID][]testinyadapter.ResultComment
+	posted      []commentCall
+	commentFail map[int64]error
 }
 
 func newFakeTestiny() *fakeTestiny {
@@ -57,6 +62,7 @@ func newFakeTestiny() *fakeTestiny {
 		},
 		plans:    map[int64]string{193: "Chat session logout"},
 		ms:       map[int64]string{80: "Sprint 2026-20"},
+		msStart:  map[int64]time.Time{80: time.Date(2026, 9, 22, 5, 0, 0, 0, time.UTC)},
 		projects: []testinyadapter.Project{mob, kern},
 		delay:    map[domain.TestinyRunID]time.Duration{},
 		calls:    map[string]int{},
@@ -146,6 +152,7 @@ type fakeStore struct {
 	mu       sync.Mutex
 	links    []domain.TestinyRunLink
 	log      []domain.TestinyResultEntry
+	evidence []domain.TestinyEvidenceEntry
 	sessions map[domain.SessionID]domain.SessionRecord
 	projects map[string]domain.ProjectRecord
 }
