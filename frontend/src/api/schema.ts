@@ -2154,6 +2154,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/qa-evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch the Google Drive folder (an rclone path) QA evidence is uploaded into */
+        get: operations["getQAEvidenceSettings"];
+        /** Set the Google Drive folder QA evidence is uploaded into (empty turns upload off) */
+        put: operations["setQAEvidenceSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/reclaim": {
         parameters: {
             query?: never;
@@ -4008,6 +4026,10 @@ export interface components {
             sessionPrefix: string;
             testinyProject?: string;
         };
+        QAEvidenceSettingsResponse: {
+            /** @description An rclone path, <remote>:<path>, e.g. finnomena:QA. A run's folder goes under it at <Project>/<YYYY>/<milestone>/TP-<n> - <plan>/TR-<n> - <run>. Empty turns evidence upload off. */
+            driveFolder: string;
+        };
         ReclaimSettingsResponse: {
             artifactPatterns?: string[];
             artifactsEnabled: boolean;
@@ -4421,6 +4443,10 @@ export interface components {
         SetProjectConfigInput: {
             config: components["schemas"]["ProjectConfig"];
             mergeFields?: string[];
+        };
+        SetQAEvidenceSettingsRequest: {
+            /** @description An rclone path such as finnomena:QA; empty turns evidence upload off. */
+            driveFolder: string;
         };
         SetReclaimSettingsRequest: {
             artifactPatterns?: string[];
@@ -4939,6 +4965,7 @@ export interface components {
             prompts: components["schemas"]["SystemPromptItem"][];
         };
         TestinyCaseResult: {
+            evidence: components["schemas"]["TestinyEvidenceLink"][];
             /** Format: int64 */
             id: number;
             recorded?: components["schemas"]["TestinyResultRecord"];
@@ -4946,6 +4973,13 @@ export interface components {
             status: string;
             steps: components["schemas"]["DomainTestinyRunStep"][];
             title: string;
+        };
+        TestinyEvidenceLink: {
+            /** @description The Drive file id the link names. */
+            driveId: string;
+            /** @description The evidence file's name when AO posted the link; empty for a link a person posted. */
+            file: string;
+            url: string;
         };
         TestinyFetchError: {
             /** @enum {string} */
@@ -13709,6 +13743,95 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getQAEvidenceSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QAEvidenceSettingsResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setQAEvidenceSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetQAEvidenceSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QAEvidenceSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -299,6 +299,7 @@ var schemaNames = map[string]string{
 	"DomainTestinyCaseStatus":              "TestinyCaseStatus",
 	"DomainTestinyFetchError":              "TestinyFetchError",
 	"DomainTestinyFetchErrorKind":          "TestinyFetchErrorKind",
+	"DomainTestinyEvidenceLink":            "TestinyEvidenceLink",
 	// httpd/controllers — simulator device-lease wire envelopes
 	"ControllersSimLeaseParam":                 "SimLeaseParam",
 	"ControllersAcquireSimLeaseInput":          "AcquireSimLeaseInput",
@@ -383,6 +384,8 @@ var schemaNames = map[string]string{
 	"ControllersSetWikiSettingsRequest":             "SetWikiSettingsRequest",
 	"ControllersRefLinksSettingsResponse":           "RefLinksSettingsResponse",
 	"ControllersSetRefLinksSettingsRequest":         "SetRefLinksSettingsRequest",
+	"ControllersQAEvidenceSettingsResponse":         "QAEvidenceSettingsResponse",
+	"ControllersSetQAEvidenceSettingsRequest":       "SetQAEvidenceSettingsRequest",
 	"ControllersSimTrustSettingsResponse":           "SimTrustSettingsResponse",
 	"ControllersSetSimTrustSettingsRequest":         "SetSimTrustSettingsRequest",
 	"ControllersWikiStatusResponse":                 "WikiStatusResponse",
@@ -2434,6 +2437,26 @@ func settingsOperations() []operation {
 				{http.StatusOK, controllers.RefLinksSettingsResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/qa-evidence", id: "getQAEvidenceSettings", tag: "settings",
+			summary: "Fetch the Google Drive folder (an rclone path) QA evidence is uploaded into",
+			resps: []respUnit{
+				{http.StatusOK, controllers.QAEvidenceSettingsResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/qa-evidence", id: "setQAEvidenceSettings", tag: "settings",
+			summary: "Set the Google Drive folder QA evidence is uploaded into (empty turns upload off)",
+			reqBody: controllers.SetQAEvidenceSettingsRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.QAEvidenceSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
 		{

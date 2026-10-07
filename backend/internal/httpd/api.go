@@ -106,6 +106,7 @@ type APIDeps struct {
 	// not a session, so it has no lifecycle wiring of its own.
 	WikiSettings     controllers.WikiSettingsService
 	RefLinks         controllers.RefLinksService
+	QAEvidence       controllers.QAEvidenceSettingsService
 	Wiki             controllers.WikiService
 	SystemPrompts    controllers.SystemPromptsService
 	MessageTemplates controllers.MessageTemplatesService
@@ -200,7 +201,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:        &controllers.ImportController{Svc: deps.Import},
-		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, SimTrust: simTrustSettings(deps.SimTrust), SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, QAEvidence: deps.QAEvidence, SimTrust: simTrustSettings(deps.SimTrust), SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:           &controllers.WikiController{Svc: deps.Wiki},
 		daemon:         &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		learning:       &controllers.LearningController{Svc: deps.Learning},

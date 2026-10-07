@@ -17,6 +17,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
+	"github.com/aoagents/agent-orchestrator/backend/internal/qaevidence"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reclaimsettings"
 	"github.com/aoagents/agent-orchestrator/backend/internal/reflinks"
 	"github.com/aoagents/agent-orchestrator/backend/internal/responselang"
@@ -67,6 +68,13 @@ type RefLinksService interface {
 	Set(reflinks.Settings) error
 }
 
+// QAEvidenceSettingsService is the QA evidence settings store surface the
+// controller needs. *qaevidence.Store satisfies this directly.
+type QAEvidenceSettingsService interface {
+	Get() qaevidence.Settings
+	Set(qaevidence.Settings) error
+}
+
 // SimTrustSettingsService is the sim-trust settings store surface the controller
 // needs. *simtrust.Store satisfies this directly.
 type SimTrustSettingsService interface {
@@ -100,6 +108,7 @@ type SettingsController struct {
 	ResponseLanguage ResponseLanguageService
 	Wiki             WikiSettingsService
 	RefLinks         RefLinksService
+	QAEvidence       QAEvidenceSettingsService
 	SimTrust         SimTrustSettingsService
 	SystemPrompts    SystemPromptsService
 	MessageTemplates MessageTemplatesService
@@ -123,6 +132,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/sim-trust", c.setSimTrust)
 	r.Get("/settings/ref-links", c.getRefLinks)
 	r.Put("/settings/ref-links", c.setRefLinks)
+	r.Get("/settings/qa-evidence", c.getQAEvidence)
+	r.Put("/settings/qa-evidence", c.setQAEvidence)
 	r.Get("/settings/prompts", c.getPrompts)
 	r.Put("/settings/prompts/{kind}", c.setPrompt)
 	r.Delete("/settings/prompts/{kind}", c.clearPrompt)
@@ -398,6 +409,33 @@ func (c *SettingsController) setRefLinks(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, refLinksSettingsResponse(c.RefLinks.Get()))
+}
+
+func (c *SettingsController) getQAEvidence(w http.ResponseWriter, r *http.Request) {
+	if c.QAEvidence == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/qa-evidence")
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, QAEvidenceSettingsResponse{DriveFolder: c.QAEvidence.Get().DriveFolder})
+}
+
+// setQAEvidence replaces the Drive folder. An empty one is legitimate: it is
+// how evidence upload is turned off.
+func (c *SettingsController) setQAEvidence(w http.ResponseWriter, r *http.Request) {
+	if c.QAEvidence == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/qa-evidence")
+		return
+	}
+	var in SetQAEvidenceSettingsRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	if err := c.QAEvidence.Set(qaevidence.Settings{DriveFolder: in.DriveFolder}); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_SETTINGS", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, QAEvidenceSettingsResponse{DriveFolder: c.QAEvidence.Get().DriveFolder})
 }
 
 func (c *SettingsController) getSimTrust(w http.ResponseWriter, r *http.Request) {
