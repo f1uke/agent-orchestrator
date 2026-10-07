@@ -68,3 +68,15 @@ nothing extra.
   know qa's id: the crew is formed after dev is already running.
 - **Bracket what you want to trust:** `ao crew run --start --kind build|test|device`
   ... `ao crew run --end --result pass|fail`.
+  AO discards the run if the tree moved under it; an unbracketed run is never
+  certified.
+- **Each of you drives only your own devices.** On an iOS task qa tests on its
+  own clone; dev names the exact build in its handover
+  (`ao send --crew qa --about <sha> --message "<path>.app, Build: <line>"`), and
+  qa installs that bundle rather than rebuilding.
+- **The artifact is the reply.** dev answers a finding by committing; qa answers a
+  handoff by running it and handing back. No acknowledgements, and the message
+  caps are enforced: see [send.md](send.md).
+
+`ao crew review` prints these rules to dev when it creates the qa; this section
+is where to read them again, after a compaction for instance.

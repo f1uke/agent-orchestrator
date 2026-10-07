@@ -3501,33 +3501,30 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// A solo worker - every session an ordinary spawn creates - takes the
 		// second branch, byte-for-byte unchanged.
 		if crewRole == domain.CrewRoleQA {
+			// qa opens no pull request and creates no branch, so it gets no
+			// branch convention either.
 			base = m.effectiveBase(prompts.KindQA, projectID) +
 				prompts.Section(adds.Worker) +
 				prompts.CoordinationFloorFor(prompts.KindQA, spec.ChildWorktrees) +
-				prompts.CrewProtocol(string(crewRole)) +
-				workerGitConventionPrompt(conv, cfg.DefaultBranch)
+				prompts.CrewProtocol(string(crewRole))
 			break
 		}
-		orchestratorID, ok, err := m.activeOrchestratorSessionID(ctx, projectID)
+		// The live orchestrator is named inside the reporting floor; with none
+		// active the floor says how to find one, because the obligation to
+		// report holds either way.
+		orchestratorID, _, err := m.activeOrchestratorSessionID(ctx, projectID)
 		if err != nil {
 			return "", err
 		}
-		body := m.effectiveBase(prompts.KindWorker, projectID) +
+		base = m.effectiveBase(prompts.KindWorker, projectID) +
 			prompts.Section(adds.Worker) +
-			prompts.CoordinationFloorFor(prompts.KindWorker, spec.ChildWorktrees) +
+			prompts.WorkerFloor(string(orchestratorID), spec.ChildWorktrees) +
 			// Both members of a crew are told about each other; a SOLO worker -
-			// every session an ordinary spawn creates - renders nothing here and
-			// its prompt is byte-for-byte what it was.
+			// every session an ordinary spawn creates - renders nothing here.
 			prompts.CrewProtocol(string(crewRole)) +
-			workerGitConventionPrompt(conv, cfg.DefaultBranch) +
-			// dev owns the pull request, so only it is told how to open one. qa's
-			// branch above deliberately renders nothing here.
-			workerPRTargetPrompt(spec.PRTarget)
-		if ok {
-			base = workerOrchestratorPrompt(orchestratorID) + "\n\n" + body
-		} else {
-			base = body
-		}
+			// dev owns the pull request, so only it and a solo worker are told
+			// how to open one. qa's branch above renders nothing here.
+			workerPRPrompt(spec.PRTarget, conv, cfg.DefaultBranch)
 	}
 	if base == "" {
 		return "", nil
@@ -3595,7 +3592,12 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// Every worker kind, qa included, each told what is its own: qa and a
 		// solo worker play runs and record results, dev hands that check to qa.
 		// A project without Testiny renders nothing.
-		base += prompts.TestinyProtocol(cfg.UsesTestiny, string(projectID), string(crewRole), caseScripts)
+		base += prompts.TestinyProtocol(prompts.Testiny{
+			On:        cfg.UsesTestiny,
+			ProjectID: string(projectID),
+			Skill:     testinySkillDir(cfg.TestinySkill),
+			Language:  prompts.ResolveResponseLanguage(cfg.ResponseLanguage, m.globalResponseLanguage()),
+		}, string(crewRole), caseScripts)
 	}
 	workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
 	if err != nil {
@@ -3611,6 +3613,27 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 	// so the default path is byte-for-byte unchanged.
 	lang := prompts.ResolveResponseLanguage(cfg.ResponseLanguage, m.globalResponseLanguage())
 	return base + m.aoSkillPointer(cfg.HasWebUI) + prompts.ConfidentialityGuard + prompts.ResponseLanguageDirective(lang), nil
+}
+
+// testinySkillDir is the project's Testiny conventions skill folder with a
+// leading ~ expanded, or "" when none is set or the folder holds no SKILL.md:
+// the prompt never sends an agent to a skill that is not there, and without
+// one the agent asks the human for those conventions.
+func testinySkillDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	if strings.HasPrefix(dir, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(home, strings.TrimPrefix(dir, "~/"))
+	}
+	if !isFile(filepath.Join(dir, "SKILL.md")) {
+		return ""
+	}
+	return dir
 }
 
 // globalResponseLanguage returns the global default human-facing response
@@ -3720,16 +3743,6 @@ func workspaceRepoList(repos []domain.WorkspaceRepoRecord) string {
 	return strings.Join(lines, "\n")
 }
 
-// workerOrchestratorPrompt names the live orchestrator a worker reports to. WHEN
-// it reports is the worker floor's rule (prompts.CoordinationFloor), so it holds
-// even when no orchestrator was active at spawn and this block is absent.
-func workerOrchestratorPrompt(orchestratorID domain.SessionID) string {
-	return fmt.Sprintf(`## Orchestrator coordination
-
-This project's orchestrator session is %[1]s. Send it the reports "Required coordination" below asks for, and message it for cross-session coordination; settle everything else within your own task:
-`+"`ao send --session %[1]s --message \"<your message>\"`", orchestratorID)
-}
-
 // orchestratorGitConventionPrompt returns the branch-convention section injected
 // into the orchestrator prompt, or "" when the project sets no convention. This is
 // the primary mechanism: the orchestrator builds every `ao spawn`, so it must know
@@ -3742,19 +3755,20 @@ func orchestratorGitConventionPrompt(conv domain.GitConventionConfig, baseBranch
 	if conv.Workflow == domain.GitWorkflowGitflow {
 		return fmt.Sprintf("\n\n"+`## Git branch convention (gitflow)
 
-This project follows gitflow. When you spawn a worker, start it from `+"`%[1]s`"+` and set its branch explicitly so it lands on-convention:
+This project follows gitflow. Spawn every worker from `+"`%[1]s`"+` with its branch set explicitly, so it lands on-convention:
 `+"`ao spawn --from %[1]s --target %[1]s --branch <type>/<topic> ...`"+`
-- `+"`feature/<topic>`"+` — new features and enhancements
-- `+"`bugfix/<topic>`"+` — bug fixes
-- `+"`hotfix/<topic>`"+` — urgent production fixes
-When the task has a Jira card key, put it uppercase right after the type, e.g. `+"`feature/PROJ-2270-checkout-list`"+`. --from is where the worktree is cut from; --target is where the worker's pull request merges — normally both `+"`%[1]s`"+`, but pass a different --target when the task must land elsewhere (e.g. a hotfix cut from a release branch that merges into `+"`%[1]s`"+`). If you leave --branch off, AO auto-names a gitflow branch from the task.`, baseBranch)
+- `+"`feature/<topic>`"+`: new features and enhancements
+- `+"`bugfix/<topic>`"+`: bug fixes
+- `+"`hotfix/<topic>`"+`: urgent production fixes
+
+Put a Jira card key uppercase right after the type, e.g. `+"`feature/PROJ-2270-checkout-list`"+`. --target is where the worker's pull request merges: normally `+"`%[1]s`"+`, but pass a different one when the task must land elsewhere (e.g. a hotfix cut from a release branch that merges into `+"`%[1]s`"+`). If you leave --branch off, AO auto-names a gitflow branch from the task.`, baseBranch)
 	}
 	prefix := conv.NormalizedBranchPrefix()
 	return fmt.Sprintf("\n\n"+`## Git branch convention
 
-This project prefixes every branch with `+"`%[2]s`"+`. When you spawn a worker, start it from `+"`%[1]s`"+` and set its branch explicitly so it lands on-convention:
+This project prefixes every branch with `+"`%[2]s`"+`. Spawn every worker from `+"`%[1]s`"+` with its branch set explicitly, so it lands on-convention:
 `+"`ao spawn --from %[1]s --target %[1]s --branch %[2]s<topic> ...`"+`
-For example `+"`%[2]sadd-login`"+`, or `+"`%[2]sPROJ-2270-checkout-list`"+` when the task has a Jira card key. --from is where the worktree is cut from; --target is where the worker's pull request merges — normally both `+"`%[1]s`"+`, but pass a different --target when the task must land elsewhere. If you leave --branch off, AO applies the `+"`%[2]s`"+` prefix automatically.`, baseBranch, prefix)
+For example `+"`%[2]sadd-login`"+`, or `+"`%[2]sPROJ-2270-checkout-list`"+` when the task has a Jira card key. --target is where the worker's pull request merges: normally `+"`%[1]s`"+`, but pass a different one when the task must land elsewhere. If you leave --branch off, AO applies the `+"`%[2]s`"+` prefix automatically.`, baseBranch, prefix)
 }
 
 // confirmBeforeSpawn reports whether the orchestrator prompt should carry the
@@ -3784,13 +3798,13 @@ func orchestratorSpawnConfirmPrompt(enabled bool, conv domain.GitConventionConfi
 	}
 	return fmt.Sprintf("\n\n"+`## Confirm before spawning
 
-Before you run `+"`ao spawn`"+`, present a short confirmation summary to the human and wait for their explicit approval. Do NOT spawn until they confirm. The summary must list:
-- **Task** — one line on what the worker will do
-- **Source branch** — the `+"`--from`"+` branch the worktree is cut from (default `+"`%[1]s`"+`)
-- **New branch** — %[2]s
-- **PR target** — the `+"`--target`"+` branch the worker's pull request will merge into; omit `+"`--target`"+` and it resolves to `+"`--from`"+` (so, by default, `+"`%[1]s`"+`)
+Before you run `+"`ao spawn`"+`, show the human a short summary and wait for their explicit approval; do NOT spawn until they confirm. The summary lists:
+- **Task**: one line on what the worker will do
+- **Source branch**: the `+"`--from`"+` branch the worktree is cut from (default `+"`%[1]s`"+`)
+- **New branch**: %[2]s
+- **PR target**: the `+"`--target`"+` branch the worker's pull request merges into; omitted, it is `+"`--from`"+` (by default `+"`%[1]s`"+`)
 
-If the human asks for changes, revise and re-confirm. Run `+"`ao spawn`"+` only after they approve. This confirmation is conversational — ask in chat and wait; there is no separate UI dialog.`, baseBranch, newBranch)
+If the human asks for changes, revise and confirm again. This is a question in chat; there is no separate dialog.`, baseBranch, newBranch)
 }
 
 // orchestratorCheckInGatePrompt returns the section that tells the orchestrator
@@ -3805,51 +3819,47 @@ func orchestratorCheckInGatePrompt(enabled bool) string {
 	return prompts.CheckInGateBriefingNote()
 }
 
-// workerGitConventionPrompt returns the branch-convention section injected into the
-// worker prompt, or "" when the project sets no convention. It is a short standing
-// note so a worker independently keeps any branches it creates on-convention and
-// targets the right base; the namespace rules in the worker base (prompts.KindWorker)
-// still govern how sibling/stacked branches are named.
-func workerGitConventionPrompt(conv domain.GitConventionConfig, baseBranch string) string {
-	if !conv.Active() {
-		return ""
-	}
-	if conv.Workflow == domain.GitWorkflowGitflow {
-		return fmt.Sprintf("\n\n"+`## Git branch convention
-
-This project follows gitflow: name branches by type (`+"`feature/…`"+`, `+"`bugfix/…`"+`, `+"`hotfix/…`"+`) and open your pull requests against this session's recorded PR target (`+"`%s`"+` unless spawn set a different `+"`--target`"+`).`, baseBranch)
-	}
-	prefix := conv.NormalizedBranchPrefix()
-	return fmt.Sprintf("\n\n"+`## Git branch convention
-
-This project prefixes branches with `+"`%[2]s`"+`: keep any branches you create under that prefix and open your pull requests against this session's recorded PR target (`+"`%[1]s`"+` unless spawn set a different `+"`--target`"+`).`, baseBranch, prefix)
-}
-
-// workerPRTargetPrompt returns the section that names THIS session's PR target
-// branch and the flag that aims a new pull request at it, or "" when the target
-// is unknown (rows created before AO recorded one; the convention section and the
-// worker floor still describe where to look).
+// workerPRPrompt is the one section that tells a solo worker or a crew's dev
+// where its pull request goes and how its branches are named, or "" when
+// neither is known (a row predating recorded targets, on a project with no
+// convention).
 //
-// The generic instruction - "open the PR against this session's recorded PR
-// target" - was not enough, twice in 24 hours: `gh pr create` with no `--base`
-// silently defaults to the REPOSITORY's default branch, so a worker following its
-// nose opened against `main` instead of the project's `main-fluke`, CI ran the
-// format gate over ~1300 commits of unrelated drift, and the red run it left in
-// the rollup is what showed a green PR as ci_failed on the board (#282, #287).
-// Naming the branch, and the flag, at the moment the PR is opened is the fix; AO
-// deliberately does NOT retarget on its own, so a PR aimed somewhere unusual on
-// purpose is still the worker's (and the human's) call to make.
-func workerPRTargetPrompt(target string) string {
+// It names the target branch AND the flag at the moment the PR is opened,
+// because the generic "open it against the recorded target" was not enough,
+// twice in 24 hours: `gh pr create` with no `--base` silently defaults to the
+// REPOSITORY's default branch, so a worker following its nose opened against
+// `main` instead of the project's `main-fluke`, CI ran the format gate over
+// ~1300 commits of unrelated drift, and the red run it left in the rollup is
+// what showed a green PR as ci_failed on the board (#282, #287). AO
+// deliberately does NOT retarget on its own, so a PR aimed somewhere unusual
+// on purpose is still the worker's (and the human's) call to make.
+func workerPRPrompt(target string, conv domain.GitConventionConfig, baseBranch string) string {
 	target = strings.TrimSpace(target)
-	if target == "" {
-		return ""
+	var naming string
+	switch {
+	case !conv.Active():
+	case conv.Workflow == domain.GitWorkflowGitflow:
+		naming = "This project follows gitflow: name any branch you create by type (`feature/...`, `bugfix/...`, `hotfix/...`)."
+	default:
+		naming = "This project prefixes branches with `" + conv.NormalizedBranchPrefix() + "`: keep any branch you create under that prefix."
 	}
-	return fmt.Sprintf("\n\n"+`## Opening this session's pull request
+	if target == "" {
+		if naming == "" {
+			return ""
+		}
+		return "\n\n## Opening this session's pull request\n\n" + naming +
+			" Open your pull requests against this session's recorded PR target (`" + baseBranch + "` unless spawn set a different `--target`)."
+	}
+	out := fmt.Sprintf("\n\n"+`## Opening this session's pull request
 
 This session's PR target is `+"`%[1]s`"+`. Name it EXPLICITLY when you open the pull request:
 `+"`gh pr create --base %[1]s ...`"+` (GitHub) or `+"`glab mr create --target-branch %[1]s ...`"+` (GitLab)
 
-Neither tool defaults to your target: with no base they aim at the REPOSITORY's default branch, which merges your work into the wrong place and runs CI over every commit between the two branches. If you have already opened one against the wrong base, retarget it in place (`+"`gh pr edit <number> --base %[1]s`"+`, `+"`glab mr update <number> --target-branch %[1]s`"+`) rather than opening a second pull request. Targeting a different branch on purpose - stacking on a sibling, say - is still fine: say so in the pull request description.`, target)
+Neither tool defaults to your target: with no base they aim at the REPOSITORY's default branch, which merges your work into the wrong place and runs CI over every commit between the two branches. If you have already opened one against the wrong base, retarget it in place (`+"`gh pr edit <number> --base %[1]s`"+`, `+"`glab mr update <number> --target-branch %[1]s`"+`) rather than opening a second pull request. Targeting a different branch on purpose (stacking on a sibling, say) is fine: say so in the pull request description.`, target)
+	if naming != "" {
+		out += "\n\n" + naming
+	}
+	return out
 }
 
 // spawnEnv builds the runtime environment: the per-project env vars first, then

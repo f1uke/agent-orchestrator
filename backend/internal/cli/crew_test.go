@@ -417,7 +417,9 @@ func TestCrewReview_PostsToTheReviewRouteAsItself(t *testing.T) {
 	}
 	// What dev is told back: the member exists, and how to talk to it. Its own
 	// prompt cannot have said the first of those.
-	for _, wantOut := range []string{"demo-9", "qa", "ao send --crew qa"} {
+	// The rules for sharing the task arrive here, at the moment they start to
+	// apply, because dev's standing prompt holds only how to ask.
+	for _, wantOut := range []string{"demo-9", "qa", "ao send --crew qa", "ao crew run --start", "AO refuses the fourth", "Name the exact build"} {
 		if !strings.Contains(out, wantOut) {
 			t.Fatalf("output is missing %q: %q", wantOut, out)
 		}

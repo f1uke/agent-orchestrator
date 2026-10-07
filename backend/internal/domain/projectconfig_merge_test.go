@@ -37,6 +37,7 @@ func fullProjectConfig() ProjectConfig {
 		SimTrust:                &SimTrustConfig{CAFiles: []string{"~/proxy-ca.pem"}},
 		MobileScripts:           &MobileScriptsConfig{Product: "nter", Platform: MobilePlatformIOS},
 		UsesTestiny:             true,
+		TestinySkill:            "~/skills/testiny",
 		DisableAutoCrew:         true,
 		PauseBeforeImplementing: true,
 		LearnFromSessions:       true,
@@ -66,6 +67,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		HasWebUI:                false,
 		HasIOSSimulator:         false,
 		UsesTestiny:             false,
+		TestinySkill:            "/skills/other-testiny",
 		DisableAutoCrew:         false,
 		PauseBeforeImplementing: false,
 	}
@@ -102,6 +104,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		{"simTrust", func(c ProjectConfig) any { return c.SimTrust }},
 		{"mobileScripts", func(c ProjectConfig) any { return c.MobileScripts }},
 		{"usesTestiny", func(c ProjectConfig) any { return c.UsesTestiny }},
+		{"testinySkill", func(c ProjectConfig) any { return c.TestinySkill }},
 		{"approvalRule", func(c ProjectConfig) any { return c.ApprovalRule }},
 		{"systemPromptAdditions", func(c ProjectConfig) any { return c.SystemPromptAdditions }},
 	}

@@ -41,8 +41,10 @@ func TestIOSDeviceBlocks_OwnCloneAndMockRule(t *testing.T) {
 // The device never changes hands: dev keeps its own, names the build, and qa
 // installs that build on its own clone and checks it before playing.
 func TestCrewHandover_HandsOverTheBuildNotTheDevice(t *testing.T) {
-	dev := SimulatorHandoverToQA() + CrewProtocol("dev")
-	for _, want := range []string{"qa gets its own device", "Name the exact build qa must install", "`Build:`", "Your device stays yours"} {
+	// dev's prompt says the device stays its own; the build handover arrives
+	// with the qa, in what `ao crew review` prints.
+	dev := SimulatorHandoverToQA() + CrewProtocol("dev") + CrewReviewGuidance()
+	for _, want := range []string{"qa gets its own device", "Name the exact build", "`Build:`", "Your device is yours for the whole task"} {
 		if !strings.Contains(dev, want) {
 			t.Errorf("dev handover is missing %q:\n%s", want, dev)
 		}
@@ -67,7 +69,7 @@ func TestCrewHandover_HandsOverTheBuildNotTheDevice(t *testing.T) {
 // A one-shot action is played for real once, last, wherever cases are played.
 func TestCasePlay_OneShotOrderReplacesPersonOnly(t *testing.T) {
 	for name, block := range map[string]string{
-		"testiny": TestinyProtocol(true, "mer", "qa", nil),
+		"testiny": TestinyProtocol(Testiny{On: true, ProjectID: "mer"}, "qa", nil),
 		"android": MobileScriptPlay(MobileScripts{Product: "nter", Store: "/store"}),
 	} {
 		if !strings.Contains(block, "failures first, success last") {
@@ -77,7 +79,7 @@ func TestCasePlay_OneShotOrderReplacesPersonOnly(t *testing.T) {
 			t.Errorf("%s play block still leaves every irreversible step to a person", name)
 		}
 	}
-	if !strings.Contains(TestinyProtocol(true, "mer", "qa", nil), "whether each case ran against the real API or which mock set and why") {
+	if !strings.Contains(TestinyProtocol(Testiny{On: true, ProjectID: "mer"}, "qa", nil), "whether each case ran against the real API or which mock set and why") {
 		t.Error("qa's handback does not say which API each case ran against")
 	}
 }

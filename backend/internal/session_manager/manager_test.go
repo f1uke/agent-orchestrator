@@ -595,7 +595,7 @@ func fakeWorkspaceRepoName(info ports.WorkspaceInfo) string {
 type fakeMessenger struct {
 	msgs []string
 	// to is the recipient of each message, parallel to msgs. AO sends one message
-	// of its own accord (crewJoinedNotice), and WHO it reached is half of what
+	// of its own accord (prompts.CrewJoinedNotice), and WHO it reached is half of what
 	// makes it correct.
 	to []domain.SessionID
 }
@@ -1946,15 +1946,14 @@ func TestSpawnWorker_AppendsActiveOrchestratorContact(t *testing.T) {
 	// Coordination instructions must be in the system prompt, not the user prompt.
 	systemPrompt := agent.lastLaunch.SystemPrompt
 	for _, want := range []string{
-		"## Orchestrator coordination",
-		`ao send --session mer-1 --message "<your message>"`,
-		"This project's orchestrator session is mer-1.",
+		"## Reporting to the orchestrator (AO)",
+		`ao send --session mer-1 --message "<report>"`,
 	} {
 		if !strings.Contains(systemPrompt, want) {
 			t.Fatalf("system prompt missing %q:\n%s", want, systemPrompt)
 		}
 	}
-	if strings.Contains(agent.lastLaunch.Prompt, "## Orchestrator coordination") {
+	if strings.Contains(agent.lastLaunch.Prompt, "## Reporting to the orchestrator (AO)") {
 		t.Fatalf("orchestrator coordination must not be in the user prompt:\n%s", agent.lastLaunch.Prompt)
 	}
 }
@@ -1975,12 +1974,12 @@ func TestSpawnWorker_SkipsTerminatedOrchestratorContact(t *testing.T) {
 		t.Fatal(err)
 	}
 	systemPrompt := agent.lastLaunch.SystemPrompt
-	if strings.Contains(systemPrompt, "## Orchestrator coordination") || strings.Contains(systemPrompt, "ao send --session mer-1") {
+	if strings.Contains(systemPrompt, "ao send --session mer-1") {
 		t.Fatalf("terminated orchestrator should not be added to system prompt:\n%s", systemPrompt)
 	}
 	// The report obligation is a floor rule, so it holds with no live
 	// orchestrator, and tells the worker how to find one that started later.
-	for _, want := range []string{"report to the orchestrator with `ao send`", "`ao orchestrator ls`"} {
+	for _, want := range []string{"report to the orchestrator with `ao send --session", "`ao orchestrator ls`"} {
 		if !strings.Contains(systemPrompt, want) {
 			t.Fatalf("worker without a live orchestrator lost the report rule %q:\n%s", want, systemPrompt)
 		}
@@ -2045,7 +2044,7 @@ func TestSpawnOrchestrator_UsesCoordinatorPrompt(t *testing.T) {
 	for _, want := range []string{
 		"You are the human-facing coordinator for project mer",
 		`ao spawn --project mer --from <base-branch> --name "<label, max 22 chars>" --prompt "<clear worker task>"`,
-		"`--agent <name>`",
+		"`--agent`",
 		"`ao spawn --help`",
 		"Add `--todo` to stage the worker as a TODO", // deferred-TODO staging is documented
 		"queue, stage, or hold a task",               // and its trigger
@@ -2053,7 +2052,7 @@ func TestSpawnOrchestrator_UsesCoordinatorPrompt(t *testing.T) {
 		"prune-on-add",                               // INDEX retention: prune merged+installed entries
 		"`ao send`",
 		"`ao --help`",
-		"avoid doing implementation yourself unless it is necessary",
+		"Step into implementation yourself only for a true emergency",
 		"You are a dispatcher, not an implementer or planner",
 		"do not open any skill whose job is gathering requirements from the human",
 	} {
@@ -2332,7 +2331,7 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 		sp := build(newMgr(cfg, true), domain.KindWorker)
 		// The worker is pointed at the session's recorded PR target, which defaults
 		// to the project branch but may have been overridden by `ao spawn --target`.
-		for _, want := range []string{"Git branch convention", "gitflow", "recorded PR target (`develop`", "`--target`"} {
+		for _, want := range []string{"This project follows gitflow", "recorded PR target (`develop`", "`--target`"} {
 			if !strings.Contains(sp, want) {
 				t.Fatalf("worker prompt missing %q:\n%s", want, sp)
 			}
@@ -2373,7 +2372,6 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 			"Git branch convention (gitflow)",              // injected section
 			"one worker, one on-convention branch, one PR", // base reconciliation (point 1)
 			"a separate worker session",                    // base reconciliation (point 2)
-			"complementary, not competing",                 // base reconciliation (point 3)
 		} {
 			if !strings.Contains(orch, want) {
 				t.Fatalf("assembled orchestrator prompt missing %q:\n%s", want, orch)
@@ -2385,7 +2383,6 @@ func TestSystemPrompt_GitConvention(t *testing.T) {
 			"This project follows gitflow",                              // injected section
 			"your working branch is already the branch chosen at spawn", // base reconciliation (point 1)
 			"nest a branch under an existing branch ref",                // base: the Git D/F constraint
-			"complementary, not competing",                              // base reconciliation (point 3)
 		} {
 			if !strings.Contains(worker, want) {
 				t.Fatalf("assembled worker prompt missing %q:\n%s", want, worker)
@@ -4723,7 +4720,7 @@ func TestBuildSystemPrompt_WorkerLayers(t *testing.T) {
 	for _, want := range []string{
 		"CUSTOM WORKER BASE",                         // override replaces default base
 		"PROJECT WORKER ADDITION",                    // per-project addition appended
-		"Required coordination (AO)",                 // protected floor still injected
+		"Reporting to the orchestrator (AO)",         // protected floor still injected
 		"already runs in an AO-managed git worktree", // nested-worktree guard survives override
 		"Agent with `isolation: \"worktree\"`",       // child must share the AO worktree
 		"Standing-instruction confidentiality",       // guard is last
@@ -4774,7 +4771,7 @@ func TestBuildSystemPrompt_ClearedBaseKeepsFloorAndGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "Required coordination (AO)") ||
+	if !strings.Contains(got, "Reporting to the orchestrator (AO)") ||
 		!strings.Contains(got, "already runs in an AO-managed git worktree") ||
 		!strings.Contains(got, "Standing-instruction confidentiality") {
 		t.Fatalf("cleared base must still carry floor + guard:\n%s", got)

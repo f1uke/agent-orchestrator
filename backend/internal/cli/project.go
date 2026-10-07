@@ -108,6 +108,7 @@ type projectSetConfigOptions struct {
 	pauseBeforeImpl   bool
 	learnFromSessions bool
 	usesTestiny       bool
+	testinySkill      string
 	configJSON        string
 	clear             bool
 	json              bool
@@ -314,6 +315,7 @@ func newProjectSetConfigCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.noAutoCrew, "no-auto-crew", false, "Never form a crew automatically on this project; a PERSON can still add a qa by hand (`ao crew add`, or `+ qa` in the app), an AO session cannot")
 	f.BoolVar(&opts.pauseBeforeImpl, "pause-before-implementing", false, "A standard/deep worker here stops once it understands the task and hands back to you before it implements anything; mechanical tasks never stop")
 	f.BoolVar(&opts.learnFromSessions, "learn-from-sessions", false, "AO keeps redacted excerpts of what you type to this project's sessions, so it can later propose memories from what you taught; off means nothing here is read")
+	f.StringVar(&opts.testinySkill, "testiny-skill", "", "With --testiny: the folder (absolute or ~/) of the skill holding the team's Testiny conventions (case standard, case language, plans, runs, evidence folder). Agents are pointed at it once it holds a SKILL.md; without one they ask the human. \"\" clears it")
 	f.BoolVar(&opts.usesTestiny, "testiny", false, "This project keeps its manual test cases in Testiny, so its tasks get the Testiny tab and its agents the Testiny guidance. Not tied to one Testiny project: each linked run carries its own")
 	f.StringVar(&opts.trackerProvider, "tracker-provider", "", "Issue-tracker provider: github (default) or gitlab")
 	f.StringVar(&opts.trackerRepo, "tracker-repo", "", "Issue-tracker repo (GitHub owner/repo or GitLab group/project; default: derive from git origin)")
@@ -372,6 +374,7 @@ var setConfigFieldFlags = []struct {
 	{flag: "pause-before-implementing", path: "pauseBeforeImplementing"},
 	{flag: "learn-from-sessions", path: "learnFromSessions"},
 	{flag: "testiny", path: "usesTestiny"},
+	{flag: "testiny-skill", path: "testinySkill"},
 }
 
 // resolveSetConfigWrite decides what this invocation writes and how: the config
@@ -462,6 +465,7 @@ func buildProjectConfig(opts projectSetConfigOptions) (domain.ProjectConfig, err
 		PauseBeforeImplementing: opts.pauseBeforeImpl,
 		LearnFromSessions:       opts.learnFromSessions,
 		UsesTestiny:             opts.usesTestiny,
+		TestinySkill:            strings.TrimSpace(opts.testinySkill),
 	}
 	// "none" is the CLI-friendly spelling of the default (empty) workflow; the
 	// daemon stores it as unset. Normalize so `--git-workflow none` round-trips.

@@ -64,7 +64,6 @@ func TestWorkerDefault_ReconcilesGitflow(t *testing.T) {
 		"stay in your session's namespace",                          // namespace tracking requirement (point 3)
 		"nest a branch under an existing branch ref",                // the Git D/F constraint (correctness)
 		"spawn a separate session",                                  // escape hatch for independent work (point 2)
-		"complementary, not competing",                              // convention + namespace compose (point 3)
 	} {
 		if !strings.Contains(base, want) {
 			t.Fatalf("worker default missing reconciliation wording %q:\n%s", want, base)
@@ -88,7 +87,6 @@ func TestOrchestratorDefault_ReconcilesGitflow(t *testing.T) {
 	for _, want := range []string{
 		"one worker, one on-convention branch, one PR", // common case (point 1)
 		"a separate worker session",                    // different-type escape hatch (point 2)
-		"complementary, not competing",                 // convention + namespace compose (point 3)
 	} {
 		if !strings.Contains(base, want) {
 			t.Fatalf("orchestrator default missing reconciliation wording %q:\n%s", want, base)
@@ -193,20 +191,22 @@ func TestOrchestratorDefault_DocumentsTaskSizeFlag(t *testing.T) {
 	}
 }
 
-// TestOrchestratorDefault_RefersToWorkByBoardName: the orchestrator base must
-// tell the dispatcher to name worker sessions and their PRs by the human-readable
-// board label when talking to the human, keeping the internal session id / PR
-// number for parenthetical disambiguation only.
+// TestOrchestratorDefault_RefersToWorkByBoardName: every agent names sessions
+// and their PRs by the human-readable board label, and marks an id it does
+// write with its sigil. The rule lives once, in the reference convention every
+// prompt carries, not again in the orchestrator base.
 func TestOrchestratorDefault_RefersToWorkByBoardName(t *testing.T) {
-	base := DefaultBase(KindOrchestrator)
 	for _, want := range []string{
-		"human-readable board name",                        // the rule
-		"rather than the internal session id or PR number", // what to avoid
-		"put it in parentheses after the name",             // the disambiguation escape hatch
+		"human-readable board name",         // the rule
+		"When you do write an id or number", // the disambiguation escape hatch
+		"Never write a bare session number", // what to avoid
 	} {
-		if !strings.Contains(base, want) {
-			t.Fatalf("orchestrator default missing board-name guidance %q:\n%s", want, base)
+		if !strings.Contains(ReferenceConvention(), want) {
+			t.Fatalf("reference convention missing board-name guidance %q:\n%s", want, ReferenceConvention())
 		}
+	}
+	if strings.Contains(DefaultBase(KindOrchestrator), "board name") {
+		t.Fatal("the orchestrator base restates the board-name rule the reference convention carries")
 	}
 }
 
@@ -441,10 +441,10 @@ func TestTaskSizeDirective_StandardDeepAndUnknownRenderNothing(t *testing.T) {
 func TestWorkerDefault_ContextEconomy(t *testing.T) {
 	base := DefaultBase(KindWorker)
 	for _, want := range []string{
-		"## Context economy (AO)",
+		"## Project knowledge and context (AO)",
 		"Read only the specific knowledge-store entries your brief names", // R3a
 		"ranged read with offset/limit",                                   // R3b targeted reads
-		"take screenshots sparingly",                                      // R3c screenshot cap
+		"look at few screenshots (a couple per verify pass)",              // R3c: what enters context, not what a run saves
 	} {
 		if !strings.Contains(base, want) {
 			t.Fatalf("worker default missing context-economy wording %q:\n%s", want, base)
@@ -554,12 +554,16 @@ func TestCoordinationFloor_QAMustHandBackWhenItFinishes(t *testing.T) {
 		"what is left for a person to check by hand, and why a machine cannot",
 		// The stopping rule, reusing the cap AO already has rather than a new one -
 		// and it is now MECHANISM, so the prompt says what actually happens.
-		"One message per finish",
-		"REFUSED by AO",
+		"one message per finish",
 	} {
 		if !strings.Contains(qa, want) {
 			t.Fatalf("qa floor missing handback rule %q:\n%s", want, qa)
 		}
+	}
+	// The cap qa finishes under is MECHANISM, so its crew block (as protected as
+	// the floor) says what actually happens.
+	if !strings.Contains(CrewProtocol("qa"), "AO refuses the fourth") {
+		t.Fatalf("qa is not told the message cap is enforced:\n%s", CrewProtocol("qa"))
 	}
 	// qa is a worker session, so it keeps every worker invariant as well.
 	if !strings.Contains(qa, "namespace") || !strings.Contains(qa, "already runs in an AO-managed git worktree") {
@@ -577,11 +581,11 @@ func TestCoordinationFloor_SoloWorkerHasNoHandbackObligation(t *testing.T) {
 	if strings.Contains(worker, "Handing back (AO)") {
 		t.Fatalf("the worker floor must not carry qa's handback obligation:\n%s", worker)
 	}
-	if CoordinationFloor(KindQA) != qaCoordinationFloor+workerFloor+qaHandbackFloor {
-		t.Fatal("the qa floor must share workerFloor with the worker floor, so worker invariants cannot drift apart")
-	}
-	if !strings.HasSuffix(worker, workerFloor) {
-		t.Fatal("the worker floor must end with the shared workerFloor")
+	for _, childWorktrees := range []bool{false, true} {
+		shared := processFloor(childWorktrees)
+		if !strings.HasSuffix(CoordinationFloorFor(KindQA, childWorktrees), shared) || !strings.HasSuffix(CoordinationFloorFor(KindWorker, childWorktrees), shared) {
+			t.Fatal("the qa and worker floors must end with the same processFloor, so worker invariants cannot drift apart")
+		}
 	}
 }
 
@@ -680,8 +684,9 @@ func TestCrewProtocol_DevIsToldHowToSummonItsQA(t *testing.T) {
 		// Nothing else creates one, and forgetting is not silent.
 		"Nothing else creates one",
 		"AO says so in the report you send",
-		// And what changes when it happens.
-		"both running at once",
+		// And what changes when it happens, and where the rules for it arrive.
+		"at the same time as you",
+		"What `ao crew review` prints",
 	} {
 		if !strings.Contains(dev, want) {
 			t.Fatalf("crew dev is not told how to get its qa: missing %q:\n%s", want, dev)
@@ -715,8 +720,9 @@ func TestCrewProtocol_SoloRendersNothingAndAboutNamesAnArtifact(t *testing.T) {
 	if CrewProtocol("") != "" {
 		t.Fatalf("a solo worker must render no crew block:\n%s", CrewProtocol(""))
 	}
-	for _, role := range []string{"dev", "qa"} {
-		block := CrewProtocol(role)
+	// dev learns how to share the task when it gains a qa, from what
+	// `ao crew review` prints; qa has a crewmate from its first turn.
+	for role, block := range map[string]string{"dev": CrewReviewGuidance(), "qa": CrewProtocol("qa")} {
 		if !strings.Contains(block, "--about <commit-sha|testiny-id>") {
 			t.Fatalf("crew %s is not told what --about names:\n%s", role, block)
 		}
@@ -732,10 +738,10 @@ func TestCrewProtocol_SoloRendersNothingAndAboutNamesAnArtifact(t *testing.T) {
 // from the Jira key, and asks the human when the key does not settle it.
 func TestTestinyProtocol_RendersOnlyWhereTheProjectUsesTestiny(t *testing.T) {
 	for _, role := range []string{"", "dev", "qa"} {
-		if got := TestinyProtocol(false, "mer", role, &MobileScripts{Product: "nter", IOS: true, Store: "/store"}); got != "" {
+		if got := TestinyProtocol(Testiny{ProjectID: "mer"}, role, &MobileScripts{Product: "nter", IOS: true, Store: "/store"}); got != "" {
 			t.Fatalf("role %q: a project without Testiny rendered a Testiny block:\n%s", role, got)
 		}
-		got := TestinyProtocol(true, "mer", role, nil)
+		got := TestinyProtocol(Testiny{On: true, ProjectID: "mer"}, role, nil)
 		for _, want := range []string{
 			"\n\n## Testiny test cases (AO)\n",
 			"`~/.ao/knowledge/mer/plans/<branch>--testiny.md`",
@@ -944,7 +950,7 @@ func TestQADefault_StaysLanguageNeutral(t *testing.T) {
 func TestWorkerFloorForbidsPatternKills(t *testing.T) {
 	for _, k := range []Kind{KindWorker, KindQA} {
 		floor := CoordinationFloor(k)
-		for _, want := range []string{"## Stopping processes (AO)", "`$!`", "Never kill by pattern", "`pkill -f`", "`killall`"} {
+		for _, want := range []string{"## Shared machine (AO)", "`$!`", "Never kill by pattern", "`pkill -f`", "`killall`"} {
 			if !strings.Contains(floor, want) {
 				t.Errorf("%s floor is missing %q", k, want)
 			}
@@ -959,7 +965,7 @@ func TestWorkerFloorForbidsGitStash(t *testing.T) {
 	for _, k := range []Kind{KindWorker, KindQA} {
 		for _, childWorktrees := range []bool{false, true} {
 			floor := CoordinationFloorFor(k, childWorktrees)
-			for _, want := range []string{"## Setting work aside (AO)", "Never use `git stash`", "commit it on your branch", "`.patch` file", "`~/.ao/knowledge/<project>/`"} {
+			for _, want := range []string{"## Shared machine (AO)", "Never use `git stash`", "commit it on your branch", "`.patch` file", "`~/.ao/knowledge/<project>/`"} {
 				if !strings.Contains(floor, want) {
 					t.Errorf("%s floor (childWorktrees=%v) is missing %q", k, childWorktrees, want)
 				}
@@ -974,10 +980,10 @@ func TestWorkerFloorForbidsGitStash(t *testing.T) {
 func TestCoordinationFloor_WorkerReportsAtEachMoment(t *testing.T) {
 	worker := CoordinationFloor(KindWorker)
 	for _, want := range []string{
-		"report to the orchestrator with `ao send`",
+		"report to the orchestrator with `ao send --session",
 		"**your PR/MR is open**",
 		"**you need the human**",
-		"**you finish** - your last act before you end your turn",
+		"**you finish**, as your last act before you end your turn",
 		"the knowledge-store paths you wrote",
 		// The finish report is where the manual checks live.
 		"anything a person must check by hand (what, where, and why a test cannot)",
@@ -1000,7 +1006,7 @@ func TestCoordinationFloor_QAIsNotToldToReport(t *testing.T) {
 	if strings.Contains(qa, "report to the orchestrator") {
 		t.Fatalf("qa floor must not carry the orchestrator report obligation:\n%s", qa)
 	}
-	if !strings.Contains(qa, "## Required coordination (AO)") || !strings.Contains(qa, "namespace") {
+	if !strings.Contains(qa, "## Handing back (AO)") || !strings.Contains(qa, "namespace") {
 		t.Fatal("qa floor lost the namespace invariant")
 	}
 }
@@ -1050,10 +1056,10 @@ func TestCoordinationFloorForChildWorktrees(t *testing.T) {
 		if shared != CoordinationFloor(k) {
 			t.Errorf("%s: CoordinationFloorFor(false) differs from CoordinationFloor", k)
 		}
-		if !strings.Contains(shared, "Do not launch an Agent with `isolation: \"worktree\"`") || strings.Contains(shared, "Child agents and their worktrees") {
+		if !strings.Contains(shared, "do not launch an Agent with `isolation: \"worktree\"`") || strings.Contains(shared, "Child agents and their worktrees") {
 			t.Errorf("%s: shared floor lost the shared-worktree rule", k)
 		}
-		for _, want := range []string{"launch each one with `isolation: \"worktree\"`", "Commit before you delegate", "Never call `EnterWorktree`", "## Stopping processes (AO)"} {
+		for _, want := range []string{"launch each one with `isolation: \"worktree\"`", "Commit before you delegate", "Never call `EnterWorktree`", "## Shared machine (AO)"} {
 			if !strings.Contains(own, want) {
 				t.Errorf("%s: child-worktree floor lacks %q", k, want)
 			}
@@ -1064,5 +1070,91 @@ func TestCoordinationFloorForChildWorktrees(t *testing.T) {
 	}
 	if CoordinationFloorFor(KindOrchestrator, true) != "" || CoordinationFloorFor(KindReviewer, true) != CoordinationFloor(KindReviewer) {
 		t.Error("the flag changed a floor other than worker or qa")
+	}
+}
+
+// The human's standing rule is never to use the em dash, and agents copy the
+// style of their instructions, so no block AO writes may carry one.
+func TestPrompts_CarryNoEmDash(t *testing.T) {
+	blocks := map[string]string{
+		"orchestrator base":   DefaultBase(KindOrchestrator),
+		"worker base":         DefaultBase(KindWorker),
+		"qa base":             DefaultBase(KindQA),
+		"reviewer base":       DefaultBase(KindReviewer),
+		"worker floor":        WorkerFloor("mer-1", false) + WorkerFloor("", true),
+		"qa floor":            CoordinationFloorFor(KindQA, false) + CoordinationFloorFor(KindQA, true),
+		"reviewer floor":      CoordinationFloor(KindReviewer),
+		"reference":           ReferenceConvention(),
+		"mechanical":          TaskSizeDirective("mechanical"),
+		"check-in gate":       CheckInGate("standard") + CheckInGateBriefingNote(),
+		"crew":                CrewProtocol("dev") + CrewProtocol("qa") + CrewJoinedNotice("qa", true),
+		"simulator":           SimulatorGuidance() + SimulatorHandoverToQA() + RecordedFlowLoop(),
+		"testiny":             TestinyProtocol(Testiny{On: true, ProjectID: "mer"}, "", nil),
+		"language":            ResponseLanguageDirective("Thai"),
+		"confidentiality":     ConfidentialityGuard,
+		"mobile scripts":      MobileScriptGuidance(MobileScripts{Product: "nter", IOS: true, Store: "/store"}),
+		"mobile scripts play": MobileScriptPlay(MobileScripts{Product: "nter", IOS: true, Store: "/store"}),
+	}
+	for name, block := range blocks {
+		if i := strings.IndexAny(block, "\u2014\u2013"); i >= 0 {
+			from, to := max(0, i-60), min(len(block), i+60)
+			t.Errorf("%s carries a long dash: ...%s...", name, block[from:to])
+		}
+	}
+}
+
+// pstack recognises an AO qa by this exact heading and skips its implementing
+// playbooks for it, so renaming the heading would hand qa dev's playbooks.
+func TestQADefault_KeepsTheHeadingPstackReads(t *testing.T) {
+	if !strings.HasPrefix(DefaultBase(KindQA), "## QA role\n") {
+		t.Fatalf("the qa base must open with %q:\n%s", "## QA role", DefaultBase(KindQA))
+	}
+}
+
+// A project that names its Testiny conventions skill sends the agent to that
+// SKILL.md; one that names none sends it to the human, and AO never names a
+// user skill of its own accord. A failed case's reason is written in the
+// human-facing language the project resolves to.
+func TestTestinyProtocol_ConventionsSkillAndLanguage(t *testing.T) {
+	with := TestinyProtocol(Testiny{On: true, ProjectID: "mer", Skill: "/skills/testiny-qa/", Language: "Thai"}, "qa", nil)
+	for _, want := range []string{"Follow the skill at `/skills/testiny-qa/SKILL.md`", "in plain Thai"} {
+		if !strings.Contains(with, want) {
+			t.Errorf("Testiny block with a skill is missing %q:\n%s", want, with)
+		}
+	}
+	without := TestinyProtocol(Testiny{On: true, ProjectID: "mer"}, "", nil)
+	for _, want := range []string{"names no skill for its Testiny conventions", "ask the human for the team's case standard", "in plain English"} {
+		if !strings.Contains(without, want) {
+			t.Errorf("Testiny block without a skill is missing %q:\n%s", want, without)
+		}
+	}
+	for name, block := range map[string]string{"with": with, "without": without} {
+		if strings.Contains(block, "managing-testiny-qa") || strings.Contains(block, "{{") {
+			t.Errorf("Testiny block (%s) names a user skill or leaves a placeholder:\n%s", name, block)
+		}
+	}
+}
+
+// dev's crew rules arrive with its qa, so the prompt dev starts with holds only
+// how and when to ask; qa, which always has a crewmate, carries them in full.
+func TestCrewProtocol_DevGetsTheSharingRulesWhenItsQAArrives(t *testing.T) {
+	dev := CrewProtocol("dev")
+	for _, gone := range []string{"ao crew run --start", "AO refuses the fourth"} {
+		if strings.Contains(dev, gone) {
+			t.Errorf("dev's standing prompt still carries %q, which applies only once a qa exists", gone)
+		}
+	}
+	for name, block := range map[string]string{"review output": CrewReviewGuidance(), "person's notice": CrewJoinedNotice("qa", false), "qa prompt": CrewProtocol("qa")} {
+		for _, want := range []string{"ao crew run --start", "AO refuses the fourth", "--about <commit-sha|testiny-id>"} {
+			if !strings.Contains(block, want) {
+				t.Errorf("%s is missing %q", name, want)
+			}
+		}
+	}
+	if strings.Contains(CrewJoinedNotice("qa", false), "Testiny") != strings.Contains(CrewReviewGuidance(), "Testiny") {
+		t.Error("the notice names Testiny on a project without it")
+	}
+	if !strings.Contains(CrewJoinedNotice("qa", true), "qa now owns the Testiny drafts") {
+		t.Error("on a Testiny project the notice does not hand the Testiny work to qa")
 	}
 }

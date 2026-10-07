@@ -153,7 +153,7 @@ func TestAttachCrewMember_TellsDevItsPromptIsNowWrong(t *testing.T) {
 	for _, want := range []string{
 		"[AO]",              // attributed to AO, not to a person or the new member
 		"qa",                // what joined
-		"one git index",     // the thing a solo prompt does not know
+		"One git index",     // the thing a solo prompt does not know
 		"ao send --crew qa", // how to reach it
 	} {
 		if !strings.Contains(got[0], want) {

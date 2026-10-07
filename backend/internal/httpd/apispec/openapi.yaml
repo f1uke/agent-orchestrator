@@ -11825,6 +11825,8 @@ components:
           type: array
         systemPromptAdditions:
           $ref: '#/components/schemas/DomainSystemPromptAdditions'
+        testinySkill:
+          type: string
         trackerIntake:
           $ref: '#/components/schemas/TrackerIntakeConfig'
         usesTestiny:
