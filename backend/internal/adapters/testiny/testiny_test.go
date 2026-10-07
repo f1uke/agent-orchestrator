@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -173,8 +175,101 @@ func TestPlanAndMilestoneTitles(t *testing.T) {
 		t.Fatalf("Plan = %+v, %v", plan, err)
 	}
 	ms, err := c.Milestone(context.Background(), 80)
-	if err != nil || ms != (Ref{ID: 80, Title: "Sprint 2026-20"}) {
-		t.Fatalf("Milestone = %+v, %v", ms, err)
+	want := Milestone{
+		ID: 80, Title: "Sprint 2026-20",
+		StartAt:   time.Date(2026, 9, 22, 5, 0, 0, 0, time.UTC),
+		CreatedAt: time.Date(2026, 9, 22, 4, 22, 52, 969000000, time.UTC),
+	}
+	if err != nil || ms.ID != want.ID || ms.Title != want.Title || !ms.StartAt.Equal(want.StartAt) || !ms.CreatedAt.Equal(want.CreatedAt) {
+		t.Fatalf("Milestone = %+v, %v; want %+v", ms, err, want)
+	}
+}
+
+func TestMilestoneWithoutAStartDate(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{
+		"milestone show 81": {Stdout: []byte(`{"data":{"id":81,"title":"Backlog","created_at":"2025-12-01T00:00:00.000Z","start_at":null},"meta":null}`)},
+	}}
+	ms, err := newClient(f, time.Now).Milestone(context.Background(), 81)
+	if err != nil || !ms.StartAt.IsZero() || ms.CreatedAt.Year() != 2025 {
+		t.Fatalf("Milestone = %+v, %v; want no start and the created date", ms, err)
+	}
+}
+
+const commentFind565 = `raw POST /comment/find --body={"filter":{"type":"TEXT"},"map":{"entities":["comment","testrun","testcase"],"ids":{"testrun_id":565}},"pagination":{"limit":1000,"offset":0}}`
+
+func TestResultCommentsReadsEveryLinkOnEachResult(t *testing.T) {
+	f := &fakeCLI{answers: map[string]Output{commentFind565: ok(t, "comment_find_565.json")}}
+	got, err := newClient(f, time.Now).ResultComments(context.Background(), 565)
+	if err != nil {
+		t.Fatalf("ResultComments: %v", err)
+	}
+	want := []ResultComment{
+		{ID: 2562, CaseID: 3829},
+		{ID: 2568, CaseID: 6538, URLs: []string{"https://drive.google.com/file/d/1FakeDriveIdOne/view?usp=drive_link"}},
+		{ID: 2570, CaseID: 6542, URLs: []string{"https://drive.google.com/open?id=1FakeDriveIdFour"}},
+		{ID: 2573, CaseID: 6542, URLs: []string{
+			"https://drive.google.com/file/d/1FakeDriveIdTwo/view?usp=drive_link",
+			"https://drive.google.com/file/d/1FakeDriveIdThree/view?usp=drive_link",
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ResultComments =\n%+v\nwant (oldest first, the deleted comment left out)\n%+v", got, want)
+	}
+}
+
+func TestResultCommentsPagesUntilAShortPage(t *testing.T) {
+	page := func(offset, n int) Output {
+		var data []string
+		for i := range n {
+			data = append(data, fmt.Sprintf(`{"id":%d,"deleted_at":null,"text":"plain https://drive.google.com/open?id=x%d","comment_testrun_values":{"testcase_id":1}}`, offset+i+1, offset+i+1))
+		}
+		return Output{Stdout: []byte(`{"meta":{"count":` + strconv.Itoa(n) + `},"data":[` + strings.Join(data, ",") + `]}`)}
+	}
+	at := func(offset int) string {
+		return strings.Replace(commentFind565, `"offset":0`, `"offset":`+strconv.Itoa(offset), 1)
+	}
+	f := &fakeCLI{answers: map[string]Output{at(0): page(0, 1000), at(1000): page(1000, 1000), at(2000): page(2000, 3)}}
+	got, err := newClient(f, time.Now).ResultComments(context.Background(), 565)
+	if err != nil {
+		t.Fatalf("ResultComments: %v", err)
+	}
+	if len(got) != 2003 || got[2002].URLs[0] != "https://drive.google.com/open?id=x2003" {
+		t.Fatalf("read %d comments, want 2003 across three pages", len(got))
+	}
+	if n := len(f.calls); n != 3 {
+		t.Fatalf("%d calls, want 3", n)
+	}
+}
+
+func TestCommentURLsReadsPlainText(t *testing.T) {
+	got := commentURLs("see https://drive.google.com/file/d/1a/view, and (https://example.com/x).")
+	want := []string{"https://drive.google.com/file/d/1a/view", "https://example.com/x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("commentURLs = %q, want %q", got, want)
+	}
+}
+
+func TestCommentOnResult(t *testing.T) {
+	text := "https://drive.google.com/file/d/1a/view?usp=drive_link\nhttps://drive.google.com/file/d/1b/view?usp=drive_link"
+	argv := "run results comment --run=565 --case=6538 --project-id=1 --text=" + text
+	f := &fakeCLI{answers: map[string]Output{argv: {Stdout: []byte(`{"data":{"id":2601,"type":"TEXT","target":"TRTC","project_id":1},"meta":null}`)}}}
+	id, err := newClient(f, time.Now).CommentOnResult(context.Background(), 565, 6538, 1, text)
+	if err != nil || id != 2601 {
+		t.Fatalf("CommentOnResult = %d, %v; want 2601", id, err)
+	}
+	if last := f.argvs[0][len(f.argvs[0])-1]; last != "--text="+text {
+		t.Fatalf("the text is not one argv element: %q", f.argvs[0])
+	}
+}
+
+func TestCommentOnResultRefusedForACaseNotInTheRun(t *testing.T) {
+	argv := "run results comment --run=565 --case=9 --project-id=1 --text=x"
+	f := &fakeCLI{answers: map[string]Output{argv: {
+		Stderr:   []byte(`{"error":{"kind":"usage","message":"case 9 is not in run 565, so a comment on its result would show nowhere"},"exit_code":2}`),
+		ExitCode: 2,
+	}}}
+	if _, err := newClient(f, time.Now).CommentOnResult(context.Background(), 565, 9, 1, "x"); !errors.Is(err, ErrRejected) {
+		t.Fatalf("err = %v, want ErrRejected", err)
 	}
 }
 

@@ -59,7 +59,7 @@ type RunReader interface {
 	Results(ctx context.Context, id domain.TestinyRunID) (testinyadapter.Results, error)
 	Case(ctx context.Context, id int64) (domain.TestinyCaseDetail, error)
 	Plan(ctx context.Context, id int64) (testinyadapter.Ref, error)
-	Milestone(ctx context.Context, id int64) (testinyadapter.Ref, error)
+	Milestone(ctx context.Context, id int64) (testinyadapter.Milestone, error)
 	Project(ctx context.Context, ref string) (testinyadapter.Project, error)
 	ProjectByID(ctx context.Context, id int64) (testinyadapter.Project, error)
 }
@@ -346,8 +346,8 @@ func (s *Service) complete(ctx context.Context, run testinyadapter.Run, res test
 	}
 	if run.MilestoneID != 0 {
 		read(func() error {
-			ref, err := s.reader.Milestone(ctx, run.MilestoneID)
-			milestone = &domain.TestinyRef{ID: ref.ID, Title: ref.Title}
+			m, err := s.reader.Milestone(ctx, run.MilestoneID)
+			milestone = &domain.TestinyRef{ID: m.ID, Title: m.Title}
 			return err
 		})
 	}

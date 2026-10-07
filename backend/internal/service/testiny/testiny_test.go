@@ -30,6 +30,7 @@ type fakeTestiny struct {
 	results  map[domain.TestinyRunID]testinyadapter.Results
 	plans    map[int64]string
 	ms       map[int64]string
+	msStart  map[int64]time.Time
 	projects []testinyadapter.Project
 	fail     error
 	delay    map[domain.TestinyRunID]time.Duration
@@ -117,11 +118,11 @@ func (f *fakeTestiny) Plan(_ context.Context, id int64) (testinyadapter.Ref, err
 	return testinyadapter.Ref{ID: id, Title: f.plans[id]}, nil
 }
 
-func (f *fakeTestiny) Milestone(_ context.Context, id int64) (testinyadapter.Ref, error) {
+func (f *fakeTestiny) Milestone(_ context.Context, id int64) (testinyadapter.Milestone, error) {
 	if err := f.note(fmt.Sprintf("milestone show %d", id)); err != nil {
-		return testinyadapter.Ref{}, err
+		return testinyadapter.Milestone{}, err
 	}
-	return testinyadapter.Ref{ID: id, Title: f.ms[id]}, nil
+	return testinyadapter.Milestone{ID: id, Title: f.ms[id], StartAt: f.msStart[id], CreatedAt: time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)}, nil
 }
 
 func (f *fakeTestiny) Project(_ context.Context, ref string) (testinyadapter.Project, error) {
