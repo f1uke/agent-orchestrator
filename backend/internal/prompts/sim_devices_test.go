@@ -67,7 +67,7 @@ func TestCrewHandover_HandsOverTheBuildNotTheDevice(t *testing.T) {
 // A one-shot action is played for real once, last, wherever cases are played.
 func TestCasePlay_OneShotOrderReplacesPersonOnly(t *testing.T) {
 	for name, block := range map[string]string{
-		"testiny": TestinyProtocol("MOB", "mer", "qa", nil),
+		"testiny": TestinyProtocol(true, "mer", "qa", nil),
 		"android": MobileScriptPlay(MobileScripts{Product: "nter", Store: "/store"}),
 	} {
 		if !strings.Contains(block, "failures first, success last") {
@@ -77,7 +77,7 @@ func TestCasePlay_OneShotOrderReplacesPersonOnly(t *testing.T) {
 			t.Errorf("%s play block still leaves every irreversible step to a person", name)
 		}
 	}
-	if !strings.Contains(TestinyProtocol("MOB", "mer", "qa", nil), "whether each case ran against the real API or which mock set and why") {
+	if !strings.Contains(TestinyProtocol(true, "mer", "qa", nil), "whether each case ran against the real API or which mock set and why") {
 		t.Error("qa's handback does not say which API each case ran against")
 	}
 }
