@@ -40,7 +40,7 @@ func TestActivityEvent_DetailDecaysToCoarse(t *testing.T) {
 
 func TestActivityEvent_StickyCoarseNeverDecays(t *testing.T) {
 	at := time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC)
-	for _, state := range []ActivityState{ActivityBackground, ActivityWaitingInput, ActivityExited} {
+	for _, state := range []ActivityState{ActivityWaitingInput, ActivityExited} {
 		coarse, ttl := CoarseFromActivityState(state)
 		if ttl != 0 {
 			t.Errorf("%s: coarse %q ttl = %v, want 0 (sticky)", state, coarse, ttl)
@@ -68,7 +68,7 @@ func TestCoarseFromActivityState(t *testing.T) {
 		{ActivityActive, CoarseWorking, CoarseWorkingTTL},
 		{ActivityIdle, CoarseIdle, CoarseIdleTTL},
 		{ActivityParked, CoarseIdle, 0},
-		{ActivityBackground, CoarseWorking, 0},
+		{ActivityBackground, CoarseWorking, CoarseBackgroundTTL},
 		{ActivityWaitingInput, CoarseWaiting, 0},
 		{ActivityExited, CoarseExited, 0},
 		{ActivityState("bogus"), "", 0},
@@ -86,6 +86,9 @@ func TestCoarseFromActivityState(t *testing.T) {
 func TestCoarseTTLsMirrorStatusDeriverGraces(t *testing.T) {
 	if CoarseWorkingTTL != 10*time.Minute {
 		t.Errorf("CoarseWorkingTTL = %v, want activeStaleGrace (10m)", CoarseWorkingTTL)
+	}
+	if CoarseBackgroundTTL != 30*time.Minute {
+		t.Errorf("CoarseBackgroundTTL = %v, want backgroundStaleGrace (30m)", CoarseBackgroundTTL)
 	}
 	if CoarseIdleTTL != 45*time.Second {
 		t.Errorf("CoarseIdleTTL = %v, want waitingInputGrace (45s)", CoarseIdleTTL)

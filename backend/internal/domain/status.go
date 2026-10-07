@@ -39,17 +39,18 @@ type StatusReason string
 // StatusReason values name each rule in the status derivation; the trailing
 // comment on each states the condition that selects it.
 const (
-	ReasonTodo         StatusReason = "todo"            // prepared but not started (TODO lane)
-	ReasonWorking      StatusReason = "working"         // active, heartbeat fresh
-	ReasonBackground   StatusReason = "background_work" // turn over, the agent's own background work still running
-	ReasonWaitingInput StatusReason = "waiting_input"   // agent reported a prompt (Notification hook)
-	ReasonActiveStale  StatusReason = "active_stale"    // active aged past grace -> needs_input (timeout guess)
-	ReasonIdleAged     StatusReason = "idle_aged"       // idle aged past grace -> needs_input (timeout guess)
-	ReasonIdle         StatusReason = "idle"            // fresh idle within grace, or hook-less quiet
-	ReasonNoSignal     StatusReason = "no_signal"       // hook-capable but never signalled
-	ReasonPRPipeline   StatusReason = "pr_pipeline"     // status came from the open-PR aggregate
-	ReasonTerminated   StatusReason = "terminated"      // session terminated
-	ReasonMerged       StatusReason = "merged"          // merged branch / terminated with a merged PR
+	ReasonTodo           StatusReason = "todo"            // prepared but not started (TODO lane)
+	ReasonWorking        StatusReason = "working"         // active, heartbeat fresh
+	ReasonBackground     StatusReason = "background_work" // turn over, the agent's own background work still running
+	ReasonWaitingInput   StatusReason = "waiting_input"   // agent reported a prompt (Notification hook)
+	ReasonActiveStale    StatusReason = "active_stale"    // active aged past grace -> needs_input (timeout guess)
+	ReasonIdleAged       StatusReason = "idle_aged"       // idle aged past grace -> needs_input (timeout guess)
+	ReasonBackgroundAged StatusReason = "background_aged" // background work still listed but quiet past grace -> needs_input (timeout guess)
+	ReasonIdle           StatusReason = "idle"            // fresh idle within grace, or hook-less quiet
+	ReasonNoSignal       StatusReason = "no_signal"       // hook-capable but never signalled
+	ReasonPRPipeline     StatusReason = "pr_pipeline"     // status came from the open-PR aggregate
+	ReasonTerminated     StatusReason = "terminated"      // session terminated
+	ReasonMerged         StatusReason = "merged"          // merged branch / terminated with a merged PR
 	// ReasonRunsDiscarded is CappedRepeat runs in a row thrown away because the
 	// tree moved under each of them. The member cannot get a quiet window, and
 	// the automatic retry is spent, so a human decides: pause the other member,

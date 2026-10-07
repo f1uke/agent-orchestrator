@@ -82,6 +82,7 @@ export type StatusReason =
 	| "waiting_input"
 	| "active_stale"
 	| "idle_aged"
+	| "background_aged"
 	| "idle"
 	| "no_signal"
 	| "pr_pipeline"
@@ -95,6 +96,7 @@ const statusReasons = new Set<StatusReason>([
 	"waiting_input",
 	"active_stale",
 	"idle_aged",
+	"background_aged",
 	"idle",
 	"no_signal",
 	"pr_pipeline",
@@ -115,6 +117,7 @@ export const statusReasonLabel: Record<StatusReason, string> = {
 	waiting_input: "Agent requested input",
 	active_stale: "No activity for a while — assumed waiting (a turn's Stop hook may have been lost)",
 	idle_aged: "Turn ended and went quiet — assumed waiting",
+	background_aged: "Background work still running but quiet for a while — assumed waiting",
 	idle: "Recently active",
 	no_signal: "No hook has reported since launch",
 	pr_pipeline: "Status from the pull request pipeline",

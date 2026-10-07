@@ -315,6 +315,19 @@ describe("taskLane — nobody is working on this", () => {
 		expect(lane.holder).toBeUndefined();
 	});
 
+	it("says so when qa is only keeping background work it stopped waiting on", () => {
+		// A server or watcher qa left running: the daemon has stopped reading it as
+		// work, and so must the stall rule.
+		const { dev, qa } = stalled();
+		const lingering = {
+			...qa,
+			statusReason: "background_aged" as const,
+			activity: { state: "background" as const, lastActivityAt: "" },
+		};
+		const lane = taskLane({ dev, qa: lingering, members: [dev, lingering], isCrew: true }, { review: "not run" });
+		expect(lane.note).toBe("Nobody is working on this");
+	});
+
 	it("says so whether or not qa handed anything back", () => {
 		const { dev, qa } = stalled();
 		const silent = { ...qa, crew: { id: "demo-1", role: "qa" as const, hasRun: true } };

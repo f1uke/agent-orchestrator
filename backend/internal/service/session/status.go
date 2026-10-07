@@ -35,6 +35,14 @@ const waitingInputGrace = 45 * time.Second
 // so a real between-signals lull never trips it.
 const activeStaleGrace = 10 * time.Minute
 
+// backgroundStaleGrace is how long an agent waiting on its own background work
+// still reads as working without a new turn. Claude Code wakes the agent as each
+// piece reports (a Monitor event, a finished shell or subagent), so a long quiet
+// stretch means what is left is something it set running and moved on from - a
+// server, a watcher - rather than work it is blocked on, and a long-lived one
+// would otherwise hold the card on "working" for as long as it runs.
+const backgroundStaleGrace = 30 * time.Minute
+
 // statusResult is the full outcome of the status derivation: the display Status
 // plus WHY it was chosen and, for timeout-based readings, when/what it will flip
 // to next. All fields are derived on read from durable facts; none is stored.
@@ -168,6 +176,9 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 		// waiting-for-human rather than a permanent false "working".
 		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonActiveStale}
 	}
+	if rec.Activity.State == domain.ActivityBackground {
+		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonBackgroundAged}
+	}
 
 	// parked is the harness saying outright what waitingInputGrace otherwise has to
 	// infer: the turn is over and the agent has settled at its prompt. It reads as
@@ -205,25 +216,29 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 
 // workingReading reports whether the agent is working, and the reading that
 // says so. An active agent is working until activeStaleGrace passes without a
-// refreshing signal, then flips to next. An agent waiting on its own background
-// work is working with no countdown: that work can legitimately run for hours,
-// and Claude Code reports each piece's end with a new turn (or the reaper finds
-// the agent dead), so no timer is needed to end the reading.
+// refreshing signal, and an agent waiting on its own background work until
+// backgroundStaleGrace does; either then flips to next.
 func workingReading(rec domain.SessionRecord, now time.Time, next domain.SessionStatus) (statusResult, bool) {
-	switch {
-	case rec.Activity.State == domain.ActivityBackground:
-		return statusResult{Status: domain.StatusWorking, Reason: domain.ReasonBackground}, true
-	case rec.Activity.State == domain.ActivityActive && now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace:
-		at := rec.Activity.LastActivityAt.Add(activeStaleGrace)
-		return statusResult{
-			Status:           domain.StatusWorking,
-			Reason:           domain.ReasonWorking,
-			NextTransitionAt: &at,
-			NextTransitionTo: next,
-		}, true
+	var grace time.Duration
+	var reason domain.StatusReason
+	switch rec.Activity.State {
+	case domain.ActivityActive:
+		grace, reason = activeStaleGrace, domain.ReasonWorking
+	case domain.ActivityBackground:
+		grace, reason = backgroundStaleGrace, domain.ReasonBackground
 	default:
 		return statusResult{}, false
 	}
+	if now.Sub(rec.Activity.LastActivityAt) > grace {
+		return statusResult{}, false
+	}
+	at := rec.Activity.LastActivityAt.Add(grace)
+	return statusResult{
+		Status:           domain.StatusWorking,
+		Reason:           reason,
+		NextTransitionAt: &at,
+		NextTransitionTo: next,
+	}, true
 }
 
 // idleCountdown returns the pending transition for a fresh idle session (one the

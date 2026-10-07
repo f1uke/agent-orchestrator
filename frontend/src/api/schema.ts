@@ -3312,7 +3312,7 @@ export interface components {
             /** @enum {string} */
             status: "todo" | "working" | "pr_open" | "draft" | "ci_failed" | "review_pending" | "changes_requested" | "approved" | "mergeable" | "merged" | "needs_input" | "idle" | "terminated" | "no_signal";
             /** @enum {string} */
-            statusReason?: "working" | "background_work" | "waiting_input" | "active_stale" | "idle_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged" | "runs_discarded" | "crew_talk_capped";
+            statusReason?: "working" | "background_work" | "waiting_input" | "active_stale" | "idle_aged" | "background_aged" | "idle" | "no_signal" | "pr_pipeline" | "terminated" | "merged" | "runs_discarded" | "crew_talk_capped";
             targetBranch?: string;
             /** @enum {string} */
             targetSource?: "pr" | "session_pr_target" | "session_base" | "project";

@@ -101,6 +101,16 @@ func TestDeriveActivityState(t *testing.T) {
 		{"stop with a running background shell -> background", "stop", `{"background_tasks":[{"id":"b1","type":"shell","status":"running"}]}`, domain.ActivityBackground, true},
 		{"stop with a running background subagent -> background", "stop", `{"background_tasks":[{"id":"a1","type":"subagent","status":"running"}]}`, domain.ActivityBackground, true},
 		{"stop with only finished background work -> idle", "stop", `{"background_tasks":[{"id":"b1","type":"shell","status":"completed"}]}`, domain.ActivityIdle, true},
+		{"stop with a pending background subagent -> background", "stop", `{"background_tasks":[{"id":"a1","type":"subagent","status":"pending"}]}`, domain.ActivityBackground, true},
+		{"stop with a running workflow -> background", "stop", `{"background_tasks":[{"id":"w1","type":"workflow","status":"running"}]}`, domain.ActivityBackground, true},
+		// Claude Code's own housekeeping is listed too, and never wakes the agent
+		// by finishing: an Artifact comment monitor (a "monitor" that watches for
+		// as long as the session lives), memory consolidation, the auto-mode scan.
+		{"stop with only an artifact comment monitor -> idle", "stop", `{"background_tasks":[{"id":"m1","type":"monitor","status":"running","server":"","tool":""}]}`, domain.ActivityIdle, true},
+		{"stop with only a dream -> idle", "stop", `{"background_tasks":[{"id":"d1","type":"dream","status":"running"}]}`, domain.ActivityIdle, true},
+		{"stop with only an auto-mode scan -> idle", "stop", `{"background_tasks":[{"id":"s1","type":"auto-mode scan","status":"running"}]}`, domain.ActivityIdle, true},
+		{"stop with only a memory import -> idle", "stop", `{"background_tasks":[{"id":"i1","type":"memory import","status":"running"}]}`, domain.ActivityIdle, true},
+		{"stop with housekeeping beside a running shell -> background", "stop", `{"background_tasks":[{"id":"d1","type":"dream","status":"running"},{"id":"b1","type":"shell","status":"running"}]}`, domain.ActivityBackground, true},
 		{"stop malformed payload -> idle", "stop", `not json`, domain.ActivityIdle, true},
 		{"notification idle_prompt -> parked", "notification", `{"notification_type":"idle_prompt"}`, domain.ActivityParked, true},
 		{"notification permission_prompt -> waiting_input", "notification", `{"notification_type":"permission_prompt"}`, domain.ActivityWaitingInput, true},

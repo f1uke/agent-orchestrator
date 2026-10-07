@@ -469,9 +469,14 @@ func TestDeriveStatusDetailReason(t *testing.T) {
 		{"parked", statusRec(domain.ActivityParked, false), nil, false, domain.StatusNeedsInput, domain.ReasonIdleAged, ""},
 		// The turn is over but the agent's own background work is still running:
 		// it resumes by itself, so it reads working however long the work takes.
-		{"background", backgroundRec(10 * activeStaleGrace), nil, false, domain.StatusWorking, domain.ReasonBackground, ""},
-		{"background-ci-failing-pr-working", backgroundRec(10 * activeStaleGrace), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusWorking, domain.ReasonBackground, ""},
-		{"background-mergeable-pr-pipeline", backgroundRec(10 * activeStaleGrace), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), false, domain.StatusMergeable, domain.ReasonPRPipeline, ""},
+		{"background", backgroundRec(backgroundStaleGrace / 2), nil, false, domain.StatusWorking, domain.ReasonBackground, domain.StatusNeedsInput},
+		{"background-ci-failing-pr-working", backgroundRec(backgroundStaleGrace / 2), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusWorking, domain.ReasonBackground, domain.StatusCIFailed},
+		{"background-mergeable-pr-pipeline", backgroundRec(backgroundStaleGrace / 2), statusPR(domain.PRFacts{Mergeability: domain.MergeMergeable}), false, domain.StatusMergeable, domain.ReasonPRPipeline, ""},
+		// Background work that has not woken the agent for backgroundStaleGrace is
+		// most likely something it left running (a server, a watcher), not work it
+		// is waiting on: the human gets the turn back, told why.
+		{"background-aged", backgroundRec(2 * backgroundStaleGrace), nil, false, domain.StatusNeedsInput, domain.ReasonBackgroundAged, ""},
+		{"background-aged-ci-failing-pr", backgroundRec(2 * backgroundStaleGrace), statusPR(domain.PRFacts{CI: domain.CIFailing}), false, domain.StatusCIFailed, domain.ReasonPRPipeline, ""},
 		{"idle-fresh-signalled", idleAgedRec(waitingInputGrace / 2), nil, false, domain.StatusIdle, domain.ReasonIdle, domain.StatusNeedsInput},
 		{"idle-fresh-never-signalled", silentRec(10 * time.Second), nil, false, domain.StatusIdle, domain.ReasonIdle, domain.StatusNoSignal},
 		{"no-signal", silentRec(2 * noSignalGrace), nil, false, domain.StatusNoSignal, domain.ReasonNoSignal, ""},
@@ -790,5 +795,14 @@ func TestDeriveStatus_UndeliveredParkReadsAsNeedsInput(t *testing.T) {
 	}
 	if got.Reason != domain.ReasonIdleAged {
 		t.Fatalf("reason = %q, want %q", got.Reason, domain.ReasonIdleAged)
+	}
+}
+
+func TestDeriveStatusBackgroundCountsDownToNeedsInput(t *testing.T) {
+	rec := backgroundRec(time.Minute)
+	got := deriveStatusDetail(rec, nil, statusNow, true, domain.ApprovalRule{}, crewRunFacts{})
+	wantAt := rec.Activity.LastActivityAt.Add(backgroundStaleGrace)
+	if got.NextTransitionAt == nil || !got.NextTransitionAt.Equal(wantAt) || got.NextTransitionTo != domain.StatusNeedsInput {
+		t.Fatalf("got next %v -> %q, want %v -> needs_input", got.NextTransitionAt, got.NextTransitionTo, wantAt)
 	}
 }
