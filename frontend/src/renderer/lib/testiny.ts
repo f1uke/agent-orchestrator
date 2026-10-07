@@ -242,8 +242,19 @@ export function evidenceLabel(path: string): { location: string; folder: string 
 	return { location, folder };
 }
 
-/** One Drive link on a case's result, as the row shows it. */
-export type EvidenceChip = { url: string; label: string; title: string; kind: "image" | "video" | "file" };
+/**
+ * One Drive link on a case's result, as the row shows it. `label` is `stem` +
+ * `ext`, split so a narrow rail cuts the stem and keeps the extension: two
+ * recordings of one case differ mostly at their end.
+ */
+export type EvidenceChip = {
+	url: string;
+	label: string;
+	stem: string;
+	ext: string;
+	title: string;
+	kind: "image" | "video" | "file";
+};
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|heic|webp)$/i;
 const VIDEO_EXT = /\.(mov|mp4|m4v|webm)$/i;
@@ -260,10 +271,14 @@ export function evidenceChips(caseId: number, links: TestinyEvidenceLink[]): Evi
 	return links.map((link) => {
 		if (!link.file) {
 			n += 1;
-			return { url: link.url, label: unnamed > 1 ? `Drive file ${n}` : "Drive file", title: link.url, kind: "file" };
+			const label = unnamed > 1 ? `Drive file ${n}` : "Drive file";
+			return { url: link.url, label, stem: label, ext: "", title: link.url, kind: "file" };
 		}
-		const kind = IMAGE_EXT.test(link.file) ? "image" : VIDEO_EXT.test(link.file) ? "video" : "file";
-		return { url: link.url, label: link.file.replace(prefix, ""), title: link.file, kind };
+		const label = link.file.replace(prefix, "");
+		const dot = label.lastIndexOf(".");
+		const cut = dot > 0 ? dot : label.length;
+		const kind = IMAGE_EXT.test(label) ? "image" : VIDEO_EXT.test(label) ? "video" : "file";
+		return { url: link.url, label, stem: label.slice(0, cut), ext: label.slice(cut), title: link.file, kind };
 	});
 }
 

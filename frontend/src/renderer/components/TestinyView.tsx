@@ -639,27 +639,30 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 const EVIDENCE_ICON: Record<EvidenceChip["kind"], LucideIcon> = { image: FileImage, video: FileVideo, file: FileIcon };
 
 /**
- * The Drive links on a case's result, as a quiet line of chips. A chip is at
- * most half the line, so a long recording name cuts short rather than pushing
- * its neighbour onto a line of its own. A link opens in the system browser:
- * the main window hands every new-window URL to it.
+ * The Drive links on a case's result, as quiet links under it in the
+ * provenance line's type. A name too long for the rail is cut before its
+ * extension. A link opens in the system browser: the main window hands every
+ * new-window URL to it.
  */
 function EvidenceLinks({ caseId, links }: { caseId: number; links: TestinyEvidenceLink[] }) {
 	return (
-		<ul aria-label="Evidence" className="col-span-2 col-start-2 mt-1 flex min-w-0 flex-wrap gap-1">
+		<ul aria-label="Evidence" className="col-span-2 col-start-2 mt-1 flex min-w-0 flex-wrap gap-x-3 gap-y-0.5">
 			{evidenceChips(caseId, links).map((chip) => {
 				const Icon = EVIDENCE_ICON[chip.kind];
 				return (
-					<li key={chip.url} className="max-w-[calc(50%-2px)] min-w-0">
+					<li key={chip.url} className="flex max-w-full min-w-0">
 						<a
-							className="flex h-[18px] min-w-0 items-center gap-1 rounded border border-border px-1.5 text-[11px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
+							className="group flex min-w-0 items-center gap-1 rounded-sm text-[11px] leading-4 text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
 							href={chip.url}
 							target="_blank"
 							rel="noopener noreferrer"
 							title={chip.title}
 						>
-							<Icon className="size-3 shrink-0 text-passive" aria-hidden="true" />
-							<span className="truncate">{chip.label}</span>
+							<Icon className="size-3 shrink-0 text-passive group-hover:text-muted-foreground" aria-hidden="true" />
+							<span className="flex min-w-0 decoration-passive underline-offset-2 group-hover:underline">
+								<span className="truncate">{chip.stem}</span>
+								<span className="shrink-0">{chip.ext}</span>
+							</span>
 						</a>
 					</li>
 				);

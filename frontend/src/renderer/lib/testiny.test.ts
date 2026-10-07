@@ -196,9 +196,27 @@ describe("evidenceChips", () => {
 
 	it("names a file AO uploaded without the case's own prefix, keeping the full name as its title", () => {
 		expect(evidenceChips(2124, [link(1, "TC-2124 pass - iPhone 15.mov"), link(2, "TC-2124 FAIL MOB-9.png")])).toEqual([
-			{ url: link(1, "").url, label: "pass - iPhone 15.mov", title: "TC-2124 pass - iPhone 15.mov", kind: "video" },
-			{ url: link(2, "").url, label: "FAIL MOB-9.png", title: "TC-2124 FAIL MOB-9.png", kind: "image" },
+			{
+				url: link(1, "").url,
+				label: "pass - iPhone 15.mov",
+				stem: "pass - iPhone 15",
+				ext: ".mov",
+				title: "TC-2124 pass - iPhone 15.mov",
+				kind: "video",
+			},
+			{
+				url: link(2, "").url,
+				label: "FAIL MOB-9.png",
+				stem: "FAIL MOB-9",
+				ext: ".png",
+				title: "TC-2124 FAIL MOB-9.png",
+				kind: "image",
+			},
 		]);
+	});
+
+	it("keeps a name with no extension whole", () => {
+		expect(evidenceChips(1, [link(1, "TC-1 pass")])[0]).toMatchObject({ stem: "pass", ext: "", kind: "file" });
 	});
 
 	it("keeps another case's prefix, which the row does not say", () => {

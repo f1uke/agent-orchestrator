@@ -205,7 +205,7 @@ test("a case Testiny would not answer for says why and offers a retry", async ({
 	await expect(details.getByRole("button", { name: "Retry" })).toBeVisible();
 });
 
-test("a case's Drive evidence sits under it as one quiet line of links", async ({ page }) => {
+test("a case's Drive evidence sits under it as quiet links, cut before the extension", async ({ page }) => {
 	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing");
 
 	const inspector = page.locator("#inspector");
@@ -219,16 +219,15 @@ test("a case's Drive evidence sits under it as one quiet line of links", async (
 	await expect(links.first()).toHaveAttribute("target", "_blank");
 	await expect(links.first()).toHaveAttribute("href", /^https:\/\/drive\.google\.com\/file\/d\//);
 
-	// A long name is cut short on its chip, keeping the whole of it as the title,
-	// and two chips still fit on one line.
+	// A name too long for the rail is cut before its extension, inside the card,
+	// and keeps the whole of it as the title.
 	const long = links.nth(1);
 	await expect(long).toHaveAttribute("title", "TC-7201 pass - Pixel 8 Pro Android 15 large text and dark mode.mp4");
-	const label = long.locator("span");
-	expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-	const [first, second] = [(await links.first().boundingBox())!, (await long.boundingBox())!];
-	expect(second.y).toBe(first.y);
+	expect(await long.locator(".truncate").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+	const ext = (await long.getByText(".mp4", { exact: true }).boundingBox())!;
 	const card = (await android.boundingBox())!;
-	expect(second.x + second.width).toBeLessThanOrEqual(card.x + card.width);
+	expect(ext.width).toBeGreaterThan(0);
+	expect(ext.x + ext.width).toBeLessThanOrEqual(card.x + card.width);
 
 	const pasted = android.getByRole("listitem").filter({ hasText: "Empty state shows when there is nothing to share" });
 	await expect(pasted.getByRole("list", { name: "Evidence" }).getByRole("link")).toHaveText([
