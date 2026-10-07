@@ -1824,13 +1824,10 @@ func (m *Manager) restore(ctx context.Context, id domain.SessionID) (domain.Sess
 	// terminal state with no relaunch and no teardown of the running agent. Only a
 	// genuinely dead runtime falls through to the relaunch path below. A probe error
 	// is not proof of death, so it also falls through rather than adopting.
-	if handleID := strings.TrimSpace(meta.RuntimeHandleID); handleID != "" {
-		if m.agentAdoptable(ctx, ports.RuntimeHandle{ID: handleID}) {
-			if err := m.lcm.MarkSpawned(ctx, id, meta, domain.WokenByRestore); err != nil {
-				return domain.SessionRecord{}, fmt.Errorf("restore %s: adopt live runtime: %w", id, err)
-			}
-			return m.getRecord(ctx, id)
-		}
+	if adopted, err := m.adoptLive(ctx, rec); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restore %s: adopt live runtime: %w", id, err)
+	} else if adopted {
+		return m.getRecord(ctx, id)
 	}
 	// Resumability is decided inside restoreArgv, not here. A promptless session
 	// can still be fully resumable when the harness pins a deterministic session id
@@ -1851,6 +1848,39 @@ func (m *Manager) restore(ctx context.Context, id domain.SessionID) (domain.Sess
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: workspace: %w", id, err)
 	}
 	return m.relaunchRestoredSession(ctx, rec, project, ws, domain.WokenByRestore)
+}
+
+// AdoptLiveAgent takes back a terminated session whose agent is still running in
+// its runtime, relaunching nothing - Restore's adopt step on its own. adopted is
+// false, and nothing changes, when the session is live or its agent is gone.
+func (m *Manager) AdoptLiveAgent(ctx context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
+	rec, err := m.getRecord(ctx, id)
+	if err != nil {
+		return domain.SessionRecord{}, false, err
+	}
+	if !rec.IsTerminated {
+		return rec, false, nil
+	}
+	adopted, err := m.adoptLive(ctx, rec)
+	if err != nil {
+		return domain.SessionRecord{}, false, fmt.Errorf("adopt %s: %w", id, err)
+	}
+	if !adopted {
+		return rec, false, nil
+	}
+	rec, err = m.getRecord(ctx, id)
+	return rec, err == nil, err
+}
+
+func (m *Manager) adoptLive(ctx context.Context, rec domain.SessionRecord) (bool, error) {
+	handleID := strings.TrimSpace(rec.Metadata.RuntimeHandleID)
+	if handleID == "" || !m.agentAdoptable(ctx, ports.RuntimeHandle{ID: handleID}) {
+		return false, nil
+	}
+	if err := m.lcm.MarkSpawned(ctx, rec.ID, rec.Metadata, domain.WokenByRestore); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // `by` names what asked for this relaunch; it reaches MarkSpawned, which keeps
