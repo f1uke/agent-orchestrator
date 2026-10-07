@@ -10224,6 +10224,7 @@ components:
         statusReason:
           enum:
           - working
+          - background_work
           - waiting_input
           - active_stale
           - idle_aged
@@ -10233,6 +10234,7 @@ components:
           - terminated
           - merged
           - runs_discarded
+          - crew_talk_capped
           type: string
         targetBranch:
           type: string
@@ -12756,6 +12758,7 @@ components:
           - idle
           - waiting_input
           - parked
+          - background
           - blocked
           - exited
           type: string
@@ -12833,6 +12836,7 @@ components:
           - idle
           - waiting_input
           - parked
+          - background
           - exited
           type: string
       required:

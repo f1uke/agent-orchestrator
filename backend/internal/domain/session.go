@@ -274,7 +274,7 @@ type Session struct {
 	// StatusReason names the derivation rule that produced Status, so the UI can
 	// explain WHY (e.g. a needs_input from a lost-hook timeout vs a real agent
 	// prompt). Derived on read, never stored.
-	StatusReason StatusReason `json:"statusReason,omitempty" enum:"working,waiting_input,active_stale,idle_aged,idle,no_signal,pr_pipeline,terminated,merged,runs_discarded"`
+	StatusReason StatusReason `json:"statusReason,omitempty" enum:"working,background_work,waiting_input,active_stale,idle_aged,idle,no_signal,pr_pipeline,terminated,merged,runs_discarded,crew_talk_capped"`
 	// NextTransitionAt is when the current timeout-based reading will flip if no
 	// new signal arrives; nil when the status is sticky/terminal. NextTransitionTo
 	// is what it becomes. Both derived on read.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -1354,9 +1355,7 @@ func (c *SessionsController) activity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := domain.ActivityState(in.State)
-	switch state {
-	case domain.ActivityActive, domain.ActivityIdle, domain.ActivityWaitingInput, domain.ActivityParked, domain.ActivityExited:
-	default:
+	if !slices.Contains(domain.ActivityStates, state) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_ACTIVITY_STATE", "Unknown activity state", nil)
 		return
 	}

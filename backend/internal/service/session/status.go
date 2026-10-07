@@ -128,16 +128,8 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 		// agent goes stale/idle (mirrors the Reactivated active branch below).
 		// POSITIVE states (mergeable/approved) and neutral ones (draft/pr_open)
 		// are never overridden: a ready-to-merge PR stays ready even while active.
-		if isDeferrableProblemStatus(prStatus) &&
-			rec.Activity.State == domain.ActivityActive &&
-			now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace {
-			at := rec.Activity.LastActivityAt.Add(activeStaleGrace)
-			return statusResult{
-				Status:           domain.StatusWorking,
-				Reason:           domain.ReasonWorking,
-				NextTransitionAt: &at,
-				NextTransitionTo: prStatus,
-			}
+		if working, ok := workingReading(rec, now, prStatus); ok && isDeferrableProblemStatus(prStatus) {
+			return working
 		}
 		return statusResult{Status: prStatus, Reason: domain.ReasonPRPipeline}
 	}
@@ -147,14 +139,8 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 	// takes on new work (an open PR already won above) or is finished again
 	// (terminated already won above). An actively-working one still shows working.
 	if rec.Reactivated {
-		if rec.Activity.State == domain.ActivityActive && now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace {
-			at := rec.Activity.LastActivityAt.Add(activeStaleGrace)
-			return statusResult{
-				Status:           domain.StatusWorking,
-				Reason:           domain.ReasonWorking,
-				NextTransitionAt: &at,
-				NextTransitionTo: domain.StatusNeedsInput,
-			}
+		if working, ok := workingReading(rec, now, domain.StatusNeedsInput); ok {
+			return working
 		}
 		return statusResult{Status: domain.StatusNeedsInput, Reason: domain.ReasonWaitingInput}
 	}
@@ -173,16 +159,10 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 		return statusResult{Status: domain.StatusMerged, Reason: domain.ReasonMerged}
 	}
 
+	if working, ok := workingReading(rec, now, domain.StatusNeedsInput); ok {
+		return working
+	}
 	if rec.Activity.State == domain.ActivityActive {
-		if now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace {
-			at := rec.Activity.LastActivityAt.Add(activeStaleGrace)
-			return statusResult{
-				Status:           domain.StatusWorking,
-				Reason:           domain.ReasonWorking,
-				NextTransitionAt: &at,
-				NextTransitionTo: domain.StatusNeedsInput,
-			}
-		}
 		// active but no signal refreshed it within the grace: the turn's closing
 		// Stop was lost and nothing else demoted it, so surface it as
 		// waiting-for-human rather than a permanent false "working".
@@ -221,6 +201,29 @@ func deriveStatusDetail(rec domain.SessionRecord, prs []domain.PRFacts, now time
 	// and to what it will flip so the UI can count down to it.
 	at, to := idleCountdown(rec, signalCapable)
 	return statusResult{Status: domain.StatusIdle, Reason: domain.ReasonIdle, NextTransitionAt: at, NextTransitionTo: to}
+}
+
+// workingReading reports whether the agent is working, and the reading that
+// says so. An active agent is working until activeStaleGrace passes without a
+// refreshing signal, then flips to next. An agent waiting on its own background
+// work is working with no countdown: that work can legitimately run for hours,
+// and Claude Code reports each piece's end with a new turn (or the reaper finds
+// the agent dead), so no timer is needed to end the reading.
+func workingReading(rec domain.SessionRecord, now time.Time, next domain.SessionStatus) (statusResult, bool) {
+	switch {
+	case rec.Activity.State == domain.ActivityBackground:
+		return statusResult{Status: domain.StatusWorking, Reason: domain.ReasonBackground}, true
+	case rec.Activity.State == domain.ActivityActive && now.Sub(rec.Activity.LastActivityAt) <= activeStaleGrace:
+		at := rec.Activity.LastActivityAt.Add(activeStaleGrace)
+		return statusResult{
+			Status:           domain.StatusWorking,
+			Reason:           domain.ReasonWorking,
+			NextTransitionAt: &at,
+			NextTransitionTo: next,
+		}, true
+	default:
+		return statusResult{}, false
+	}
 }
 
 // idleCountdown returns the pending transition for a fresh idle session (one the

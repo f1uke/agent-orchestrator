@@ -15,7 +15,7 @@ describe("toSessionActivity", () => {
 	});
 
 	it("still round-trips every other state the daemon reports", () => {
-		for (const state of ["active", "idle", "waiting_input", "exited"]) {
+		for (const state of ["active", "idle", "waiting_input", "background", "exited"]) {
 			expect(toSessionActivity({ state, lastActivityAt: "" })?.state).toBe(state);
 		}
 	});
@@ -53,6 +53,17 @@ describe("attentionZone is unaffected by the activity split", () => {
 		const agedIdle = boardSession({ statusReason: "idle_aged", activity: { state: "idle", lastActivityAt: "" } });
 		expect(attentionZone(parked)).toBe(attentionZone(agedIdle));
 		expect(attentionZone(parked)).toBe("action");
+	});
+
+	it("keeps a session waiting on its own background work in the lane of a working one", () => {
+		const background = boardSession({
+			status: "working",
+			statusReason: "background_work",
+			activity: { state: "background", lastActivityAt: "" },
+		});
+		const active = boardSession({ status: "working", statusReason: "working", activity: { state: "active", lastActivityAt: "" } });
+		expect(attentionZone(background)).toBe(attentionZone(active));
+		expect(attentionZone(background)).not.toBe("action");
 	});
 
 	it("leaves a parked session with an open PR in its PR lane", () => {

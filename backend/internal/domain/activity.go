@@ -33,6 +33,12 @@ const (
 	ActivityExited       ActivityState = "exited"
 )
 
+// ActivityStates is every state an agent hook may report. The store's CHECK
+// constraint and the activity endpoint both accept exactly these.
+var ActivityStates = []ActivityState{
+	ActivityActive, ActivityIdle, ActivityWaitingInput, ActivityParked, ActivityBackground, ActivityExited,
+}
+
 // IsSticky reports whether an activity state must NOT be aged/demoted by the
 // passage of time (a paused agent is still paused until a new signal says so).
 //
