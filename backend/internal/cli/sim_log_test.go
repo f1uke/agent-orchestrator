@@ -241,11 +241,13 @@ func TestSimLog_NothingMatchedSaysWhatDidLogAndWhy(t *testing.T) {
 		t.Fatalf("nothing matching is not a failure of the command: %v", err)
 	}
 	for _, want := range []string{
-		"MyApp",       // what was asked for
-		"Nimbus",      // and what actually logged, so the name can be fixed
-		"SpringBoard", //
-		"NSLog",       // the limitation that explains most empty results
-		"print",       //
+		"MyApp",                   // what was asked for
+		"Nimbus",                  // and what actually logged, so the name can be fixed
+		"SpringBoard",             //
+		"NSLog",                   // the limitation that explains most empty results
+		"print",                   //
+		"ao sim launch --console", // and where print CAN be read
+		"ao sim console",          //
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("an empty result must mention %q:\n%s", want, out)
@@ -429,7 +431,7 @@ func TestSimLog_HelpNamesThePrintLimitationAndTheHazard(t *testing.T) {
 		t.Fatalf("sim log --help: %v", err)
 	}
 	help := strings.ToLower(out)
-	for _, want := range []string{"print", "nslog", "stdout", "--console-pipe", "main thread"} {
+	for _, want := range []string{"print", "nslog", "stdout", "--console-pipe", "main thread", "ao sim launch --console", "ao sim console"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("the command's own help must mention %q:\n%s", want, out)
 		}

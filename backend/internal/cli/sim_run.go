@@ -83,8 +83,10 @@ type simRunResult struct {
 	// Booted marks a device this command powered on on its way through.
 	Booted bool `json:"booted"`
 
-	BundleID     string        `json:"bundleId"`
-	PID          string        `json:"pid,omitempty"`
+	BundleID string `json:"bundleId"`
+	PID      string `json:"pid,omitempty"`
+	// Console is the file the app's stdout and stderr go to, with --console.
+	Console      string        `json:"console,omitempty"`
 	Build        *simBuildView `json:"build,omitempty"`
 	BuildUnknown string        `json:"buildUnknown,omitempty"`
 	// Warning is what is wrong with the app this run built, when anything is.
@@ -104,6 +106,7 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 		configuration string
 		udid          string
 		ttl           string
+		console       bool
 		json          bool
 	}
 	cmd := &cobra.Command{
@@ -126,10 +129,13 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			"because that is what Xcode's Run button builds. A project without one - schemes " +
 			"for the app and its library, environments in the configurations - is asked " +
 			"about rather than guessed at. With no --udid it uses the simulator assigned to " +
-			"this session ($AO_SIM_UDID).",
+			"this session ($AO_SIM_UDID).\n\n" +
+			"--console launches it with its stdout and stderr - where `print` goes - in a file " +
+			"`ao sim console` reads, exactly as `ao sim launch --console` does.",
 		Example: `  ao sim run
   ao sim run --scheme NterApp --configuration Dev
   ao sim run --scheme NterApp --configuration UAT
+  ao sim run --scheme NterApp --configuration Dev --console && ao sim console --follow
   ao sim run --scheme NterApp --configuration Dev --udid 00000000-0000-0000-0000-000000000000 --json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -138,7 +144,9 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			// reads when a build fails, and holding them back until the end
 			// would make a three-minute build look like a hang. --json governs
 			// the RESULT, which is written last.
-			result, err := ctx.runSimApp(cmd.Context(), cmd.ErrOrStderr(), opts.scheme, opts.configuration, opts.udid, opts.ttl)
+			result, err := ctx.runSimApp(cmd.Context(), cmd.ErrOrStderr(), simRunRequest{
+				scheme: opts.scheme, configuration: opts.configuration, udid: opts.udid, ttl: opts.ttl, console: opts.console,
+			})
 			// Report the verdict before returning either way. The run bar
 			// started this command in a pane nothing waits on, so this file is
 			// the ONLY way the outcome gets back to it - and a failed run that
@@ -158,8 +166,15 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.configuration, "configuration", "", "Build configuration. Defaults to Debug when the project has one, and asks when it does not")
 	f.StringVar(&opts.udid, "udid", "", "Run on this simulator instead of this session's own")
 	f.StringVar(&opts.ttl, "ttl", "", "How long to hold the device afterwards (e.g. 30s, 10m, 1h). Default 30m")
+	f.BoolVar(&opts.console, "console", false, "Launch with stdout and stderr in a file that ao sim console reads")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
 	return cmd
+}
+
+// simRunRequest is what `ao sim run` was asked for.
+type simRunRequest struct {
+	scheme, configuration, udid, ttl string
+	console                          bool
 }
 
 // runSimApp is the whole command: find the project, decide the scheme, take the
@@ -169,9 +184,8 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 // before anything expensive happens: a missing project, an ambiguous scheme and
 // a device somebody else holds all fail in about a second, because each of them
 // after a full build is a wasted build.
-func (c *commandContext) runSimApp(
-	ctx context.Context, progress io.Writer, scheme, configuration, udid, rawTTL string,
-) (simRunResult, error) {
+func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req simRunRequest) (simRunResult, error) {
+	scheme, configuration, udid, rawTTL := req.scheme, req.configuration, req.udid, req.ttl
 	dir, err := os.Getwd()
 	if err != nil {
 		return simRunResult{}, fmt.Errorf("could not read the current directory: %w", err)
@@ -253,6 +267,15 @@ func (c *commandContext) runSimApp(
 	// succeeded and a screen that did not change is the single most confusing
 	// outcome this command could have. A terminate that finds nothing running
 	// exits non-zero, which is why its error is dropped.
+	if req.console {
+		pid, path, err := c.launchSimConsole(ctx, device, bundleID)
+		if err != nil {
+			return simRunResult{}, err
+		}
+		result.PID, result.Console = pid, path
+		result.Build, result.BuildUnknown = c.readSimBuild(ctx, device, bundleID)
+		return result, nil
+	}
 	_, _ = c.deps.CommandOutput(ctx, "xcrun", "simctl", "terminate", device.UDID, bundleID)
 	launched, err := c.deps.CommandOutput(ctx, "xcrun", "simctl", "launch", device.UDID, bundleID)
 	if err != nil {
@@ -698,6 +721,9 @@ func writeSimRun(out io.Writer, result simRunResult) error {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "App: %s\n", result.App); err != nil {
+		return err
+	}
+	if err := writeSimConsoleLine(out, result.Console); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "Lease: held by @%s until %s.\n", result.Lease.Holder, expiryOf(result.Lease)); err != nil {

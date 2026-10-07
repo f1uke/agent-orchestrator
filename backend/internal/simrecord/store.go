@@ -46,6 +46,12 @@ func ShotsDir(dataDir, sessionID string) string {
 	return filepath.Join(SessionDir(dataDir, sessionID), "shots")
 }
 
+// ConsoleDir is where `ao sim launch --console` sends an app's stdout and
+// stderr, one file per device and app.
+func ConsoleDir(dataDir, sessionID string) string {
+	return filepath.Join(SessionDir(dataDir, sessionID), "console")
+}
+
 // VideosDir is where `ao sim record` writes screen recordings. It is a third
 // sibling rather than a second use of ShotsDir for the reason the flows/shots
 // split already records: these are used differently, and a video is orders of

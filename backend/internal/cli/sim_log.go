@@ -30,7 +30,8 @@ import (
 // This route cannot do that. `log` reads the device's unified log, which never
 // blocks the process that wrote to it, so no amount of not-reading this command
 // can affect the app. AO deliberately offers NO way to attach a pipe to an
-// app's stdout: see the --stdout note in the help below.
+// app's stdout: see the --stdout note in the help below. Stdout in a FILE is
+// offered instead, by `ao sim launch --console` (sim_console.go).
 //
 // Like `ao sim shot` and `ao sim ax` this is a read: it takes no lease, is
 // never blocked by one, and always reports who holds the device.
@@ -46,10 +47,11 @@ const (
 	defaultSimLogMaxLines = 200
 	// simLogPrintNote is the limitation an agent will otherwise read as "this
 	// command is broken". It is repeated wherever an empty result is reported.
-	simLogPrintNote = "`print` and `debugPrint` write to the app's stdout, and an app launched by " +
-		"SpringBoard has its stdout discarded - that output does not exist anywhere, so no log command can show it. " +
-		"`NSLog(...)`, `os_log` and `Logger` DO reach this log. To read a payload, add a temporary NSLog probe, " +
-		"run the flow, and take it out again."
+	simLogPrintNote = "`print` and `debugPrint` write to the app's stdout, never to this log, and an app launched by " +
+		"SpringBoard has its stdout discarded. To read them, relaunch it with `ao sim launch --console` and read " +
+		"`ao sim console`: the output goes to a file, which never blocks the app. `NSLog(...)`, `os_log` and `Logger` " +
+		"DO reach this log, and survive any relaunch - a Maestro flow's included - so for a payload read across a " +
+		"flow, add a temporary NSLog probe, run the flow, and take it out again."
 )
 
 // simLogResult is the `ao sim log --json` payload for a history read.
@@ -92,17 +94,20 @@ func newSimLogCommand(ctx *commandContext) *cobra.Command {
 			"WHAT THIS CAN SEE: anything logged with `NSLog`, `os_log` or `Logger`, from any process on the " +
 			"device. Filter it down with --process (the executable's name) and --grep (a regular expression " +
 			"over the whole entry).\n\n" +
-			"WHAT IT CANNOT SEE: `print` and `debugPrint`. They write to the app's stdout, and an app launched " +
-			"by SpringBoard - tapped on the home screen, or started with `simctl launch` - has its stdout " +
-			"discarded. That output does not exist anywhere on the device, so an empty result for a `print` you " +
-			"can see in Xcode means exactly that, not a broken command. To read a payload, add a temporary " +
-			"`NSLog(\"...\\(body)\")` probe, run the flow, read it here, and take the probe out again.\n\n" +
-			"WHY THERE IS NO --stdout FLAG: the only way to capture stdout is to launch the app with a pipe " +
+			"WHAT IT CANNOT SEE: `print` and `debugPrint`. They write to the app's stdout, never to this log, and " +
+			"an app launched by SpringBoard - tapped on the home screen, or started with a plain `simctl launch` - " +
+			"has its stdout discarded. So an empty result for a `print` you can see in Xcode is not a broken " +
+			"command. To read `print`, relaunch the app with `ao sim launch --console` (or `ao sim run --console`) " +
+			"and read `ao sim console`: stdout goes to a FILE, which never blocks the app. Only that launch is " +
+			"captured - a Maestro `launchApp` or the home screen relaunches it with stdout on /dev/null again - so " +
+			"for a payload read across a flow, add a temporary `NSLog(\"...\\(body)\")` probe instead: the " +
+			"unified log survives any relaunch. Read it here, and take the probe out again.\n\n" +
+			"WHY THERE IS NO --stdout PIPE: the other way to capture stdout is to launch the app with a pipe " +
 			"attached (`xcrun simctl launch --console-pipe`). When anything stops draining that pipe, the 64 KB " +
 			"buffer fills and the app blocks in write() on its MAIN THREAD - no accessibility, no touches, a " +
 			"frozen screen - and none of those symptoms points back at the capture. AO will not offer a mode " +
 			"whose failure wedges the app under test. This command cannot: the unified log never blocks the " +
-			"process that wrote to it.\n\n" +
+			"process that wrote to it, and neither does the file `--console` writes.\n\n" +
 			"This is a read: it needs no claim on the device and is never blocked by one, but it always reports " +
 			"who holds it. " + simPowerNote,
 		Example: `  ao sim log --process Nimbus
