@@ -58,11 +58,12 @@ const appRoot = "/Containers/Bundle/Application/"
 // "Nimbus.app/PlugIns/NimbusWidget.appex/NimbusWidget") for an installed app,
 // and the full path for anything else.
 func (p Process) InBundle() string {
-	i := strings.Index(p.Path, appRoot)
+	path := slashed(p.Path)
+	i := strings.Index(path, appRoot)
 	if i < 0 {
 		return p.Path
 	}
-	_, rest, found := strings.Cut(p.Path[i+len(appRoot):], "/")
+	_, rest, found := strings.Cut(path[i+len(appRoot):], "/")
 	if !found {
 		return p.Path
 	}
@@ -118,10 +119,10 @@ func (t Table) Get(pid int) (Process, bool) {
 // AppsOn is every process running an app installed on the device whose data
 // directory this is: main apps and their extensions alike.
 func (t Table) AppsOn(dataPath string) []Process {
-	prefix := strings.TrimRight(dataPath, "/") + appRoot
+	prefix := strings.TrimRight(slashed(dataPath), "/") + appRoot
 	var apps []Process
 	for _, p := range t {
-		if strings.HasPrefix(p.Path, prefix) {
+		if strings.HasPrefix(slashed(p.Path), prefix) {
 			apps = append(apps, p)
 		}
 	}
@@ -131,15 +132,20 @@ func (t Table) AppsOn(dataPath string) []Process {
 // Main is the app's own process: the executable directly inside the .app at
 // appPath, not an extension under PlugIns/.
 func (t Table) Main(appPath string) (Process, bool) {
-	prefix := strings.TrimRight(appPath, "/") + "/"
+	prefix := strings.TrimRight(slashed(appPath), "/") + "/"
 	for _, p := range t {
-		rest, found := strings.CutPrefix(p.Path, prefix)
+		rest, found := strings.CutPrefix(slashed(p.Path), prefix)
 		if found && rest != "" && !strings.Contains(rest, "/") {
 			return p, true
 		}
 	}
 	return Process{}, false
 }
+
+// slashed compares a path from `ps`, which always uses "/", with one built by
+// path/filepath, which uses the OS separator. On macOS, the only OS with a
+// simulator, it changes nothing.
+func slashed(path string) string { return filepath.ToSlash(path) }
 
 // HoldKind is what holds an app.
 type HoldKind string

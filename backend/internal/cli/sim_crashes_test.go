@@ -36,11 +36,19 @@ func writeCrash(t *testing.T, home, file, app, bundleID, stamp, udid, exception 
 	}
 }
 
+// setHome points os.UserHomeDir at dir on every OS: it reads HOME on Unix and
+// USERPROFILE on Windows.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 func crashMachine(t *testing.T) *debugMachine {
 	t.Helper()
 	m := newDebugMachine(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	writeCrash(t, home, "Nimbus-1.ips", "Nimbus", "com.example.Nimbus", "2026-10-08 09:10:00.00 +0700", simUDIDProMax, "EXC_CRASH")
 	writeCrash(t, home, "Nimbus-2.ips", "Nimbus", "com.example.Nimbus", "2026-10-08 10:15:00.00 +0700", simUDIDProMax, "EXC_BREAKPOINT")
 	writeCrash(t, home, "Lantern-1.ips", "Lantern", "com.example.Lantern", "2026-10-08 09:30:00.00 +0700", simUDIDProMax, "EXC_BAD_ACCESS")
@@ -125,7 +133,7 @@ func TestSimCrashes_ShowPastTheEndIsAUsageError(t *testing.T) {
 
 func TestSimCrashes_NoneIsAnAnswerNotAFailure(t *testing.T) {
 	m := newDebugMachine(t)
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	out, _, err := executeCLI(t, m.deps, "sim", "crashes")
 	if err != nil || !strings.Contains(out, "No crash reports") {
 		t.Fatalf("out=%q err=%v", out, err)
@@ -146,7 +154,7 @@ func TestSimCrashes_RefusesABaseDevice(t *testing.T) {
 func TestSimCrashes_ShowWithoutAppInfoPointsAtTheLogForTheMessage(t *testing.T) {
 	m := newDebugMachine(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	dir := filepath.Join(home, "Library", "Logs", "DiagnosticReports")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
@@ -171,7 +179,7 @@ func TestSimCrashes_ShowWithoutAppInfoPointsAtTheLogForTheMessage(t *testing.T) 
 // empty list right after a crash says so, or it reads as "it did not crash".
 func TestSimCrashes_NoneSaysAReportArrivesLate(t *testing.T) {
 	m := newDebugMachine(t)
-	t.Setenv("HOME", t.TempDir())
+	setHome(t, t.TempDir())
 	out, _, err := executeCLI(t, m.deps, "sim", "crashes")
 	if err != nil || !strings.Contains(out, "30 s") {
 		t.Fatalf("out=%q err=%v", out, err)
