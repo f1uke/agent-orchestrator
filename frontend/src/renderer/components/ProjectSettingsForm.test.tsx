@@ -558,16 +558,23 @@ describe("ProjectSettingsForm", () => {
 		const mode = await screen.findByRole("combobox", { name: "Drive devices only through scripts" });
 		expect(mode).toHaveTextContent("Off");
 		expect(screen.queryByLabelText("Scripts product")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Verify skill")).not.toBeInTheDocument();
 
 		await chooseOption(mode, "Scripts only - Android");
 		await openRows();
 		await userEvent.type(screen.getByLabelText("Scripts product"), "nter");
 		await userEvent.type(screen.getByLabelText("Scripts store"), "/opt/scripts");
+		await userEvent.type(screen.getByLabelText("Verify skill"), "projects/nter/verify");
 		await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
 		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
 		const body = putMock.mock.calls[0]?.[1]?.body;
-		expect(body.config.mobileScripts).toEqual({ platform: "android", product: "nter", store: "/opt/scripts" });
+		expect(body.config.mobileScripts).toEqual({
+			platform: "android",
+			product: "nter",
+			store: "/opt/scripts",
+			verifySkill: "projects/nter/verify",
+		});
 		expect(body.config.env).toEqual({ TOKEN: "secret" });
 	});
 

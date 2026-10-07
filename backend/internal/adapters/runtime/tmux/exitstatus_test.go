@@ -117,3 +117,44 @@ func TestBuildLaunchCommand_RecordsTheExitOnlyWhenAsked(t *testing.T) {
 		t.Errorf("recorder does not name the session and the journal: %q", got)
 	}
 }
+
+// A launch handed a stdin file runs the agent with exactly that file's bytes on
+// its standard input, whatever the file name and the text hold, and keeps the
+// prompt itself out of the command.
+func TestBuildLaunchCommand_ConnectsTheStdinFile(t *testing.T) {
+	dir := t.TempDir()
+	prompt := "-starts like a flag\nline two `ls` $(whoami) $HOME 'single' \"double\" \\ back\nภาษาไทย ทดสอบ\n"
+	stdinFile := filepath.Join(dir, "it's a prompt.md")
+	if err := os.WriteFile(stdinFile, []byte(prompt), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "got")
+	cfg := ports.RuntimeConfig{
+		SessionID:      "s-1",
+		Argv:           []string{"/bin/sh", "-c", `cat > "$0"`, out},
+		StdinFile:      stdinFile,
+		ExitStatusFile: filepath.Join(dir, "endings.jsonl"),
+	}
+	cmd := buildLaunchCommand(cfg)
+	if strings.Contains(cmd, "ภาษาไทย") {
+		t.Fatalf("the prompt text is in the launch command: %q", cmd)
+	}
+	// SHELL=true makes the keep-alive shell exit at once, so the launch command
+	// runs to completion.
+	run := exec.Command("/bin/sh", "-c", cmd)
+	run.Env = append(os.Environ(), "SHELL=/usr/bin/true")
+	if b, err := run.CombinedOutput(); err != nil {
+		t.Fatalf("launch command: %v: %s", err, b)
+	}
+	got, err := os.ReadFile(out) //nolint:gosec // test-owned temp dir
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != prompt {
+		t.Fatalf("agent stdin = %q, want %q", got, prompt)
+	}
+	entries, err := endingslog.Read(dir)
+	if err != nil || len(entries) != 1 || entries[0].Exit == nil || entries[0].Exit.Code != 0 {
+		t.Fatalf("the agent's exit was not recorded after the redirect: %+v, %v", entries, err)
+	}
+}

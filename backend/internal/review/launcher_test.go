@@ -48,14 +48,17 @@ func (f fakeReviewerResolver) Reviewer(domain.ReviewerHarness) (ports.Reviewer, 
 }
 
 type fakeRuntime struct {
-	createCfg   ports.RuntimeConfig
-	sentMsg     string
-	sentTo      string
-	alive       bool
-	agentAlive  bool
-	destroyed   []string
-	createOrder []string // "destroy"/"create" sequence to assert ordering
+	connectsStdin bool
+	createCfg     ports.RuntimeConfig
+	sentMsg       string
+	sentTo        string
+	alive         bool
+	agentAlive    bool
+	destroyed     []string
+	createOrder   []string // "destroy"/"create" sequence to assert ordering
 }
+
+func (f *fakeRuntime) ConnectsStdinFile() bool { return f.connectsStdin }
 
 func (f *fakeRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
 	f.createCfg = cfg
@@ -134,6 +137,57 @@ func TestLauncherSpawnHandsReviewerSystemPromptByFile(t *testing.T) {
 	}
 	if info, _ := os.Stat(inv.SystemPromptFile); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("reviewer prompt file mode = %o, want 600", info.Mode().Perm())
+	}
+}
+
+// stdinReviewer hands back the prompt file as the pane's stdin, as an adapter
+// whose agent reads its first prompt from stdin does.
+type stdinReviewer struct{ fakeReviewer }
+
+func (f *stdinReviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, error) {
+	spec, err := f.fakeReviewer.ReviewCommand(ctx, inv)
+	spec.StdinFile = inv.PromptFile
+	return spec, err
+}
+
+// On a runtime that connects stdin files, the per-pass review prompt reaches
+// the reviewer pane through a private file on its stdin.
+func TestLauncherSpawnFeedsReviewerPromptOnStdin(t *testing.T) {
+	reviewer := &stdinReviewer{}
+	rt := &fakeRuntime{connectsStdin: true}
+	dataDir := t.TempDir()
+	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt, dataDir)
+
+	if _, err := l.Spawn(context.Background(), launchSpec()); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	inv := reviewer.gotInv
+	if inv.Prompt == "" {
+		t.Fatal("reviewer got no prompt; nothing to check")
+	}
+	if want := filepath.Join(promptfile.Dir(dataDir, "mer-1"), promptfile.ReviewerPrompt); inv.PromptFile != want {
+		t.Fatalf("PromptFile = %q, want %q", inv.PromptFile, want)
+	}
+	if data, err := os.ReadFile(inv.PromptFile); err != nil || string(data) != inv.Prompt {
+		t.Fatalf("reviewer prompt file does not hold the review prompt (%v)", err)
+	}
+	if rt.createCfg.StdinFile != inv.PromptFile {
+		t.Fatalf("pane stdin = %q, want %q", rt.createCfg.StdinFile, inv.PromptFile)
+	}
+}
+
+// A runtime that cannot connect stdin gets no prompt file, so the adapter keeps
+// the prompt in the command.
+func TestLauncherSpawnWritesNoReviewerPromptFileWithoutStdin(t *testing.T) {
+	reviewer := &stdinReviewer{}
+	rt := &fakeRuntime{}
+	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, rt, t.TempDir())
+
+	if _, err := l.Spawn(context.Background(), launchSpec()); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if reviewer.gotInv.PromptFile != "" || rt.createCfg.StdinFile != "" {
+		t.Fatalf("PromptFile = %q, stdin = %q; want neither", reviewer.gotInv.PromptFile, rt.createCfg.StdinFile)
 	}
 }
 

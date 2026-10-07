@@ -483,6 +483,12 @@ type MobileScriptsConfig struct {
 	// Store is the checkout holding bin/flow, projects/ and accounts/. Empty
 	// means DefaultMobileScriptsStore.
 	Store string `json:"store,omitempty"`
+	// VerifySkill is the store-relative folder of the project's verify skill
+	// (the folder holding SKILL.md, e.g. projects/nter/verify). When set, AO
+	// links it into every worktree as .claude/skills/verify from the task's own
+	// store worktree, and the device block of a worker's prompt defers to it
+	// instead of restating how to build, drive and check the app.
+	VerifySkill string `json:"verifySkill,omitempty"`
 }
 
 // StoreOrDefault is the store a prompt names.
@@ -510,6 +516,14 @@ func (c MobileScriptsConfig) Validate() error {
 	case MobilePlatformIOS, MobilePlatformAndroid:
 	default:
 		return fmt.Errorf("mobileScripts.platform: %q must be %q or %q", c.Platform, MobilePlatformIOS, MobilePlatformAndroid)
+	}
+	if c.VerifySkill != "" {
+		if strings.TrimSpace(c.VerifySkill) != c.VerifySkill || strings.ContainsAny(c.VerifySkill, "\n\r") {
+			return fmt.Errorf("mobileScripts.verifySkill: %q has surrounding whitespace or a line break", c.VerifySkill)
+		}
+		if err := validateRepoRelative(c.VerifySkill); err != nil {
+			return fmt.Errorf("mobileScripts.verifySkill: %q: store-relative path required, without .. segments", c.VerifySkill)
+		}
 	}
 	if c.Store != "" {
 		if strings.TrimSpace(c.Store) != c.Store || strings.ContainsAny(c.Store, "\n\r") {

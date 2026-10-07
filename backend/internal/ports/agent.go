@@ -323,4 +323,11 @@ const (
 	PromptDeliveryInCommand   PromptDeliveryStrategy = "in_command"
 	PromptDeliveryAfterStart  PromptDeliveryStrategy = "after_start"
 	PromptDeliveryCustomAgent PromptDeliveryStrategy = "custom_agent"
+	// PromptDeliveryStdin: the agent reads its initial prompt from standard
+	// input and stays interactive. When the runtime can connect a file to the
+	// agent's stdin (StdinFileConnector), AO writes the prompt to a private file
+	// and launches the agent with an empty LaunchConfig.Prompt, so the prompt
+	// never rides on argv (see LaunchConfig.SystemPromptFile for why that
+	// matters). Otherwise the prompt goes in the command as before.
+	PromptDeliveryStdin PromptDeliveryStrategy = "stdin"
 )

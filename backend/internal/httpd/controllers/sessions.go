@@ -1599,7 +1599,25 @@ func sessionView(s domain.Session) SessionView {
 	if s.IsTodo {
 		prompt = s.Metadata.Prompt
 	}
-	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s), Crew: sessionCrew(s), TaskSize: s.TaskSize, RuntimeTouch: s.RuntimeTouch, CrewRun: s.CrewRun, CrewRunDiscards: s.CrewRunDiscards, Children: s.Children}
+	return SessionView{Session: s, Branch: s.Metadata.Branch, WorkspacePath: s.Metadata.WorkspacePath, PreviewURL: s.Metadata.PreviewURL, PreviewRevision: s.Metadata.PreviewRevision, Prompt: prompt, PRs: sessionPRFacts(s.PRs), TokenUsage: sessionTokenUsage(s), Termination: sessionTermination(s), Crew: sessionCrew(s), TaskSize: s.TaskSize, RuntimeTouch: s.RuntimeTouch, CrewRun: s.CrewRun, CrewRunDiscards: s.CrewRunDiscards, Children: s.Children, ScriptsStore: sessionScriptsStore(s.ScriptsStore)}
+}
+
+// sessionScriptsStore is the chip's summary of a store worktree, or nil.
+func sessionScriptsStore(w *domain.ScriptsStoreWorktree) *SessionScriptsStore {
+	if w == nil {
+		return nil
+	}
+	files := append([]string{}, w.Uncommitted...)
+	seen := map[string]bool{}
+	for _, f := range files {
+		seen[f] = true
+	}
+	for _, f := range w.HeldFiles {
+		if !seen[f] {
+			files = append(files, f)
+		}
+	}
+	return &SessionScriptsStore{Uncommitted: len(w.Uncommitted), Unpublished: w.Unpublished, HeldReason: w.HeldReason, Files: files}
 }
 
 // sessionCrew builds the curated crew wire object, or nil for a SOLO session.

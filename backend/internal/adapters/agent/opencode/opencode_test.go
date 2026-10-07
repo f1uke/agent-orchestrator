@@ -343,18 +343,6 @@ func TestGetLaunchCommandMapsPermissionModes(t *testing.T) {
 	}
 }
 
-func TestGetPromptDeliveryStrategyIsInCommand(t *testing.T) {
-	plugin := &Plugin{}
-
-	got, err := plugin.GetPromptDeliveryStrategy(context.Background(), ports.LaunchConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != ports.PromptDeliveryInCommand {
-		t.Fatalf("unexpected strategy: %q", got)
-	}
-}
-
 func TestGetConfigSpecHasNoCustomFieldsYet(t *testing.T) {
 	plugin := &Plugin{}
 
@@ -753,5 +741,14 @@ func TestOpenCodePlugin_ReportsToolPartsByNameOnly(t *testing.T) {
 	// A streaming part is re-emitted constantly; only status transitions fire.
 	if !strings.Contains(body, "toolReports") {
 		t.Errorf("plugin must dedup tool reports per call id:\n%s", body)
+	}
+}
+
+// The opencode TUI submits what arrives on stdin as its first message and keeps
+// reading the keyboard, so AO can keep the task brief off argv.
+func TestGetPromptDeliveryStrategyIsStdin(t *testing.T) {
+	got, err := (&Plugin{}).GetPromptDeliveryStrategy(context.Background(), ports.LaunchConfig{})
+	if err != nil || got != ports.PromptDeliveryStdin {
+		t.Fatalf("strategy = %q, %v; want %q", got, err, ports.PromptDeliveryStdin)
 	}
 }

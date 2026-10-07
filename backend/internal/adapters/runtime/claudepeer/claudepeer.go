@@ -36,6 +36,7 @@ type Delegate interface {
 	ports.Runtime
 	ports.Attacher
 	ports.AgentLivenessProber
+	ports.StdinFileConnector
 	SendMessage(ctx context.Context, handle ports.RuntimeHandle, message string) error
 	GetOutput(ctx context.Context, handle ports.RuntimeHandle, lines int) (string, error)
 }

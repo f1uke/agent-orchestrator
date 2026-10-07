@@ -651,6 +651,8 @@ func (f *fakeSessionLifecycle) SetSimDeviceAssigner(fn func(context.Context, dom
 
 func (f *fakeSessionLifecycle) SetChildren(sessionmanager.ChildWork) {}
 
+func (f *fakeSessionLifecycle) SetScriptsStore(sessionmanager.ScriptsStore) {}
+
 func (f *fakeSessionLifecycle) ProvisionWorkspace(context.Context, domain.ProjectRecord, string) error {
 	return nil
 }

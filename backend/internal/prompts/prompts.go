@@ -273,13 +273,17 @@ Non-negotiable: keep every branch you create within your session's branch namesp
 // a stuck build ran `pkill -f 'xcodebuild test'`, and that matched - and
 // killed - every other iOS agent on the machine, whose instructions held those
 // words.
-const workerFloor = sharedChildrenFloor + stopProcessesFloor
+//
+// It also bans `git stash`: every worktree of a repo shares one stash stack, and
+// on 2026-10-07 a worker parked a stop-gap patch there, where any other session
+// could pop or drop it.
+const workerFloor = sharedChildrenFloor + stopProcessesFloor + setWorkAsideFloor
 
 // childWorktreesWorkerFloor replaces workerFloor for a worker whose Claude Code
 // hands each isolated subagent's worktree to AO: there, parallel file-writing
 // children are safe, because AO cuts each one from the worker's HEAD outside
 // its folder and merges its commits back.
-const childWorktreesWorkerFloor = childWorktreesFloor + stopProcessesFloor
+const childWorktreesWorkerFloor = childWorktreesFloor + stopProcessesFloor + setWorkAsideFloor
 
 const sharedChildrenFloor = "\n\n" + `## Child agents share this AO worktree
 
@@ -299,6 +303,10 @@ This session runs in an AO-managed git worktree on its assigned branch. You may 
 const stopProcessesFloor = "\n\n" + `## Stopping processes (AO)
 
 Kill only a process you started, by the PID you captured when you started it (` + "`$!`" + `). Never kill by pattern: no ` + "`pkill -f`" + `, ` + "`killall`" + ` or ` + "`pgrep ... | xargs kill`" + ` on a word. A pattern matches every process on this machine whose command line holds that word, other agents included, and one such kill has already ended every live session at once.`
+
+const setWorkAsideFloor = "\n\n" + `## Setting work aside (AO)
+
+Never use ` + "`git stash`" + `. Every worktree of a repository shares one stash stack, so another session can pop or drop your entry. To set work aside, commit it on your branch, or save it as a ` + "`.patch`" + ` file in the project's knowledge store (` + "`" + knowledgestore.PromptDir + "/<project>/`" + `).`
 
 // qaHandbackFloor is qa's obligation to HAND BACK, and it exists because the
 // first full crew run stalled for want of it.

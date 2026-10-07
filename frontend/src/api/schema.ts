@@ -1498,6 +1498,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/scripts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the session's scripts store worktree: uncommitted files, unpublished commits, and the main checkout's own dirty files */
+        get: operations["getSessionScripts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/scripts/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish the committed scripts of the session's store worktree into the store's main checkout */
+        post: operations["publishSessionScripts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/send": {
         parameters: {
             query?: never;
@@ -1577,6 +1611,23 @@ export interface paths {
         put?: never;
         /** Type text into the focused field through the device's XCTest runner, as characters, and prove it arrived */
         post: operations["typeSimText"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/sim-doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check, without changing anything, whether a session's simulator is worth driving: device, lease, installed build and proxy root CA */
+        get: operations["simDoctor"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3220,6 +3271,7 @@ export interface components {
              * @enum {string}
              */
             runtimeTouch?: "sim" | "preview";
+            scriptsStore?: components["schemas"]["SessionScriptsStore"];
             /** @enum {string} */
             sleepReason?: "idle" | "turn" | "merged" | "undelivered";
             /** @enum {string} */
@@ -3514,6 +3566,7 @@ export interface components {
             platform: "ios" | "android";
             product: string;
             store?: string;
+            verifySkill?: string;
         };
         DomainReviewerConfig: {
             harness: string;
@@ -4064,6 +4117,47 @@ export interface components {
             ok: boolean;
             sessionId: string;
         };
+        ScriptsPublishResponse: {
+            /** @description Commits the branch had that the base lacked. */
+            commits: number;
+            detail?: string;
+            /** @description The conflicting files, or the main checkout's files in the way. */
+            files?: string[];
+            /** @enum {string} */
+            hold?: "publish_conflict" | "store_dirty_overlap" | "store_off_base" | "publish_failed";
+            /** @enum {string} */
+            outcome: "nothing" | "fast_forward" | "merged" | "refused";
+            /** @description The base branch's new tip. */
+            sha?: string;
+            worktree: components["schemas"]["ScriptsStoreWorktreeView"];
+        };
+        ScriptsStatusResponse: {
+            /** @description The store main checkout's own uncommitted files, which a publish cannot touch. */
+            storeDirty: string[];
+            worktree: components["schemas"]["ScriptsStoreWorktreeView"];
+        };
+        ScriptsStoreWorktreeView: {
+            /** @description The store branch a publish merges into. */
+            baseBranch: string;
+            branch: string;
+            heldFiles?: string[];
+            /** @enum {string} */
+            heldReason?: "uncommitted" | "publish_conflict" | "store_dirty_overlap" | "store_off_base" | "publish_failed";
+            /** @description The workspace owner: the solo worker, or the crew's dev. */
+            owner: string;
+            /** @description The worktree; AO_SCRIPTS_STORE in the session. */
+            path: string;
+            /** Format: date-time */
+            publishedAt?: null | string;
+            /** @enum {string} */
+            state: "active" | "held" | "removed";
+            /** @description The store's main checkout. */
+            store: string;
+            /** @description Files in the worktree nobody committed; a publish leaves them. */
+            uncommitted: string[];
+            /** @description Commits on the branch the base branch does not have. */
+            unpublished: number;
+        };
         SendSessionMessageRequest: {
             about?: string;
             from?: string;
@@ -4250,6 +4344,19 @@ export interface components {
         SessionResponse: {
             session: components["schemas"]["ControllersSessionView"];
         };
+        SessionScriptsStore: {
+            /** @description The uncommitted files, then the files a teardown's hold named. */
+            files: string[];
+            /**
+             * @description Why a teardown kept the worktree.
+             * @enum {string}
+             */
+            heldReason?: "uncommitted" | "publish_conflict" | "store_dirty_overlap" | "store_off_base" | "publish_failed";
+            /** @description Files in the worktree nobody committed. */
+            uncommitted: number;
+            /** @description Commits the store's base branch does not have. */
+            unpublished: number;
+        };
         SessionTermination: {
             /** Format: date-time */
             at: string;
@@ -4403,6 +4510,19 @@ export interface components {
             state: string;
             trust?: components["schemas"]["SimTrustView"];
             udid: string;
+        };
+        SimDoctorCheckView: {
+            message: string;
+            /** @description device, lease, app or proxy CA. */
+            name: string;
+            /** @description OK, WARN or FAIL. Only FAIL makes the report not ok. */
+            status: string;
+        };
+        SimDoctorResponse: {
+            /** @description Every check that applied, in order. Only the device line is present when there is no device to check. */
+            checks: components["schemas"]["SimDoctorCheckView"][];
+            /** @description True when no check is FAIL. */
+            ok: boolean;
         };
         SimGestureInput: {
             /** @description Swipe duration in milliseconds. Omit for 300. */
@@ -10766,6 +10886,106 @@ export interface operations {
             };
         };
     };
+    getSessionScripts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScriptsStatusResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    publishSessionScripts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScriptsPublishResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     sendSessionMessage: {
         parameters: {
             query?: never;
@@ -11152,6 +11372,63 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    simDoctor: {
+        parameters: {
+            query?: {
+                /** @description Simulator to check. Omit for the session's assigned one. */
+                udid?: string;
+                /** @description Bundle id whose installed build to check. Omit to skip the build check. */
+                app?: string;
+                /** @description Absolute path of a .app on this Mac that the installed app must be. Requires app. */
+                expect?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimDoctorResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

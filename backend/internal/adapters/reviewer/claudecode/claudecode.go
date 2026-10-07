@@ -77,10 +77,22 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 	if sessionID == "" {
 		sessionID = inv.ReviewerID
 	}
+	// The per-pass prompt rides on the pane's stdin when the launcher wrote it to
+	// a file and the agent reads stdin, so it stays off the command line.
+	prompt, stdinFile := inv.Prompt, ""
+	if inv.PromptFile != "" {
+		strategy, err := r.agent.GetPromptDeliveryStrategy(ctx, ports.LaunchConfig{Prompt: inv.Prompt})
+		if err != nil {
+			return ports.ReviewCommandSpec{}, err
+		}
+		if strategy == ports.PromptDeliveryStdin {
+			prompt, stdinFile = "", inv.PromptFile
+		}
+	}
 	argv, err := r.agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		SessionID:     sessionID,
 		WorkspacePath: inv.WorkspacePath,
-		Prompt:        inv.Prompt,
+		Prompt:        prompt,
 		SystemPrompt:  inv.SystemPrompt,
 		// By path, so the reviewer role stays off the pane's command line.
 		SystemPromptFile: inv.SystemPromptFile,
@@ -94,7 +106,7 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 	if err != nil {
 		return ports.ReviewCommandSpec{}, err
 	}
-	return ports.ReviewCommandSpec{Argv: argv}, nil
+	return ports.ReviewCommandSpec{Argv: argv, StdinFile: stdinFile}, nil
 }
 
 // PreLaunch runs any reviewer-specific preflight. For Claude Code this records

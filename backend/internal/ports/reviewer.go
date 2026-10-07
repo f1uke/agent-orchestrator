@@ -58,9 +58,14 @@ type ReviewInvocation struct {
 	// ignore them.
 	// SystemPromptFile is a private file holding SystemPrompt, to hand the agent
 	// in place of the text (see LaunchConfig.SystemPromptFile).
+	// PromptFile is a private file holding Prompt, set only when the runtime can
+	// connect a file to the pane's stdin. An adapter whose agent reads its first
+	// prompt from stdin (PromptDeliveryStdin) returns it as
+	// ReviewCommandSpec.StdinFile and leaves Prompt off argv.
 	Prompt           string
 	SystemPrompt     string
 	SystemPromptFile string
+	PromptFile       string
 }
 
 // ReviewTask is one PR/run in a multi-PR review trigger queue.
@@ -79,6 +84,9 @@ type ReviewTask struct {
 type ReviewCommandSpec struct {
 	Argv []string
 	Env  map[string]string
+	// StdinFile is the file the runtime connects to the reviewer's stdin (see
+	// RuntimeConfig.StdinFile); empty for none.
+	StdinFile string
 }
 
 // ReviewerResolver maps a reviewer harness onto its adapter. ok=false means no

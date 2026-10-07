@@ -1511,3 +1511,91 @@ func TestManager_ListSummaryCarriesTestinyProject(t *testing.T) {
 		})
 	}
 }
+
+// `ao project set-config <id> --symlink ""` is how a person drops a project's
+// symlinks, and it sends [""] for the field. A blank entry names no path and no
+// command, so it is stored as nothing, never as a list holding an empty string
+// that the Settings page would show as an empty row.
+func TestManager_SetConfig_DropsBlankListEntries(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name           string
+		in             project.SetConfigInput
+		wantSymlinks   []string
+		wantPostCreate []string
+	}{
+		{"merge blank symlink clears", project.SetConfigInput{Config: domain.ProjectConfig{Symlinks: []string{""}}, MergeFields: []string{"symlinks"}}, nil, []string{"make"}},
+		{"merge blank post-create clears", project.SetConfigInput{Config: domain.ProjectConfig{PostCreate: []string{" "}}, MergeFields: []string{"postCreate"}}, []string{".env"}, nil},
+		{"merge keeps the real entries", project.SetConfigInput{Config: domain.ProjectConfig{Symlinks: []string{"", "a", "\t"}}, MergeFields: []string{"symlinks"}}, []string{"a"}, []string{"make"}},
+		{"replace drops blanks", project.SetConfigInput{Config: domain.ProjectConfig{Symlinks: []string{"", "b"}, PostCreate: []string{"  ", "pnpm i"}}}, []string{"b"}, []string{"pnpm i"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newManager(t)
+			seed := &domain.ProjectConfig{Symlinks: []string{".env"}, PostCreate: []string{"make"}}
+			if _, err := m.Add(ctx, project.AddInput{Path: gitRepo(t), ProjectID: ptr("ao"), Config: seed}); err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			if _, err := m.SetConfig(ctx, "ao", tc.in); err != nil {
+				t.Fatalf("SetConfig: %v", err)
+			}
+			got, err := m.Get(ctx, "ao")
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			var cfg domain.ProjectConfig
+			if got.Project != nil && got.Project.Config != nil {
+				cfg = *got.Project.Config
+			}
+			if !reflect.DeepEqual(cfg.Symlinks, tc.wantSymlinks) || !reflect.DeepEqual(cfg.PostCreate, tc.wantPostCreate) {
+				t.Fatalf("symlinks = %#v, postCreate = %#v; want %#v, %#v", cfg.Symlinks, cfg.PostCreate, tc.wantSymlinks, tc.wantPostCreate)
+			}
+		})
+	}
+}
+
+// A config stored before blanks were dropped (nter-ios-app held "symlinks":
+// [""]) reads back without them, and the next write of any field stores it
+// tidy.
+func TestManager_StoredBlankListEntriesAreDropped(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	m := project.New(store)
+	if _, err := m.Add(ctx, project.AddInput{Path: gitRepo(t), ProjectID: ptr("ao")}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	row, _, err := store.GetProject(ctx, "ao")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	row.Config.Symlinks = []string{""}
+	row.Config.PostCreate = []string{"", "make"}
+	if err := store.UpsertProject(ctx, row); err != nil {
+		t.Fatalf("seed legacy config: %v", err)
+	}
+
+	got, err := m.Get(ctx, "ao")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if c := got.Project.Config; c == nil || c.Symlinks != nil || !reflect.DeepEqual(c.PostCreate, []string{"make"}) {
+		t.Fatalf("read config = %#v, want no symlinks and postCreate [make]", c)
+	}
+
+	if _, err := m.SetConfig(ctx, "ao", project.SetConfigInput{
+		Config:      domain.ProjectConfig{PauseBeforeImplementing: true},
+		MergeFields: []string{"pauseBeforeImplementing"},
+	}); err != nil {
+		t.Fatalf("SetConfig: %v", err)
+	}
+	row, _, err = store.GetProject(ctx, "ao")
+	if err != nil {
+		t.Fatalf("GetProject: %v", err)
+	}
+	if row.Config.Symlinks != nil || !reflect.DeepEqual(row.Config.PostCreate, []string{"make"}) {
+		t.Fatalf("stored config = %#v, want no symlinks and postCreate [make]", row.Config)
+	}
+}

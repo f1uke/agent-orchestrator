@@ -332,4 +332,8 @@ type Session struct {
 	// ran with `isolation: "worktree"` and what became of their work. Empty for
 	// every session that never ran one. Derived on read.
 	Children []SessionChild `json:"-"`
+	// ScriptsStore is the workspace's own worktree of the mobile scripts store,
+	// on the owner's row only (a crew member's card is its dev's), and only
+	// while it exists. Derived on read.
+	ScriptsStore *ScriptsStoreWorktree `json:"-"`
 }

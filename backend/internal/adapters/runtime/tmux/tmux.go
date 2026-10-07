@@ -873,9 +873,14 @@ func (r *Runtime) launchScriptBaseDir(env map[string]string) string {
 	return os.TempDir()
 }
 
+// ConnectsStdinFile reports that Create honours RuntimeConfig.StdinFile: the
+// launch command redirects the agent's stdin from it.
+func (r *Runtime) ConnectsStdinFile() bool { return true }
+
 // buildLaunchCommand builds the shell command string passed to `sh -c`. It
-// exports env vars, then runs argv, then execs a keep-alive interactive shell
-// so the tmux session survives the agent exiting.
+// exports env vars, then runs argv (its stdin redirected from cfg.StdinFile when
+// set), then execs a keep-alive interactive shell so the tmux session survives
+// the agent exiting.
 //
 // PATH from cfg.Env is exported last, after all other keys, so an explicit
 // override takes effect. A UTF-8 LC_CTYPE follows, only when nothing has set a
@@ -917,6 +922,10 @@ func buildLaunchCommand(cfg ports.RuntimeConfig) string {
 		parts[i] = shellQuote(a)
 	}
 	b.WriteString(strings.Join(parts, " "))
+	if cfg.StdinFile != "" {
+		b.WriteString(" < ")
+		b.WriteString(shellQuote(cfg.StdinFile))
+	}
 	if rec := exitStatusRecorder(cfg.ExitStatusFile, cfg.SessionID); rec != "" {
 		b.WriteString("; ")
 		b.WriteString(rec)

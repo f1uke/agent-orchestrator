@@ -108,7 +108,7 @@ const testinyTestData = "\n   - **Test Data** names the int/uat test account and
 // scripts: a script takes its account through --account, so the account goes
 // in the store's accounts file. The store's no-data-in-script rule is about
 // reuse, not secrecy.
-const testinyCaseScriptAccount = `. When the case script needs that account and ` + "`{{store}}/accounts/{{product}}.json`" + ` does not have it yet, add it there under a clear id (the file is git-ignored; its shape is in ` + "`accounts/{{product}}.example.json`" + `) and pass it to the script with ` + "`--account <id>`" + `. The script still takes the account through ` + "`--account`" + `, never as values written into it.`
+const testinyCaseScriptAccount = `. When the case script needs that account and ` + "`{{root}}/accounts/{{product}}.json`" + ` does not have it yet, add it there under a clear id (the file is git-ignored; its shape is in ` + "`accounts/{{product}}.example.json`" + `) and pass it to the script with ` + "`--account <id>`" + `. The script still takes the account through ` + "`--account`" + `, never as values written into it.`
 
 const testinyReportItems = `the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the evidence folder path, and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.`
 

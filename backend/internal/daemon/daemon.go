@@ -21,6 +21,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	testinyadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/testiny"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/childtree"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/storetree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
@@ -35,6 +36,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgdelivery"
 	"github.com/aoagents/agent-orchestrator/backend/internal/msgqueue"
 	"github.com/aoagents/agent-orchestrator/backend/internal/notify"
+	"github.com/aoagents/agent-orchestrator/backend/internal/observe/reaper"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/preview"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
@@ -50,6 +52,7 @@ import (
 	jirasvc "github.com/aoagents/agent-orchestrator/backend/internal/service/jira"
 	notificationsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/notification"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
+	scriptstoresvc "github.com/aoagents/agent-orchestrator/backend/internal/service/scriptstore"
 	simsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/sim"
 	testinysvc "github.com/aoagents/agent-orchestrator/backend/internal/service/testiny"
 	wikisvc "github.com/aoagents/agent-orchestrator/backend/internal/service/wiki"
@@ -410,6 +413,17 @@ func Run() error {
 	})
 	sessMgr.SetChildren(childSvc)
 
+	// Each mobileScripts workspace's own worktree of the scripts store, beside
+	// the worker trees. The manager cuts it at spawn, re-attaches it at restore
+	// and settles it at teardown.
+	scriptsSvc := scriptstoresvc.New(scriptstoresvc.Options{
+		Store:   store,
+		Trees:   storetree.New(),
+		DataDir: cfg.DataDir,
+		Logger:  log,
+	})
+	sessMgr.SetScriptsStore(scriptsSvc)
+
 	// Auto-reclaim: a settings-backed poll loop that tears down finished worker
 	// sessions (tmux + worktree, branch kept) once they have sat past the
 	// configured grace period. Every decision it makes — reclaim or refusal — is
@@ -515,6 +529,7 @@ func Run() error {
 		Testiny:            testinysvc.New(testinyadapter.New(testinyadapter.Options{}), store, store, testinysvc.Options{}),
 		CrewRuns:           crewRunSvc,
 		Children:           childSvc,
+		Scripts:            scriptsSvc,
 		Sim:                simSvc,
 		IOSRun:             iosRunSvc,
 		SimScreen:          simScreen,
@@ -537,6 +552,7 @@ func Run() error {
 		WikiSettings:       wikiSettings,
 		RefLinks:           refLinkSettings,
 		SimTrust:           simTrustSettings,
+		SimAssignments:     store,
 		Wiki:               wikiSvc,
 		SystemPrompts:      promptOverrides,
 		MessageTemplates:   promptOverrides,
@@ -565,6 +581,11 @@ func Run() error {
 	// terminate dead ones, reap leaked tmux, then restore shutdown-saved
 	// sessions. Best-effort: a failure is logged but never blocks boot. Placed
 	// before srv.Run so sessions are consistent before the server serves.
+	// Store worktrees first, so a session restored below re-attaches to a
+	// worktree whose row already agrees with the disk.
+	if scriptsErr := scriptsSvc.Reconcile(ctx); scriptsErr != nil {
+		log.Error("reconcile scripts store worktrees on boot failed", "err", scriptsErr)
+	}
 	if reconcileErr := sessMgr.Reconcile(ctx); reconcileErr != nil {
 		log.Error("reconcile sessions on boot failed", "err", reconcileErr)
 	}
@@ -655,6 +676,19 @@ func Run() error {
 		Description: "Scans for idle sessions and closes them once past the idle TTL.",
 		Interval:    sweepInterval,
 	})
+	// The git facts the board's unpublished-scripts chip reads, on the
+	// lifecycle tick's cadence: two read-only git commands per store worktree,
+	// and a row write only when a fact changed.
+	scriptsRec := loopReg.Register(looptelemetry.Spec{
+		Name:        "scripts-store-refresh",
+		Display:     "Scripts store worktrees",
+		Description: "Reads each scripts store worktree's uncommitted files and unpublished commits for the board.",
+		Interval:    reaper.DefaultTickInterval,
+	})
+	scriptsRefreshDone := startTickerSweep(ctx, "scripts store refresh", reaper.DefaultTickInterval, func(ctx context.Context) error {
+		scriptsRec.Tick()
+		return scriptsSvc.Refresh(ctx)
+	}, log)
 	idleSweepDone := startTickerSweep(ctx, "idle session sweep", sweepInterval, func(ctx context.Context) error {
 		idleRec.Tick()
 		return sessMgr.CloseIdleSessions(ctx)
@@ -731,6 +765,7 @@ func Run() error {
 	stop()
 	<-previewDone
 	<-idleSweepDone
+	<-scriptsRefreshDone
 	<-queueSweepDone
 	<-simOwnerSyncDone
 	<-orchSyncDone

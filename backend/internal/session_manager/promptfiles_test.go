@@ -1,6 +1,7 @@
 package sessionmanager
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -170,4 +171,137 @@ func TestReapOrphanedPromptFiles(t *testing.T) {
 	if len(owners) != 1 || owners[0] != "mer-1" {
 		t.Fatalf("left = %v, want only the live session mer-1", owners)
 	}
+}
+
+// stdinAgent is a recordingAgent that reads its first prompt from stdin.
+type stdinAgent struct{ recordingAgent }
+
+func (*stdinAgent) GetPromptDeliveryStrategy(context.Context, ports.LaunchConfig) (ports.PromptDeliveryStrategy, error) {
+	return ports.PromptDeliveryStdin, nil
+}
+
+// assertPromptOnStdin checks the runtime was asked to feed the agent a 0600 file
+// under the session's prompt dir holding exactly prompt, and the agent was not
+// handed the prompt to put in its command.
+func assertPromptOnStdin(t *testing.T, dataDir string, id domain.SessionID, launch ports.LaunchConfig, cfg ports.RuntimeConfig, prompt string) {
+	t.Helper()
+	if launch.Prompt != "" {
+		t.Fatalf("the agent was handed the prompt for its command line: %q", launch.Prompt)
+	}
+	if want := filepath.Join(promptfile.Dir(dataDir, id), promptfile.InitialPrompt); cfg.StdinFile != want {
+		t.Fatalf("stdin file = %q, want %q", cfg.StdinFile, want)
+	}
+	info, err := os.Stat(cfg.StdinFile)
+	if err != nil {
+		t.Fatalf("stdin file: %v", err)
+	}
+	if got := info.Mode().Perm(); runtime.GOOS != "windows" && got != 0o600 {
+		t.Fatalf("stdin file mode = %o, want 600", got)
+	}
+	if data, _ := os.ReadFile(cfg.StdinFile); string(data) != prompt {
+		t.Fatalf("stdin file holds %q, want the prompt %q", data, prompt)
+	}
+}
+
+// Spawn and the fresh relaunch a restore falls back to hand a stdin-reading agent
+// its prompt through the runtime's stdin; a resume replays nothing.
+func TestInitialPromptIsHandedToTheAgentOnStdin(t *testing.T) {
+	agent := &stdinAgent{}
+	m, st, rt, dataDir := managerWithAgentAndDataDir(t, singleAgent{agent: agent})
+	rt.connectsStdin = true
+	prompt := "do it\nwith `backticks` $(and) 'quotes' ภาษาไทย"
+
+	rec, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: prompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPromptOnStdin(t, dataDir, rec.ID, agent.lastLaunch, rt.lastCfg, prompt)
+	if got := st.sessions[rec.ID].Metadata.Prompt; got != prompt {
+		t.Fatalf("stored prompt = %q, want %q", got, prompt)
+	}
+
+	// Resume: the native session already carries the prompt.
+	row := st.sessions[rec.ID]
+	row.IsTerminated = true
+	row.Metadata.AgentSessionID = "agent-x"
+	st.sessions[rec.ID] = row
+	if _, err := m.Restore(ctx, rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if rt.lastCfg.StdinFile != "" {
+		t.Fatalf("a resume was fed the prompt again: %q", rt.lastCfg.StdinFile)
+	}
+
+	// Fresh relaunch: no native session to resume, so the prompt is replayed.
+	if err := promptfile.Remove(dataDir, rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	row = st.sessions[rec.ID]
+	row.IsTerminated = true
+	row.Metadata.AgentSessionID = ""
+	st.sessions[rec.ID] = row
+	agent.lastLaunch = ports.LaunchConfig{}
+	if _, err := m.Restore(ctx, rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertPromptOnStdin(t, dataDir, rec.ID, agent.lastLaunch, rt.lastCfg, prompt)
+}
+
+// A runtime that cannot connect a stdin file, or an agent that does not read
+// stdin, gets the prompt in the launch command as before.
+func TestInitialPromptStaysInTheCommandWithoutBothEnds(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		agent         interface{ launched() ports.LaunchConfig }
+		connectsStdin bool
+	}{
+		{name: "runtime cannot connect stdin", agent: &stdinAgent{}, connectsStdin: false},
+		{name: "agent does not read stdin", agent: &recordingAgent{}, connectsStdin: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m, _, rt, _ := managerWithAgentAndDataDir(t, singleAgent{agent: c.agent.(ports.Agent)})
+			rt.connectsStdin = c.connectsStdin
+			if _, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: "do it"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := c.agent.launched().Prompt; got != "do it" {
+				t.Fatalf("launch prompt = %q, want it in the command", got)
+			}
+			if rt.lastCfg.StdinFile != "" {
+				t.Fatalf("stdin file = %q, want none", rt.lastCfg.StdinFile)
+			}
+		})
+	}
+}
+
+func (a *recordingAgent) launched() ports.LaunchConfig { return a.lastLaunch }
+
+// End to end through the real Claude Code adapter: the argv tmux will run
+// carries no part of the task prompt, and the prompt is on stdin.
+func TestSpawnedClaudeArgvCarriesNoInitialPrompt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stub claude binary is a POSIX shell script")
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil { //nolint:gosec // G306: a stub binary must be executable
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+
+	m, _, rt, dataDir := managerWithAgentAndDataDir(t, singleAgent{agent: claudecode.New()})
+	rt.connectsStdin = true
+	prompt := "run xcodebuild test -workspace NterWorkspace"
+
+	rec, err := m.Spawn(ctx, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, Prompt: prompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range rt.lastCfg.Argv {
+		if arg == "--" || strings.Contains(arg, "xcodebuild") {
+			t.Fatalf("argv carries the task prompt:\n%q", rt.lastCfg.Argv)
+		}
+	}
+	assertPromptOnStdin(t, dataDir, rec.ID, ports.LaunchConfig{}, rt.lastCfg, prompt)
 }

@@ -208,6 +208,22 @@ sql:
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
               type: "TestinyCaseStatus"
+          - column: "scripts_store_worktrees.session_id"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "SessionID"
+          - column: "scripts_store_worktrees.project_id"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "ProjectID"
+          - column: "scripts_store_worktrees.state"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "ScriptsStoreState"
+          - column: "scripts_store_worktrees.held_reason"
+            go_type:
+              import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"
+              type: "ScriptsStoreHold"
           - column: "session_children.session_id"
             go_type:
               import: "github.com/aoagents/agent-orchestrator/backend/internal/domain"

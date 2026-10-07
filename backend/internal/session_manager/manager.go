@@ -23,6 +23,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptfile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/promptoverrides"
 	"github.com/aoagents/agent-orchestrator/backend/internal/prompts"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/scriptstore"
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 )
 
@@ -172,6 +173,10 @@ const (
 	// about a session without a device changes.
 	EnvSimUDID        = "AO_SIM_UDID"
 	EnvSimDestination = "AO_SIM_DESTINATION"
+	// EnvScriptsStore is the checkout a worker on a mobileScripts project
+	// writes its scripts into: its workspace's own worktree of the store when
+	// it has one, otherwise the store's main checkout.
+	EnvScriptsStore = "AO_SCRIPTS_STORE"
 )
 
 // hookBinaryName is the executable name the workspace hook commands invoke:
@@ -314,6 +319,9 @@ type Manager struct {
 	// on them and a relaunch settles their orphans. Nil disables child
 	// worktrees altogether: no worker is told it may have them.
 	children ChildWork
+	// scripts owns each mobileScripts workspace's own worktree of the scripts
+	// store. Nil leaves every worker on the store's main checkout.
+	scripts ScriptsStore
 	// simDeviceAssigner returns the udid of the simulator a session owns,
 	// reserving one if it has none. Injected by the daemon after the simulator
 	// services exist, same as sessionPaneReaper; nil in tests/wiring that omit it,
@@ -614,7 +622,17 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 // failure it tears down whatever partial workspace/runtime it created; the seed
 // row is then either deleted (keepTodo=false, a fresh spawn) or left intact as a
 // TODO for the user to retry (keepTodo=true, a TODO Start).
-func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord, cfg ports.SpawnConfig, id domain.SessionID, prompt, systemPrompt string, keepTodo, childWorktrees bool) (domain.SessionRecord, error) {
+func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord, cfg ports.SpawnConfig, id domain.SessionID, prompt, systemPrompt string, keepTodo, childWorktrees bool) (_ domain.SessionRecord, err error) {
+	// A store worktree this spawn cut goes with the workspace it was cut for.
+	// It is fresh, so settling it removes it.
+	storeCut := false
+	defer func() {
+		if err != nil && storeCut {
+			if _, settleErr := m.scripts.Settle(ctx, id, scriptstore.SettleKeep); settleErr != nil {
+				m.logger.Warn("spawn: remove the scripts store worktree of a failed spawn", "sessionID", id, "error", settleErr)
+			}
+		}
+	}()
 	disposeSeed := func() {
 		if keepTodo {
 			m.logger.Warn("start todo: materialize failed, keeping task in TODO for retry", "sessionID", id)
@@ -681,6 +699,26 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 			disposeSeed()
 			return domain.SessionRecord{}, fmt.Errorf("spawn %s: provision: %w", id, err)
 		}
+		// The workspace's own worktree of the scripts store is part of the
+		// workspace: a store that cannot have one leaves the agent on the main
+		// checkout, but one that should and could not be cut fails the spawn
+		// like a failed provision.
+		if cfg.Kind == domain.KindWorker {
+			plan, err := m.ensureScriptsStore(ctx, project, id)
+			if err != nil {
+				m.destroySpawnWorkspace(ctx, ws, workspaceProject)
+				disposeSeed()
+				return domain.SessionRecord{}, fmt.Errorf("spawn %s: scripts store worktree: %w", id, err)
+			}
+			storeCut = plan.Isolated
+		}
+	}
+	scriptsOwnerID := id
+	if cfg.CrewOf != "" {
+		scriptsOwnerID = cfg.CrewOf
+	}
+	if cfg.Kind == domain.KindWorker {
+		m.linkVerifySkill(ctx, project, scriptsOwnerID, ws.Path)
 	}
 
 	agent, ok := m.agents.Agent(cfg.Harness)
@@ -701,11 +739,17 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		disposeSeed()
 		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, prompt)
+	if err != nil {
+		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
+		disposeSeed()
+		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
+	}
 	argv, err := agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		SessionID:        string(id),
 		WorkspacePath:    ws.Path,
 		Kind:             cfg.Kind,
-		Prompt:           prompt,
+		Prompt:           commandPrompt,
 		SystemPrompt:     systemPrompt,
 		SystemPromptFile: systemPromptFile,
 		IssueID:          string(cfg.IssueID),
@@ -732,8 +776,9 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:         runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees),
+		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, cfg.Kind, scriptsOwnerID)),
 		ExitStatusFile: m.exitStatusFile(),
+		StdinFile:      stdinFile,
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -1257,6 +1302,11 @@ type TeardownResult struct {
 	// UndeliveredChildren are the worker's child worktrees whose work is not on
 	// its branch yet, listed when Reason is ReasonChildrenUndelivered.
 	UndeliveredChildren []domain.SessionChild
+	// ScriptsStore is the workspace's scripts store worktree when ending the
+	// session would lose work it holds: files nobody committed, or commits the
+	// publish teardown ran could not deliver. Set alongside any refusal reason,
+	// and on its own with ReasonScriptsStoreDirty.
+	ScriptsStore *scriptstore.Settlement
 	// PreservedRef names the ref a discard captured the undelivered work at
 	// (refs/ao/preserved/<session-id>), so "thrown away" is still recoverable by
 	// someone who changes their mind. Empty when nothing was captured.
@@ -1303,6 +1353,12 @@ const (
 	// discard does not lose that work either: it is preserved on each child's
 	// kept branch.
 	ReasonChildrenUndelivered = "children_undelivered"
+	// ReasonScriptsStoreDirty means the workspace's scripts store worktree
+	// holds work the store does not have and a teardown could not publish:
+	// uncommitted files, or commits the store's main checkout refused. A kill
+	// that asks first is refused; a background teardown keeps the worktree held
+	// and the session non-terminal, exactly like ReasonWorkspaceDirty.
+	ReasonScriptsStoreDirty = "scripts_store_dirty"
 )
 
 // Teardown is the BACKGROUND teardown: auto-reclaim, cleanup, project teardown
@@ -1367,32 +1423,48 @@ func (m *Manager) teardown(ctx context.Context, id domain.SessionID, cause strin
 		if filesErr != nil {
 			return TeardownResult{}, fmt.Errorf("kill %s: read uncommitted work: %w", id, filesErr)
 		}
-		filesAtStake := len(files) > 0 && !workspaceOutlivesTeardownGiven(rec, preflight)
-		// The worker's child worktrees are its undelivered work too. A refusal
-		// names BOTH lists at once: it is the preview a discard is confirmed
-		// against, so naming only one would let the other be lost unseen.
-		if dirty == DirtyRefuse && m.children != nil {
-			children, childErr := m.children.Undelivered(ctx, id)
-			if childErr != nil {
-				return TeardownResult{}, fmt.Errorf("kill %s: read child worktrees: %w", id, childErr)
+		outlives := workspaceOutlivesTeardownGiven(rec, preflight)
+		filesAtStake := len(files) > 0 && !outlives
+		// The worker's child worktrees and its scripts store worktree are its
+		// undelivered work too. A refusal names EVERY list at once: it is the
+		// preview a discard is confirmed against, so naming only one would let
+		// another be lost unseen.
+		if dirty == DirtyRefuse {
+			var children []domain.SessionChild
+			if m.children != nil {
+				var childErr error
+				if children, childErr = m.children.Undelivered(ctx, id); childErr != nil {
+					return TeardownResult{}, fmt.Errorf("kill %s: read child worktrees: %w", id, childErr)
+				}
 			}
-			if len(children) > 0 {
-				res.UndeliveredChildren = children
-				if filesAtStake {
+			// The check publishes what is committed, so only what a publish
+			// cannot deliver is left to refuse over.
+			var store *scriptstore.Settlement
+			if m.ownsScriptsStore(rec) && !outlives {
+				settled, storeErr := m.scripts.Settle(ctx, id, scriptstore.SettleCheck)
+				if storeErr != nil {
+					return TeardownResult{}, fmt.Errorf("kill %s: scripts store worktree: %w", id, storeErr)
+				}
+				if settled.Blocked {
+					store = &settled
+				}
+			}
+			if filesAtStake || len(children) > 0 || store != nil {
+				res.UndeliveredChildren, res.ScriptsStore = children, store
+				switch {
+				case filesAtStake:
 					res.Undelivered = files
 					res.Reason = ReasonWorkspaceDirty
-				} else {
+				case len(children) > 0:
 					res.Reason = ReasonChildrenUndelivered
+				default:
+					res.Reason = ReasonScriptsStoreDirty
 				}
 				return res, nil
 			}
 		}
 		if filesAtStake {
 			res.Undelivered = files
-			if dirty == DirtyRefuse {
-				res.Reason = ReasonWorkspaceDirty
-				return res, nil
-			}
 			// DirtyDiscard. Capture BEFORE anything is destroyed, and abort the
 			// whole teardown if the capture fails: "discard" is a decision about
 			// where the work goes, not permission to lose it. The ref outlives the
@@ -1472,6 +1544,26 @@ func (m *Manager) teardown(ctx context.Context, id domain.SessionID, cause strin
 	// pass, and BEFORE any destroy, so a live tenant never loses its tree. A
 	// session that shares its path with nobody is unaffected.
 	held := workspaceHeldGiven(rec, tenants)
+	// The workspace's scripts store worktree goes with its repo worktree, and
+	// first: what it holds is published, and a worktree still holding work the
+	// store does not have keeps the whole workspace, session non-terminal, so
+	// the next attempt finds both exactly where they were.
+	if !held && m.ownsScriptsStore(rec) {
+		policy := scriptstore.SettleKeep
+		if dirty == DirtyDiscard {
+			policy = scriptstore.SettleDiscard
+		}
+		settled, err := m.scripts.Settle(ctx, id, policy)
+		if err != nil {
+			m.logger.Warn("teardown: settle the scripts store worktree; keeping the workspace", "sessionID", id, "error", err)
+			res.Reason = ReasonScriptsStoreDirty
+			return res, nil
+		}
+		if settled.Present && !settled.Removed {
+			res.Reason, res.ScriptsStore = ReasonScriptsStoreDirty, &settled
+			return res, nil
+		}
+	}
 	switch {
 	case held:
 		// Deliberately NOT an early return like the dirty case: this session IS
@@ -1620,6 +1712,22 @@ func (m *Manager) PurgeSession(ctx context.Context, id domain.SessionID, force b
 	if handle.ID != "" {
 		if err := m.runtime.Destroy(ctx, handle); err != nil {
 			return fmt.Errorf("purge %s: runtime: %w", id, err)
+		}
+	}
+	// The scripts store worktree is the workspace's too, and refuses the same
+	// way a dirty tree does: force is the only thing that deletes unpublished
+	// scripts.
+	if m.ownsScriptsStore(rec) {
+		policy := scriptstore.SettleKeep
+		if force {
+			policy = scriptstore.SettleDiscard
+		}
+		settled, err := m.scripts.Settle(ctx, id, policy)
+		if err != nil {
+			return fmt.Errorf("purge %s: scripts store worktree: %w", id, err)
+		}
+		if settled.Present && !settled.Removed {
+			return fmt.Errorf("purge %s: the scripts store worktree holds scripts the store does not have: %w", id, ports.ErrWorkspaceDirty)
 		}
 	}
 	if ws.Path != "" {
@@ -1867,6 +1975,14 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 			m.logger.Warn("restore: settle orphaned child worktrees", "sessionID", rec.ID, "error", err)
 		}
 	}
+	// Symlinks again, never post-create: a link the project gained after this
+	// worktree was spawned reaches it here, and an existing link is left as it
+	// is. Post-create commands are not idempotent (an install into a tree a
+	// crewmate may be working in), so restore never runs them.
+	if err := applySymlinks(project.Path, ws.Path, project.Config.Symlinks, m.logger); err != nil {
+		m.logger.Warn("restore: project symlinks", "sessionID", rec.ID, "error", err)
+	}
+	m.attachScriptsStore(ctx, project, rec, ws.Path)
 	childWorktrees := m.childWorktreesFor(ctx, rec.Harness, rec.Kind)
 	// The system prompt is derived, not persisted: recompute it so a restored
 	// session keeps its standing instructions across the relaunch.
@@ -1881,6 +1997,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		CrewRole:       promptCrewRoleOf(project, rec),
 		PRTarget:       rec.PRTarget,
 		ChildWorktrees: childWorktrees,
+		ScriptsOwner:   scriptsOwner(rec),
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: system prompt: %w", rec.ID, err)
@@ -1895,7 +2012,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
-	argv, err := restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, systemPromptFile, agentConfig, rec.Kind)
+	argv, stdinFile, err := m.restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, systemPromptFile, agentConfig, rec.Kind)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
@@ -1905,8 +2022,9 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:         runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees),
+		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, rec.Kind, scriptsOwner(rec))),
 		ExitStatusFile: m.exitStatusFile(),
+		StdinFile:      stdinFile,
 	})
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w: %w", rec.ID, ErrAgentLaunchFailed, err)
@@ -3298,6 +3416,7 @@ func (m *Manager) buildSpawnTexts(ctx context.Context, cfg ports.SpawnConfig, pr
 		CrewRole:       role,
 		PRTarget:       prTarget,
 		ChildWorktrees: childWorktrees,
+		ScriptsOwner:   cfg.CrewOf,
 	})
 	if err != nil {
 		return "", "", err
@@ -3334,6 +3453,10 @@ type systemPromptSpec struct {
 	// ChildWorktrees picks the worker floor that lets isolated subagents have
 	// their own AO worktrees (see childWorktreesFor).
 	ChildWorktrees bool
+	// ScriptsOwner is the session whose scripts store worktree this worker
+	// uses (scriptsOwner): its crew's dev, or itself. Empty while a session
+	// that will own its workspace is being spawned, before it has an id.
+	ScriptsOwner domain.SessionID
 }
 
 // buildSystemPrompt derives the standing instructions for a session of the
@@ -3426,8 +3549,8 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, spec systemPromptSpec) 
 		// which is about the lease and holds unchanged; qa plays its cases with
 		// scripts instead of recording flows into the repository.
 		var caseScripts *prompts.MobileScripts
-		if ms := cfg.MobileScripts; ms != nil {
-			scripts := prompts.MobileScripts{Product: ms.Product, IOS: ms.Platform == domain.MobilePlatformIOS, Store: ms.StoreOrDefault()}
+		if cfg.MobileScripts != nil {
+			scripts := m.promptScripts(ctx, project, spec.ScriptsOwner)
 			base += prompts.MobileScriptGuidance(scripts)
 			switch crewRole {
 			case domain.CrewRoleDev:
@@ -3788,8 +3911,11 @@ func simDeviceEnv(udid string) map[string]string {
 // command, which fails every callback and silently kills activity tracking).
 // When the pin cannot be applied the inherited PATH is kept and a warning is
 // logged so the degradation isn't silent.
-func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string, childWorktrees bool) map[string]string {
+func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string, childWorktrees bool, scriptsStore string) map[string]string {
 	env := spawnEnv(id, project, issue, kind, crew, m.crewIDs(ctx, id, crew, role), m.dataDir, m.runFile, projectEnv)
+	if scriptsStore != "" {
+		env[EnvScriptsStore] = scriptsStore
+	}
 	if childWorktrees {
 		env[EnvChildWorktrees] = "1"
 	} else {
@@ -3853,7 +3979,7 @@ func (m *Manager) ProvisionWorkspace(ctx context.Context, project domain.Project
 // post-create commands. Either failing aborts the spawn so a half-provisioned
 // workspace never launches an agent.
 func (m *Manager) provisionWorkspace(ctx context.Context, project domain.ProjectRecord, workspacePath string) error {
-	if err := applySymlinks(project.Path, workspacePath, project.Config.Symlinks); err != nil {
+	if err := applySymlinks(project.Path, workspacePath, project.Config.Symlinks, m.logger); err != nil {
 		return err
 	}
 	return runPostCreate(ctx, workspacePath, project.Config.PostCreate)
@@ -3861,10 +3987,13 @@ func (m *Manager) provisionWorkspace(ctx context.Context, project domain.Project
 
 // applySymlinks links each repo-relative path into the workspace. A source that
 // does not exist is skipped (symlinks are a convenience for optional files like
-// .env); a real link failure aborts. Paths must be repo-relative with no
+// .env); a real link failure aborts. A source that is itself a symlink works:
+// the workspace link points at the project's link, which resolves on. One whose
+// target is gone is skipped too, but logged, because it was set up on purpose
+// and the agent would otherwise go without it silently. Paths must be repo-relative with no
 // parent traversal (no leading "/", no ".." segment) — a bad path is refused
 // up front so a project config cannot escape the project or workspace tree.
-func applySymlinks(projectPath, workspacePath string, symlinks []string) error {
+func applySymlinks(projectPath, workspacePath string, symlinks []string, logger *slog.Logger) error {
 	for _, rel := range symlinks {
 		rel = strings.TrimSpace(rel)
 		if rel == "" {
@@ -3876,6 +4005,9 @@ func applySymlinks(projectPath, workspacePath string, symlinks []string) error {
 		}
 		source := filepath.Join(projectPath, clean)
 		if _, err := os.Stat(source); err != nil {
+			if _, lerr := os.Lstat(source); lerr == nil && logger != nil {
+				logger.Warn("symlink source is a link whose target is gone; not linked", "path", rel, "error", err)
+			}
 			continue
 		}
 		target := filepath.Join(workspacePath, clean)
@@ -3989,8 +4121,10 @@ func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id do
 // Returns ErrNotResumable only for a promptless, unresumable non-orchestrator:
 // a worker with no prompt and no native session id has nothing to restore from.
 // Orchestrators are promptless by design, so when they cannot resume they
-// relaunch fresh with the system prompt only rather than erroring.
-func restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt, systemPromptFile string, agentConfig ports.AgentConfig, kind domain.SessionKind) ([]string, error) {
+// relaunch fresh with the system prompt only rather than erroring. A fresh
+// relaunch replays the prompt the way a spawn delivers it, so stdinFile is the
+// file the runtime feeds the agent, or empty.
+func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt, systemPromptFile string, agentConfig ports.AgentConfig, kind domain.SessionKind) (argv []string, stdinFile string, err error) {
 	ref := ports.SessionRef{
 		ID:            string(id),
 		WorkspacePath: workspacePath,
@@ -3998,32 +4132,36 @@ func restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, wo
 	}
 	cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, Config: agentConfig, Permissions: agentConfig.Permissions})
 	if err != nil {
-		return nil, fmt.Errorf("restore command: %w", err)
+		return nil, "", fmt.Errorf("restore command: %w", err)
 	}
 	if ok {
-		return cmd, nil
+		return cmd, "", nil
 	}
 	// Adapter cannot resume. A saved prompt is replayed fresh. An orchestrator is
 	// promptless by design and relaunches with the system prompt only. A promptless
 	// WORKER has no task and no session id to restore from: do not blank-relaunch it.
 	if meta.Prompt == "" && kind != domain.KindOrchestrator {
-		return nil, ErrNotResumable
+		return nil, "", ErrNotResumable
+	}
+	commandPrompt, stdinFile, err := m.deliverInitialPrompt(ctx, agent, id, meta.Prompt)
+	if err != nil {
+		return nil, "", err
 	}
 	// Fall through to GetLaunchCommand (replays meta.Prompt; empty for an orchestrator).
-	argv, err := agent.GetLaunchCommand(ctx, ports.LaunchConfig{
+	argv, err = agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		SessionID:        string(id),
 		WorkspacePath:    workspacePath,
 		Kind:             kind,
-		Prompt:           meta.Prompt,
+		Prompt:           commandPrompt,
 		SystemPrompt:     systemPrompt,
 		SystemPromptFile: systemPromptFile,
 		Config:           agentConfig,
 		Permissions:      agentConfig.Permissions,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("launch command: %w", err)
+		return nil, "", fmt.Errorf("launch command: %w", err)
 	}
-	return argv, nil
+	return argv, stdinFile, nil
 }
 
 // validateAgentBinary checks that argv[0] resolves via the manager's

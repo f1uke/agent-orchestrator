@@ -2,7 +2,12 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileWarning, Loader2 } from "lucide-react";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
-import { killSession, type UncommittedFile, type UndeliveredChild } from "../lib/kill-session";
+import {
+	killSession,
+	type ScriptsStoreRefusal,
+	type UncommittedFile,
+	type UndeliveredChild,
+} from "../lib/kill-session";
 import { useOverlayDismissFocus } from "../lib/overlay-focus";
 import { captureRendererEvent } from "../lib/telemetry";
 import { Button } from "./ui/button";
@@ -27,6 +32,7 @@ export function UndeliveredWorkDialog({
 	sessionTitle,
 	files,
 	subagents = [],
+	scriptsStore,
 	onOpenSession,
 	onDiscarded,
 }: {
@@ -37,6 +43,8 @@ export function UndeliveredWorkDialog({
 	files: UncommittedFile[];
 	/** The worker's subagents whose work has not reached its branch yet. */
 	subagents?: UndeliveredChild[];
+	/** The scripts store worktree, when it holds work the store does not have. */
+	scriptsStore?: ScriptsStoreRefusal;
 	/** Undefined on surfaces already inside the session (its own toolbar). */
 	onOpenSession?: () => void;
 	onDiscarded?: () => void;
@@ -49,6 +57,7 @@ export function UndeliveredWorkDialog({
 			void captureRendererEvent("ao.renderer.session_discard_requested", {
 				files: files.length,
 				subagents: subagents.length,
+				scripts_store: scriptsStore ? 1 : 0,
 			});
 			return killSession(sessionId, { discardUncommitted: true });
 		},
@@ -63,7 +72,11 @@ export function UndeliveredWorkDialog({
 	// A refusal for the worker's subagents alone names no files: the worktree
 	// itself is clean, and what is at stake is their work, which a discard keeps
 	// on each subagent's own branch.
-	const subagentsOnly = files.length === 0 && subagents.length > 0;
+	const subagentsOnly = files.length === 0 && subagents.length > 0 && !scriptsStore;
+	// Likewise a refusal for the scripts store worktree alone: what a discard
+	// deletes is that worktree and its branch, not anything in this one.
+	const scriptsOnly = files.length === 0 && subagents.length === 0 && Boolean(scriptsStore);
+	const showFiles = files.length > 0 || (subagents.length === 0 && !scriptsStore);
 
 	return (
 		<Dialog.Root open={open} onOpenChange={(next) => !discard.isPending && onOpenChange(next)}>
@@ -83,7 +96,12 @@ export function UndeliveredWorkDialog({
 						This session still holds undelivered work
 					</Dialog.Title>
 					<Dialog.Description className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
-						{subagentsOnly ? (
+						{scriptsOnly ? (
+							<>
+								{sessionTitle ? `“${sessionTitle}” ` : ""}has scripts in its scripts store worktree that the store does
+								not have, so it was not moved to Done and nothing was torn down.
+							</>
+						) : files.length === 0 && subagents.length > 0 ? (
 							<>
 								{sessionTitle ? `“${sessionTitle}” ` : ""}has {subagents.length} subagent
 								{subagents.length === 1 ? "" : "s"} whose work is not on its branch yet, so it was not moved to Done and
@@ -114,7 +132,9 @@ export function UndeliveredWorkDialog({
 						</ul>
 					)}
 
-					{!subagentsOnly && (
+					{scriptsStore && <ScriptsStoreSection store={scriptsStore} />}
+
+					{showFiles && (
 						<ul className="mt-3 max-h-52 overflow-y-auto rounded-md border border-border bg-background p-2">
 							{files.length === 0 ? (
 								<li className="px-1 py-0.5 text-[12px] text-muted-foreground">
@@ -141,11 +161,19 @@ export function UndeliveredWorkDialog({
 						<span className="text-foreground">Finish it:</span> open the session — it resumes the agent in this
 						worktree, with the work still there.
 					</p>
-					{subagentsOnly ? (
+					{scriptsOnly ? (
+						<p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+							<span className="text-foreground">Or discard it:</span> the scripts store worktree and its branch{" "}
+							<span className="font-mono text-[11px] text-passive">{scriptsStore?.branch}</span> are deleted, with every
+							script listed above. This cannot be undone.
+						</p>
+					) : files.length === 0 && subagents.length > 0 ? (
 						<p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
 							<span className="text-foreground">Or end it anyway:</span> the subagents stop, and AO commits what each
-							one left onto its own branch, keeps that branch, and removes its folder. Nothing is merged and nothing is
-							deleted.
+							one left onto its own branch, keeps that branch, and removes its folder. Nothing is merged
+							{scriptsStore
+								? ". The scripts store worktree and its branch are deleted, with the scripts listed above."
+								: " and nothing is deleted."}
 						</p>
 					) : (
 						<p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
@@ -154,6 +182,7 @@ export function UndeliveredWorkDialog({
 							<span className="font-mono text-[11px] text-passive">refs/ao/preserved/{sessionId}</span> first, so this
 							is recoverable.
 							{subagents.length > 0 && " The subagents' work is kept on their own branches."}
+							{scriptsStore && " The scripts store worktree and its branch are deleted, with the scripts listed above."}
 						</p>
 					)}
 
@@ -195,5 +224,48 @@ export function UndeliveredWorkDialog({
 				</Dialog.Content>
 			</Dialog.Portal>
 		</Dialog.Root>
+	);
+}
+
+/**
+ * The scripts store worktree's part of the refusal: what is in it that the
+ * store does not have. Teardown already published every commit it could, so
+ * what is listed is exactly what a discard would delete.
+ */
+function ScriptsStoreSection({ store }: { store: ScriptsStoreRefusal }) {
+	const refused = store.publishRefused;
+	return (
+		<div className="mt-3 rounded-md border border-border bg-background p-2" data-undelivered-scripts-store="">
+			<div className="px-1 pb-1 text-[11.5px] font-medium text-foreground">
+				Scripts store
+				{store.path && (
+					<span className="block break-all font-mono text-[10.5px] font-normal text-passive">{store.path}</span>
+				)}
+			</div>
+			<ul className="max-h-40 overflow-y-auto">
+				{store.uncommitted.map((file) => (
+					<li key={`u:${file}`} className="flex items-baseline gap-2 px-1 py-0.5 font-mono text-[11.5px]">
+						<span className="w-[4.75rem] shrink-0 text-passive">uncommitted</span>
+						<span className="min-w-0 flex-1 break-all text-foreground">{file}</span>
+					</li>
+				))}
+				{refused?.files.map((file) => (
+					<li key={`r:${file}`} className="flex items-baseline gap-2 px-1 py-0.5 font-mono text-[11.5px]">
+						<span className="w-[4.75rem] shrink-0 text-passive">
+							{refused.hold === "publish_conflict" ? "conflict" : "in the way"}
+						</span>
+						<span className="min-w-0 flex-1 break-all text-foreground">{file}</span>
+					</li>
+				))}
+				{store.uncommitted.length === 0 && !refused?.files.length && (
+					<li className="px-1 py-0.5 text-[12px] text-muted-foreground">The daemon named no files.</li>
+				)}
+			</ul>
+			{refused && (
+				<p className="px-1 pt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+					Publishing its commits was refused: {refused.detail}
+				</p>
+			)}
+		</div>
 	);
 }

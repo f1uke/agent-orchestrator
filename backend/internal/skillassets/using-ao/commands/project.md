@@ -143,13 +143,14 @@ ao project set-config <id> [flags]
 | `--config-json string` | Full config as a JSON object (overrides field flags) | - |
 | `--branch-prefix string` | Branch prefix for auto-named branches (required for `custom`; default `feature/` for `gitflow`) | - |
 | `--default-branch string` | Base branch new session worktrees are created from | - |
-| `--env stringArray` | Env var `KEY=VALUE` forwarded into sessions (repeatable) | - |
+| `--env stringArray` | Env var `KEY=VALUE` forwarded into sessions (repeatable). `""` clears the env | - |
 | `--git-workflow string` | Branch convention: `none`, `gitflow` or `custom` | `none` |
 | `--ios-simulator` | This project targets iOS, so sessions get the Device tab and the `ao sim` guidance | off |
 | `--json` | Output the updated project as JSON | - |
 | `--mobile-platform string` | With `--mobile-scripts`: the app this repo builds, `ios` (scripts run through `ao sim flow run`) or `android` (through `maestro --device`) | required with `--mobile-scripts` |
 | `--mobile-scripts string` | Drive this project's simulators/emulators ONLY through the scripts of this product (its folder in the scripts store, e.g. `nter`); `""` turns it off | off |
 | `--mobile-scripts-store string` | With `--mobile-scripts`: the scripts store checkout | `~/Documents/Projects/mobile-ui-scripts` |
+| `--mobile-scripts-verify-skill string` | With `--mobile-scripts`: the store-relative folder of the project's verify skill (e.g. `projects/nter/verify`). AO links it into each worktree as `.claude/skills/verify`, from the task's own worktree of the store, and the device guidance defers to it | none |
 | `--model string` | Agent model override (e.g. `claude-opus-4-5`) | - |
 | `--sim-trust-ca string` | Root-CA file (absolute or `~/`) this project's simulators trust on boot and claim, instead of the global list (repeatable). `none` trusts nothing here; `""` goes back to the global list | the global list (Proxyman's CA when present) |
 | `--no-auto-crew` | Never form a crew automatically; a person can still add a qa by hand | off |
@@ -157,9 +158,9 @@ ao project set-config <id> [flags]
 | `--pause-before-implementing` | A standard/deep worker stops once it understands the task and hands back before implementing | off |
 | `--learn-from-sessions` | AO keeps redacted excerpts of what the human types to this project's sessions, so it can later propose memories from them; off means nothing here is read (see `ao learn`) | off |
 | `--permission string` | Permission mode: `default`, `accept-edits`, `auto`, `bypass-permissions` | - |
-| `--post-create stringArray` | Command to run after workspace creation (repeatable) | - |
+| `--post-create stringArray` | Command to run after workspace creation (repeatable). `""` clears the commands | - |
 | `--session-prefix string` | Displayed session-id prefix | - |
-| `--symlink stringArray` | Repo-relative path to symlink into workspaces (repeatable) | - |
+| `--symlink stringArray` | Repo-relative path to symlink into workspaces (repeatable). `""` clears the symlinks | - |
 | `--testiny-project string` | The Testiny project that holds this project's manual test cases: its key (`project_key` in `testiny project ls`, e.g. `MOB`), name or id; `""` turns it off | off |
 | `--tracker-assignee string` | Issue assignee required for intake eligibility | - |
 | `--tracker-intake` | Enable issue-tracker intake for matching issues | off |
@@ -183,8 +184,8 @@ ao project set-config agent-orchestrator --env "NODE_ENV=development" --post-cre
 ```bash
 # A mobile project whose devices are driven only by scripts: the iOS and the
 # Android repo of one product share its scripts (projects/nter in the store).
-# The three --mobile-* flags write one setting together, so pass them together.
-ao project set-config nter-ios-app --mobile-scripts nter --mobile-platform ios
+# The --mobile-* flags write one setting together, so pass them together.
+ao project set-config nter-ios-app --mobile-scripts nter --mobile-platform ios --mobile-scripts-verify-skill projects/nter/verify
 ao project set-config nter-android-app --mobile-scripts nter --mobile-platform android
 ao project set-config nter-ios-app --mobile-scripts ""     # turn it off
 ```

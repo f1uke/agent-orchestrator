@@ -12,7 +12,8 @@ import (
 // builds, so the test asserts the reviewer's tool policy without needing the
 // real claude binary on PATH.
 type captureAgent struct {
-	got ports.LaunchConfig
+	got      ports.LaunchConfig
+	strategy ports.PromptDeliveryStrategy
 }
 
 func (a *captureAgent) GetConfigSpec(context.Context) (ports.ConfigSpec, error) {
@@ -23,7 +24,10 @@ func (a *captureAgent) GetLaunchCommand(_ context.Context, cfg ports.LaunchConfi
 	return []string{"claude"}, nil
 }
 func (a *captureAgent) GetPromptDeliveryStrategy(context.Context, ports.LaunchConfig) (ports.PromptDeliveryStrategy, error) {
-	return ports.PromptDeliveryInCommand, nil
+	if a.strategy == "" {
+		return ports.PromptDeliveryInCommand, nil
+	}
+	return a.strategy, nil
 }
 func (a *captureAgent) GetAgentHooks(context.Context, ports.WorkspaceHookConfig) error { return nil }
 func (a *captureAgent) GetRestoreCommand(context.Context, ports.RestoreConfig) ([]string, bool, error) {
@@ -139,4 +143,29 @@ func contains(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// Given a prompt file, a reviewer whose agent reads stdin launches with the file
+// on stdin and the prompt off argv; an agent that does not read stdin keeps the
+// prompt in its command.
+func TestReviewCommandFeedsPromptFileOnStdin(t *testing.T) {
+	inv := ports.ReviewInvocation{ReviewerID: "review-w1", Prompt: "review it", PromptFile: "/data/prompts/w1/reviewer-prompt.md"}
+
+	agent := &captureAgent{strategy: ports.PromptDeliveryStdin}
+	spec, err := (&Reviewer{agent: agent}).ReviewCommand(context.Background(), inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.got.Prompt != "" || spec.StdinFile != inv.PromptFile {
+		t.Fatalf("launch prompt = %q, stdin = %q; want none and %q", agent.got.Prompt, spec.StdinFile, inv.PromptFile)
+	}
+
+	agent = &captureAgent{}
+	spec, err = (&Reviewer{agent: agent}).ReviewCommand(context.Background(), inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.got.Prompt != "review it" || spec.StdinFile != "" {
+		t.Fatalf("launch prompt = %q, stdin = %q; want the prompt in the command", agent.got.Prompt, spec.StdinFile)
+	}
 }
