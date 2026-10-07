@@ -143,7 +143,7 @@ ao project set-config <id> [flags]
 | `--config-json string` | Full config as a JSON object (overrides field flags) | - |
 | `--branch-prefix string` | Branch prefix for auto-named branches (required for `custom`; default `feature/` for `gitflow`) | - |
 | `--default-branch string` | Base branch new session worktrees are created from | - |
-| `--env stringArray` | Env var `KEY=VALUE` forwarded into sessions (repeatable) | - |
+| `--env stringArray` | Env var `KEY=VALUE` forwarded into sessions (repeatable). `""` clears the env | - |
 | `--git-workflow string` | Branch convention: `none`, `gitflow` or `custom` | `none` |
 | `--ios-simulator` | This project targets iOS, so sessions get the Device tab and the `ao sim` guidance | off |
 | `--json` | Output the updated project as JSON | - |
@@ -158,9 +158,9 @@ ao project set-config <id> [flags]
 | `--pause-before-implementing` | A standard/deep worker stops once it understands the task and hands back before implementing | off |
 | `--learn-from-sessions` | AO keeps redacted excerpts of what the human types to this project's sessions, so it can later propose memories from them; off means nothing here is read (see `ao learn`) | off |
 | `--permission string` | Permission mode: `default`, `accept-edits`, `auto`, `bypass-permissions` | - |
-| `--post-create stringArray` | Command to run after workspace creation (repeatable) | - |
+| `--post-create stringArray` | Command to run after workspace creation (repeatable). `""` clears the commands | - |
 | `--session-prefix string` | Displayed session-id prefix | - |
-| `--symlink stringArray` | Repo-relative path to symlink into workspaces (repeatable) | - |
+| `--symlink stringArray` | Repo-relative path to symlink into workspaces (repeatable). `""` clears the symlinks | - |
 | `--testiny-project string` | The Testiny project that holds this project's manual test cases: its key (`project_key` in `testiny project ls`, e.g. `MOB`), name or id; `""` turns it off | off |
 | `--tracker-assignee string` | Issue assignee required for intake eligibility | - |
 | `--tracker-intake` | Enable issue-tracker intake for matching issues | off |
