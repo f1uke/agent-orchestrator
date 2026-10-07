@@ -277,7 +277,7 @@ func (m *Manager) tellDevAMemberJoined(ctx context.Context, devID domain.Session
 		m.logger.Warn("crew: could not read the project; telling dev without its Testiny line",
 			"crew", devID, "member", member.ID, "error", err)
 	}
-	if _, err := m.Send(ctx, devID, crewJoinedNotice(member.CrewRole, project.Config.TestinyProject != "")); err != nil {
+	if _, err := m.Send(ctx, devID, crewJoinedNotice(member.CrewRole, project.Config.UsesTestiny)); err != nil {
 		m.logger.Warn("crew: could not tell dev that a member joined its task",
 			"crew", devID, "member", member.ID, "error", err)
 	}

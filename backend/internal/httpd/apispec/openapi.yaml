@@ -6090,8 +6090,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/APIError'
           description: Bad Gateway
-      summary: Link a Testiny run to a task, once Testiny confirms it is in the project's
-        Testiny project
+      summary: Link a Testiny run to a task, once Testiny confirms it exists, with
+        the run's own Testiny project
       tags:
       - testiny
   /api/v1/sessions/{sessionId}/testiny/runs/{runId}:
@@ -11154,8 +11154,14 @@ components:
           description: Session id of the agent linking the run ($AO_SESSION_ID). Empty
             when a person links it in the app.
           type: string
+        project:
+          description: 'The Testiny project the run should be in: its key, name or
+            id. Optional; when given, a run in another project is refused, as is a
+            URL whose key names another project.'
+          type: string
         ref:
-          description: 'The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632).'
+          description: 'The run: its id (632), TR-632, or its URL (https://app.testiny.io/MOB/testruns/tr/632).
+            Run ids are global in Testiny, so the run names its own project.'
           type: string
       required:
       - ref
@@ -11572,10 +11578,10 @@ components:
           type: array
         systemPromptAdditions:
           $ref: '#/components/schemas/DomainSystemPromptAdditions'
-        testinyProject:
-          type: string
         trackerIntake:
           $ref: '#/components/schemas/TrackerIntakeConfig'
+        usesTestiny:
+          type: boolean
         worker:
           $ref: '#/components/schemas/RoleOverride'
       type: object
@@ -11626,8 +11632,8 @@ components:
           type: string
         sessionPrefix:
           type: string
-        testinyProject:
-          type: string
+        usesTestiny:
+          type: boolean
       required:
       - id
       - name
@@ -11637,6 +11643,7 @@ components:
       - hasWebUI
       - hasIOSSimulator
       - disableAutoCrew
+      - usesTestiny
       type: object
     QAEvidenceSettingsResponse:
       properties:
@@ -14106,9 +14113,6 @@ components:
       type: object
     TestinyRunsResponse:
       properties:
-        project:
-          description: The project's Testiny project, as set (a key, name or id).
-          type: string
         runs:
           description: The task's runs in the order they were linked. A run Testiny
             could not read now carries fetchError.
@@ -14116,7 +14120,6 @@ components:
             $ref: '#/components/schemas/TestinyRunView'
           type: array
       required:
-      - project
       - runs
       type: object
     TrackerIntakeConfig:

@@ -1185,7 +1185,7 @@ func testinyOperations() []operation {
 		},
 		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/testiny/runs", id: "linkTestinyRun", tag: "testiny",
-			summary:    "Link a Testiny run to a task, once Testiny confirms it is in the project's Testiny project",
+			summary:    "Link a Testiny run to a task, once Testiny confirms it exists, with the run's own Testiny project",
 			pathParams: []any{controllers.SessionIDParam{}},
 			reqBody:    controllers.LinkTestinyRunInput{},
 			resps: []respUnit{

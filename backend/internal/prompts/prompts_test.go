@@ -727,22 +727,29 @@ func TestCrewProtocol_SoloRendersNothingAndAboutNamesAnArtifact(t *testing.T) {
 }
 
 // A project without Testiny renders no Testiny block, whoever the worker is; one
-// with it names its Testiny project and where drafts go in the AO project's own
-// store, for every worker kind.
-func TestTestinyProtocol_RendersOnlyForATestinyProject(t *testing.T) {
+// with it says where drafts go in the AO project's own store, for every worker
+// kind. It names no Testiny project of its own: the agent picks one per task
+// from the Jira key, and asks the human when the key does not settle it.
+func TestTestinyProtocol_RendersOnlyWhereTheProjectUsesTestiny(t *testing.T) {
 	for _, role := range []string{"", "dev", "qa"} {
-		if got := TestinyProtocol("", "mer", role, &MobileScripts{Product: "nter", IOS: true, Store: "/store"}); got != "" {
+		if got := TestinyProtocol(false, "mer", role, &MobileScripts{Product: "nter", IOS: true, Store: "/store"}); got != "" {
 			t.Fatalf("role %q: a project without Testiny rendered a Testiny block:\n%s", role, got)
 		}
-		got := TestinyProtocol("MOB", "mer", role, nil)
+		got := TestinyProtocol(true, "mer", role, nil)
 		for _, want := range []string{
 			"\n\n## Testiny test cases (AO)\n",
-			"Testiny project `MOB`",
 			"`~/.ao/knowledge/mer/plans/<branch>--testiny.md`",
+			"STAR-2413 is in STAR",
+			"MOBILITY project, whose key is MOB",
+			"ask the human which project",
+			"`ao testiny link \"$AO_CREW_ID\" <run-id> --project <KEY>`",
 		} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("role %q: the Testiny block is missing %q:\n%s", role, want, got)
 			}
+		}
+		if strings.Contains(got, "Testiny project `") {
+			t.Fatalf("role %q: the Testiny block names a fixed Testiny project:\n%s", role, got)
 		}
 	}
 }

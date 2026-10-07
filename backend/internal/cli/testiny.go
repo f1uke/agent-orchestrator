@@ -21,14 +21,14 @@ import (
 
 // linkTestinyRunRequest mirrors controllers.LinkTestinyRunInput.
 type linkTestinyRunRequest struct {
-	Ref  string `json:"ref"`
-	From string `json:"from,omitempty"`
+	Ref     string `json:"ref"`
+	Project string `json:"project,omitempty"`
+	From    string `json:"from,omitempty"`
 }
 
 // testinyRunsResponse mirrors controllers.TestinyRunsResponse.
 type testinyRunsResponse struct {
-	Project string                  `json:"project"`
-	Runs    []domain.TestinyRunView `json:"runs"`
+	Runs []domain.TestinyRunView `json:"runs"`
 }
 
 // recordTestinyResultsRequest mirrors controllers.RecordTestinyResultsInput.
@@ -82,16 +82,23 @@ func newTestinyCommand(ctx *commandContext) *cobra.Command {
 }
 
 func newTestinyLinkCommand(ctx *commandContext) *cobra.Command {
-	return &cobra.Command{
-		Use:   "link <task> <run-id|url>",
+	var project string
+	cmd := &cobra.Command{
+		Use:   "link <task> <run-id|url> [--project <key>]",
 		Short: "Link a Testiny run to a task",
-		Long: "Links a run to the task, after Testiny confirms the run exists in the project's " +
-			"Testiny project. The run is a run id (632), TR-632, or the run's URL. Run from a " +
-			"crew's qa, it lands on the task all the same. Linking a run twice is a no-op.",
+		Long: "Links a run to the task, after Testiny confirms the run exists. The run is a run id " +
+			"(632), TR-632, or the run's URL. Run ids are global in Testiny, so the run names its own " +
+			"Testiny project, and one task may hold runs from several. Give the run's URL, or its id " +
+			"with --project: a run that is not in the project the URL or --project names is refused. " +
+			"Run from a crew's qa, it lands on the task all the same. Linking a run twice is a no-op.",
 		Args: exactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			task := strings.TrimSpace(args[0])
-			req := linkTestinyRunRequest{Ref: strings.TrimSpace(args[1]), From: strings.TrimSpace(os.Getenv("AO_SESSION_ID"))}
+			req := linkTestinyRunRequest{
+				Ref:     strings.TrimSpace(args[1]),
+				Project: strings.TrimSpace(project),
+				From:    strings.TrimSpace(os.Getenv("AO_SESSION_ID")),
+			}
 			var view domain.TestinyRunView
 			if err := ctx.postJSON(cmd.Context(), testinyRunsPath(task), req, &view); err != nil {
 				return testinyError(err)
@@ -100,6 +107,8 @@ func newTestinyLinkCommand(ctx *commandContext) *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().StringVar(&project, "project", "", "The Testiny project the run is in: its key (project_key in testiny project ls, e.g. MOB), name or id")
+	return cmd
 }
 
 func newTestinyUnlinkCommand(ctx *commandContext) *cobra.Command {
@@ -443,7 +452,7 @@ func writeTestinyRuns(w io.Writer, task string, runs []domain.TestinyRunView) er
 			b.WriteString("\n")
 		}
 		if v.FetchedAt == nil {
-			fmt.Fprintf(&b, "%s (no data)\n", v.Link.RunID)
+			fmt.Fprintf(&b, "%s (no data)\n", testinyRunName(v.Link))
 		} else {
 			fmt.Fprintf(&b, "%s\n", testinyHeadline(v))
 			if v.URL != "" {
@@ -480,9 +489,19 @@ func writeTestinyRuns(w io.Writer, task string, runs []domain.TestinyRunView) er
 	return err
 }
 
-// testinyHeadline is `TR-632 "<title>" (6 cases: 5 passed, 1 failed)`.
+// testinyHeadline is `MOB TR-632 "<title>" (6 cases: 5 passed, 1 failed)`.
 func testinyHeadline(v domain.TestinyRunView) string {
-	return fmt.Sprintf("%s %q (%s)", v.Link.RunID, v.Title, testinyCounts(v.Counts))
+	return fmt.Sprintf("%s %q (%s)", testinyRunName(v.Link), v.Title, testinyCounts(v.Counts))
+}
+
+// testinyRunName is the run's id after its Testiny project's key (or name):
+// `MOB TR-632`. One task may hold runs from several projects. A link whose
+// project AO has not read yet is just `TR-632`.
+func testinyRunName(l domain.TestinyRunLink) string {
+	if p := l.Project.Label(); p != "" {
+		return p + " " + l.RunID.String()
+	}
+	return l.RunID.String()
 }
 
 // testinyStatusOrder puts the statuses a person acts on first; a status AO

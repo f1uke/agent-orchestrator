@@ -1413,102 +1413,41 @@ func TestManager_SetConfig_NoMergeFieldsStillReplaces(t *testing.T) {
 	}
 }
 
-// The Testiny project is typed by a person, so the save trims it before judging
-// it, stores the trimmed key, and treats a blank as "off". Both write modes go
-// through it: the desktop replaces the whole config, the CLI merges one field.
-func TestManager_SetConfig_TestinyProject(t *testing.T) {
-	ctx := context.Background()
-	for _, tc := range []struct {
-		name  string
-		in    project.SetConfigInput
-		want  string
-		wantE bool
-	}{
-		{"replace stores the key", project.SetConfigInput{Config: domain.ProjectConfig{TestinyProject: "MOB"}}, "MOB", false},
-		{"replace trims", project.SetConfigInput{Config: domain.ProjectConfig{TestinyProject: "  MOB \t"}}, "MOB", false},
-		{"replace blank turns it off", project.SetConfigInput{Config: domain.ProjectConfig{TestinyProject: "   "}}, "", false},
-		{"replace accepts a name", project.SetConfigInput{Config: domain.ProjectConfig{TestinyProject: "Mobile App"}}, "Mobile App", false},
-		{"merge trims", project.SetConfigInput{Config: domain.ProjectConfig{TestinyProject: " MOB "}, MergeFields: []string{"testinyProject"}}, "MOB", false},
-		{"merge empty clears", project.SetConfigInput{Config: domain.ProjectConfig{}, MergeFields: []string{"testinyProject"}}, "", false},
-		{"replace rejects a path", project.SetConfigInput{Config: domain.ProjectConfig{TestinyProject: "MOB/cases"}}, "", true},
-		{"merge rejects a line break", project.SetConfigInput{Config: domain.ProjectConfig{TestinyProject: "MOB\nx"}, MergeFields: []string{"testinyProject"}}, "", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := newManager(t)
-			if _, err := m.Add(ctx, project.AddInput{Path: gitRepo(t), ProjectID: ptr("ao"), Config: &domain.ProjectConfig{TestinyProject: "OLD"}}); err != nil {
-				t.Fatalf("Add: %v", err)
-			}
-			_, err := m.SetConfig(ctx, "ao", tc.in)
-			if tc.wantE {
-				wantCode(t, err, "INVALID_PROJECT_CONFIG")
-				var e *apierr.Error
-				if errors.As(err, &e) && !strings.Contains(e.Message, "must be a Testiny project key, name or id") {
-					t.Fatalf("message = %q", e.Message)
-				}
-			} else if err != nil {
-				t.Fatalf("SetConfig: %v", err)
-			}
-			got, err := m.Get(ctx, "ao")
-			if err != nil {
-				t.Fatalf("Get: %v", err)
-			}
-			stored := ""
-			if got.Project != nil && got.Project.Config != nil {
-				stored = got.Project.Config.TestinyProject
-			}
-			want := tc.want
-			if tc.wantE {
-				want = "OLD"
-			}
-			if stored != want {
-				t.Fatalf("stored testinyProject = %q, want %q", stored, want)
-			}
-		})
-	}
-}
-
-// Registering a project with a config judges the Testiny project the same way.
-func TestManager_Add_TrimsTestinyProject(t *testing.T) {
+// The desktop decides whether a task gets a Testiny tab from the project list,
+// so the switch rides the summary, and the CLI's merge turns it on and off
+// without touching the rest of the config.
+func TestManager_UsesTestinyRidesTheSummary(t *testing.T) {
 	ctx := context.Background()
 	m := newManager(t)
-	if _, err := m.Add(ctx, project.AddInput{Path: gitRepo(t), ProjectID: ptr("ao"), Config: &domain.ProjectConfig{TestinyProject: " MOB "}}); err != nil {
+	if _, err := m.Add(ctx, project.AddInput{Path: gitRepo(t), ProjectID: ptr("ao"), Config: &domain.ProjectConfig{DefaultBranch: "develop"}}); err != nil {
 		t.Fatalf("Add: %v", err)
+	}
+	uses := func() bool {
+		t.Helper()
+		list, err := m.List(ctx)
+		if err != nil || len(list) != 1 {
+			t.Fatalf("List = %#v, %v", list, err)
+		}
+		return list[0].UsesTestiny
+	}
+	if uses() {
+		t.Fatal("a project that never turned Testiny on reports it on")
+	}
+	for _, want := range []bool{true, false} {
+		in := project.SetConfigInput{Config: domain.ProjectConfig{UsesTestiny: want}, MergeFields: []string{"usesTestiny"}}
+		if _, err := m.SetConfig(ctx, "ao", in); err != nil {
+			t.Fatalf("SetConfig usesTestiny=%v: %v", want, err)
+		}
+		if got := uses(); got != want {
+			t.Fatalf("summary usesTestiny = %v, want %v", got, want)
+		}
 	}
 	got, err := m.Get(ctx, "ao")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Project == nil || got.Project.Config == nil || got.Project.Config.TestinyProject != "MOB" {
-		t.Fatalf("stored config = %#v, want testinyProject MOB", got.Project)
-	}
-}
-
-// The desktop decides whether a task gets a Testiny tab from the project list,
-// so the key rides the summary. A project without one reports empty.
-func TestManager_ListSummaryCarriesTestinyProject(t *testing.T) {
-	ctx := context.Background()
-	for _, tc := range []struct {
-		name string
-		cfg  *domain.ProjectConfig
-		want string
-	}{
-		{"no config at all", nil, ""},
-		{"config that never mentions it", &domain.ProjectConfig{DefaultBranch: "develop"}, ""},
-		{"set", &domain.ProjectConfig{TestinyProject: "MOB"}, "MOB"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := newManager(t)
-			if _, err := m.Add(ctx, project.AddInput{Path: gitRepo(t), ProjectID: ptr("ao"), Config: tc.cfg}); err != nil {
-				t.Fatalf("Add: %v", err)
-			}
-			list, err := m.List(ctx)
-			if err != nil {
-				t.Fatalf("List: %v", err)
-			}
-			if len(list) != 1 || list[0].TestinyProject != tc.want {
-				t.Fatalf("summary = %#v, want testinyProject %q", list, tc.want)
-			}
-		})
+	if got.Project == nil || got.Project.Config == nil || got.Project.Config.DefaultBranch != "develop" {
+		t.Fatalf("the merge lost the rest of the config: %#v", got.Project)
 	}
 }
 

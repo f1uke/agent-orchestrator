@@ -65,12 +65,11 @@ func (s *Service) RecordResults(ctx context.Context, task domain.SessionID, id d
 		return domain.TestinyRunView{}, fmt.Errorf("%w: %s in %s; report your result in the handback instead. A person can set the case or step back to NOTRUN to ask for a re-run",
 			ErrSetByPerson, strings.Join(refused, ", "), id)
 	}
-	project, err := s.project(ctx, cfg.TestinyProject)
-	if err != nil {
-		return domain.TestinyRunView{}, err
+	if link.Project.ID == 0 {
+		return domain.TestinyRunView{}, fmt.Errorf("%w: the Testiny project of %s could not be read; try again", testinyadapter.ErrUnavailable, id)
 	}
 
-	written, writeErr := s.reader.SetResults(ctx, id, project.ID, send)
+	written, writeErr := s.reader.SetResults(ctx, id, link.Project.ID, send)
 	s.forget(id)
 	if len(written) > 0 {
 		asked := make(map[int64]domain.TestinyResult, len(results))
@@ -96,7 +95,7 @@ func (s *Service) RecordResults(ctx context.Context, task domain.SessionID, id d
 }
 
 func (s *Service) linkOf(ctx context.Context, task domain.SessionID, id domain.TestinyRunID) (domain.TestinyRunLink, error) {
-	links, err := s.links.ListTestinyRunLinks(ctx, task)
+	links, err := s.taskLinks(ctx, task)
 	if err != nil {
 		return domain.TestinyRunLink{}, err
 	}

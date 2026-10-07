@@ -74,10 +74,10 @@ func TestTheRunViewCarriesEachCasesStepResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := caseByID(t, runs.Runs[0], 7201).Steps; !reflect.DeepEqual(got, held) {
+	if got := caseByID(t, runs[0], 7201).Steps; !reflect.DeepEqual(got, held) {
 		t.Fatalf("TC-7201 steps = %+v, want %+v", got, held)
 	}
-	if got := caseByID(t, runs.Runs[0], 7202).Steps; got == nil || len(got) != 0 {
+	if got := caseByID(t, runs[0], 7202).Steps; got == nil || len(got) != 0 {
 		t.Fatalf("TC-7202 steps = %#v, want an empty list", got)
 	}
 }
