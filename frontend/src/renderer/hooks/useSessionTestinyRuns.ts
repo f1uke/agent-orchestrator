@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
-import { mockRecordTestinyResult, mockTestinyRuns } from "../lib/mock-data";
+import { mockRecordTestinyResult, mockTestinyCase, mockTestinyRuns } from "../lib/mock-data";
 import {
 	withCase,
 	withResult,
+	type TestinyCaseDetail,
 	type TestinyResultWrite,
 	type TestinyRun,
 	type TestinyRunsResponse,
@@ -37,6 +38,30 @@ export function useSessionTestinyRuns(taskId: string) {
 		queryKey: sessionTestinyQueryKey(taskId),
 		queryFn: () => fetchRuns(taskId, false),
 		refetchInterval: usePreviewData ? false : 30_000,
+	});
+}
+
+const testinyCaseQueryKey = (taskId: string, caseId: number) => ["session-testiny-case", taskId, caseId] as const;
+
+/**
+ * One case of the task's runs in full (test data, precondition, steps), read
+ * live by the daemon when its panel first opens. Kept for a minute like the
+ * daemon's own cache, so closing and reopening a panel reads nothing. Not
+ * retried: a refusal shows at once with its reason, and the panel has a Retry.
+ */
+export function useTestinyCase(taskId: string, caseId: number) {
+	return useQuery({
+		queryKey: testinyCaseQueryKey(taskId, caseId),
+		queryFn: async (): Promise<TestinyCaseDetail> => {
+			if (usePreviewData) return mockTestinyCase(taskId, caseId);
+			const { data, error } = await apiClient.GET("/api/v1/sessions/{sessionId}/testiny/cases/{caseId}", {
+				params: { path: { sessionId: taskId, caseId: String(caseId) } },
+			});
+			if (error || !data) throw new Error(apiErrorMessage(error, "Couldn't read the case"));
+			return data;
+		},
+		staleTime: 60_000,
+		retry: false,
 	});
 }
 

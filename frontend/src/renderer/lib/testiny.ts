@@ -5,6 +5,7 @@ export type TestinyRun = components["schemas"]["TestinyRunView"];
 export type TestinyCase = components["schemas"]["TestinyCaseResult"];
 export type TestinyRunsResponse = components["schemas"]["TestinyRunsResponse"];
 export type TestinyFetchErrorKind = components["schemas"]["TestinyFetchError"]["kind"];
+export type TestinyCaseDetail = components["schemas"]["DomainTestinyCaseDetail"];
 type TestinyRecord = components["schemas"]["TestinyResultRecord"];
 
 /** The statuses Testiny records, in the order the summary chips and the status menu show them. */
@@ -197,4 +198,84 @@ export function evidenceLabel(path: string): { location: string; folder: string 
 	const folder = rest.slice(cut);
 	const location = rest.startsWith(`~${QA_EVIDENCE_ROOT}`) ? `~${QA_EVIDENCE_ROOT}…/` : rest.slice(0, cut);
 	return { location, folder };
+}
+
+/** One fact about a case, with the field it came from, so a bare "High" or "iOS" still says what it is. */
+export type CaseChip = { field: string; value: string };
+
+/** What a case is about, in the order the detail panel's meta line reads it. Unset fields are left out. */
+export function caseChips(detail: TestinyCaseDetail): CaseChip[] {
+	const chips: CaseChip[] = [];
+	const add = (field: string, value: string | undefined) => {
+		if (value) chips.push({ field, value });
+	};
+	add("Priority", detail.priority?.label);
+	add("Type", sentenceCase(detail.type));
+	for (const platform of detail.platforms) add("Platform", platform);
+	add("Jira", detail.jira);
+	for (const status of detail.automation) add("Automation", status);
+	return chips;
+}
+
+/**
+ * Where the case sits in the product, as label/value rows: these run long
+ * ("Share > Empty state when the account has never shared a fund"), which a
+ * chip can only wrap into a block.
+ */
+export function caseFacts(detail: TestinyCaseDetail): [string, string][] {
+	const facts: [string, string][] = [];
+	const feature = [detail.features, detail.subFeatures].filter(Boolean).join(" > ");
+	if (feature) facts.push(["Feature", feature]);
+	if (detail.section) facts.push(["Section", detail.section]);
+	return facts;
+}
+
+/** Testiny's FUNCTIONAL or NON_FUNCTIONAL, as a person writes it. */
+function sentenceCase(value: string): string {
+	const words = value.replace(/_/g, " ").toLowerCase();
+	return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** A run of a case's rich text: plain lines, or a flat list. */
+export type TextBlock =
+	{ kind: "text"; text: string } | { kind: "list"; ordered: boolean; start: number; items: string[] };
+
+/** "- item" or "3. item": the number when there is one, then the item. */
+const LIST_LINE = /^(?:(\d+)\.|-) (.*)$/;
+
+/**
+ * Splits the daemon's plain-text rendering of a rich-text field into blocks, so
+ * "- " and "1. " runs show as real lists. Text with an indented line (a nested
+ * list, or an item that wraps onto its own lines) is kept whole, as written: a
+ * flat list would lose its shape. A blank line ends a block.
+ */
+export function textBlocks(text: string): TextBlock[] {
+	if (text.trim() === "") return [];
+	const lines = text.split("\n");
+	if (lines.some((line) => /^\s+\S/.test(line))) return [{ kind: "text", text }];
+	const blocks: TextBlock[] = [];
+	let open: TextBlock | null = null;
+	for (const line of lines) {
+		if (line.trim() === "") {
+			open = null;
+			continue;
+		}
+		const listed = LIST_LINE.exec(line);
+		if (listed) {
+			const [, number, item] = listed;
+			const ordered = number !== undefined;
+			if (open?.kind === "list" && open.ordered === ordered) {
+				open.items.push(item);
+				continue;
+			}
+			open = { kind: "list", ordered, start: ordered ? Number(number) : 1, items: [item] };
+		} else if (open?.kind === "text") {
+			open.text += `\n${line}`;
+			continue;
+		} else {
+			open = { kind: "text", text: line };
+		}
+		blocks.push(open);
+	}
+	return blocks;
 }

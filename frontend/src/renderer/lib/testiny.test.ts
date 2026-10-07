@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	ageLabel,
+	caseChips,
+	caseFacts,
 	evidenceLabel,
 	linkedByLabel,
 	orderCases,
@@ -9,9 +11,11 @@ import {
 	scriptCoverage,
 	sharedBlocker,
 	summaryCounts,
+	textBlocks,
 	withCase,
 	withResult,
 	type TestinyCase,
+	type TestinyCaseDetail,
 	type TestinyRun,
 } from "./testiny";
 
@@ -277,5 +281,101 @@ describe("provenanceLabel", () => {
 	it("says nothing when AO wrote nothing, or Testiny changed the case since", () => {
 		expect(provenanceLabel(tc(1, "FAILED"), NOW, sessions)).toBeNull();
 		expect(provenanceLabel({ ...tc(1, "PASSED"), recorded: recorded() }, NOW, sessions)).toBeNull();
+	});
+});
+
+const detail = (over: Partial<TestinyCaseDetail> = {}): TestinyCaseDetail => ({
+	id: 7102,
+	title: "Empty state",
+	template: "STEPS",
+	type: "",
+	platforms: [],
+	jira: "",
+	features: "",
+	subFeatures: "",
+	section: "",
+	automation: [],
+	testData: "",
+	precondition: "",
+	description: "",
+	remark: "",
+	steps: [],
+	stepsText: "",
+	expectedText: "",
+	bdd: "",
+	...over,
+});
+
+describe("caseChips", () => {
+	it("lists what the case is about in reading order, each with the field it came from", () => {
+		expect(
+			caseChips(
+				detail({
+					priority: { level: 2, label: "High" },
+					type: "FUNCTIONAL",
+					platforms: ["iOS", "Android"],
+					jira: "MOBILITY-4839",
+					features: "Share",
+					subFeatures: "Empty state",
+					section: "Fund page",
+					automation: ["Manual"],
+				}),
+			),
+		).toEqual([
+			{ field: "Priority", value: "High" },
+			{ field: "Type", value: "Functional" },
+			{ field: "Platform", value: "iOS" },
+			{ field: "Platform", value: "Android" },
+			{ field: "Jira", value: "MOBILITY-4839" },
+			{ field: "Automation", value: "Manual" },
+		]);
+	});
+
+	it("leaves out what the case does not set", () => {
+		expect(caseChips(detail())).toEqual([]);
+		expect(caseChips(detail({ subFeatures: "Empty state", type: "NON_FUNCTIONAL" }))).toEqual([
+			{ field: "Type", value: "Non functional" },
+		]);
+	});
+});
+
+describe("caseFacts", () => {
+	it("puts the long fields on their own rows, feature then section", () => {
+		expect(caseFacts(detail({ features: "Share", subFeatures: "Empty state", section: "Fund page" }))).toEqual([
+			["Feature", "Share > Empty state"],
+			["Section", "Fund page"],
+		]);
+	});
+
+	it("leaves out what the case does not set", () => {
+		expect(caseFacts(detail())).toEqual([]);
+		expect(caseFacts(detail({ subFeatures: "Empty state" }))).toEqual([["Feature", "Empty state"]]);
+	});
+});
+
+describe("textBlocks", () => {
+	it("has no blocks for no text", () => {
+		expect(textBlocks("")).toEqual([]);
+		expect(textBlocks(" \n ")).toEqual([]);
+	});
+
+	it("keeps plain lines as one block of text", () => {
+		expect(textBlocks("Logged in\nOn the fund page")).toEqual([{ kind: "text", text: "Logged in\nOn the fund page" }]);
+	});
+
+	it("reads bullet and numbered lines as lists, with the text around them", () => {
+		expect(textBlocks("Before you start:\n- Logged in\n- Nothing shared yet\n\n3. Open\n4. Share\nDone")).toEqual([
+			{ kind: "text", text: "Before you start:" },
+			{ kind: "list", ordered: false, start: 1, items: ["Logged in", "Nothing shared yet"] },
+			{ kind: "list", ordered: true, start: 3, items: ["Open", "Share"] },
+			{ kind: "text", text: "Done" },
+		]);
+	});
+
+	it("keeps nested or wrapped lists as written, since a flat list would lose their shape", () => {
+		const nested = "- iOS\n  - iPhone\n- Android";
+		expect(textBlocks(nested)).toEqual([{ kind: "text", text: nested }]);
+		const table = "User | Password\nqa | fake";
+		expect(textBlocks(table)).toEqual([{ kind: "text", text: table }]);
 	});
 });

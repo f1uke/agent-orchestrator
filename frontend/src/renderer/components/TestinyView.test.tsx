@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TestinyView } from "./TestinyView";
-import type { TestinyCase, TestinyRun } from "../lib/testiny";
+import type { TestinyCase, TestinyCaseDetail, TestinyRun } from "../lib/testiny";
 import type { WorkspaceSession, WorkspaceSummary } from "../types/workspace";
 
 const { getMock, postMock, deleteMock } = vi.hoisted(() => ({
@@ -619,5 +619,269 @@ describe("TestinyView setting a result", () => {
 		const provenance = row("disclaimer").getByText("set by qa · 5 min ago");
 		expect(shown.compareDocumentPosition(provenance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 		expect(row("voiceover").queryByText("a reason Testiny moved past")).toBeNull();
+	});
+});
+
+describe("TestinyView case details", () => {
+	const CASE = "/api/v1/sessions/{sessionId}/testiny/cases/{caseId}";
+	const REF_LINKS = "/api/v1/settings/ref-links";
+	const caseReads = () => getMock.mock.calls.filter(([path]) => path === CASE);
+
+	const detail = (id: number, over: Partial<TestinyCaseDetail> = {}): TestinyCaseDetail => ({
+		id,
+		title: `case ${id}`,
+		template: "STEPS",
+		type: "",
+		platforms: [],
+		jira: "",
+		features: "",
+		subFeatures: "",
+		section: "",
+		automation: [],
+		testData: "",
+		precondition: "",
+		description: "",
+		remark: "",
+		steps: [],
+		stepsText: "",
+		expectedText: "",
+		bdd: "",
+		...over,
+	});
+
+	const full = detail(1, {
+		priority: { level: 2, label: "High" },
+		type: "FUNCTIONAL",
+		platforms: ["iOS"],
+		jira: "MOBILITY-4839",
+		features: "Share",
+		subFeatures: "Empty state",
+		testData: "qa@example.com / fake-password\nPIN 000000",
+		precondition: "- Logged in\n- Nothing shared yet",
+		steps: [
+			{ n: 1, action: "Open a fund page", expected: "The fund page shows" },
+			{ n: 2, action: "Tap Share", expected: "The empty state shows" },
+		],
+		description: "Covers the sheet with nothing in it",
+		remark: "Found on 4.12",
+	});
+
+	/** The runs list, case details by id (a string is the daemon's refusal), and the Jira address setting. */
+	function serveCases(cases: TestinyCase[], details: Record<number, TestinyCaseDetail | string>, jiraBaseUrl = "") {
+		getMock.mockImplementation(async (path: string, init?: { params: { path: { caseId: string } } }) => {
+			if (path === CASE) {
+				const found = details[Number(init?.params.path.caseId)];
+				return typeof found === "string" ? { error: { message: found } } : { data: found };
+			}
+			if (path === REF_LINKS) {
+				return { data: { jiraBaseUrl, gitlabBaseUrl: "", gitlabDefaultRepo: "", gitlabRepoAliases: {} } };
+			}
+			return { data: { project: "MOB", runs: [run(632, { cases })] } };
+		});
+	}
+
+	const titleButton = (title: string) => screen.findByRole("button", { name: title });
+	const panel = (title: string) => screen.findByRole("region", { name: `${title} details` });
+
+	it("opens a case's details from its title, and closes them from it again", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		renderView();
+
+		const title = await titleButton("disclaimer");
+		expect(title).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByRole("region", { name: "disclaimer details" })).toBeNull();
+
+		await user.click(title);
+		expect(title).toHaveAttribute("aria-expanded", "true");
+		expect(await within(await panel("disclaimer")).findByText("Open a fund page")).toBeInTheDocument();
+
+		await user.click(title);
+		expect(title).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByRole("region", { name: "disclaimer details" })).toBeNull();
+	});
+
+	it("opens from the keyboard", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		renderView();
+
+		(await titleButton("disclaimer")).focus();
+		await user.keyboard("{Enter}");
+		expect(await panel("disclaimer")).toBeInTheDocument();
+	});
+
+	it("keeps several cases open at once", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer"), tc(2, "NOTRUN", "cold launch")], {
+			1: full,
+			2: detail(2, { testData: "uat account" }),
+		});
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		await user.click(await titleButton("cold launch"));
+		expect(await within(await panel("disclaimer")).findByText("Open a fund page")).toBeInTheDocument();
+		expect(await within(await panel("cold launch")).findByText("uat account")).toBeInTheDocument();
+	});
+
+	it("reads a case from Testiny only when it is first opened", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		renderView();
+
+		const title = await titleButton("disclaimer");
+		expect(caseReads()).toHaveLength(0);
+
+		await user.click(title);
+		await within(await panel("disclaimer")).findByText("Open a fund page");
+		await user.click(title);
+		await user.click(title);
+		await within(await panel("disclaimer")).findByText("Open a fund page");
+
+		expect(caseReads()).toEqual([[CASE, { params: { path: { sessionId: "task-1", caseId: "1" } } }]]);
+	});
+
+	it("shows the case's facts, test data, precondition, steps, description and remark in that order", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		const details = within(await panel("disclaimer"));
+		await details.findByText("Open a fund page");
+
+		expect(details.getAllByRole("heading").map((h) => h.textContent)).toEqual([
+			"Test data",
+			"Precondition",
+			"Steps",
+			"Description",
+			"Remark",
+		]);
+		const facts = details.getByRole("list", { name: "About this case" });
+		expect(
+			within(facts)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual(["High", "Functional", "iOS", "MOBILITY-4839"]);
+		expect(within(facts).getByText("High").closest("li")).toHaveAttribute("title", "Priority: High");
+		// The long fields read as label/value rows, not chips.
+		const feature = details.getByText("Share > Empty state");
+		expect(feature.tagName).toBe("DD");
+		expect(feature.previousElementSibling).toHaveTextContent("Feature");
+
+		// Test data is shown as written, line breaks and all, so it can be copied.
+		const testData = details.getByText(/qa@example\.com/);
+		expect(testData.textContent).toBe("qa@example.com / fake-password\nPIN 000000");
+
+		const precondition = details.getByRole("list", { name: "Precondition" });
+		expect(
+			within(precondition)
+				.getAllByRole("listitem")
+				.map((li) => li.textContent),
+		).toEqual(["Logged in", "Nothing shared yet"]);
+		expect(details.getByText("Covers the sheet with nothing in it")).toBeInTheDocument();
+		expect(details.getByText("Found on 4.12")).toBeInTheDocument();
+	});
+
+	it("lists a STEPS case's steps in order, each expected result under its action", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		const steps = await within(await panel("disclaimer")).findByRole("list", { name: "Steps" });
+		const rows = within(steps).getAllByRole("listitem");
+		expect(rows).toHaveLength(2);
+		full.steps.forEach((step, index) => {
+			const row = within(rows[index]);
+			expect(row.getByText(String(step.n))).toBeInTheDocument();
+			const action = row.getByText(step.action);
+			const expected = row.getByText(step.expected);
+			expect(expected.textContent).toBe(`Expected: ${step.expected}`);
+			expect(action.compareDocumentPosition(expected) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		});
+	});
+
+	it("leaves out every section the case does not fill", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], {
+			1: detail(1, { steps: [{ n: 1, action: "Open a fund page", expected: "" }] }),
+		});
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		const details = within(await panel("disclaimer"));
+		await details.findByText("Open a fund page");
+		expect(details.getAllByRole("heading").map((h) => h.textContent)).toEqual(["Steps"]);
+		expect(details.queryByRole("list", { name: "About this case" })).toBeNull();
+	});
+
+	it("shows a TEXT case's steps and expected result as the two texts they are", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "NOTRUN", "cold launch")], {
+			1: detail(1, {
+				template: "TEXT",
+				stepsText: "Share nothing\nKill the app and open it again",
+				expectedText: "The empty state still shows",
+			}),
+		});
+		renderView();
+
+		await user.click(await titleButton("cold launch"));
+		const details = within(await panel("cold launch"));
+		await details.findByText("The empty state still shows");
+		expect(details.getAllByRole("heading").map((h) => h.textContent)).toEqual(["Steps", "Expected result"]);
+		expect(details.queryByRole("list", { name: "Steps" })).toBeNull();
+		expect(details.getByText(/Share nothing/).textContent).toBe("Share nothing\nKill the app and open it again");
+	});
+
+	it("shows a BDD case's scenario as written", async () => {
+		const user = userEvent.setup();
+		const bdd = "Scenario: empty share sheet\n  Given nothing is shared\n  Then the empty state shows";
+		serveCases([tc(1, "NOTRUN", "cold launch")], { 1: detail(1, { template: "BDD", bdd }) });
+		renderView();
+
+		await user.click(await titleButton("cold launch"));
+		const details = within(await panel("cold launch"));
+		expect((await details.findByText(/Scenario: empty share sheet/)).textContent).toBe(bdd);
+		expect(details.getAllByRole("heading").map((h) => h.textContent)).toEqual(["Scenario"]);
+	});
+
+	it("links the Jira key to the Jira address set in Settings", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full }, "https://example.atlassian.net");
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		const link = await within(await panel("disclaimer")).findByRole("link", { name: "MOBILITY-4839" });
+		expect(link).toHaveAttribute("href", "https://example.atlassian.net/browse/MOBILITY-4839");
+	});
+
+	it("keeps the Jira key as text when no Jira address is set", async () => {
+		const user = userEvent.setup();
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		const details = within(await panel("disclaimer"));
+		expect(await details.findByText("MOBILITY-4839")).toBeInTheDocument();
+		expect(details.queryByRole("link")).toBeNull();
+	});
+
+	it("says why a case could not be read, and reads it again on Retry", async () => {
+		const user = userEvent.setup();
+		const refusal = "the case is not in a run linked to this task: TC-1 (TESTINY_CASE_NOT_IN_TASK)";
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: refusal });
+		renderView();
+
+		await user.click(await titleButton("disclaimer"));
+		const details = within(await panel("disclaimer"));
+		expect(await details.findByRole("alert")).toHaveTextContent(refusal);
+
+		serveCases([tc(1, "FAILED", "disclaimer")], { 1: full });
+		await user.click(details.getByRole("button", { name: "Retry" }));
+		expect(await details.findByText("Open a fund page")).toBeInTheDocument();
+		expect(details.queryByRole("alert")).toBeNull();
 	});
 });

@@ -1916,6 +1916,83 @@ export function mockRecordTestinyResult(
 	return structuredClone(written);
 }
 
+/**
+ * A case's details in the preview, FAKE data only (the real field holds int/uat
+ * accounts). TC-7102 is a STEPS case with every section, TC-7104 a TEXT case,
+ * TC-7106 one Testiny would not answer for; every other demo case gets a short
+ * STEPS case so any title opens something.
+ */
+export function mockTestinyCase(taskId: string, caseId: number): components["schemas"]["DomainTestinyCaseDetail"] {
+	const found = mockTestinyRuns(taskId)
+		.runs.flatMap((r) => r.cases)
+		.find((c) => c.id === caseId);
+	if (!found) throw new Error(`TC-${caseId} is in none of the runs linked to ${taskId} (TESTINY_CASE_NOT_IN_TASK)`);
+	if (caseId === 7106) throw new Error("Testiny did not answer in time, try again (TESTINY_UNAVAILABLE)");
+	const base: components["schemas"]["DomainTestinyCaseDetail"] = {
+		id: caseId,
+		title: found.title,
+		priority: { level: 3, label: "Medium" },
+		type: "FUNCTIONAL",
+		template: "STEPS",
+		platforms: ["iOS"],
+		jira: "MOBILITY-4839",
+		features: "Share",
+		subFeatures: "Empty state",
+		section: "",
+		testData: "qa@example.com / fake-password",
+		precondition: "Logged in with the test account",
+		description: "",
+		remark: "",
+		automation: ["Manual"],
+		steps: [{ n: 1, action: "Play the case as its title says", expected: found.title.replace(/^\[\w+\] /, "") }],
+		stepsText: "",
+		expectedText: "",
+		bdd: "",
+	};
+	if (caseId === 7102) {
+		return {
+			...base,
+			priority: { level: 2, label: "High" },
+			subFeatures: "Empty state when the account has never shared a fund",
+			section: "Fund page > Share sheet",
+			automation: ["Automated"],
+			testData: "qa@example.com / fake-password\nPIN 000000",
+			precondition: [
+				"- Logged in with the test account above",
+				"- The account has never shared a fund",
+				"- แอปเป็นเวอร์ชัน 4.12 ขึ้นไป และเปิดการแจ้งเตือนไว้แล้ว",
+			].join("\n"),
+			steps: [
+				{ n: 1, action: "Open any fund page", expected: "The fund page shows the Share button in the top bar" },
+				{ n: 2, action: "Tap Share", expected: "The share sheet opens from the bottom" },
+				{
+					n: 3,
+					action: "ดูรายการในหน้าแชร์",
+					expected: "เห็นข้อความแจ้งว่ายังไม่มีรายการที่แชร์ แทนรายการว่างเปล่า",
+				},
+				{ n: 4, action: "Tap outside the sheet", expected: "The sheet closes and the fund page shows again" },
+			],
+			description: "Covers the share sheet for an account that has nothing to share yet.",
+			remark: 'Design: Share sheet v3, frame "Empty".',
+		};
+	}
+	if (caseId === 7104) {
+		return {
+			...base,
+			template: "TEXT",
+			precondition: "The account has never shared a fund.",
+			steps: [],
+			stepsText: [
+				"1. Open the share sheet once and close it",
+				"2. Kill the app from the app switcher",
+				"3. Open the app and the share sheet again",
+			].join("\n"),
+			expectedText: "The empty state still shows, with the same copy as before the cold launch.",
+		};
+	}
+	return base;
+}
+
 const mockTestinyStore = new Map<string, components["schemas"]["TestinyRunsResponse"]>();
 
 function demoTestinyRuns(taskId: string): components["schemas"]["TestinyRunsResponse"] {

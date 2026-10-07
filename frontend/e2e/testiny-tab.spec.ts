@@ -87,6 +87,56 @@ test("setting a case to Failed asks why, then shows it as the person's result", 
 	);
 });
 
+test("a case's title opens its test data, precondition and steps under it", async ({ page }) => {
+	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing");
+
+	const inspector = page.locator("#inspector");
+	await inspector.getByRole("tab", { name: "Testiny" }).click();
+	const run = inspector.getByRole("article").first();
+
+	const title = run.getByRole("button", { name: "[Share] Empty state shows when there is nothing to share" });
+	await expect(title).toHaveAttribute("aria-expanded", "false");
+	await title.click();
+	await expect(title).toHaveAttribute("aria-expanded", "true");
+
+	const details = run.getByRole("region", { name: "[Share] Empty state shows when there is nothing to share details" });
+	await expect(details.getByRole("heading")).toHaveText([
+		"Test data",
+		"Precondition",
+		"Steps",
+		"Description",
+		"Remark",
+	]);
+	await expect(details.getByText("qa@example.com / fake-password")).toBeVisible();
+	await expect(details.getByRole("list", { name: "Precondition" }).getByRole("listitem")).toHaveCount(3);
+	const steps = details.getByRole("list", { name: "Steps" }).getByRole("listitem");
+	await expect(steps).toHaveCount(4);
+	await expect(steps.nth(1)).toContainText("Tap Share");
+	await expect(steps.nth(1)).toContainText("Expected: The share sheet opens from the bottom");
+
+	// The panel starts on the title's own edge, under it.
+	const titleBox = (await title.boundingBox())!;
+	const detailsBox = (await details.boundingBox())!;
+	expect(detailsBox.x).toBe(titleBox.x);
+	expect(detailsBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
+
+	await title.click();
+	await expect(details).toHaveCount(0);
+});
+
+test("a case Testiny would not answer for says why and offers a retry", async ({ page }) => {
+	await page.goto("/#/projects/ao-demo/sessions/demo-qa-testing");
+
+	const inspector = page.locator("#inspector");
+	await inspector.getByRole("tab", { name: "Testiny" }).click();
+	const run = inspector.getByRole("article").first();
+
+	await run.getByRole("button", { name: "[Share] VoiceOver reads the empty state" }).click();
+	const details = run.getByRole("region", { name: "[Share] VoiceOver reads the empty state details" });
+	await expect(details.getByRole("alert")).toContainText("TESTINY_UNAVAILABLE");
+	await expect(details.getByRole("button", { name: "Retry" })).toBeVisible();
+});
+
 test("a task in a project without Testiny has no Testiny tab", async ({ page }) => {
 	await page.goto("/#/projects/docs-site/sessions/docs-installation");
 

@@ -1,20 +1,25 @@
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ArrowUpRight, ChevronRight, CircleDashed, RefreshCw, TriangleAlert } from "lucide-react";
 import {
 	useLinkTestinyRun,
 	useRecordTestinyResult,
 	useRefreshTestinyRuns,
 	useSessionTestinyRuns,
+	useTestinyCase,
 	useTestinyRunsVersion,
 	useUnlinkTestinyRun,
 	type ResultWriteHold,
 } from "../hooks/useSessionTestinyRuns";
+import { useRefLinkSettings } from "../hooks/useRefLinkSettings";
 import { useWorkspaceQuery } from "../hooks/useWorkspaceQuery";
 import { aoBridge } from "../lib/bridge";
+import { splitRefLinks } from "../lib/ref-links";
 import { testinyCaseGlyph, type TestinyCaseTone } from "../lib/status-glyph";
 import { taskKeyOf } from "../lib/task-key";
 import {
 	ageLabel,
+	caseChips,
+	caseFacts,
 	evidenceLabel,
 	linkedByLabel,
 	needsComment,
@@ -27,8 +32,11 @@ import {
 	summaryCounts,
 	TESTINY_COMMENT_MAX,
 	TESTINY_STATUSES,
+	textBlocks,
+	type CaseChip,
 	type CaseOrder,
 	type TestinyCase,
+	type TestinyCaseDetail,
 	type TestinyFetchErrorKind,
 	type TestinyRun,
 	type TestinyStatus,
@@ -444,6 +452,8 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 	const trigger = useRef<HTMLButtonElement>(null);
 	const field = useRef<HTMLInputElement>(null);
 	const focusFieldOnClose = useRef(false);
+	const [expanded, setExpanded] = useState(false);
+	const detailsId = useId();
 	const reason = standingRecord(testCase)?.comment;
 	const provenance = row.provenance(testCase);
 	// One write per case at a time, so Testiny cannot land them out of order.
@@ -520,7 +530,15 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 					</DropdownMenuRadioGroup>
 				</DropdownMenuContent>
 			</DropdownMenu>
-			<span className="min-w-0 text-foreground">{testCase.title}</span>
+			<button
+				type="button"
+				aria-expanded={expanded}
+				aria-controls={expanded ? detailsId : undefined}
+				className="min-w-0 self-start rounded-sm text-left text-foreground decoration-passive underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+				onClick={() => setExpanded((v) => !v)}
+			>
+				{testCase.title}
+			</button>
 			{testCase.script ? (
 				<span
 					className="shrink-0 rounded border border-border px-1 font-mono text-[10px] leading-4 text-muted-foreground"
@@ -550,6 +568,7 @@ function CaseRow({ testCase, row }: { testCase: TestinyCase; row: RowContext }):
 					{record.error.message}
 				</p>
 			) : null}
+			{expanded ? <CaseDetails id={detailsId} taskId={row.taskId} testCase={testCase} /> : null}
 		</li>
 	);
 }
@@ -598,5 +617,195 @@ function CommentField({
 				Save
 			</Button>
 		</form>
+	);
+}
+
+/** A case read in full from Testiny the first time its title is opened, under the title's own edge. */
+function CaseDetails({ id, taskId, testCase }: { id: string; taskId: string; testCase: TestinyCase }) {
+	const query = useTestinyCase(taskId, testCase.id);
+	return (
+		<section
+			id={id}
+			aria-label={`${testCase.title} details`}
+			className="col-span-2 col-start-2 mt-2 mb-1.5 flex flex-col gap-3"
+		>
+			{query.isPending ? (
+				<p className="text-[11.5px] text-passive">Reading the case from Testiny…</p>
+			) : query.isError ? (
+				<div className="flex items-start gap-2">
+					<p className="min-w-0 text-[11px] leading-snug [overflow-wrap:anywhere] text-error" role="alert">
+						{query.error.message}
+					</p>
+					<Button
+						variant="ghost"
+						size="sm"
+						className="-my-1 -mr-2 ml-auto h-6 px-2 text-[11px]"
+						disabled={query.isFetching}
+						onClick={() => void query.refetch()}
+					>
+						Retry
+					</Button>
+				</div>
+			) : (
+				<CaseDetailBody detail={query.data} />
+			)}
+		</section>
+	);
+}
+
+const DETAIL_TEXT = "text-[11.5px] leading-relaxed text-foreground [overflow-wrap:anywhere]";
+
+/** Every section the case fills, in the order a tester plays it; an empty one is left out. */
+function CaseDetailBody({ detail }: { detail: TestinyCaseDetail }) {
+	const chips = caseChips(detail);
+	return (
+		<>
+			{chips.length > 0 ? <CaseChips chips={chips} /> : null}
+			<CaseFacts facts={caseFacts(detail)} />
+			{detail.testData ? (
+				<DetailSection title="Test data">
+					<p className={cn(DETAIL_TEXT, "font-mono text-[11px] whitespace-pre-wrap select-text")}>{detail.testData}</p>
+				</DetailSection>
+			) : null}
+			<RichTextSection title="Precondition" text={detail.precondition} />
+			{detail.steps.length > 0 ? (
+				<DetailSection title="Steps">
+					<StepList steps={detail.steps} />
+				</DetailSection>
+			) : null}
+			<RichTextSection title="Steps" text={detail.stepsText} />
+			<RichTextSection title="Expected result" text={detail.expectedText} />
+			{detail.bdd ? (
+				<DetailSection title="Scenario">
+					<p className={cn(DETAIL_TEXT, "font-mono text-[11px] whitespace-pre-wrap")}>{detail.bdd}</p>
+				</DetailSection>
+			) : null}
+			<RichTextSection title="Description" text={detail.description} />
+			<RichTextSection title="Remark" text={detail.remark} />
+		</>
+	);
+}
+
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+	return (
+		<div className="flex flex-col gap-1">
+			<h4 className={EYEBROW}>{title}</h4>
+			{children}
+		</div>
+	);
+}
+
+function CaseFacts({ facts }: { facts: [string, string][] }) {
+	if (facts.length === 0) return null;
+	return (
+		<dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 text-[11.5px] text-muted-foreground">
+			{facts.map(([label, value]) => (
+				<div key={label} className="contents">
+					<dt className={EYEBROW}>{label}</dt>
+					<dd className="min-w-0 [overflow-wrap:anywhere]">{value}</dd>
+				</div>
+			))}
+		</dl>
+	);
+}
+
+function CaseChips({ chips }: { chips: CaseChip[] }) {
+	return (
+		<ul aria-label="About this case" className="flex flex-wrap gap-1">
+			{chips.map((chip, index) => (
+				<li key={index} className="max-w-full" title={`${chip.field}: ${chip.value}`}>
+					<Badge className="h-auto min-h-[18px] max-w-full shrink rounded-[9px] py-px leading-[14px] [overflow-wrap:anywhere]">
+						{chip.field === "Jira" ? <JiraKeys value={chip.value} /> : chip.value}
+					</Badge>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+/** The case's Jira keys, each linked when Settings has the Jira address; plain text otherwise. */
+function JiraKeys({ value }: { value: string }) {
+	const settings = useRefLinkSettings().data;
+	return (
+		<span>
+			{splitRefLinks(value, settings).map((part, index) =>
+				part.kind === "text" ? (
+					part.value
+				) : (
+					<a
+						key={index}
+						className="text-accent hover:underline"
+						href={part.url}
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						{part.value}
+					</a>
+				),
+			)}
+		</span>
+	);
+}
+
+/** A rich-text field as the daemon renders it: "- " and "1. " runs as lists, the rest as the lines it has. */
+function RichTextSection({ title, text }: { title: string; text: string }) {
+	const blocks = textBlocks(text);
+	if (blocks.length === 0) return null;
+	return (
+		<DetailSection title={title}>
+			{blocks.map((block, index) =>
+				block.kind === "text" ? (
+					<p key={index} className={cn(DETAIL_TEXT, "whitespace-pre-wrap")}>
+						{block.text}
+					</p>
+				) : block.ordered ? (
+					<ol key={index} aria-label={title} start={block.start} className={cn(DETAIL_TEXT, LIST, "list-decimal")}>
+						{block.items.map((item, at) => (
+							<li key={at}>{item}</li>
+						))}
+					</ol>
+				) : (
+					<ul key={index} aria-label={title} className={cn(DETAIL_TEXT, LIST, "list-disc")}>
+						{block.items.map((item, at) => (
+							<li key={at}>{item}</li>
+						))}
+					</ul>
+				),
+			)}
+		</DetailSection>
+	);
+}
+
+const LIST = "flex flex-col gap-0.5 pl-4 marker:text-passive";
+
+/**
+ * A STEPS case's table as one row per step, the expected result under its
+ * action. Three columns left each text under 100 px in the rail and wrapped
+ * most steps onto four lines.
+ */
+function StepList({ steps }: { steps: TestinyCaseDetail["steps"] }) {
+	return (
+		<ol aria-label="Steps" className="flex flex-col text-[11.5px] leading-relaxed">
+			{steps.map((step) => (
+				<li
+					key={step.n}
+					className="grid grid-cols-[1rem_minmax(0,1fr)] gap-y-0.5 border-t border-border py-1.5 first:border-t-0 first:pt-0 last:pb-0"
+				>
+					<span className="font-mono text-[11px] text-passive tabular-nums">{step.n}</span>
+					<p className="whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{step.action}</p>
+					{step.expected ? (
+						<p className="col-start-2 grid grid-cols-[1rem_minmax(0,1fr)] whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">
+							<span className="text-passive" aria-hidden="true">
+								→
+							</span>
+							<span>
+								<span className="sr-only">Expected: </span>
+								{step.expected}
+							</span>
+						</p>
+					) : null}
+				</li>
+			))}
+		</ol>
 	);
 }
