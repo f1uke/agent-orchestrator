@@ -111,6 +111,10 @@ var simPromptDecisions = map[string]bool{
 	// recorder until this became the screen recorder, and the prompt must not
 	// teach either spelling as the other.
 	"record": false,
+	// `doctor` reads a device and changes nothing, so it carries no hazard an
+	// agent driving by hand gets wrong unprompted; the commands it would name
+	// (boot, claim, install) are already taught here.
+	"doctor": false,
 
 	// Flags, keyed "<command> --<flag>", for prompt-worthy commands only: a
 	// flag on an omitted command is covered by the command's own decision.
@@ -329,6 +333,9 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	// The screen recorder: a video is something a task asks for, and the
 	// script's own screenshot is the evidence the rule asks for.
 	"record": scriptOmits,
+	// `doctor` is not named by the block yet. When it is, its `--app` and
+	// `--expect` owe decisions too (`--udid` and `--json` are ambient).
+	"doctor": scriptOmits,
 }
 
 // mobileScriptGuidanceBudget caps the script-only iOS block the way
