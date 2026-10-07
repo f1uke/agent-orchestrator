@@ -1874,6 +1874,13 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 			m.logger.Warn("restore: settle orphaned child worktrees", "sessionID", rec.ID, "error", err)
 		}
 	}
+	// Symlinks again, never post-create: a link the project gained after this
+	// worktree was spawned reaches it here, and an existing link is left as it
+	// is. Post-create commands are not idempotent (an install into a tree a
+	// crewmate may be working in), so restore never runs them.
+	if err := applySymlinks(project.Path, ws.Path, project.Config.Symlinks, m.logger); err != nil {
+		m.logger.Warn("restore: project symlinks", "sessionID", rec.ID, "error", err)
+	}
 	childWorktrees := m.childWorktreesFor(ctx, rec.Harness, rec.Kind)
 	// The system prompt is derived, not persisted: recompute it so a restored
 	// session keeps its standing instructions across the relaunch.
@@ -3861,7 +3868,7 @@ func (m *Manager) ProvisionWorkspace(ctx context.Context, project domain.Project
 // post-create commands. Either failing aborts the spawn so a half-provisioned
 // workspace never launches an agent.
 func (m *Manager) provisionWorkspace(ctx context.Context, project domain.ProjectRecord, workspacePath string) error {
-	if err := applySymlinks(project.Path, workspacePath, project.Config.Symlinks); err != nil {
+	if err := applySymlinks(project.Path, workspacePath, project.Config.Symlinks, m.logger); err != nil {
 		return err
 	}
 	return runPostCreate(ctx, workspacePath, project.Config.PostCreate)
@@ -3869,10 +3876,13 @@ func (m *Manager) provisionWorkspace(ctx context.Context, project domain.Project
 
 // applySymlinks links each repo-relative path into the workspace. A source that
 // does not exist is skipped (symlinks are a convenience for optional files like
-// .env); a real link failure aborts. Paths must be repo-relative with no
+// .env); a real link failure aborts. A source that is itself a symlink works:
+// the workspace link points at the project's link, which resolves on. One whose
+// target is gone is skipped too, but logged, because it was set up on purpose
+// and the agent would otherwise go without it silently. Paths must be repo-relative with no
 // parent traversal (no leading "/", no ".." segment) — a bad path is refused
 // up front so a project config cannot escape the project or workspace tree.
-func applySymlinks(projectPath, workspacePath string, symlinks []string) error {
+func applySymlinks(projectPath, workspacePath string, symlinks []string, logger *slog.Logger) error {
 	for _, rel := range symlinks {
 		rel = strings.TrimSpace(rel)
 		if rel == "" {
@@ -3884,6 +3894,9 @@ func applySymlinks(projectPath, workspacePath string, symlinks []string) error {
 		}
 		source := filepath.Join(projectPath, clean)
 		if _, err := os.Stat(source); err != nil {
+			if _, lerr := os.Lstat(source); lerr == nil && logger != nil {
+				logger.Warn("symlink source is a link whose target is gone; not linked", "path", rel, "error", err)
+			}
 			continue
 		}
 		target := filepath.Join(workspacePath, clean)

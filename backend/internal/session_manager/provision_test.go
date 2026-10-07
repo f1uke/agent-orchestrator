@@ -171,7 +171,7 @@ func TestApplySymlinks(t *testing.T) {
 	}
 
 	// A present source is linked; a missing source is skipped, not an error.
-	if err := applySymlinks(project, workspace, []string{".env", "missing.txt"}); err != nil {
+	if err := applySymlinks(project, workspace, []string{".env", "missing.txt"}, nil); err != nil {
 		t.Fatalf("applySymlinks: %v", err)
 	}
 	target := filepath.Join(workspace, ".env")
@@ -183,6 +183,53 @@ func TestApplySymlinks(t *testing.T) {
 	}
 }
 
+// A project keeps a git-ignored folder as a symlink to somewhere outside the
+// repository (nter links its verify skill from the scripts store). The link AO
+// makes points at the project's link, and reading through both hops must work.
+func TestApplySymlinks_SourceIsItselfASymlink(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "SKILL.md"), []byte("verify"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".claude", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(project, ".claude", "skills", "verify")); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	if err := applySymlinks(project, workspace, []string{".claude/skills/verify"}, nil); err != nil {
+		t.Fatalf("applySymlinks: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(workspace, ".claude", "skills", "verify", "SKILL.md")); err != nil || string(data) != "verify" {
+		t.Fatalf("SKILL.md through two links = %q err=%v", data, err)
+	}
+}
+
+// A symlink added to the project after a session was spawned reaches that
+// session when it is restored. Before, only spawn provisioned, so a worktree
+// older than the setting never got the link.
+func TestRestore_AppliesSymlinksAddedAfterSpawn(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, ".env"), []byte("X=1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	st := newFakeStore()
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Path: project, Config: domain.ProjectConfig{Symlinks: []string{".env"}}}
+	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: workspace, Branch: "b", AgentSessionID: "agent-x"})
+	lookPath := func(string) (string, error) { return "/bin/true", nil }
+	m := New(Deps{Runtime: &fakeRuntime{}, Agents: singleAgent{agent: &recordingAgent{}}, Workspace: &fakeWorkspace{path: workspace}, Store: st, Messenger: &fakeMessenger{}, Lifecycle: &fakeLCM{store: st}, LookPath: lookPath})
+
+	if _, err := m.Restore(ctx, "mer-1"); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(workspace, ".env")); err != nil || string(data) != "X=1" {
+		t.Fatalf("restored workspace .env = %q err=%v, want the project's symlinked file", data, err)
+	}
+}
+
 func TestApplySymlinksRejectsParentTraversal(t *testing.T) {
 	project := t.TempDir()
 	workspace := t.TempDir()
@@ -190,7 +237,7 @@ func TestApplySymlinksRejectsParentTraversal(t *testing.T) {
 	// before any stat/link runs, so a project config cannot link in arbitrary
 	// host files.
 	for _, bad := range []string{"../escape", "/etc/passwd", "a/../../b", ".."} {
-		if err := applySymlinks(project, workspace, []string{bad}); err == nil {
+		if err := applySymlinks(project, workspace, []string{bad}, nil); err == nil {
 			t.Fatalf("applySymlinks(%q) accepted an unsafe path", bad)
 		}
 	}
