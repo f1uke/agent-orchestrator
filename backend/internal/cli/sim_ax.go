@@ -266,6 +266,10 @@ func (c *commandContext) readSimAX(ctx context.Context, udid string, maxNodes in
 // working command's path pays for it. A probe that cannot tell says so by
 // returning nothing, and the caller says exactly what it said before.
 func (c *commandContext) explainEmptySimTree(ctx context.Context, device simDevice, front simbridge.Frontmost) error {
+	if hold, held := c.heldSimApp(ctx, front.PID); held {
+		return fmt.Errorf("%s returned an empty accessibility tree because the app in the foreground cannot answer.\n%s",
+			device.Label(), heldSimAppReport(front, hold))
+	}
 	if diag, ok := simhang.Diagnose(ctx, c.deps.LookPath, c.deps.CommandOutput, front.PID); ok && diag.Blocked {
 		return blockedSimAppError(device, front, diag)
 	}
@@ -293,6 +297,9 @@ func (c *commandContext) blockedSimAppNote(ctx context.Context, device simDevice
 	snapshot, err := driver.AX(ctx, device.UDID)
 	if err != nil {
 		return ""
+	}
+	if hold, held := c.heldSimApp(ctx, snapshot.Frontmost.PID); held {
+		return heldSimAppReport(snapshot.Frontmost, hold)
 	}
 	diag, ok := simhang.Diagnose(ctx, c.deps.LookPath, c.deps.CommandOutput, snapshot.Frontmost.PID)
 	if !ok || !diag.Blocked {
