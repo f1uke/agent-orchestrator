@@ -473,7 +473,7 @@ Prefer a work item's human-readable name in conversation, but whenever you do wr
 Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`<project>-<num>`" + `.`
 
 // SimulatorGuidance is what a worker in a project that targets iOS is told
-// about the device it can actually look at. Injected only when the project has
+// about the devices it can actually look at. Injected only when the project has
 // opted in (ProjectConfig.HasIOSSimulator), for the same reason the desktop
 // app's Device tab is: on a project with no simulator the commands fail on
 // every machine, and an instruction an agent cannot follow is worse than none.
@@ -482,64 +482,44 @@ Never write a bare session number — always ` + "`@…`" + ` or the full ` + "`
 // already points at. What is here is the part an agent gets wrong without
 // being told: that reading the screen is free but touching it needs a claim,
 // that an element can be named rather than measured, that half of a scrolling
-// screen's elements cannot be tapped from where they are, that one booted
-// device is picked without asking and may be the human's working device rather
-// than a scratch one, that the lease guards the DEVICE and not the command - a
-// raw `xcodebuild -destination` walks straight past it - that an empty
+// screen's elements cannot be tapped from where they are, which devices are its
+// own (simDevices), that the lease guards the DEVICE and not the command - a raw
+// `xcodebuild -destination` walks straight past it - that an empty
 // accessibility tree is a diagnosis about the app rather than a fact about
-// accessibility, and what an agent may do about the device's POWER.
-//
-// That last part used to read "you cannot boot one, so say so and stop". It is
-// now the opposite instruction, and the reversal is the point rather than an
-// edit: `ao sim boot` exists, and until it did, an iOS task on a machine with
-// nothing booted could not take a lease - which is the event that creates the
-// task's qa - so qa could never appear by itself. The asymmetry is what has to
-// survive: an agent may bring a device UP, and nothing more. Shutdown, reboot
-// and erase stay the human's, in the desktop app's Device tab.
+// accessibility, and which API a run should talk to (simAPIMocks).
 //
 // Which `ao sim` commands belong here is a reviewed decision, not an accident:
 // cli.TestSimGuidance_DecidesEverySubcommand holds that list against the real
 // command tree, so a command added later cannot silently default to "omitted".
-//
-// The lease bullet is an INTERIM rule and nothing enforces it: `ao sim` refuses a
-// claim on a device another member holds, but `xcodebuild -destination` never
-// asks, and nothing yet tells an agent which device is supposed to be its own -
-// so with one device booted it reaches for the one its crewmate is driving. The
-// durable fix is a device per crew member with its udid in the agent's
-// environment, so both `ao sim` and a raw `xcodebuild` land on the right one by
-// default. Until that ships, this is a rule an agent can still walk past.
-func SimulatorGuidance() string { return simulatorGuidance }
+func SimulatorGuidance() string { return simulatorGuidance + simAPIMocks(mockToolsCatalog) }
 
-// SimulatorHandoverToQA is the short note a CREW-ELIGIBLE dev gets AFTER the full
-// simulator catalog, and the ordering is the point.
+// SimulatorHandoverToQA is the short note a CREW-ELIGIBLE dev gets AFTER the
+// device block (the catalog, or the script-only block), and the ordering is the
+// point: dev drives its own device while it builds, and hands the verification,
+// not the device, to qa.
 //
-// The block has been written twice, against two different systems, and the second
-// rewrite is the one that matters. It first REPLACED the catalog ("the device is
-// qa's, do not claim it"), which became circular the moment qa was created BY the
-// claim. It then told dev that claiming was what created its qa - true at the
-// time, and the source of the collision this change exists to remove: dev claimed
-// a device, a qa appeared beside it and reached for the same one, and on a
-// machine with a single booted simulator the two undid each other's work.
-//
-// Now the claim creates nobody, so what is left to say is the honest sequencing:
-// drive the device while you are working, and when the change is DONE hand the
-// verification over by asking for a qa. dev keeps the whole catalog either way -
-// it may be alone on this task for its entire life.
+// qa runs on its OWN clone of the same base, so nothing about the device changes
+// hands any more; what has to cross is the BUILD. A qa that rebuilds from the
+// worktree can test a different binary from the one dev meant, so dev names the
+// exact .app and its Build: line, and qa installs that (simQADevBuild).
 //
 // A SOLO worker - every `mechanical` task, and every session on a project that
-// forms no crews - gets the catalog and no note, byte-for-byte what it always had.
+// forms no crews - gets the device block and no note.
 func SimulatorHandoverToQA() string { return simulatorHandoverToQA }
 
 const simulatorHandoverToQA = "\n\n" + `### Drive it while you work, then hand the verification over (AO)
 
-The device is yours while the change is being built: claim it, install, look, release. What you should NOT do is verify your own finished work on it. When you believe the change is done, ask for the agent whose job that is - ` + "`ao crew review`" + ` - and give it the driving: it plays the flows, captures the evidence and reports the results. It is awake and working at the same time as you from the moment it exists, so release the lease and leave the device to it rather than re-playing screens yourself; a lease you leave held is one it is blocked on. Reading (` + "`ao sim ax`" + `, ` + "`ao sim shot`" + `, ` + "`ao sim log`" + `) never needs a claim and never blocks anyone.`
+Your device is yours for the whole task: build, install and look on it while you work. Do not verify your own finished work on it. When you believe the change is done, ask for the agent whose job that is - ` + "`ao crew review`" + ` - and hand it the build:
+
+- **qa gets its own device**, a clone of the same base as yours, never yours. You keep yours and may go on working while qa tests.
+- **Name the exact build qa must install** in your handover: ` + "`ao send --crew qa --about <sha> --message \"<path>.app, Build: <line>\"`" + `, with the ` + "`Build:`" + ` line ` + "`ao sim shot`" + ` or ` + "`ao sim doctor`" + ` printed for it. qa installs that bundle and does not rebuild; if you rebuild after sending it, send the new one.`
 
 const simulatorGuidance = "\n\n" + `## Driving the iOS Simulator (AO)
 
-This project targets iOS, so a booted simulator on this machine is something you can read and drive yourself rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
+This project targets iOS, so you have your own simulator to read and drive rather than reason about blind. Look at the screen before you conclude anything about it, and again after every interaction: a gesture that reports success has not necessarily changed what you expected.
 
-` + "```bash\n" + `ao sim list                     # what exists, and what is booted
-ao sim boot --udid <udid>       # power one ON when none is; already booted is a no-op
+` + "```bash\n" + `ao sim list                     # every device, its role (base, or whose clone) and whether it is booted
+ao sim boot                     # power yours ON; already booted is a no-op
 ao sim claim                    # required before ANY touch; reading never needs it
 ao sim ax                       # the screen as elements: name, state, box, tap point
 ao sim tap --label "Continue"   # tap what ` + "`ao sim ax`" + ` NAMED; it reads the screen itself, so this replaces a read you would have run
@@ -552,9 +532,8 @@ ao sim install ./MyApp.app      # put an already-built bundle on the device
 ao sim launch --terminate-first # start what you just installed
 ao sim release` + "\n```" + `
 
-- **The device is shared** with other AO sessions and with a human in Xcode; the claim excludes other AO sessions only, on every AO daemon here (sandbox daemons too). You may power a device **on and nothing else** - no shutdown, reboot or erase, because those wipe a device or take one from whoever is on it. So when nothing is booted, boot one and carry on; a simulator is a multi-gigabyte VM, so boot the one you need and no more.
-- **The device that is yours is ` + "`$AO_SIM_UDID`" + `**, one per crew member, so ` + "`ao sim`" + ` with no ` + "`--udid`" + ` already means yours. Other tools must be told: ` + "`xcodebuild -destination \"$AO_SIM_DESTINATION\"`" + `, ` + "`maestro --device \"$AO_SIM_UDID\"`" + `. Unset means none was free - then anything that installs or mutates goes on a scratch device you name, never on whichever one is booted.
-- **A lease guards the device, not the command.** ` + "`xcrun simctl`" + ` never consults it, and dev and qa clobber each other just as easily as strangers do. Build and install with ` + "`ao sim run`" + `, a built bundle with ` + "`ao sim install`" + `: both take the lease as part of doing it, and run's build names no device, so it cannot reach one somebody else is driving. A raw ` + "`simctl install`" + ` chained after a claim that FAILED is how somebody's mid-verification build gets overwritten. A refusal names the holder and means nothing was written - wait, or say so.
+` + simDevices + `
+- **A lease guards the device, not the command.** ` + "`xcrun simctl`" + ` and ` + "`xcodebuild -destination`" + ` never consult it, so a raw call aimed at a device that is not yours overwrites whoever is on it - dev and qa clobber each other just as easily as strangers do. Build and install with ` + "`ao sim run`" + `, a built bundle with ` + "`ao sim install`" + `: both take the lease as they install. A refusal names the holder and means nothing was written - wait, or say so.
 - **A screenshot says which build it was of**, because ` + "`xcodebuild test`" + ` reinstalls the app while running tests: captures either side of that look identical and are of different software. Compare the ` + "`Build:`" + ` line before the pictures.
 - **On a device you hold, ` + "`ao sim ax`" + ` reads every process on screen**: a web sign-in sheet, a system alert, the Paste menu, the keyboard. Tap those by name too (` + "`ao sim tap --label Paste`" + `). Its ` + "`Reader:`" + ` line says when it could read only the app, and why.
 - **An element marked ` + "`off screen`" + ` carries no tap point**, because it is on the page and not on the screen. Its ` + "`box`" + ` says how far away it is (a top edge past 1.0 is below the fold): scroll with ` + "`ao sim drag`" + `, read again, then tap. ` + "`covered by`" + ` means under the tab bar, the keyboard's bar or a sheet, which would take the tap: scroll it clear or close the keyboard, then read again.
@@ -581,10 +560,11 @@ Everything else - naming an element by its identifier, typing, buttons, zooming,
 // Injected for qa only, and only on a project that has a simulator: every command
 // here fails on a machine with no device, and an instruction an agent cannot
 // follow is worse than none - the same reason SimulatorGuidance is gated. A dev
-// never sees it (once a qa exists, the device is qa's instrument), and a SOLO
-// worker never sees it either, which keeps the lone-worker prompt byte-for-byte
-// what it was.
-func RecordedFlowLoop() string { return recordedFlowLoop }
+// never sees it (verifying is qa's job), and a SOLO worker never sees it either.
+//
+// It opens with simQADevBuild because this is the one qa-only block on a catalog
+// project: qa's own device and dev's build are what every play it makes rests on.
+func RecordedFlowLoop() string { return simQADevBuild + recordedFlowLoop }
 
 const recordedFlowLoop = "\n\n" + `## Turning a played scenario into a test (AO)
 
@@ -596,7 +576,7 @@ ao sim flow record start --name "<the case>"        # then drive it yourself, or
 ao sim flow record status                           # what it has captured, without stopping it
 ao sim flow record stop --entry <entry flow>        # writes the Maestro flow
 ao sim flow check <flow.yaml>                       # parses it; needs no device at all
-ao sim flow run <flow.yaml> --udid <scratch>        # a flow relaunches the app: never the human's device` + "\n```" + `
+ao sim flow run <flow.yaml>                         # on your own device: a flow relaunches the app` + "\n```" + `
 
 - ` + "`--entry`" + ` answers *how do you even reach that screen*: a recording starts wherever the app already was, and ` + "`--entry`" + ` prepends a shared entry-point flow as ` + "`runFlow`" + ` rather than re-recording the way in every time.
 - ` + "`stop`" + ` writes the flow into your session's artifact directory, OUTSIDE any repository, so committing it is a deliberate act: ` + "`--out`" + ` it into a test path, then ` + "`git commit <paths>`" + ` prefixed ` + "`test:`" + `.
@@ -607,20 +587,17 @@ ao sim flow run <flow.yaml> --udid <scratch>        # a flow relaunches the app:
 // than as a role in a story.
 //
 // The two members are told DIFFERENT things about when the crew exists, and that
-// is the whole of what lazy creation changes here. qa is created the first time
-// dev touches a runtime surface, so qa can always be told "you are both running
+// is the whole of what lazy creation changes here. qa is created when dev asks
+// for one (`ao crew review`), so qa can always be told "you are both running
 // right now" - dev has been running for a while by then - while dev must be told
-// the truth of its own position: alone, possibly for ever, and one `ao sim claim`
-// away from not being. Naming the trigger in dev's own prompt is what stops the
-// instruction from being circular, because the sentence that used to say "the
-// device is qa's, do not claim it" would otherwise stop the only event that ever
-// creates a qa.
+// the truth of its own position: alone, possibly for ever, and one
+// `ao crew review` away from not being.
 //
 // It carries three things a prompt is the right home for and one it is not:
 //
 //   - You are BOTH RUNNING, once there are two of you. Neither waits for the
-//     other, and neither can stand the other down. Anything exclusive - the git
-//     index, the simulator lease, a device - is contended in real time.
+//     other, and neither can stand the other down. The git index is contended
+//     in real time; devices are not, because each member has its own.
 //   - How to address the other one, which is by ROLE and never by id. dev cannot
 //     know qa's id: qa may not exist yet when dev's runtime is launched.
 //   - THE ARTIFACT IS THE REPLY. dev answers a finding by committing; qa answers
@@ -661,22 +638,23 @@ const crewOpeningQA = `You are **qa** on a task worked by TWO agents in ONE work
 // It used to name a TRIGGER: AO created the qa the first time dev touched the
 // app's runtime, and dev was told so as an observation it could neither ask for
 // nor avoid. That is gone. Touching the runtime is when dev STARTS driving the
-// app, so the qa it produced woke up wanting the same device dev was still using,
-// and the two fought over it. The verb is dev's now, and it is stated as an
-// instruction with a TIME on it, because the time is the whole content of the
-// change: when you think it is done, not when you start looking at it.
+// app, so the qa it produced started checking work that was not finished. The
+// verb is dev's now, and it is stated as an instruction with a TIME on it,
+// because the time is the whole content of the change: when you think it is
+// done, not when you start looking at it. The device never changes hands: qa
+// gets its own clone, and dev hands over the build (SimulatorHandoverToQA).
 const crewOpeningDev = `You are **dev**. You are working this task ALONE right now, and a task that never needs a second pair of eyes stays that way: a backend-only change gets no qa and you carry the whole job.
 
-**When you believe the change is DONE and want it checked, ask for a qa:** ` + "`ao crew review`" + ` (no arguments - the task is this session). Ask once the work is finished and your own checks pass, not while you are still driving the app: a qa is a second agent that starts working the moment it exists, and the device, the worktree and the git index are things you will then be sharing in real time. Nothing else creates one, so a task you never ask about is one nobody but you ever looked at - and if you close out having driven the app without asking, AO says so in the report you send.
+**When you believe the change is DONE and want it checked, ask for a qa:** ` + "`ao crew review`" + ` (no arguments - the task is this session). Ask once the work is finished and your own checks pass, not while you are still driving the app: a qa is a second agent that starts working the moment it exists, and the worktree and the git index are things you will then be sharing in real time. Nothing else creates one, so a task you never ask about is one nobody but you ever looked at - and if you close out having driven the app without asking, AO says so in the report you send.
 
-From the moment it exists you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other - and one thing stops being yours alone: the device - release the lease and hand the verification over.`
+From the moment it exists you are TWO agents in ONE worktree, **both running at once** - nothing takes turns, your crewmate is editing, building and committing while you are, and starting one of you never stops the other. Your device stays yours: on an iOS task qa gets its own, and what you hand it is the verification and the build to test.`
 
 const crewProtocolBody = `
 
 **What that means once there are two of you.**
 - **One git index, one branch.** A wide ` + "`git add -A`" + ` sweeps up whatever your crewmate has half-written and commits it under your name. Commit the paths you meant to commit. An occasional ` + "`index.lock`" + ` failure is two commits landing together - retry it, nothing is damaged.
 - **Bracket anything you want to TRUST.** Wrap a build, a test suite or a device pass in ` + "`ao crew run --start --kind build|test|device`" + ` ... ` + "`ao crew run --end --result pass|fail`" + `. AO watches the worktree across that interval and DISCARDS the run if the tree moved under it - a result read off a half-written tree looks fine and means nothing, and this is the only thing that catches it. An unbracketed run is never certified.
-- **Anything exclusive is contended live** - the ` + "`ao sim`" + ` lease above all. Take it when you need it, release it the moment you are done.
+- **Each of you drives only your own devices.** On an iOS task each member has its own simulator; installing on or driving the other's overwrites its work mid-run.
 
 **Talking to %s.** Address the role, never an id:
 

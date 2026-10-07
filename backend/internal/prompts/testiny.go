@@ -103,7 +103,7 @@ const testinyLoop = "\n\n" + `**Playing a run, start to finish.**
 // while it runs, and from then on the daemon refuses its results.
 const testinyNotYours = "\n" + `   - **Refused with ` + "`TESTINY_WRITE_NOT_YOURS`" + `:** a qa has joined your task, and results and evidence are its to record.`
 
-const testinyPlay = `Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.`
+const testinyPlay = `Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. ` + oneShotOrder
 
 const testinyPlayCaseScripts = `Write its case script from that, or check that its script still matches it, then play it with the script, as "Playing test cases with Maestro scripts" above says: its assertions and the Figma comparison are the two checks.`
 
@@ -124,7 +124,7 @@ const testinyEvidenceStep = "\n" + `5. **Upload the evidence and link it on each
    - **Refused because the run has no plan or no milestone:** adding one is a Testiny write, so draft it and ask the human, then run it again once it is added.
    - **Any other refusal** (a closed run, no Drive folder set, Drive sign-in): report it with its message, and never work around it.`
 
-const testinyReportItems = `the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the run's evidence folder and its Drive folder, whether every case's evidence is linked on its result (or what ` + "`ao testiny evidence`" + ` refused and why), and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.`
+const testinyReportItems = `the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), whether each case ran against the real API or which mock set and why, the run's evidence folder and its Drive folder, whether every case's evidence is linked on its result (or what ` + "`ao testiny evidence`" + ` refused and why), and what is left for a person: visual checks with no Figma frame, steps you could not play, and cases a person had already set.`
 
 const testinyReportSolo = "\n6. **Your finish report names** " + testinyReportItems
 

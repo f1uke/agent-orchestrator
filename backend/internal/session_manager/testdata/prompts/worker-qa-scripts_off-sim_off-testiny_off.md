@@ -65,7 +65,7 @@ You are **qa** on a task worked by TWO agents in ONE worktree, and **you are bot
 **What that means once there are two of you.**
 - **One git index, one branch.** A wide `git add -A` sweeps up whatever your crewmate has half-written and commits it under your name. Commit the paths you meant to commit. An occasional `index.lock` failure is two commits landing together - retry it, nothing is damaged.
 - **Bracket anything you want to TRUST.** Wrap a build, a test suite or a device pass in `ao crew run --start --kind build|test|device` ... `ao crew run --end --result pass|fail`. AO watches the worktree across that interval and DISCARDS the run if the tree moved under it - a result read off a half-written tree looks fine and means nothing, and this is the only thing that catches it. An unbracketed run is never certified.
-- **Anything exclusive is contended live** - the `ao sim` lease above all. Take it when you need it, release it the moment you are done.
+- **Each of you drives only your own devices.** On an iOS task each member has its own simulator; installing on or driving the other's overwrites its work mid-run.
 
 **Talking to dev.** Address the role, never an id:
 
