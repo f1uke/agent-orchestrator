@@ -3514,6 +3514,7 @@ export interface components {
             platform: "ios" | "android";
             product: string;
             store?: string;
+            verifySkill?: string;
         };
         DomainReviewerConfig: {
             harness: string;

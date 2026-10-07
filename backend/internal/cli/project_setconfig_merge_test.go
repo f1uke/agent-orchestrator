@@ -109,6 +109,10 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--mobile-scripts-store", "/opt/scripts"},
 		want: domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{Store: "/opt/scripts"}},
 	},
+	"mobile-scripts-verify-skill": {
+		args: []string{"--mobile-scripts-verify-skill", "projects/nter/verify"},
+		want: domain.ProjectConfig{MobileScripts: &domain.MobileScriptsConfig{VerifySkill: "projects/nter/verify"}},
+	},
 	"sim-trust-ca": {
 		args: []string{"--sim-trust-ca", "~/proxy-ca.pem"},
 		want: domain.ProjectConfig{SimTrust: &domain.SimTrustConfig{CAFiles: []string{"~/proxy-ca.pem"}}},
@@ -261,14 +265,14 @@ func TestProjectSetConfig_SeveralFlagsNameSeveralFields(t *testing.T) {
 	}
 }
 
-// The mobile-scripts trio names its one field once, carries all three values,
+// The mobile-scripts flags name their one field once, carry every value,
 // and an empty product with nothing else is how the setting is turned off.
 func TestProjectSetConfig_MobileScriptsFlagsWriteOneSetting(t *testing.T) {
-	got := captureSetConfig(t, "--mobile-scripts", "nter", "--mobile-platform", "ios", "--mobile-scripts-store", "~/scripts")
+	got := captureSetConfig(t, "--mobile-scripts", "nter", "--mobile-platform", "ios", "--mobile-scripts-store", "~/scripts", "--mobile-scripts-verify-skill", "projects/nter/verify")
 	if want := []string{"mobileScripts"}; !reflect.DeepEqual(got.MergeFields, want) {
 		t.Fatalf("mergeFields = %v, want %v", got.MergeFields, want)
 	}
-	want := &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS, Store: "~/scripts"}
+	want := &domain.MobileScriptsConfig{Product: "nter", Platform: domain.MobilePlatformIOS, Store: "~/scripts", VerifySkill: "projects/nter/verify"}
 	if !reflect.DeepEqual(got.Config.MobileScripts, want) {
 		t.Fatalf("mobileScripts = %#v, want %#v", got.Config.MobileScripts, want)
 	}

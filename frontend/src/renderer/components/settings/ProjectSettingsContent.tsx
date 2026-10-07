@@ -648,6 +648,27 @@ function WhatAgentsAreToldSection({ form }: { form: ProjectForm }) {
 					</SettingRow>
 				)}
 
+				{draft.mobileScriptsPlatform !== "" && (
+					<SettingRow
+						name="Verify skill"
+						summary="The project's verify skill, linked into every worktree as .claude/skills/verify. Device guidance then points at it."
+						detail="Optional. The folder holding SKILL.md, relative to the scripts store (e.g. projects/nter/verify). Each task gets it from its own worktree of the store."
+						ownership={{ kind: "project-only" }}
+						timing="next-worker"
+						value={draft.mobileScriptsVerifySkill || "none"}
+						modified={isFieldDirty("mobileScriptsVerifySkill")}
+						controlId="mobileScriptsVerifySkill"
+					>
+						<input
+							id="mobileScriptsVerifySkill"
+							className={INPUT_CLASS}
+							value={draft.mobileScriptsVerifySkill}
+							onChange={(e) => setField("mobileScriptsVerifySkill", e.target.value)}
+							placeholder="projects/<product>/verify"
+						/>
+					</SettingRow>
+				)}
+
 				<SettingRow
 					name="Testiny project"
 					summary="Agents keep this project's manual test cases in Testiny, and tasks get a Testiny tab. Empty turns it off."

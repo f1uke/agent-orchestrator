@@ -150,6 +150,7 @@ ao project set-config <id> [flags]
 | `--mobile-platform string` | With `--mobile-scripts`: the app this repo builds, `ios` (scripts run through `ao sim flow run`) or `android` (through `maestro --device`) | required with `--mobile-scripts` |
 | `--mobile-scripts string` | Drive this project's simulators/emulators ONLY through the scripts of this product (its folder in the scripts store, e.g. `nter`); `""` turns it off | off |
 | `--mobile-scripts-store string` | With `--mobile-scripts`: the scripts store checkout | `~/Documents/Projects/mobile-ui-scripts` |
+| `--mobile-scripts-verify-skill string` | With `--mobile-scripts`: the store-relative folder of the project's verify skill (e.g. `projects/nter/verify`). AO links it into each worktree as `.claude/skills/verify`, from the task's own worktree of the store, and the device guidance defers to it | none |
 | `--model string` | Agent model override (e.g. `claude-opus-4-5`) | - |
 | `--sim-trust-ca string` | Root-CA file (absolute or `~/`) this project's simulators trust on boot and claim, instead of the global list (repeatable). `none` trusts nothing here; `""` goes back to the global list | the global list (Proxyman's CA when present) |
 | `--no-auto-crew` | Never form a crew automatically; a person can still add a qa by hand | off |
@@ -183,8 +184,8 @@ ao project set-config agent-orchestrator --env "NODE_ENV=development" --post-cre
 ```bash
 # A mobile project whose devices are driven only by scripts: the iOS and the
 # Android repo of one product share its scripts (projects/nter in the store).
-# The three --mobile-* flags write one setting together, so pass them together.
-ao project set-config nter-ios-app --mobile-scripts nter --mobile-platform ios
+# The --mobile-* flags write one setting together, so pass them together.
+ao project set-config nter-ios-app --mobile-scripts nter --mobile-platform ios --mobile-scripts-verify-skill projects/nter/verify
 ao project set-config nter-android-app --mobile-scripts nter --mobile-platform android
 ao project set-config nter-ios-app --mobile-scripts ""     # turn it off
 ```

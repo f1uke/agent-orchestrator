@@ -10226,6 +10226,8 @@ components:
           type: string
         store:
           type: string
+        verifySkill:
+          type: string
       required:
       - product
       - platform
