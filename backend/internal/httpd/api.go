@@ -294,6 +294,15 @@ func (a *API) Register(root chi.Router) {
 				a.sessions.RegisterTaskScoped(r)
 			})
 		})
+		// Task-scoped work that takes minutes: the same scoping as above,
+		// without the REST timeout.
+		r.Group(func(r chi.Router) {
+			if resolver, ok := a.sessions.Svc.(controllers.SessionAliasResolver); ok {
+				r.Use(controllers.SessionAlias(resolver))
+			}
+			r.Use(controllers.TaskScoped(a.sessions.Svc))
+			a.testiny.RegisterUntimed(r)
+		})
 		// Long-lived streams intentionally bypass the REST timeout middleware.
 		a.notifications.RegisterStream(r)
 		a.activity.RegisterStream(r)
