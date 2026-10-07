@@ -1,6 +1,8 @@
 package claudecode
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
@@ -95,6 +97,11 @@ func TestDeriveActivityState(t *testing.T) {
 		{"post tool use -> active", "post-tool-use", `{"tool_name":"Bash"}`, domain.ActivityActive, true},
 		{"post tool use failure -> active", "post-tool-use-failure", `{"tool_name":"Bash"}`, domain.ActivityActive, true},
 		{"stop -> idle", "stop", `{}`, domain.ActivityIdle, true},
+		{"stop with no background work -> idle", "stop", `{"background_tasks":[]}`, domain.ActivityIdle, true},
+		{"stop with a running background shell -> background", "stop", `{"background_tasks":[{"id":"b1","type":"shell","status":"running"}]}`, domain.ActivityBackground, true},
+		{"stop with a running background subagent -> background", "stop", `{"background_tasks":[{"id":"a1","type":"subagent","status":"running"}]}`, domain.ActivityBackground, true},
+		{"stop with only finished background work -> idle", "stop", `{"background_tasks":[{"id":"b1","type":"shell","status":"completed"}]}`, domain.ActivityIdle, true},
+		{"stop malformed payload -> idle", "stop", `not json`, domain.ActivityIdle, true},
 		{"notification idle_prompt -> parked", "notification", `{"notification_type":"idle_prompt"}`, domain.ActivityParked, true},
 		{"notification permission_prompt -> waiting_input", "notification", `{"notification_type":"permission_prompt"}`, domain.ActivityWaitingInput, true},
 		{"notification auth_success -> no signal", "notification", `{"notification_type":"auth_success"}`, "", false},
@@ -117,5 +124,18 @@ func TestDeriveActivityState(t *testing.T) {
 					tt.event, tt.payload, got, ok, tt.want, tt.wantOK)
 			}
 		})
+	}
+}
+
+// The Stop payload real Claude Code (2.1.292) sent when a worker ended its turn
+// with a background Bash, a Monitor and a background subagent still running.
+func TestDeriveActivityStateStopWithLiveBackgroundWork(t *testing.T) {
+	payload, err := os.ReadFile(filepath.Join("testdata", "activity", "stop-background.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := DeriveActivityState("stop", payload)
+	if got != domain.ActivityBackground || !ok {
+		t.Fatalf("DeriveActivityState(stop, fixture) = (%q, %v), want (%q, true)", got, ok, domain.ActivityBackground)
 	}
 }

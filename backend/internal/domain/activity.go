@@ -20,11 +20,16 @@ type ActivityState string
 //     prompt. Nobody is blocked and nothing is open; this is precisely the state
 //     in which an agent most needs to be told its CI went red. Injecting here is
 //     what a nudge is for.
+//   - Background: the turn is over but the agent left work running that will
+//     wake it when it lands (a background shell, a Monitor, a background
+//     subagent). Nobody is blocked and the agent is listening, like parked, but
+//     it is not the human's turn: the agent resumes by itself.
 const (
 	ActivityActive       ActivityState = "active"
 	ActivityIdle         ActivityState = "idle"
 	ActivityWaitingInput ActivityState = "waiting_input"
 	ActivityParked       ActivityState = "parked"
+	ActivityBackground   ActivityState = "background"
 	ActivityExited       ActivityState = "exited"
 )
 

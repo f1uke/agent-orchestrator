@@ -22,6 +22,10 @@ const (
 type RuntimeFacts struct {
 	ObservedAt time.Time
 	Probe      ProbeResult
+	// Agent is the reading of the agent process inside the runtime, which can
+	// die while its pane lives on. Probed only for a session waiting on its own
+	// background work, where a dead agent changes the reading; empty otherwise.
+	Agent ProbeResult
 }
 
 // SessionEnd is what an end-of-session hook reports about the ending itself. It

@@ -2050,3 +2050,68 @@ func TestSCMObservation_ReadyToMergeSuppressedWhileWaitingInput(t *testing.T) {
 		t.Fatalf("waiting-input session emitted ready notification: %+v", sink.intents)
 	}
 }
+
+func waitingOnBackgroundWork(id domain.SessionID, stoppedAt time.Time) domain.SessionRecord {
+	rec := working(id)
+	rec.Activity = domain.Activity{State: domain.ActivityBackground, LastActivityAt: stoppedAt}
+	rec.FirstSignalAt = stoppedAt
+	return rec
+}
+
+// Claude Code reports idle_prompt a minute into any quiet prompt, background work
+// or not. It must not turn an agent that will wake itself into one waiting on the
+// human.
+func TestApplyActivitySignal_ParkedDoesNotEndBackgroundWork(t *testing.T) {
+	m, st, _ := newManager()
+	stoppedAt := time.Now().Add(-time.Minute)
+	st.sessions["mer-1"] = waitingOnBackgroundWork("mer-1", stoppedAt)
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityParked}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-1"].Activity; got.State != domain.ActivityBackground || !got.LastActivityAt.Equal(stoppedAt) {
+		t.Fatalf("parked over background work: got %+v, want it unchanged", got)
+	}
+}
+
+func TestApplyActivitySignal_StopWithNothingRunningEndsBackgroundWork(t *testing.T) {
+	m, st, _ := newManager()
+	st.sessions["mer-1"] = waitingOnBackgroundWork("mer-1", time.Now().Add(-time.Hour))
+	if err := m.ApplyActivitySignal(ctx, "mer-1", ports.ActivitySignal{Valid: true, State: domain.ActivityIdle}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.sessions["mer-1"].Activity.State; got != domain.ActivityIdle {
+		t.Fatalf("got %q, want idle", got)
+	}
+}
+
+// An agent that crashed fires no hook, and its pane lives on behind a keep-alive
+// shell. The work it was waiting on died with it, so nothing will wake it: it
+// is back to the idle its last Stop would have been.
+func TestRuntimeObservation_DeadAgentEndsBackgroundWork(t *testing.T) {
+	m, st, _ := newManager()
+	stoppedAt := time.Now().Add(-time.Hour)
+	st.sessions["mer-1"] = waitingOnBackgroundWork("mer-1", stoppedAt)
+	if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Probe: ports.ProbeAlive, Agent: ports.ProbeDead}); err != nil {
+		t.Fatal(err)
+	}
+	got := st.sessions["mer-1"]
+	if got.IsTerminated || got.Activity.State != domain.ActivityIdle || !got.Activity.LastActivityAt.Equal(stoppedAt) {
+		t.Fatalf("got %+v, want idle as of the last Stop and not terminated", got)
+	}
+}
+
+func TestRuntimeObservation_LiveOrUnknownAgentKeepsBackgroundWork(t *testing.T) {
+	for _, agent := range []ports.ProbeResult{ports.ProbeAlive, ports.ProbeFailed, ""} {
+		t.Run(string(agent), func(t *testing.T) {
+			m, st, _ := newManager()
+			st.sessions["mer-1"] = waitingOnBackgroundWork("mer-1", time.Now().Add(-time.Hour))
+			before := st.sessions["mer-1"]
+			if err := m.ApplyRuntimeObservation(ctx, "mer-1", ports.RuntimeFacts{Probe: ports.ProbeAlive, Agent: agent}); err != nil {
+				t.Fatal(err)
+			}
+			if st.sessions["mer-1"] != before {
+				t.Fatalf("got %+v, want unchanged", st.sessions["mer-1"])
+			}
+		})
+	}
+}
