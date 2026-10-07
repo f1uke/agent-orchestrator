@@ -93,13 +93,13 @@ This project keeps its manual test cases in Testiny project `MOB`. You own every
 
 - **Reading Testiny needs no permission.**
 - **Recording a result or linking a case to this task's Jira issue needs no yes.** A result goes on a run already linked to this task: a case's status, with a reason unless it PASSED, and its steps' results. Record it with `ao testiny result`, never with `testiny run results set` directly: AO logs the write, enforces who may write, and updates the Testiny tab. A link only adds the issue to the case as a requirement: linking twice writes nothing, and it never writes to Jira.
-- **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, a milestone link or an attachment. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
-- **Never upload evidence**, to Testiny or anywhere else. Save screenshots and recordings in the run's QA Evidence folder, with the names the skill gives.
+- **Uploading a run's evidence and linking it on each result needs no yes either.** Do it with `ao testiny evidence`, never with `rclone`, `testiny run results comment` or `testiny attach up` directly: AO checks the folder against the skill's names, uploads it to Google Drive, posts each file's link on its case's result in the run without changing the status, and logs every upload and link. It refuses a closed run or one not linked to this task, and never posts a link twice, so running it again is safe.
+- **Every other Testiny write waits for the human's explicit yes**: creating or editing a case, plan or run, or a milestone link. Draft it first at `~/.ao/knowledge/mer/plans/<branch>--testiny.md`, show the human that draft, and run the write only after they approve it. A yes covers the draft you showed and nothing more.
 - **Link each run for this task once it exists**, so it shows in the Testiny tab: `ao testiny link "$AO_CREW_ID" <run-id>`. Linking a run is AO's own record, not a Testiny write, and needs no permission. `ao testiny runs "$AO_CREW_ID"` shows what is linked and each case's status.
 
 **Playing a run, start to finish.**
 
-1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, plan and run, get the human's yes, create them, and link the run.
+1. **Plan.** `ao testiny runs "$AO_CREW_ID"` lists the runs linked to this task. None yet: draft the cases, the plan, and a run of that plan on the sprint's milestone (the evidence folder needs both), get the human's yes, create them, and link the run.
 2. **Link each case to this task's Jira issue** as a requirement: every case you create, right after you create it, and every case in a run linked to this task. Run `testiny case link <case-id> <JIRA-KEY>`, with the key from the `issue` field of `ao session get "$AO_CREW_ID"` (`jira:<KEY>`). If the task has no Jira issue, skip this step and say so in your report.
 3. **Play each case.** Read it first: `ao testiny case "$AO_CREW_ID" <case-id>` prints its test data, precondition, and each step with its expected result. Play it from that, and judge it on two checks: its expected result and, for a case that shows UI, the screen against its Figma frame. A step that cannot be undone (submit, buy, delete) stays a person's.
    - **Test Data** names the int/uat test account and data the case needs: use it to play the case.
@@ -110,7 +110,11 @@ This project keeps its manual test cases in Testiny project `MOB`. You own every
    - **BLOCKED** when you could not drive the case (UNDRIVEABLE), with the reason from your attempt, never a guess.
    - **No Figma frame linked:** record what the expected result gives, and leave the visual check for a person.
    - **Refused with `TESTINY_RESULT_SET_BY_PERSON`:** a person already decided that case or step, and their status stands. Report your finding instead; never retry it or work around it.
-5. **Hand back** to dev with the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the evidence folder path, and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
+5. **Upload the evidence and link it on each result**, before the run is closed: a closed run is frozen. Build the run's folder under QA Evidence as the skill says, every name read from Testiny, with its README and each case's screenshots or recordings. Then run `ao testiny evidence "$AO_CREW_ID" <run-id>`.
+   - **Refused for a name or a file:** fix every problem it lists and run it again.
+   - **Refused because the run has no plan or no milestone:** adding one is a Testiny write, so draft it and ask the human, then run it again once it is added.
+   - **Any other refusal** (a closed run, no Drive folder set, Drive sign-in): report it with its message, and never work around it.
+6. **Hand back** to dev with the commit you tested, each run's link with its counts, every case that did not pass and why, the cases and runs you created, the cases you linked to the Jira issue (or that the task has none), the run's evidence folder and its Drive folder, whether every case's evidence is linked on its result (or what `ao testiny evidence` refused and why), and what is left for a person: visual checks with no Figma frame, steps that cannot be undone, and cases a person had already set.
 
 ## Using the ao CLI
 
