@@ -1,0 +1,21 @@
+{"app_name":"Nimbus","timestamp":"2026-10-08 10:15:00.00 +0700","app_version":"2.4.0","build_version":"318","bundleID":"com.example.Nimbus","bug_type":"309","name":"Nimbus","incident_id":"0000AAAA-0000-0000-0000-000000000001"}
+{
+  "procPath" : "\/Users\/USER\/Library\/Developer\/CoreSimulator\/Devices\/AAAAAAAA-0000-0000-0000-000000000001\/data\/Containers\/Bundle\/Application\/1111AAAA-0000-0000-0000-000000000000\/Nimbus.app\/Nimbus",
+  "exception" : {"type" : "EXC_BREAKPOINT", "signal" : "SIGTRAP", "codes" : "0x0000000000000001"},
+  "termination" : {"namespace" : "SIGNAL", "indicator" : "Trace\/BPT trap: 5", "byProc" : "exc handler", "code" : 5},
+  "asi" : {"libswiftCore.dylib" : ["Nimbus\/ForecastStore.swift:42: Fatal error: Unexpectedly found nil while unwrapping an Optional value"]},
+  "faultingThread" : 1,
+  "threads" : [
+    {"id" : 100, "queue" : "com.apple.main-thread", "frames" : [{"imageOffset" : 2928, "symbol" : "mach_msg2_trap", "symbolLocation" : 8, "imageIndex" : 2}]},
+    {"triggered" : true, "id" : 101, "name" : "worker", "frames" : [
+      {"imageOffset" : 401234, "symbol" : "_assertionFailure(_:_:file:line:flags:)", "symbolLocation" : 156, "imageIndex" : 1},
+      {"imageOffset" : 18432, "sourceLine" : 42, "sourceFile" : "ForecastStore.swift", "symbol" : "ForecastStore.load()", "symbolLocation" : 88, "imageIndex" : 0},
+      {"imageOffset" : 9216, "imageIndex" : 0}
+    ]}
+  ],
+  "usedImages" : [
+    {"name" : "Nimbus", "path" : "\/Users\/USER\/Library\/Developer\/CoreSimulator\/Devices\/AAAAAAAA-0000-0000-0000-000000000001\/data\/Containers\/Bundle\/Application\/1111AAAA-0000-0000-0000-000000000000\/Nimbus.app\/Nimbus"},
+    {"name" : "libswiftCore.dylib", "path" : "\/usr\/lib\/swift\/libswiftCore.dylib"},
+    {"path" : "\/usr\/lib\/system\/libsystem_kernel.dylib"}
+  ]
+}

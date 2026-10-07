@@ -1,0 +1,9 @@
+{"app_name":"Lantern","timestamp":"2026-10-08 09:30:00.00 +0700","app_version":"1.0","build_version":"1","bundleID":"com.example.Lantern","bug_type":"309","name":"Lantern","incident_id":"0000AAAA-0000-0000-0000-000000000003"}
+{
+  "procPath" : "\/Users\/USER\/Library\/Developer\/CoreSimulator\/Devices\/AAAAAAAA-0000-0000-0000-000000000001\/data\/Containers\/Bundle\/Application\/5555EEEE-0000-0000-0000-000000000000\/Lantern.app\/Lantern",
+  "exception" : {"type" : "EXC_BAD_ACCESS", "signal" : "SIGSEGV"},
+  "termination" : {"indicator" : "Segmentation fault: 11", "byProc" : "exc handler"},
+  "faultingThread" : 0,
+  "threads" : [{"triggered" : true, "frames" : [{"imageOffset" : 64, "imageIndex" : 0}]}],
+  "usedImages" : [{"name" : "Lantern", "path" : "\/x\/Lantern.app\/Lantern"}]
+}
