@@ -771,9 +771,17 @@ func Run() error {
 		logSimSweep(log, report)
 		return err
 	}
-	if err := sweepSimClones(ctx); err != nil {
-		log.Warn("simulator clean-up on boot failed", "err", err)
-	}
+	// The boot sweep runs off the start path: it lists the machine's devices,
+	// and a cold `simctl list` can outlast any readiness wait. Ending sessions
+	// and restores are safe alongside it, since each session is swept under its
+	// own lock.
+	simBootSweepDone := make(chan struct{})
+	go func() {
+		defer close(simBootSweepDone)
+		if err := sweepSimClones(ctx); err != nil {
+			log.Warn("simulator clean-up on boot failed", "err", err)
+		}
+	}()
 	stopSimEndings := cdcPipe.Broadcaster.Subscribe(func(e cdc.Event) {
 		if !sessionEnded(e) {
 			return
@@ -831,6 +839,7 @@ func Run() error {
 	<-queueSweepDone
 	<-simOwnerSyncDone
 	<-simCloneSweepDone
+	<-simBootSweepDone
 	<-orchSyncDone
 	<-knowledgeMigrationDone
 	<-legacySmokeCleanupDone
