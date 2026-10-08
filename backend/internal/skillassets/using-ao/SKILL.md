@@ -11,6 +11,7 @@ description: Catalog of the AO (Agent Orchestrator) `ao` CLI - spawning workers,
 |---|---|---|---|
 | `spawn` | Spawn a worker agent in a fresh git worktree | Starting a new task or issue | [commands/spawn.md](commands/spawn.md) |
 | `session` | Manage agent sessions (list, kill, rename, restore, etc.) | Inspecting or controlling running/terminated sessions | [commands/session.md](commands/session.md) |
+| `claude-profile` | List the Claude profiles (named Claude Code settings files) claude-code sessions launch with | Choosing a profile for a spawn, a project or a running session | [commands/session.md](commands/session.md) |
 | `project` | Register, inspect, configure, or remove projects | Setting up or managing repos AO knows about | [commands/project.md](commands/project.md) |
 | `orchestrator` | List orchestrator sessions | Viewing which sessions are orchestrators | [commands/orchestrator.md](commands/orchestrator.md) |
 | `review` | Submit a reviewer result for a worker's PR | Completing a code review loop | [commands/review.md](commands/review.md) |
