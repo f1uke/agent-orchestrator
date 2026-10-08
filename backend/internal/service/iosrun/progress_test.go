@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func writeProgress(t *testing.T, svc *Service, id string, progress Progress) {
 
 func TestCurrent_CarriesTheProgressTheCommandReported(t *testing.T) {
 	svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), &fakeRuntime{alive: true})
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	started := time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)
@@ -48,7 +49,7 @@ func TestCurrent_CarriesTheProgressTheCommandReported(t *testing.T) {
 
 func TestCurrent_DropsProgressOnceTheRunHasAVerdict(t *testing.T) {
 	svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), &fakeRuntime{alive: true})
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	writeProgress(t, svc, "mer-9", Progress{Stage: StageLaunching, StageStartedAt: time.Now()})
@@ -62,11 +63,11 @@ func TestCurrent_DropsProgressOnceTheRunHasAVerdict(t *testing.T) {
 
 func TestStart_ClearsThePreviousRunsProgress(t *testing.T) {
 	svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), &fakeRuntime{alive: true})
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	writeProgress(t, svc, "mer-9", Progress{Stage: StageLaunching, StageStartedAt: time.Now()})
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if run, _, _ := svc.Current(context.Background(), "mer-9"); run.Stage != "" {
@@ -76,7 +77,7 @@ func TestStart_ClearsThePreviousRunsProgress(t *testing.T) {
 
 func finishWith(t *testing.T, svc *Service, configuration string, seconds float64, at time.Time) {
 	t.Helper()
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", configuration, ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: configuration, UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunSucceeded, FinishedAt: &at, BuildSeconds: seconds})
@@ -91,13 +92,13 @@ func TestCurrent_EstimatesFromTheLastSuccessfulBuildOfTheSameSchemeAndConfigurat
 	finishWith(t, svc, "Dev", 102, time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC))
 
 	restarted := stateful(t, worktree(t, "Nter.xcodeproj"), state, &fakeRuntime{alive: true})
-	if _, err := restarted.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := restarted.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if run, _, _ := restarted.Current(context.Background(), "mer-9"); run.LastBuildSeconds != 102 {
 		t.Fatalf("lastBuildSeconds = %v, want 102 from the last Dev build", run.LastBuildSeconds)
 	}
-	if _, err := restarted.Start(context.Background(), "mer-9", "Nter", "UAT", ""); err != nil {
+	if _, err := restarted.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "UAT", UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	if run, _, _ := restarted.Current(context.Background(), "mer-9"); run.LastBuildSeconds != 0 {
@@ -168,7 +169,7 @@ func stoppable(t *testing.T, args string) (*Service, *[]int) {
 			func(context.Context, int) (string, error) { return args, nil },
 			func(pid int) error { signalled = append(signalled, pid); return nil },
 		))
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	return svc, &signalled
@@ -228,7 +229,7 @@ func TestExcerptWithoutAnErrorIsTheEnd(t *testing.T) {
 func TestCurrent_NamesTheIssuesRelativeToTheWorktree(t *testing.T) {
 	dir := worktree(t, "Nter.xcodeproj")
 	svc := stateful(t, dir, t.TempDir(), &fakeRuntime{alive: true})
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatal(err)
 	}
 	writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunFailed, Errors: 2, Warnings: 7, Issues: []xcresultstream.Issue{
@@ -238,5 +239,41 @@ func TestCurrent_NamesTheIssuesRelativeToTheWorktree(t *testing.T) {
 	run, _, _ := svc.Current(context.Background(), "mer-9")
 	if run.Errors != 2 || run.Warnings != 7 || run.Issues[0].File != filepath.Join("App", "AppDelegate.swift") || run.Issues[1].File != "/elsewhere/Lib.swift" {
 		t.Fatalf("run = %+v", run)
+	}
+}
+
+func TestStart_PassesTheModeToTheCommand(t *testing.T) {
+	cases := map[Mode][]string{
+		ModeRun:                {"--attach"},
+		ModeRunWithoutBuilding: {"--attach", "--no-build"},
+		ModeBuild:              {"--build-only"},
+		ModeCleanBuild:         {"--attach", "--clean"},
+	}
+	for mode, want := range cases {
+		rt := &fakeRuntime{}
+		svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), rt)
+		run, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", Mode: mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		argv := strings.Join(rt.created[0].Argv, " ")
+		for _, flag := range want {
+			if !strings.Contains(argv, flag) {
+				t.Errorf("%s: argv %q is missing %s", mode, argv, flag)
+			}
+		}
+		if mode == ModeBuild && strings.Contains(argv, "--attach") {
+			t.Errorf("a build-only run has no app to stay with: %q", argv)
+		}
+		if run.Mode != mode {
+			t.Errorf("run.Mode = %q, want %q", run.Mode, mode)
+		}
+	}
+}
+
+func TestStart_RefusesAModeItDoesNotKnow(t *testing.T) {
+	svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), &fakeRuntime{})
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", Mode: "archive"}); err == nil {
+		t.Fatal("an unknown mode must be refused, not run as something else")
 	}
 }

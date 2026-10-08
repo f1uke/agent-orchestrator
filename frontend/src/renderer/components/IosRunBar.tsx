@@ -17,6 +17,7 @@ import {
 	useStartIosRun,
 	useStopIosRun,
 	type IosProject,
+	type StartIosRunRequest,
 	type IosRun,
 } from "../hooks/useIosProject";
 import { useSessionNames } from "../hooks/useSessionNames";
@@ -30,6 +31,7 @@ import { cn } from "../lib/utils";
 import type { TerminalTarget } from "../types/terminal";
 import { BuildIssuesSheet, issueCounts } from "./BuildIssuesSheet";
 import { SimDevicePicker } from "./SimDevicePicker";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { XcodegenResultSheet, type XcodegenViewState } from "./XcodegenResultSheet";
 
@@ -160,7 +162,7 @@ export function IosRunBar({
 
 	const watchingRun = terminalTarget.kind === "run";
 	const noSimulators = !devices.isLoading && allDevices.length === 0;
-	const blocked = blockedReason({
+	const blockedFacts = {
 		project,
 		schemes,
 		configurations,
@@ -169,40 +171,46 @@ export function IosRunBar({
 		chosenUdid,
 		noSimulators,
 		booted: booted.length,
-	});
+	};
+	const blocked = blockedReason(blockedFacts);
+	const blockedToBuild = blockedReason({ ...blockedFacts, needsDevice: false });
+	const runAs = (mode: RunMode) => {
+		if (!chosenScheme || !chosenConfiguration) return;
+		start.mutate(
+			{ scheme: chosenScheme, configuration: chosenConfiguration, udid: chosenUdid ?? undefined, mode },
+			{ onSuccess: (started) => onShowRun(started.handleId) },
+		);
+	};
 
 	return (
 		<div
 			className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-raised px-2 py-1.5"
 			data-testid="ios-run-bar"
 		>
-			<button
-				aria-label={chosenScheme ? `Run ${chosenScheme}` : "Run"}
-				className={cn(
-					"flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium transition-colors",
-					blocked ? "cursor-not-allowed text-passive" : "bg-accent text-accent-foreground hover:brightness-110",
-				)}
-				disabled={Boolean(blocked) || start.isPending}
-				onClick={() => {
-					if (!chosenScheme || !chosenConfiguration) return;
-					start.mutate(
-						{ scheme: chosenScheme, configuration: chosenConfiguration, udid: chosenUdid ?? undefined },
-						{ onSuccess: (started) => onShowRun(started.handleId) },
-					);
-				}}
-				title={blocked ?? `Build ${chosenScheme} (${chosenConfiguration}) and run it`}
-				type="button"
-			>
-				{start.isPending ? (
-					<Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
-				) : (
-					// Filled, not lucide's outline. At 14px a hollow triangle on the
-					// accent fill reads as an outline of a button rather than the
-					// play mark every run control in every tool uses.
-					<Play aria-hidden className="size-3.5" fill="currentColor" />
-				)}
-				Run
-			</button>
+			<div className="flex h-7 shrink-0 items-stretch">
+				<button
+					aria-label={chosenScheme ? `Run ${chosenScheme}` : "Run"}
+					className={cn(
+						"flex items-center gap-1.5 rounded-l-md pr-2 pl-2.5 text-[12px] font-medium transition-colors",
+						blocked ? "cursor-not-allowed text-passive" : "bg-accent text-accent-foreground hover:brightness-110",
+					)}
+					disabled={Boolean(blocked) || start.isPending}
+					onClick={() => runAs("run")}
+					title={blocked ?? `Build ${chosenScheme} (${chosenConfiguration}) and run it`}
+					type="button"
+				>
+					{start.isPending ? (
+						<Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+					) : (
+						// Filled, not lucide's outline. At 14px a hollow triangle on the
+						// accent fill reads as an outline of a button rather than the
+						// play mark every run control in every tool uses.
+						<Play aria-hidden className="size-3.5" fill="currentColor" />
+					)}
+					Run
+				</button>
+				<RunMenu blocked={blocked} blockedToBuild={blockedToBuild} disabled={start.isPending} onRun={runAs} />
+			</div>
 			<StopButton onStop={() => stop.mutate()} pending={stop.isPending} run={run} />
 
 			{specs.length > 0 ? <XcodegenButton sessionId={sessionId} specs={specs} /> : null}
@@ -285,7 +293,10 @@ function blockedReason({
 	chosenUdid,
 	noSimulators,
 	booted,
+	needsDevice = true,
 }: {
+	/** False for a build that installs nothing, which needs no simulator. */
+	needsDevice?: boolean;
 	project: IosProject;
 	/** The scheme list the component already normalised - never the raw payload. */
 	schemes: string[];
@@ -297,7 +308,9 @@ function blockedReason({
 	noSimulators: boolean;
 	booted: number;
 }): string | null {
-	if (noSimulators) return "This machine has no iOS Simulators installed, so there is nothing to run the app on.";
+	if (needsDevice && noSimulators) {
+		return "This machine has no iOS Simulators installed, so there is nothing to run the app on.";
+	}
 	if (schemes.length === 0) {
 		return project.schemesError || `${project.name} listed no schemes, so there is nothing to build.`;
 	}
@@ -313,7 +326,7 @@ function blockedReason({
 		);
 	}
 	if (!chosenConfiguration) return "Choose which build configuration to run - it is the app's environment.";
-	if (!chosenUdid) {
+	if (needsDevice && !chosenUdid) {
 		// Several booted is the ambiguity; several installed and none booted is
 		// the other one, and they want different words - the second asks the
 		// human which multi-gigabyte device to start.
@@ -497,7 +510,7 @@ function RunChip({
 		},
 		succeeded: {
 			icon: <CheckCircle2 aria-hidden className="size-3.5 text-success" />,
-			label: `Ran ${built}`,
+			label: run.mode === "build" ? `Built ${built}` : `Ran ${built}`,
 			tone: "text-muted-foreground",
 		},
 		failed: {
@@ -545,6 +558,64 @@ function RunChip({
 				/>
 			) : null}
 		</>
+	);
+}
+
+type RunMode = NonNullable<StartIosRunRequest["mode"]>;
+
+const RUN_MENU: { mode: RunMode; label: string; detail: string; buildsOnly?: boolean }[] = [
+	{ mode: "run-without-building", label: "Run without building", detail: "Install and launch the last build" },
+	{ mode: "build", label: "Build only", detail: "Build, and touch no simulator", buildsOnly: true },
+	{ mode: "clean-build", label: "Clean build", detail: "Delete this worktree's DerivedData, then build and run" },
+];
+
+function RunMenu({
+	blocked,
+	blockedToBuild,
+	disabled,
+	onRun,
+}: {
+	blocked: string | null;
+	blockedToBuild: string | null;
+	disabled: boolean;
+	onRun: (mode: RunMode) => void;
+}) {
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<button
+					aria-label="More ways to run"
+					className={cn(
+						"flex w-5 items-center justify-center rounded-r-md border-l transition-colors",
+						blockedToBuild
+							? "cursor-not-allowed border-border text-passive"
+							: "border-black/15 bg-accent text-accent-foreground hover:brightness-110",
+					)}
+					disabled={disabled || Boolean(blockedToBuild)}
+					title="Run without building, build only, clean build"
+					type="button"
+				>
+					<ChevronDown aria-hidden className="size-3" />
+				</button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start" className="w-64">
+				{RUN_MENU.map((item) => {
+					const reason = item.buildsOnly ? blockedToBuild : blocked;
+					return (
+						<DropdownMenuItem
+							className="flex-col items-start gap-0.5"
+							disabled={Boolean(reason)}
+							key={item.mode}
+							onSelect={() => onRun(item.mode)}
+							title={reason ?? undefined}
+						>
+							<span className="text-[12px] text-foreground">{item.label}</span>
+							<span className="text-[11px] text-muted-foreground">{item.detail}</span>
+						</DropdownMenuItem>
+					);
+				})}
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 

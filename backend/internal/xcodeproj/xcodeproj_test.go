@@ -530,3 +530,51 @@ func TestRecoverFailedOutputKeepsTheInnermostFailures(t *testing.T) {
 		t.Fatalf("recovered:\n%q\nwant:\n%q", got, want)
 	}
 }
+
+func TestOwnDerivedDataAcceptsOnlyThisProjectsFolder(t *testing.T) {
+	root := t.TempDir()
+	worktree := filepath.Join(root, "worktrees", "feature-x")
+	project := Project{Name: "NterWorkspace.xcworkspace", Path: filepath.Join(worktree, "NterWorkspace.xcworkspace"), Kind: KindWorkspace}
+	shared := filepath.Join(root, "Library", "Developer", "Xcode", "DerivedData")
+	ours := filepath.Join(shared, "NterWorkspace-abcdefgh")
+	theirs := filepath.Join(shared, "NterWorkspace-zzzzzzzz")
+	writePlist := func(dir, workspace string) {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		body := "<plist><dict><key>WorkspacePath</key>\n\t<string>" + workspace + "</string></dict></plist>"
+		if err := os.WriteFile(filepath.Join(dir, "info.plist"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePlist(ours, project.Path)
+	writePlist(theirs, filepath.Join(root, "worktrees", "other", "NterWorkspace.xcworkspace"))
+
+	products := func(dd string) string { return filepath.Join(dd, "Build", "Products") }
+	cases := []struct {
+		name     string
+		buildDir string
+		want     string
+	}{
+		{"this worktree's folder under the shared root", products(ours), ours},
+		{"a workspace-relative folder inside the worktree", products(filepath.Join(worktree, "derivedDataPath")), filepath.Join(worktree, "derivedDataPath")},
+		{"another worktree's folder of the same project", products(theirs), ""},
+		{"the shared root itself", products(shared), ""},
+		{"a folder of another project", products(filepath.Join(shared, "AdvisorAppWorkspace-abcdefgh")), ""},
+		{"a folder holding the worktree", products(root), ""},
+		{"the worktree itself", products(worktree), ""},
+		{"a build dir not in Xcode's layout", filepath.Join(worktree, "build"), ""},
+	}
+	for _, c := range cases {
+		got, err := OwnDerivedData(c.buildDir, worktree, project)
+		if c.want == "" {
+			if err == nil {
+				t.Errorf("%s: accepted %s, want a refusal", c.name, got)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("%s: got %q, %v; want %q", c.name, got, err, c.want)
+		}
+	}
+}

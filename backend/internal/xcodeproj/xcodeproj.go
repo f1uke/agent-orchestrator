@@ -28,9 +28,11 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -611,6 +613,27 @@ type settingsOutput struct {
 // usually right, and an install that silently puts yesterday's build on the
 // device the rest of the time.
 func ProductPath(ctx context.Context, run Runner, dir string, project Project, scheme, configuration string) (string, error) {
+	settings, err := appSettings(ctx, run, dir, project, scheme, configuration)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(settings["TARGET_BUILD_DIR"], settings["FULL_PRODUCT_NAME"]), nil
+}
+
+// BuildDir is the scheme's BUILD_DIR, `<DerivedData>/Build/Products` for a
+// project that keeps Xcode's layout.
+func BuildDir(ctx context.Context, run Runner, dir string, project Project, scheme, configuration string) (string, error) {
+	settings, err := appSettings(ctx, run, dir, project, scheme, configuration)
+	if err != nil {
+		return "", err
+	}
+	if settings["BUILD_DIR"] == "" {
+		return "", fmt.Errorf("the build settings for %s name no BUILD_DIR", scheme)
+	}
+	return settings["BUILD_DIR"], nil
+}
+
+func appSettings(ctx context.Context, run Runner, dir string, project Project, scheme, configuration string) (map[string]string, error) {
 	args := append(append([]string{"xcodebuild", "-showBuildSettings", "-json"}, project.Flag()...),
 		"-scheme", scheme,
 		"-configuration", configuration,
@@ -618,21 +641,85 @@ func ProductPath(ctx context.Context, run Runner, dir string, project Project, s
 	)
 	out, err := run(ctx, dir, Binary, args...)
 	if err != nil {
-		return "", fmt.Errorf("`xcodebuild -showBuildSettings` failed for %s: %w: %s", scheme, err, tail(out))
+		return nil, fmt.Errorf("`xcodebuild -showBuildSettings` failed for %s: %w: %s", scheme, err, tail(out))
 	}
 	var parsed []settingsOutput
 	if err := json.Unmarshal(trimToJSON(out), &parsed); err != nil {
-		return "", fmt.Errorf("could not read the build settings for %s: %w", scheme, err)
+		return nil, fmt.Errorf("could not read the build settings for %s: %w", scheme, err)
 	}
 	for _, entry := range parsed {
-		dir, product := entry.BuildSettings["TARGET_BUILD_DIR"], entry.BuildSettings["FULL_PRODUCT_NAME"]
-		if dir == "" || !strings.HasSuffix(product, ".app") {
+		if entry.BuildSettings["TARGET_BUILD_DIR"] == "" || !strings.HasSuffix(entry.BuildSettings["FULL_PRODUCT_NAME"], ".app") {
 			continue
 		}
-		return filepath.Join(dir, product), nil
+		return entry.BuildSettings, nil
 	}
-	return "", ErrNoProduct
+	return nil, ErrNoProduct
 }
+
+// OwnDerivedData is the DerivedData directory that belongs to this worktree's
+// project, read from its BUILD_DIR, or an error when that cannot be shown. A
+// clean deletes it, so it accepts only Xcode's own two layouts:
+//
+//   - `<root>/DerivedData/<Name>-<hash>`, per workspace, where Name is the
+//     project's and an info.plist, when there is one, names this project;
+//   - a directory inside the worktree itself (a workspace-relative location).
+//
+// Never the DerivedData root, never a directory holding the worktree.
+func OwnDerivedData(buildDir, worktree string, project Project) (string, error) {
+	clean := filepath.Clean(buildDir)
+	suffix := string(filepath.Separator) + filepath.Join("Build", "Products")
+	if !strings.HasSuffix(clean, suffix) {
+		return "", fmt.Errorf("BUILD_DIR %s is not <DerivedData>/Build/Products, so there is no DerivedData of this project's own to clean", buildDir)
+	}
+	dd := strings.TrimSuffix(clean, suffix)
+	worktree = filepath.Clean(worktree)
+	if dd == worktree || isWithin(worktree, dd) {
+		return "", fmt.Errorf("%s holds this worktree, so it is not DerivedData to delete", dd)
+	}
+	if isWithin(dd, worktree) {
+		return dd, nil
+	}
+	name := strings.TrimSuffix(project.Name, filepath.Ext(project.Name))
+	base := filepath.Base(dd)
+	if filepath.Base(filepath.Dir(dd)) != "DerivedData" || name == "" || !strings.HasPrefix(base, name+"-") || len(base) <= len(name)+1 {
+		return "", fmt.Errorf("%s is not %s's own DerivedData folder (DerivedData/%s-<hash>)", dd, project.Name, name)
+	}
+	if owner, ok := derivedDataOwner(dd); ok && !samePath(owner, project.Path) {
+		return "", fmt.Errorf("%s belongs to %s, not this worktree's %s", dd, owner, project.Path)
+	}
+	return dd, nil
+}
+
+func samePath(a, b string) bool {
+	resolve := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return filepath.Clean(p)
+	}
+	return resolve(a) == resolve(b)
+}
+
+func isWithin(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// derivedDataOwner reads the WorkspacePath Xcode records in a DerivedData
+// folder's info.plist, when it wrote one.
+func derivedDataOwner(dd string) (string, bool) {
+	body, err := os.ReadFile(filepath.Join(dd, "info.plist")) //nolint:gosec // a DerivedData folder's own record
+	if err != nil {
+		return "", false
+	}
+	m := workspacePathKey.FindSubmatch(body)
+	if m == nil {
+		return "", false
+	}
+	return html.UnescapeString(string(m[1])), true
+}
+
+var workspacePathKey = regexp.MustCompile(`<key>WorkspacePath</key>\s*<string>([^<]*)</string>`)
 
 // trimToJSON drops anything xcodebuild printed before its JSON.
 //

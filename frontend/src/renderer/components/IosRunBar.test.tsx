@@ -111,7 +111,7 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A" } }),
+				expect.objectContaining({ body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A", mode: "run" } }),
 			),
 		);
 		// The build output has to be where the human is looking, or it is a
@@ -191,7 +191,7 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE" } }),
+				expect.objectContaining({ body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE", mode: "run" } }),
 			),
 		);
 	});
@@ -465,7 +465,7 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A" } }),
+				expect.objectContaining({ body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A", mode: "run" } }),
 			),
 		);
 	});
@@ -705,5 +705,40 @@ describe("IosRunBar", () => {
 
 		await userEvent.click(screen.getByRole("button", { name: /App\/AppDelegate.swift:12:5/ }));
 		expect(onOpenWorkspaceFile).toHaveBeenCalledWith({ path: "App/AppDelegate.swift", line: 12, column: 5 });
+	});
+
+	it("offers running without building, building only and a clean build", async () => {
+		answer({ ios: { project: project({ schemes: ["Nter"] }) } });
+		postMock.mockResolvedValue({ data: { run: { handleId: "h", scheme: "Nter", state: "running" } } });
+		renderBar();
+		await waitFor(() => expect(screen.getByRole("button", { name: "Run Nter" })).toBeEnabled());
+		await userEvent.click(screen.getByRole("button", { name: "More ways to run" }));
+		for (const label of ["Run without building", "Build only", "Clean build"]) {
+			expect(await screen.findByText(label)).toBeInTheDocument();
+		}
+		await userEvent.click(screen.getByText("Clean build"));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: expect.objectContaining({ mode: "clean-build" }) }),
+			),
+		);
+	});
+
+	it("builds without a simulator, which Run itself needs", async () => {
+		answer({ ios: { project: project({ schemes: ["Nter"] }) }, devices: [] });
+		postMock.mockResolvedValue({ data: { run: { handleId: "h", scheme: "Nter", state: "running" } } });
+		renderBar();
+		const more = await screen.findByRole("button", { name: "More ways to run" });
+		await waitFor(() => expect(more).toBeEnabled());
+		expect(screen.getByRole("button", { name: "Run Nter" })).toBeDisabled();
+		await userEvent.click(more);
+		await userEvent.click(await screen.findByText("Build only"));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: expect.objectContaining({ mode: "build", scheme: "Nter" }) }),
+			),
+		);
 	});
 });

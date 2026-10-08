@@ -3568,6 +3568,11 @@ export interface components {
         ControllersStartIOSRunInput: {
             /** @description The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects. */
             configuration: string;
+            /**
+             * @description run builds, installs and launches; run-without-building installs and launches the last build; build builds and touches no device; clean-build deletes this worktree's own DerivedData first. Omitted is run.
+             * @enum {string}
+             */
+            mode?: "run" | "run-without-building" | "build" | "clean-build";
             /** @description The Xcode scheme to build, as listed on the project. */
             scheme: string;
             /** @description The simulator to install and launch on. Omitted uses the one assigned to this session. */
@@ -3922,6 +3927,11 @@ export interface components {
              * @description How long the last successful build of the same project, scheme and configuration took. Present while running when there is one.
              */
             lastBuildSeconds?: number;
+            /**
+             * @description What the run does. Absent is run.
+             * @enum {string}
+             */
+            mode?: "run" | "run-without-building" | "build" | "clean-build";
             scheme: string;
             /**
              * @description The step a running run is on. Absent once it has ended.

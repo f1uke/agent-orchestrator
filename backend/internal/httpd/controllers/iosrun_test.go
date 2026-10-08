@@ -30,7 +30,7 @@ func (f *fakeIOSRun) Project(_ context.Context, _ domain.SessionID, refresh bool
 	return f.project, nil
 }
 
-func (f *fakeIOSRun) Start(context.Context, domain.SessionID, string, string, string) (iosrunsvc.Run, error) {
+func (f *fakeIOSRun) Start(context.Context, domain.SessionID, iosrunsvc.StartRequest) (iosrunsvc.Run, error) {
 	return iosrunsvc.Run{}, nil
 }
 

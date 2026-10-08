@@ -121,10 +121,39 @@ const (
 	RunStopped RunState = "stopped"
 )
 
+// Mode is what Run does: the whole loop, or one part of it.
+type Mode string
+
+const (
+	ModeRun Mode = "run"
+	// ModeRunWithoutBuilding installs and launches what the last build left.
+	ModeRunWithoutBuilding Mode = "run-without-building"
+	// ModeBuild builds and touches no device.
+	ModeBuild Mode = "build"
+	// ModeCleanBuild deletes this worktree's own DerivedData, then runs.
+	ModeCleanBuild Mode = "clean-build"
+)
+
+var modeFlags = map[Mode]string{
+	ModeRun:                "",
+	ModeRunWithoutBuilding: "--no-build",
+	ModeBuild:              "--build-only",
+	ModeCleanBuild:         "--clean",
+}
+
+// StartRequest is what the bar asks a run for.
+type StartRequest struct {
+	Scheme        string
+	Configuration string
+	UDID          string
+	Mode          Mode
+}
+
 // Run is a build the bar started, and what became of it.
 type Run struct {
 	// HandleID is the runtime handle the renderer attaches its terminal to.
 	HandleID string `json:"handleId"`
+	Mode     Mode   `json:"mode,omitempty" enum:"run,run-without-building,build,clean-build" description:"What the run does. Absent is run."`
 	Scheme   string `json:"scheme"`
 	// Configuration is the environment it was built for. Recorded so the bar can
 	// re-select what is already running rather than resetting to a default, and
@@ -173,7 +202,7 @@ type Manager interface {
 	// Project reads what this session can build. refresh skips the cache, which
 	// is what opening a picker in the bar does.
 	Project(ctx context.Context, id domain.SessionID, refresh bool) (Project, error)
-	Start(ctx context.Context, id domain.SessionID, scheme, configuration, udid string) (Run, error)
+	Start(ctx context.Context, id domain.SessionID, req StartRequest) (Run, error)
 	Current(ctx context.Context, id domain.SessionID) (Run, bool, error)
 	Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.Result, error)
 	Stop(ctx context.Context, id domain.SessionID) (Run, error)
@@ -462,7 +491,16 @@ func (s *Service) remember(id domain.SessionID, project Project, at time.Time) {
 // run safe - the lease taken before the build, the build that names no device,
 // the boot cap - lives there and is exercised identically whether a human
 // pressed a button or an agent typed the command.
-func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, configuration, udid string) (Run, error) {
+func (s *Service) Start(ctx context.Context, id domain.SessionID, req StartRequest) (Run, error) {
+	scheme, configuration, udid := req.Scheme, req.Configuration, req.UDID
+	mode := req.Mode
+	if mode == "" {
+		mode = ModeRun
+	}
+	flag, ok := modeFlags[mode]
+	if !ok {
+		return Run{}, apierr.Invalid("IOS_RUN_UNKNOWN_MODE", fmt.Sprintf("%q is not a way to run.", mode), nil)
+	}
 	dir, err := s.workspace(ctx, id)
 	if err != nil {
 		return Run{}, err
@@ -513,7 +551,14 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	}
 	// --attach keeps the command with the app it launched, so Stop always has a
 	// process to reach: the build while it builds, the app once it runs.
-	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme, "--configuration", configuration, "--attach"}
+	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme, "--configuration", configuration}
+	if mode != ModeBuild {
+		argv = append(argv, "--attach")
+	}
+	if flag != "" {
+		argv = append(argv, flag)
+	}
+
 	if trimmed := strings.TrimSpace(udid); trimmed != "" {
 		argv = append(argv, "--udid", trimmed)
 	}
@@ -541,6 +586,7 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	}
 	run := Run{
 		HandleID:      handle,
+		Mode:          mode,
 		Scheme:        scheme,
 		Configuration: configuration,
 		UDID:          strings.TrimSpace(udid),

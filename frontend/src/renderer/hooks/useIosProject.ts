@@ -140,7 +140,7 @@ export function useRunXcodegen(sessionId: string) {
 	});
 }
 
-export type StartIosRunRequest = { scheme: string; configuration: string; udid?: string };
+export type StartIosRunRequest = components["schemas"]["ControllersStartIOSRunInput"];
 
 /**
  * Pressing Run. The daemon starts `ao sim run` in a pane of its own and hands
@@ -151,10 +151,10 @@ export type StartIosRunRequest = { scheme: string; configuration: string; udid?:
 export function useStartIosRun(sessionId: string, onProblem: (message: string) => void) {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async ({ scheme, configuration, udid }: StartIosRunRequest): Promise<IosRun> => {
+		mutationFn: async (body: StartIosRunRequest): Promise<IosRun> => {
 			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/ios-runs", {
 				params: { path: { sessionId } },
-				body: { scheme, configuration, udid },
+				body,
 			});
 			if (error || !data) throw error ?? new Error("Could not start the run");
 			return data.run;

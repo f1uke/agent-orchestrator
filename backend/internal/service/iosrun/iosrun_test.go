@@ -296,7 +296,7 @@ func TestStart_RunsTheCLIInTheSessionsWorktree(t *testing.T) {
 	rt := &fakeRuntime{}
 	svc := service(t, dir, `{"workspace":{"schemes":["Nter","NterDev"]}}`, rt)
 
-	run, err := svc.Start(context.Background(), "mer-9", "NterDev", "Dev", "UDID-1")
+	run, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "NterDev", Configuration: "Dev", UDID: "UDID-1"})
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestStart_RefusesOnAWorktreeWithNoProject(t *testing.T) {
 	rt := &fakeRuntime{}
 	svc := service(t, worktree(t, "backend"), "", rt)
 
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Debug", ""); err == nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Debug", UDID: ""}); err == nil {
 		t.Fatal("a worktree with no Xcode project has nothing to run")
 	}
 	if len(rt.created) != 0 {
@@ -350,7 +350,7 @@ func TestStart_RefusesASchemeTheProjectDoesNotHave(t *testing.T) {
 	rt := &fakeRuntime{}
 	svc := service(t, worktree(t, "Nter.xcodeproj"), `{"project":{"schemes":["Nter"]}}`, rt)
 
-	_, err := svc.Start(context.Background(), "mer-9", "NterStaging", "Debug", "")
+	_, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "NterStaging", Configuration: "Debug", UDID: ""})
 	if err == nil {
 		t.Fatal("an unknown scheme must not open a pane")
 	}
@@ -369,7 +369,7 @@ func TestCurrent_ReadsLivenessFromTheRuntime(t *testing.T) {
 	if _, ok, _ := svc.Current(context.Background(), "mer-9"); ok {
 		t.Fatal("a session that never ran anything has no run")
 	}
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Debug", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Debug", UDID: ""}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	run, ok, err := svc.Current(context.Background(), "mer-9")
@@ -394,7 +394,7 @@ func TestCurrent_ReadsLivenessFromTheRuntime(t *testing.T) {
 func TestCurrent_AnUnreadableRuntimeIsNotADeadRun(t *testing.T) {
 	rt := &fakeRuntime{alive: true, aliveErr: errors.New("tmux: server not found")}
 	svc := service(t, worktree(t, "Nter.xcodeproj"), `{"project":{"schemes":["Nter"]}}`, rt)
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Debug", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Debug", UDID: ""}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
@@ -491,7 +491,7 @@ func TestStart_RefusesWithoutAConfiguration(t *testing.T) {
 	rt := &fakeRuntime{}
 	svc := service(t, worktree(t, "Nter.xcodeproj"), `{"project":{"schemes":["Nter"],"configurations":["Dev","UAT"]}}`, rt)
 
-	_, err := svc.Start(context.Background(), "mer-9", "Nter", "", "")
+	_, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "", UDID: ""})
 	if err == nil {
 		t.Fatal("a run with no configuration must not open a pane")
 	}
@@ -506,7 +506,7 @@ func TestStart_RefusesAConfigurationTheProjectDoesNotHave(t *testing.T) {
 
 	// Exactly the stale-list case: the bar offered Debug before this fix, and
 	// the project never had one.
-	_, err := svc.Start(context.Background(), "mer-9", "Nter", "Debug", "")
+	_, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Debug", UDID: ""})
 	if err == nil {
 		t.Fatal("an unknown configuration must not open a pane")
 	}
@@ -555,7 +555,7 @@ func TestCurrent_ReportsTheVerdictTheCommandWrote(t *testing.T) {
 	// than from a probe that has not caught up.
 	rt := &fakeRuntime{alive: true}
 	svc := stateful(t, worktree(t, "Nter.xcodeproj"), state, rt)
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	writeVerdict(t, svc.resultPath("mer-9"), Result{
@@ -586,7 +586,7 @@ func TestCurrent_SurvivesADaemonThatRestarted(t *testing.T) {
 	state, dir := t.TempDir(), worktree(t, "Nter.xcodeproj")
 	rt := &fakeRuntime{alive: true}
 	first := stateful(t, dir, state, rt)
-	if _, err := first.Start(context.Background(), "mer-9", "Nter", "UAT", "UDID-1"); err != nil {
+	if _, err := first.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "UAT", UDID: "UDID-1"}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	writeVerdict(t, first.resultPath("mer-9"), Result{State: RunSucceeded, Summary: "Built Nter (UAT) and launched it."})
@@ -608,12 +608,12 @@ func TestCurrent_SurvivesADaemonThatRestarted(t *testing.T) {
 func TestStart_ClearsThePreviousRunsVerdict(t *testing.T) {
 	state := t.TempDir()
 	svc := stateful(t, worktree(t, "Nter.xcodeproj"), state, &fakeRuntime{alive: true})
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunFailed, Summary: "building Nter failed"})
 
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "UAT", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "UAT", UDID: ""}); err != nil {
 		t.Fatalf("second start: %v", err)
 	}
 	run, _, _ := svc.Current(context.Background(), "mer-9")
@@ -628,7 +628,7 @@ func TestStart_TellsTheCommandWhereToReport(t *testing.T) {
 	state := t.TempDir()
 	rt := &fakeRuntime{}
 	svc := stateful(t, worktree(t, "Nter.xcodeproj"), state, rt)
-	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", UDID: ""}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 

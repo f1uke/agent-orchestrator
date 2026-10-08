@@ -97,9 +97,13 @@ type simRunResult struct {
 	// project can disable signing in its OWN settings, and because a run that
 	// installs an app with no entitlements must never again be reported as a
 	// plain success. See simUnentitledWarning.
-	Warning string       `json:"warning,omitempty"`
-	Lease   simLeaseView `json:"lease"`
-	Note    string       `json:"note"`
+	Warning string `json:"warning,omitempty"`
+	// BuildOnly is a run that built and stopped there; NoBuild one that ran
+	// the last build.
+	BuildOnly bool         `json:"buildOnly,omitempty"`
+	NoBuild   bool         `json:"noBuild,omitempty"`
+	Lease     simLeaseView `json:"lease"`
+	Note      string       `json:"note"`
 }
 
 func newSimRunCommand(ctx *commandContext) *cobra.Command {
@@ -110,6 +114,9 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 		ttl           string
 		console       bool
 		attach        bool
+		noBuild       bool
+		buildOnly     bool
+		clean         bool
 		json          bool
 	}
 	cmd := &cobra.Command{
@@ -152,12 +159,15 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			// the RESULT, which is written last.
 			// Ctrl-C, or the run bar's Stop, ends the build or the app cleanly
 			// rather than killing this process out from under xcodebuild.
+			if opts.noBuild && (opts.buildOnly || opts.clean) {
+				return usageError{errors.New("--no-build runs the last build, so it cannot be combined with --build-only or --clean")}
+			}
 			runCtx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stopSignals()
 			report := newRunReport()
 			result, err := ctx.runSimApp(runCtx, cmd.ErrOrStderr(), simRunRequest{
 				scheme: opts.scheme, configuration: opts.configuration, udid: opts.udid, ttl: opts.ttl, console: opts.console,
-				report: report,
+				noBuild: opts.noBuild, buildOnly: opts.buildOnly, clean: opts.clean, report: report,
 			})
 			if err == nil {
 				if opts.json {
@@ -166,7 +176,7 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 					err = writeSimRun(cmd.OutOrStdout(), result)
 				}
 			}
-			if err == nil && opts.attach {
+			if err == nil && opts.attach && !opts.buildOnly {
 				err = ctx.attachSimApp(runCtx, cmd.ErrOrStderr(), result, report)
 			}
 			// Report the verdict before returning either way. The run bar
@@ -183,6 +193,9 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.udid, "udid", "", "Run on this simulator instead of this session's own")
 	f.StringVar(&opts.ttl, "ttl", "", "How long to hold the device afterwards (e.g. 30s, 10m, 1h). Default 30m")
 	f.BoolVar(&opts.console, "console", false, "Launch with stdout and stderr in a file that ao sim console reads")
+	f.BoolVar(&opts.noBuild, "no-build", false, "Install and launch what the last build produced, without building")
+	f.BoolVar(&opts.buildOnly, "build-only", false, "Build, and touch no simulator")
+	f.BoolVar(&opts.clean, "clean", false, "Delete this worktree's own DerivedData folder before building")
 	f.BoolVar(&opts.attach, "attach", false, "Stay with the app after launching it until it exits; Ctrl-C terminates it")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
 	return cmd
@@ -192,6 +205,7 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 type simRunRequest struct {
 	scheme, configuration, udid, ttl string
 	console                          bool
+	noBuild, buildOnly, clean        bool
 	report                           *runReport
 }
 
@@ -220,6 +234,21 @@ func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req 
 	if err != nil {
 		return simRunResult{}, err
 	}
+	if req.clean {
+		if err := c.cleanDerivedData(ctx, progress, dir, project, scheme, configuration); err != nil {
+			return simRunResult{}, err
+		}
+	}
+	if req.buildOnly {
+		if err := c.buildSimApp(ctx, progress, project, scheme, configuration, simDevice{}, req.report); err != nil {
+			return simRunResult{}, err
+		}
+		app, err := xcodeproj.ProductPath(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
+		if err != nil {
+			return simRunResult{}, err
+		}
+		return simRunResult{Scheme: scheme, Configuration: configuration, Project: project.Name, App: app, BuildOnly: true}, nil
+	}
 
 	// Boot first when the device is down: a lease on a shut-down simulator
 	// grants the right to write to something that cannot be written to.
@@ -235,12 +264,17 @@ func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req 
 		return simRunResult{}, err
 	}
 
-	if err := c.buildSimApp(ctx, progress, project, scheme, configuration, device, req.report); err != nil {
-		return simRunResult{}, err
+	if !req.noBuild {
+		if err := c.buildSimApp(ctx, progress, project, scheme, configuration, device, req.report); err != nil {
+			return simRunResult{}, err
+		}
 	}
 	app, err := xcodeproj.ProductPath(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
 	if err != nil {
 		return simRunResult{}, err
+	}
+	if _, err := os.Stat(app); req.noBuild && err != nil {
+		return simRunResult{}, fmt.Errorf("there is no build of %s (%s) to run yet: %s does not exist. Build it first", scheme, configuration, app)
 	}
 
 	result := simRunResult{
@@ -253,6 +287,7 @@ func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req 
 		Runtime:           device.Runtime,
 		RuntimeIdentifier: device.RuntimeIdentifier,
 		Booted:            booted,
+		NoBuild:           req.noBuild,
 		Warning:           c.unentitledWarning(ctx, app),
 		Lease:             lease,
 		Note:              simRunNote,
@@ -683,6 +718,13 @@ func explainNoXcodeProject(err error, dir string) error {
 // repeated tail was xcodebuild's own `IDERunDestination` warning, not the
 // compiler error anybody needed.
 func explainSimBuildFailure(err error, scheme string, device simDevice, signing bool) error {
+	if device.Name == "" {
+		failure := fmt.Errorf("building %s failed (%v). The compiler's output is above", scheme, buildExit(err))
+		if signing {
+			return fmt.Errorf("%w\n%s", failure, simSigningFailureHint)
+		}
+		return failure
+	}
 	failure := fmt.Errorf("building %s failed (%v). The compiler's output is above.\n"+
 		"Nothing was installed on %s, so the app on it is whatever was there before; "+
 		"this session still holds the device", scheme, buildExit(err), device.Name)
@@ -727,6 +769,10 @@ func buildExit(err error) string {
 }
 
 func writeSimRun(out io.Writer, result simRunResult) error {
+	if result.BuildOnly {
+		_, err := fmt.Fprintf(out, "Built %s (%s).\nApp: %s\n", result.Scheme, result.Configuration, result.App)
+		return err
+	}
 	if result.Booted {
 		if _, err := fmt.Fprintf(out, "Booted %s (%s).\n", result.Name, result.Runtime); err != nil {
 			return err
@@ -791,6 +837,9 @@ func (c *commandContext) buildSimApp(
 	if stopWatching != nil {
 		report.buildFinished(stopWatching())
 	}
+	if ctx.Err() != nil && device.Name == "" {
+		return fmt.Errorf("stopped while building %s: %w", scheme, ctx.Err())
+	}
 	if ctx.Err() != nil {
 		return fmt.Errorf("stopped while building %s. Nothing was installed on %s: %w", scheme, device.Name, ctx.Err())
 	}
@@ -817,4 +866,22 @@ func (c *commandContext) replayFailedOutput(ctx context.Context, out io.Writer, 
 		return
 	}
 	noteProgress(out, "\nThe failed tasks printed:\n\n%s", recovered)
+}
+
+// cleanDerivedData deletes this worktree's own DerivedData folder, and only it:
+// see xcodeproj.OwnDerivedData for what counts as its own.
+func (c *commandContext) cleanDerivedData(ctx context.Context, progress io.Writer, dir string, project xcodeproj.Project, scheme, configuration string) error {
+	buildDir, err := xcodeproj.BuildDir(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
+	if err != nil {
+		return err
+	}
+	dd, err := xcodeproj.OwnDerivedData(buildDir, dir, project)
+	if err != nil {
+		return fmt.Errorf("nothing was cleaned: %w", err)
+	}
+	noteProgress(progress, "Deleting %s…\n", dd)
+	if err := os.RemoveAll(dd); err != nil {
+		return fmt.Errorf("could not delete %s: %w", dd, err)
+	}
+	return nil
 }

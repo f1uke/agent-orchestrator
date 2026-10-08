@@ -150,6 +150,11 @@ func (r *runReport) finish(result simRunResult, runErr error, stopped bool) {
 	case runErr != nil:
 		verdict.State = iosrun.RunFailed
 		verdict.Summary = firstLineOf(runErr)
+	case result.NoBuild:
+		verdict.Summary = fmt.Sprintf("Launched the last build of %s (%s), %s, on %s.",
+			result.Scheme, result.Configuration, result.BundleID, result.Name)
+	case result.BuildOnly:
+		verdict.Summary = fmt.Sprintf("Built %s (%s).", result.Scheme, result.Configuration)
 	default:
 		verdict.Summary = fmt.Sprintf("Built %s (%s) and launched %s on %s.",
 			result.Scheme, result.Configuration, result.BundleID, result.Name)

@@ -10533,6 +10533,16 @@ components:
           description: 'The build configuration - which environment to build for,
             as listed on the project. Required: there is no safe default across projects.'
           type: string
+        mode:
+          description: run builds, installs and launches; run-without-building installs
+            and launches the last build; build builds and touches no device; clean-build
+            deletes this worktree's own DerivedData first. Omitted is run.
+          enum:
+          - run
+          - run-without-building
+          - build
+          - clean-build
+          type: string
         scheme:
           description: The Xcode scheme to build, as listed on the project.
           type: string
@@ -11331,6 +11341,14 @@ components:
             and configuration took. Present while running when there is one.
           format: double
           type: number
+        mode:
+          description: What the run does. Absent is run.
+          enum:
+          - run
+          - run-without-building
+          - build
+          - clean-build
+          type: string
         scheme:
           type: string
         stage:
