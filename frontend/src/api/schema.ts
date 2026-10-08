@@ -2203,6 +2203,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/claude-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the Claude profiles, built-ins first */
+        get: operations["getClaudeProfiles"];
+        /** Replace the user Claude profiles */
+        put: operations["setClaudeProfiles"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/message-templates": {
         parameters: {
             query?: never;
@@ -2840,6 +2858,18 @@ export interface components {
             label?: string;
             /** @description Base model to clone for a new device, matched by unique prefix (e.g. iPhone SE). Empty is the default. */
             model?: string;
+        };
+        ClaudeProfile: {
+            builtin: boolean;
+            name: string;
+            settingsFile: string;
+        };
+        ClaudeProfileInput: {
+            name: string;
+            settingsFile: string;
+        };
+        ClaudeProfilesResponse: {
+            profiles: components["schemas"]["ClaudeProfile"][];
         };
         CleanupSessionsResponse: {
             cleaned: string[];
@@ -4691,6 +4721,9 @@ export interface components {
         };
         SetAutoResolveRequest: {
             override: null | boolean;
+        };
+        SetClaudeProfilesRequest: {
+            profiles: components["schemas"]["ClaudeProfileInput"][];
         };
         SetMessageTemplateRequest: {
             template: string;
@@ -14344,6 +14377,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutoNudgeSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getClaudeProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudeProfilesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setClaudeProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetClaudeProfilesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudeProfilesResponse"];
                 };
             };
             /** @description Bad Request */

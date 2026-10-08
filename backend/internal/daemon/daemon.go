@@ -25,6 +25,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/storetree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
+	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemonlog"
@@ -384,6 +385,15 @@ func Run() error {
 		}
 		return fmt.Errorf("spawn-confirm settings: %w", err)
 	}
+	claudeProfiles, err := claudeprofile.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("claude profiles: %w", err)
+	}
 
 	// One jira client backs the display read, the status transitions and
 	// cross-project search, all over Jira Cloud REST v3 (a single API-token auth
@@ -575,6 +585,7 @@ func Run() error {
 		Telemetry:          telemetrySink,
 		Settings:           reclaimSettings,
 		SpawnConfirm:       spawnConfirmSettings,
+		ClaudeProfiles:     claudeProfiles,
 		AutoNudge:          autoNudge,
 		ResponseLanguage:   responseLangSettings,
 		WikiSettings:       wikiSettings,

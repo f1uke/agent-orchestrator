@@ -1919,6 +1919,34 @@ type SetSpawnConfirmSettingsRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+// ClaudeProfile is one named Claude Code settings file a claude-code session can
+// launch with. Built-in profiles cannot be edited; SettingsFile is empty for
+// Subscription, which launches with no --settings.
+type ClaudeProfile struct {
+	Name         string `json:"name"`
+	SettingsFile string `json:"settingsFile"`
+	Builtin      bool   `json:"builtin"`
+}
+
+// ClaudeProfilesResponse is the body of GET/PUT /api/v1/settings/claude-profiles:
+// the built-ins first, then the user profiles.
+type ClaudeProfilesResponse struct {
+	Profiles []ClaudeProfile `json:"profiles"`
+}
+
+// ClaudeProfileInput is one user profile in a PUT: a name and a settings file,
+// absolute or ~/.
+type ClaudeProfileInput struct {
+	Name         string `json:"name" minLength:"1"`
+	SettingsFile string `json:"settingsFile" minLength:"1"`
+}
+
+// SetClaudeProfilesRequest is the body of PUT /api/v1/settings/claude-profiles.
+// It replaces the whole list of user profiles.
+type SetClaudeProfilesRequest struct {
+	Profiles []ClaudeProfileInput `json:"profiles"`
+}
+
 // AutoNudgeSettingsResponse mirrors autonudge.Settings on the wire. It is
 // the body of GET/PUT /api/v1/settings/auto-nudge.
 type AutoNudgeSettingsResponse struct {

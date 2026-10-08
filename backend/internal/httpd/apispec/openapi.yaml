@@ -7247,6 +7247,55 @@ paths:
       summary: Replace the auto-nudge-on-comments gate setting
       tags:
       - settings
+  /api/v1/settings/claude-profiles:
+    get:
+      operationId: getClaudeProfiles
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeProfilesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: List the Claude profiles, built-ins first
+      tags:
+      - settings
+    put:
+      operationId: setClaudeProfiles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetClaudeProfilesRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeProfilesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Replace the user Claude profiles
+      tags:
+      - settings
   /api/v1/settings/message-templates:
     get:
       operationId: getMessageTemplates
@@ -8832,6 +8881,40 @@ components:
           description: Base model to clone for a new device, matched by unique prefix
             (e.g. iPhone SE). Empty is the default.
           type: string
+      type: object
+    ClaudeProfile:
+      properties:
+        builtin:
+          type: boolean
+        name:
+          type: string
+        settingsFile:
+          type: string
+      required:
+      - name
+      - settingsFile
+      - builtin
+      type: object
+    ClaudeProfileInput:
+      properties:
+        name:
+          minLength: 1
+          type: string
+        settingsFile:
+          minLength: 1
+          type: string
+      required:
+      - name
+      - settingsFile
+      type: object
+    ClaudeProfilesResponse:
+      properties:
+        profiles:
+          items:
+            $ref: '#/components/schemas/ClaudeProfile'
+          type: array
+      required:
+      - profiles
       type: object
     CleanupSessionsResponse:
       properties:
@@ -13278,6 +13361,15 @@ components:
           - boolean
       required:
       - override
+      type: object
+    SetClaudeProfilesRequest:
+      properties:
+        profiles:
+          items:
+            $ref: '#/components/schemas/ClaudeProfileInput'
+          type: array
+      required:
+      - profiles
       type: object
     SetMessageTemplateRequest:
       properties:

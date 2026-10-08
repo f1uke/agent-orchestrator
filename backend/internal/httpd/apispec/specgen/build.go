@@ -387,6 +387,10 @@ var schemaNames = map[string]string{
 	"ControllersSetReclaimSettingsRequest":          "SetReclaimSettingsRequest",
 	"ControllersSpawnConfirmSettingsResponse":       "SpawnConfirmSettingsResponse",
 	"ControllersSetSpawnConfirmSettingsRequest":     "SetSpawnConfirmSettingsRequest",
+	"ControllersClaudeProfile":                      "ClaudeProfile",
+	"ControllersClaudeProfilesResponse":             "ClaudeProfilesResponse",
+	"ControllersClaudeProfileInput":                 "ClaudeProfileInput",
+	"ControllersSetClaudeProfilesRequest":           "SetClaudeProfilesRequest",
 	"ControllersAutoNudgeSettingsResponse":          "AutoNudgeSettingsResponse",
 	"ControllersSetAutoNudgeSettingsRequest":        "SetAutoNudgeSettingsRequest",
 	"ControllersResponseLanguageSettingsResponse":   "ResponseLanguageSettingsResponse",
@@ -2468,6 +2472,24 @@ func settingsOperations() []operation {
 			reqBody: controllers.SetSpawnConfirmSettingsRequest{},
 			resps: []respUnit{
 				{http.StatusOK, controllers.SpawnConfirmSettingsResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/settings/claude-profiles", id: "getClaudeProfiles", tag: "settings",
+			summary: "List the Claude profiles, built-ins first",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ClaudeProfilesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/settings/claude-profiles", id: "setClaudeProfiles", tag: "settings",
+			summary: "Replace the user Claude profiles",
+			reqBody: controllers.SetClaudeProfilesRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ClaudeProfilesResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 			},
