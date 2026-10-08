@@ -108,6 +108,9 @@ type fakeSessionService struct {
 	updatedID    domain.SessionID
 	updatedPatch ports.TodoSpecPatch
 	updateErr    error
+
+	claudeProfileReq claudeProfileCall
+	claudeProfileErr error
 }
 
 func newFakeSessionService() *fakeSessionService {

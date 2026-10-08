@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/gitremote"
@@ -59,6 +61,7 @@ type Service struct {
 	clock          func() time.Time
 	telemetry      ports.EventSink
 	defaultHarness domain.AgentHarness
+	claudeProfiles ClaudeProfiles
 	// addMu serialises the whole body of Add. Workspace registration performs
 	// filesystem mutations (git init, .gitignore writes, commits) that are not
 	// covered by the store's own writeMu, so path/id conflict checks plus the
@@ -83,6 +86,15 @@ type Deps struct {
 	Sessions       SessionTeardowner
 	Clock          func() time.Time
 	Telemetry      ports.EventSink
+	// ClaudeProfiles validates a project's default Claude profile. Nil knows
+	// only the built-in profiles.
+	ClaudeProfiles ClaudeProfiles
+}
+
+// ClaudeProfiles resolves a Claude profile name. *claudeprofile.Store
+// satisfies it.
+type ClaudeProfiles interface {
+	Lookup(name string) (claudeprofile.Profile, error)
 }
 
 // New returns a project service backed by the given durable store.
@@ -102,9 +114,13 @@ func NewWithDeps(d Deps) *Service {
 		clock:          d.Clock,
 		telemetry:      d.Telemetry,
 		defaultHarness: defaultHarness,
+		claudeProfiles: d.ClaudeProfiles,
 	}
 	if s.clock == nil {
 		s.clock = time.Now
+	}
+	if s.claudeProfiles == nil {
+		s.claudeProfiles = claudeprofile.Builtins()
 	}
 	return s
 }
@@ -289,6 +305,9 @@ func (m *Service) Add(ctx context.Context, in AddInput) (Project, error) {
 		if err := projectConfig.Validate(); err != nil {
 			return Project{}, apierr.Invalid("INVALID_PROJECT_CONFIG", err.Error(), nil)
 		}
+		if projectConfig.ClaudeProfile, err = m.canonicalClaudeProfile(projectConfig.ClaudeProfile); err != nil {
+			return Project{}, err
+		}
 	}
 
 	registeredAt := time.Now()
@@ -425,6 +444,9 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 		}
 	}
 
+	if next.ClaudeProfile, err = m.canonicalClaudeProfile(next.ClaudeProfile); err != nil {
+		return Project{}, err
+	}
 	// Normalized again after the merge so a write of any field also tidies
 	// what an older daemon stored.
 	row.Config = normalizeConfig(next)
@@ -432,6 +454,21 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 		return Project{}, apierr.Internal("PROJECT_CONFIG_UPDATE_FAILED", "Failed to update project config")
 	}
 	return m.projectFromRow(row), nil
+}
+
+func (m *Service) canonicalClaudeProfile(name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", nil
+	}
+	p, err := m.claudeProfiles.Lookup(name)
+	var unknown *claudeprofile.UnknownProfileError
+	if errors.As(err, &unknown) {
+		return "", apierr.Invalid("UNKNOWN_CLAUDE_PROFILE", unknown.Error(), map[string]any{"known": unknown.Known})
+	}
+	if err != nil {
+		return "", apierr.Invalid("UNKNOWN_CLAUDE_PROFILE", err.Error(), nil)
+	}
+	return p.Name, nil
 }
 
 // normalizeConfig drops the blank entries of the config's lists. A blank list

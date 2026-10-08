@@ -89,6 +89,11 @@ type Deps struct {
 	// Nil defaults to English (no directive injected).
 	ResponseLanguage func() string
 
+	// ClaudeSettings resolves a Claude profile name to the settings file a
+	// claude-code reviewer launches with, erroring when it is unusable. Nil
+	// launches every reviewer with none.
+	ClaudeSettings func(profile string) (string, error)
+
 	// Clock and NewID are injectable for deterministic tests.
 	Clock func() time.Time
 	NewID func() string
@@ -105,6 +110,7 @@ type Engine struct {
 	watcher          Watcher
 	promptOverrides  func() promptoverrides.Overrides
 	responseLanguage func() string
+	claudeSettings   func(profile string) (string, error)
 	clock            func() time.Time
 	newID            func() string
 
@@ -146,6 +152,7 @@ func New(d Deps) *Engine {
 		watcher:          d.Watcher,
 		promptOverrides:  d.PromptOverrides,
 		responseLanguage: d.ResponseLanguage,
+		claudeSettings:   d.ClaudeSettings,
 		clock:            clock,
 		newID:            newID,
 		triggerLocks:     make(map[domain.SessionID]*sync.Mutex),
@@ -381,6 +388,13 @@ func (e *Engine) Trigger(ctx stdctx.Context, workerID domain.SessionID) (Trigger
 		handleID = reviewRow.ReviewerHandleID
 	}
 	if handleID == "" {
+		if harness == domain.ReviewerClaudeCode && e.claudeSettings != nil {
+			file, err := e.claudeSettings(projCfg.ClaudeProfile)
+			if err != nil {
+				return TriggerResult{}, failRuns(0, fmt.Errorf("launch reviewer: %w", err))
+			}
+			spec.ClaudeSettingsFile = file
+		}
 		h, err := e.launcher.Spawn(ctx, spec)
 		if err != nil {
 			return TriggerResult{}, failRuns(0, fmt.Errorf("launch reviewer: %w", err))

@@ -665,6 +665,10 @@ func (f *fakeCommander) Teardown(_ context.Context, id domain.SessionID, cause s
 	}
 	return sessionmanager.TeardownResult{Freed: true}, nil
 }
+func (f *fakeCommander) SetClaudeProfile(context.Context, domain.SessionID, string, bool) (domain.SessionRecord, domain.ClaudeProfileRestart, error) {
+	return domain.SessionRecord{}, "", errors.New("fakeCommander: SetClaudeProfile not implemented")
+}
+
 func (f *fakeCommander) Restart(_ context.Context, id domain.SessionID) (domain.SessionRecord, error) {
 	if f.restartErr != nil {
 		return domain.SessionRecord{}, f.restartErr

@@ -15,6 +15,7 @@ ao spawn [flags]
 | `--from string` | Source branch the worktree is created FROM (the UI "Start from" field), e.g. `main` | **Required** |
 | `--target string` | Branch the worker's PR will merge INTO, e.g. `develop` | Optional; defaults to the `--from` branch |
 | `--branch string` | New branch name for the session worktree | AI-named from the task when blank (like the UI); falls back to `ao/<session-id>/root` if naming fails |
+| `--claude-profile string` | Claude profile a claude-code worker launches with (`ao claude-profile ls`); ignored for other agents. An unknown name fails before anything is created | The project's `claudeProfile`, else `Subscription` |
 | `--claim-pr string` | Immediately claim an existing PR for the spawned session: a github.com PR URL/number, or a full GitLab merge-request URL | - |
 | `--harness string` | Agent harness to use (see list below) | Project `worker.agent`; required if the project has none |
 | `--issue string` | Issue id to associate with the session | - |

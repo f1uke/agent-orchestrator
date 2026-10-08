@@ -51,8 +51,16 @@ import (
 // the CLI's request body. Every other method is a no-op so it satisfies the
 // controllers.SessionService interface.
 type fakeSessionService struct {
-	spawned    ports.SpawnConfig
-	previewErr error
+	spawned              ports.SpawnConfig
+	previewErr           error
+	claudeProfileCall    claudeProfileCall
+	claudeProfileOutcome domain.ClaudeProfileRestart
+}
+
+type claudeProfileCall struct {
+	id      domain.SessionID
+	profile string
+	restart bool
 }
 
 var _ controllers.SessionService = (*fakeSessionService)(nil)
@@ -174,6 +182,11 @@ func (f *fakeSessionService) SetTargetBranch(context.Context, domain.SessionID, 
 
 func (f *fakeSessionService) SetBranch(context.Context, domain.SessionID, string) (domain.Session, error) {
 	return domain.Session{}, nil
+}
+
+func (f *fakeSessionService) SetClaudeProfile(_ context.Context, id domain.SessionID, profile string, restart bool) (domain.Session, domain.ClaudeProfileRestart, error) {
+	f.claudeProfileCall = claudeProfileCall{id: id, profile: profile, restart: restart}
+	return domain.Session{SessionRecord: domain.SessionRecord{ID: id, ClaudeProfile: "OmniRoute"}}, f.claudeProfileOutcome, nil
 }
 
 func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) (ports.SendOutcome, error) {
@@ -334,13 +347,18 @@ func (f *fakeProjectManager) ListBranches(context.Context, domain.ProjectID) ([]
 // loopback round trip through postJSON.
 func startDriftTestDaemon(t *testing.T, sessions controllers.SessionService, projects projectsvc.Manager) {
 	t.Helper()
-
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	router := httpd.NewRouterWithControl(config.Config{}, log, nil, httpd.APIDeps{
+	startDriftTestDaemonWith(t, httpd.APIDeps{
 		Agents:   &fakeAgentCatalog{},
 		Sessions: sessions,
 		Projects: projects,
-	}, httpd.ControlDeps{})
+	})
+}
+
+func startDriftTestDaemonWith(t *testing.T, deps httpd.APIDeps) {
+	t.Helper()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	router := httpd.NewRouterWithControl(config.Config{}, log, nil, deps, httpd.ControlDeps{})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 

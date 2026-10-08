@@ -44,6 +44,7 @@ type spawnOptions struct {
 	todo           bool
 	keepWarm       bool
 	taskSize       string
+	claudeProfile  string
 }
 
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
@@ -81,6 +82,9 @@ type spawnRequest struct {
 	// (the default) means standard. A mechanical task is authorized in the worker
 	// prompt to skip the process skills (`ao spawn --task-size`).
 	TaskSize string `json:"taskSize,omitempty"`
+	// ClaudeProfile names the Claude profile a claude-code worker launches with
+	// (`--claude-profile`). Empty inherits the project default.
+	ClaudeProfile string `json:"claudeProfile,omitempty"`
 }
 
 type spawnResult struct {
@@ -189,6 +193,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 				DisplayName:     name,
 				KeepWarmOnMerge: opts.keepWarm,
 				TaskSize:        opts.taskSize,
+				ClaudeProfile:   strings.TrimSpace(opts.claudeProfile),
 			}
 			if opts.todo {
 				// --todo stages a prepared TODO (no branch/worktree/tmux until
@@ -263,6 +268,7 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip advisory agent catalog install/auth preflight before spawning")
 	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until ao session start <id>)")
 	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker running on the board when its PR merges instead of archiving it to Done: its tmux, and any build or test in it, carries on (it still sleeps after the idle window like any worker) - for a worker that will open more PRs")
+	f.StringVar(&opts.claudeProfile, "claude-profile", "", "Claude profile (a named Claude Code settings file, see ao claude-profile ls) a claude-code worker launches with (default: the project's, else Subscription); ignored for other agents")
 	f.StringVar(&opts.taskSize, "task-size", "", "How big the task is - it decides both the ceremony AND how many agents work it.\n"+
 		"  mechanical  ONE agent. Skips the up-front requirements/plan/test-first ceremony and goes\n"+
 		"              straight to edit + verify.\n"+

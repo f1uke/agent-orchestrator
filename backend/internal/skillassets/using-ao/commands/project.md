@@ -30,6 +30,9 @@ ao project set-config nter-ios-app --default-branch develop --model claude-opus-
   a partial object drops every field it leaves out.
 - **A change reaches the NEXT session spawned or restored in that project**, not the ones
   already running.
+- **`--claude-profile <name>`** sets the Claude profile (`ao claude-profile ls`) the project's
+  claude-code sessions and reviewers launch with; `""` goes back to `Subscription`. A running
+  session keeps its own profile: switch it with `ao session set-claude-profile`.
 
 ## Script-only mobile projects
 

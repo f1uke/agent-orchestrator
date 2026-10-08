@@ -26,7 +26,7 @@ func TestGetLaunchCommandBypassWithPrompt(t *testing.T) {
 	}
 
 	want := []string{
-		"claude", "--settings", sessionSettings,
+		"claude",
 		"--permission-mode", "bypassPermissions",
 		"--", "-add a health check",
 	}
@@ -86,7 +86,7 @@ func TestGetLaunchCommandPassesSystemPromptByFile(t *testing.T) {
 	}
 
 	want := []string{
-		"claude", "--settings", sessionSettings,
+		"claude",
 		"--append-system-prompt-file", promptFile,
 		"--", "do the thing",
 	}
@@ -414,7 +414,7 @@ func TestGetRestoreCommandReadsAgentSessionID(t *testing.T) {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
 	// The hook-captured native id wins over the derived fallback.
-	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--resume", "claude-native-1"}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -434,7 +434,7 @@ func TestGetRestoreCommandReappendsSystemPrompt(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--append-system-prompt", "You are an orchestrator.", "--resume", "claude-native-1"}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", "You are an orchestrator.", "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -454,7 +454,7 @@ func TestGetRestoreCommandPassesSystemPromptByFile(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--append-system-prompt-file", promptFile, "--resume", "claude-native-1"}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--append-system-prompt-file", promptFile, "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -483,7 +483,7 @@ func TestGetRestoreCommandFallsBackToDerivedUUID(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--resume", claudeSessionUUID("sess-r")}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", claudeSessionUUID("sess-r")}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -582,7 +582,7 @@ func TestGetRestoreCommandResumesWhenTranscriptPresent(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--resume", uid}
+	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", uid}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -920,31 +920,54 @@ func TestGetPromptDeliveryStrategyIsStdin(t *testing.T) {
 	}
 }
 
-func TestLaunchAndRestoreTurnOffTheAgentsView(t *testing.T) {
+func TestLaunchEnvTurnsOffTheAgentsView(t *testing.T) {
+	got := (&Plugin{}).LaunchEnv()
+	if !reflect.DeepEqual(got, map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"}) {
+		t.Fatalf("LaunchEnv() = %v, want CLAUDE_CODE_DISABLE_AGENT_VIEW=1", got)
+	}
+}
+
+func TestSubscriptionLaunchAndRestoreCarryNoSettingsFlag(t *testing.T) {
+	launch, restore := launchAndRestore(t, "")
+	for name, cmd := range map[string][]string{"launch": launch, "restore": restore} {
+		if contains(cmd, "--settings") {
+			t.Errorf("%s carries --settings with no profile file: %q", name, cmd)
+		}
+	}
+}
+
+func TestProfileSettingsFileIsTheOnlySettingsFlag(t *testing.T) {
+	const file = "/home/u/.claude/settings-omniroute.json"
+	launch, restore := launchAndRestore(t, file)
+	for name, cmd := range map[string][]string{"launch": launch, "restore": restore} {
+		var values []string
+		for i, arg := range cmd[:len(cmd)-1] {
+			if arg == "--settings" {
+				values = append(values, cmd[i+1])
+			}
+		}
+		if !reflect.DeepEqual(values, []string{file}) {
+			t.Errorf("%s --settings values = %q, want exactly [%s]: %q", name, values, file, cmd)
+		}
+	}
+	if !containsSubsequence(restore, []string{"--resume", "native-1"}) {
+		t.Errorf("restore does not resume: %q", restore)
+	}
+}
+
+func launchAndRestore(t *testing.T, settingsFile string) (launch, restore []string) {
+	t.Helper()
 	p := &Plugin{resolvedBinary: "claude"}
-	launch, err := p.GetLaunchCommand(context.Background(), ports.LaunchConfig{SessionID: "ao-1"})
+	launch, err := p.GetLaunchCommand(context.Background(), ports.LaunchConfig{SessionID: "ao-1", SettingsFile: settingsFile})
 	if err != nil {
 		t.Fatal(err)
 	}
 	restore, ok, err := p.GetRestoreCommand(context.Background(), ports.RestoreConfig{
-		Session: ports.SessionRef{ID: "ao-1", Metadata: map[string]string{ports.MetadataKeyAgentSessionID: "native-1"}},
+		SettingsFile: settingsFile,
+		Session:      ports.SessionRef{ID: "ao-1", Metadata: map[string]string{ports.MetadataKeyAgentSessionID: "native-1"}},
 	})
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v)", ok, err)
 	}
-	for name, cmd := range map[string][]string{"launch": launch, "restore": restore} {
-		var settings struct {
-			DisableAgentView bool `json:"disableAgentView"`
-		}
-		for i, arg := range cmd[:len(cmd)-1] {
-			if arg == "--settings" {
-				if err := json.Unmarshal([]byte(cmd[i+1]), &settings); err != nil {
-					t.Fatalf("%s: --settings %q: %v", name, cmd[i+1], err)
-				}
-			}
-		}
-		if !settings.DisableAgentView {
-			t.Errorf("%s does not turn the agents view off: %q", name, cmd)
-		}
-	}
+	return launch, restore
 }

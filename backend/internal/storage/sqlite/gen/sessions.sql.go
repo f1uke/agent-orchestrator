@@ -20,7 +20,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
+    claude_profile, restart_pending
 FROM sessions WHERE id = ?
 `
 
@@ -78,6 +79,8 @@ func (q *Queries) GetSession(ctx context.Context, id domain.SessionID) (Session,
 		&i.CrewJoinReason,
 		&i.RuntimeTouch,
 		&i.CrewRoundStartedAt,
+		&i.ClaudeProfile,
+		&i.RestartPending,
 	)
 	return i, err
 }
@@ -91,8 +94,8 @@ INSERT INTO sessions (
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
     crew_id, crew_role, crew_join_reason, runtime_touch, sleep_reason, woken_by,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    created_at, updated_at, claude_profile
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSessionParams struct {
@@ -139,6 +142,7 @@ type InsertSessionParams struct {
 	TerminatedAt              sql.NullTime
 	CreatedAt                 time.Time
 	UpdatedAt                 time.Time
+	ClaudeProfile             string
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -186,6 +190,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.TerminatedAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.ClaudeProfile,
 	)
 	return err
 }
@@ -197,7 +202,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
+    claude_profile, restart_pending
 FROM sessions ORDER BY project_id, num
 `
 
@@ -261,6 +267,8 @@ func (q *Queries) ListAllSessions(ctx context.Context) ([]Session, error) {
 			&i.CrewJoinReason,
 			&i.RuntimeTouch,
 			&i.CrewRoundStartedAt,
+			&i.ClaudeProfile,
+			&i.RestartPending,
 		); err != nil {
 			return nil, err
 		}
@@ -282,7 +290,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
+    claude_profile, restart_pending
 FROM sessions WHERE project_id = ? ORDER BY num
 `
 
@@ -346,6 +355,8 @@ func (q *Queries) ListSessionsByProject(ctx context.Context, projectID domain.Pr
 			&i.CrewJoinReason,
 			&i.RuntimeTouch,
 			&i.CrewRoundStartedAt,
+			&i.ClaudeProfile,
+			&i.RestartPending,
 		); err != nil {
 			return nil, err
 		}
@@ -482,6 +493,27 @@ func (q *Queries) SetSessionBranch(ctx context.Context, arg SetSessionBranchPara
 	return result.RowsAffected()
 }
 
+const setSessionClaudeProfile = `-- name: SetSessionClaudeProfile :execrows
+UPDATE sessions SET claude_profile = ?, updated_at = ? WHERE id = ?
+`
+
+type SetSessionClaudeProfileParams struct {
+	ClaudeProfile string
+	UpdatedAt     time.Time
+	ID            domain.SessionID
+}
+
+// Sole writer of claude_profile after the row is inserted, so the full-row
+// lifecycle write can never put back a profile the human just switched away
+// from. Bumps updated_at so the sessions_cdc_update trigger redraws the chip.
+func (q *Queries) SetSessionClaudeProfile(ctx context.Context, arg SetSessionClaudeProfileParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionClaudeProfile, arg.ClaudeProfile, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setSessionCrew = `-- name: SetSessionCrew :execrows
 UPDATE sessions SET crew_id = ?, crew_role = ?, updated_at = ? WHERE id = ?
 `
@@ -601,6 +633,26 @@ type SetSessionPreviewURLParams struct {
 // trigger and the desktop browser panel re-navigates / refreshes.
 func (q *Queries) SetSessionPreviewURL(ctx context.Context, arg SetSessionPreviewURLParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, setSessionPreviewURL, arg.PreviewURL, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setSessionRestartPending = `-- name: SetSessionRestartPending :execrows
+UPDATE sessions SET restart_pending = ?, updated_at = ? WHERE id = ?
+`
+
+type SetSessionRestartPendingParams struct {
+	RestartPending bool
+	UpdatedAt      time.Time
+	ID             domain.SessionID
+}
+
+// Sole writer of restart_pending: set when a profile switch asks for a restart
+// while the agent is mid-turn, cleared by the relaunch that applies it.
+func (q *Queries) SetSessionRestartPending(ctx context.Context, arg SetSessionRestartPendingParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionRestartPending, arg.RestartPending, arg.UpdatedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}

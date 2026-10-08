@@ -376,6 +376,12 @@ type SpawnSessionRequest struct {
 	// mechanical task is authorized in the worker prompt to skip the process
 	// skills. Persisted on the session; not surfaced on the read model.
 	TaskSize domain.TaskSize `json:"taskSize,omitempty" enum:"mechanical,standard,deep"`
+	// ClaudeProfile names the Claude profile a claude-code session launches with
+	// (`ao spawn --claude-profile`), matched case-insensitively. Absent/empty
+	// inherits the project's default, else Subscription; ignored for any other
+	// agent. An unknown name is refused with UNKNOWN_CLAUDE_PROFILE before
+	// anything is created.
+	ClaudeProfile string `json:"claudeProfile,omitempty"`
 }
 
 // UpdateTodoSpecRequest is the body of PATCH /api/v1/sessions/{sessionId}/spec:
@@ -390,6 +396,28 @@ type UpdateTodoSpecRequest struct {
 	PRTarget       *string              `json:"prTarget,omitempty"`
 	Prompt         *string              `json:"prompt,omitempty" maxLength:"4096"`
 	AutoNameBranch *bool                `json:"autoNameBranch,omitempty"`
+	// ClaudeProfile overrides the project's default Claude profile when the task
+	// starts; empty goes back to the project default.
+	ClaudeProfile *string `json:"claudeProfile,omitempty"`
+}
+
+// SetSessionClaudeProfileRequest is the body of PUT
+// /api/v1/sessions/{sessionId}/claude-profile.
+type SetSessionClaudeProfileRequest struct {
+	// Profile names the Claude profile to switch to, matched case-insensitively.
+	Profile string `json:"profile" minLength:"1"`
+	// Restart restarts the agent onto the profile: now when it is idle or
+	// parked, once it is idle when it is mid-turn. Without it the profile
+	// applies on the session's next restart.
+	Restart bool `json:"restart,omitempty"`
+}
+
+// SetSessionClaudeProfileResponse is the switched session and what happened to
+// its running agent: restarted now, a restart pending until it is idle, or
+// nothing until its next launch.
+type SetSessionClaudeProfileResponse struct {
+	Session SessionView                 `json:"session"`
+	Restart domain.ClaudeProfileRestart `json:"restart" enum:"restarted,pending,next_launch"`
 }
 
 // SessionResponse is the { session } body shared by session create/get.
@@ -1917,6 +1945,34 @@ type SpawnConfirmSettingsResponse struct {
 // SetSpawnConfirmSettingsRequest is the body of PUT /api/v1/settings/spawn-confirm.
 type SetSpawnConfirmSettingsRequest struct {
 	Enabled bool `json:"enabled"`
+}
+
+// ClaudeProfile is one named Claude Code settings file a claude-code session can
+// launch with. Built-in profiles cannot be edited; SettingsFile is empty for
+// Subscription, which launches with no --settings.
+type ClaudeProfile struct {
+	Name         string `json:"name"`
+	SettingsFile string `json:"settingsFile"`
+	Builtin      bool   `json:"builtin"`
+}
+
+// ClaudeProfilesResponse is the body of GET/PUT /api/v1/settings/claude-profiles:
+// the built-ins first, then the user profiles.
+type ClaudeProfilesResponse struct {
+	Profiles []ClaudeProfile `json:"profiles"`
+}
+
+// ClaudeProfileInput is one user profile in a PUT: a name and a settings file,
+// absolute or ~/.
+type ClaudeProfileInput struct {
+	Name         string `json:"name" minLength:"1"`
+	SettingsFile string `json:"settingsFile" minLength:"1"`
+}
+
+// SetClaudeProfilesRequest is the body of PUT /api/v1/settings/claude-profiles.
+// It replaces the whole list of user profiles.
+type SetClaudeProfilesRequest struct {
+	Profiles []ClaudeProfileInput `json:"profiles"`
 }
 
 // AutoNudgeSettingsResponse mirrors autonudge.Settings on the wire. It is
