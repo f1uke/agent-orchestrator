@@ -33,6 +33,7 @@ import { BuildIssuesSheet, issueCounts } from "./BuildIssuesSheet";
 import { SimDevicePicker } from "./SimDevicePicker";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Switch } from "./ui/switch";
 import { XcodegenResultSheet, type XcodegenViewState } from "./XcodegenResultSheet";
 
 /**
@@ -88,6 +89,7 @@ export function IosRunBar({
 	const [scheme, setScheme] = useState<string | null>(null);
 	const [configuration, setConfiguration] = useState<string | null>(null);
 	const [udid, setUdid] = useState<string | null>(null);
+	const [console, setConsole] = useConsolePreference(sessionId);
 
 	// The device list is only asked for once the bar is really rendering, which
 	// on a non-iOS project is never. `enabled` is what keeps a Go worktree from
@@ -177,7 +179,7 @@ export function IosRunBar({
 	const runAs = (mode: RunMode) => {
 		if (!chosenScheme || !chosenConfiguration) return;
 		start.mutate(
-			{ scheme: chosenScheme, configuration: chosenConfiguration, udid: chosenUdid ?? undefined, mode },
+			{ scheme: chosenScheme, configuration: chosenConfiguration, udid: chosenUdid ?? undefined, mode, console },
 			{ onSuccess: (started) => onShowRun(started.handleId) },
 		);
 	};
@@ -251,6 +253,22 @@ export function IosRunBar({
 				sessionId={sessionId}
 				task={task}
 			/>
+			<label
+				className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+				title={
+					console
+						? "Runs launch the app with its print() and stdout shown in the run's terminal"
+						: "Show the app's print() and stdout in the run's terminal"
+				}
+			>
+				<Switch
+					aria-label="Show the app's console"
+					checked={console}
+					className="h-4 w-7 data-[state=checked]:bg-accent [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
+					onCheckedChange={setConsole}
+				/>
+				Console
+			</label>
 
 			<div className="ml-auto flex min-w-0 items-center gap-2">
 				{problem ? <Problem message={problem} /> : null}
@@ -695,6 +713,27 @@ function XcodegenButton({ sessionId, specs }: { sessionId: string; specs: { dir:
 			<XcodegenResultSheet onOpenChange={setOpen} open={open} state={state} />
 		</>
 	);
+}
+
+/** The console switch, remembered per session in this browser only. */
+function useConsolePreference(sessionId: string): [boolean, (on: boolean) => void] {
+	const key = `ao-ios-run-console:${sessionId}`;
+	const [on, setOn] = useState(() => {
+		try {
+			return window.localStorage.getItem(key) === "1";
+		} catch {
+			return false;
+		}
+	});
+	const set = (next: boolean) => {
+		setOn(next);
+		try {
+			window.localStorage.setItem(key, next ? "1" : "0");
+		} catch {
+			// A browser that refuses storage still gets the switch for this visit.
+		}
+	};
+	return [on, set];
 }
 
 /** Re-renders every second while `enabled`, so elapsed time and the estimate move. */

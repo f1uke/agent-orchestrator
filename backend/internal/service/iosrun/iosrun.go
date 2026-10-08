@@ -147,6 +147,8 @@ type StartRequest struct {
 	Configuration string
 	UDID          string
 	Mode          Mode
+	// Console launches the app with its stdout and stderr shown in the run's pane.
+	Console bool
 }
 
 // Run is a build the bar started, and what became of it.
@@ -154,6 +156,7 @@ type Run struct {
 	// HandleID is the runtime handle the renderer attaches its terminal to.
 	HandleID string `json:"handleId"`
 	Mode     Mode   `json:"mode,omitempty" enum:"run,run-without-building,build,clean-build" description:"What the run does. Absent is run."`
+	Console  bool   `json:"console,omitempty" description:"The app was launched with its stdout and stderr (where print goes) shown in the run's pane."`
 	Scheme   string `json:"scheme"`
 	// Configuration is the environment it was built for. Recorded so the bar can
 	// re-select what is already running rather than resetting to a default, and
@@ -558,6 +561,10 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, req StartReque
 	if flag != "" {
 		argv = append(argv, flag)
 	}
+	console := req.Console && mode != ModeBuild
+	if console {
+		argv = append(argv, "--console")
+	}
 
 	if trimmed := strings.TrimSpace(udid); trimmed != "" {
 		argv = append(argv, "--udid", trimmed)
@@ -587,6 +594,7 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, req StartReque
 	run := Run{
 		HandleID:      handle,
 		Mode:          mode,
+		Console:       console,
 		Scheme:        scheme,
 		Configuration: configuration,
 		UDID:          strings.TrimSpace(udid),

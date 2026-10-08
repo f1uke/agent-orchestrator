@@ -277,3 +277,21 @@ func TestStart_RefusesAModeItDoesNotKnow(t *testing.T) {
 		t.Fatal("an unknown mode must be refused, not run as something else")
 	}
 }
+
+func TestStart_ShowsTheConsoleWhenAsked(t *testing.T) {
+	for _, c := range []struct {
+		mode    Mode
+		console bool
+		want    bool
+	}{{ModeRun, true, true}, {ModeRun, false, false}, {ModeBuild, true, false}} {
+		rt := &fakeRuntime{}
+		svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), rt)
+		run, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", Mode: c.mode, Console: c.console})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Contains(strings.Join(rt.created[0].Argv, " "), "--console"); got != c.want || run.Console != c.want {
+			t.Errorf("%s console=%v: --console passed=%v run.Console=%v, want %v", c.mode, c.console, got, run.Console, c.want)
+		}
+	}
+}

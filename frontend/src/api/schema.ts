@@ -3568,6 +3568,8 @@ export interface components {
         ControllersStartIOSRunInput: {
             /** @description The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects. */
             configuration: string;
+            /** @description Launch with the app's stdout and stderr (where print goes) shown in the run's pane, as ao sim run --console does. Ignored by build. */
+            console?: boolean;
             /**
              * @description run builds, installs and launches; run-without-building installs and launches the last build; build builds and touches no device; clean-build deletes this worktree's own DerivedData first. Omitted is run.
              * @enum {string}
@@ -3915,6 +3917,8 @@ export interface components {
              */
             buildStartedAt?: null | string;
             configuration: string;
+            /** @description The app was launched with its stdout and stderr (where print goes) shown in the run's pane. */
+            console?: boolean;
             /** @description How many errors the build reported. */
             errors?: number;
             /** Format: date-time */

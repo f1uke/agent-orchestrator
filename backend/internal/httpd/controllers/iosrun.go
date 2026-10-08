@@ -36,6 +36,7 @@ type StartIOSRunInput struct {
 	// build one, and the failure arrives minutes later as an empty PODS_ROOT.
 	Configuration string         `json:"configuration" description:"The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects."`
 	UDID          string         `json:"udid,omitempty" description:"The simulator to install and launch on. Omitted uses the one assigned to this session."`
+	Console       bool           `json:"console,omitempty" description:"Launch with the app's stdout and stderr (where print goes) shown in the run's pane, as ao sim run --console does. Ignored by build."`
 	Mode          iosrunsvc.Mode `json:"mode,omitempty" enum:"run,run-without-building,build,clean-build" description:"run builds, installs and launches; run-without-building installs and launches the last build; build builds and touches no device; clean-build deletes this worktree's own DerivedData first. Omitted is run."`
 }
 
@@ -150,7 +151,7 @@ func (c *IOSRunController) start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run, err := c.Svc.Start(r.Context(), sessionID(r), iosrunsvc.StartRequest{
-		Scheme: in.Scheme, Configuration: in.Configuration, UDID: in.UDID, Mode: in.Mode,
+		Scheme: in.Scheme, Configuration: in.Configuration, UDID: in.UDID, Mode: in.Mode, Console: in.Console,
 	})
 	if err != nil {
 		envelope.WriteError(w, r, err)

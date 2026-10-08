@@ -111,7 +111,7 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A", mode: "run" } }),
+				expect.objectContaining({ body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A", mode: "run", console: false } }),
 			),
 		);
 		// The build output has to be where the human is looking, or it is a
@@ -191,7 +191,7 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE", mode: "run" } }),
+				expect.objectContaining({ body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE", mode: "run", console: false } }),
 			),
 		);
 	});
@@ -465,7 +465,7 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A", mode: "run" } }),
+				expect.objectContaining({ body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A", mode: "run", console: false } }),
 			),
 		);
 	});
@@ -740,5 +740,23 @@ describe("IosRunBar", () => {
 				expect.objectContaining({ body: expect.objectContaining({ mode: "build", scheme: "Nter" }) }),
 			),
 		);
+	});
+
+	it("runs with the app's console when the switch is on", async () => {
+		window.localStorage.clear();
+		answer({ ios: { project: project({ schemes: ["Nter"] }) } });
+		postMock.mockResolvedValue({ data: { run: { handleId: "h", scheme: "Nter", state: "running" } } });
+		renderBar();
+		const run = await screen.findByRole("button", { name: "Run Nter" });
+		await waitFor(() => expect(run).toBeEnabled());
+		await userEvent.click(screen.getByRole("switch", { name: "Show the app's console" }));
+		await userEvent.click(run);
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: expect.objectContaining({ console: true, mode: "run" }) }),
+			),
+		);
+		expect(window.localStorage.getItem(`ao-ios-run-console:${SESSION}`)).toBe("1");
 	});
 });
