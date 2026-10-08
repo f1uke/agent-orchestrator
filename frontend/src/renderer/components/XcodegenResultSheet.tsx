@@ -1,12 +1,10 @@
 import { CheckCircle2, Loader2, TriangleAlert, XCircle } from "lucide-react";
-import type { RunXcodegenResult, XcodegenDirResult } from "../../main/run-xcodegen";
+import type { components } from "../../api/schema";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./ui/sheet";
 
-/**
- * The lifecycle of a single "Run xcodegen" invocation as the menu sees it:
- * pending (`running`), a resolved backend `result`, or an unexpected IPC/main
- * failure (`error`).
- */
+export type RunXcodegenResult = components["schemas"]["XcodegenResult"];
+type XcodegenDirResult = components["schemas"]["XcodegenDirResult"];
+
 export type XcodegenViewState =
 	{ phase: "running" } | { phase: "error" } | { phase: "done"; result: RunXcodegenResult };
 
@@ -102,7 +100,7 @@ function Body({ state }: { state: XcodegenViewState | null }) {
 		return (
 			<div className="text-[13px] text-muted-foreground">
 				No <code className="font-mono text-foreground">project.yml</code> found under{" "}
-				<code className="font-mono text-foreground">{result.root}</code>. Nothing to generate.
+				<code className="font-mono text-foreground">{result.root ?? ""}</code>. Nothing to generate.
 			</div>
 		);
 	}

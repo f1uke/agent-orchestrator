@@ -2715,6 +2715,7 @@ export function mockIosProject(): components["schemas"]["ControllersIOSProjectRe
 			kind: "workspace",
 			schemes: ["DemoApp", "DemoCore"],
 			configurations: ["Dev", "Mock-api", "Production", "Release", "UAT"],
+			xcodegen: { installed: true, specs: [{ dir: "DemoApp", stale: true }] },
 		},
 		// A run that has ENDED, because that is the state the harness could not
 		// show before: while a build is going the bar is obviously busy, and the

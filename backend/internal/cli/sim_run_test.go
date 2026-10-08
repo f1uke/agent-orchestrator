@@ -543,7 +543,7 @@ func readRunVerdict(t *testing.T, path string) iosrun.Result {
 func TestSimRun_ReportsASuccessfulRunToTheBar(t *testing.T) {
 	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
 	verdict := filepath.Join(t.TempDir(), "iosrun", "result.json")
-	t.Setenv(iosrun.EnvResultFile, verdict)
+	t.Setenv(iosrun.EnvRunDir, filepath.Dir(verdict))
 
 	if _, errOut, err := executeCLI(t, deps, "sim", "run", "--configuration", "Dev"); err != nil {
 		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
@@ -571,7 +571,7 @@ func TestSimRun_ReportsAFailedBuildToTheBar(t *testing.T) {
 		return stream, nil
 	}
 	verdict := filepath.Join(t.TempDir(), "result.json")
-	t.Setenv(iosrun.EnvResultFile, verdict)
+	t.Setenv(iosrun.EnvRunDir, filepath.Dir(verdict))
 
 	if _, _, err := executeCLI(t, deps, "sim", "run", "--configuration", "Dev"); err == nil {
 		t.Fatal("a failed build must fail the command")
@@ -596,7 +596,7 @@ func TestSimRun_ReportsAFailedBuildToTheBar(t *testing.T) {
 func TestSimRun_WritesNoVerdictWhenNobodyAsked(t *testing.T) {
 	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev"`)
 	dir := t.TempDir()
-	t.Setenv(iosrun.EnvResultFile, "")
+	t.Setenv(iosrun.EnvRunDir, "")
 
 	if _, errOut, err := executeCLI(t, deps, "sim", "run"); err != nil {
 		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)
@@ -617,7 +617,7 @@ func TestSimRun_WarnsWhenTheAppItBuiltHasNoEntitlements(t *testing.T) {
 	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev","UAT"`)
 	signsAs(&deps, codesignLinkerSigned)
 	verdict := filepath.Join(t.TempDir(), "result.json")
-	t.Setenv(iosrun.EnvResultFile, verdict)
+	t.Setenv(iosrun.EnvRunDir, filepath.Dir(verdict))
 
 	out, errOut, err := executeCLI(t, deps, "sim", "run", "--configuration", "Dev")
 	if err != nil {
@@ -647,7 +647,7 @@ func TestSimRun_WarnsWhenTheAppItBuiltHasNoEntitlements(t *testing.T) {
 func TestSimRun_ReportsNoWarningForAnOrdinaryBuild(t *testing.T) {
 	deps, _, _, _ := configuredRunDeps(t, `"Nter"`, `"Dev"`)
 	verdict := filepath.Join(t.TempDir(), "result.json")
-	t.Setenv(iosrun.EnvResultFile, verdict)
+	t.Setenv(iosrun.EnvRunDir, filepath.Dir(verdict))
 
 	if _, errOut, err := executeCLI(t, deps, "sim", "run"); err != nil {
 		t.Fatalf("sim run failed: %v\nstderr=%s", err, errOut)

@@ -58,7 +58,9 @@ export function SimDevicePicker({
 	onPower,
 	sessionId,
 	task,
+	width = "w-[190px] shrink-0",
 }: {
+	width?: string;
 	chosen: string | null;
 	devices: SimDevice[];
 	/**
@@ -123,7 +125,10 @@ export function SimDevicePicker({
 					// A FIXED width, not a fitted one. The trigger sits in the toolbar
 					// above the device, and a pill that changed width with the chosen
 					// device's name would move the screen underneath it.
-					className="flex h-7 w-[190px] shrink-0 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay"
+					className={cn(
+						"flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay",
+						width,
+					)}
 					type="button"
 				>
 					{current ? (

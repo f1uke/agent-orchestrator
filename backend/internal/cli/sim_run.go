@@ -3,15 +3,16 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,6 +20,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcodeproj"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcresultstream"
 )
 
 // Building an app from source and putting it on a simulator.
@@ -95,9 +97,11 @@ type simRunResult struct {
 	// project can disable signing in its OWN settings, and because a run that
 	// installs an app with no entitlements must never again be reported as a
 	// plain success. See simUnentitledWarning.
-	Warning string       `json:"warning,omitempty"`
-	Lease   simLeaseView `json:"lease"`
-	Note    string       `json:"note"`
+	Warning   string       `json:"warning,omitempty"`
+	BuildOnly bool         `json:"buildOnly,omitempty"`
+	NoBuild   bool         `json:"noBuild,omitempty"`
+	Lease     simLeaseView `json:"lease"`
+	Note      string       `json:"note"`
 }
 
 func newSimRunCommand(ctx *commandContext) *cobra.Command {
@@ -107,6 +111,10 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 		udid          string
 		ttl           string
 		console       bool
+		attach        bool
+		noBuild       bool
+		buildOnly     bool
+		clean         bool
 		json          bool
 	}
 	cmd := &cobra.Command{
@@ -131,7 +139,10 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			"about rather than guessed at. With no --udid it uses the simulator assigned to " +
 			"this session ($AO_SIM_UDID).\n\n" +
 			"--console launches it with its stdout and stderr - where `print` goes - in a file " +
-			"`ao sim console` reads, exactly as `ao sim launch --console` does.",
+			"`ao sim console` reads, exactly as `ao sim launch --console` does.\n\n" +
+			"--attach stays with the app after launching it, printing its console when there is one, " +
+			"until it exits; Ctrl-C then terminates it. The run bar runs this way, so its Stop always " +
+			"has a process to stop. Ctrl-C during a build interrupts xcodebuild and installs nothing.",
 		Example: `  ao sim run
   ao sim run --scheme NterApp --configuration Dev
   ao sim run --scheme NterApp --configuration UAT
@@ -144,21 +155,32 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			// reads when a build fails, and holding them back until the end
 			// would make a three-minute build look like a hang. --json governs
 			// the RESULT, which is written last.
-			result, err := ctx.runSimApp(cmd.Context(), cmd.ErrOrStderr(), simRunRequest{
+			if opts.noBuild && (opts.buildOnly || opts.clean) {
+				return usageError{errors.New("--no-build runs the last build, so it cannot be combined with --build-only or --clean")}
+			}
+			runCtx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stopSignals()
+			report := newRunReport()
+			result, err := ctx.runSimApp(runCtx, cmd.ErrOrStderr(), simRunRequest{
 				scheme: opts.scheme, configuration: opts.configuration, udid: opts.udid, ttl: opts.ttl, console: opts.console,
+				noBuild: opts.noBuild, buildOnly: opts.buildOnly, clean: opts.clean, report: report,
 			})
+			if err == nil {
+				if opts.json {
+					err = writeJSON(cmd.OutOrStdout(), result)
+				} else {
+					err = writeSimRun(cmd.OutOrStdout(), result)
+				}
+			}
+			if err == nil && opts.attach && !opts.buildOnly {
+				err = ctx.attachSimApp(runCtx, cmd.ErrOrStderr(), result, report)
+			}
 			// Report the verdict before returning either way. The run bar
 			// started this command in a pane nothing waits on, so this file is
 			// the ONLY way the outcome gets back to it - and a failed run that
 			// reported nothing would leave the bar saying "running" for ever.
-			reportSimRunResult(result, err)
-			if err != nil {
-				return err
-			}
-			if opts.json {
-				return writeJSON(cmd.OutOrStdout(), result)
-			}
-			return writeSimRun(cmd.OutOrStdout(), result)
+			report.finish(result, err, runCtx.Err() != nil)
+			return err
 		},
 	}
 	f := cmd.Flags()
@@ -167,6 +189,10 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.udid, "udid", "", "Run on this simulator instead of this session's own")
 	f.StringVar(&opts.ttl, "ttl", "", "How long to hold the device afterwards (e.g. 30s, 10m, 1h). Default 30m")
 	f.BoolVar(&opts.console, "console", false, "Launch with stdout and stderr in a file that ao sim console reads")
+	f.BoolVar(&opts.noBuild, "no-build", false, "Install and launch what the last build produced, without building")
+	f.BoolVar(&opts.buildOnly, "build-only", false, "Build, and touch no simulator")
+	f.BoolVar(&opts.clean, "clean", false, "Delete this worktree's own DerivedData folder before building")
+	f.BoolVar(&opts.attach, "attach", false, "Stay with the app after launching it until it exits; Ctrl-C terminates it")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
 	return cmd
 }
@@ -175,6 +201,8 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 type simRunRequest struct {
 	scheme, configuration, udid, ttl string
 	console                          bool
+	noBuild, buildOnly, clean        bool
+	report                           *runReport
 }
 
 // runSimApp is the whole command: find the project, decide the scheme, take the
@@ -202,10 +230,25 @@ func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req 
 	if err != nil {
 		return simRunResult{}, err
 	}
+	if req.clean {
+		if err := c.cleanDerivedData(ctx, progress, dir, project, scheme, configuration); err != nil {
+			return simRunResult{}, err
+		}
+	}
+	if req.buildOnly {
+		if err := c.buildSimApp(ctx, progress, project, scheme, configuration, simDevice{}, req.report); err != nil {
+			return simRunResult{}, err
+		}
+		app, err := xcodeproj.ProductPath(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
+		if err != nil {
+			return simRunResult{}, err
+		}
+		return simRunResult{Scheme: scheme, Configuration: configuration, Project: project.Name, App: app, BuildOnly: true}, nil
+	}
 
 	// Boot first when the device is down: a lease on a shut-down simulator
 	// grants the right to write to something that cannot be written to.
-	booted, err := c.bootSimRunDevice(ctx, progress, udid)
+	booted, err := c.bootSimRunDevice(ctx, progress, udid, req.report)
 	if err != nil {
 		return simRunResult{}, err
 	}
@@ -217,20 +260,17 @@ func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req 
 		return simRunResult{}, err
 	}
 
-	noteProgress(progress, "Building %s (%s) from %s…\n", scheme, configuration, project.Name)
-	resultBundle, discardResultBundle, err := freshResultBundlePath()
-	if err != nil {
-		return simRunResult{}, err
-	}
-	watch := &signingWatch{out: progress}
-	err = c.streamBuild(ctx, watch, xcodeproj.Binary, xcodeproj.BuildArgs(project, scheme, configuration, resultBundle)...)
-	discardResultBundle()
-	if err != nil {
-		return simRunResult{}, explainSimBuildFailure(err, scheme, device, watch.saw)
+	if !req.noBuild {
+		if err := c.buildSimApp(ctx, progress, project, scheme, configuration, device, req.report); err != nil {
+			return simRunResult{}, err
+		}
 	}
 	app, err := xcodeproj.ProductPath(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
 	if err != nil {
 		return simRunResult{}, err
+	}
+	if _, err := os.Stat(app); req.noBuild && err != nil {
+		return simRunResult{}, fmt.Errorf("there is no build of %s (%s) to run yet: %s does not exist. Build it first", scheme, configuration, app)
 	}
 
 	result := simRunResult{
@@ -243,11 +283,13 @@ func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req 
 		Runtime:           device.Runtime,
 		RuntimeIdentifier: device.RuntimeIdentifier,
 		Booted:            booted,
+		NoBuild:           req.noBuild,
 		Warning:           c.unentitledWarning(ctx, app),
 		Lease:             lease,
 		Note:              simRunNote,
 	}
 
+	req.report.stage(iosrun.StageInstalling)
 	noteProgress(progress, "Installing %s on %s…\n", filepath.Base(app), device.Label())
 	out, err := c.deps.CommandOutput(ctx, "xcrun", "simctl", "install", device.UDID, app)
 	if err != nil {
@@ -260,6 +302,7 @@ func (c *commandContext) runSimApp(ctx context.Context, progress io.Writer, req 
 			"so there is nothing to launch; `ao sim launch <bundle-id>` starts it", filepath.Base(app), device.Name)
 	}
 	result.BundleID = bundleID
+	req.report.stage(iosrun.StageLaunching)
 
 	// Terminate before launching, always. The whole point of Run is to see the
 	// code that was just built, and `simctl launch` against an app that is
@@ -417,7 +460,7 @@ func firstLine(text string) string {
 // bootSimRunDevice powers the target on when it is down, and reports whether it
 // did. It is the same path as `ao sim boot`, which is what keeps one
 // boot cap rather than two that can drift apart.
-func (c *commandContext) bootSimRunDevice(ctx context.Context, progress io.Writer, udid string) (bool, error) {
+func (c *commandContext) bootSimRunDevice(ctx context.Context, progress io.Writer, udid string, report *runReport) (bool, error) {
 	devices, err := c.listSimDevices(ctx)
 	if err != nil {
 		return false, err
@@ -442,6 +485,7 @@ func (c *commandContext) bootSimRunDevice(ctx context.Context, progress io.Write
 	if target.Booted() {
 		return false, nil
 	}
+	report.stage(iosrun.StageBooting)
 	noteProgress(progress, "%s is shut down. Booting it…\n", target.Label())
 	timeout, err := parseSimBootTimeout("")
 	if err != nil {
@@ -483,21 +527,21 @@ func bootedSimDevices(devices []simDevice) []simDevice {
 // xcodebuild refuses a path that already exists - which two runs at once would
 // otherwise collide on. A run stopped mid-build never reaches its cleanup, so
 // leftovers older than resultBundleMaxAge are swept by the next run.
-func freshResultBundlePath() (string, func(), error) {
+func freshResultBundlePath() (bundle, stream string, cleanup func(), err error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	parent := filepath.Join(cfg.DataDir, "iosrun-results")
 	if err := os.MkdirAll(parent, 0o750); err != nil {
-		return "", nil, fmt.Errorf("could not prepare a place for the build's result bundle: %w", err)
+		return "", "", nil, fmt.Errorf("could not prepare a place for the build's result bundle: %w", err)
 	}
 	sweepResultBundles(parent, time.Now())
 	dir, err := os.MkdirTemp(parent, "build-")
 	if err != nil {
-		return "", nil, fmt.Errorf("could not prepare a place for the build's result bundle: %w", err)
+		return "", "", nil, fmt.Errorf("could not prepare a place for the build's result bundle: %w", err)
 	}
-	return filepath.Join(dir, "build.xcresult"), func() { _ = os.RemoveAll(dir) }, nil
+	return filepath.Join(dir, "build.xcresult"), filepath.Join(dir, "build.stream"), func() { _ = os.RemoveAll(dir) }, nil
 }
 
 // resultBundleMaxAge is longer than any build runs, so a sweep never takes a
@@ -518,8 +562,10 @@ func sweepResultBundles(parent string, now time.Time) {
 	}
 }
 
+const buildStopGrace = 20 * time.Second
+
 func (c *commandContext) streamBuild(ctx context.Context, out io.Writer, name string, args ...string) error {
-	stream, err := c.deps.StartStream(ctx, name, args...)
+	stream, err := c.deps.StartStream(context.WithoutCancel(ctx), name, args...)
 	if err != nil {
 		return fmt.Errorf("could not start %s: %w", name, err)
 	}
@@ -531,6 +577,13 @@ func (c *commandContext) streamBuild(ctx context.Context, out io.Writer, name st
 	go func() {
 		select {
 		case <-ctx.Done():
+			if child, ok := stream.(interface{ Interrupt() error }); ok && child.Interrupt() == nil {
+				select {
+				case <-reading:
+					return
+				case <-time.After(buildStopGrace):
+				}
+			}
 			_ = stream.Close()
 		case <-reading:
 		}
@@ -657,6 +710,13 @@ func explainNoXcodeProject(err error, dir string) error {
 // repeated tail was xcodebuild's own `IDERunDestination` warning, not the
 // compiler error anybody needed.
 func explainSimBuildFailure(err error, scheme string, device simDevice, signing bool) error {
+	if device.Name == "" {
+		failure := fmt.Errorf("building %s failed (%v). The compiler's output is above", scheme, buildExit(err))
+		if signing {
+			return fmt.Errorf("%w\n%s", failure, simSigningFailureHint)
+		}
+		return failure
+	}
 	failure := fmt.Errorf("building %s failed (%v). The compiler's output is above.\n"+
 		"Nothing was installed on %s, so the app on it is whatever was there before; "+
 		"this session still holds the device", scheme, buildExit(err), device.Name)
@@ -701,12 +761,19 @@ func buildExit(err error) string {
 }
 
 func writeSimRun(out io.Writer, result simRunResult) error {
+	if result.BuildOnly {
+		_, err := fmt.Fprintf(out, "Built %s (%s).\nApp: %s\n", result.Scheme, result.Configuration, result.App)
+		return err
+	}
 	if result.Booted {
 		if _, err := fmt.Fprintf(out, "Booted %s (%s).\n", result.Name, result.Runtime); err != nil {
 			return err
 		}
 	}
 	launched := "Built " + result.Scheme + " (" + result.Configuration + ") and launched " + result.BundleID
+	if result.NoBuild {
+		launched = "Launched the last build of " + result.Scheme + " (" + result.Configuration + "), " + result.BundleID
+	}
 	if result.PID != "" {
 		launched += " (pid " + result.PID + ")"
 	}
@@ -733,47 +800,82 @@ func writeSimRun(out io.Writer, result simRunResult) error {
 	return err
 }
 
-// reportSimRunResult writes how this run ended, when the run bar asked to be
-// told (iosrun.EnvResultFile). A human or an agent typing `ao sim run` has the
-// variable unset and nothing is written.
-//
-// 🗝 The command reports rather than the daemon inferring, because only the
-// command knows WHICH step failed: a compile error, a lease another session
-// holds, and a device that would not boot are three different sentences, and
-// the exit status nobody watched is the same for all three.
-//
-// It is one sentence, never the build log. The output is already in the pane
-// the bar points at, and a bar that restated compiler errors would be a worse
-// copy of the terminal underneath it.
-func reportSimRunResult(result simRunResult, runErr error) {
-	path := strings.TrimSpace(os.Getenv(iosrun.EnvResultFile))
-	if path == "" {
-		return
+func (c *commandContext) buildSimApp(
+	ctx context.Context, progress io.Writer, project xcodeproj.Project, scheme, configuration string, device simDevice, report *runReport,
+) error {
+	report.stage(iosrun.StageBuilding)
+	noteProgress(progress, "Building %s (%s) from %s…\n", scheme, configuration, project.Name)
+	resultBundle, stream, discardResultBundle, err := freshResultBundlePath()
+	if err != nil {
+		return err
 	}
-	finished := time.Now().UTC()
-	verdict := iosrun.Result{State: iosrun.RunSucceeded, FinishedAt: &finished}
-	switch {
-	case runErr != nil:
-		verdict.State = iosrun.RunFailed
-		verdict.Summary = firstLineOf(runErr)
-	default:
-		verdict.Summary = fmt.Sprintf("Built %s (%s) and launched %s on %s.",
-			result.Scheme, result.Configuration, result.BundleID, result.Name)
-		// A run that WORKED and installed a broken app is still a run that
-		// worked - the pane's output is not an error and calling the run failed
-		// would send the reader looking for a compiler error that is not there.
-		// The warning rides beside the verdict instead, so the bar can say both.
-		verdict.Warning = firstLine(result.Warning)
+	defer discardResultBundle()
+	outputs := xcodeproj.BuildOutputs{ResultBundle: resultBundle}
+	if report != nil {
+		if err := os.WriteFile(stream, nil, 0o600); err == nil {
+			outputs.ProgressStream = stream
+		}
 	}
-	body, err := json.Marshal(verdict)
+	out := progress
+	if log := report.buildLog(); log != nil {
+		defer func() { _ = log.Close() }()
+		out = io.MultiWriter(progress, log)
+	}
+	watch := &signingWatch{out: out}
+	var stopWatching func() xcresultstream.Snapshot
+	if outputs.ProgressStream != "" {
+		stopWatching = c.watchBuildProgress(ctx, stream, report)
+	}
+	err = c.streamBuild(ctx, watch, xcodeproj.Binary, xcodeproj.BuildArgs(project, scheme, configuration, outputs)...)
+	if stopWatching != nil {
+		report.buildFinished(stopWatching())
+	}
+	if ctx.Err() != nil && device.Name == "" {
+		return stoppedError{fmt.Sprintf("Stopped while building %s.", scheme)}
+	}
+	if ctx.Err() != nil {
+		return stoppedError{fmt.Sprintf("Stopped while building %s. Nothing was installed on %s.", scheme, device.Name)}
+	}
+	if err != nil {
+		if outputs.ProgressStream != "" {
+			c.replayFailedOutput(ctx, watch, resultBundle)
+		}
+		return explainSimBuildFailure(err, scheme, device, watch.saw)
+	}
+	report.buildSucceeded()
+	return nil
+}
+
+func (c *commandContext) replayFailedOutput(ctx context.Context, out io.Writer, resultBundle string) {
+	log, err := c.deps.CommandOutput(ctx, "xcrun", "xcresulttool", "get", "log", "--path", resultBundle, "--type", "build")
 	if err != nil {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	recovered, err := xcodeproj.RecoverFailedOutput(log)
+	if err != nil || recovered == "" {
 		return
 	}
-	// A verdict that cannot be written changes nothing about the run itself,
-	// which has already happened; the bar falls back to "stopped", which is
-	// what it says whenever a run ends without reporting.
-	_ = os.WriteFile(path, body, 0o600)
+	noteProgress(out, "\nThe failed tasks printed:\n\n%s", recovered)
 }
+
+func (c *commandContext) cleanDerivedData(ctx context.Context, progress io.Writer, dir string, project xcodeproj.Project, scheme, configuration string) error {
+	buildDir, err := xcodeproj.BuildDir(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
+	if err != nil {
+		return err
+	}
+	dd, err := xcodeproj.OwnDerivedData(buildDir, dir, project)
+	if err != nil {
+		return fmt.Errorf("nothing was cleaned: %w", err)
+	}
+	noteProgress(progress, "Deleting %s…\n", dd)
+	if err := os.RemoveAll(dd); err != nil {
+		return fmt.Errorf("could not delete %s: %w", dd, err)
+	}
+	return nil
+}
+
+type stoppedError struct{ message string }
+
+func (e stoppedError) Error() string { return e.message }
+
+func (stoppedError) Unwrap() error { return context.Canceled }

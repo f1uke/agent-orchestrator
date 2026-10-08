@@ -105,6 +105,13 @@ func (s *processStream) Close() error {
 	return nil
 }
 
+func (s *processStream) Interrupt() error {
+	if s.cmd.Process == nil {
+		return os.ErrProcessDone
+	}
+	return s.cmd.Process.Signal(os.Interrupt)
+}
+
 func (s *processStream) wait() {
 	s.waitOnce.Do(func() { s.waitErr = s.cmd.Wait() })
 }

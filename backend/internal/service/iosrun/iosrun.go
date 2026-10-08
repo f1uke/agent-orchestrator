@@ -28,7 +28,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,8 +40,12 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcodegen"
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcodeproj"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcresultstream"
 )
+
+const xcodegenOutlivesTheRequest = 15 * time.Minute
 
 // listingTTL is how long a project listing is reused. `xcodebuild -list` takes
 // seconds on a real project (~13 s cold on nter-ios-app) and the answer changes
@@ -50,6 +58,9 @@ import (
 // because opening either dropdown asks with refresh=true, which skips this
 // entirely. See Project.
 const listingTTL = time.Minute
+
+// listingTimeout bounds one listing; ~13 s cold on nter-ios-app.
+const listingTimeout = 2 * time.Minute
 
 // Sessions is the slice of the session store this package needs: where a
 // session's worktree is. The SQLite store satisfies it.
@@ -86,7 +97,14 @@ type Project struct {
 	// ConfigurationsError says why THAT list is empty. It is its own field
 	// rather than sharing SchemesError because either question can fail on its
 	// own, and a picker must say which one did.
-	ConfigurationsError string `json:"configurationsError,omitempty"`
+	ConfigurationsError string        `json:"configurationsError,omitempty"`
+	Xcodegen            XcodegenState `json:"xcodegen" description:"The xcodegen specs in this worktree and whether each project is behind its spec."`
+}
+
+// XcodegenState is what the run bar's xcodegen button needs.
+type XcodegenState struct {
+	Installed bool            `json:"installed"`
+	Specs     []xcodegen.Spec `json:"specs"`
 }
 
 // RunState is what became of a run. The bar shows one of these four and
@@ -108,10 +126,39 @@ const (
 	RunStopped RunState = "stopped"
 )
 
+// Mode is what Run does: the whole loop, or one part of it.
+type Mode string
+
+// The ways to run, one per item of the run bar's menu plus Run itself.
+const (
+	ModeRun                Mode = "run"
+	ModeRunWithoutBuilding Mode = "run-without-building"
+	ModeBuild              Mode = "build"
+	ModeCleanBuild         Mode = "clean-build"
+)
+
+var modeFlags = map[Mode]string{
+	ModeRun:                "",
+	ModeRunWithoutBuilding: "--no-build",
+	ModeBuild:              "--build-only",
+	ModeCleanBuild:         "--clean",
+}
+
+// StartRequest is what the bar asks a run for.
+type StartRequest struct {
+	Scheme        string
+	Configuration string
+	UDID          string
+	Mode          Mode
+	Console       bool
+}
+
 // Run is a build the bar started, and what became of it.
 type Run struct {
 	// HandleID is the runtime handle the renderer attaches its terminal to.
 	HandleID string `json:"handleId"`
+	Mode     Mode   `json:"mode,omitempty" enum:"run,run-without-building,build,clean-build" description:"What the run does. Absent is run."`
+	Console  bool   `json:"console,omitempty" description:"The app was launched with its stdout and stderr (where print goes) shown in the run's pane."`
 	Scheme   string `json:"scheme"`
 	// Configuration is the environment it was built for. Recorded so the bar can
 	// re-select what is already running rather than resetting to a default, and
@@ -137,7 +184,16 @@ type Run struct {
 	StartedAt time.Time `json:"startedAt"`
 	// FinishedAt is when the command reported its result; absent while running,
 	// and absent for a run that was stopped without reporting one.
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	FinishedAt       *time.Time             `json:"finishedAt,omitempty"`
+	Stage            Stage                  `json:"stage,omitempty" enum:"preparing,booting,building,installing,launching,app-running" description:"The step a running run is on. Absent once it has ended."`
+	StageStartedAt   *time.Time             `json:"stageStartedAt,omitempty"`
+	BuildStartedAt   *time.Time             `json:"buildStartedAt,omitempty" description:"When the build itself started, which the estimate is measured from."`
+	Build            *BuildProgress         `json:"build,omitempty" description:"How far the build is, while it runs."`
+	LastBuildSeconds float64                `json:"lastBuildSeconds,omitempty" description:"How long the last successful build of the same project, scheme and configuration took. Present while running when there is one."`
+	BuildSeconds     float64                `json:"buildSeconds,omitempty" description:"How long this run's build took, when it succeeded."`
+	Errors           int                    `json:"errors,omitempty" description:"How many errors the build reported."`
+	Warnings         int                    `json:"warnings,omitempty" description:"How many warnings the build reported."`
+	Issues           []xcresultstream.Issue `json:"issues,omitempty" description:"The build's first errors, then its first warnings, each with its file and one-based line when it has one. A file inside the session's worktree is relative to it, which is the path the editor opens."`
 }
 
 // Manager is the surface the HTTP controller depends on.
@@ -145,8 +201,11 @@ type Manager interface {
 	// Project reads what this session can build. refresh skips the cache, which
 	// is what opening a picker in the bar does.
 	Project(ctx context.Context, id domain.SessionID, refresh bool) (Project, error)
-	Start(ctx context.Context, id domain.SessionID, scheme, configuration, udid string) (Run, error)
+	Start(ctx context.Context, id domain.SessionID, req StartRequest) (Run, error)
 	Current(ctx context.Context, id domain.SessionID) (Run, bool, error)
+	Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.Result, error)
+	Stop(ctx context.Context, id domain.SessionID) (Run, error)
+	BuildLog(ctx context.Context, id domain.SessionID) (BuildLog, error)
 }
 
 // Service is the production Manager.
@@ -170,11 +229,15 @@ type Service struct {
 	now      func() time.Time
 	// log is where a failed listing's real output goes. The run bar gets a
 	// sentence; this keeps the evidence behind it.
-	log *slog.Logger
+	log         *slog.Logger
+	xcodegen    *xcodegen.Generator
+	processArgs func(ctx context.Context, pid int) (string, error)
+	interrupt   func(pid int) error
 
-	mu     sync.Mutex
-	runs   map[domain.SessionID]Run
-	cached map[domain.SessionID]cachedListing
+	mu        sync.Mutex
+	historyMu sync.Mutex
+	runs      map[domain.SessionID]Run
+	cached    map[domain.SessionID]cachedListing
 }
 
 type cachedListing struct {
@@ -194,6 +257,14 @@ func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = 
 // WithLogger replaces the logger. Production passes none and gets slog.Default.
 func WithLogger(l *slog.Logger) Option { return func(s *Service) { s.log = l } }
 
+// WithXcodegen replaces the xcodegen runner; tests use it.
+func WithXcodegen(g *xcodegen.Generator) Option { return func(s *Service) { s.xcodegen = g } }
+
+// WithProcesses replaces how a stop reads and signals the run's command.
+func WithProcesses(args func(ctx context.Context, pid int) (string, error), interrupt func(pid int) error) Option {
+	return func(s *Service) { s.processArgs, s.interrupt = args, interrupt }
+}
+
 // WithStateDir is where runs are recorded. Production passes the daemon's data
 // dir; a test passes t.TempDir() or nothing.
 func WithStateDir(dir string) Option { return func(s *Service) { s.stateDir = dir } }
@@ -201,17 +272,26 @@ func WithStateDir(dir string) Option { return func(s *Service) { s.stateDir = di
 // New builds the service. aoBinary is the absolute path to this daemon's `ao`.
 func New(sessions Sessions, runtime Runtime, aoBinary string, opts ...Option) *Service {
 	s := &Service{
-		sessions: sessions,
-		runtime:  runtime,
-		run:      commandOutputInDir,
-		aoBinary: aoBinary,
-		now:      time.Now,
-		log:      slog.Default(),
-		runs:     map[domain.SessionID]Run{},
-		cached:   map[domain.SessionID]cachedListing{},
+		sessions:    sessions,
+		runtime:     runtime,
+		run:         commandOutputInDir,
+		aoBinary:    aoBinary,
+		processArgs: processArgs,
+		interrupt:   interruptProcess,
+		now:         time.Now,
+		log:         slog.Default(),
+		runs:        map[domain.SessionID]Run{},
+		cached:      map[domain.SessionID]cachedListing{},
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.xcodegen == nil {
+		stateFile := ""
+		if s.stateDir != "" {
+			stateFile = filepath.Join(s.stateDir, "xcodegen.json")
+		}
+		s.xcodegen = xcodegen.New(stateFile)
 	}
 	return s
 }
@@ -261,15 +341,25 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool
 		}
 	}
 
+	// The listing is cached, so it must not die with the request that asked
+	// for it: a poll aborted mid-listing would cache "xcodebuild was killed".
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), listingTimeout)
+	defer cancel()
 	found, err := xcodeproj.Find(dir)
 	if err != nil {
-		if errors.Is(err, xcodeproj.ErrNoProject) {
-			// Cached like any other answer: a Go worktree is asked this question
-			// every time its session is opened, and the answer never changes.
-			s.remember(id, Project{}, now)
-			return Project{}, nil
+		if !errors.Is(err, xcodeproj.ErrNoProject) {
+			return Project{}, err
 		}
-		return Project{}, err
+		project := Project{}
+		if xcodegen.HasRootSpec(dir) {
+			project.Xcodegen = s.xcodegenState(ctx, dir)
+			project.SchemesError = "There is no Xcode project yet. Run xcodegen to generate it."
+			project.ConfigurationsError = project.SchemesError
+		}
+		// Cached like any other answer: a Go worktree is asked this question
+		// every time its session is opened, and the answer never changes.
+		s.remember(id, project, now)
+		return project, nil
 	}
 	project := Project{Name: found.Name, Path: found.Path, Kind: string(found.Kind)}
 
@@ -279,7 +369,11 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool
 	var schemes, configurations []string
 	var schemesErr, configurationsErr error
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		project.Xcodegen = s.xcodegenState(ctx, dir)
+	}()
 	go func() {
 		defer wg.Done()
 		schemes, schemesErr = xcodeproj.Schemes(ctx, s.run, dir, found)
@@ -313,6 +407,27 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool
 	}
 	s.remember(id, project, now)
 	return project, nil
+}
+
+func (s *Service) xcodegenState(ctx context.Context, dir string) XcodegenState {
+	installed, specs := s.xcodegen.Specs(ctx, dir)
+	return XcodegenState{Installed: installed, Specs: specs}
+}
+
+// Xcodegen runs `xcodegen generate` over the session's worktree, and forgets the
+// cached listing so the next read sees the project it produced.
+func (s *Service) Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.Result, error) {
+	dir, err := s.workspace(ctx, id)
+	if err != nil {
+		return xcodegen.Result{}, err
+	}
+	genCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), xcodegenOutlivesTheRequest)
+	defer cancel()
+	result := s.xcodegen.Generate(genCtx, dir)
+	s.mu.Lock()
+	delete(s.cached, id)
+	s.mu.Unlock()
+	return result, nil
 }
 
 // explain turns a failed listing into ONE SENTENCE A PERSON CAN ACT ON, and
@@ -377,7 +492,16 @@ func (s *Service) remember(id domain.SessionID, project Project, at time.Time) {
 // run safe - the lease taken before the build, the build that names no device,
 // the boot cap - lives there and is exercised identically whether a human
 // pressed a button or an agent typed the command.
-func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, configuration, udid string) (Run, error) {
+func (s *Service) Start(ctx context.Context, id domain.SessionID, req StartRequest) (Run, error) {
+	scheme, configuration, udid := req.Scheme, req.Configuration, req.UDID
+	mode := req.Mode
+	if mode == "" {
+		mode = ModeRun
+	}
+	flag, ok := modeFlags[mode]
+	if !ok {
+		return Run{}, apierr.Invalid("IOS_RUN_UNKNOWN_MODE", fmt.Sprintf("%q is not a way to run.", mode), nil)
+	}
 	dir, err := s.workspace(ctx, id)
 	if err != nil {
 		return Run{}, err
@@ -425,7 +549,19 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	if err := s.runtime.Destroy(ctx, ports.RuntimeHandle{ID: handle}); err != nil {
 		return Run{}, fmt.Errorf("ios run: clear the previous pane: %w", err)
 	}
+	s.clearRun(id)
 	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme, "--configuration", configuration}
+	if mode != ModeBuild {
+		argv = append(argv, "--attach")
+	}
+	if flag != "" {
+		argv = append(argv, flag)
+	}
+	console := req.Console && mode != ModeBuild
+	if console {
+		argv = append(argv, "--console")
+	}
+
 	if trimmed := strings.TrimSpace(udid); trimmed != "" {
 		argv = append(argv, "--udid", trimmed)
 	}
@@ -436,8 +572,8 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	// And this is how the command reports what became of it. Only `ao sim run`
 	// can tell a failed build from a refused lease, so it writes the verdict
 	// rather than the daemon inferring one from an exit nobody watched.
-	if path := s.resultPath(id); path != "" {
-		env[EnvResultFile] = path
+	if dir := s.runDir(id); dir != "" {
+		env[EnvRunDir] = dir
 	}
 	if trimmed := strings.TrimSpace(udid); trimmed != "" {
 		env["AO_SIM_UDID"] = trimmed
@@ -453,6 +589,8 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	}
 	run := Run{
 		HandleID:      handle,
+		Mode:          mode,
+		Console:       console,
 		Scheme:        scheme,
 		Configuration: configuration,
 		UDID:          strings.TrimSpace(udid),
@@ -494,9 +632,16 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 			return Run{}, false, nil
 		}
 	}
+	project, known := s.projectOf(ctx, id)
 	if result, found := s.readResult(id); found {
 		run.State, run.Summary, run.FinishedAt = result.State, result.Summary, result.FinishedAt
 		run.Warning = result.Warning
+		run.BuildSeconds = result.BuildSeconds
+		run.Errors, run.Warnings = result.Errors, result.Warnings
+		run.Issues = s.relativeIssues(ctx, id, result.Issues)
+		if known {
+			s.rememberBuild(project, run, result)
+		}
 		return run, true, nil
 	}
 	alive, err := s.live(ctx, run.HandleID)
@@ -505,11 +650,163 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 	}
 	if alive {
 		run.State = RunRunning
+		if progress, ok := s.readProgress(id); ok {
+			run.Stage, run.StageStartedAt = progress.Stage, &progress.StageStartedAt
+			run.BuildStartedAt, run.Build = progress.BuildStartedAt, progress.Build
+		}
+		if last, ok := s.lastBuild(project, run); ok && known {
+			run.LastBuildSeconds = last.BuildSeconds
+		}
 		return run, true, nil
 	}
 	run.State = RunStopped
 	run.Summary = "The run ended without reporting how it went. Its output is still in the pane."
 	return run, true, nil
+}
+
+// Stop interrupts the session's running `ao sim run`, which decides what that
+// means from where it is: a build is cancelled, an app it stays with is
+// terminated. Either way the command reports how it ended, as it always does.
+func (s *Service) Stop(ctx context.Context, id domain.SessionID) (Run, error) {
+	run, ok, err := s.Current(ctx, id)
+	if err != nil {
+		return Run{}, err
+	}
+	if !ok || run.State != RunRunning {
+		return Run{}, apierr.Invalid("IOS_RUN_NOT_RUNNING", "Nothing is running to stop.", nil)
+	}
+	progress, ok := s.readProgress(id)
+	if !ok || progress.PID <= 0 {
+		return Run{}, apierr.Invalid("IOS_RUN_NOT_STARTED", "The run has not started yet. Try again in a moment.", nil)
+	}
+	// The pid is checked before it is signalled: a run that ended without
+	// reporting leaves a pid behind that the system may have handed to anything.
+	args, err := s.processArgs(ctx, progress.PID)
+	if err != nil || !strings.Contains(args, " sim run") {
+		return Run{}, apierr.Invalid("IOS_RUN_NOT_RUNNING", "The run's process is gone, so there is nothing to stop.", nil)
+	}
+	if err := s.interrupt(progress.PID); err != nil {
+		return Run{}, fmt.Errorf("ios run: stop pid %d: %w", progress.PID, err)
+	}
+	return run, nil
+}
+
+func processArgs(ctx context.Context, pid int) (string, error) {
+	out, err := exec.CommandContext(ctx, "ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+func interruptProcess(pid int) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Signal(os.Interrupt)
+}
+
+func (s *Service) relativeIssues(ctx context.Context, id domain.SessionID, issues []xcresultstream.Issue) []xcresultstream.Issue {
+	dir, err := s.workspace(ctx, id)
+	if err != nil || len(issues) == 0 {
+		return issues
+	}
+	roots := []string{dir}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil && resolved != dir {
+		roots = append(roots, resolved)
+	}
+	out := make([]xcresultstream.Issue, len(issues))
+	for i, issue := range issues {
+		out[i] = issue
+		if issue.File == "" {
+			continue
+		}
+		files := []string{issue.File}
+		if resolved, err := filepath.EvalSymlinks(issue.File); err == nil && resolved != issue.File {
+			files = append(files, resolved)
+		}
+	match:
+		for _, file := range files {
+			for _, root := range roots {
+				if rel, err := filepath.Rel(root, file); err == nil && !strings.HasPrefix(rel, "..") {
+					out[i].File = rel
+					break match
+				}
+			}
+		}
+	}
+	return out
+}
+
+// BuildLog is a window of a run's build log around its first error, or its
+// end when there is none.
+type BuildLog struct {
+	Lines []string `json:"lines"`
+	// FirstLine is the one-based number of Lines[0] in the whole log.
+	FirstLine int `json:"firstLine"`
+	// ErrorLine is the one-based number of the first error line, 0 when the log has none.
+	ErrorLine  int `json:"errorLine"`
+	TotalLines int `json:"totalLines"`
+}
+
+const (
+	logLinesBefore = 20
+	logLinesAfter  = 60
+	logTailLines   = 80
+)
+
+var errorLine = regexp.MustCompile(`(^|: )(fatal )?error: `)
+
+// BuildLog reads the session's last build log.
+func (s *Service) BuildLog(ctx context.Context, id domain.SessionID) (BuildLog, error) {
+	dir := s.runDir(id)
+	if dir == "" {
+		return BuildLog{}, apierr.NotFound("IOS_RUN_NO_LOG", "This run kept no build log.")
+	}
+	body, err := os.ReadFile(filepath.Join(dir, LogFile))
+	if err != nil {
+		return BuildLog{}, apierr.NotFound("IOS_RUN_NO_LOG", "This run kept no build log.")
+	}
+	text := string(body)
+	if worktree, err := s.workspace(ctx, id); err == nil {
+		text = withoutWorktreePrefix(text, worktree)
+	}
+	return excerpt(strings.Split(strings.TrimRight(text, "\n"), "\n")), nil
+}
+
+// A path can arrive through a symlink (/tmp and /private/tmp), so both spellings go.
+func withoutWorktreePrefix(text, worktree string) string {
+	prefixes := []string{worktree}
+	if resolved, err := filepath.EvalSymlinks(worktree); err == nil {
+		prefixes = append(prefixes, resolved)
+	}
+	if rest, ok := strings.CutPrefix(worktree, "/private/"); ok {
+		prefixes = append(prefixes, "/"+rest)
+	}
+	for _, prefix := range prefixes {
+		text = strings.ReplaceAll(text, strings.TrimSuffix(prefix, "/")+"/", "")
+	}
+	return text
+}
+
+func excerpt(lines []string) BuildLog {
+	log := BuildLog{TotalLines: len(lines)}
+	from, to := max(0, len(lines)-logTailLines), len(lines)
+	for i, line := range lines {
+		if errorLine.MatchString(line) {
+			log.ErrorLine = i + 1
+			from, to = max(0, i-logLinesBefore), min(len(lines), i+logLinesAfter)
+			break
+		}
+	}
+	log.Lines, log.FirstLine = lines[from:to], from+1
+	return log
+}
+
+func (s *Service) projectOf(ctx context.Context, id domain.SessionID) (domain.ProjectID, bool) {
+	record, found, err := s.sessions.GetSession(ctx, id)
+	if err != nil || !found || record.ProjectID == "" {
+		return "", false
+	}
+	return record.ProjectID, true
 }
 
 // workspace is the session's worktree, which is where everything here happens.

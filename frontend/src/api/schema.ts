@@ -1205,6 +1205,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/ios-runs/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The lines of the session's last build log around its first error, or its end when it has none */
+        get: operations["getIOSRunLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/ios-runs/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop the session's run: cancel its build, or terminate the app it launched */
+        post: operations["stopIOSRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/jira": {
         parameters: {
             query?: never;
@@ -2111,6 +2145,23 @@ export interface paths {
         get: operations["searchWorkspace"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{sessionId}/xcodegen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run xcodegen generate in every directory of the session's worktree that holds a project.yml */
+        post: operations["runXcodegen"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3517,6 +3568,13 @@ export interface components {
         ControllersStartIOSRunInput: {
             /** @description The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects. */
             configuration: string;
+            /** @description Launch with the app's stdout and stderr (where print goes) shown in the run's pane, as ao sim run --console does. Ignored by build. */
+            console?: boolean;
+            /**
+             * @description run builds, installs and launches; run-without-building installs and launches the last build; build builds and touches no device; clean-build deletes this worktree's own DerivedData first. Omitted is run.
+             * @enum {string}
+             */
+            mode?: "run" | "run-without-building" | "build" | "clean-build";
             /** @description The Xcode scheme to build, as listed on the project. */
             scheme: string;
             /** @description The simulator to install and launch on. Omitted uses the one assigned to this session. */
@@ -3815,6 +3873,25 @@ export interface components {
             available: boolean;
             legacyRoot: string;
         };
+        IosrunBuildLog: {
+            errorLine: number;
+            firstLine: number;
+            lines: string[];
+            totalLines: number;
+        };
+        IosrunBuildProgress: {
+            /** @description Tasks done and planned, and the build service's own fraction. Absent until the build has planned, and while another progress-reporting build runs on this Mac. */
+            counts?: components["schemas"]["XcresultstreamCounts"];
+            errors: number;
+            /**
+             * @description What the build is doing, read from the tasks it starts.
+             * @enum {string}
+             */
+            phase?: "resolving" | "planning" | "compiling" | "linking" | "signing" | "building";
+            /** @description Another progress-reporting build is running on this Mac, so task counts cannot be told apart and are withheld. */
+            shared?: boolean;
+            warnings: number;
+        };
         IosrunProject: {
             configurations: string[];
             configurationsError?: string;
@@ -3823,13 +3900,50 @@ export interface components {
             path: string;
             schemes: string[];
             schemesError?: string;
+            /** @description The xcodegen specs in this worktree and whether each project is behind its spec. */
+            xcodegen: components["schemas"]["IosrunXcodegenState"];
         };
         IosrunRun: {
+            /** @description How far the build is, while it runs. */
+            build?: components["schemas"]["IosrunBuildProgress"];
+            /**
+             * Format: double
+             * @description How long this run's build took, when it succeeded.
+             */
+            buildSeconds?: number;
+            /**
+             * Format: date-time
+             * @description When the build itself started, which the estimate is measured from.
+             */
+            buildStartedAt?: null | string;
             configuration: string;
+            /** @description The app was launched with its stdout and stderr (where print goes) shown in the run's pane. */
+            console?: boolean;
+            /** @description How many errors the build reported. */
+            errors?: number;
             /** Format: date-time */
             finishedAt?: null | string;
             handleId: string;
+            /** @description The build's first errors, then its first warnings, each with its file and one-based line when it has one. A file inside the session's worktree is relative to it, which is the path the editor opens. */
+            issues?: components["schemas"]["XcresultstreamIssue"][];
+            /**
+             * Format: double
+             * @description How long the last successful build of the same project, scheme and configuration took. Present while running when there is one.
+             */
+            lastBuildSeconds?: number;
+            /**
+             * @description What the run does. Absent is run.
+             * @enum {string}
+             */
+            mode?: "run" | "run-without-building" | "build" | "clean-build";
             scheme: string;
+            /**
+             * @description The step a running run is on. Absent once it has ended.
+             * @enum {string}
+             */
+            stage?: "preparing" | "booting" | "building" | "installing" | "launching" | "app-running";
+            /** Format: date-time */
+            stageStartedAt?: null | string;
             /** Format: date-time */
             startedAt: string;
             /**
@@ -3842,6 +3956,12 @@ export interface components {
             udid: string;
             /** @description What is wrong with the app this run installed, when anything is - a run can succeed and still leave an app that cannot reach the Keychain. Empty is the ordinary case. */
             warning?: string;
+            /** @description How many warnings the build reported. */
+            warnings?: number;
+        };
+        IosrunXcodegenState: {
+            installed: boolean;
+            specs: components["schemas"]["XcodegenSpec"][];
         };
         JiraAttachment: {
             filename?: string;
@@ -5454,6 +5574,35 @@ export interface components {
             contentHash: string;
             path: string;
             size: number;
+        };
+        XcodegenDirResult: {
+            dir: string;
+            exitCode: null | number;
+            ok: boolean;
+            output: string;
+        };
+        XcodegenResult: {
+            results: components["schemas"]["XcodegenDirResult"][];
+            root?: string;
+            /** @enum {string} */
+            status: "not-installed" | "no-specs" | "ran";
+        };
+        XcodegenSpec: {
+            dir: string;
+            stale: boolean;
+        };
+        XcresultstreamCounts: {
+            done: number;
+            /** Format: double */
+            fraction: number;
+            total: number;
+        };
+        XcresultstreamIssue: {
+            column?: number;
+            file?: string;
+            line?: number;
+            message: string;
+            severity: string;
         };
     };
     responses: never;
@@ -9999,6 +10148,115 @@ export interface operations {
             };
         };
     };
+    getIOSRunLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IosrunBuildLog"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    stopIOSRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersStartIOSRunResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     getSessionJira: {
         parameters: {
             query?: never;
@@ -13910,6 +14168,65 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    runXcodegen: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["XcodegenResult"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

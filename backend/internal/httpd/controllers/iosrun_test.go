@@ -13,6 +13,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd"
 	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcodegen"
 )
 
 // fakeIOSRun answers whatever a test hands it, so the controller's own
@@ -29,12 +30,24 @@ func (f *fakeIOSRun) Project(_ context.Context, _ domain.SessionID, refresh bool
 	return f.project, nil
 }
 
-func (f *fakeIOSRun) Start(context.Context, domain.SessionID, string, string, string) (iosrunsvc.Run, error) {
+func (f *fakeIOSRun) Start(context.Context, domain.SessionID, iosrunsvc.StartRequest) (iosrunsvc.Run, error) {
 	return iosrunsvc.Run{}, nil
 }
 
 func (f *fakeIOSRun) Current(context.Context, domain.SessionID) (iosrunsvc.Run, bool, error) {
 	return iosrunsvc.Run{}, false, nil
+}
+
+func (f *fakeIOSRun) Xcodegen(context.Context, domain.SessionID) (xcodegen.Result, error) {
+	return xcodegen.Result{Status: xcodegen.StatusNoSpecs, Root: "/w"}, nil
+}
+
+func (f *fakeIOSRun) Stop(context.Context, domain.SessionID) (iosrunsvc.Run, error) {
+	return iosrunsvc.Run{}, nil
+}
+
+func (f *fakeIOSRun) BuildLog(context.Context, domain.SessionID) (iosrunsvc.BuildLog, error) {
+	return iosrunsvc.BuildLog{}, nil
 }
 
 func newIOSRunTestServer(t *testing.T, svc iosrunsvc.Manager) *httptest.Server {
@@ -118,5 +131,31 @@ func TestIOSProject_PassesRefreshThrough(t *testing.T) {
 	}
 	if len(svc.refreshed) != 2 || svc.refreshed[0] || !svc.refreshed[1] {
 		t.Fatalf("asked with refresh=%v, want [false true]", svc.refreshed)
+	}
+}
+
+func TestIOSProject_SerialisesNoXcodegenSpecsAsAnArray(t *testing.T) {
+	srv := newIOSRunTestServer(t, &fakeIOSRun{project: iosrunsvc.Project{Name: "Nter.xcodeproj"}})
+	resp, err := http.Get(srv.URL + "/api/v1/sessions/mer-9/ios-project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"specs":[]`) {
+		t.Fatalf("body %s, want specs as an empty array", body)
+	}
+}
+
+func TestRunXcodegen_AnswersWithTheGenerateResult(t *testing.T) {
+	srv := newIOSRunTestServer(t, &fakeIOSRun{})
+	resp, err := http.Post(srv.URL+"/api/v1/sessions/mer-9/xcodegen", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `"status":"no-specs"`) || !strings.Contains(string(body), `"results":[]`) {
+		t.Fatalf("status %d body %s", resp.StatusCode, body)
 	}
 }

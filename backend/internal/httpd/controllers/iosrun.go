@@ -9,6 +9,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcodegen"
 )
 
 // IOSProjectResponse is the body of GET /api/v1/sessions/{sessionId}/ios-project:
@@ -33,8 +34,10 @@ type StartIOSRunInput struct {
 	// Required, and deliberately not defaulted to Debug: a project with no Debug
 	// configuration (nter-ios-app has Dev, UAT, Production and no Debug) cannot
 	// build one, and the failure arrives minutes later as an empty PODS_ROOT.
-	Configuration string `json:"configuration" description:"The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects."`
-	UDID          string `json:"udid,omitempty" description:"The simulator to install and launch on. Omitted uses the one assigned to this session."`
+	Configuration string         `json:"configuration" description:"The build configuration - which environment to build for, as listed on the project. Required: there is no safe default across projects."`
+	UDID          string         `json:"udid,omitempty" description:"The simulator to install and launch on. Omitted uses the one assigned to this session."`
+	Console       bool           `json:"console,omitempty" description:"Launch with the app's stdout and stderr (where print goes) shown in the run's pane, as ao sim run --console does. Ignored by build."`
+	Mode          iosrunsvc.Mode `json:"mode,omitempty" enum:"run,run-without-building,build,clean-build" description:"run builds, installs and launches; run-without-building installs and launches the last build; build builds and touches no device; clean-build deletes this worktree's own DerivedData first. Omitted is run."`
 }
 
 // StartIOSRunResponse is the body of a started run (201).
@@ -52,6 +55,54 @@ type IOSRunController struct {
 func (c *IOSRunController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/ios-project", c.project)
 	r.Post("/sessions/{sessionId}/ios-runs", c.start)
+	r.Post("/sessions/{sessionId}/ios-runs/stop", c.stop)
+	r.Get("/sessions/{sessionId}/ios-runs/log", c.buildLog)
+	r.Post("/sessions/{sessionId}/xcodegen", c.xcodegen)
+}
+
+func (c *IOSRunController) buildLog(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/ios-runs/log")
+		return
+	}
+	log, err := c.Svc.BuildLog(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	if log.Lines == nil {
+		log.Lines = []string{}
+	}
+	envelope.WriteJSON(w, http.StatusOK, log)
+}
+
+func (c *IOSRunController) stop(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/ios-runs/stop")
+		return
+	}
+	run, err := c.Svc.Stop(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusAccepted, StartIOSRunResponse{Run: run})
+}
+
+func (c *IOSRunController) xcodegen(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/xcodegen")
+		return
+	}
+	result, err := c.Svc.Xcodegen(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	if result.Results == nil {
+		result.Results = []xcodegen.DirResult{}
+	}
+	envelope.WriteJSON(w, http.StatusOK, result)
 }
 
 func (c *IOSRunController) project(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +127,9 @@ func (c *IOSRunController) project(w http.ResponseWriter, r *http.Request) {
 	if project.Configurations == nil {
 		project.Configurations = []string{}
 	}
+	if project.Xcodegen.Specs == nil {
+		project.Xcodegen.Specs = []xcodegen.Spec{}
+	}
 	res := IOSProjectResponse{Project: project}
 	// The run rides on the project read rather than on a route of its own: the
 	// bar asks this question on every poll anyway, and a second request for
@@ -96,7 +150,9 @@ func (c *IOSRunController) start(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
 		return
 	}
-	run, err := c.Svc.Start(r.Context(), sessionID(r), in.Scheme, in.Configuration, in.UDID)
+	run, err := c.Svc.Start(r.Context(), sessionID(r), iosrunsvc.StartRequest{
+		Scheme: in.Scheme, Configuration: in.Configuration, UDID: in.UDID, Mode: in.Mode, Console: in.Console,
+	})
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

@@ -28,9 +28,11 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -532,7 +534,7 @@ const GenericSimulatorDestination = "generic/platform=iOS Simulator"
 // cli/sim_run.go, which names it in the refusal. What this must never do again
 // is hand back an app that looks fine and cannot reach the Keychain.
 //
-// resultBundle, when set, is where xcodebuild writes the run's result bundle.
+// out.ResultBundle, when set, is where xcodebuild writes the run's result bundle.
 // 🗝 The bundle itself is not wanted - what it buys is the BUILD LOG. Without
 // `-resultBundlePath`, xcodebuild does not reliably leave an `.xcactivitylog`
 // in DerivedData: measured on a two-module fixture (2026-10-05), 0 of the 2
@@ -544,10 +546,13 @@ const GenericSimulatorDestination = "generic/platform=iOS Simulator"
 // how `import UIKit` came to be underlined "No such module" in a file that
 // builds. xcodebuild refuses a path that already exists, so the caller passes a
 // fresh one.
-func BuildArgs(project Project, scheme, configuration, resultBundle string) []string {
+func BuildArgs(project Project, scheme, configuration string, out BuildOutputs) []string {
 	args := append([]string{"xcodebuild"}, project.Flag()...)
-	if resultBundle != "" {
-		args = append(args, "-resultBundlePath", resultBundle)
+	if out.ResultBundle != "" {
+		args = append(args, "-resultBundlePath", out.ResultBundle)
+	}
+	if out.ResultBundle != "" && out.ProgressStream != "" {
+		args = append(args, ProgressFlag, "-resultStreamPath", out.ProgressStream)
 	}
 	return append(args,
 		"-scheme", scheme,
@@ -576,6 +581,21 @@ func BuildArgs(project Project, scheme, configuration, resultBundle string) []st
 	)
 }
 
+// BuildOutputs are the files a build writes besides its products.
+type BuildOutputs struct {
+	ResultBundle string
+	// ProgressStream, with ResultBundle, is where xcodebuild streams its events
+	// with the build service's task counts in them. The file must exist.
+	ProgressStream string
+}
+
+// ProgressFlag makes xcodebuild post the build service's task counts into its
+// result stream. Two costs, measured on Xcode 26.3: the counts go to EVERY
+// result stream on the Mac, unattributed, and a FAILED build stops printing its
+// task output (the compiler errors among it) to stdout. The result bundle still
+// has that output; see RecoverFailedOutput.
+const ProgressFlag = "-IDEPostProgressNotifications=YES"
+
 // settingsOutput is the shape of `xcodebuild -showBuildSettings -json`: one
 // entry per target, each with a flat map of settings.
 type settingsOutput struct {
@@ -593,6 +613,27 @@ type settingsOutput struct {
 // usually right, and an install that silently puts yesterday's build on the
 // device the rest of the time.
 func ProductPath(ctx context.Context, run Runner, dir string, project Project, scheme, configuration string) (string, error) {
+	settings, err := appSettings(ctx, run, dir, project, scheme, configuration)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(settings["TARGET_BUILD_DIR"], settings["FULL_PRODUCT_NAME"]), nil
+}
+
+// BuildDir is the scheme's BUILD_DIR, `<DerivedData>/Build/Products` for a
+// project that keeps Xcode's layout.
+func BuildDir(ctx context.Context, run Runner, dir string, project Project, scheme, configuration string) (string, error) {
+	settings, err := appSettings(ctx, run, dir, project, scheme, configuration)
+	if err != nil {
+		return "", err
+	}
+	if settings["BUILD_DIR"] == "" {
+		return "", fmt.Errorf("the build settings for %s name no BUILD_DIR", scheme)
+	}
+	return settings["BUILD_DIR"], nil
+}
+
+func appSettings(ctx context.Context, run Runner, dir string, project Project, scheme, configuration string) (map[string]string, error) {
 	args := append(append([]string{"xcodebuild", "-showBuildSettings", "-json"}, project.Flag()...),
 		"-scheme", scheme,
 		"-configuration", configuration,
@@ -600,21 +641,83 @@ func ProductPath(ctx context.Context, run Runner, dir string, project Project, s
 	)
 	out, err := run(ctx, dir, Binary, args...)
 	if err != nil {
-		return "", fmt.Errorf("`xcodebuild -showBuildSettings` failed for %s: %w: %s", scheme, err, tail(out))
+		return nil, fmt.Errorf("`xcodebuild -showBuildSettings` failed for %s: %w: %s", scheme, err, tail(out))
 	}
 	var parsed []settingsOutput
 	if err := json.Unmarshal(trimToJSON(out), &parsed); err != nil {
-		return "", fmt.Errorf("could not read the build settings for %s: %w", scheme, err)
+		return nil, fmt.Errorf("could not read the build settings for %s: %w", scheme, err)
 	}
 	for _, entry := range parsed {
-		dir, product := entry.BuildSettings["TARGET_BUILD_DIR"], entry.BuildSettings["FULL_PRODUCT_NAME"]
-		if dir == "" || !strings.HasSuffix(product, ".app") {
+		if entry.BuildSettings["TARGET_BUILD_DIR"] == "" || !strings.HasSuffix(entry.BuildSettings["FULL_PRODUCT_NAME"], ".app") {
 			continue
 		}
-		return filepath.Join(dir, product), nil
+		return entry.BuildSettings, nil
 	}
-	return "", ErrNoProduct
+	return nil, ErrNoProduct
 }
+
+// OwnDerivedData is the DerivedData directory that belongs to this worktree's
+// project, read from its BUILD_DIR, or an error when that cannot be shown. A
+// clean deletes it, so it accepts only Xcode's own two layouts:
+//
+//   - `<root>/DerivedData/<Name>-<hash>`, per workspace, where Name is the
+//     project's and an info.plist, when there is one, names this project;
+//   - a directory inside the worktree itself (a workspace-relative location).
+//
+// Never the DerivedData root, never a directory holding the worktree.
+func OwnDerivedData(buildDir, worktree string, project Project) (string, error) {
+	clean := filepath.Clean(buildDir)
+	suffix := string(filepath.Separator) + filepath.Join("Build", "Products")
+	if !strings.HasSuffix(clean, suffix) {
+		return "", fmt.Errorf("BUILD_DIR %s is not <DerivedData>/Build/Products, so there is no DerivedData of this project's own to clean", buildDir)
+	}
+	dd := strings.TrimSuffix(clean, suffix)
+	worktree = filepath.Clean(worktree)
+	if dd == worktree || isWithin(worktree, dd) {
+		return "", fmt.Errorf("%s holds this worktree, so it is not DerivedData to delete", dd)
+	}
+	if isWithin(dd, worktree) {
+		return dd, nil
+	}
+	name := strings.TrimSuffix(project.Name, filepath.Ext(project.Name))
+	base := filepath.Base(dd)
+	if filepath.Base(filepath.Dir(dd)) != "DerivedData" || name == "" || !strings.HasPrefix(base, name+"-") || len(base) <= len(name)+1 {
+		return "", fmt.Errorf("%s is not %s's own DerivedData folder (DerivedData/%s-<hash>)", dd, project.Name, name)
+	}
+	if owner, ok := derivedDataOwner(dd); ok && !samePath(owner, project.Path) {
+		return "", fmt.Errorf("%s belongs to %s, not this worktree's %s", dd, owner, project.Path)
+	}
+	return dd, nil
+}
+
+func samePath(a, b string) bool {
+	resolve := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return filepath.Clean(p)
+	}
+	return resolve(a) == resolve(b)
+}
+
+func isWithin(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func derivedDataOwner(dd string) (string, bool) {
+	body, err := os.ReadFile(filepath.Join(dd, "info.plist"))
+	if err != nil {
+		return "", false
+	}
+	m := workspacePathKey.FindSubmatch(body)
+	if m == nil {
+		return "", false
+	}
+	return html.UnescapeString(string(m[1])), true
+}
+
+var workspacePathKey = regexp.MustCompile(`<key>WorkspacePath</key>\s*<string>([^<]*)</string>`)
 
 // trimToJSON drops anything xcodebuild printed before its JSON.
 //
@@ -657,4 +760,49 @@ func tail(out []byte) string {
 		lines = lines[len(lines)-keep:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// logSection is one section of `xcrun xcresulttool get log --type build`.
+type logSection struct {
+	Title   string `json:"title"`
+	Result  string `json:"result"`
+	Command struct {
+		EmittedOutput string `json:"emittedOutput"`
+	} `json:"commandInvocationDetails"`
+	Subsections []logSection `json:"subsections"`
+}
+
+// RecoverFailedOutput is what the failed tasks of a build printed, read back
+// from its result bundle's build log: the output ProgressFlag keeps off stdout.
+// Only the innermost failed sections are kept; the ones around them carry the
+// whole compiler command line and none of the errors.
+func RecoverFailedOutput(buildLog []byte) (string, error) {
+	var root logSection
+	if err := json.Unmarshal(trimToJSON(buildLog), &root); err != nil {
+		return "", fmt.Errorf("read the build log: %w", err)
+	}
+	var b strings.Builder
+	var walk func(logSection)
+	walk = func(s logSection) {
+		if s.Result != "failed" {
+			return
+		}
+		failedChild := false
+		for _, child := range s.Subsections {
+			if child.Result == "failed" {
+				failedChild = true
+				walk(child)
+			}
+		}
+		if failedChild {
+			return
+		}
+		fmt.Fprintf(&b, "%s\n", s.Title)
+		if out := strings.TrimRight(s.Command.EmittedOutput, "\n"); out != "" {
+			fmt.Fprintf(&b, "%s\n", out)
+		}
+		b.WriteString("\n")
+	}
+	walk(root)
+	return b.String(), nil
 }

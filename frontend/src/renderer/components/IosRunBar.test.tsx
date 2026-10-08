@@ -36,6 +36,7 @@ const project = (over: Record<string, unknown> = {}) => ({
 	// configuration without choosing one. The no-Debug project - which is the
 	// real one this feature exists for - is its own test below.
 	configurations: ["Debug", "Release"],
+	xcodegen: { installed: true, specs: [] },
 	...over,
 });
 
@@ -110,7 +111,9 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A" } }),
+				expect.objectContaining({
+					body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A", mode: "run", console: false },
+				}),
 			),
 		);
 		// The build output has to be where the human is looking, or it is a
@@ -190,7 +193,9 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE" } }),
+				expect.objectContaining({
+					body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE", mode: "run", console: false },
+				}),
 			),
 		);
 	});
@@ -258,7 +263,7 @@ describe("IosRunBar", () => {
 		answer({ ios: { project: project(), run } });
 		const { onShowRun } = renderBar();
 
-		await userEvent.click(await screen.findByRole("button", { name: /Running NterDev \(Debug\)/ }));
+		await userEvent.click(await screen.findByRole("button", { name: /Starting/ }));
 		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
 
 		const onShowAgent = vi.fn();
@@ -273,6 +278,26 @@ describe("IosRunBar", () => {
 		);
 		await userEvent.click(await screen.findByRole("button", { name: "Back to agent" }));
 		expect(onShowAgent).toHaveBeenCalled();
+	});
+
+	it("shows how far the build is with the build's own task counts", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "running",
+			startedAt: "2026-09-18T10:00:00Z",
+			stage: "building",
+			buildStartedAt: "2026-09-18T10:00:00Z",
+			build: { phase: "compiling", counts: { done: 120, total: 480, fraction: 0.25 }, errors: 0, warnings: 0 },
+		};
+		answer({ ios: { project: project(), run } });
+		renderBar();
+
+		const chip = await screen.findByRole("button", { name: /Compiling 120\/480/ });
+		expect(chip).toHaveAttribute("title", expect.stringContaining("120 of 480 build tasks"));
+		expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
 	});
 
 	// A finished build's pane stays on screen on purpose - its keep-alive shell
@@ -444,7 +469,9 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A" } }),
+				expect.objectContaining({
+					body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A", mode: "run", console: false },
+				}),
 			),
 		);
 	});
@@ -511,5 +538,280 @@ describe("IosRunBar", () => {
 		await userEvent.keyboard("{Escape}");
 		await userEvent.click(screen.getByRole("button", { name: "Build configuration to run" }));
 		await waitFor(() => expect(refreshes()).toBe(2));
+	});
+
+	it("has no xcodegen button on a project with no spec", async () => {
+		answer();
+		renderBar();
+		await screen.findByRole("button", { name: /^Run/ });
+		expect(screen.queryByRole("button", { name: /xcodegen/ })).not.toBeInTheDocument();
+	});
+
+	it("marks xcodegen when a spec changed since the project was generated", async () => {
+		answer({ ios: { project: project({ xcodegen: { installed: true, specs: [{ dir: "NterApp", stale: true }] } }) } });
+		renderBar();
+		const button = await screen.findByRole("button", { name: "Run xcodegen (the project is out of date)" });
+		expect(button).toHaveAttribute("title", expect.stringContaining("The Xcode project is behind NterApp/project.yml"));
+		expect(screen.getByTestId("xcodegen-stale-dot")).toBeInTheDocument();
+	});
+
+	it("shows no dot on a project that matches its spec", async () => {
+		answer({ ios: { project: project({ xcodegen: { installed: true, specs: [{ dir: "NterApp", stale: false }] } }) } });
+		renderBar();
+		await screen.findByRole("button", { name: "Run xcodegen" });
+		expect(screen.queryByTestId("xcodegen-stale-dot")).not.toBeInTheDocument();
+	});
+
+	it("runs xcodegen for the session and shows per-directory results", async () => {
+		answer({ ios: { project: project({ xcodegen: { installed: true, specs: [{ dir: "NterApp", stale: true }] } }) } });
+		postMock.mockResolvedValue({
+			data: {
+				status: "ran",
+				root: "/w",
+				results: [{ dir: "NterApp", ok: true, exitCode: 0, output: "Created project" }],
+			},
+		});
+		renderBar();
+		await userEvent.click(await screen.findByRole("button", { name: /Run xcodegen/ }));
+		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/xcodegen", {
+			params: { path: { sessionId: SESSION } },
+		});
+		expect(await screen.findByText("Ran in 1 directory · 1/1 succeeded.")).toBeInTheDocument();
+	});
+
+	it("says so when xcodegen is not installed", async () => {
+		answer({
+			ios: { project: project({ xcodegen: { installed: false, specs: [{ dir: "NterApp", stale: false }] } }) },
+		});
+		postMock.mockResolvedValue({ data: { status: "not-installed", results: [] } });
+		renderBar();
+		await userEvent.click(await screen.findByRole("button", { name: "Run xcodegen" }));
+		expect(await screen.findByText(/isn't installed or isn't on your PATH/)).toBeInTheDocument();
+		expect(screen.getByText("brew install xcodegen")).toBeInTheDocument();
+	});
+
+	it("renders for an xcodegen project whose Xcode project was never generated", async () => {
+		answer({
+			ios: {
+				project: project({
+					name: "",
+					schemes: [],
+					configurations: [],
+					schemesError: "There is no Xcode project yet. Run xcodegen to generate it.",
+					xcodegen: { installed: true, specs: [{ dir: ".", stale: true }] },
+				}),
+			},
+		});
+		renderBar();
+		expect(await screen.findByRole("button", { name: /Run xcodegen/ })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute(
+			"title",
+			expect.stringContaining("Run xcodegen first"),
+		);
+	});
+
+	it("keeps Stop in place and disabled while nothing runs", async () => {
+		answer();
+		renderBar();
+		expect(await screen.findByRole("button", { name: "Stop" })).toBeDisabled();
+	});
+
+	it("stops a running build", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "running",
+			startedAt: "2026-09-18T10:00:00Z",
+			stage: "building",
+		};
+		answer({ ios: { project: project(), run } });
+		postMock.mockResolvedValue({ data: { run } });
+		renderBar();
+		const stop = await screen.findByRole("button", { name: "Stop" });
+		await waitFor(() => expect(stop).toBeEnabled());
+		expect(stop).toHaveAttribute("title", "Stop building NterDev (Debug)");
+		await userEvent.click(stop);
+		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/ios-runs/stop", {
+			params: { path: { sessionId: SESSION } },
+		});
+	});
+
+	it("says Stop terminates an app that is running", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "running",
+			startedAt: "2026-09-18T10:00:00Z",
+			stage: "app-running",
+		};
+		answer({ ios: { project: project(), run } });
+		renderBar();
+		expect(await screen.findByRole("button", { name: /Running NterDev \(Debug\)/ })).toBeInTheDocument();
+		await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled());
+		expect(screen.getByRole("button", { name: "Stop" })).toHaveAttribute(
+			"title",
+			"Stop NterDev (Debug): terminate the app",
+		);
+	});
+
+	it("says how long the last build took", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "succeeded",
+			startedAt: "2026-09-18T10:00:00Z",
+			finishedAt: "2026-09-18T10:02:00Z",
+			buildSeconds: 102,
+		};
+		answer({ ios: { project: project(), run } });
+		renderBar();
+		expect(
+			await screen.findByRole("button", { name: /Ran NterDev \(Debug\)\s*last build 1m 42s/ }),
+		).toBeInTheDocument();
+	});
+
+	it("summarises a failed build and opens its log at the first error", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "failed",
+			summary: "building NterDev failed (exit status 65).",
+			startedAt: "2026-09-18T10:00:00Z",
+			errors: 2,
+			warnings: 1,
+			issues: [
+				{
+					severity: "error",
+					message: "Cannot find 'foo' in scope",
+					file: "App/AppDelegate.swift",
+					line: 12,
+					column: 5,
+				},
+				{ severity: "error", message: "Missing return" },
+				{ severity: "warning", message: "Variable 'x' was never used", file: "App/A.swift", line: 3, column: 9 },
+			],
+		};
+		getMock.mockImplementation((path: string) => {
+			if (path === "/api/v1/sessions/{sessionId}/ios-project")
+				return Promise.resolve({ data: { project: project(), run } });
+			if (path === "/api/v1/sessions/{sessionId}/ios-runs/log") {
+				return Promise.resolve({
+					data: {
+						lines: [
+							"CompileSwift normal arm64 App/AppDelegate.swift",
+							"/w/App/AppDelegate.swift:12:5: error: cannot find 'foo' in scope",
+						],
+						firstLine: 40,
+						errorLine: 41,
+						totalLines: 900,
+					},
+					response: { status: 200 },
+				});
+			}
+			return Promise.resolve({
+				data: { devices: [device("UDID-A", "iPhone 17 Pro Max", "Booted")], defaultUdid: null },
+			});
+		});
+		const onOpenWorkspaceFile = vi.fn();
+		render(
+			<IosRunBar
+				onOpenWorkspaceFile={onOpenWorkspaceFile}
+				onShowAgent={vi.fn()}
+				onShowRun={vi.fn()}
+				sessionId={SESSION}
+				terminalTarget={{ kind: "worker" }}
+			/>,
+			{ wrapper: Wrapper },
+		);
+
+		await userEvent.click(
+			await screen.findByRole("button", { name: /NterDev \(Debug\) failed\s*2 errors · 1 warning/ }),
+		);
+		expect(await screen.findByText("App/AppDelegate.swift:12:5")).toBeInTheDocument();
+		expect(await screen.findByText("Lines 40-41 of 900, at the first error")).toBeInTheDocument();
+		expect(screen.getByText("41").parentElement).toHaveClass("bg-error/15");
+
+		await userEvent.click(screen.getByRole("button", { name: /App\/AppDelegate.swift:12:5/ }));
+		expect(onOpenWorkspaceFile).toHaveBeenCalledWith({ path: "App/AppDelegate.swift", line: 12, column: 5 });
+	});
+
+	it("offers running without building, building only and a clean build", async () => {
+		answer({ ios: { project: project({ schemes: ["Nter"] }) } });
+		postMock.mockResolvedValue({ data: { run: { handleId: "h", scheme: "Nter", state: "running" } } });
+		renderBar();
+		await waitFor(() => expect(screen.getByRole("button", { name: "Run Nter" })).toBeEnabled());
+		await userEvent.click(screen.getByRole("button", { name: "More ways to run" }));
+		for (const label of ["Run without building", "Build only", "Clean build"]) {
+			expect(await screen.findByText(label)).toBeInTheDocument();
+		}
+		await userEvent.click(screen.getByText("Clean build"));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: expect.objectContaining({ mode: "clean-build" }) }),
+			),
+		);
+	});
+
+	it("builds without a simulator, which Run itself needs", async () => {
+		answer({ ios: { project: project({ schemes: ["Nter"] }) }, devices: [] });
+		postMock.mockResolvedValue({ data: { run: { handleId: "h", scheme: "Nter", state: "running" } } });
+		renderBar();
+		const more = await screen.findByRole("button", { name: "More ways to run" });
+		await waitFor(() => expect(more).toBeEnabled());
+		expect(screen.getByRole("button", { name: "Run Nter" })).toBeDisabled();
+		await userEvent.click(more);
+		await userEvent.click(await screen.findByText("Build only"));
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: expect.objectContaining({ mode: "build", scheme: "Nter" }) }),
+			),
+		);
+	});
+
+	it("runs with the app's console when the switch is on", async () => {
+		window.localStorage.clear();
+		answer({ ios: { project: project({ schemes: ["Nter"] }) } });
+		postMock.mockResolvedValue({ data: { run: { handleId: "h", scheme: "Nter", state: "running" } } });
+		renderBar();
+		const run = await screen.findByRole("button", { name: "Run Nter" });
+		await waitFor(() => expect(run).toBeEnabled());
+		await userEvent.click(screen.getByRole("switch", { name: "Show the app's console" }));
+		await userEvent.click(run);
+		await waitFor(() =>
+			expect(postMock).toHaveBeenCalledWith(
+				"/api/v1/sessions/{sessionId}/ios-runs",
+				expect.objectContaining({ body: expect.objectContaining({ console: true, mode: "run" }) }),
+			),
+		);
+		expect(window.localStorage.getItem(`ao-ios-run-console:${SESSION}`)).toBe("1");
+	});
+
+	it("leads a failed run with no compiler errors to the terminal, not to its warnings", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "failed",
+			summary: "`simctl install` failed on iPhone 17 Pro Max.",
+			startedAt: "2026-09-18T10:00:00Z",
+			warnings: 3,
+			issues: [{ severity: "warning", message: "unused" }],
+		};
+		answer({ ios: { project: project(), run } });
+		const { onShowRun } = renderBar();
+		await userEvent.click(await screen.findByRole("button", { name: /NterDev \(Debug\) failed/ }));
+		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
+		expect(screen.queryByText("Build log")).not.toBeInTheDocument();
 	});
 });

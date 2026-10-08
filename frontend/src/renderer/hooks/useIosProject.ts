@@ -54,7 +54,16 @@ export function useIosProject(sessionId: string | undefined) {
 
 /** A daemon that cannot build for iOS at all, in the shape a Go worktree has. */
 function noIosProject(): IosProjectResponse {
-	return { project: { name: "", path: "", kind: "", schemes: [], configurations: [] } };
+	return {
+		project: {
+			name: "",
+			path: "",
+			kind: "",
+			schemes: [],
+			configurations: [],
+			xcodegen: { installed: false, specs: [] },
+		},
+	};
 }
 
 /**
@@ -87,7 +96,65 @@ export function useRefreshIosProject(sessionId: string) {
 	});
 }
 
-export type StartIosRunRequest = { scheme: string; configuration: string; udid?: string };
+export function useStopIosRun(sessionId: string, onProblem: (message: string) => void) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (): Promise<IosRun> => {
+			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/ios-runs/stop", {
+				params: { path: { sessionId } },
+			});
+			if (error || !data) throw error ?? new Error("Could not stop the run");
+			return data.run;
+		},
+		onMutate: () => onProblem(""),
+		onError: (error) => onProblem(apiErrorMessage(error, "Could not stop the run")),
+		onSettled: () => void queryClient.invalidateQueries({ queryKey: iosProjectQueryKey(sessionId) }),
+	});
+}
+
+export type IosBuildLog = components["schemas"]["IosrunBuildLog"];
+
+export function useIosBuildLog(sessionId: string, startedAt: string, enabled: boolean) {
+	return useQuery<IosBuildLog | null>({
+		queryKey: ["ios-run-log", sessionId, startedAt],
+		enabled,
+		staleTime: 0,
+		queryFn: async ({ signal }) => {
+			const { data, response } = await apiClient.GET("/api/v1/sessions/{sessionId}/ios-runs/log", {
+				params: { path: { sessionId } },
+				signal,
+			});
+			if (response?.status === 404) return null;
+			return data ?? null;
+		},
+	});
+}
+
+export type XcodegenResult = components["schemas"]["XcodegenResult"];
+
+export function useRunXcodegen(sessionId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (): Promise<XcodegenResult> => {
+			if (usePreviewData)
+				return {
+					status: "ran",
+					root: "/demo",
+					results: [
+						{ dir: "DemoApp", ok: true, exitCode: 0, output: "Created project at /demo/DemoApp/DemoApp.xcodeproj" },
+					],
+				};
+			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/xcodegen", {
+				params: { path: { sessionId } },
+			});
+			if (error || !data) throw error ?? new Error("Could not run xcodegen");
+			return data;
+		},
+		onSettled: () => void queryClient.invalidateQueries({ queryKey: iosProjectQueryKey(sessionId) }),
+	});
+}
+
+export type StartIosRunRequest = components["schemas"]["ControllersStartIOSRunInput"];
 
 /**
  * Pressing Run. The daemon starts `ao sim run` in a pane of its own and hands
@@ -98,10 +165,10 @@ export type StartIosRunRequest = { scheme: string; configuration: string; udid?:
 export function useStartIosRun(sessionId: string, onProblem: (message: string) => void) {
 	const queryClient = useQueryClient();
 	return useMutation({
-		mutationFn: async ({ scheme, configuration, udid }: StartIosRunRequest): Promise<IosRun> => {
+		mutationFn: async (body: StartIosRunRequest): Promise<IosRun> => {
 			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/ios-runs", {
 				params: { path: { sessionId } },
-				body: { scheme, configuration, udid },
+				body,
 			});
 			if (error || !data) throw error ?? new Error("Could not start the run");
 			return data.run;
