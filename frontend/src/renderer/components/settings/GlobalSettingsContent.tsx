@@ -157,9 +157,10 @@ function EveryAgentSection({ form }: { form: GlobalForm }) {
 					summary="Named Claude Code settings files a project, a new task or a running session can pick - for example to route a session through OmniRoute instead of the subscription."
 					detail={
 						<>
-							Each profile is a name and a settings file passed to Claude Code with <code>--settings</code>. AO checks
-							the file exists and is a JSON object before every launch. The built-ins cannot be changed or shadowed.
-							Profiles apply only to sessions whose agent is Claude Code.
+							Each profile is a name and a settings file passed to Claude Code with{" "}
+							<code className="whitespace-nowrap">--settings</code>. AO checks the file exists and is a JSON object
+							before every launch. The built-ins cannot be changed or shadowed. Profiles apply only to sessions whose
+							agent is Claude Code.
 						</>
 					}
 					ownership={{ kind: "global-only" }}
