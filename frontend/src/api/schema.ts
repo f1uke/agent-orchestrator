@@ -4266,6 +4266,7 @@ export interface components {
         ProjectConfig: {
             agentConfig?: components["schemas"]["AgentConfig"];
             approvalRule?: components["schemas"]["ApprovalRule"];
+            claudeProfile?: string;
             defaultBranch?: string;
             disableAutoCrew?: boolean;
             env?: {

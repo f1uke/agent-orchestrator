@@ -58,6 +58,21 @@ type Agent interface {
 	SessionInfo(ctx context.Context, session SessionRef) (info SessionInfo, ok bool, err error)
 }
 
+// AgentLaunchEnv is the optional capability for adapters whose agent must run
+// with extra env vars on every launch and restore. These win over a project's
+// own env.
+type AgentLaunchEnv interface {
+	LaunchEnv() map[string]string
+}
+
+// LaunchEnvOf returns the adapter's launch env, or nil when it declares none.
+func LaunchEnvOf(agent Agent) map[string]string {
+	if a, ok := agent.(AgentLaunchEnv); ok {
+		return a.LaunchEnv()
+	}
+	return nil
+}
+
 // AgentAuthChecker is the optional capability for adapters whose native CLI has
 // a cheap local authentication status probe.
 type AgentAuthChecker interface {
@@ -195,6 +210,9 @@ type LaunchConfig struct {
 	SystemPrompt     string
 	SystemPromptFile string
 	WorkspacePath    string
+	// SettingsFile is an agent settings file to launch with (claude-code's
+	// `--settings`, from the session's Claude profile). Empty means none.
+	SettingsFile string
 }
 
 // WorkspaceHookConfig carries inputs needed to install workspace-local agent hooks.
@@ -267,6 +285,8 @@ type RestoreConfig struct {
 	// LaunchConfig.SystemPromptFile applies here too.
 	SystemPrompt     string
 	SystemPromptFile string
+	// SettingsFile is the LaunchConfig.SettingsFile of the relaunch.
+	SettingsFile string
 }
 
 // SessionRef identifies an AO session whose agent-owned metadata may be read.

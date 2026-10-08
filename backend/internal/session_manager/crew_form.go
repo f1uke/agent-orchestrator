@@ -149,18 +149,19 @@ func (m *Manager) spawnSuspendedCrewMemberLocked(ctx context.Context, project do
 	}
 	now := m.clock()
 	seed := domain.SessionRecord{
-		ProjectID:   dev.ProjectID,
-		IssueID:     dev.IssueID,
-		Kind:        domain.KindWorker,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		Harness:     harness,
-		DisplayName: dev.DisplayName,
-		Activity:    domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
-		BaseBranch:  dev.BaseBranch,
-		PRTarget:    dev.PRTarget,
-		TaskSize:    dev.TaskSize.WithDefault(),
-		CreatedBy:   dev.CreatedBy,
+		ProjectID:     dev.ProjectID,
+		IssueID:       dev.IssueID,
+		Kind:          domain.KindWorker,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Harness:       harness,
+		DisplayName:   dev.DisplayName,
+		Activity:      domain.Activity{State: domain.ActivityIdle, LastActivityAt: now},
+		BaseBranch:    dev.BaseBranch,
+		PRTarget:      dev.PRTarget,
+		TaskSize:      dev.TaskSize.WithDefault(),
+		CreatedBy:     dev.CreatedBy,
+		ClaudeProfile: dev.ClaudeProfile,
 		// WHAT CREATED IT: dev opening the simulator, dev opening a preview, or a
 		// human. One transition, so one value, written once with the row - and the
 		// only durable state the join line under the crew strip needs.

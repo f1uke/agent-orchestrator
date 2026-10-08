@@ -12202,6 +12202,8 @@ components:
           $ref: '#/components/schemas/AgentConfig'
         approvalRule:
           $ref: '#/components/schemas/ApprovalRule'
+        claudeProfile:
+          type: string
         defaultBranch:
           type: string
         disableAutoCrew:

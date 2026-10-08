@@ -193,20 +193,33 @@ func SettingsPath(p Profile) (string, error) {
 	if rest, ok := strings.CutPrefix(file, "~/"); ok {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", fmt.Errorf("%w: Claude profile %q: resolve ~: %w", ErrSettingsFile, p.Name, err)
+			return "", &SettingsFileError{Profile: p.Name, File: file, Problem: "cannot be resolved: " + err.Error()}
 		}
 		file = filepath.Join(home, rest)
 	}
 	b, err := os.ReadFile(file)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", &SettingsFileError{Profile: p.Name, File: file, Problem: "does not exist"}
+	}
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("%w: Claude profile %q: settings file %s does not exist", ErrSettingsFile, p.Name, file)
-		}
-		return "", fmt.Errorf("%w: Claude profile %q: read settings file %s: %w", ErrSettingsFile, p.Name, file, err)
+		return "", &SettingsFileError{Profile: p.Name, File: file, Problem: "cannot be read: " + err.Error()}
 	}
 	var obj map[string]any
 	if err := json.Unmarshal(b, &obj); err != nil || obj == nil {
-		return "", fmt.Errorf("%w: Claude profile %q: settings file %s is not a JSON object", ErrSettingsFile, p.Name, file)
+		return "", &SettingsFileError{Profile: p.Name, File: file, Problem: "is not a JSON object"}
 	}
 	return file, nil
 }
+
+// SettingsFileError is a profile whose settings file Claude Code cannot use.
+type SettingsFileError struct {
+	Profile string
+	File    string
+	Problem string
+}
+
+func (e *SettingsFileError) Error() string {
+	return fmt.Sprintf("the settings file %s of Claude profile %q %s", e.File, e.Profile, e.Problem)
+}
+
+func (e *SettingsFileError) Unwrap() error { return ErrSettingsFile }

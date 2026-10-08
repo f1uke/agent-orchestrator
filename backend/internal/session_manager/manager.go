@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/endingslog"
 	"github.com/aoagents/agent-orchestrator/backend/internal/knowledgestore"
@@ -265,6 +266,11 @@ type Store interface {
 	// somebody asked for. Sole writer of the column, for the same reason
 	// SetSessionCrew is. ok=false means the row is gone, a benign race on a purge.
 	StartCrewRound(ctx context.Context, id domain.SessionID, at time.Time) (ok bool, err error)
+	// SetSessionClaudeProfile is the sole writer of the session's Claude profile
+	// after insert; SetSessionRestartPending the sole writer of its pending
+	// restart. ok=false means the session id does not exist.
+	SetSessionClaudeProfile(ctx context.Context, id domain.SessionID, profile string, updatedAt time.Time) (ok bool, err error)
+	SetSessionRestartPending(ctx context.Context, id domain.SessionID, pending bool, updatedAt time.Time) (ok bool, err error)
 }
 
 // Manager coordinates internal session spawn, restore, kill, and cleanup over
@@ -336,6 +342,8 @@ type Manager struct {
 	// nothing - which is what keeps the solo path unchanged.
 	crewMu    sync.Mutex
 	crewLocks map[domain.SessionID]*sync.Mutex
+
+	claudeProfiles ClaudeProfileRegistry
 }
 
 // Deps are the collaborators a Session Manager needs; New wires them together.
@@ -383,6 +391,9 @@ type Deps struct {
 	// read at spawn/restore so an edit takes effect on the next (re)launch. Nil
 	// defaults to English (no directive injected).
 	ResponseLanguage func() string
+	// ClaudeProfiles resolves the Claude profile a claude-code session launches
+	// with. Nil knows only the built-in profiles.
+	ClaudeProfiles ClaudeProfileRegistry
 }
 
 // New builds a Session Manager from its dependencies, defaulting the clock to
@@ -406,6 +417,10 @@ func New(d Deps) *Manager {
 		spawnConfirmEnabled: d.SpawnConfirmEnabled,
 		promptOverrides:     d.PromptOverrides,
 		responseLanguage:    d.ResponseLanguage,
+		claudeProfiles:      d.ClaudeProfiles,
+	}
+	if m.claudeProfiles == nil {
+		m.claudeProfiles = claudeprofile.Builtins()
 	}
 	if m.clock == nil {
 		// UTC so spawn-stamped CreatedAt/UpdatedAt match every other session
@@ -546,6 +561,13 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if _, ok := m.agents.Agent(cfg.Harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w: %q", ErrUnknownHarness, cfg.Harness)
 	}
+	cfg.ClaudeProfile, err = m.spawnClaudeProfile(cfg.Harness, cfg.ClaudeProfile, project)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
+	}
+	if _, err := m.claudeSettingsFile(cfg.Harness, cfg.ClaudeProfile); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
+	}
 
 	if err := m.validateRuntimePrerequisites(); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("spawn: %w", err)
@@ -640,6 +662,11 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 			return
 		}
 		m.rollbackSpawnSeedRow(ctx, id)
+	}
+	settingsFile, err := m.claudeSettingsFile(cfg.Harness, cfg.ClaudeProfile)
+	if err != nil {
+		disposeSeed()
+		return domain.SessionRecord{}, fmt.Errorf("spawn %s: %w", id, err)
 	}
 
 	branch := cfg.Branch
@@ -757,6 +784,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		IssueID:          string(cfg.IssueID),
 		Config:           agentConfig,
 		Permissions:      agentConfig.Permissions,
+		SettingsFile:     settingsFile,
 	})
 	if err != nil {
 		m.destroySpawnWorkspace(ctx, ws, workspaceProject)
@@ -778,7 +806,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 		Branch:         runtimeNameBranch(ws.Branch, cfg.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, cfg.Kind, scriptsOwnerID), needsSimulator(cfg.Kind, project.Config)),
+		Env:            withLaunchEnv(m.runtimeEnv(ctx, id, cfg.ProjectID, cfg.IssueID, cfg.Kind, cfg.CrewOf, cfg.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, cfg.Kind, scriptsOwnerID), needsSimulator(cfg.Kind, project.Config)), agent),
 		ExitStatusFile: m.exitStatusFile(),
 		StdinFile:      stdinFile,
 	})
@@ -820,6 +848,11 @@ func (m *Manager) PrepareTodo(ctx context.Context, cfg ports.SpawnConfig) (domai
 			return domain.SessionRecord{}, fmt.Errorf("prepare todo: %w: %q", ErrUnknownHarness, cfg.Harness)
 		}
 	}
+	profile, err := m.todoClaudeProfile(cfg.ClaudeProfile)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("prepare todo: %w", err)
+	}
+	cfg.ClaudeProfile = profile
 	rec, err := m.store.CreateSession(ctx, todoSeedRecord(cfg, m.clock()))
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("prepare todo: create: %w", err)
@@ -870,6 +903,10 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if _, ok := m.agents.Agent(cfg.Harness); !ok {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w: %q", id, ErrUnknownHarness, cfg.Harness)
 	}
+	cfg.ClaudeProfile, err = m.spawnClaudeProfile(cfg.Harness, row.ClaudeProfile, project)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
+	}
 	if err := m.validateRuntimePrerequisites(); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
 	}
@@ -878,8 +915,14 @@ func (m *Manager) StartTodo(ctx context.Context, id domain.SessionID) (domain.Se
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("start todo %s: prompt: %w", id, err)
 	}
+	if err := m.setClaudeProfile(ctx, id, cfg.ClaudeProfile); err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("start todo %s: %w", id, err)
+	}
 	out, err := m.materialize(ctx, project, cfg, id, prompt, systemPrompt, true, childWorktrees)
 	if err != nil {
+		if restoreErr := m.setClaudeProfile(ctx, id, row.ClaudeProfile); restoreErr != nil {
+			m.logger.Warn("start todo: put back the task's Claude profile override", "sessionID", id, "error", restoreErr)
+		}
 		return out, err
 	}
 	// A started TODO is an ordinary spawn: one session, and the crew its work
@@ -928,9 +971,22 @@ func (m *Manager) UpdateTodoSpec(ctx context.Context, id domain.SessionID, patch
 	if patch.AutoNameBranch != nil {
 		row.AutoNameBranch = *patch.AutoNameBranch
 	}
+	var profile *string
+	if patch.ClaudeProfile != nil {
+		name, err := m.todoClaudeProfile(*patch.ClaudeProfile)
+		if err != nil {
+			return domain.SessionRecord{}, fmt.Errorf("update todo %s: %w", id, err)
+		}
+		profile = &name
+	}
 	row.UpdatedAt = m.clock()
 	if err := m.store.UpdateSession(ctx, row); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("update todo %s: %w", id, err)
+	}
+	if profile != nil {
+		if err := m.setClaudeProfile(ctx, id, *profile); err != nil {
+			return domain.SessionRecord{}, fmt.Errorf("update todo %s: %w", id, err)
+		}
 	}
 	return m.getRecord(ctx, id)
 }
@@ -1969,6 +2025,10 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if !ok {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: no agent adapter for harness %q", rec.ID, rec.Harness)
 	}
+	settingsFile, err := m.claudeSettingsFile(rec.Harness, rec.ClaudeProfile)
+	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
+	}
 	// A child worktree's subagent lived inside the process being replaced, so
 	// none can stop by itself any more: settle them before the new process
 	// starts, committing and merging what each left.
@@ -2014,7 +2074,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
-	argv, stdinFile, err := m.restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, systemPromptFile, agentConfig, rec.Kind)
+	argv, stdinFile, err := m.restoreArgv(ctx, agent, rec.ID, ws.Path, rec.Metadata, systemPrompt, systemPromptFile, settingsFile, agentConfig, rec.Kind)
 	if err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: %w", rec.ID, err)
 	}
@@ -2024,7 +2084,7 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 		Branch:         runtimeNameBranch(ws.Branch, rec.CrewRole),
 		WorkspacePath:  ws.Path,
 		Argv:           argv,
-		Env:            m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, rec.Kind, scriptsOwner(rec)), needsSimulator(rec.Kind, project.Config)),
+		Env:            withLaunchEnv(m.runtimeEnv(ctx, rec.ID, rec.ProjectID, rec.IssueID, rec.Kind, rec.CrewID, rec.CrewRole, ws.Path, project.Config.Env, childWorktrees, m.scriptsStoreEnv(ctx, project, rec.Kind, scriptsOwner(rec)), needsSimulator(rec.Kind, project.Config)), agent),
 		ExitStatusFile: m.exitStatusFile(),
 		StdinFile:      stdinFile,
 	})
@@ -2035,6 +2095,9 @@ func (m *Manager) relaunchRestoredSession(ctx context.Context, rec domain.Sessio
 	if err := m.lcm.MarkSpawned(ctx, rec.ID, metadata, by); err != nil {
 		_ = m.runtime.Destroy(ctx, handle)
 		return domain.SessionRecord{}, fmt.Errorf("restore %s: completed: %w", rec.ID, err)
+	}
+	if rec.RestartPending {
+		m.clearRestartPending(ctx, rec.ID)
 	}
 	return m.getRecord(ctx, rec.ID)
 }
@@ -2106,6 +2169,9 @@ func (m *Manager) restartInPlace(ctx context.Context, rec domain.SessionRecord) 
 	// the running agent untouched.
 	project, err := m.loadProject(ctx, rec.ProjectID)
 	if err != nil {
+		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, err)
+	}
+	if _, err := m.claudeSettingsFile(rec.Harness, rec.ClaudeProfile); err != nil {
 		return domain.SessionRecord{}, fmt.Errorf("restart %s: %w", rec.ID, err)
 	}
 	if handle := runtimeHandle(rec.Metadata); handle.ID != "" {
@@ -3317,6 +3383,7 @@ func seedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		PRTarget:        cfg.PRTarget,
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
+		ClaudeProfile:   cfg.ClaudeProfile,
 	}
 }
 
@@ -3369,6 +3436,7 @@ func todoSeedRecord(cfg ports.SpawnConfig, now time.Time) domain.SessionRecord {
 		CreatedBy:       cfg.CreatedBy,
 		KeepWarmOnMerge: cfg.KeepWarmOnMerge,
 		TaskSize:        cfg.TaskSize.WithDefault(),
+		ClaudeProfile:   cfg.ClaudeProfile,
 		Metadata:        domain.SessionMetadata{Branch: cfg.Branch, Prompt: cfg.Prompt},
 	}
 }
@@ -4151,13 +4219,13 @@ func (m *Manager) prepareWorkspace(ctx context.Context, agent ports.Agent, id do
 // relaunch fresh with the system prompt only rather than erroring. A fresh
 // relaunch replays the prompt the way a spawn delivers it, so stdinFile is the
 // file the runtime feeds the agent, or empty.
-func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt, systemPromptFile string, agentConfig ports.AgentConfig, kind domain.SessionKind) (argv []string, stdinFile string, err error) {
+func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, id domain.SessionID, workspacePath string, meta domain.SessionMetadata, systemPrompt, systemPromptFile, settingsFile string, agentConfig ports.AgentConfig, kind domain.SessionKind) (argv []string, stdinFile string, err error) {
 	ref := ports.SessionRef{
 		ID:            string(id),
 		WorkspacePath: workspacePath,
 		Metadata:      map[string]string{ports.MetadataKeyAgentSessionID: meta.AgentSessionID},
 	}
-	cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, Config: agentConfig, Permissions: agentConfig.Permissions})
+	cmd, ok, err := agent.GetRestoreCommand(ctx, ports.RestoreConfig{Session: ref, Kind: kind, SystemPrompt: systemPrompt, SystemPromptFile: systemPromptFile, SettingsFile: settingsFile, Config: agentConfig, Permissions: agentConfig.Permissions})
 	if err != nil {
 		return nil, "", fmt.Errorf("restore command: %w", err)
 	}
@@ -4184,6 +4252,7 @@ func (m *Manager) restoreArgv(ctx context.Context, agent ports.Agent, id domain.
 		SystemPromptFile: systemPromptFile,
 		Config:           agentConfig,
 		Permissions:      agentConfig.Permissions,
+		SettingsFile:     settingsFile,
 	})
 	if err != nil {
 		return nil, "", fmt.Errorf("launch command: %w", err)

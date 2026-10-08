@@ -63,6 +63,11 @@ type ProjectConfig struct {
 	// bodies, branch names, and identifiers stay English.
 	ResponseLanguage string `json:"responseLanguage,omitempty"`
 
+	// ClaudeProfile names the Claude profile this project's claude-code sessions
+	// (and reviewers) launch with unless a spawn names another. Empty is
+	// Subscription.
+	ClaudeProfile string `json:"claudeProfile,omitempty"`
+
 	// HasWebUI records whether this project renders in a browser. It is the single
 	// fact behind three effects, so they can never contradict each other: the
 	// desktop inspector's Browser tab, the `ao preview` guidance injected into

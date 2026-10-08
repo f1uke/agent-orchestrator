@@ -64,6 +64,10 @@ type SpawnConfig struct {
 	// session being joined, and one-dev-per-crew is a database invariant).
 	CrewOf   domain.SessionID
 	CrewRole domain.CrewRole
+	// ClaudeProfile overrides the project's default Claude profile for a
+	// claude-code session (`ao spawn --claude-profile`). Ignored for any other
+	// agent; empty inherits the project default, else Subscription.
+	ClaudeProfile string
 }
 
 // TodoSpecPatch carries the editable fields of a prepared TODO. A nil pointer
@@ -76,4 +80,5 @@ type TodoSpecPatch struct {
 	PRTarget       *string
 	Prompt         *string
 	AutoNameBranch *bool
+	ClaudeProfile  *string
 }

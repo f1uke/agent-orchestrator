@@ -183,6 +183,28 @@ func (f *fakeStore) StartCrewRound(_ context.Context, id domain.SessionID, at ti
 // SetSessionRuntimeTouch mirrors the real store, including the part that matters:
 // it is WRITE-ONCE. A row that already carries a touch is left alone and reports
 // false, so the FIRST surface a task drove is the one recorded.
+func (f *fakeStore) SetSessionClaudeProfile(_ context.Context, id domain.SessionID, profile string, updatedAt time.Time) (bool, error) {
+	rec, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	rec.ClaudeProfile = profile
+	rec.UpdatedAt = updatedAt
+	f.sessions[id] = rec
+	return true, nil
+}
+
+func (f *fakeStore) SetSessionRestartPending(_ context.Context, id domain.SessionID, pending bool, updatedAt time.Time) (bool, error) {
+	rec, ok := f.sessions[id]
+	if !ok {
+		return false, nil
+	}
+	rec.RestartPending = pending
+	rec.UpdatedAt = updatedAt
+	f.sessions[id] = rec
+	return true, nil
+}
+
 func (f *fakeStore) SetSessionRuntimeTouch(_ context.Context, id domain.SessionID, touch domain.RuntimeTouch, updatedAt time.Time) (bool, error) {
 	rec, ok := f.sessions[id]
 	if !ok || rec.RuntimeTouch != "" {
