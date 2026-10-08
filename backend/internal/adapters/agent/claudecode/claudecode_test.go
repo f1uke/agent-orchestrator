@@ -26,7 +26,7 @@ func TestGetLaunchCommandBypassWithPrompt(t *testing.T) {
 	}
 
 	want := []string{
-		"claude",
+		"claude", "--settings", sessionSettings,
 		"--permission-mode", "bypassPermissions",
 		"--", "-add a health check",
 	}
@@ -86,7 +86,7 @@ func TestGetLaunchCommandPassesSystemPromptByFile(t *testing.T) {
 	}
 
 	want := []string{
-		"claude",
+		"claude", "--settings", sessionSettings,
 		"--append-system-prompt-file", promptFile,
 		"--", "do the thing",
 	}
@@ -414,7 +414,7 @@ func TestGetRestoreCommandReadsAgentSessionID(t *testing.T) {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
 	// The hook-captured native id wins over the derived fallback.
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", "claude-native-1"}
+	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -434,7 +434,7 @@ func TestGetRestoreCommandReappendsSystemPrompt(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--append-system-prompt", "You are an orchestrator.", "--resume", "claude-native-1"}
+	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--append-system-prompt", "You are an orchestrator.", "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -454,7 +454,7 @@ func TestGetRestoreCommandPassesSystemPromptByFile(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--append-system-prompt-file", promptFile, "--resume", "claude-native-1"}
+	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--append-system-prompt-file", promptFile, "--resume", "claude-native-1"}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -483,7 +483,7 @@ func TestGetRestoreCommandFallsBackToDerivedUUID(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", claudeSessionUUID("sess-r")}
+	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--resume", claudeSessionUUID("sess-r")}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -582,7 +582,7 @@ func TestGetRestoreCommandResumesWhenTranscriptPresent(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("restore = (ok=%v, err=%v), want ok", ok, err)
 	}
-	want := []string{"claude", "--permission-mode", "bypassPermissions", "--resume", uid}
+	want := []string{"claude", "--settings", sessionSettings, "--permission-mode", "bypassPermissions", "--resume", uid}
 	if !reflect.DeepEqual(cmd, want) {
 		t.Fatalf("restore cmd\nwant: %#v\n got: %#v", want, cmd)
 	}
@@ -917,5 +917,34 @@ func TestGetPromptDeliveryStrategyIsStdin(t *testing.T) {
 	got, err := (&Plugin{}).GetPromptDeliveryStrategy(context.Background(), ports.LaunchConfig{})
 	if err != nil || got != ports.PromptDeliveryStdin {
 		t.Fatalf("strategy = %q, %v; want %q", got, err, ports.PromptDeliveryStdin)
+	}
+}
+
+func TestLaunchAndRestoreTurnOffTheAgentsView(t *testing.T) {
+	p := &Plugin{resolvedBinary: "claude"}
+	launch, err := p.GetLaunchCommand(context.Background(), ports.LaunchConfig{SessionID: "ao-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore, ok, err := p.GetRestoreCommand(context.Background(), ports.RestoreConfig{
+		Session: ports.SessionRef{ID: "ao-1", Metadata: map[string]string{ports.MetadataKeyAgentSessionID: "native-1"}},
+	})
+	if err != nil || !ok {
+		t.Fatalf("restore = (ok=%v, err=%v)", ok, err)
+	}
+	for name, cmd := range map[string][]string{"launch": launch, "restore": restore} {
+		var settings struct {
+			DisableAgentView bool `json:"disableAgentView"`
+		}
+		for i, arg := range cmd[:len(cmd)-1] {
+			if arg == "--settings" {
+				if err := json.Unmarshal([]byte(cmd[i+1]), &settings); err != nil {
+					t.Fatalf("%s: --settings %q: %v", name, cmd[i+1], err)
+				}
+			}
+		}
+		if !settings.DisableAgentView {
+			t.Errorf("%s does not turn the agents view off: %q", name, cmd)
+		}
 	}
 }

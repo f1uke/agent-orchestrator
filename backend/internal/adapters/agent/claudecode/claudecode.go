@@ -135,10 +135,15 @@ func (p *Plugin) GetConfigSpec(ctx context.Context) (ports.ConfigSpec, error) {
 	}, nil
 }
 
+// Claude Code 2.1.294: one Left arrow on an empty prompt moves the conversation to a
+// background job of its per-user daemon, which carries another AO session's environment.
+const sessionSettings = `{"disableAgentView":true}`
+
 // GetLaunchCommand builds the argv to start an interactive Claude Code
 // session. Shape:
 //
-//	claude [--session-id <uuid>] \
+//	claude --settings <sessionSettings> \
+//	       [--session-id <uuid>] \
 //	       [--permission-mode <mode>] \
 //	       [--append-system-prompt-file <path>] \
 //	       [-- <prompt>]
@@ -167,7 +172,7 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 		return nil, err
 	}
 
-	cmd = []string{binary}
+	cmd = []string{binary, "--settings", sessionSettings}
 	if cfg.SessionID != "" {
 		cmd = append(cmd, "--session-id", claudeSessionUUID(cfg.SessionID))
 	}
@@ -235,8 +240,8 @@ func (p *Plugin) PreLaunch(ctx context.Context, cfg ports.LaunchConfig) error {
 }
 
 // GetRestoreCommand rebuilds the argv that continues an existing Claude Code
-// session: `claude [--permission-mode <mode>] [--append-system-prompt-file <path>]
-// --resume <agentSessionId>`. It prefers the hook-captured native session id
+// session: `claude --settings <sessionSettings> [--permission-mode <mode>]
+// [--append-system-prompt-file <path>] --resume <agentSessionId>`. It prefers the hook-captured native session id
 // from cfg.Session.Metadata["agentSessionId"]; for sessions created before hooks
 // captured it, it falls back to the deterministic UUID AO pins via
 // --session-id at launch. ok is false only when neither is available, so the
@@ -279,8 +284,8 @@ func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig)
 	if err != nil {
 		return nil, false, err
 	}
-	cmd = make([]string, 0, 7)
-	cmd = append(cmd, binary)
+	cmd = make([]string, 0, 9)
+	cmd = append(cmd, binary, "--settings", sessionSettings)
 	appendPermissionFlags(&cmd, cfg.Permissions)
 	// --resume rebuilds the system prompt from the current flags (it is not
 	// stored in the transcript), so standing instructions must be re-appended
