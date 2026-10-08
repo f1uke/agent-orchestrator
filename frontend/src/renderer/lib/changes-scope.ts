@@ -16,7 +16,14 @@ import type { WorkspaceChanges } from "../hooks/useWorkspaceChanges";
  */
 export type ChangesScope = Pick<
 	WorkspaceChanges,
-	"targetBranch" | "branch" | "branchMissing" | "diffSubject" | "includesWorktree" | "pendingPaths" | "headState"
+	| "targetBranch"
+	| "branch"
+	| "branchMissing"
+	| "diffSubject"
+	| "includesWorktree"
+	| "pendingPaths"
+	| "headState"
+	| "headBranchOwner"
 >;
 
 type Scope = ChangesScope & { headLabel?: string };
@@ -51,9 +58,17 @@ function thatStandpoint(scope: Scope): string {
 export function changesScopeNotice(scope: Scope): { headline: string; detail: string } | null {
 	const target = scope.targetBranch || "the target branch";
 	if (scope.branchMissing) {
+		// A rename is followed by the daemon, so a missing branch here was deleted,
+		// or renamed onto a branch another session already records.
+		if (scope.headBranchOwner) {
+			return {
+				headline: `Branch ${scope.branch} is not in this worktree`,
+				detail: `The worktree is on ${scope.headLabel}, which session ${scope.headBranchOwner} records, so this session was not moved onto it. Showing the worktree's HEAD against ${target} instead. If this session should have that branch, move ${scope.headBranchOwner} off it, then run \`ao session set-branch\`.`,
+			};
+		}
 		return {
 			headline: `Branch ${scope.branch} is not in this worktree`,
-			detail: `It may have been renamed or deleted. Showing the worktree's HEAD against ${target} instead, which is ${where(
+			detail: `It no longer exists here. Showing the worktree's HEAD against ${target} instead, which is ${where(
 				scope,
 			)}.`,
 		};
