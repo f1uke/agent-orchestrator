@@ -102,11 +102,12 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 		Permissions:     ports.PermissionModeAuto,
 		AllowedTools:    reviewerAllowedTools,
 		DisallowedTools: reviewerDisallowedTools,
+		SettingsFile:    inv.SettingsFile,
 	})
 	if err != nil {
 		return ports.ReviewCommandSpec{}, err
 	}
-	return ports.ReviewCommandSpec{Argv: argv, StdinFile: stdinFile}, nil
+	return ports.ReviewCommandSpec{Argv: argv, Env: ports.LaunchEnvOf(r.agent), StdinFile: stdinFile}, nil
 }
 
 // PreLaunch runs any reviewer-specific preflight. For Claude Code this records

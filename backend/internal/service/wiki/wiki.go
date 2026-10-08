@@ -230,6 +230,7 @@ func (s *Service) Start(ctx context.Context, harness domain.AgentHarness) (Statu
 		SessionID:     domain.SessionID(HandleID),
 		WorkspacePath: vault,
 		Argv:          argv,
+		Env:           ports.LaunchEnvOf(agent),
 	}); err != nil {
 		return Status{}, fmt.Errorf("wiki start agent: %w", err)
 	}

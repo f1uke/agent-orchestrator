@@ -18,6 +18,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/tmux"
 	telemetryadapter "github.com/aoagents/agent-orchestrator/backend/internal/adapters/telemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
+	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/lifecycle"
@@ -175,7 +176,7 @@ func TestWiring_StartSessionBuildsSessionService(t *testing.T) {
 		t.Fatalf("responselang.NewStore: %v", err)
 	}
 	watcher := &recordingWatcher{}
-	svc, reviewSvc, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, watcher, log)
+	svc, reviewSvc, lc, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, claudeprofile.Builtins(), promptOverrides, responseLang, nil, watcher, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}
@@ -314,7 +315,7 @@ func TestStartTrackerIntake_RunsEvenWithoutEnabledProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("responselang.NewStore: %v", err)
 	}
-	svc, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, promptOverrides, responseLang, nil, nil, log)
+	svc, _, _, err := startSession(cfg, rt, store, lcm, messenger, telemetryadapter.NoopSink{}, spawnConfirm, claudeprofile.Builtins(), promptOverrides, responseLang, nil, nil, log)
 	if err != nil {
 		t.Fatalf("startSession: %v", err)
 	}
@@ -638,6 +639,8 @@ func (f *fakeSessionLifecycle) RestoreAll(_ context.Context) error {
 }
 
 func (f *fakeSessionLifecycle) CloseIdleSessions(_ context.Context) error { return nil }
+
+func (f *fakeSessionLifecycle) RestartPendingSessions(_ context.Context) error { return nil }
 
 func (f *fakeSessionLifecycle) ReapOrphanedPromptFiles(_ context.Context) (int, error) { return 0, nil }
 

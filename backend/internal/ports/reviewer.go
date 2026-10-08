@@ -66,6 +66,9 @@ type ReviewInvocation struct {
 	SystemPrompt     string
 	SystemPromptFile string
 	PromptFile       string
+	// SettingsFile is the settings file a claude-code reviewer launches with:
+	// the file of the project's default Claude profile. Empty means none.
+	SettingsFile string
 }
 
 // ReviewTask is one PR/run in a multi-PR review trigger queue.

@@ -18,6 +18,8 @@ const idleSweepIntervalDefault = 5 * time.Minute
 // actually waiting.
 const msgQueueSweepInterval = 5 * time.Second
 
+const restartPendingSweepInterval = 5 * time.Second
+
 // startTickerSweep launches a background goroutine that calls sweep on every
 // tick until ctx is cancelled, returning a channel closed when the goroutine
 // exits so daemon shutdown can drain it (mirroring the preview poller's
