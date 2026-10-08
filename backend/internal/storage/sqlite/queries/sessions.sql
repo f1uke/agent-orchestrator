@@ -94,6 +94,15 @@ UPDATE sessions SET keep_warm_on_merge = ?, updated_at = ? WHERE id = ?;
 -- the board.
 UPDATE sessions SET pr_target = ?, updated_at = ? WHERE id = ?;
 
+-- name: SetSessionBranch :execrows
+-- Move a session onto the branch its worktree is on, after a rename there. A
+-- compare-and-swap on the branch it is replacing: a writer that read an older
+-- value (the follow loop racing `ao session set-branch`) changes nothing, and
+-- the caller reads the row again. Bumps updated_at so the sessions_cdc_update
+-- trigger refreshes the board and the Files tab.
+UPDATE sessions SET branch = sqlc.arg(branch), updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id) AND branch = sqlc.arg(from_branch);
+
 -- name: SetSessionIssueBinding :execrows
 -- Set (or clear) a session's Jira binding after it is created: issue_id becomes
 -- "jira:<KEY>" on link (display_name = the issue's human title) or "" on unlink

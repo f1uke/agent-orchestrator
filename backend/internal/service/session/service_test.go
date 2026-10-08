@@ -132,6 +132,17 @@ func (f *fakeStore) SetSessionAutoResolve(_ context.Context, id domain.SessionID
 	return true, nil
 }
 
+func (f *fakeStore) SetSessionBranch(_ context.Context, id domain.SessionID, from, to string, updatedAt time.Time) (bool, error) {
+	rec, ok := f.sessions[id]
+	if !ok || rec.Metadata.Branch != from {
+		return false, nil
+	}
+	rec.Metadata.Branch = to
+	rec.UpdatedAt = updatedAt
+	f.sessions[id] = rec
+	return true, nil
+}
+
 func (f *fakeStore) SetSessionPRTarget(_ context.Context, id domain.SessionID, target string, updatedAt time.Time) (bool, error) {
 	rec, ok := f.sessions[id]
 	if !ok {

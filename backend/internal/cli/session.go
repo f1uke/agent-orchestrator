@@ -167,6 +167,7 @@ func newSessionCommand(ctx *commandContext) *cobra.Command {
 	cmd.AddCommand(newSessionRenameCommand(ctx))
 	cmd.AddCommand(newSessionCleanupCommand(ctx))
 	cmd.AddCommand(newSessionClaimPRCommand(ctx))
+	cmd.AddCommand(newSessionSetBranchCommand(ctx))
 	return cmd
 }
 
@@ -351,6 +352,60 @@ func newSessionClaimPRCommand(ctx *commandContext) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.noTakeover, "no-takeover", false, "Refuse if another active session owns the PR")
 	cmd.Flags().BoolVar(&opts.json, "json", false, "Output as JSON")
 	return cmd
+}
+
+func newSessionSetBranchCommand(ctx *commandContext) *cobra.Command {
+	var opts sessionOptions
+	cmd := &cobra.Command{
+		Use:   "set-branch <session-id> <branch>",
+		Short: "Record a session's own branch after it changed in its worktree",
+		Long: `Record <branch> as the session's own branch, so PR discovery, CI, review,
+the Files tab and restore all use it.
+
+AO follows a branch renamed in the session's worktree (git branch -m) by itself
+within seconds. Use this for what it leaves alone: a rename that kept the old
+branch (git branch -c, or checkout -b and keep working), or a worktree that is
+detached and should be tied back to a branch.
+
+The branch must exist in the session's worktree. It cannot be the branch the
+session merges into or was cut from, or a branch another live session records.`,
+		Example: "  ao session set-branch ao-12 feature/ABC-2-fix-login",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if err := cobra.ExactArgs(2)(cmd, args); err != nil {
+				return usageError{err}
+			}
+			if _, err := normalizeSessionID(args[0]); err != nil {
+				return err
+			}
+			if strings.TrimSpace(args[1]) == "" {
+				return usageError{errors.New("branch is required")}
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := normalizeSessionID(args[0])
+			if err != nil {
+				return err
+			}
+			return ctx.setSessionBranch(cmd.Context(), cmd, id, strings.TrimSpace(args[1]), opts)
+		},
+	}
+	addSessionProjectFlag(cmd.Flags(), &opts.project, "Project id to scope the lookup")
+	return cmd
+}
+
+func (c *commandContext) setSessionBranch(ctx context.Context, cmd *cobra.Command, id, branch string, opts sessionOptions) error {
+	if opts.project != "" {
+		if _, err := c.fetchScopedSession(ctx, id, opts.project); err != nil {
+			return err
+		}
+	}
+	var res sessionResponse
+	if err := c.putJSON(ctx, "sessions/"+url.PathEscape(id)+"/branch", controllers.SetSessionBranchRequest{Branch: branch}, &res); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(cmd.OutOrStdout(), "session %s branch: %s\n", id, res.Session.Branch)
+	return err
 }
 
 func addSessionProjectFlag(flags interface {

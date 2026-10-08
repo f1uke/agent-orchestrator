@@ -448,6 +448,14 @@ type SetSessionTargetRequest struct {
 	TargetBranch string `json:"targetBranch" minLength:"1"`
 }
 
+// SetSessionBranchRequest is the body of PUT /api/v1/sessions/{sessionId}/branch:
+// record the session's own branch. AO follows a branch renamed in the worktree by
+// itself; this is for what it leaves alone, such as a rename that kept the old
+// branch. The branch must exist in the session's worktree.
+type SetSessionBranchRequest struct {
+	Branch string `json:"branch" minLength:"1"`
+}
+
 // RenameSessionResponse is the body of PATCH /api/v1/sessions/{sessionId}.
 type RenameSessionResponse struct {
 	OK          bool             `json:"ok"`
@@ -1561,6 +1569,10 @@ type WorkspaceChangesResponse struct {
 	// be reported, or an empty list reads as "this session did nothing".
 	HeadState string `json:"headState,omitempty"`
 	HeadLabel string `json:"headLabel,omitempty"`
+	// HeadBranchOwner is the live session that records the branch the worktree
+	// is on, when it is not this one. AO follows a branch renamed in the
+	// worktree, but not onto another session's branch.
+	HeadBranchOwner domain.SessionID `json:"headBranchOwner,omitempty"`
 }
 
 // ChangedFileDTO is one changed file in the Changes list.
@@ -1624,6 +1636,7 @@ func workspaceChangesResponse(res sessionsvc.WorkspaceChangesResult) WorkspaceCh
 		PendingPaths:        res.PendingPaths,
 		HeadState:           res.HeadState,
 		HeadLabel:           res.HeadLabel,
+		HeadBranchOwner:     res.HeadBranchOwner,
 	}
 }
 

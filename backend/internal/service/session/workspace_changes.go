@@ -203,9 +203,9 @@ type WorkspaceChangesResult struct {
 	// records no branch AND the worktree is not standing on one.
 	Branch string
 	// BranchMissing reports that Branch is named but has no ref in this worktree
-	// (never created, renamed, or deleted). The diff then falls back to HEAD, and
-	// saying so is the difference between "nothing changed" and "I could not find
-	// the thing you asked about".
+	// (never created, or deleted; a rename is followed by FollowWorktreeBranch).
+	// The diff then falls back to HEAD, and saying so is the difference between
+	// "nothing changed" and "I could not find the thing you asked about".
 	BranchMissing bool
 	// DiffSubject is what Files was measured FROM: ChangesSubjectBranch (the
 	// branch's tip) or ChangesSubjectHead (the worktree's HEAD).
@@ -225,6 +225,9 @@ type WorkspaceChangesResult struct {
 	// when HEAD is on Branch.
 	HeadState string
 	HeadLabel string
+	// HeadBranchOwner is the live session that records the branch the worktree
+	// is on, when that is not this session (see FollowWorktreeBranch).
+	HeadBranchOwner domain.SessionID
 }
 
 // changesScope is the answer to "what exactly are we comparing, and what is the
@@ -249,6 +252,10 @@ type changesScope struct {
 	Branch                          string
 	BranchMissing, IncludesWorktree bool
 	HeadState, HeadLabel            string
+	// HeadBranchOwner is the live session that records the branch the worktree
+	// is on, when that is not this session: the one reason AO leaves a renamed
+	// branch unfollowed that the reader cannot see for themselves.
+	HeadBranchOwner domain.SessionID
 	// Reason is non-empty when nothing can be diffed; the caller returns it as an
 	// Available=false payload rather than an error.
 	Reason string
@@ -269,6 +276,15 @@ func (s *Service) resolveChangesScope(
 	ctx context.Context, rec domain.SessionRecord, workspace string, forceFetch bool,
 ) changesScope {
 	sc := changesScope{}
+	// Follow a rename first, so the person looking at Files sees the branch the
+	// session is on now rather than a "branch is missing" notice until the
+	// follow loop's next pass. A failure only means the record stays as it was.
+	if follow, err := s.FollowWorktreeBranch(ctx, rec); err == nil {
+		if follow.Outcome == BranchFollowed {
+			rec.Metadata.Branch = follow.Head
+		}
+		sc.HeadBranchOwner = follow.Owner
+	}
 	sc.Target, sc.TargetSource = s.resolveTargetBranch(ctx, rec, workspace)
 	if sc.Target == "" {
 		sc.Reason = ChangesNoTargetBranch
@@ -409,6 +425,7 @@ func (s *Service) WorkspaceChanges(
 		TargetFetchInFlight: sc.Fresh.InFlight,
 		Branch:              sc.Branch, BranchMissing: sc.BranchMissing, DiffSubject: sc.Subject,
 		IncludesWorktree: sc.IncludesWorktree, HeadState: sc.HeadState, HeadLabel: sc.HeadLabel,
+		HeadBranchOwner: sc.HeadBranchOwner,
 	}
 	if sc.Reason != "" {
 		res.Reason = sc.Reason

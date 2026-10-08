@@ -126,6 +126,23 @@ func (s *Store) SetSessionPRTarget(ctx context.Context, id domain.SessionID, tar
 	return rows > 0, nil
 }
 
+// SetSessionBranch moves a session from branch `from` to branch `to`. ok=false
+// when the session does not exist or no longer records `from`.
+func (s *Store) SetSessionBranch(ctx context.Context, id domain.SessionID, from, to string, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionBranch(ctx, gen.SetSessionBranchParams{
+		ID:         id,
+		FromBranch: from,
+		Branch:     to,
+		UpdatedAt:  updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set branch for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionKeepWarmOnMerge toggles whether a worker keeps running (card on the
 // board, tmux untouched) rather than terminating to Done when its PR merges.
 // Returns ok=false when the session id does not

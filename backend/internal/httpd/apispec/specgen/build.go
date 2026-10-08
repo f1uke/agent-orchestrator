@@ -1943,6 +1943,20 @@ func sessionOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/branch", id: "setSessionBranch", tag: "sessions",
+			summary:    "Set the session's own branch to one that exists in its worktree",
+			pathParams: []any{controllers.SessionIDParam{}},
+			reqBody:    controllers.SetSessionBranchRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.SessionResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPut, path: "/api/v1/sessions/{sessionId}/target", id: "setSessionTarget", tag: "sessions",
 			summary:    "Set the branch this session's work merges into (retargets an open PR/MR)",
 			pathParams: []any{controllers.SessionIDParam{}},
