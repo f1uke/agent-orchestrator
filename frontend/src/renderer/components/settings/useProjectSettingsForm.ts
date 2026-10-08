@@ -12,6 +12,7 @@ import {
 } from "../../lib/sim-trust";
 import { responseLanguageQueryKey } from "./useGlobalSettingsForm";
 import { captureRendererEvent } from "../../lib/telemetry";
+import { useClaudeProfiles } from "../../lib/claude-profiles";
 import { spawnOrchestrator } from "../../lib/spawn-orchestrator";
 import { newestActiveOrchestrator } from "../../types/workspace";
 import {
@@ -48,6 +49,8 @@ export type ProjectSettingsFormState = {
 	orchestratorModel: string;
 	workerModel: string;
 	permissions: string;
+	// "" is Subscription, the daemon's default.
+	claudeProfile: string;
 	reviewerHarness: string;
 	hasWebUI: boolean;
 	hasIOSSimulator: boolean;
@@ -92,6 +95,7 @@ function extractForm(project: Project, config: ProjectConfig): ProjectSettingsFo
 		orchestratorModel: config.orchestrator?.agentConfig?.model ?? "",
 		workerModel: config.worker?.agentConfig?.model ?? "",
 		permissions: config.agentConfig?.permissions ?? "",
+		claudeProfile: config.claudeProfile ?? "",
 		reviewerHarness: config.reviewers?.[0]?.harness ?? "",
 		hasWebUI: config.hasWebUI ?? false,
 		hasIOSSimulator: config.hasIOSSimulator ?? false,
@@ -232,6 +236,7 @@ export function useProjectSettingsForm({
 	const globalSimTrustQuery = useQuery({ queryKey: simTrustSettingsQueryKey, queryFn: fetchSimTrustSettings });
 	const globalSimTrustCaFiles = globalSimTrustQuery.data?.caFiles;
 	const agentCatalog = agentsQuery.data;
+	const claudeProfilesQuery = useClaudeProfiles();
 	const refreshAgentsMutation = useMutation({
 		mutationFn: refreshAgents,
 		onSuccess: (next) => queryClient.setQueryData(agentsQueryKey, next),
@@ -328,6 +333,7 @@ export function useProjectSettingsForm({
 				// Empty means "inherit the global default" - omit the field so an
 				// otherwise-unset config still persists as unset.
 				responseLanguage: form.responseLanguage || undefined,
+				claudeProfile: form.claudeProfile || undefined,
 			};
 			const { error } = await apiClient.PUT("/api/v1/projects/{id}/config", {
 				params: { path: { id: projectId } },
@@ -406,6 +412,7 @@ export function useProjectSettingsForm({
 		isGitLabProject,
 		hasKnownRemote,
 		agentCatalog,
+		claudeProfiles: claudeProfilesQuery.data ?? [],
 		agentsQuery,
 		refreshAgentsMutation,
 		missingRequiredAgent,

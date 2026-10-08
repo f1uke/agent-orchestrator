@@ -91,6 +91,7 @@ import { useWikiStatus } from "../hooks/useWiki";
 import { isWaiting, useLearningStatus, useProposals } from "../hooks/useMemory";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
+import { ClaudeProfileChip } from "./ClaudeProfileChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergedChip } from "./MergedChip";
 import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
@@ -1158,6 +1159,7 @@ function SessionRow({
 				<span className="flex shrink-0 items-center gap-1 empty:hidden group-data-[collapsible=icon]:hidden">
 					<QueuedMessagesChip session={session} compact />
 					<UnpublishedScriptsChip session={session} compact />
+					<ClaudeProfileChip session={session} compact />
 					{isMergedAwaitingNext(session) ? (
 						<MergedChip session={session} compact />
 					) : isUndeliveredParked(session) ? (

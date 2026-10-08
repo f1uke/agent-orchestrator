@@ -125,6 +125,17 @@ const simTrustPayload = {
 	error: undefined,
 };
 
+const claudeProfilesPayload = {
+	data: {
+		profiles: [
+			{ name: "Subscription", settingsFile: "", builtin: true },
+			{ name: "OmniRoute", settingsFile: "~/.claude/settings-omniroute.json", builtin: true },
+			{ name: "Bedrock", settingsFile: "~/.claude/settings-bedrock.json", builtin: false },
+		],
+	},
+	error: undefined,
+};
+
 const templatesPayload = {
 	data: {
 		templates: [
@@ -175,6 +186,8 @@ function mockGet(
 				return simTrustPayload;
 			case "/api/v1/settings/qa-evidence":
 				return { data: { driveFolder: "" }, error: undefined };
+			case "/api/v1/settings/claude-profiles":
+				return claudeProfilesPayload;
 			case "/api/v1/import":
 				return importPayload;
 			default:
@@ -593,5 +606,73 @@ describe("GlobalSettingsForm", () => {
 		await userEvent.click(await screen.findByRole("button", { name: "Run migration" }));
 		expect(await screen.findByText(/disk full/i)).toBeInTheDocument();
 		expect(setMigration).toHaveBeenCalledWith(expect.objectContaining({ status: "failed", error: "disk full" }));
+	});
+
+	describe("Claude profiles", () => {
+		it("lists the built-ins read-only and saves only the user profiles through the bar", async () => {
+			putMock.mockImplementation(async (path: string, init: { body: { profiles: unknown[] } }) =>
+				path === "/api/v1/settings/claude-profiles"
+					? {
+							data: { profiles: [...claudeProfilesPayload.data.profiles.slice(0, 2), ...init.body.profiles] },
+							error: undefined,
+						}
+					: { data: {}, error: undefined },
+			);
+			renderForm();
+			await goToSection("Every agent");
+			const builtins = await screen.findByRole("list", { name: "Built-in Claude profiles" });
+			expect(within(builtins).getByText("Subscription")).toBeInTheDocument();
+			expect(within(builtins).getByText("~/.claude/settings-omniroute.json")).toBeInTheDocument();
+			expect(within(builtins).queryByRole("textbox")).not.toBeInTheDocument();
+
+			await userEvent.clear(screen.getByLabelText("Profile 1 settings file"));
+			await userEvent.type(screen.getByLabelText("Profile 1 settings file"), "~/.claude/bedrock.json");
+			await userEvent.click(screen.getByRole("button", { name: "Add profile" }));
+			await userEvent.type(screen.getByLabelText("Profile 2 name"), " Vertex ");
+			await userEvent.type(screen.getByLabelText("Profile 2 settings file"), "~/.claude/vertex.json");
+			await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+			await waitFor(() =>
+				expect(putMock).toHaveBeenCalledWith("/api/v1/settings/claude-profiles", {
+					body: {
+						profiles: [
+							{ name: "Bedrock", settingsFile: "~/.claude/bedrock.json" },
+							{ name: "Vertex", settingsFile: "~/.claude/vertex.json" },
+						],
+					},
+				}),
+			);
+			await waitFor(() => expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument());
+			expect(screen.getByLabelText("Profile 2 name")).toHaveValue("Vertex");
+		});
+
+		it("removes a user profile and Discard puts it back", async () => {
+			renderForm();
+			await goToSection("Every agent");
+			await userEvent.click(await screen.findByRole("button", { name: "Remove profile Bedrock" }));
+			expect(screen.queryByLabelText("Profile 1 name")).not.toBeInTheDocument();
+
+			await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+			expect(screen.getByLabelText("Profile 1 name")).toHaveValue("Bedrock");
+			expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+			expect(putMock).not.toHaveBeenCalled();
+		});
+
+		it("shows the daemon's refusal of the list at the field", async () => {
+			const refusal = 'profile "subscription" shadows a built-in profile';
+			putMock.mockImplementation(async (path: string) =>
+				path === "/api/v1/settings/claude-profiles"
+					? { data: undefined, error: { code: "INVALID_CLAUDE_PROFILES", message: refusal } }
+					: { data: {}, error: undefined },
+			);
+			renderForm();
+			await goToSection("Every agent");
+			await userEvent.clear(await screen.findByLabelText("Profile 1 name"));
+			await userEvent.type(screen.getByLabelText("Profile 1 name"), "subscription");
+			await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+			expect(await screen.findByRole("alert")).toHaveTextContent(refusal);
+			expect(screen.getByLabelText("Profile 1 name")).toHaveValue("subscription");
+		});
 	});
 });

@@ -7,3 +7,10 @@ describe("project settings search", () => {
 		expect(hits.map((section) => section.key)).toEqual(["told"]);
 	});
 });
+
+describe("global settings search", () => {
+	it("finds the section holding the Claude profiles when searching for omniroute", () => {
+		const hits = sectionsForScope("global").filter((section) => matchesSearch(section, "OmniRoute"));
+		expect(hits.map((section) => section.key)).toEqual(["every-agent"]);
+	});
+});

@@ -708,6 +708,19 @@ body {
 	margin-left: 6px;
 }
 
+.terminal-toolbar__control--text {
+	width: auto;
+	gap: 4px;
+	margin-left: 6px;
+	padding: 0 6px;
+	font-size: 11px;
+}
+
+.terminal-toolbar__pending {
+	color: var(--amber);
+	white-space: nowrap;
+}
+
 /* Destructive toolbar control (Kill): red at rest, deeper red on hover, so the
    irreversible action reads as danger even as a bare icon beside the neutral
    reload/fullscreen controls. */

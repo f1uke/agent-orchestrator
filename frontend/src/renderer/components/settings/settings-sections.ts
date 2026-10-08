@@ -76,7 +76,8 @@ export const GLOBAL_SECTIONS: SectionMeta[] = [
 		Icon: Bot,
 		hint: "what every session starts from",
 		keywords:
-			"response language thai english default localization system prompt base orchestrator worker qa reviewer coordination floor confidentiality placeholder project id",
+			"response language thai english default localization system prompt base orchestrator worker qa reviewer coordination floor confidentiality placeholder project id " +
+			"claude profile profiles settings file omniroute subscription router proxy anthropic base url",
 	},
 	{
 		key: "running",

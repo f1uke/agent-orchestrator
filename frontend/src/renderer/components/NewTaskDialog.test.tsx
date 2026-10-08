@@ -75,6 +75,17 @@ beforeEach(() => {
 				error: undefined,
 			};
 		}
+		if (path === "/api/v1/settings/claude-profiles") {
+			return {
+				data: {
+					profiles: [
+						{ name: "Subscription", settingsFile: "", builtin: true },
+						{ name: "OmniRoute", settingsFile: "~/.claude/settings-omniroute.json", builtin: true },
+					],
+				},
+				error: undefined,
+			};
+		}
 		if (path === "/api/v1/projects/{id}/branches") {
 			return { data: { branches: [] }, error: undefined };
 		}
@@ -448,4 +459,50 @@ describe("NewTaskDialog", () => {
 		expect(body.displayName).toBe("Example story");
 		expect(onCreated).toHaveBeenCalledWith("task-1");
 	}, 10_000);
+	describe("Claude profile", () => {
+		async function fillAndStart(user: ReturnType<typeof userEvent.setup>) {
+			await user.type(screen.getByLabelText("Title"), "Route through OmniRoute");
+			await user.type(screen.getByLabelText("Brief"), "Do the work.");
+			await user.click(screen.getByRole("button", { name: "Start now" }));
+			await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1));
+		}
+
+		it("defaults to the project's profile and sends none", async () => {
+			renderDialog();
+			const user = userEvent.setup();
+			await waitForAgentCatalog();
+
+			expect(await screen.findByRole("combobox", { name: "Claude profile" })).toHaveTextContent(
+				"Project default (Subscription)",
+			);
+			await fillAndStart(user);
+			expect(spawnBody().claudeProfile).toBeUndefined();
+		});
+
+		it("sends the profile the human picked", async () => {
+			renderDialog();
+			const user = userEvent.setup();
+			await waitForAgentCatalog();
+
+			await user.click(await screen.findByRole("combobox", { name: "Claude profile" }));
+			await user.click(await screen.findByRole("option", { name: "OmniRoute" }));
+			await fillAndStart(user);
+			expect(spawnBody().claudeProfile).toBe("OmniRoute");
+		});
+
+		it("is hidden for an agent that is not Claude Code, and sends nothing for it", async () => {
+			renderDialog();
+			const user = userEvent.setup();
+			await waitForAgentCatalog();
+
+			await user.click(await screen.findByRole("combobox", { name: "Claude profile" }));
+			await user.click(await screen.findByRole("option", { name: "OmniRoute" }));
+			await user.click(screen.getByRole("combobox", { name: "Agent" }));
+			await user.click(await screen.findByRole("option", { name: "Cursor" }));
+
+			expect(screen.queryByRole("combobox", { name: "Claude profile" })).not.toBeInTheDocument();
+			await fillAndStart(user);
+			expect(spawnBody().claudeProfile).toBeUndefined();
+		});
+	});
 });
