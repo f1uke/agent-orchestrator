@@ -258,7 +258,7 @@ describe("IosRunBar", () => {
 		answer({ ios: { project: project(), run } });
 		const { onShowRun } = renderBar();
 
-		await userEvent.click(await screen.findByRole("button", { name: /Running NterDev \(Debug\)/ }));
+		await userEvent.click(await screen.findByRole("button", { name: /Starting/ }));
 		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
 
 		const onShowAgent = vi.fn();
@@ -273,6 +273,26 @@ describe("IosRunBar", () => {
 		);
 		await userEvent.click(await screen.findByRole("button", { name: "Back to agent" }));
 		expect(onShowAgent).toHaveBeenCalled();
+	});
+
+	it("shows how far the build is with the build's own task counts", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "running",
+			startedAt: "2026-09-18T10:00:00Z",
+			stage: "building",
+			buildStartedAt: "2026-09-18T10:00:00Z",
+			build: { phase: "compiling", counts: { done: 120, total: 480, fraction: 0.25 }, errors: 0, warnings: 0 },
+		};
+		answer({ ios: { project: project(), run } });
+		renderBar();
+
+		const chip = await screen.findByRole("button", { name: /Compiling 120\/480/ });
+		expect(chip).toHaveAttribute("title", expect.stringContaining("120 of 480 build tasks"));
+		expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
 	});
 
 	// A finished build's pane stays on screen on purpose - its keep-alive shell

@@ -28,7 +28,7 @@ func (f fakeSessions) GetSession(context.Context, domain.SessionID) (domain.Sess
 	if f.err != nil {
 		return domain.SessionRecord{}, false, f.err
 	}
-	rec := domain.SessionRecord{}
+	rec := domain.SessionRecord{ProjectID: "nter"}
 	rec.Metadata.WorkspacePath = f.path
 	return rec, f.found, nil
 }
@@ -632,7 +632,7 @@ func TestStart_TellsTheCommandWhereToReport(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	if got := rt.created[0].Env[EnvResultFile]; got != svc.resultPath("mer-9") {
-		t.Fatalf("%s=%q, want %q", EnvResultFile, got, svc.resultPath("mer-9"))
+	if got := rt.created[0].Env[EnvRunDir]; got != svc.runDir("mer-9") {
+		t.Fatalf("%s=%q, want %q", EnvRunDir, got, svc.runDir("mer-9"))
 	}
 }

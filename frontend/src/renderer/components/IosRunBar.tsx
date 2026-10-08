@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Play, Terminal, XCircle } from "lucide-react";
 import {
 	useIosProject,
@@ -11,6 +11,7 @@ import { useSessionNames } from "../hooks/useSessionNames";
 import { useSimDevices } from "../hooks/useSimDevices";
 import { useSimPower } from "../hooks/useSimPower";
 import type { Task } from "../lib/crew";
+import { builtName, runProgress } from "../lib/ios-run-progress";
 import { isBase, isWatchable, sessionDevices } from "../lib/sim-devices";
 import { cn } from "../lib/utils";
 import type { TerminalTarget } from "../types/terminal";
@@ -440,11 +441,14 @@ function RunChip({
 	// The configuration rides along with the scheme in the label: on a project
 	// whose environments ARE its configurations, "NterApp failed" leaves out
 	// half of what failed.
-	const built = run.configuration ? `${run.scheme} (${run.configuration})` : run.scheme;
+	const built = builtName(run);
+	const now = useNow(run.state === "running");
+	const progress = run.state === "running" ? runProgress(run, now) : null;
+	const fraction = useMonotonic(progress?.fraction, run.startedAt);
 	const state = {
 		running: {
-			icon: <Loader2 aria-hidden className="size-3.5 animate-spin text-accent motion-reduce:animate-none" />,
-			label: `Running ${built}`,
+			icon: <ProgressRing fraction={progress?.kind === "indeterminate" ? undefined : fraction} />,
+			label: progress?.label ?? `Running ${built}`,
 			tone: "text-muted-foreground",
 		},
 		succeeded: {
@@ -473,12 +477,64 @@ function RunChip({
 			// The one line the daemon carries up from the command - "building
 			// NterApp failed (exit status 65)" - rather than a tooltip that
 			// repeats the label.
-			title={run.summary || state.label}
+			title={progress?.tooltip ?? (run.summary || state.label)}
 			type="button"
 		>
 			{state.icon}
 			{watching ? "Back to agent" : state.label}
 		</button>
+	);
+}
+
+/** Re-renders every second while `enabled`, so elapsed time and the estimate move. */
+function useNow(enabled: boolean): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!enabled) return;
+		setNow(Date.now());
+		const timer = setInterval(() => setNow(Date.now()), 1_000);
+		return () => clearInterval(timer);
+	}, [enabled]);
+	return now;
+}
+
+/** The largest value seen for `key`: progress may switch source mid-build and must never go backwards. */
+function useMonotonic(value: number | undefined, key: string): number | undefined {
+	const seen = useRef<{ key: string; max: number } | null>(null);
+	if (value === undefined) return seen.current?.key === key ? seen.current.max : undefined;
+	if (seen.current?.key !== key || value > seen.current.max) seen.current = { key, max: value };
+	return seen.current.max;
+}
+
+const RING_RADIUS = 5.25;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+function ProgressRing({ fraction }: { fraction?: number }) {
+	if (fraction === undefined) {
+		return <Loader2 aria-hidden className="size-3.5 animate-spin text-accent motion-reduce:animate-none" />;
+	}
+	return (
+		<svg
+			aria-valuemax={100}
+			aria-valuemin={0}
+			aria-valuenow={Math.round(fraction * 100)}
+			className="size-3.5 shrink-0 -rotate-90"
+			role="progressbar"
+			viewBox="0 0 14 14"
+		>
+			<circle className="stroke-border" cx="7" cy="7" fill="none" r={RING_RADIUS} strokeWidth="1.75" />
+			<circle
+				className="stroke-accent transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none"
+				cx="7"
+				cy="7"
+				fill="none"
+				r={RING_RADIUS}
+				strokeDasharray={RING_CIRCUMFERENCE}
+				strokeDashoffset={RING_CIRCUMFERENCE * (1 - fraction)}
+				strokeLinecap="round"
+				strokeWidth="1.75"
+			/>
+		</svg>
 	);
 }
 

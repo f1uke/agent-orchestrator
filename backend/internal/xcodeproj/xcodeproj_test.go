@@ -142,7 +142,7 @@ func TestSchemes_EmptyIsItsOwnAnswer(t *testing.T) {
 // consults no lease, so a build aimed at one simulator is the call that can
 // walk over a session driving it.
 func TestBuildArgs_NamesNoDevice(t *testing.T) {
-	args := BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterDev", "Debug", "")
+	args := BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterDev", "Debug", BuildOutputs{})
 
 	line := strings.Join(args, " ")
 	if !strings.Contains(line, "-destination "+GenericSimulatorDestination) {
@@ -432,7 +432,7 @@ func TestConfigurations_EmptyIsItsOwnAnswer(t *testing.T) {
 // fails against an arm64-only xcframework, which is a doomed build dressed up as
 // a compiler error.
 func TestBuildArgs_BuildsOnlyThisMachinesArchitecture(t *testing.T) {
-	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", ""), " ")
+	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", BuildOutputs{}), " ")
 
 	// ARCHS, not ONLY_ACTIVE_ARCH: a target that sets ONLY_ACTIVE_ARCH=NO of its
 	// own - which CocoaPods writes into the Pods project - beats the flag, and
@@ -447,14 +447,14 @@ func TestBuildArgs_BuildsOnlyThisMachinesArchitecture(t *testing.T) {
 // Without one, measured on a two-module fixture, the builds that compiled
 // anything left no log at all. No path, no flag: `ao sim run` always passes one.
 func TestBuildArgs_AsksForAResultBundleSoTheBuildIsLogged(t *testing.T) {
-	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", "/d/build.xcresult"), " ")
+	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", BuildOutputs{ResultBundle: "/d/build.xcresult"}), " ")
 	if !strings.Contains(line, "-resultBundlePath /d/build.xcresult") {
 		t.Fatalf("the build must write a result bundle, or xcodebuild may leave no log: %q", line)
 	}
 	if !strings.HasSuffix(line, " build") {
 		t.Fatalf("the action must stay last: %q", line)
 	}
-	if bare := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", ""), " "); strings.Contains(bare, "-resultBundlePath") {
+	if bare := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", BuildOutputs{}), " "); strings.Contains(bare, "-resultBundlePath") {
 		t.Fatalf("no path must mean no flag: %q", bare)
 	}
 }
@@ -499,7 +499,7 @@ func TestPodInstallPending(t *testing.T) {
 // no certificate - and a build setting that turns signing off is the one thing
 // that must never come back. See the comment on BuildArgs for the measurements.
 func TestBuildArgs_NeverDisablesCodeSigning(t *testing.T) {
-	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", ""), " ")
+	line := strings.Join(BuildArgs(Project{Kind: KindWorkspace, Path: "/w/Nter.xcworkspace"}, "NterApp", "Dev", BuildOutputs{}), " ")
 
 	for _, forbidden := range []string{
 		"CODE_SIGNING_ALLOWED=NO",
@@ -510,5 +510,23 @@ func TestBuildArgs_NeverDisablesCodeSigning(t *testing.T) {
 		if strings.Contains(line, forbidden) {
 			t.Fatalf("a simulator build must sign itself; %q disables or overrides that: %q", forbidden, line)
 		}
+	}
+}
+
+func TestRecoverFailedOutputKeepsTheInnermostFailures(t *testing.T) {
+	log := `{"title":"Building project Demo","result":"failed","subsections":[
+		{"title":"Copy Demo.modulemap","result":"succeeded","commandInvocationDetails":{"emittedOutput":"copied"}},
+		{"title":"Emitting module for Demo","result":"cancelled","subsections":[]},
+		{"title":"Compiling Bad.swift","result":"failed","commandInvocationDetails":{"emittedOutput":"Failed frontend command:\nswift-frontend -frontend -c ..."},
+		 "subsections":[{"title":"Compile Bad.swift (arm64)","result":"failed",
+		   "commandInvocationDetails":{"emittedOutput":"/w/Bad.swift:1:38: error: cannot convert value\n"}}]},
+		{"title":"Link Demo (arm64)","result":"failed","commandInvocationDetails":{"emittedOutput":""}}]}`
+	got, err := RecoverFailedOutput([]byte(log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Compile Bad.swift (arm64)\n/w/Bad.swift:1:38: error: cannot convert value\n\nLink Demo (arm64)\n\n"
+	if got != want {
+		t.Fatalf("recovered:\n%q\nwant:\n%q", got, want)
 	}
 }

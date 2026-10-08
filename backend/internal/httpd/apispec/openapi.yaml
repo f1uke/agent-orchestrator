@@ -11081,6 +11081,35 @@ components:
       - available
       - legacyRoot
       type: object
+    IosrunBuildProgress:
+      properties:
+        counts:
+          $ref: '#/components/schemas/XcresultstreamCounts'
+          description: Tasks done and planned, and the build service's own fraction.
+            Absent until the build has planned, and while another progress-reporting
+            build runs on this Mac.
+        errors:
+          type: integer
+        phase:
+          description: What the build is doing, read from the tasks it starts.
+          enum:
+          - resolving
+          - planning
+          - compiling
+          - linking
+          - signing
+          - building
+          type: string
+        shared:
+          description: Another progress-reporting build is running on this Mac, so
+            task counts cannot be told apart and are withheld.
+          type: boolean
+        warnings:
+          type: integer
+      required:
+      - errors
+      - warnings
+      type: object
     IosrunProject:
       properties:
         configurations:
@@ -11110,6 +11139,20 @@ components:
       type: object
     IosrunRun:
       properties:
+        build:
+          $ref: '#/components/schemas/IosrunBuildProgress'
+          description: How far the build is, while it runs.
+        buildSeconds:
+          description: How long this run's build took, when it succeeded.
+          format: double
+          type: number
+        buildStartedAt:
+          description: When the build itself started, which the estimate is measured
+            from.
+          format: date-time
+          type:
+          - "null"
+          - string
         configuration:
           type: string
         finishedAt:
@@ -11119,8 +11162,27 @@ components:
           - string
         handleId:
           type: string
+        lastBuildSeconds:
+          description: How long the last successful build of the same project, scheme
+            and configuration took. Present while running when there is one.
+          format: double
+          type: number
         scheme:
           type: string
+        stage:
+          description: The step a running run is on. Absent once it has ended.
+          enum:
+          - preparing
+          - booting
+          - building
+          - installing
+          - launching
+          type: string
+        stageStartedAt:
+          format: date-time
+          type:
+          - "null"
+          - string
         startedAt:
           format: date-time
           type: string
@@ -15110,6 +15172,20 @@ components:
       - contentHash
       - size
       - changedLines
+      type: object
+    XcresultstreamCounts:
+      properties:
+        done:
+          type: integer
+        fraction:
+          format: double
+          type: number
+        total:
+          type: integer
+      required:
+      - done
+      - total
+      - fraction
       type: object
 tags:
 - description: Supported and locally runnable agent adapters

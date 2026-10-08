@@ -532,7 +532,7 @@ const GenericSimulatorDestination = "generic/platform=iOS Simulator"
 // cli/sim_run.go, which names it in the refusal. What this must never do again
 // is hand back an app that looks fine and cannot reach the Keychain.
 //
-// resultBundle, when set, is where xcodebuild writes the run's result bundle.
+// out.ResultBundle, when set, is where xcodebuild writes the run's result bundle.
 // 🗝 The bundle itself is not wanted - what it buys is the BUILD LOG. Without
 // `-resultBundlePath`, xcodebuild does not reliably leave an `.xcactivitylog`
 // in DerivedData: measured on a two-module fixture (2026-10-05), 0 of the 2
@@ -544,10 +544,13 @@ const GenericSimulatorDestination = "generic/platform=iOS Simulator"
 // how `import UIKit` came to be underlined "No such module" in a file that
 // builds. xcodebuild refuses a path that already exists, so the caller passes a
 // fresh one.
-func BuildArgs(project Project, scheme, configuration, resultBundle string) []string {
+func BuildArgs(project Project, scheme, configuration string, out BuildOutputs) []string {
 	args := append([]string{"xcodebuild"}, project.Flag()...)
-	if resultBundle != "" {
-		args = append(args, "-resultBundlePath", resultBundle)
+	if out.ResultBundle != "" {
+		args = append(args, "-resultBundlePath", out.ResultBundle)
+	}
+	if out.ResultBundle != "" && out.ProgressStream != "" {
+		args = append(args, ProgressFlag, "-resultStreamPath", out.ProgressStream)
 	}
 	return append(args,
 		"-scheme", scheme,
@@ -575,6 +578,21 @@ func BuildArgs(project Project, scheme, configuration, resultBundle string) []st
 		"build",
 	)
 }
+
+// BuildOutputs are the files a build writes besides its products.
+type BuildOutputs struct {
+	ResultBundle string
+	// ProgressStream, with ResultBundle, is where xcodebuild streams its events
+	// with the build service's task counts in them. The file must exist.
+	ProgressStream string
+}
+
+// ProgressFlag makes xcodebuild post the build service's task counts into its
+// result stream. Two costs, measured on Xcode 26.3: the counts go to EVERY
+// result stream on the Mac, unattributed, and a FAILED build stops printing its
+// task output (the compiler errors among it) to stdout. The result bundle still
+// has that output; see RecoverFailedOutput.
+const ProgressFlag = "-IDEPostProgressNotifications=YES"
 
 // settingsOutput is the shape of `xcodebuild -showBuildSettings -json`: one
 // entry per target, each with a flat map of settings.
@@ -657,4 +675,49 @@ func tail(out []byte) string {
 		lines = lines[len(lines)-keep:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// logSection is one section of `xcrun xcresulttool get log --type build`.
+type logSection struct {
+	Title   string `json:"title"`
+	Result  string `json:"result"`
+	Command struct {
+		EmittedOutput string `json:"emittedOutput"`
+	} `json:"commandInvocationDetails"`
+	Subsections []logSection `json:"subsections"`
+}
+
+// RecoverFailedOutput is what the failed tasks of a build printed, read back
+// from its result bundle's build log: the output ProgressFlag keeps off stdout.
+// Only the innermost failed sections are kept; the ones around them carry the
+// whole compiler command line and none of the errors.
+func RecoverFailedOutput(buildLog []byte) (string, error) {
+	var root logSection
+	if err := json.Unmarshal(trimToJSON(buildLog), &root); err != nil {
+		return "", fmt.Errorf("read the build log: %w", err)
+	}
+	var b strings.Builder
+	var walk func(logSection)
+	walk = func(s logSection) {
+		if s.Result != "failed" {
+			return
+		}
+		failedChild := false
+		for _, child := range s.Subsections {
+			if child.Result == "failed" {
+				failedChild = true
+				walk(child)
+			}
+		}
+		if failedChild {
+			return
+		}
+		fmt.Fprintf(&b, "%s\n", s.Title)
+		if out := strings.TrimRight(s.Command.EmittedOutput, "\n"); out != "" {
+			fmt.Fprintf(&b, "%s\n", out)
+		}
+		b.WriteString("\n")
+	}
+	walk(root)
+	return b.String(), nil
 }

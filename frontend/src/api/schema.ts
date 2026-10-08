@@ -3815,6 +3815,19 @@ export interface components {
             available: boolean;
             legacyRoot: string;
         };
+        IosrunBuildProgress: {
+            /** @description Tasks done and planned, and the build service's own fraction. Absent until the build has planned, and while another progress-reporting build runs on this Mac. */
+            counts?: components["schemas"]["XcresultstreamCounts"];
+            errors: number;
+            /**
+             * @description What the build is doing, read from the tasks it starts.
+             * @enum {string}
+             */
+            phase?: "resolving" | "planning" | "compiling" | "linking" | "signing" | "building";
+            /** @description Another progress-reporting build is running on this Mac, so task counts cannot be told apart and are withheld. */
+            shared?: boolean;
+            warnings: number;
+        };
         IosrunProject: {
             configurations: string[];
             configurationsError?: string;
@@ -3825,11 +3838,35 @@ export interface components {
             schemesError?: string;
         };
         IosrunRun: {
+            /** @description How far the build is, while it runs. */
+            build?: components["schemas"]["IosrunBuildProgress"];
+            /**
+             * Format: double
+             * @description How long this run's build took, when it succeeded.
+             */
+            buildSeconds?: number;
+            /**
+             * Format: date-time
+             * @description When the build itself started, which the estimate is measured from.
+             */
+            buildStartedAt?: null | string;
             configuration: string;
             /** Format: date-time */
             finishedAt?: null | string;
             handleId: string;
+            /**
+             * Format: double
+             * @description How long the last successful build of the same project, scheme and configuration took. Present while running when there is one.
+             */
+            lastBuildSeconds?: number;
             scheme: string;
+            /**
+             * @description The step a running run is on. Absent once it has ended.
+             * @enum {string}
+             */
+            stage?: "preparing" | "booting" | "building" | "installing" | "launching";
+            /** Format: date-time */
+            stageStartedAt?: null | string;
             /** Format: date-time */
             startedAt: string;
             /**
@@ -5454,6 +5491,12 @@ export interface components {
             contentHash: string;
             path: string;
             size: number;
+        };
+        XcresultstreamCounts: {
+            done: number;
+            /** Format: double */
+            fraction: number;
+            total: number;
         };
     };
     responses: never;

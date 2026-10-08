@@ -138,6 +138,16 @@ type Run struct {
 	// FinishedAt is when the command reported its result; absent while running,
 	// and absent for a run that was stopped without reporting one.
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	// Stage is the step a running run is on, as the command last reported it.
+	Stage          Stage          `json:"stage,omitempty" enum:"preparing,booting,building,installing,launching" description:"The step a running run is on. Absent once it has ended."`
+	StageStartedAt *time.Time     `json:"stageStartedAt,omitempty"`
+	BuildStartedAt *time.Time     `json:"buildStartedAt,omitempty" description:"When the build itself started, which the estimate is measured from."`
+	Build          *BuildProgress `json:"build,omitempty" description:"How far the build is, while it runs."`
+	// LastBuildSeconds is how long the last successful build of the same
+	// project, scheme and configuration took: what the bar estimates against
+	// when the build's own counts are not available.
+	LastBuildSeconds float64 `json:"lastBuildSeconds,omitempty" description:"How long the last successful build of the same project, scheme and configuration took. Present while running when there is one."`
+	BuildSeconds     float64 `json:"buildSeconds,omitempty" description:"How long this run's build took, when it succeeded."`
 }
 
 // Manager is the surface the HTTP controller depends on.
@@ -172,9 +182,10 @@ type Service struct {
 	// sentence; this keeps the evidence behind it.
 	log *slog.Logger
 
-	mu     sync.Mutex
-	runs   map[domain.SessionID]Run
-	cached map[domain.SessionID]cachedListing
+	mu        sync.Mutex
+	historyMu sync.Mutex
+	runs      map[domain.SessionID]Run
+	cached    map[domain.SessionID]cachedListing
 }
 
 type cachedListing struct {
@@ -419,6 +430,7 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	}
 
 	handle := HandleID(id)
+	s.clearRun(id)
 	// Tear down whatever is under the handle first. Destroy is idempotent, so
 	// this is equally "no pane yet" and "the last run is still on screen", and
 	// it is what keeps tmux's new-session from failing on a keep-alive shell.
@@ -436,8 +448,8 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	// And this is how the command reports what became of it. Only `ao sim run`
 	// can tell a failed build from a refused lease, so it writes the verdict
 	// rather than the daemon inferring one from an exit nobody watched.
-	if path := s.resultPath(id); path != "" {
-		env[EnvResultFile] = path
+	if dir := s.runDir(id); dir != "" {
+		env[EnvRunDir] = dir
 	}
 	if trimmed := strings.TrimSpace(udid); trimmed != "" {
 		env["AO_SIM_UDID"] = trimmed
@@ -494,9 +506,14 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 			return Run{}, false, nil
 		}
 	}
+	project := s.projectOf(ctx, id)
 	if result, found := s.readResult(id); found {
 		run.State, run.Summary, run.FinishedAt = result.State, result.Summary, result.FinishedAt
 		run.Warning = result.Warning
+		run.BuildSeconds = result.BuildSeconds
+		if project != "" {
+			s.rememberBuild(project, run.Scheme, run.Configuration, result)
+		}
 		return run, true, nil
 	}
 	alive, err := s.live(ctx, run.HandleID)
@@ -505,11 +522,28 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 	}
 	if alive {
 		run.State = RunRunning
+		if progress, ok := s.readProgress(id); ok {
+			run.Stage, run.StageStartedAt = progress.Stage, &progress.StageStartedAt
+			run.BuildStartedAt, run.Build = progress.BuildStartedAt, progress.Build
+		}
+		if last, ok := s.lastBuild(project, run.Scheme, run.Configuration); ok && project != "" {
+			run.LastBuildSeconds = last.BuildSeconds
+		}
 		return run, true, nil
 	}
 	run.State = RunStopped
 	run.Summary = "The run ended without reporting how it went. Its output is still in the pane."
 	return run, true, nil
+}
+
+// projectOf is the session's project, or "" when it cannot be read: the history
+// it keys is a convenience, never a reason to fail a poll.
+func (s *Service) projectOf(ctx context.Context, id domain.SessionID) domain.ProjectID {
+	record, found, err := s.sessions.GetSession(ctx, id)
+	if err != nil || !found {
+		return ""
+	}
+	return record.ProjectID
 }
 
 // workspace is the session's worktree, which is where everything here happens.
