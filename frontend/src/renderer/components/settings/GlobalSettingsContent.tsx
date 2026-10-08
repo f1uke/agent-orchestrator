@@ -20,6 +20,7 @@ import { shortcutLabel } from "../../../shared/editor-shortcuts";
 import { isMacPlatform } from "../../lib/platform";
 import { caFilesCount, formatCaFileLines, parseCaFileLines, sameCaFiles } from "../../lib/sim-trust";
 import { GLOBAL_SECTIONS } from "./settings-sections";
+import { ClaudeProfilesEditor } from "./ClaudeProfilesEditor";
 import type { PromptKind } from "./useGlobalSettingsForm";
 import type { useGlobalSettingsForm } from "./useGlobalSettingsForm";
 
@@ -150,6 +151,29 @@ function EveryAgentSection({ form }: { form: GlobalForm }) {
 						</SettingRow>
 					);
 				})}
+
+				<SettingRow
+					name="Claude profiles"
+					summary="Named Claude Code settings files a project, a new task or a running session can pick - for example to route a session through OmniRoute instead of the subscription."
+					detail={
+						<>
+							Each profile is a name and a settings file passed to Claude Code with <code>--settings</code>. AO checks
+							the file exists and is a JSON object before every launch. The built-ins cannot be changed or shadowed.
+							Profiles apply only to sessions whose agent is Claude Code.
+						</>
+					}
+					ownership={{ kind: "global-only" }}
+					timing="on-save"
+					value={`${form.builtinClaudeProfiles.length + draft.claudeProfiles.length} profiles`}
+					modified={form.claudeProfilesDirty}
+				>
+					<ClaudeProfilesEditor
+						builtins={form.builtinClaudeProfiles}
+						profiles={draft.claudeProfiles}
+						error={form.fieldErrors.claudeProfiles}
+						onChange={form.setClaudeProfiles}
+					/>
+				</SettingRow>
 			</SettingRows>
 		</>
 	);

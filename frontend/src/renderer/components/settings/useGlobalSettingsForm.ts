@@ -18,6 +18,13 @@ import {
 	simTrustSettingsQueryKey,
 	type SimTrustSettings,
 } from "../../lib/sim-trust";
+import {
+	claudeProfilesQueryKey,
+	fetchClaudeProfiles,
+	userProfiles,
+	type ClaudeProfile,
+	type ClaudeProfileInput,
+} from "../../lib/claude-profiles";
 
 export type PromptKind = "orchestrator" | "worker" | "qa" | "reviewer";
 export type PromptItem = { kind: PromptKind; default: string; override: string | null; warnings?: string[] };
@@ -72,6 +79,8 @@ export type GlobalDraft = {
 	editorFormatOnSave: boolean;
 	editorReindentShortcut: string;
 	editorFormatShortcut: string;
+	// The user's Claude profiles only; the built-ins are fixed in the daemon.
+	claudeProfiles: ClaudeProfileInput[];
 };
 
 export type GlobalScalarField =
@@ -117,7 +126,10 @@ const EMPTY_DRAFT: GlobalDraft = {
 	editorFormatOnSave: DEFAULT_EDITOR_SETTINGS.formatOnSave,
 	editorReindentShortcut: DEFAULT_EDITOR_SETTINGS.reindentShortcut,
 	editorFormatShortcut: DEFAULT_EDITOR_SETTINGS.formatShortcut,
+	claudeProfiles: [],
 };
+
+type GlobalErrorField = GlobalScalarField | "claudeProfiles";
 
 function recordEqual(a: Record<string, string>, b: Record<string, string>): boolean {
 	const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
@@ -216,6 +228,7 @@ export function useGlobalSettingsForm() {
 			return data as components["schemas"]["ReclaimSettingsResponse"];
 		},
 	});
+	const claudeProfilesQuery = useQuery({ queryKey: claudeProfilesQueryKey, queryFn: fetchClaudeProfiles });
 	const updateQuery = useQuery({ queryKey: updateSettingsQueryKey, queryFn: () => aoBridge.updateSettings.get() });
 	// Its own key under the editor's: this copy is the form's baseline, seeded
 	// once; a save invalidates the prefix, which reaches every open editor too.
@@ -229,7 +242,7 @@ export function useGlobalSettingsForm() {
 	const [savedAt, setSavedAt] = useState<number | null>(null);
 	// The daemon's refusal of one field's value, shown at that field until it is
 	// edited or saved again.
-	const [fieldErrors, setFieldErrors] = useState<Partial<Record<GlobalScalarField, string>>>({});
+	const [fieldErrors, setFieldErrors] = useState<Partial<Record<GlobalErrorField, string>>>({});
 	// Seed each slice once, the first time its query resolves, into BOTH draft and
 	// baseline (so it starts clean). Settings queries don't auto-refetch, so a
 	// seed-once guard keeps user edits from being clobbered.
@@ -339,6 +352,14 @@ export function useGlobalSettingsForm() {
 	}, [reclaimQuery.data]);
 
 	useEffect(() => {
+		if (!claudeProfilesQuery.data || seeded.current.has("claudeProfiles")) return;
+		seeded.current.add("claudeProfiles");
+		const v = userProfiles(claudeProfilesQuery.data);
+		setDraft((d) => ({ ...d, claudeProfiles: v }));
+		setBaseline((b) => ({ ...b, claudeProfiles: v }));
+	}, [claudeProfilesQuery.data]);
+
+	useEffect(() => {
 		if (!updateQuery.data || seeded.current.has("updates")) return;
 		seeded.current.add("updates");
 		const { enabled, channel } = updateQuery.data;
@@ -368,6 +389,7 @@ export function useGlobalSettingsForm() {
 	const isPromptDirty = (kind: string) => draft.prompts[kind] !== baseline.prompts[kind];
 	const isTemplateDirty = (name: string) => draft.templates[name] !== baseline.templates[name];
 	const isFieldDirty = (field: GlobalScalarField) => draft[field] !== baseline[field];
+	const claudeProfilesDirty = !sameProfileList(draft.claudeProfiles, baseline.claudeProfiles);
 
 	const dirty =
 		!recordEqual(draft.prompts, baseline.prompts) ||
@@ -384,7 +406,8 @@ export function useGlobalSettingsForm() {
 		draft.reclaimArtifacts !== baseline.reclaimArtifacts ||
 		draft.updatesEnabled !== baseline.updatesEnabled ||
 		draft.updateChannel !== baseline.updateChannel ||
-		editorDirty(draft, baseline);
+		editorDirty(draft, baseline) ||
+		claudeProfilesDirty;
 
 	const touch = () => setSavedAt(null);
 	const setPrompt = (kind: string, value: string) => {
@@ -401,13 +424,24 @@ export function useGlobalSettingsForm() {
 		setDraft((d) => ({ ...d, [field]: value }));
 	};
 
+	const setClaudeProfiles = (profiles: ClaudeProfileInput[]) => {
+		touch();
+		setFieldErrors((e) => (e.claudeProfiles === undefined ? e : { ...e, claudeProfiles: undefined }));
+		setDraft((d) => ({ ...d, claudeProfiles: profiles }));
+	};
+
 	const mutation = useMutation({
 		mutationFn: async () => {
 			const ops: Promise<void>[] = [];
 			setFieldErrors({});
 			// What the daemon stored, where it normalizes (a trailing `/` trimmed,
 			// say), so the form shows the value that is actually in effect.
-			const saved: { refLinks?: RefLinkSettingsResponse; simTrust?: SimTrustSettings; qaEvidence?: string } = {};
+			const saved: {
+				refLinks?: RefLinkSettingsResponse;
+				simTrust?: SimTrustSettings;
+				qaEvidence?: string;
+				claudeProfiles?: ClaudeProfile[];
+			} = {};
 			const putPrompt = async (kind: string, base: string) => {
 				const { error } = await apiClient.PUT("/api/v1/settings/prompts/{kind}", {
 					params: { path: { kind: kind as PromptKind } },
@@ -563,6 +597,21 @@ export function useGlobalSettingsForm() {
 				};
 				ops.push(aoBridge.updateSettings.set(next));
 			}
+			if (claudeProfilesDirty) {
+				ops.push(
+					(async () => {
+						const { data, error } = await apiClient.PUT("/api/v1/settings/claude-profiles", {
+							body: { profiles: cleanProfileList(draft.claudeProfiles) },
+						});
+						if (error) {
+							const message = apiErrorMessage(error);
+							setFieldErrors((e) => ({ ...e, claudeProfiles: message }));
+							throw new Error(message);
+						}
+						saved.claudeProfiles = (data as components["schemas"]["ClaudeProfilesResponse"]).profiles;
+					})(),
+				);
+			}
 			if (editorDirty(draft, baseline)) {
 				ops.push(
 					aoBridge.editorSettings
@@ -597,6 +646,10 @@ export function useGlobalSettingsForm() {
 				queryClient.setQueryData(simTrustSettingsQueryKey, saved.simTrust);
 			}
 			if (saved.qaEvidence !== undefined) next = { ...next, qaEvidenceDriveFolder: saved.qaEvidence };
+			if (saved.claudeProfiles) {
+				next = { ...next, claudeProfiles: userProfiles(saved.claudeProfiles) };
+				queryClient.setQueryData(claudeProfilesQueryKey, saved.claudeProfiles);
+			}
 			setDraft(next);
 			setBaseline(next);
 			// The Tasks tab's copy (and the form's own, by prefix).
@@ -633,6 +686,9 @@ export function useGlobalSettingsForm() {
 		// The saved global list, its found-on-this-Mac flags, and the shipped
 		// default the row can restore.
 		simTrust: simTrustQuery.data,
+		builtinClaudeProfiles: (claudeProfilesQuery.data ?? []).filter((p) => p.builtin),
+		claudeProfilesDirty,
+		setClaudeProfiles,
 		draft,
 		promptDefault,
 		templateDefault,
@@ -658,6 +714,16 @@ function editorDirty(draft: GlobalDraft, baseline: GlobalDraft): boolean {
 		draft.editorReindentShortcut !== baseline.editorReindentShortcut ||
 		draft.editorFormatShortcut !== baseline.editorFormatShortcut
 	);
+}
+
+function sameProfileList(a: ClaudeProfileInput[], b: ClaudeProfileInput[]): boolean {
+	return a.length === b.length && a.every((p, i) => p.name === b[i].name && p.settingsFile === b[i].settingsFile);
+}
+
+function cleanProfileList(profiles: ClaudeProfileInput[]): ClaudeProfileInput[] {
+	return profiles
+		.map((p) => ({ name: p.name.trim(), settingsFile: p.settingsFile.trim() }))
+		.filter((p) => p.name !== "" || p.settingsFile !== "");
 }
 
 function refLinksDirty(draft: GlobalDraft, baseline: GlobalDraft): boolean {
