@@ -6,6 +6,7 @@ import {
 	Loader2,
 	Play,
 	Square,
+	SquareTerminal,
 	Terminal,
 	Wrench,
 	XCircle,
@@ -185,113 +186,114 @@ export function IosRunBar({
 	};
 
 	return (
-		<div
-			className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-raised px-2 py-1.5"
-			data-testid="ios-run-bar"
-		>
-			<div className="flex h-7 shrink-0 items-stretch">
-				<button
-					aria-label={chosenScheme ? `Run ${chosenScheme}` : "Run"}
-					className={cn(
-						"flex items-center gap-1.5 rounded-l-md pr-2 pl-2.5 text-[12px] font-medium transition-colors",
-						blocked ? "cursor-not-allowed text-passive" : "bg-accent text-accent-foreground hover:brightness-110",
-					)}
-					disabled={Boolean(blocked) || start.isPending}
-					onClick={() => runAs("run")}
-					title={blocked ?? `Build ${chosenScheme} (${chosenConfiguration}) and run it`}
-					type="button"
-				>
-					{start.isPending ? (
-						<Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
-					) : (
-						// Filled, not lucide's outline. At 14px a hollow triangle on the
-						// accent fill reads as an outline of a button rather than the
-						// play mark every run control in every tool uses.
-						<Play aria-hidden className="size-3.5" fill="currentColor" />
-					)}
-					Run
-				</button>
-				<RunMenu blocked={blocked} blockedToBuild={blockedToBuild} disabled={start.isPending} onRun={runAs} />
-			</div>
-			<StopButton onStop={() => stop.mutate()} pending={stop.isPending} run={run} />
+		<div className="@container shrink-0 border-b border-border bg-raised" data-testid="ios-run-bar">
+			<div className="flex flex-wrap items-center gap-1.5 overflow-hidden px-2 py-1.5 @[48rem]:flex-nowrap">
+				<div className="flex h-7 shrink-0 items-stretch">
+					<button
+						aria-label={chosenScheme ? `Run ${chosenScheme}` : "Run"}
+						className={cn(
+							"flex items-center gap-1.5 rounded-l-md pr-2 pl-2.5 text-[12px] font-medium transition-colors",
+							blocked ? "cursor-not-allowed text-passive" : "bg-accent text-accent-foreground hover:brightness-110",
+						)}
+						disabled={Boolean(blocked) || start.isPending}
+						onClick={() => runAs("run")}
+						title={blocked ?? `Build ${chosenScheme} (${chosenConfiguration}) and run it`}
+						type="button"
+					>
+						{start.isPending ? (
+							<Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+						) : (
+							// Filled, not lucide's outline. At 14px a hollow triangle on the
+							// accent fill reads as an outline of a button rather than the
+							// play mark every run control in every tool uses.
+							<Play aria-hidden className="size-3.5" fill="currentColor" />
+						)}
+						Run
+					</button>
+					<RunMenu blocked={blocked} blockedToBuild={blockedToBuild} disabled={start.isPending} onRun={runAs} />
+				</div>
+				<StopButton onStop={() => stop.mutate()} pending={stop.isPending} run={run} />
 
-			{specs.length > 0 ? <XcodegenButton sessionId={sessionId} specs={specs} /> : null}
-			<ChoicePicker
-				chosen={chosenScheme}
-				choices={schemes}
-				empty="No schemes"
-				label="Scheme to run"
-				onChoose={setScheme}
-				onOpen={refresh.mutate}
-				placeholder="Choose a scheme"
-				reason={project.schemesError ?? ""}
-				refreshing={refresh.isPending}
-				width="w-[150px]"
-			/>
-			<ChoicePicker
-				chosen={chosenConfiguration}
-				choices={configurations}
-				empty="No configurations"
-				label="Build configuration to run"
-				onChoose={setConfiguration}
-				onOpen={refresh.mutate}
-				placeholder="Choose a configuration"
-				reason={project.configurationsError ?? ""}
-				refreshing={refresh.isPending}
-				width="w-[180px]"
-			/>
-
-			<span aria-hidden className="h-4 w-px shrink-0 bg-border" />
-
-			<SimDevicePicker
-				chosen={chosenUdid}
-				devices={allDevices}
-				holderNames={holderNames}
-				loading={devices.isLoading}
-				onChoose={setUdid}
-				onPower={power.mutate}
-				sessionId={sessionId}
-				task={task}
-			/>
-			<label
-				className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-				title={
-					console
-						? "Runs launch the app with its print() and stdout shown in the run's terminal"
-						: "Show the app's print() and stdout in the run's terminal"
-				}
-			>
-				<Switch
-					aria-label="Show the app's console"
-					checked={console}
-					className="h-4 w-7 data-[state=checked]:bg-accent [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
-					onCheckedChange={setConsole}
+				{specs.length > 0 ? <XcodegenButton sessionId={sessionId} specs={specs} /> : null}
+				<ChoicePicker
+					chosen={chosenScheme}
+					choices={schemes}
+					empty="No schemes"
+					label="Scheme to run"
+					onChoose={setScheme}
+					onOpen={refresh.mutate}
+					placeholder="Scheme"
+					reason={project.schemesError ?? ""}
+					refreshing={refresh.isPending}
+					width="w-[120px] min-w-[88px] shrink"
 				/>
-				Console
-			</label>
+				<ChoicePicker
+					chosen={chosenConfiguration}
+					choices={configurations}
+					empty="No configurations"
+					label="Build configuration to run"
+					onChoose={setConfiguration}
+					onOpen={refresh.mutate}
+					placeholder="Configuration"
+					reason={project.configurationsError ?? ""}
+					refreshing={refresh.isPending}
+					width="w-[112px] min-w-[64px] shrink"
+				/>
 
-			<div className="ml-auto flex min-w-0 items-center gap-2">
-				{problem ? <Problem message={problem} /> : null}
-				{/*
-				 * A run's own warning outranks the chip beside it: the run
-				 * WORKED, so the chip says "Ran NterApp (Dev)" in the ordinary
-				 * tone, and the only thing wrong is the app it left on the
-				 * device. That combination shipped a build with no entitlements
-				 * from this very button and took three hours to trace, so it
-				 * gets the same treatment as a refusal rather than a tooltip
-				 * nobody hovers.
-				 */}
-				{!problem && run?.warning ? <Problem message={run.warning} /> : null}
-				{run ? (
-					<RunChip
-						onOpenWorkspaceFile={onOpenWorkspaceFile}
-						onShowAgent={onShowAgent}
-						onShowRun={onShowRun}
-						run={run}
-						sessionId={sessionId}
-						watching={watchingRun}
+				<span aria-hidden className="h-4 w-px shrink-0 bg-border" />
+
+				<SimDevicePicker
+					chosen={chosenUdid}
+					devices={allDevices}
+					holderNames={holderNames}
+					loading={devices.isLoading}
+					onChoose={setUdid}
+					onPower={power.mutate}
+					sessionId={sessionId}
+					task={task}
+					width="w-[168px] min-w-[112px] shrink"
+				/>
+				<label
+					className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+					title={
+						console
+							? "Runs launch the app with its print() and stdout shown in the run's terminal"
+							: "Show the app's print() and stdout in the run's terminal"
+					}
+				>
+					<Switch
+						aria-label="Show the app's console"
+						checked={console}
+						className="h-4 w-7 data-[state=checked]:bg-accent [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
+						onCheckedChange={setConsole}
 					/>
-				) : null}
+					<SquareTerminal aria-hidden className="size-3.5 @[60rem]:hidden" />
+					<span className="hidden @[60rem]:inline">Console</span>
+				</label>
+
+				<div className="ml-auto flex min-w-0 shrink-[0.05] items-center gap-2 @[48rem]:shrink-0">
+					{problem ? <Problem message={problem} /> : null}
+					{/*
+					 * A run's own warning outranks the chip beside it: the run
+					 * WORKED, so the chip says "Ran NterApp (Dev)" in the ordinary
+					 * tone, and the only thing wrong is the app it left on the
+					 * device. That combination shipped a build with no entitlements
+					 * from this very button and took three hours to trace, so it
+					 * gets the same treatment as a refusal rather than a tooltip
+					 * nobody hovers.
+					 */}
+					{!problem && run?.warning ? <Problem message={run.warning} /> : null}
+					{run ? (
+						<RunChip
+							onOpenWorkspaceFile={onOpenWorkspaceFile}
+							onShowAgent={onShowAgent}
+							onShowRun={onShowRun}
+							run={run}
+							sessionId={sessionId}
+							watching={watchingRun}
+						/>
+					) : null}
+				</div>
 			</div>
 		</div>
 	);
@@ -330,6 +332,9 @@ function blockedReason({
 		return "This machine has no iOS Simulators installed, so there is nothing to run the app on.";
 	}
 	if (schemes.length === 0) {
+		if (project.xcodegen?.specs?.some((spec) => spec.stale)) {
+			return "The Xcode project is behind its xcodegen spec. Run xcodegen first (it also runs the spec's postGenCommand, such as pod install).";
+		}
 		return project.schemesError || `${project.name} listed no schemes, so there is nothing to build.`;
 	}
 	if (!chosenScheme) return "Choose which scheme to run.";
@@ -405,10 +410,9 @@ function ChoicePicker({
 	reason: string;
 	refreshing: boolean;
 	/**
-	 * The trigger's fixed width. Fixed so that choosing a long name cannot shift
-	 * the controls after it sideways, and per-picker because the two
-	 * placeholders are different lengths - "Choose a configuration" truncated to
-	 * "Choose a configur…" reads as a bug rather than as a prompt.
+	 * The trigger's width: fixed so that choosing a long name cannot shift the
+	 * controls after it sideways, and allowed to shrink so the bar stays one row
+	 * in a narrow pane.
 	 */
 	width: string;
 }) {
@@ -425,7 +429,7 @@ function ChoicePicker({
 				<button
 					aria-label={label}
 					className={cn(
-						"flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay",
+						"flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-foreground transition-colors hover:bg-overlay",
 						width,
 					)}
 					type="button"
@@ -546,7 +550,7 @@ function RunChip({
 		<>
 			<button
 				className={cn(
-					"flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors hover:bg-overlay",
+					"flex h-7 min-w-0 items-center gap-1.5 rounded-md px-2 text-[11px] whitespace-nowrap transition-colors hover:bg-overlay",
 					watching ? "text-foreground" : state.tone,
 				)}
 				onClick={() => {
@@ -560,10 +564,14 @@ function RunChip({
 				title={progress?.tooltip ?? (run.summary || state.label)}
 				type="button"
 			>
-				{state.icon}
-				{watching ? "Back to agent" : state.label}
-				{!watching && counts ? <span className="tabular-nums">{counts}</span> : null}
-				{!watching && timing ? <span className="tabular-nums text-passive">{timing}</span> : null}
+				<span className="flex shrink-0">{state.icon}</span>
+				<span className="min-w-0 truncate tabular-nums">{watching ? "Back to agent" : state.label}</span>
+				{!watching && counts ? (
+					<IssueBadges errors={run.errors ?? 0} label={counts} warnings={run.warnings ?? 0} />
+				) : null}
+				{!watching && timing ? (
+					<span className="hidden shrink-0 tabular-nums text-passive @[48rem]:inline">{timing}</span>
+				) : null}
 			</button>
 			{hasIssues ? (
 				<BuildIssuesSheet
@@ -616,7 +624,7 @@ function RunMenu({
 					<ChevronDown aria-hidden className="size-3" />
 				</button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start" className="w-64">
+			<DropdownMenuContent align="start" className="w-72">
 				{RUN_MENU.map((item) => {
 					const reason = item.buildsOnly ? blockedToBuild : blocked;
 					return (
@@ -634,6 +642,27 @@ function RunMenu({
 				})}
 			</DropdownMenuContent>
 		</DropdownMenu>
+	);
+}
+
+/** Xcode's own shorthand for a build's issues: a red count and a yellow one. */
+function IssueBadges({ errors, label, warnings }: { errors: number; label: string; warnings: number }) {
+	return (
+		<span className="flex shrink-0 items-center gap-1.5 tabular-nums">
+			<span className="sr-only">{label}</span>
+			{errors ? (
+				<span aria-hidden className="flex items-center gap-0.5 text-error">
+					<XCircle className="size-3" />
+					{errors}
+				</span>
+			) : null}
+			{warnings ? (
+				<span aria-hidden className="flex items-center gap-0.5 text-warning">
+					<AlertTriangle className="size-3" />
+					{warnings}
+				</span>
+			) : null}
+		</span>
 	);
 }
 
@@ -678,7 +707,7 @@ function XcodegenButton({ sessionId, specs }: { sessionId: string; specs: { dir:
 		.filter((spec) => spec.stale)
 		.map((spec) => (spec.dir === "." ? "project.yml" : `${spec.dir}/project.yml`));
 	const title = stale.length
-		? `${stale.join(", ")} changed since the project was last generated. Run xcodegen`
+		? `The Xcode project is behind ${stale.join(", ")}. Run xcodegen`
 		: "Run xcodegen";
 	return (
 		<>

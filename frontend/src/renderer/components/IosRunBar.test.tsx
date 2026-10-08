@@ -545,7 +545,7 @@ describe("IosRunBar", () => {
 		answer({ ios: { project: project({ xcodegen: { installed: true, specs: [{ dir: "NterApp", stale: true }] } }) } });
 		renderBar();
 		const button = await screen.findByRole("button", { name: "Run xcodegen (the project is out of date)" });
-		expect(button).toHaveAttribute("title", expect.stringContaining("NterApp/project.yml changed"));
+		expect(button).toHaveAttribute("title", expect.stringContaining("The Xcode project is behind NterApp/project.yml"));
 		expect(screen.getByTestId("xcodegen-stale-dot")).toBeInTheDocument();
 	});
 
@@ -590,7 +590,7 @@ describe("IosRunBar", () => {
 		});
 		renderBar();
 		expect(await screen.findByRole("button", { name: /Run xcodegen/ })).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute("title", "There is no Xcode project yet. Run xcodegen to generate it.");
+		expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute("title", expect.stringContaining("Run xcodegen first"));
 	});
 
 	it("keeps Stop in place and disabled while nothing runs", async () => {

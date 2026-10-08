@@ -154,3 +154,21 @@ func TestAMalformedStreamStopsReadingWithoutPanicking(t *testing.T) {
 		t.Fatal("events after a malformed one must not be trusted")
 	}
 }
+
+func TestCountsSeenWhileAnotherBuildPostedAreNotKept(t *testing.T) {
+	var r Reader
+	r.Feed([]byte(graph("Demo") + advisory("Demo : 10 / 100", 0.1)))
+	r.Share(true)
+	r.Feed([]byte(advisory("Demo : 95 / 100", 0.95)))
+	if got := r.Snapshot().Counts; got != nil {
+		t.Fatalf("Counts = %+v while shared, want none", got)
+	}
+	r.Share(false)
+	if got := r.Snapshot().Counts; got != nil {
+		t.Fatalf("Counts = %+v right after sharing ended, want a fresh start", got)
+	}
+	r.Feed([]byte(advisory("Demo : 30 / 100", 0.3)))
+	if got := r.Snapshot().Counts; got == nil || got.Done != 30 {
+		t.Fatalf("Counts = %+v, want 30/100: the other build's 95 must not hold it down", got)
+	}
+}

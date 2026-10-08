@@ -38,6 +38,7 @@ const (
 // Stage is the step of a run the command is on.
 type Stage string
 
+// The steps of a run, in the order the command reaches them.
 const (
 	StagePreparing  Stage = "preparing"
 	StageBooting    Stage = "booting"
@@ -217,15 +218,20 @@ func (s *Service) readProgress(id domain.SessionID) (Progress, bool) {
 }
 
 // historyEntry is the last successful build of one project, scheme and
-// configuration. The device is not part of the key: the build targets the
-// Simulator generically, so the device cannot change it.
+// configuration, with clean builds kept apart: a clean nter build takes minutes
+// and an incremental one seconds. The device is not part of the key: the build
+// targets the Simulator generically, so the device cannot change it.
 type historyEntry struct {
 	BuildSeconds float64   `json:"buildSeconds"`
 	FinishedAt   time.Time `json:"finishedAt"`
 }
 
-func historyKey(project domain.ProjectID, scheme, configuration string) string {
-	return string(project) + "|" + scheme + "|" + configuration
+func historyKey(project domain.ProjectID, run Run) string {
+	key := string(project) + "|" + run.Scheme + "|" + run.Configuration
+	if run.Mode == ModeCleanBuild {
+		key += "|clean"
+	}
+	return key
 }
 
 func (s *Service) historyPath() string {
@@ -250,16 +256,16 @@ func (s *Service) readHistory() map[string]historyEntry {
 }
 
 // lastBuild is the estimate a running build is measured against.
-func (s *Service) lastBuild(project domain.ProjectID, scheme, configuration string) (historyEntry, bool) {
+func (s *Service) lastBuild(project domain.ProjectID, run Run) (historyEntry, bool) {
 	s.historyMu.Lock()
 	defer s.historyMu.Unlock()
-	entry, ok := s.readHistory()[historyKey(project, scheme, configuration)]
+	entry, ok := s.readHistory()[historyKey(project, run)]
 	return entry, ok && entry.BuildSeconds > 0
 }
 
 // rememberBuild records a successful build once; reading the same verdict again
 // changes nothing.
-func (s *Service) rememberBuild(project domain.ProjectID, scheme, configuration string, result Result) {
+func (s *Service) rememberBuild(project domain.ProjectID, run Run, result Result) {
 	path := s.historyPath()
 	if path == "" || result.BuildSeconds <= 0 || result.FinishedAt == nil {
 		return
@@ -267,7 +273,7 @@ func (s *Service) rememberBuild(project domain.ProjectID, scheme, configuration 
 	s.historyMu.Lock()
 	defer s.historyMu.Unlock()
 	history := s.readHistory()
-	key := historyKey(project, scheme, configuration)
+	key := historyKey(project, run)
 	if !history[key].FinishedAt.Before(*result.FinishedAt) {
 		return
 	}

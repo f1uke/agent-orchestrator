@@ -224,6 +224,7 @@ func (c *commandContext) watchBuildProgress(ctx context.Context, streamPath stri
 			if tick%sharedCheckEvery == 0 {
 				if out, err := c.deps.CommandOutput(ctx, "ps", "-axo", "pid=,args="); err == nil {
 					shared = otherProgressBuilds(out, streamPath)
+					reader.Share(shared)
 				}
 			}
 			readMore()

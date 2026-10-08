@@ -21,8 +21,8 @@ const simRunTerminateWait = 10 * time.Second
 // stopped, copying its console to out when it has one. A stop terminates the app
 // and waits until its process is gone, so nothing is left frozen or half-held.
 func (c *commandContext) attachSimApp(ctx context.Context, out io.Writer, result simRunResult, report *runReport) error {
-	pid, err := strconv.Atoi(result.PID)
-	if err != nil || pid <= 0 {
+	pid, _ := strconv.Atoi(result.PID)
+	if pid <= 0 {
 		return nil
 	}
 	report.stage(iosrun.StageAppRunning)

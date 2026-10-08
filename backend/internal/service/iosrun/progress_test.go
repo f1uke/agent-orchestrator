@@ -112,7 +112,7 @@ func TestCurrent_KeepsTheNewestBuildDuration(t *testing.T) {
 	finishWith(t, svc, "Dev", 40, time.Date(2026, 10, 8, 10, 0, 0, 0, time.UTC))
 	finishWith(t, svc, "Dev", 999, time.Date(2026, 10, 8, 8, 0, 0, 0, time.UTC))
 
-	entry, ok := svc.lastBuild("nter", "Nter", "Dev")
+	entry, ok := svc.lastBuild("nter", Run{Scheme: "Nter", Configuration: "Dev"})
 	if !ok || entry.BuildSeconds != 40 {
 		t.Fatalf("history = %+v, want the 10:00 build's 40s", entry)
 	}
@@ -121,7 +121,7 @@ func TestCurrent_KeepsTheNewestBuildDuration(t *testing.T) {
 func TestCurrent_DoesNotRememberARunThatNeverBuilt(t *testing.T) {
 	svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), &fakeRuntime{alive: true})
 	finishWith(t, svc, "Dev", 0, time.Now())
-	if _, ok := svc.lastBuild("nter", "Nter", "Dev"); ok {
+	if _, ok := svc.lastBuild("nter", Run{Scheme: "Nter", Configuration: "Dev"}); ok {
 		t.Fatal("a run with no successful build has no duration to estimate from")
 	}
 }
@@ -292,6 +292,66 @@ func TestStart_ShowsTheConsoleWhenAsked(t *testing.T) {
 		}
 		if got := strings.Contains(strings.Join(rt.created[0].Argv, " "), "--console"); got != c.want || run.Console != c.want {
 			t.Errorf("%s console=%v: --console passed=%v run.Console=%v, want %v", c.mode, c.console, got, run.Console, c.want)
+		}
+	}
+}
+
+func TestCurrent_NamesAnIssueReachedThroughASymlinkRelativeToTheWorktree(t *testing.T) {
+	realDir := t.TempDir()
+	dir := filepath.Join(realDir, "wt")
+	if err := os.MkdirAll(filepath.Join(dir, "Nter.xcodeproj"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "A.swift"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	svc := stateful(t, dir, t.TempDir(), &fakeRuntime{alive: true})
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev"}); err != nil {
+		t.Fatal(err)
+	}
+	writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunFailed, Errors: 1, Issues: []xcresultstream.Issue{
+		{Severity: "error", Message: "x", File: filepath.Join(link, "wt", "A.swift"), Line: 1},
+	}})
+	if run, _, _ := svc.Current(context.Background(), "mer-9"); run.Issues[0].File != "A.swift" {
+		t.Fatalf("file = %q, want A.swift: /tmp and /private/tmp are one directory", run.Issues[0].File)
+	}
+}
+
+func TestWithoutWorktreePrefixShortensPathsInsideTheWorktree(t *testing.T) {
+	got := withoutWorktreePrefix("/private/tmp/wt/App/A.swift:1:2: error: x\n/tmp/wt/App/B.swift:3:4: warning: y\n/elsewhere/C.swift:5: note", "/private/tmp/wt")
+	want := "App/A.swift:1:2: error: x\nApp/B.swift:3:4: warning: y\n/elsewhere/C.swift:5: note"
+	if got != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestCurrent_EstimatesACleanBuildFromTheLastCleanBuild(t *testing.T) {
+	svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), &fakeRuntime{alive: true})
+	at := time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		mode    Mode
+		seconds float64
+	}{{ModeCleanBuild, 300}, {ModeRun, 40}} {
+		if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", Mode: c.mode}); err != nil {
+			t.Fatal(err)
+		}
+		at = at.Add(time.Hour)
+		finished := at
+		writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunSucceeded, FinishedAt: &finished, BuildSeconds: c.seconds})
+		if _, _, err := svc.Current(context.Background(), "mer-9"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for mode, want := range map[Mode]float64{ModeCleanBuild: 300, ModeRun: 40} {
+		if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev", Mode: mode}); err != nil {
+			t.Fatal(err)
+		}
+		if run, _, _ := svc.Current(context.Background(), "mer-9"); run.LastBuildSeconds != want {
+			t.Errorf("%s: lastBuildSeconds = %v, want %v", mode, run.LastBuildSeconds, want)
 		}
 	}
 }

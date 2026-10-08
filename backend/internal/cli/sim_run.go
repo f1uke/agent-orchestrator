@@ -779,6 +779,9 @@ func writeSimRun(out io.Writer, result simRunResult) error {
 		}
 	}
 	launched := "Built " + result.Scheme + " (" + result.Configuration + ") and launched " + result.BundleID
+	if result.NoBuild {
+		launched = "Launched the last build of " + result.Scheme + " (" + result.Configuration + "), " + result.BundleID
+	}
 	if result.PID != "" {
 		launched += " (pid " + result.PID + ")"
 	}
@@ -838,10 +841,10 @@ func (c *commandContext) buildSimApp(
 		report.buildFinished(stopWatching())
 	}
 	if ctx.Err() != nil && device.Name == "" {
-		return fmt.Errorf("stopped while building %s: %w", scheme, ctx.Err())
+		return stoppedError{fmt.Sprintf("Stopped while building %s.", scheme)}
 	}
 	if ctx.Err() != nil {
-		return fmt.Errorf("stopped while building %s. Nothing was installed on %s: %w", scheme, device.Name, ctx.Err())
+		return stoppedError{fmt.Sprintf("Stopped while building %s. Nothing was installed on %s.", scheme, device.Name)}
 	}
 	if err != nil {
 		if outputs.ProgressStream != "" {
@@ -885,3 +888,10 @@ func (c *commandContext) cleanDerivedData(ctx context.Context, progress io.Write
 	}
 	return nil
 }
+
+// stoppedError is a run the human stopped: a sentence, not a failure's cause.
+type stoppedError struct{ message string }
+
+func (e stoppedError) Error() string { return e.message }
+
+func (stoppedError) Unwrap() error { return context.Canceled }

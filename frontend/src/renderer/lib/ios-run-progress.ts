@@ -75,7 +75,10 @@ function buildProgress(run: IosRun, now: number, name: string): RunProgressView 
 			tooltip: `${why}Estimated from the last build of ${name}, ${formatDuration(last)}`,
 		};
 	}
-	return { kind: "indeterminate", label: phase, tooltip: `Building ${name}` };
+	const tooltip = build?.shared
+		? `Building ${name}. Another build on this Mac is reporting progress, so this build's own counts cannot be told apart, and there is no earlier build like this one to estimate from.`
+		: `Building ${name}`;
+	return { kind: "indeterminate", label: phase, tooltip };
 }
 
 /** Elapsed time while a run works towards launching, and the build's duration once it has ended. */

@@ -124,6 +124,7 @@ const (
 // Mode is what Run does: the whole loop, or one part of it.
 type Mode string
 
+// The ways to run, one per item of the run bar's menu plus Run itself.
 const (
 	ModeRun Mode = "run"
 	// ModeRunWithoutBuilding installs and launches what the last build left.
@@ -644,7 +645,7 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 		run.Errors, run.Warnings = result.Errors, result.Warnings
 		run.Issues = s.relativeIssues(ctx, id, result.Issues)
 		if project != "" {
-			s.rememberBuild(project, run.Scheme, run.Configuration, result)
+			s.rememberBuild(project, run, result)
 		}
 		return run, true, nil
 	}
@@ -658,7 +659,7 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 			run.Stage, run.StageStartedAt = progress.Stage, &progress.StageStartedAt
 			run.BuildStartedAt, run.Build = progress.BuildStartedAt, progress.Build
 		}
-		if last, ok := s.lastBuild(project, run.Scheme, run.Configuration); ok && project != "" {
+		if last, ok := s.lastBuild(project, run); ok && project != "" {
 			run.LastBuildSeconds = last.BuildSeconds
 		}
 		return run, true, nil
@@ -720,10 +721,20 @@ func (s *Service) relativeIssues(ctx context.Context, id domain.SessionID, issue
 	out := make([]xcresultstream.Issue, len(issues))
 	for i, issue := range issues {
 		out[i] = issue
-		for _, root := range roots {
-			if rel, err := filepath.Rel(root, issue.File); err == nil && issue.File != "" && !strings.HasPrefix(rel, "..") {
-				out[i].File = rel
-				break
+		if issue.File == "" {
+			continue
+		}
+		files := []string{issue.File}
+		if resolved, err := filepath.EvalSymlinks(issue.File); err == nil && resolved != issue.File {
+			files = append(files, resolved)
+		}
+	match:
+		for _, file := range files {
+			for _, root := range roots {
+				if rel, err := filepath.Rel(root, file); err == nil && !strings.HasPrefix(rel, "..") {
+					out[i].File = rel
+					break match
+				}
 			}
 		}
 	}
@@ -750,7 +761,7 @@ const (
 var errorLine = regexp.MustCompile(`(^|: )(fatal )?error: `)
 
 // BuildLog reads the session's last build log.
-func (s *Service) BuildLog(_ context.Context, id domain.SessionID) (BuildLog, error) {
+func (s *Service) BuildLog(ctx context.Context, id domain.SessionID) (BuildLog, error) {
 	dir := s.runDir(id)
 	if dir == "" {
 		return BuildLog{}, apierr.NotFound("IOS_RUN_NO_LOG", "This run kept no build log.")
@@ -759,7 +770,28 @@ func (s *Service) BuildLog(_ context.Context, id domain.SessionID) (BuildLog, er
 	if err != nil {
 		return BuildLog{}, apierr.NotFound("IOS_RUN_NO_LOG", "This run kept no build log.")
 	}
-	return excerpt(strings.Split(strings.TrimRight(string(body), "\n"), "\n")), nil
+	text := string(body)
+	if worktree, err := s.workspace(ctx, id); err == nil {
+		text = withoutWorktreePrefix(text, worktree)
+	}
+	return excerpt(strings.Split(strings.TrimRight(text, "\n"), "\n")), nil
+}
+
+// withoutWorktreePrefix shortens every path inside the worktree to one relative
+// to it, so "NterApp/AppDelegate.swift:12:5: error:" fits the sheet. A path can
+// arrive through a symlink (/tmp and /private/tmp), so both spellings go.
+func withoutWorktreePrefix(text, worktree string) string {
+	prefixes := []string{worktree}
+	if resolved, err := filepath.EvalSymlinks(worktree); err == nil {
+		prefixes = append(prefixes, resolved)
+	}
+	if rest, ok := strings.CutPrefix(worktree, "/private/"); ok {
+		prefixes = append(prefixes, "/"+rest)
+	}
+	for _, prefix := range prefixes {
+		text = strings.ReplaceAll(text, strings.TrimSuffix(prefix, "/")+"/", "")
+	}
+	return text
 }
 
 func excerpt(lines []string) BuildLog {

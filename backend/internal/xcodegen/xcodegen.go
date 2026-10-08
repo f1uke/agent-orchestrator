@@ -29,6 +29,7 @@ const SpecFile = "project.yml"
 // Status is how a generate went as a whole.
 type Status string
 
+// The three ways a generate over a worktree can go.
 const (
 	StatusNotInstalled Status = "not-installed"
 	StatusNoSpecs      Status = "no-specs"
@@ -125,7 +126,7 @@ func New(stateFile string, opts ...Option) *Generator {
 type Option func(*Generator)
 
 // WithExec replaces the command runner; tests use it.
-func WithExec(exec Exec) Option { return func(g *Generator) { g.exec = exec } }
+func WithExec(run Exec) Option { return func(g *Generator) { g.exec = run } }
 
 // WithBinary replaces how the xcodegen binary is found; tests use it.
 func WithBinary(find func() (string, error)) Option { return func(g *Generator) { g.binary = find } }

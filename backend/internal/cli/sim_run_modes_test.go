@@ -38,8 +38,12 @@ func TestSimRun_BuildOnlyTouchesNoSimulator(t *testing.T) {
 
 func TestSimRun_NoBuildInstallsTheLastBuild(t *testing.T) {
 	deps, _, calls, builds := configuredRunDeps(t, `"Nter"`, `"Dev"`)
-	if _, errOut, err := executeCLI(t, deps, "sim", "run", "--no-build"); err != nil {
+	out, errOut, err := executeCLI(t, deps, "sim", "run", "--no-build")
+	if err != nil {
 		t.Fatalf("sim run --no-build failed: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "Launched the last build of Nter (Dev)") || strings.Contains(out, "Built ") {
+		t.Fatalf("a run that built nothing must not say it built: %s", out)
 	}
 	if len(*builds) != 0 {
 		t.Fatalf("--no-build ran %d builds", len(*builds))

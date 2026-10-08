@@ -50,7 +50,7 @@ func TestSimRun_StopCancelsTheBuildByInterruptingIt(t *testing.T) {
 		t.Fatalf("interrupts=%d closes=%d, want xcodebuild asked to stop, then reaped", build.interrupts.Load(), build.stops())
 	}
 	verdict := readRunVerdict(t, filepath.Join(dir, iosrun.ResultFile))
-	if verdict.State != iosrun.RunStopped || !strings.Contains(verdict.Summary, "stopped while building Nter") {
+	if verdict.State != iosrun.RunStopped || verdict.Summary != "Stopped while building Nter. Nothing was installed on iPhone 17 Pro Max." {
 		t.Fatalf("verdict = %+v, want stopped while building", verdict)
 	}
 	if ranSimctl(*calls, "install") != nil {

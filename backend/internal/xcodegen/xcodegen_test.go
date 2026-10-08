@@ -20,7 +20,7 @@ func fakeXcodegen(t *testing.T, calls *[]string) Exec {
 		*calls = append(*calls, args[0]+" "+filepath.Base(dir))
 		spec, err := os.ReadFile(filepath.Join(dir, SpecFile))
 		if err != nil {
-			return []byte("no spec"), 1, nil
+			return []byte("no spec"), 1, err
 		}
 		switch args[0] {
 		case "cache":

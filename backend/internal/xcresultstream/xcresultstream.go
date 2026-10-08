@@ -16,6 +16,7 @@ import (
 // Phase is what the build is doing, read from the tasks it starts.
 type Phase string
 
+// The phases the run bar names.
 const (
 	PhaseResolving Phase = "resolving"
 	PhasePlanning  Phase = "planning"
@@ -61,6 +62,7 @@ type Snapshot struct {
 type Reader struct {
 	pending  []byte
 	broken   bool
+	shared   bool
 	targets  map[string]bool
 	phase    Phase
 	counts   *Counts
@@ -94,6 +96,17 @@ func (r *Reader) Feed(p []byte) {
 		r.apply(ev)
 	}
 	r.pending = append(r.pending[:0], r.pending[consumed:]...)
+}
+
+// Share says whether another build on this Mac is posting counts too. While it
+// is, no count can be told apart from that build's, so none is kept, and the
+// counts start over once it has gone: the highest one seen while sharing may
+// have been the other build's.
+func (r *Reader) Share(shared bool) {
+	if shared != r.shared {
+		r.counts = nil
+	}
+	r.shared = shared
 }
 
 // Snapshot is the state so far. The returned value shares nothing with the reader.
@@ -187,7 +200,7 @@ var countPattern = regexp.MustCompile(`(\d+)[\s\x{2009}\x{202F}\x{00A0}]*/[\s\x{
 // stream also receives the counts of every other flagged build on the Mac.
 func (r *Reader) advise(message, progress string) {
 	target, rest, ok := strings.Cut(message, " : ")
-	if !ok || !r.targets[strings.TrimSpace(target)] {
+	if r.shared || !ok || !r.targets[strings.TrimSpace(target)] {
 		return
 	}
 	m := countPattern.FindStringSubmatch(rest)
