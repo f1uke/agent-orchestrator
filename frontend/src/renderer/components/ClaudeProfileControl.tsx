@@ -4,9 +4,9 @@ import { ChevronDown, Loader2, Route } from "lucide-react";
 import { useState } from "react";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import {
+	profileChoices,
 	profileDisplayName,
 	sameProfile,
-	SUBSCRIPTION_PROFILE,
 	useClaudeProfiles,
 	usesClaudeProfiles,
 } from "../lib/claude-profiles";
@@ -38,9 +38,7 @@ function ProfileSwitcher({ session }: { session: WorkspaceSession }) {
 	const profilesQuery = useClaudeProfiles();
 	const [target, setTarget] = useState<string | null>(null);
 	const current = profileDisplayName(session.claudeProfile);
-	const names = (profilesQuery.data ?? []).map((p) => p.name);
-	if (!names.some((n) => sameProfile(n, SUBSCRIPTION_PROFILE))) names.unshift(SUBSCRIPTION_PROFILE);
-	if (!names.some((n) => sameProfile(n, current))) names.push(current);
+	const names = profileChoices(profilesQuery.data ?? [], current);
 	const selected = names.find((n) => sameProfile(n, current)) ?? current;
 
 	const switchProfile = useMutation({
@@ -84,7 +82,7 @@ function ProfileSwitcher({ session }: { session: WorkspaceSession }) {
 					>
 						<Route className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
 						<span className="max-w-[120px] truncate">{current}</span>
-						{pending && <span className="terminal-toolbar__pending">restart pending</span>}
+						{pending && <span className="terminal-toolbar__pending">· restart pending</span>}
 						<ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
 					</button>
 				</DropdownMenuTrigger>

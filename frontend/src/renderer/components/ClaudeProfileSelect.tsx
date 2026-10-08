@@ -1,10 +1,8 @@
-import { SUBSCRIPTION_PROFILE, sameProfile, type ClaudeProfile } from "../lib/claude-profiles";
+import { SUBSCRIPTION_PROFILE, profileChoices, sameProfile, type ClaudeProfile } from "../lib/claude-profiles";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 const INHERIT = "__inherit__";
 
-// `value` "" is the empty choice: Subscription, or, given `inheritLabel`, whatever
-// the project default is.
 export function ClaudeProfileSelect({
 	id,
 	profiles,
@@ -20,9 +18,7 @@ export function ClaudeProfileSelect({
 	inheritLabel?: string;
 	className?: string;
 }) {
-	const names = profiles.map((p) => p.name);
-	if (!names.some((n) => sameProfile(n, SUBSCRIPTION_PROFILE))) names.unshift(SUBSCRIPTION_PROFILE);
-	if (value && !names.some((n) => sameProfile(n, value))) names.push(value);
+	const names = profileChoices(profiles, value);
 	const empty = inheritLabel ? INHERIT : SUBSCRIPTION_PROFILE;
 	const selected = value ? (names.find((n) => sameProfile(n, value)) ?? value) : empty;
 

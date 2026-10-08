@@ -17,13 +17,28 @@ const session: WorkspaceSession = {
 };
 
 describe("ClaudeProfileChip", () => {
-	it.each([false, true])("names a routed profile (compact=%s)", (compact) => {
-		render(<ClaudeProfileChip session={{ ...session, claudeProfile: "OmniRoute" }} compact={compact} />);
+	it("names a routed profile on the card", () => {
+		render(<ClaudeProfileChip session={{ ...session, claudeProfile: "OmniRoute" }} />);
 		expect(screen.getByLabelText("Claude profile OmniRoute")).toHaveTextContent("OmniRoute");
 	});
 
-	it.each([undefined, "", "Subscription", "subscription"])("stays quiet for the subscription (%s)", (profile) => {
-		const { container } = render(<ClaudeProfileChip session={{ ...session, claudeProfile: profile }} />);
+	it("marks a routed profile on the sidebar row and names it on hover", () => {
+		render(<ClaudeProfileChip session={{ ...session, claudeProfile: "OmniRoute" }} compact />);
+		expect(screen.getByRole("img", { name: "Claude profile OmniRoute" })).toHaveAttribute(
+			"title",
+			expect.stringContaining("OmniRoute"),
+		);
+	});
+
+	it.each([
+		[undefined, false],
+		["", false],
+		["Subscription", false],
+		["subscription", true],
+	])("stays quiet for the subscription (%s, compact=%s)", (profile, compact) => {
+		const { container } = render(
+			<ClaudeProfileChip session={{ ...session, claudeProfile: profile }} compact={compact} />,
+		);
 		expect(container).toBeEmptyDOMElement();
 	});
 });

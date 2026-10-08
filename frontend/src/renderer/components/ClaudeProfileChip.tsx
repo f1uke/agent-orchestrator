@@ -10,13 +10,8 @@ export function ClaudeProfileChip({ session, compact = false }: { session: Works
 
 	if (compact) {
 		return (
-			<span
-				aria-label={label}
-				className="inline-flex min-w-0 max-w-[88px] shrink items-center gap-0.5 text-[10px] text-passive"
-				title={title}
-			>
-				<Route className="h-3 w-3 shrink-0" strokeWidth={2} aria-hidden="true" />
-				<span className="truncate">{profile}</span>
+			<span aria-label={label} role="img" className="inline-flex shrink-0 text-passive" title={title}>
+				<Route className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
 			</span>
 		);
 	}

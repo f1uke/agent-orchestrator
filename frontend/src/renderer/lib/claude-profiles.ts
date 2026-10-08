@@ -40,6 +40,13 @@ export function sameProfile(a: string | null | undefined, b: string | null | und
 	return profileDisplayName(a).toLowerCase() === profileDisplayName(b).toLowerCase();
 }
 
+export function profileChoices(profiles: ClaudeProfile[], current: string): string[] {
+	const names = profiles.map((p) => p.name);
+	if (!names.some((n) => sameProfile(n, SUBSCRIPTION_PROFILE))) names.unshift(SUBSCRIPTION_PROFILE);
+	if (current && !names.some((n) => sameProfile(n, current))) names.push(current);
+	return names;
+}
+
 export function userProfiles(profiles: ClaudeProfile[]): ClaudeProfileInput[] {
 	return profiles.filter((p) => !p.builtin).map(({ name, settingsFile }) => ({ name, settingsFile }));
 }
