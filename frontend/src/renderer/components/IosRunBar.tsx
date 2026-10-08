@@ -13,7 +13,7 @@ import { useSessionNames } from "../hooks/useSessionNames";
 import { useSimDevices } from "../hooks/useSimDevices";
 import { useSimPower } from "../hooks/useSimPower";
 import type { Task } from "../lib/crew";
-import { builtName, runProgress } from "../lib/ios-run-progress";
+import { builtName, runProgress, runTiming } from "../lib/ios-run-progress";
 import { isBase, isWatchable, sessionDevices } from "../lib/sim-devices";
 import { cn } from "../lib/utils";
 import type { TerminalTarget } from "../types/terminal";
@@ -452,6 +452,7 @@ function RunChip({
 	const now = useNow(run.state === "running");
 	const progress = run.state === "running" ? runProgress(run, now) : null;
 	const fraction = useMonotonic(progress?.fraction, run.startedAt);
+	const timing = runTiming(run, now);
 	const state = {
 		running: {
 			icon:
@@ -494,6 +495,7 @@ function RunChip({
 		>
 			{state.icon}
 			{watching ? "Back to agent" : state.label}
+			{!watching && timing ? <span className="tabular-nums text-passive">{timing}</span> : null}
 		</button>
 	);
 }

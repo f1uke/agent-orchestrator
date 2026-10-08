@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IosRun } from "../hooks/useIosProject";
-import { formatDuration, runProgress } from "./ios-run-progress";
+import { formatDuration, runProgress, runTiming } from "./ios-run-progress";
 
 const T0 = Date.parse("2026-10-08T09:00:00Z");
 
@@ -69,5 +69,21 @@ describe("formatDuration", () => {
 		expect(formatDuration(4.2)).toBe("4s");
 		expect(formatDuration(102)).toBe("1m 42s");
 		expect(formatDuration(3600)).toBe("60m 0s");
+	});
+});
+
+describe("runTiming", () => {
+	it("counts up while the run works towards launching", () => {
+		expect(runTiming(running(), T0 + 42_400)).toBe("42s");
+		expect(runTiming(running({ stage: "installing" }), T0 + 102_000)).toBe("1m 42s");
+	});
+
+	it("stops counting once the app runs", () => {
+		expect(runTiming(running({ stage: "app-running" }), T0 + 300_000)).toBeNull();
+	});
+
+	it("says how long the last build took once the run ended", () => {
+		expect(runTiming(running({ state: "succeeded", stage: undefined, buildSeconds: 102 }), T0)).toBe("last build 1m 42s");
+		expect(runTiming(running({ state: "failed", stage: undefined }), T0)).toBeNull();
 	});
 });

@@ -77,3 +77,13 @@ function buildProgress(run: IosRun, now: number, name: string): RunProgressView 
 	}
 	return { kind: "indeterminate", label: phase, tooltip: `Building ${name}` };
 }
+
+/** Elapsed time while a run works towards launching, and the build's duration once it has ended. */
+export function runTiming(run: IosRun, now: number): string | null {
+	if (run.state === "running") {
+		if (run.stage === "app-running") return null;
+		const startedAt = Date.parse(run.startedAt);
+		return Number.isFinite(startedAt) ? formatDuration(Math.max(0, now - startedAt) / 1000) : null;
+	}
+	return run.buildSeconds ? `last build ${formatDuration(run.buildSeconds)}` : null;
+}

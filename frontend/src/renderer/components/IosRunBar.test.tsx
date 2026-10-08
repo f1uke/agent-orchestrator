@@ -637,4 +637,20 @@ describe("IosRunBar", () => {
 		await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled());
 		expect(screen.getByRole("button", { name: "Stop" })).toHaveAttribute("title", "Stop NterDev (Debug): terminate the app");
 	});
+
+	it("says how long the last build took", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "succeeded",
+			startedAt: "2026-09-18T10:00:00Z",
+			finishedAt: "2026-09-18T10:02:00Z",
+			buildSeconds: 102,
+		};
+		answer({ ios: { project: project(), run } });
+		renderBar();
+		expect(await screen.findByRole("button", { name: /Ran NterDev \(Debug\)\s*last build 1m 42s/ })).toBeInTheDocument();
+	});
 });
