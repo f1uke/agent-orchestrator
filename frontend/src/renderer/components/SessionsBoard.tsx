@@ -51,6 +51,7 @@ import { useWorkspaceQuery, workspaceQueryKey } from "../hooks/useWorkspaceQuery
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { TodoDetailDialog } from "./TodoDetailDialog";
 import { IdleStatusChip } from "./IdleStatusChip";
+import { ClaudeProfileChip } from "./ClaudeProfileChip";
 import { QueuedMessagesChip } from "./QueuedMessagesChip";
 import { MergedChip } from "./MergedChip";
 import { UndeliveredWorkChip } from "./UndeliveredWorkChip";
@@ -1308,6 +1309,7 @@ function SessionCard({
 						)}
 						<QueuedMessagesChip session={session} />
 						<UnpublishedScriptsChip session={session} />
+						<ClaudeProfileChip session={session} />
 						{isMergedAwaitingNext(session) ? (
 							<MergedChip session={session} />
 						) : isUndeliveredParked(session) ? (
