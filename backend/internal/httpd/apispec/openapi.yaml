@@ -2584,6 +2584,63 @@ paths:
       summary: Set (or clear) the per-session auto-resolve-on-reply gate
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/branch:
+    put:
+      operationId: setSessionBranch
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ControllersSetSessionBranchRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Set the session's own branch to one that exists in its worktree
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/children:
     get:
       operationId: listChildren
@@ -10148,6 +10205,14 @@ components:
       - status
       - prs
       type: object
+    ControllersSetSessionBranchRequest:
+      properties:
+        branch:
+          minLength: 1
+          type: string
+      required:
+      - branch
+      type: object
     ControllersSimDeviceFrameView:
       properties:
         radius:
@@ -14750,6 +14815,8 @@ components:
           items:
             $ref: '#/components/schemas/ChangedFileDTO'
           type: array
+        headBranchOwner:
+          type: string
         headLabel:
           type: string
         headState:

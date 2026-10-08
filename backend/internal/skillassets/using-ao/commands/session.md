@@ -12,6 +12,7 @@ Flags: `ao session <command> --help`. `-p <project>` scopes a lookup when ids co
 | `ao session restore <id>` | Relaunch a terminated session in its kept worktree |
 | `ao session cleanup` | Reclaim the worktrees of terminated sessions. Dirty worktrees are skipped; `-y` skips the prompt |
 | `ao session claim-pr <id> <pr>` | Attach an existing PR to a session. By default it takes the PR over from whichever session owns it; `--no-takeover` refuses instead |
+| `ao session set-branch <id> <branch>` | Record the session's own branch. A `git branch -m` in its worktree is followed by itself; use this when the old branch was kept or the worktree is detached |
 
 ```bash
 ao session restore mer-3

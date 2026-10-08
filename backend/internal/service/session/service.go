@@ -47,6 +47,9 @@ type Store interface {
 	// the change immediately instead of waiting for the observer's next poll.
 	SetPRTargetBranch(ctx context.Context, prURL, target string, updatedAt time.Time) (bool, error)
 	SetSessionIssueBinding(ctx context.Context, id domain.SessionID, issueID, displayName string, updatedAt time.Time) (bool, error)
+	// SetSessionBranch moves a session from branch `from` to `to`, and does
+	// nothing (ok=false) when the row no longer records `from`.
+	SetSessionBranch(ctx context.Context, id domain.SessionID, from, to string, updatedAt time.Time) (bool, error)
 	GetDisplayPRFactsForSession(ctx context.Context, id domain.SessionID) (domain.PRFacts, bool, error)
 	ListPRFactsForSession(ctx context.Context, id domain.SessionID) ([]domain.PRFacts, error)
 	SessionQueuedMessageCounts(ctx context.Context, id domain.SessionID) (domain.QueuedMessageCounts, error)

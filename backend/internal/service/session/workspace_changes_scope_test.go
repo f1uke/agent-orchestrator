@@ -177,10 +177,13 @@ func TestWorkspaceChanges_OtherBranchCheckedOut(t *testing.T) {
 
 // A branch that is named but has no ref here cannot be diffed. Falling back to
 // HEAD is fine; doing it SILENTLY is not, so the payload says both what it could
-// not find and what it answered instead.
+// not find and what it answered instead. (A rename is followed instead, see
+// TestWorkspaceChanges_FollowsARenameWithoutABanner; a detached HEAD gives AO
+// no name to follow.)
 func TestWorkspaceChanges_MissingBranchRefFallsBackToHeadAndSaysSo(t *testing.T) {
 	dir, _ := scopeTestRepo(t)
-	svc := scopeService(t, dir, "feature/renamed-away")
+	runGitIn(t, dir, "checkout", "-q", "--detach")
+	svc := scopeService(t, dir, "feature/deleted")
 
 	res, err := svc.WorkspaceChanges(context.Background(), "s1", WorkspaceChangesQuery{})
 	if err != nil {

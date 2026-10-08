@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 )
 
 func TestApplyConventionPrefix(t *testing.T) {
@@ -181,5 +182,63 @@ func TestExistingBranchNamesReadsTheProjectRemote(t *testing.T) {
 	}
 	if got["advisor"] || got["feature/other-project"] || got["nter/feature/other-project"] {
 		t.Errorf("names = %v, want neither the shortened Advisor/HEAD nor the other project's branches", got)
+	}
+}
+
+// TestSpawnAutoNamedBranchUsesTheSessionsIssueKey: the namer is an LLM and the
+// key it is told to use is only a hint, so a brief that mentions another ticket
+// can win. A session spawned with an issue must land on that issue's key; one
+// spawned without an issue keeps whatever the namer produced.
+func TestSpawnAutoNamedBranchUsesTheSessionsIssueKey(t *testing.T) {
+	cases := []struct {
+		name    string
+		issue   domain.IssueID
+		namerOK string
+		want    string
+	}{
+		{"issue key replaces a prompt key", "jira:ABC-2", "feature/ABC-1-fix-login", "feature/ABC-2-fix-login"},
+		{"issue key is added when the namer left none", "jira:ABC-2", "bugfix/fix-login", "bugfix/ABC-2-fix-login"},
+		{"a bare --issue key counts too", "ABC-2", "feature/ABC-1-fix-login", "feature/ABC-2-fix-login"},
+		{"a gitlab issue uses its number", "gitlab:group/repo#12", "feature/ABC-1-fix-login", "feature/12-fix-login"},
+		{"a github issue uses its number", "github:owner/repo#7", "feature/fix-login", "feature/7-fix-login"},
+		{"no issue keeps the namer's name", "", "feature/ABC-1-fix-login", "feature/ABC-1-fix-login"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, _, _, ws := newManager()
+			m.genBranchName = func(context.Context, ports.Agent, ports.SpawnConfig, domain.ProjectRecord) (string, bool) {
+				return c.namerOK, true
+			}
+			_, err := m.Spawn(ctx, ports.SpawnConfig{
+				ProjectID: "mer", Kind: domain.KindWorker, AutoNameBranch: true, IssueID: c.issue,
+				Prompt: "Fix the login screen. See ABC-1 for the earlier attempt.",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ws.lastCfg.Branch != c.want {
+				t.Fatalf("auto-named branch = %q, want %q", ws.lastCfg.Branch, c.want)
+			}
+		})
+	}
+}
+
+// TestNamingKeyHint: the hint handed to the namer is the session's issue key
+// when it has an issue, and a prompt key only when it has none.
+func TestNamingKeyHint(t *testing.T) {
+	cases := []struct {
+		issue  domain.IssueID
+		prompt string
+		want   string
+	}{
+		{"jira:ABC-2", "see ABC-1", "ABC-2"},
+		{"gitlab:group/repo#12", "see ABC-1", "12"},
+		{"", "see ABC-1", "ABC-1"},
+		{"", "no key", ""},
+	}
+	for _, c := range cases {
+		if got := namingKeyHint(c.issue, c.prompt); got != c.want {
+			t.Fatalf("namingKeyHint(%q, %q) = %q, want %q", c.issue, c.prompt, got, c.want)
+		}
 	}
 }

@@ -477,6 +477,7 @@ func Run() error {
 	// transcripts and persists token/cost totals on the session row (additive; never
 	// blocks lifecycle). Non-claude sessions are skipped (no chip).
 	tokenUsageDone := startTokenUsageObserver(ctx, store, loopReg, log)
+	branchFollowDone := startBranchFollow(ctx, store, sessionSvc, loopReg, log)
 	// Learning capture: redacted excerpts of what the human typed, for projects
 	// that opted in (learnFromSessions). Additive and off the lifecycle path.
 	learnCaptureDone := startLearnCapture(ctx, store, loopReg, log)
@@ -517,6 +518,7 @@ func Run() error {
 		<-previewDone
 		<-reclaimerDone
 		<-tokenUsageDone
+		<-branchFollowDone
 		<-learnCaptureDone
 		<-learnCollectDone
 		<-learnRulesDone
@@ -595,6 +597,7 @@ func Run() error {
 		<-previewDone
 		<-reclaimerDone
 		<-tokenUsageDone
+		<-branchFollowDone
 		<-learnCaptureDone
 		<-learnCollectDone
 		<-learnRulesDone
@@ -845,6 +848,7 @@ func Run() error {
 	<-legacySmokeCleanupDone
 	<-reclaimerDone
 	<-tokenUsageDone
+	<-branchFollowDone
 	<-learnCaptureDone
 	<-learnCollectDone
 	<-learnRulesDone

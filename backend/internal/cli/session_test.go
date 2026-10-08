@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 )
 
 type sessionRequestLog struct {
@@ -94,6 +95,18 @@ func sessionCommandServer(t *testing.T) (*httptest.Server, *sessionRequestLog) {
 			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","freed":true,"terminated":true}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/demo-1/restore":
 			_, _ = io.WriteString(w, `{"ok":true,"sessionId":"demo-1","session":`+sessionJSON("demo-1", "demo", "worker", "idle", false)+`}`)
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/sessions/demo-1/branch":
+			var req controllers.SetSessionBranchRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if req.Branch == "feature/taken" {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = io.WriteString(w, `{"error":"conflict","code":"BRANCH_OWNED","message":"Branch \"feature/taken\" belongs to live session demo-2"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"session":{"id":"demo-1","projectId":"demo","branch":`+jsonQuote(req.Branch)+`}}`)
 		case r.Method == http.MethodPatch && r.URL.Path == "/api/v1/sessions/demo-1":
 			var req sessionRenameRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -896,5 +909,46 @@ func TestSessionKill_RefusalForSubagentsNamesThemAndDiscardKeepsTheirBranches(t 
 	}
 	if len(bodies) != 2 || !strings.Contains(out, "own branch") || !strings.Contains(out, "session demo-1 killed") {
 		t.Fatalf("requests %v, output:\n%s", bodies, out)
+	}
+}
+
+func TestSessionSetBranch(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, log := sessionCommandServer(t)
+	writeRunFileFor(t, cfg, srv)
+
+	out, errOut, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"session", "set-branch", "demo-1", "feature/ABC-2-fix", "-p", "demo")
+	if err != nil {
+		t.Fatalf("session set-branch failed: %v\nstderr=%s", err, errOut)
+	}
+	if !strings.Contains(out, "session demo-1 branch: feature/ABC-2-fix") {
+		t.Fatalf("unexpected output:\n%s", out)
+	}
+	want := []string{"GET /api/v1/sessions/demo-1", "PUT /api/v1/sessions/demo-1/branch"}
+	if got := log.all(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("requests = %#v, want %#v", got, want)
+	}
+}
+
+func TestSessionSetBranch_RefusalSurfacesTheCause(t *testing.T) {
+	cfg := setConfigEnv(t)
+	srv, _ := sessionCommandServer(t)
+	writeRunFileFor(t, cfg, srv)
+
+	_, _, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }},
+		"session", "set-branch", "demo-1", "feature/taken")
+	if err == nil || ExitCode(err) != 1 || !strings.Contains(err.Error(), "belongs to live session demo-2") {
+		t.Fatalf("err = %v (exit %d), want exit 1 naming the owner", err, ExitCode(err))
+	}
+}
+
+func TestSessionSetBranch_MissingBranchIsUsageError(t *testing.T) {
+	setConfigEnv(t)
+	for _, args := range [][]string{{"demo-1"}, {"demo-1", " "}} {
+		_, _, err := executeCLI(t, Deps{}, append([]string{"session", "set-branch"}, args...)...)
+		if got := ExitCode(err); got != 2 {
+			t.Fatalf("args %q: exit code = %d, want 2 (err=%v)", args, got, err)
+		}
 	}
 }

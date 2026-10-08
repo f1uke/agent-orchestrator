@@ -77,6 +77,24 @@ describe("changesScopeNotice", () => {
 		});
 		expect(notice?.headline).toBe("Branch feature/x is not in this worktree");
 		expect(notice?.detail).toContain("HEAD");
+		// AO follows a rename by itself, so this notice no longer guesses one.
+		expect(notice?.detail).not.toContain("renamed");
+	});
+
+	// The one rename AO leaves alone: the worktree's branch is another live
+	// session's. The notice says whose, since nothing else on screen does.
+	it("names the session that owns the branch the worktree is on", () => {
+		const notice = changesScopeNotice({
+			...onBranch,
+			diffSubject: "head",
+			branchMissing: true,
+			headState: "other_branch",
+			headLabel: "feature/y",
+			headBranchOwner: "ao-7",
+		});
+		expect(notice?.headline).toBe("Branch feature/x is not in this worktree");
+		expect(notice?.detail).toContain("feature/y, which session ao-7 records");
+		expect(notice?.detail).toContain("ao session set-branch");
 	});
 
 	it("says when a detached worktree is all there is to measure", () => {

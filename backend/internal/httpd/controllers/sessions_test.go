@@ -60,6 +60,7 @@ type fakeSessionService struct {
 	replyBody             string
 	replyErr              error
 	targetErr             error
+	branchErr             error
 	replyComment          sessionsvc.PRThreadComment
 	resolvePR             string
 	resolveThread         string
@@ -279,6 +280,19 @@ func (f *fakeSessionService) SetTargetBranch(_ context.Context, id domain.Sessio
 	s.PRTarget = target
 	s.TargetBranch = target
 	s.TargetSource = "session_pr_target"
+	f.sessions[id] = s
+	return s, nil
+}
+
+func (f *fakeSessionService) SetBranch(_ context.Context, id domain.SessionID, branch string) (domain.Session, error) {
+	if f.branchErr != nil {
+		return domain.Session{}, f.branchErr
+	}
+	s, ok := f.sessions[id]
+	if !ok {
+		return domain.Session{}, apierr.NotFound("SESSION_NOT_FOUND", "Unknown session")
+	}
+	s.Metadata.Branch = branch
 	f.sessions[id] = s
 	return s, nil
 }
@@ -2430,6 +2444,33 @@ func TestSetTargetBranch_RefusedRetargetIsNotA503(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "TARGET_BRANCH_NOT_FOUND") {
 		t.Fatalf("response does not name the cause: %s", body)
+	}
+}
+
+func TestSetBranch_ReturnsUpdatedSession(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.sessions["ao-1"] = domain.Session{SessionRecord: domain.SessionRecord{ID: "ao-1"}}
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/branch", `{"branch":"feature/ABC-2-fix"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", status, body)
+	}
+	if !strings.Contains(string(body), `"branch":"feature/ABC-2-fix"`) {
+		t.Fatalf("response does not carry the new branch: %s", body)
+	}
+}
+
+// A branch another session owns is a 409 naming the cause.
+func TestSetBranch_OwnedBranchIsAConflict(t *testing.T) {
+	svc := newFakeSessionService()
+	svc.sessions["ao-1"] = domain.Session{SessionRecord: domain.SessionRecord{ID: "ao-1"}}
+	svc.branchErr = apierr.Conflict("BRANCH_OWNED", `Branch "feature/x" belongs to live session ao-2`, nil)
+	srv := newSessionTestServer(t, svc)
+
+	body, status, _ := doRequest(t, srv, "PUT", "/api/v1/sessions/ao-1/branch", `{"branch":"feature/x"}`)
+	if status != http.StatusConflict || !strings.Contains(string(body), "BRANCH_OWNED") {
+		t.Fatalf("status = %d body=%s, want 409 BRANCH_OWNED", status, body)
 	}
 }
 

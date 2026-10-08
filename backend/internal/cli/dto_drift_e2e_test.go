@@ -172,6 +172,10 @@ func (f *fakeSessionService) SetTargetBranch(context.Context, domain.SessionID, 
 	return domain.Session{}, nil
 }
 
+func (f *fakeSessionService) SetBranch(context.Context, domain.SessionID, string) (domain.Session, error) {
+	return domain.Session{}, nil
+}
+
 func (f *fakeSessionService) Send(context.Context, domain.SessionID, string) (ports.SendOutcome, error) {
 	return ports.SendOutcome{}, nil
 }

@@ -651,6 +651,7 @@ func (m *Manager) materialize(ctx context.Context, project domain.ProjectRecord,
 					gen = m.generateBranchName
 				}
 				if name, ok := gen(ctx, agent, cfg, project); ok {
+					name = withIssueKey(name, issueBranchKey(cfg.IssueID))
 					// Apply the project's branch convention (custom prefix) to the
 					// AI-named branch before de-duping, so an omitted --branch still
 					// lands on-convention.

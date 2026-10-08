@@ -76,7 +76,7 @@ func effectiveIssueID(cfg ports.SpawnConfig) domain.IssueID {
 func buildNamingPrompt(title, brief, jiraKeyHint string) string {
 	keyLine := "No Jira key detected — omit the key segment."
 	if jiraKeyHint != "" {
-		keyLine = fmt.Sprintf("Detected Jira key: %s — put it uppercase right after the type slash.", jiraKeyHint)
+		keyLine = fmt.Sprintf("Ticket key: %s — put it exactly as written right after the type slash.", jiraKeyHint)
 	}
 	return fmt.Sprintf(`Generate ONE git branch name for the task below. Output ONLY the branch name on a single line — no backticks, no quotes, no explanation.
 
@@ -197,7 +197,7 @@ func (m *Manager) generateBranchName(ctx context.Context, agent ports.Agent, cfg
 	if !isNamer {
 		return "", false
 	}
-	key := extractJiraKey(string(cfg.IssueID), cfg.Prompt)
+	key := namingKeyHint(cfg.IssueID, cfg.Prompt)
 	prompt := buildNamingPrompt(string(cfg.IssueID), cfg.Prompt, key)
 
 	cctx, cancel := context.WithTimeout(ctx, branchNameTimeout())
@@ -254,4 +254,49 @@ func (m *Manager) existingBranchNames(ctx context.Context, project domain.Projec
 		set[strings.ToLower(s)] = true
 	}
 	return set
+}
+
+// issueBranchKey is the key a branch carries for the session's own issue: the
+// Jira key of "jira:ABC-2" (or a bare "ABC-2" from --issue), and the issue
+// number of "gitlab:group/repo#12" or "github:owner/repo#12", which is how
+// GitLab's own "Create branch" names one. "" when the issue yields no key.
+func issueBranchKey(issue domain.IssueID) string {
+	id := strings.TrimSpace(string(issue))
+	if i := strings.LastIndexByte(id, '#'); i >= 0 {
+		if n := id[i+1:]; n != "" && strings.Trim(n, "0123456789") == "" {
+			return n
+		}
+	}
+	return extractJiraKey(id)
+}
+
+// namingKeyHint is the key the namer is told to use. A session with an issue
+// uses that issue's key and never one lifted from the brief: a brief names other
+// tickets freely (an earlier attempt, a related card), and the session's own
+// issue is the one statement of what it works on.
+func namingKeyHint(issue domain.IssueID, prompt string) string {
+	if strings.TrimSpace(string(issue)) != "" {
+		return issueBranchKey(issue)
+	}
+	return extractJiraKey(prompt)
+}
+
+// leadingKeyRe matches the key segment a sanitized name may lead with after its
+// type slash: a Jira key (re-uppercased by sanitizeBranchName) or an issue number.
+var leadingKeyRe = regexp.MustCompile(`^(?:[A-Z][A-Z0-9]*-\d+|\d+)(?:-|$)`)
+
+// withIssueKey puts key right after the type slash of a sanitized name,
+// replacing whatever key the namer chose. The namer is an LLM and the key in its
+// prompt is only a hint, so this is what makes the session's issue win.
+func withIssueKey(name, key string) string {
+	if key == "" {
+		return name
+	}
+	slash := strings.IndexByte(name, '/')
+	typ, rest := name[:slash+1], name[slash+1:]
+	rest = leadingKeyRe.ReplaceAllString(rest, "")
+	if rest == "" {
+		return typ + key
+	}
+	return typ + key + "-" + rest
 }

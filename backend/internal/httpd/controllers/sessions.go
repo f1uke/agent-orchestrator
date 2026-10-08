@@ -119,6 +119,7 @@ type SessionService interface {
 	SetAutoResolve(ctx context.Context, id domain.SessionID, override *bool) (domain.Session, error)
 	SetKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool) (domain.Session, error)
 	SetTargetBranch(ctx context.Context, id domain.SessionID, target string) (domain.Session, error)
+	SetBranch(ctx context.Context, id domain.SessionID, branch string) (domain.Session, error)
 	Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error)
 	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
 	ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
@@ -186,6 +187,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Put("/sessions/{sessionId}/auto-resolve", c.setAutoResolve)
 	r.Put("/sessions/{sessionId}/keep-warm", c.setKeepWarm)
 	r.Put("/sessions/{sessionId}/target", c.setTargetBranch)
+	r.Put("/sessions/{sessionId}/branch", c.setBranch)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
 	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
 	r.Get("/sessions/{sessionId}/workspace/resolve", c.resolveWorkspaceRef)
@@ -584,6 +586,25 @@ func (c *SessionsController) setTargetBranch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	updated, err := c.Svc.SetTargetBranch(r.Context(), sessionID(r), in.TargetBranch)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
+}
+
+// setBranch records the session's own branch, validated against its worktree.
+func (c *SessionsController) setBranch(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/branch")
+		return
+	}
+	var in SetSessionBranchRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	updated, err := c.Svc.SetBranch(r.Context(), sessionID(r), in.Branch)
 	if err != nil {
 		envelope.WriteError(w, r, err)
 		return

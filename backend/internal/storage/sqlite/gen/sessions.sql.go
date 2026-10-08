@@ -452,6 +452,36 @@ func (q *Queries) SetSessionAutoResolve(ctx context.Context, arg SetSessionAutoR
 	return result.RowsAffected()
 }
 
+const setSessionBranch = `-- name: SetSessionBranch :execrows
+UPDATE sessions SET branch = ?1, updated_at = ?2
+WHERE id = ?3 AND branch = ?4
+`
+
+type SetSessionBranchParams struct {
+	Branch     string
+	UpdatedAt  time.Time
+	ID         domain.SessionID
+	FromBranch string
+}
+
+// Move a session onto the branch its worktree is on, after a rename there. A
+// compare-and-swap on the branch it is replacing: a writer that read an older
+// value (the follow loop racing `ao session set-branch`) changes nothing, and
+// the caller reads the row again. Bumps updated_at so the sessions_cdc_update
+// trigger refreshes the board and the Files tab.
+func (q *Queries) SetSessionBranch(ctx context.Context, arg SetSessionBranchParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setSessionBranch,
+		arg.Branch,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.FromBranch,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setSessionCrew = `-- name: SetSessionCrew :execrows
 UPDATE sessions SET crew_id = ?, crew_role = ?, updated_at = ? WHERE id = ?
 `
