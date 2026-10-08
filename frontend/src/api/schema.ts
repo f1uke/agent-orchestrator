@@ -3444,6 +3444,7 @@ export interface components {
             baseBranch?: string;
             branch?: string;
             children?: components["schemas"]["SessionChild"][];
+            claudeProfile?: string;
             /** Format: date-time */
             createdAt: string;
             createdBy?: string;
@@ -3474,6 +3475,7 @@ export interface components {
             prs: components["schemas"]["SessionPRFacts"][];
             queuedMessages?: number;
             queuedMessagesFailed?: number;
+            restartPending?: boolean;
             /**
              * @description What this session did with the running app: took the simulator lease, or pointed ao preview at it. Absent when it never drove one.
              * @enum {string}

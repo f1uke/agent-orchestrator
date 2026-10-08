@@ -126,6 +126,40 @@ func (s *Store) SetSessionPRTarget(ctx context.Context, id domain.SessionID, tar
 	return rows > 0, nil
 }
 
+// SetSessionClaudeProfile records the Claude profile a session launches with.
+// It is the sole writer of the column after insert. Returns ok=false when the
+// session id does not exist.
+func (s *Store) SetSessionClaudeProfile(ctx context.Context, id domain.SessionID, profile string, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionClaudeProfile(ctx, gen.SetSessionClaudeProfileParams{
+		ID:            id,
+		ClaudeProfile: profile,
+		UpdatedAt:     updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set claude profile for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
+// SetSessionRestartPending sets or clears the restart a profile switch is
+// waiting to run once the agent is idle. Returns ok=false when the session id
+// does not exist.
+func (s *Store) SetSessionRestartPending(ctx context.Context, id domain.SessionID, pending bool, updatedAt time.Time) (bool, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	rows, err := s.qw.SetSessionRestartPending(ctx, gen.SetSessionRestartPendingParams{
+		ID:             id,
+		RestartPending: pending,
+		UpdatedAt:      updatedAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("set restart pending for session %s: %w", id, err)
+	}
+	return rows > 0, nil
+}
+
 // SetSessionBranch moves a session from branch `from` to branch `to`. ok=false
 // when the session does not exist or no longer records `from`.
 func (s *Store) SetSessionBranch(ctx context.Context, id domain.SessionID, from, to string, updatedAt time.Time) (bool, error) {
@@ -456,6 +490,8 @@ func rowToRecord(row gen.Session) domain.SessionRecord {
 		PRTarget:           row.PRTarget,
 		CreatedBy:          domain.SessionID(row.CreatedBy),
 		TaskSize:           domain.TaskSize(row.TaskSize),
+		ClaudeProfile:      row.ClaudeProfile,
+		RestartPending:     row.RestartPending,
 		CrewID:             domain.SessionID(row.CrewID),
 		CrewRole:           domain.CrewRole(row.CrewRole),
 		CrewJoinReason:     domain.CrewJoinReason(row.CrewJoinReason),
@@ -531,6 +567,7 @@ func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams
 		LastOpenedAt:              timeToNullTime(rec.LastOpenedAt),
 		KeepWarmOnMerge:           rec.KeepWarmOnMerge,
 		TaskSize:                  string(rec.TaskSize.WithDefault()),
+		ClaudeProfile:             rec.ClaudeProfile,
 		CrewID:                    string(rec.CrewID),
 		CrewRole:                  string(rec.CrewRole),
 		CrewJoinReason:            string(rec.CrewJoinReason),

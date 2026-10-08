@@ -158,6 +158,17 @@ type SessionRecord struct {
 	// Empty on old rows / normal spawns; WithDefault resolves that to standard (full
 	// ceremony). Internal durable fact, not part of the API read model.
 	TaskSize TaskSize `json:"-"`
+	// ClaudeProfile is the canonical name of the Claude profile (a named Claude
+	// Code settings file) this claude-code session launches with, resolved at
+	// spawn and re-read at every launch so an edited path applies on the next
+	// restart. On a prepared TODO it is the override only; Start resolves it.
+	// Empty on non-claude-code sessions and on rows older than profiles, which
+	// launch as Subscription.
+	ClaudeProfile string `json:"claudeProfile,omitempty"`
+	// RestartPending marks a profile switch that asked for a restart while the
+	// agent was mid-turn. The daemon restarts the session once it is idle or
+	// parked, and any relaunch clears it.
+	RestartPending bool `json:"restartPending,omitempty"`
 	// CrewID and CrewRole represent the CREW: the one or two long-lived sessions
 	// that belong to ONE task and share ONE worktree (dev + qa).
 	//

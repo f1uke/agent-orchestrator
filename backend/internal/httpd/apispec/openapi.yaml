@@ -10257,6 +10257,8 @@ components:
           items:
             $ref: '#/components/schemas/SessionChild'
           type: array
+        claudeProfile:
+          type: string
         createdAt:
           format: date-time
           type: string
@@ -10332,6 +10334,8 @@ components:
           type: integer
         queuedMessagesFailed:
           type: integer
+        restartPending:
+          type: boolean
         runtimeTouch:
           description: 'What this session did with the running app: took the simulator
             lease, or pointed ao preview at it. Absent when it never drove one.'

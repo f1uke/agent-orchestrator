@@ -457,6 +457,8 @@ type Session struct {
 	CrewJoinReason            string
 	RuntimeTouch              string
 	CrewRoundStartedAt        sql.NullTime
+	ClaudeProfile             string
+	RestartPending            bool
 }
 
 type SessionChild struct {
