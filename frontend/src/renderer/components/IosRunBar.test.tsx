@@ -111,7 +111,9 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A", mode: "run", console: false } }),
+				expect.objectContaining({
+					body: { scheme: "NterDev", configuration: "Debug", udid: "UDID-A", mode: "run", console: false },
+				}),
 			),
 		);
 		// The build output has to be where the human is looking, or it is a
@@ -191,7 +193,9 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE", mode: "run", console: false } }),
+				expect.objectContaining({
+					body: { scheme: "Nter", configuration: "Debug", udid: "UDID-MINE", mode: "run", console: false },
+				}),
 			),
 		);
 	});
@@ -465,7 +469,9 @@ describe("IosRunBar", () => {
 		await waitFor(() =>
 			expect(postMock).toHaveBeenCalledWith(
 				"/api/v1/sessions/{sessionId}/ios-runs",
-				expect.objectContaining({ body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A", mode: "run", console: false } }),
+				expect.objectContaining({
+					body: { scheme: "NterApp", configuration: "UAT", udid: "UDID-A", mode: "run", console: false },
+				}),
 			),
 		);
 	});
@@ -559,16 +565,24 @@ describe("IosRunBar", () => {
 	it("runs xcodegen for the session and shows per-directory results", async () => {
 		answer({ ios: { project: project({ xcodegen: { installed: true, specs: [{ dir: "NterApp", stale: true }] } }) } });
 		postMock.mockResolvedValue({
-			data: { status: "ran", root: "/w", results: [{ dir: "NterApp", ok: true, exitCode: 0, output: "Created project" }] },
+			data: {
+				status: "ran",
+				root: "/w",
+				results: [{ dir: "NterApp", ok: true, exitCode: 0, output: "Created project" }],
+			},
 		});
 		renderBar();
 		await userEvent.click(await screen.findByRole("button", { name: /Run xcodegen/ }));
-		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/xcodegen", { params: { path: { sessionId: SESSION } } });
+		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/xcodegen", {
+			params: { path: { sessionId: SESSION } },
+		});
 		expect(await screen.findByText("Ran in 1 directory · 1/1 succeeded.")).toBeInTheDocument();
 	});
 
 	it("says so when xcodegen is not installed", async () => {
-		answer({ ios: { project: project({ xcodegen: { installed: false, specs: [{ dir: "NterApp", stale: false }] } }) } });
+		answer({
+			ios: { project: project({ xcodegen: { installed: false, specs: [{ dir: "NterApp", stale: false }] } }) },
+		});
 		postMock.mockResolvedValue({ data: { status: "not-installed", results: [] } });
 		renderBar();
 		await userEvent.click(await screen.findByRole("button", { name: "Run xcodegen" }));
@@ -590,7 +604,10 @@ describe("IosRunBar", () => {
 		});
 		renderBar();
 		expect(await screen.findByRole("button", { name: /Run xcodegen/ })).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute("title", expect.stringContaining("Run xcodegen first"));
+		expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute(
+			"title",
+			expect.stringContaining("Run xcodegen first"),
+		);
 	});
 
 	it("keeps Stop in place and disabled while nothing runs", async () => {
@@ -635,7 +652,10 @@ describe("IosRunBar", () => {
 		renderBar();
 		expect(await screen.findByRole("button", { name: /Running NterDev \(Debug\)/ })).toBeInTheDocument();
 		await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled());
-		expect(screen.getByRole("button", { name: "Stop" })).toHaveAttribute("title", "Stop NterDev (Debug): terminate the app");
+		expect(screen.getByRole("button", { name: "Stop" })).toHaveAttribute(
+			"title",
+			"Stop NterDev (Debug): terminate the app",
+		);
 	});
 
 	it("says how long the last build took", async () => {
@@ -651,7 +671,9 @@ describe("IosRunBar", () => {
 		};
 		answer({ ios: { project: project(), run } });
 		renderBar();
-		expect(await screen.findByRole("button", { name: /Ran NterDev \(Debug\)\s*last build 1m 42s/ })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("button", { name: /Ran NterDev \(Debug\)\s*last build 1m 42s/ }),
+		).toBeInTheDocument();
 	});
 
 	it("summarises a failed build and opens its log at the first error", async () => {
@@ -666,17 +688,27 @@ describe("IosRunBar", () => {
 			errors: 2,
 			warnings: 1,
 			issues: [
-				{ severity: "error", message: "Cannot find 'foo' in scope", file: "App/AppDelegate.swift", line: 12, column: 5 },
+				{
+					severity: "error",
+					message: "Cannot find 'foo' in scope",
+					file: "App/AppDelegate.swift",
+					line: 12,
+					column: 5,
+				},
 				{ severity: "error", message: "Missing return" },
 				{ severity: "warning", message: "Variable 'x' was never used", file: "App/A.swift", line: 3, column: 9 },
 			],
 		};
 		getMock.mockImplementation((path: string) => {
-			if (path === "/api/v1/sessions/{sessionId}/ios-project") return Promise.resolve({ data: { project: project(), run } });
+			if (path === "/api/v1/sessions/{sessionId}/ios-project")
+				return Promise.resolve({ data: { project: project(), run } });
 			if (path === "/api/v1/sessions/{sessionId}/ios-runs/log") {
 				return Promise.resolve({
 					data: {
-						lines: ["CompileSwift normal arm64 App/AppDelegate.swift", "/w/App/AppDelegate.swift:12:5: error: cannot find 'foo' in scope"],
+						lines: [
+							"CompileSwift normal arm64 App/AppDelegate.swift",
+							"/w/App/AppDelegate.swift:12:5: error: cannot find 'foo' in scope",
+						],
 						firstLine: 40,
 						errorLine: 41,
 						totalLines: 900,
@@ -684,7 +716,9 @@ describe("IosRunBar", () => {
 					response: { status: 200 },
 				});
 			}
-			return Promise.resolve({ data: { devices: [device("UDID-A", "iPhone 17 Pro Max", "Booted")], defaultUdid: null } });
+			return Promise.resolve({
+				data: { devices: [device("UDID-A", "iPhone 17 Pro Max", "Booted")], defaultUdid: null },
+			});
 		});
 		const onOpenWorkspaceFile = vi.fn();
 		render(
@@ -698,7 +732,9 @@ describe("IosRunBar", () => {
 			{ wrapper: Wrapper },
 		);
 
-		await userEvent.click(await screen.findByRole("button", { name: /NterDev \(Debug\) failed\s*2 errors · 1 warning/ }));
+		await userEvent.click(
+			await screen.findByRole("button", { name: /NterDev \(Debug\) failed\s*2 errors · 1 warning/ }),
+		);
 		expect(await screen.findByText("App/AppDelegate.swift:12:5")).toBeInTheDocument();
 		expect(await screen.findByText("Lines 40-41 of 900, at the first error")).toBeInTheDocument();
 		expect(screen.getByText("41").parentElement).toHaveClass("bg-error/15");

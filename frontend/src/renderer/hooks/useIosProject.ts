@@ -55,7 +55,14 @@ export function useIosProject(sessionId: string | undefined) {
 /** A daemon that cannot build for iOS at all, in the shape a Go worktree has. */
 function noIosProject(): IosProjectResponse {
 	return {
-		project: { name: "", path: "", kind: "", schemes: [], configurations: [], xcodegen: { installed: false, specs: [] } },
+		project: {
+			name: "",
+			path: "",
+			kind: "",
+			schemes: [],
+			configurations: [],
+			xcodegen: { installed: false, specs: [] },
+		},
 	};
 }
 
@@ -129,7 +136,14 @@ export function useRunXcodegen(sessionId: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: async (): Promise<XcodegenResult> => {
-			if (usePreviewData) return { status: "ran", root: "/demo", results: [{ dir: "DemoApp", ok: true, exitCode: 0, output: "Created project at /demo/DemoApp/DemoApp.xcodeproj" }] };
+			if (usePreviewData)
+				return {
+					status: "ran",
+					root: "/demo",
+					results: [
+						{ dir: "DemoApp", ok: true, exitCode: 0, output: "Created project at /demo/DemoApp/DemoApp.xcodeproj" },
+					],
+				};
 			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/xcodegen", {
 				params: { path: { sessionId } },
 			});

@@ -20,7 +20,9 @@ const running = (over: Partial<IosRun> = {}): IosRun => ({
 describe("runProgress", () => {
 	it("uses the build's own task counts when it has them", () => {
 		const view = runProgress(
-			running({ build: { phase: "compiling", counts: { done: 120, total: 480, fraction: 0.25 }, errors: 0, warnings: 3 } }),
+			running({
+				build: { phase: "compiling", counts: { done: 120, total: 480, fraction: 0.25 }, errors: 0, warnings: 3 },
+			}),
 			T0 + 30_000,
 		);
 		expect(view).toMatchObject({ kind: "real", fraction: 0.25, label: "Compiling 120/480" });
@@ -28,7 +30,10 @@ describe("runProgress", () => {
 	});
 
 	it("estimates from the last build when there are no counts, and says so", () => {
-		const view = runProgress(running({ lastBuildSeconds: 100, build: { phase: "compiling", errors: 0, warnings: 0 } }), T0 + 50_000);
+		const view = runProgress(
+			running({ lastBuildSeconds: 100, build: { phase: "compiling", errors: 0, warnings: 0 } }),
+			T0 + 50_000,
+		);
 		expect(view).toMatchObject({ kind: "estimate" });
 		expect("fraction" in view && view.fraction).toBeCloseTo(0.5);
 		expect(view.label).toBe("Compiling");
@@ -57,7 +62,11 @@ describe("runProgress", () => {
 
 	it("names the steps around the build", () => {
 		expect(runProgress(running({ stage: "booting" }), T0).label).toBe("Booting simulator");
-		expect(runProgress(running({ stage: "installing" }), T0)).toMatchObject({ label: "Installing", kind: "real", fraction: 1 });
+		expect(runProgress(running({ stage: "installing" }), T0)).toMatchObject({
+			label: "Installing",
+			kind: "real",
+			fraction: 1,
+		});
 		expect(runProgress(running({ stage: "launching" }), T0)).toMatchObject({ label: "Launching", fraction: 1 });
 		expect(runProgress(running({ stage: undefined }), T0).label).toBe("Starting");
 	});
@@ -82,7 +91,9 @@ describe("runTiming", () => {
 	});
 
 	it("says how long the last build took once the run ended", () => {
-		expect(runTiming(running({ state: "succeeded", stage: undefined, buildSeconds: 102 }), T0)).toBe("last build 1m 42s");
+		expect(runTiming(running({ state: "succeeded", stage: undefined, buildSeconds: 102 }), T0)).toBe(
+			"last build 1m 42s",
+		);
 		expect(runTiming(running({ state: "failed", stage: undefined }), T0)).toBeNull();
 	});
 });
