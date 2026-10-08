@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Play, Square, Terminal, Wrench, XCircle } from "lucide-react";
+import {
+	AlertTriangle,
+	CheckCircle2,
+	ChevronDown,
+	Loader2,
+	Play,
+	Square,
+	Terminal,
+	Wrench,
+	XCircle,
+} from "lucide-react";
 import {
 	useIosProject,
 	useRefreshIosProject,
@@ -14,9 +24,11 @@ import { useSimDevices } from "../hooks/useSimDevices";
 import { useSimPower } from "../hooks/useSimPower";
 import type { Task } from "../lib/crew";
 import { builtName, runProgress, runTiming } from "../lib/ios-run-progress";
+import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { isBase, isWatchable, sessionDevices } from "../lib/sim-devices";
 import { cn } from "../lib/utils";
 import type { TerminalTarget } from "../types/terminal";
+import { BuildIssuesSheet, issueCounts } from "./BuildIssuesSheet";
 import { SimDevicePicker } from "./SimDevicePicker";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { XcodegenResultSheet, type XcodegenViewState } from "./XcodegenResultSheet";
@@ -49,12 +61,15 @@ import { XcodegenResultSheet, type XcodegenViewState } from "./XcodegenResultShe
  * morning.
  */
 export function IosRunBar({
+	onOpenWorkspaceFile,
 	onShowRun,
 	onShowAgent,
 	sessionId,
 	task,
 	terminalTarget,
 }: {
+	/** Open a file in the editor, which is where a build error's file:line goes. */
+	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
 	/** Point the terminal at the run pane - what Run does, and what the chip re-does. */
 	onShowRun: (handleId: string) => void;
 	/** Point the terminal back at the agent. */
@@ -241,7 +256,16 @@ export function IosRunBar({
 				 * nobody hovers.
 				 */}
 				{!problem && run?.warning ? <Problem message={run.warning} /> : null}
-				{run ? <RunChip onShowAgent={onShowAgent} onShowRun={onShowRun} run={run} watching={watchingRun} /> : null}
+				{run ? (
+					<RunChip
+						onOpenWorkspaceFile={onOpenWorkspaceFile}
+						onShowAgent={onShowAgent}
+						onShowRun={onShowRun}
+						run={run}
+						sessionId={sessionId}
+						watching={watchingRun}
+					/>
+				) : null}
 			</div>
 		</div>
 	);
@@ -434,14 +458,18 @@ function ChoicePicker({
  * another session and coming back: the daemon keeps the verdict on disk.
  */
 function RunChip({
+	onOpenWorkspaceFile,
 	onShowAgent,
 	onShowRun,
 	run,
+	sessionId,
 	watching,
 }: {
+	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
 	onShowAgent: () => void;
 	onShowRun: (handleId: string) => void;
 	run: IosRun;
+	sessionId: string;
 	/** Whether the terminal is already pointed at this run's pane. */
 	watching: boolean;
 }) {
@@ -453,6 +481,9 @@ function RunChip({
 	const progress = run.state === "running" ? runProgress(run, now) : null;
 	const fraction = useMonotonic(progress?.fraction, run.startedAt);
 	const timing = runTiming(run, now);
+	const [issuesOpen, setIssuesOpen] = useState(false);
+	const counts = run.state === "failed" ? issueCounts(run) : "";
+	const hasIssues = run.state === "failed" && (run.issues?.length ?? 0) > 0;
 	const state = {
 		running: {
 			icon:
@@ -481,22 +512,39 @@ function RunChip({
 		},
 	}[run.state];
 	return (
-		<button
-			className={cn(
-				"flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors hover:bg-overlay",
-				watching ? "text-foreground" : state.tone,
-			)}
-			onClick={() => (watching ? onShowAgent() : onShowRun(run.handleId))}
-			// The one line the daemon carries up from the command - "building
-			// NterApp failed (exit status 65)" - rather than a tooltip that
-			// repeats the label.
-			title={progress?.tooltip ?? (run.summary || state.label)}
-			type="button"
-		>
-			{state.icon}
-			{watching ? "Back to agent" : state.label}
-			{!watching && timing ? <span className="tabular-nums text-passive">{timing}</span> : null}
-		</button>
+		<>
+			<button
+				className={cn(
+					"flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11px] transition-colors hover:bg-overlay",
+					watching ? "text-foreground" : state.tone,
+				)}
+				onClick={() => {
+					if (watching) onShowAgent();
+					else if (hasIssues) setIssuesOpen(true);
+					else onShowRun(run.handleId);
+				}}
+				// The one line the daemon carries up from the command - "building
+				// NterApp failed (exit status 65)" - rather than a tooltip that
+				// repeats the label.
+				title={progress?.tooltip ?? (run.summary || state.label)}
+				type="button"
+			>
+				{state.icon}
+				{watching ? "Back to agent" : state.label}
+				{!watching && counts ? <span className="tabular-nums">{counts}</span> : null}
+				{!watching && timing ? <span className="tabular-nums text-passive">{timing}</span> : null}
+			</button>
+			{hasIssues ? (
+				<BuildIssuesSheet
+					onOpenChange={setIssuesOpen}
+					onOpenWorkspaceFile={onOpenWorkspaceFile}
+					onShowRun={onShowRun}
+					open={issuesOpen}
+					run={run}
+					sessionId={sessionId}
+				/>
+			) : null}
+		</>
 	);
 }
 
@@ -537,7 +585,9 @@ function XcodegenButton({ sessionId, specs }: { sessionId: string; specs: { dir:
 	const [open, setOpen] = useState(false);
 	const [state, setState] = useState<XcodegenViewState | null>(null);
 	const generate = useRunXcodegen(sessionId);
-	const stale = specs.filter((spec) => spec.stale).map((spec) => (spec.dir === "." ? "project.yml" : `${spec.dir}/project.yml`));
+	const stale = specs
+		.filter((spec) => spec.stale)
+		.map((spec) => (spec.dir === "." ? "project.yml" : `${spec.dir}/project.yml`));
 	const title = stale.length
 		? `${stale.join(", ")} changed since the project was last generated. Run xcodegen`
 		: "Run xcodegen";

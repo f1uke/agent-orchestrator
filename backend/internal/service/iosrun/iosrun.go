@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcodegen"
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcodeproj"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcresultstream"
 )
 
 // listingTTL is how long a project listing is reused. `xcodebuild -list` takes
@@ -159,6 +161,11 @@ type Run struct {
 	// when the build's own counts are not available.
 	LastBuildSeconds float64 `json:"lastBuildSeconds,omitempty" description:"How long the last successful build of the same project, scheme and configuration took. Present while running when there is one."`
 	BuildSeconds     float64 `json:"buildSeconds,omitempty" description:"How long this run's build took, when it succeeded."`
+	Errors           int     `json:"errors,omitempty" description:"How many errors the build reported."`
+	Warnings         int     `json:"warnings,omitempty" description:"How many warnings the build reported."`
+	// Issues carry file paths relative to the session's worktree when they are
+	// inside it, which is what the in-app editor opens.
+	Issues []xcresultstream.Issue `json:"issues,omitempty" description:"The build's first errors, then its first warnings, each with its file and one-based line when it has one."`
 }
 
 // Manager is the surface the HTTP controller depends on.
@@ -170,6 +177,7 @@ type Manager interface {
 	Current(ctx context.Context, id domain.SessionID) (Run, bool, error)
 	Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.Result, error)
 	Stop(ctx context.Context, id domain.SessionID) (Run, error)
+	BuildLog(ctx context.Context, id domain.SessionID) (BuildLog, error)
 }
 
 // Service is the production Manager.
@@ -579,6 +587,8 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 		run.State, run.Summary, run.FinishedAt = result.State, result.Summary, result.FinishedAt
 		run.Warning = result.Warning
 		run.BuildSeconds = result.BuildSeconds
+		run.Errors, run.Warnings = result.Errors, result.Warnings
+		run.Issues = s.relativeIssues(ctx, id, result.Issues)
 		if project != "" {
 			s.rememberBuild(project, run.Scheme, run.Configuration, result)
 		}
@@ -642,6 +652,74 @@ func interruptProcess(pid int) error {
 		return err
 	}
 	return process.Signal(os.Interrupt)
+}
+
+func (s *Service) relativeIssues(ctx context.Context, id domain.SessionID, issues []xcresultstream.Issue) []xcresultstream.Issue {
+	dir, err := s.workspace(ctx, id)
+	if err != nil || len(issues) == 0 {
+		return issues
+	}
+	roots := []string{dir}
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil && resolved != dir {
+		roots = append(roots, resolved)
+	}
+	out := make([]xcresultstream.Issue, len(issues))
+	for i, issue := range issues {
+		out[i] = issue
+		for _, root := range roots {
+			if rel, err := filepath.Rel(root, issue.File); err == nil && issue.File != "" && !strings.HasPrefix(rel, "..") {
+				out[i].File = rel
+				break
+			}
+		}
+	}
+	return out
+}
+
+// BuildLog is a window of a run's build log around its first error, or its
+// end when there is none.
+type BuildLog struct {
+	Lines []string `json:"lines"`
+	// FirstLine is the one-based number of Lines[0] in the whole log.
+	FirstLine int `json:"firstLine"`
+	// ErrorLine is the one-based number of the first error line, 0 when the log has none.
+	ErrorLine  int `json:"errorLine"`
+	TotalLines int `json:"totalLines"`
+}
+
+const (
+	logLinesBefore = 20
+	logLinesAfter  = 60
+	logTailLines   = 80
+)
+
+var errorLine = regexp.MustCompile(`(^|: )(fatal )?error: `)
+
+// BuildLog reads the session's last build log.
+func (s *Service) BuildLog(_ context.Context, id domain.SessionID) (BuildLog, error) {
+	dir := s.runDir(id)
+	if dir == "" {
+		return BuildLog{}, apierr.NotFound("IOS_RUN_NO_LOG", "This run kept no build log.")
+	}
+	body, err := os.ReadFile(filepath.Join(dir, LogFile)) //nolint:gosec // the path is this service's own, under its state dir
+	if err != nil {
+		return BuildLog{}, apierr.NotFound("IOS_RUN_NO_LOG", "This run kept no build log.")
+	}
+	return excerpt(strings.Split(strings.TrimRight(string(body), "\n"), "\n")), nil
+}
+
+func excerpt(lines []string) BuildLog {
+	log := BuildLog{TotalLines: len(lines)}
+	from, to := max(0, len(lines)-logTailLines), len(lines)
+	for i, line := range lines {
+		if errorLine.MatchString(line) {
+			log.ErrorLine = i + 1
+			from, to = max(0, i-logLinesBefore), min(len(lines), i+logLinesAfter)
+			break
+		}
+	}
+	log.Lines, log.FirstLine = lines[from:to], from+1
+	return log
 }
 
 // projectOf is the session's project, or "" when it cannot be read: the history

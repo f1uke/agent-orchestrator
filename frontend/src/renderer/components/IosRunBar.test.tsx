@@ -653,4 +653,57 @@ describe("IosRunBar", () => {
 		renderBar();
 		expect(await screen.findByRole("button", { name: /Ran NterDev \(Debug\)\s*last build 1m 42s/ })).toBeInTheDocument();
 	});
+
+	it("summarises a failed build and opens its log at the first error", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "failed",
+			summary: "building NterDev failed (exit status 65).",
+			startedAt: "2026-09-18T10:00:00Z",
+			errors: 2,
+			warnings: 1,
+			issues: [
+				{ severity: "error", message: "Cannot find 'foo' in scope", file: "App/AppDelegate.swift", line: 12, column: 5 },
+				{ severity: "error", message: "Missing return" },
+				{ severity: "warning", message: "Variable 'x' was never used", file: "App/A.swift", line: 3, column: 9 },
+			],
+		};
+		getMock.mockImplementation((path: string) => {
+			if (path === "/api/v1/sessions/{sessionId}/ios-project") return Promise.resolve({ data: { project: project(), run } });
+			if (path === "/api/v1/sessions/{sessionId}/ios-runs/log") {
+				return Promise.resolve({
+					data: {
+						lines: ["CompileSwift normal arm64 App/AppDelegate.swift", "/w/App/AppDelegate.swift:12:5: error: cannot find 'foo' in scope"],
+						firstLine: 40,
+						errorLine: 41,
+						totalLines: 900,
+					},
+					response: { status: 200 },
+				});
+			}
+			return Promise.resolve({ data: { devices: [device("UDID-A", "iPhone 17 Pro Max", "Booted")], defaultUdid: null } });
+		});
+		const onOpenWorkspaceFile = vi.fn();
+		render(
+			<IosRunBar
+				onOpenWorkspaceFile={onOpenWorkspaceFile}
+				onShowAgent={vi.fn()}
+				onShowRun={vi.fn()}
+				sessionId={SESSION}
+				terminalTarget={{ kind: "worker" }}
+			/>,
+			{ wrapper: Wrapper },
+		);
+
+		await userEvent.click(await screen.findByRole("button", { name: /NterDev \(Debug\) failed\s*2 errors · 1 warning/ }));
+		expect(await screen.findByText("App/AppDelegate.swift:12:5")).toBeInTheDocument();
+		expect(await screen.findByText("Lines 40-41 of 900, at the first error")).toBeInTheDocument();
+		expect(screen.getByText("41").parentElement).toHaveClass("bg-error/15");
+
+		await userEvent.click(screen.getByRole("button", { name: /App\/AppDelegate.swift:12:5/ }));
+		expect(onOpenWorkspaceFile).toHaveBeenCalledWith({ path: "App/AppDelegate.swift", line: 12, column: 5 });
+	});
 });

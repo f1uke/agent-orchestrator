@@ -46,6 +46,10 @@ func (f *fakeIOSRun) Stop(context.Context, domain.SessionID) (iosrunsvc.Run, err
 	return iosrunsvc.Run{}, nil
 }
 
+func (f *fakeIOSRun) BuildLog(context.Context, domain.SessionID) (iosrunsvc.BuildLog, error) {
+	return iosrunsvc.BuildLog{}, nil
+}
+
 func newIOSRunTestServer(t *testing.T, svc iosrunsvc.Manager) *httptest.Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

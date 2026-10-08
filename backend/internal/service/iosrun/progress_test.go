@@ -3,6 +3,7 @@ package iosrun
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -198,5 +199,44 @@ func TestStop_RefusesARunThatHasEnded(t *testing.T) {
 	writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunSucceeded})
 	if _, err := svc.Stop(context.Background(), "mer-9"); err == nil || len(*signalled) != 0 {
 		t.Fatalf("err=%v signalled=%v, want nothing to stop", err, *signalled)
+	}
+}
+
+func TestExcerptOpensAtTheFirstError(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 200; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	lines[119] = "/w/App/AppDelegate.swift:12:5: error: cannot find 'foo' in scope"
+	lines[150] = "/w/App/Other.swift:3:1: error: second"
+	log := excerpt(lines)
+	if log.ErrorLine != 120 || log.FirstLine != 100 || log.Lines[log.ErrorLine-log.FirstLine] != lines[119] || log.TotalLines != 200 {
+		t.Fatalf("log = first %d error %d (%d lines), want the window from 100 with line 120 in it", log.FirstLine, log.ErrorLine, len(log.Lines))
+	}
+}
+
+func TestExcerptWithoutAnErrorIsTheEnd(t *testing.T) {
+	lines := make([]string, 300)
+	for i := range lines {
+		lines[i] = "warning: unused"
+	}
+	if log := excerpt(lines); log.ErrorLine != 0 || log.FirstLine != 221 || len(log.Lines) != 80 {
+		t.Fatalf("log = %+v", log)
+	}
+}
+
+func TestCurrent_NamesTheIssuesRelativeToTheWorktree(t *testing.T) {
+	dir := worktree(t, "Nter.xcodeproj")
+	svc := stateful(t, dir, t.TempDir(), &fakeRuntime{alive: true})
+	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+		t.Fatal(err)
+	}
+	writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunFailed, Errors: 2, Warnings: 7, Issues: []xcresultstream.Issue{
+		{Severity: "error", Message: "cannot find 'foo' in scope", File: filepath.Join(dir, "App", "AppDelegate.swift"), Line: 12, Column: 5},
+		{Severity: "error", Message: "outside", File: "/elsewhere/Lib.swift", Line: 1},
+	}})
+	run, _, _ := svc.Current(context.Background(), "mer-9")
+	if run.Errors != 2 || run.Warnings != 7 || run.Issues[0].File != filepath.Join("App", "AppDelegate.swift") || run.Issues[1].File != "/elsewhere/Lib.swift" {
+		t.Fatalf("run = %+v", run)
 	}
 }

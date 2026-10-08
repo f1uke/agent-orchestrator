@@ -30,6 +30,9 @@ const (
 	RunFile      = "run.json"
 	ResultFile   = "result.json"
 	ProgressFile = "progress.json"
+	// LogFile is the build's output as the terminal showed it, plus the failed
+	// tasks' output replayed from the result bundle.
+	LogFile = "build.log"
 )
 
 // Stage is the step of a run the command is on.
@@ -88,6 +91,10 @@ type Result struct {
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	// BuildSeconds is how long the build took, set only when it succeeded.
 	BuildSeconds float64 `json:"buildSeconds,omitempty"`
+	Errors       int     `json:"errors,omitempty"`
+	Warnings     int     `json:"warnings,omitempty"`
+	// Issues are the build's first errors, then its first warnings.
+	Issues []xcresultstream.Issue `json:"issues,omitempty"`
 }
 
 // runDir is where this session's run record lives, or "" when no state dir was

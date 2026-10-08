@@ -777,14 +777,19 @@ func (c *commandContext) buildSimApp(
 			outputs.ProgressStream = stream
 		}
 	}
-	watch := &signingWatch{out: progress}
+	out := progress
+	if log := report.buildLog(); log != nil {
+		defer func() { _ = log.Close() }()
+		out = io.MultiWriter(progress, log)
+	}
+	watch := &signingWatch{out: out}
 	var stopWatching func() xcresultstream.Snapshot
 	if outputs.ProgressStream != "" {
 		stopWatching = c.watchBuildProgress(ctx, stream, report)
 	}
 	err = c.streamBuild(ctx, watch, xcodeproj.Binary, xcodeproj.BuildArgs(project, scheme, configuration, outputs)...)
 	if stopWatching != nil {
-		stopWatching()
+		report.buildFinished(stopWatching())
 	}
 	if ctx.Err() != nil {
 		return fmt.Errorf("stopped while building %s. Nothing was installed on %s: %w", scheme, device.Name, ctx.Err())

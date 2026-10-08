@@ -3650,6 +3650,46 @@ paths:
         in a pane of its own
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/ios-runs/log:
+    get:
+      operationId: getIOSRunLog
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IosrunBuildLog'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: The lines of the session's last build log around its first error, or
+        its end when it has none
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/ios-runs/stop:
     post:
       operationId: stopIOSRun
@@ -11173,6 +11213,24 @@ components:
       - available
       - legacyRoot
       type: object
+    IosrunBuildLog:
+      properties:
+        errorLine:
+          type: integer
+        firstLine:
+          type: integer
+        lines:
+          items:
+            type: string
+          type: array
+        totalLines:
+          type: integer
+      required:
+      - lines
+      - firstLine
+      - errorLine
+      - totalLines
+      type: object
     IosrunBuildProgress:
       properties:
         counts:
@@ -11252,6 +11310,9 @@ components:
           - string
         configuration:
           type: string
+        errors:
+          description: How many errors the build reported.
+          type: integer
         finishedAt:
           format: date-time
           type:
@@ -11259,6 +11320,12 @@ components:
           - string
         handleId:
           type: string
+        issues:
+          description: The build's first errors, then its first warnings, each with
+            its file and one-based line when it has one.
+          items:
+            $ref: '#/components/schemas/XcresultstreamIssue'
+          type: array
         lastBuildSeconds:
           description: How long the last successful build of the same project, scheme
             and configuration took. Present while running when there is one.
@@ -11306,6 +11373,9 @@ components:
             is - a run can succeed and still leave an app that cannot reach the Keychain.
             Empty is the ordinary case.
           type: string
+        warnings:
+          description: How many warnings the build reported.
+          type: integer
       required:
       - handleId
       - scheme
@@ -15342,6 +15412,22 @@ components:
       - done
       - total
       - fraction
+      type: object
+    XcresultstreamIssue:
+      properties:
+        column:
+          type: integer
+        file:
+          type: string
+        line:
+          type: integer
+        message:
+          type: string
+        severity:
+          type: string
+      required:
+      - severity
+      - message
       type: object
 tags:
 - description: Supported and locally runnable agent adapters

@@ -1205,6 +1205,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/ios-runs/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The lines of the session's last build log around its first error, or its end when it has none */
+        get: operations["getIOSRunLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/ios-runs/stop": {
         parameters: {
             query?: never;
@@ -3849,6 +3866,12 @@ export interface components {
             available: boolean;
             legacyRoot: string;
         };
+        IosrunBuildLog: {
+            errorLine: number;
+            firstLine: number;
+            lines: string[];
+            totalLines: number;
+        };
         IosrunBuildProgress: {
             /** @description Tasks done and planned, and the build service's own fraction. Absent until the build has planned, and while another progress-reporting build runs on this Mac. */
             counts?: components["schemas"]["XcresultstreamCounts"];
@@ -3887,9 +3910,13 @@ export interface components {
              */
             buildStartedAt?: null | string;
             configuration: string;
+            /** @description How many errors the build reported. */
+            errors?: number;
             /** Format: date-time */
             finishedAt?: null | string;
             handleId: string;
+            /** @description The build's first errors, then its first warnings, each with its file and one-based line when it has one. */
+            issues?: components["schemas"]["XcresultstreamIssue"][];
             /**
              * Format: double
              * @description How long the last successful build of the same project, scheme and configuration took. Present while running when there is one.
@@ -3915,6 +3942,8 @@ export interface components {
             udid: string;
             /** @description What is wrong with the app this run installed, when anything is - a run can succeed and still leave an app that cannot reach the Keychain. Empty is the ordinary case. */
             warning?: string;
+            /** @description How many warnings the build reported. */
+            warnings?: number;
         };
         IosrunXcodegenState: {
             installed: boolean;
@@ -5553,6 +5582,13 @@ export interface components {
             /** Format: double */
             fraction: number;
             total: number;
+        };
+        XcresultstreamIssue: {
+            column?: number;
+            file?: string;
+            line?: number;
+            message: string;
+            severity: string;
         };
     };
     responses: never;
@@ -10071,6 +10107,56 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getIOSRunLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IosrunBuildLog"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

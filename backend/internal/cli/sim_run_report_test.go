@@ -48,7 +48,8 @@ func TestSimRun_ReportsBuildProgressFromTheResultStream(t *testing.T) {
 		events := streamEvent("logMessageEmitted", `{"message":{"title":{"_value":"Target dependency graph (1 target)"},"annotations":{"_values":[{"title":{"_value":"Target 'Nter' in project 'Nter' (no dependencies)"}}]}}}`) +
 			streamEvent("logSectionCreated", `{"head":{"title":{"_value":"Compile AppDelegate.swift (arm64)"}}}`) +
 			streamEvent("advisoryMessage", `{"message":{"_value":"Nter : 120 / 480"},"progress":{"_value":"0.25"}}`) +
-			streamEvent("issueEmitted", `{"severity":{"_value":"warning"},"issue":{"message":{"_value":"unused"}}}`)
+			streamEvent("issueEmitted", `{"severity":{"_value":"warning"},"issue":{"message":{"_value":"unused"}}}`) +
+			streamEvent("issueEmitted", `{"severity":{"_value":"error"},"issue":{"message":{"_value":"Cannot find 'foo' in scope"},"documentLocationInCreatingWorkspace":{"url":{"_value":"file:///w/App.swift#StartingLineNumber=11&StartingColumnNumber=4"}}}}`)
 		if err := os.WriteFile(argAfter(args, "-resultStreamPath"), []byte(events), 0o600); err != nil {
 			return nil, err
 		}
@@ -71,11 +72,15 @@ func TestSimRun_ReportsBuildProgressFromTheResultStream(t *testing.T) {
 	if progress.Stage != iosrun.StageLaunching || progress.PID != os.Getpid() || progress.BuildStartedAt == nil {
 		t.Fatalf("progress = %+v, want the last stage, this pid and when the build started", progress)
 	}
-	if b := progress.Build; b == nil || b.Counts == nil || b.Counts.Done != 120 || b.Counts.Total != 480 || b.Phase != "compiling" || b.Warnings != 1 {
-		t.Fatalf("build = %+v, want compiling 120/480 with one warning", b)
+	if b := progress.Build; b == nil || b.Counts == nil || b.Counts.Done != 120 || b.Counts.Total != 480 || b.Phase != "compiling" || b.Warnings != 1 || b.Errors != 1 {
+		t.Fatalf("build = %+v, want compiling 120/480 with one warning and one error", b)
 	}
-	if verdict := readRunVerdict(t, filepath.Join(dir, iosrun.ResultFile)); verdict.BuildSeconds <= 0 {
+	verdict := readRunVerdict(t, filepath.Join(dir, iosrun.ResultFile))
+	if verdict.BuildSeconds <= 0 {
 		t.Fatalf("buildSeconds = %v, want the successful build's duration", verdict.BuildSeconds)
+	}
+	if verdict.Errors != 1 || verdict.Warnings != 1 || len(verdict.Issues) != 2 || verdict.Issues[0].File != "/w/App.swift" || verdict.Issues[0].Line != 12 {
+		t.Fatalf("verdict issues = %d errors, %d warnings, %+v", verdict.Errors, verdict.Warnings, verdict.Issues)
 	}
 }
 
@@ -107,7 +112,8 @@ func TestSimRun_ReplaysTheCompilerOutputXcodebuildKeptOffStdout(t *testing.T) {
 		}
 		return inner(ctx, name, args...)
 	}
-	t.Setenv(iosrun.EnvRunDir, t.TempDir())
+	dir := t.TempDir()
+	t.Setenv(iosrun.EnvRunDir, dir)
 
 	_, errOut, err := executeCLI(t, deps, "sim", "run")
 	if err == nil {
@@ -115,6 +121,10 @@ func TestSimRun_ReplaysTheCompilerOutputXcodebuildKeptOffStdout(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "AppDelegate.swift:12:5: error: cannot find 'foo' in scope") {
 		t.Fatalf("the compiler's error must reach the terminal:\n%s", errOut)
+	}
+	log, err := os.ReadFile(filepath.Join(dir, iosrun.LogFile))
+	if err != nil || !strings.Contains(string(log), "** BUILD FAILED **") || !strings.Contains(string(log), "error: cannot find 'foo' in scope") {
+		t.Fatalf("the build log must hold the output and the replayed error: %v\n%s", err, log)
 	}
 }
 

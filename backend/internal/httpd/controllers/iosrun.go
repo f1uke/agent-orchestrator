@@ -54,7 +54,24 @@ func (c *IOSRunController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/ios-project", c.project)
 	r.Post("/sessions/{sessionId}/ios-runs", c.start)
 	r.Post("/sessions/{sessionId}/ios-runs/stop", c.stop)
+	r.Get("/sessions/{sessionId}/ios-runs/log", c.buildLog)
 	r.Post("/sessions/{sessionId}/xcodegen", c.xcodegen)
+}
+
+func (c *IOSRunController) buildLog(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/sessions/{sessionId}/ios-runs/log")
+		return
+	}
+	log, err := c.Svc.BuildLog(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	if log.Lines == nil {
+		log.Lines = []string{}
+	}
+	envelope.WriteJSON(w, http.StatusOK, log)
 }
 
 func (c *IOSRunController) stop(w http.ResponseWriter, r *http.Request) {

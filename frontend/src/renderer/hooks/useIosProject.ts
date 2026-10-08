@@ -105,6 +105,24 @@ export function useStopIosRun(sessionId: string, onProblem: (message: string) =>
 	});
 }
 
+export type IosBuildLog = components["schemas"]["IosrunBuildLog"];
+
+export function useIosBuildLog(sessionId: string, enabled: boolean) {
+	return useQuery<IosBuildLog | null>({
+		queryKey: ["ios-run-log", sessionId],
+		enabled,
+		staleTime: 0,
+		queryFn: async ({ signal }) => {
+			const { data, response } = await apiClient.GET("/api/v1/sessions/{sessionId}/ios-runs/log", {
+				params: { path: { sessionId } },
+				signal,
+			});
+			if (response?.status === 404) return null;
+			return data ?? null;
+		},
+	});
+}
+
 export type XcodegenResult = components["schemas"]["XcodegenResult"];
 
 export function useRunXcodegen(sessionId: string) {

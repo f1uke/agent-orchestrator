@@ -29,7 +29,8 @@ type runReport struct {
 	progress     iosrun.Progress
 	buildSeconds float64
 	// end is how an attached app ended: "exited" or "stopped".
-	end string
+	end    string
+	issues xcresultstream.Snapshot
 }
 
 func newRunReport() *runReport {
@@ -83,6 +84,31 @@ func (r *runReport) buildSucceeded() {
 	}
 }
 
+// buildFinished keeps what the build's result stream said about its issues.
+func (r *runReport) buildFinished(snap xcresultstream.Snapshot) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.issues = snap
+}
+
+// buildLog is where the build's output is kept for the failure sheet, or nil.
+func (r *runReport) buildLog() *os.File {
+	if r == nil {
+		return nil
+	}
+	if err := os.MkdirAll(r.dir, 0o750); err != nil {
+		return nil
+	}
+	f, err := os.Create(filepath.Join(r.dir, iosrun.LogFile)) //nolint:gosec // the run directory the daemon named
+	if err != nil {
+		return nil
+	}
+	return f
+}
+
 func (r *runReport) ended(how string) {
 	if r == nil {
 		return
@@ -113,7 +139,10 @@ func (r *runReport) finish(result simRunResult, runErr error, stopped bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	finished := r.now().UTC()
-	verdict := iosrun.Result{State: iosrun.RunSucceeded, FinishedAt: &finished, BuildSeconds: r.buildSeconds}
+	verdict := iosrun.Result{
+		State: iosrun.RunSucceeded, FinishedAt: &finished, BuildSeconds: r.buildSeconds,
+		Errors: r.issues.Errors, Warnings: r.issues.Warnings, Issues: r.issues.Issues,
+	}
 	switch {
 	case runErr != nil && stopped:
 		verdict.State = iosrun.RunStopped
