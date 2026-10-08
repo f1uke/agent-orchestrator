@@ -289,7 +289,7 @@ func newLearnRulesProtectCommand(ctx *commandContext) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&project, "project", "", "Project the rule applies in (default: every project)")
 	cmd.Flags().StringVar(&text, "text", "", "The rule")
-	cmd.Flags().StringVar(&from, "from", "", "Copy the text of a corpus rule, by id (see `ao learn rules`)")
+	cmd.Flags().StringVar(&from, "from", "", "Copy the text of a corpus rule, by its `id` (ao learn rules lists them)")
 	cmd.Flags().StringArrayVar(&patterns, "pattern", nil, "Forbidden pattern (repeatable)")
 	cmd.Flags().StringVar(&note, "note", "", "Why the rule is protected")
 	return cmd

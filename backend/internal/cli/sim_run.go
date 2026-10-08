@@ -122,7 +122,7 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			"The build itself names no device - it targets the Simulator generically - so " +
 			"nothing `xcodebuild` does can reach a simulator somebody else is driving. A " +
 			"device that is shut down is booted on the way through, under the same " +
-			"two-simulator cap as `ao sim boot`.\n\n" +
+			"boot cap as `ao sim boot`.\n\n" +
 			"With no --scheme it builds the project's only scheme, and lists them rather " +
 			"than choosing when there are several. --configuration works the same way, with " +
 			"one addition: a project that HAS a Debug configuration gets it by default, " +
@@ -416,7 +416,7 @@ func firstLine(text string) string {
 
 // bootSimRunDevice powers the target on when it is down, and reports whether it
 // did. It is the same path as `ao sim boot`, which is what keeps one
-// two-simulator cap rather than two that can drift apart.
+// boot cap rather than two that can drift apart.
 func (c *commandContext) bootSimRunDevice(ctx context.Context, progress io.Writer, udid string) (bool, error) {
 	devices, err := c.listSimDevices(ctx)
 	if err != nil {

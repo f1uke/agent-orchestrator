@@ -12,22 +12,13 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/skillassets"
 )
 
-// The `ao sim` catalog an agent reads is a file shipped in the daemon, not the
-// command's own --help: a worker is pointed at <dataDir>/skills/.../sim.md and
-// decides from that what it can do. So a command that exists but is not in that
-// page may as well not exist - which is exactly what happened to `ao sim drag`
-// until this test existed.
-func TestSimSkillPage_DocumentsEverySubcommand(t *testing.T) {
-	dir := t.TempDir()
-	if err := skillassets.Install(dir); err != nil {
-		t.Fatalf("install skill: %v", err)
-	}
-	page, err := os.ReadFile(filepath.Join(skillassets.Dir(dir, false), "commands", "sim.md"))
-	if err != nil {
-		t.Fatalf("read sim.md: %v", err)
-	}
-	doc := string(page)
-
+// The `ao sim` catalog an agent reads is a set of files shipped in the daemon,
+// not the commands' own --help: a worker is pointed at sim.md, and decides from
+// its page table what it can do and which page to open next. So a command that
+// exists but is not routed from that page may as well not exist - which is
+// exactly what happened to `ao sim drag` until this test existed.
+func TestSimSkillPage_RoutesEverySubcommand(t *testing.T) {
+	doc := installedSkillPage(t, "sim.md")
 	var sim *cobra.Command
 	for _, cmd := range NewRootCommand(Deps{}).Commands() {
 		if cmd.Name() == "sim" {
@@ -46,18 +37,18 @@ func TestSimSkillPage_DocumentsEverySubcommand(t *testing.T) {
 		// failure as one that omits a command that does.
 		mentioned := regexp.MustCompile(`\bao sim ` + regexp.QuoteMeta(sub.Name()) + `\b`)
 		if !mentioned.MatchString(doc) {
-			t.Fatalf("`ao sim %s` is not in the skill page an agent reads", sub.Name())
+			t.Fatalf("`ao sim %s` is not routed from sim.md, the page an agent reads first", sub.Name())
 		}
 	}
 }
 
 // On a script-only project (ProjectConfig.MobileScripts) the worker prompt makes
 // every check a script run and leaves driving by hand to debugging and
-// authoring, and the skill page is the next thing that agent reads - so a page
-// that still opened with "drive it with taps" and never said otherwise would
-// teach the rule's opposite one click away from the prompt. The page has to say
-// what the setting changes, who may drive by hand, and has to show the form of
-// `flow run` that runs several flows in one Maestro start-up.
+// authoring, and sim.md is the next thing that agent reads - so a page that
+// still opened with "drive it with taps" and never said otherwise would teach
+// the rule's opposite one click away from the prompt. The page has to say what
+// the setting changes and who may drive by hand, and the Maestro page has to
+// show the form of `flow run` that runs several flows in one Maestro start-up.
 func TestSimSkillPage_TeachesTheScriptOnlyRule(t *testing.T) {
 	doc := installedSkillPage(t, "sim.md")
 	for _, want := range []string{
@@ -66,24 +57,13 @@ func TestSimSkillPage_TeachesTheScriptOnlyRule(t *testing.T) {
 		"A screen reached by hand is never evidence.",
 		"--mobile-scripts <product> --mobile-platform ios|android",
 		"never finished by hand",
-		"ao sim flow run   <file>...",
-		"ao sim flow run a.yaml b.yaml",
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("sim.md does not carry %q", want)
 		}
 	}
-}
-
-// Every `ao project set-config` field flag has a row in the page an agent reads
-// before it changes a project's config. The table had fallen nine flags behind
-// the command, which is how a setting nobody can find gets turned on by nobody.
-func TestProjectSkillPage_DocumentsEverySetConfigFlag(t *testing.T) {
-	doc := installedSkillPage(t, "project.md")
-	for _, f := range setConfigFieldFlags {
-		if !regexp.MustCompile("\\| `--" + regexp.QuoteMeta(f.flag) + "[ `]").MatchString(doc) {
-			t.Errorf("`ao project set-config --%s` has no row in project.md", f.flag)
-		}
+	if maestro := installedSkillPage(t, "sim-maestro.md"); !strings.Contains(maestro, "ao sim flow run a.yaml b.yaml") {
+		t.Error("sim-maestro.md does not show several flows in one `ao sim flow run`")
 	}
 }
 

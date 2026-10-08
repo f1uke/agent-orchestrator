@@ -1,12 +1,11 @@
 ---
 name: using-ao
-description: Catalog of the AO (Agent Orchestrator) `ao` CLI: spawning workers, managing sessions and projects, sending messages, and daemon control. Use when using the ao CLI, spawning workers, or managing AO sessions in an AO workspace.
-trigger: Using the ao CLI in an AO workspace: spawning workers, managing sessions/projects, sending messages.
+description: Catalog of the AO (Agent Orchestrator) `ao` CLI - spawning workers, sessions and projects, messages, crews, Testiny results and evidence, iOS Simulators (`ao sim`), learning, and daemon control - with the rules each command's --help does not carry. Use whenever you run or plan an `ao` command in an AO workspace, even for a single flag.
 ---
 
 # AO CLI Catalog
 
-`ao` is a thin CLI over the local AO daemon. Every command is `ao <command> --help` for the authoritative flag list.
+`ao` is a thin CLI over the local AO daemon. `ao <command> --help` is the authoritative list of flags and arguments; the pages below carry what it does not: the rules, and what to do when a command refuses.
 
 | Command | What it does | When to use | Details |
 |---|---|---|---|
@@ -20,7 +19,7 @@ trigger: Using the ao CLI in an AO workspace: spawning workers, managing session
 | `send` | Send a message to a running agent session, or to your crewmate by role | Correcting or directing a live agent; telling dev/qa about a commit or a case | [commands/send.md](commands/send.md) |
 | `learn` | See what AO kept from projects that learn from sessions, the candidate lessons and the memory proposals; decide a proposal (approve, reject, snooze, unsnooze, reopen, undo, edit); run collect now; change its budget; delete what was kept | Checking what learning stored or proposed, acting on the human's decision about a proposal, processing the backlog, or erasing it | [commands/learn.md](commands/learn.md) |
 | `scripts` | Publish your task's commits from its own worktree of the mobile scripts store into the store, and show what is uncommitted or unpublished | After committing scripts in `$AO_SCRIPTS_STORE`; before ending a task on a mobileScripts project | [commands/scripts.md](commands/scripts.md) |
-| `sim` | List local iOS Simulators, capture a booted one's screen, claim one so other sessions keep off it, check one is ready to drive | Checking how an iOS screen actually looks, or driving one (macOS) | [commands/sim.md](commands/sim.md) |
+| `sim` | Your iOS Simulators: claim and add devices, read the screen and the log, drive it, build onto it, debug the app, run Maestro flows | Anything on an iOS Simulator (macOS). Read [commands/sim.md](commands/sim.md) first: its rules hold for every page | [sim.md](commands/sim.md), [devices](commands/sim-devices.md), [screen](commands/sim-screen.md), [drive](commands/sim-drive.md), [build](commands/sim-build.md), [debug](commands/sim-debug.md), [maestro](commands/sim-maestro.md) |
 | `preview` | Open a URL in the desktop browser panel | Demoing a local server or file from inside a session | [commands/preview.md](commands/preview.md) | <!-- web-ui -->
 | `start` | Fetch (if needed) and open the AO desktop app | Launching the app | [commands/start.md](commands/start.md) |
 | `stop` | Stop the AO daemon | Shutting down AO | [commands/stop.md](commands/stop.md) |
