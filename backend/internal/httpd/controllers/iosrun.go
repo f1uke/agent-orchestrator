@@ -9,6 +9,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	iosrunsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcodegen"
 )
 
 // IOSProjectResponse is the body of GET /api/v1/sessions/{sessionId}/ios-project:
@@ -52,6 +53,23 @@ type IOSRunController struct {
 func (c *IOSRunController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/ios-project", c.project)
 	r.Post("/sessions/{sessionId}/ios-runs", c.start)
+	r.Post("/sessions/{sessionId}/xcodegen", c.xcodegen)
+}
+
+func (c *IOSRunController) xcodegen(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/xcodegen")
+		return
+	}
+	result, err := c.Svc.Xcodegen(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	if result.Results == nil {
+		result.Results = []xcodegen.DirResult{}
+	}
+	envelope.WriteJSON(w, http.StatusOK, result)
 }
 
 func (c *IOSRunController) project(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +93,9 @@ func (c *IOSRunController) project(w http.ResponseWriter, r *http.Request) {
 	}
 	if project.Configurations == nil {
 		project.Configurations = []string{}
+	}
+	if project.Xcodegen.Specs == nil {
+		project.Xcodegen.Specs = []xcodegen.Spec{}
 	}
 	res := IOSProjectResponse{Project: project}
 	// The run rides on the project read rather than on a route of its own: the

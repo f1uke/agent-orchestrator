@@ -5,7 +5,6 @@ import type { TelemetryBootstrap } from "./shared/telemetry";
 import type { MigrationState } from "./main/app-state";
 import type { NativeNotificationClickPayload, NativeNotificationInput } from "./main/native-notifications";
 import type { OpenInTargets } from "./main/open-in-targets";
-import type { RunXcodegenResult } from "./main/run-xcodegen";
 import type { UpdateSettings, UpdateStatus } from "./main/update-settings";
 import type { CompanionSettings } from "./main/companion-settings";
 import type { EditorSettings } from "./main/editor-settings";
@@ -71,7 +70,6 @@ const api = {
 		editor: (dir: string) => ipcRenderer.invoke("openIn:editor", dir) as Promise<void>,
 		xcode: (targetPath: string) => ipcRenderer.invoke("openIn:xcode", targetPath) as Promise<void>,
 		androidStudio: (dir: string) => ipcRenderer.invoke("openIn:androidStudio", dir) as Promise<void>,
-		xcodegen: (dir: string) => ipcRenderer.invoke("openIn:xcodegen", dir) as Promise<RunXcodegenResult>,
 	},
 	shell: {
 		openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url) as Promise<void>,

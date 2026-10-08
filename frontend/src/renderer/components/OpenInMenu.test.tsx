@@ -2,7 +2,6 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenInTargets } from "../../main/open-in-targets";
-import type { RunXcodegenResult } from "../../main/run-xcodegen";
 import { OpenInMenu } from "./OpenInMenu";
 
 const detectTargets = vi.fn<(dir: string) => Promise<OpenInTargets>>();
@@ -11,7 +10,6 @@ const finder = vi.fn<(dir: string) => Promise<void>>();
 const editor = vi.fn<(dir: string) => Promise<void>>();
 const xcode = vi.fn<(targetPath: string) => Promise<void>>();
 const androidStudio = vi.fn<(dir: string) => Promise<void>>();
-const xcodegen = vi.fn<(dir: string) => Promise<RunXcodegenResult>>();
 
 vi.mock("../lib/bridge", () => ({
 	aoBridge: {
@@ -22,7 +20,6 @@ vi.mock("../lib/bridge", () => ({
 			editor: (dir: string) => editor(dir),
 			xcode: (targetPath: string) => xcode(targetPath),
 			androidStudio: (dir: string) => androidStudio(dir),
-			xcodegen: (dir: string) => xcodegen(dir),
 		},
 	},
 }));
@@ -44,7 +41,6 @@ beforeEach(() => {
 	editor.mockResolvedValue(undefined);
 	xcode.mockResolvedValue(undefined);
 	androidStudio.mockResolvedValue(undefined);
-	xcodegen.mockResolvedValue({ status: "no-specs", root: "" });
 });
 
 afterEach(() => {
@@ -160,42 +156,14 @@ describe("OpenInMenu", () => {
 		expect(await screen.findByRole("status")).toHaveTextContent("Couldn't open in Terminal.");
 	});
 
-	it("always offers Run xcodegen, even when no Xcode target is detected", async () => {
+	it("leaves xcodegen to the iOS run bar", async () => {
 		detectTargets.mockResolvedValue({ hasVSCode: false });
 		const user = userEvent.setup();
 		render(<OpenInMenu directory={DIR} />);
 
 		await user.click(screen.getByRole("button", { name: "Open in…" }));
 
-		expect(await screen.findByText("Run xcodegen")).toBeInTheDocument();
-	});
-
-	it("runs xcodegen for the directory and shows per-directory results", async () => {
-		xcodegen.mockResolvedValue({
-			status: "ran",
-			root: DIR,
-			results: [{ dir: "NterApp", ok: true, exitCode: 0, output: "Created project at NterApp.xcodeproj" }],
-		});
-		const user = userEvent.setup();
-		render(<OpenInMenu directory={DIR} />);
-
-		await user.click(screen.getByRole("button", { name: "Open in…" }));
-		await user.click(await screen.findByText("Run xcodegen"));
-
-		expect(xcodegen).toHaveBeenCalledWith(DIR);
-		expect(await screen.findByText("NterApp")).toBeInTheDocument();
-		expect(screen.getByText("Ran in 1 directory · 1/1 succeeded.")).toBeInTheDocument();
-	});
-
-	it("surfaces a friendly message when xcodegen is not installed", async () => {
-		xcodegen.mockResolvedValue({ status: "not-installed" });
-		const user = userEvent.setup();
-		render(<OpenInMenu directory={DIR} />);
-
-		await user.click(screen.getByRole("button", { name: "Open in…" }));
-		await user.click(await screen.findByText("Run xcodegen"));
-
-		expect(await screen.findByText(/isn't installed or isn't on your PATH/)).toBeInTheDocument();
-		expect(screen.getByText("brew install xcodegen")).toBeInTheDocument();
+		expect(await screen.findByText("Open in Finder")).toBeInTheDocument();
+		expect(screen.queryByText("Run xcodegen")).not.toBeInTheDocument();
 	});
 });

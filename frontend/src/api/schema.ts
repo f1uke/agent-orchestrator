@@ -2117,6 +2117,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/xcodegen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run xcodegen generate in every directory of the session's worktree that holds a project.yml */
+        post: operations["runXcodegen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/cleanup": {
         parameters: {
             query?: never;
@@ -3836,6 +3853,8 @@ export interface components {
             path: string;
             schemes: string[];
             schemesError?: string;
+            /** @description The xcodegen specs in this worktree and whether each project is behind its spec. */
+            xcodegen: components["schemas"]["IosrunXcodegenState"];
         };
         IosrunRun: {
             /** @description How far the build is, while it runs. */
@@ -3879,6 +3898,10 @@ export interface components {
             udid: string;
             /** @description What is wrong with the app this run installed, when anything is - a run can succeed and still leave an app that cannot reach the Keychain. Empty is the ordinary case. */
             warning?: string;
+        };
+        IosrunXcodegenState: {
+            installed: boolean;
+            specs: components["schemas"]["XcodegenSpec"][];
         };
         JiraAttachment: {
             filename?: string;
@@ -5491,6 +5514,22 @@ export interface components {
             contentHash: string;
             path: string;
             size: number;
+        };
+        XcodegenDirResult: {
+            dir: string;
+            exitCode: null | number;
+            ok: boolean;
+            output: string;
+        };
+        XcodegenResult: {
+            results: components["schemas"]["XcodegenDirResult"][];
+            root?: string;
+            /** @enum {string} */
+            status: "not-installed" | "no-specs" | "ran";
+        };
+        XcodegenSpec: {
+            dir: string;
+            stale: boolean;
         };
         XcresultstreamCounts: {
             done: number;
@@ -13953,6 +13992,65 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    runXcodegen: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["XcodegenResult"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcodegen"
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcodeproj"
 )
 
@@ -86,7 +88,14 @@ type Project struct {
 	// ConfigurationsError says why THAT list is empty. It is its own field
 	// rather than sharing SchemesError because either question can fail on its
 	// own, and a picker must say which one did.
-	ConfigurationsError string `json:"configurationsError,omitempty"`
+	ConfigurationsError string        `json:"configurationsError,omitempty"`
+	Xcodegen            XcodegenState `json:"xcodegen" description:"The xcodegen specs in this worktree and whether each project is behind its spec."`
+}
+
+// XcodegenState is what the run bar's xcodegen button needs.
+type XcodegenState struct {
+	Installed bool            `json:"installed"`
+	Specs     []xcodegen.Spec `json:"specs"`
 }
 
 // RunState is what became of a run. The bar shows one of these four and
@@ -157,6 +166,7 @@ type Manager interface {
 	Project(ctx context.Context, id domain.SessionID, refresh bool) (Project, error)
 	Start(ctx context.Context, id domain.SessionID, scheme, configuration, udid string) (Run, error)
 	Current(ctx context.Context, id domain.SessionID) (Run, bool, error)
+	Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.Result, error)
 }
 
 // Service is the production Manager.
@@ -180,7 +190,8 @@ type Service struct {
 	now      func() time.Time
 	// log is where a failed listing's real output goes. The run bar gets a
 	// sentence; this keeps the evidence behind it.
-	log *slog.Logger
+	log      *slog.Logger
+	xcodegen *xcodegen.Generator
 
 	mu        sync.Mutex
 	historyMu sync.Mutex
@@ -205,6 +216,9 @@ func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = 
 // WithLogger replaces the logger. Production passes none and gets slog.Default.
 func WithLogger(l *slog.Logger) Option { return func(s *Service) { s.log = l } }
 
+// WithXcodegen replaces the xcodegen runner; tests use it.
+func WithXcodegen(g *xcodegen.Generator) Option { return func(s *Service) { s.xcodegen = g } }
+
 // WithStateDir is where runs are recorded. Production passes the daemon's data
 // dir; a test passes t.TempDir() or nothing.
 func WithStateDir(dir string) Option { return func(s *Service) { s.stateDir = dir } }
@@ -223,6 +237,13 @@ func New(sessions Sessions, runtime Runtime, aoBinary string, opts ...Option) *S
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.xcodegen == nil {
+		stateFile := ""
+		if s.stateDir != "" {
+			stateFile = filepath.Join(s.stateDir, "xcodegen.json")
+		}
+		s.xcodegen = xcodegen.New(stateFile)
 	}
 	return s
 }
@@ -274,13 +295,21 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool
 
 	found, err := xcodeproj.Find(dir)
 	if err != nil {
-		if errors.Is(err, xcodeproj.ErrNoProject) {
-			// Cached like any other answer: a Go worktree is asked this question
-			// every time its session is opened, and the answer never changes.
-			s.remember(id, Project{}, now)
-			return Project{}, nil
+		if !errors.Is(err, xcodeproj.ErrNoProject) {
+			return Project{}, err
 		}
-		return Project{}, err
+		project := Project{}
+		// An xcodegen project that was never generated has no Xcode project to
+		// find yet, and the bar is how it gets one.
+		if xcodegen.HasRootSpec(dir) {
+			project.Xcodegen = s.xcodegenState(ctx, dir)
+			project.SchemesError = "There is no Xcode project yet. Run xcodegen to generate it."
+			project.ConfigurationsError = project.SchemesError
+		}
+		// Cached like any other answer: a Go worktree is asked this question
+		// every time its session is opened, and the answer never changes.
+		s.remember(id, project, now)
+		return project, nil
 	}
 	project := Project{Name: found.Name, Path: found.Path, Kind: string(found.Kind)}
 
@@ -290,7 +319,11 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool
 	var schemes, configurations []string
 	var schemesErr, configurationsErr error
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		project.Xcodegen = s.xcodegenState(ctx, dir)
+	}()
 	go func() {
 		defer wg.Done()
 		schemes, schemesErr = xcodeproj.Schemes(ctx, s.run, dir, found)
@@ -324,6 +357,25 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool
 	}
 	s.remember(id, project, now)
 	return project, nil
+}
+
+func (s *Service) xcodegenState(ctx context.Context, dir string) XcodegenState {
+	installed, specs := s.xcodegen.Specs(ctx, dir)
+	return XcodegenState{Installed: installed, Specs: specs}
+}
+
+// Xcodegen runs `xcodegen generate` over the session's worktree, and forgets the
+// cached listing so the next read sees the project it produced.
+func (s *Service) Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.Result, error) {
+	dir, err := s.workspace(ctx, id)
+	if err != nil {
+		return xcodegen.Result{}, err
+	}
+	result := s.xcodegen.Generate(ctx, dir)
+	s.mu.Lock()
+	delete(s.cached, id)
+	s.mu.Unlock()
+	return result, nil
 }
 
 // explain turns a failed listing into ONE SENTENCE A PERSON CAN ACT ON, and

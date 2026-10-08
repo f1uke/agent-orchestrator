@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcodegen"
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcresultstream"
 )
 
@@ -119,5 +121,36 @@ func TestCurrent_DoesNotRememberARunThatNeverBuilt(t *testing.T) {
 	finishWith(t, svc, "Dev", 0, time.Now())
 	if _, ok := svc.lastBuild("nter", "Nter", "Dev"); ok {
 		t.Fatal("a run with no successful build has no duration to estimate from")
+	}
+}
+
+func TestProject_ShowsTheBarForAnXcodegenProjectThatWasNeverGenerated(t *testing.T) {
+	dir := worktree(t)
+	if err := os.WriteFile(filepath.Join(dir, "project.yml"), []byte("name: Demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(fakeSessions{path: dir, found: true}, &fakeRuntime{}, "ao",
+		WithXcodegen(xcodegen.New("", xcodegen.WithBinary(func() (string, error) { return "", exec.ErrNotFound }))))
+	project, err := svc.Project(context.Background(), "mer-9", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.Name != "" || len(project.Xcodegen.Specs) != 1 || project.SchemesError == "" {
+		t.Fatalf("project = %+v, want no Xcode project, one spec, and why there is nothing to build", project)
+	}
+}
+
+func TestProject_IgnoresASpecDeepInANonIOSRepository(t *testing.T) {
+	dir := worktree(t, "backend/internal/xctest")
+	if err := os.WriteFile(filepath.Join(dir, "backend/internal/xctest/project.yml"), []byte("name: Demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(fakeSessions{path: dir, found: true}, &fakeRuntime{}, "ao")
+	project, err := svc.Project(context.Background(), "mer-9", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.Name != "" || len(project.Xcodegen.Specs) != 0 {
+		t.Fatalf("project = %+v, want nothing: a test fixture's spec is not this repository's app", project)
 	}
 }

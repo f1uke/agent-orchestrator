@@ -19,6 +19,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	projectsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/project"
+	"github.com/aoagents/agent-orchestrator/backend/internal/xcodegen"
 )
 
 // Build reflects the Go contract types and the operation registry below into
@@ -1736,6 +1737,18 @@ func iosRunOperations() []operation {
 			resps: []respUnit{
 				{http.StatusCreated, controllers.StartIOSRunResponse{}},
 				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/xcodegen", id: "runXcodegen", tag: "sessions",
+			summary:    "Run xcodegen generate in every directory of the session's worktree that holds a project.yml",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusOK, xcodegen.Result{}},
 				{http.StatusNotFound, envelope.APIError{}},
 				{http.StatusUnprocessableEntity, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},

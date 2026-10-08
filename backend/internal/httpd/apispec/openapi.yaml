@@ -7032,6 +7032,52 @@ paths:
       summary: Search the contents of every file in the session's workspace
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/xcodegen:
+    post:
+      operationId: runXcodegen
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/XcodegenResult'
+          description: OK
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Run xcodegen generate in every directory of the session's worktree
+        that holds a project.yml
+      tags:
+      - sessions
   /api/v1/sessions/cleanup:
     post:
       operationId: cleanupSessions
@@ -11130,12 +11176,17 @@ components:
           type: array
         schemesError:
           type: string
+        xcodegen:
+          $ref: '#/components/schemas/IosrunXcodegenState'
+          description: The xcodegen specs in this worktree and whether each project
+            is behind its spec.
       required:
       - name
       - path
       - kind
       - schemes
       - configurations
+      - xcodegen
       type: object
     IosrunRun:
       properties:
@@ -11215,6 +11266,18 @@ components:
       - udid
       - state
       - startedAt
+      type: object
+    IosrunXcodegenState:
+      properties:
+        installed:
+          type: boolean
+        specs:
+          items:
+            $ref: '#/components/schemas/XcodegenSpec'
+          type: array
+      required:
+      - installed
+      - specs
       type: object
     JiraAttachment:
       properties:
@@ -15172,6 +15235,52 @@ components:
       - contentHash
       - size
       - changedLines
+      type: object
+    XcodegenDirResult:
+      properties:
+        dir:
+          type: string
+        exitCode:
+          type:
+          - "null"
+          - integer
+        ok:
+          type: boolean
+        output:
+          type: string
+      required:
+      - dir
+      - ok
+      - exitCode
+      - output
+      type: object
+    XcodegenResult:
+      properties:
+        results:
+          items:
+            $ref: '#/components/schemas/XcodegenDirResult'
+          type: array
+        root:
+          type: string
+        status:
+          enum:
+          - not-installed
+          - no-specs
+          - ran
+          type: string
+      required:
+      - status
+      - results
+      type: object
+    XcodegenSpec:
+      properties:
+        dir:
+          type: string
+        stale:
+          type: boolean
+      required:
+      - dir
+      - stale
       type: object
     XcresultstreamCounts:
       properties:

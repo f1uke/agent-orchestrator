@@ -36,6 +36,7 @@ const project = (over: Record<string, unknown> = {}) => ({
 	// configuration without choosing one. The no-Debug project - which is the
 	// real one this feature exists for - is its own test below.
 	configurations: ["Debug", "Release"],
+	xcodegen: { installed: true, specs: [] },
 	...over,
 });
 
@@ -531,5 +532,64 @@ describe("IosRunBar", () => {
 		await userEvent.keyboard("{Escape}");
 		await userEvent.click(screen.getByRole("button", { name: "Build configuration to run" }));
 		await waitFor(() => expect(refreshes()).toBe(2));
+	});
+
+	it("has no xcodegen button on a project with no spec", async () => {
+		answer();
+		renderBar();
+		await screen.findByRole("button", { name: /^Run/ });
+		expect(screen.queryByRole("button", { name: /xcodegen/ })).not.toBeInTheDocument();
+	});
+
+	it("marks xcodegen when a spec changed since the project was generated", async () => {
+		answer({ ios: { project: project({ xcodegen: { installed: true, specs: [{ dir: "NterApp", stale: true }] } }) } });
+		renderBar();
+		const button = await screen.findByRole("button", { name: "Run xcodegen (the project is out of date)" });
+		expect(button).toHaveAttribute("title", expect.stringContaining("NterApp/project.yml changed"));
+		expect(screen.getByTestId("xcodegen-stale-dot")).toBeInTheDocument();
+	});
+
+	it("shows no dot on a project that matches its spec", async () => {
+		answer({ ios: { project: project({ xcodegen: { installed: true, specs: [{ dir: "NterApp", stale: false }] } }) } });
+		renderBar();
+		await screen.findByRole("button", { name: "Run xcodegen" });
+		expect(screen.queryByTestId("xcodegen-stale-dot")).not.toBeInTheDocument();
+	});
+
+	it("runs xcodegen for the session and shows per-directory results", async () => {
+		answer({ ios: { project: project({ xcodegen: { installed: true, specs: [{ dir: "NterApp", stale: true }] } }) } });
+		postMock.mockResolvedValue({
+			data: { status: "ran", root: "/w", results: [{ dir: "NterApp", ok: true, exitCode: 0, output: "Created project" }] },
+		});
+		renderBar();
+		await userEvent.click(await screen.findByRole("button", { name: /Run xcodegen/ }));
+		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/xcodegen", { params: { path: { sessionId: SESSION } } });
+		expect(await screen.findByText("Ran in 1 directory · 1/1 succeeded.")).toBeInTheDocument();
+	});
+
+	it("says so when xcodegen is not installed", async () => {
+		answer({ ios: { project: project({ xcodegen: { installed: false, specs: [{ dir: "NterApp", stale: false }] } }) } });
+		postMock.mockResolvedValue({ data: { status: "not-installed", results: [] } });
+		renderBar();
+		await userEvent.click(await screen.findByRole("button", { name: "Run xcodegen" }));
+		expect(await screen.findByText(/isn't installed or isn't on your PATH/)).toBeInTheDocument();
+		expect(screen.getByText("brew install xcodegen")).toBeInTheDocument();
+	});
+
+	it("renders for an xcodegen project whose Xcode project was never generated", async () => {
+		answer({
+			ios: {
+				project: project({
+					name: "",
+					schemes: [],
+					configurations: [],
+					schemesError: "There is no Xcode project yet. Run xcodegen to generate it.",
+					xcodegen: { installed: true, specs: [{ dir: ".", stale: true }] },
+				}),
+			},
+		});
+		renderBar();
+		expect(await screen.findByRole("button", { name: /Run xcodegen/ })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute("title", "There is no Xcode project yet. Run xcodegen to generate it.");
 	});
 });

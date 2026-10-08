@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Play, Terminal, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Play, Terminal, Wrench, XCircle } from "lucide-react";
 import {
 	useIosProject,
 	useRefreshIosProject,
+	useRunXcodegen,
 	useStartIosRun,
 	type IosProject,
 	type IosRun,
@@ -17,6 +18,7 @@ import { cn } from "../lib/utils";
 import type { TerminalTarget } from "../types/terminal";
 import { SimDevicePicker } from "./SimDevicePicker";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { XcodegenResultSheet, type XcodegenViewState } from "./XcodegenResultSheet";
 
 /**
  * The iOS run bar: pick a simulator and an app environment, press Run, watch it
@@ -72,7 +74,7 @@ export function IosRunBar({
 	// The device list is only asked for once the bar is really rendering, which
 	// on a non-iOS project is never. `enabled` is what keeps a Go worktree from
 	// polling simctl every five seconds for a control it does not have.
-	const hasProject = Boolean(project?.name);
+	const hasProject = Boolean(project?.name) || (project?.xcodegen?.specs?.length ?? 0) > 0;
 	const devices = useSimDevices(hasProject);
 	// A simulator is a machine-wide resource, so the session holding one is
 	// often working on something else entirely. This is what lets the picker
@@ -94,6 +96,7 @@ export function IosRunBar({
 	const schemes = useMemo(() => project?.schemes ?? [], [project?.schemes]);
 	// Same treatment, same reason: the ONE reading of the configuration list.
 	const configurations = useMemo(() => project?.configurations ?? [], [project?.configurations]);
+	const specs = useMemo(() => project?.xcodegen?.specs ?? [], [project?.xcodegen?.specs]);
 	const allDevices = useMemo(() => devices.data?.devices ?? [], [devices.data]);
 	// A base is a template AO clones from and never a run target, so it takes
 	// no part in the obvious-candidate rule below.
@@ -136,7 +139,7 @@ export function IosRunBar({
 	}, [configuration, configurations]);
 
 	if (isLoading && !data) return null;
-	if (!project?.name) return null;
+	if (!project || !hasProject) return null;
 
 	const watchingRun = terminalTarget.kind === "run";
 	const noSimulators = !devices.isLoading && allDevices.length === 0;
@@ -184,6 +187,7 @@ export function IosRunBar({
 				Run
 			</button>
 
+			{specs.length > 0 ? <XcodegenButton sessionId={sessionId} specs={specs} /> : null}
 			<ChoicePicker
 				chosen={chosenScheme}
 				choices={schemes}
@@ -483,6 +487,53 @@ function RunChip({
 			{state.icon}
 			{watching ? "Back to agent" : state.label}
 		</button>
+	);
+}
+
+/**
+ * Runs xcodegen over the worktree. The dot says a spec, a spec it includes, or
+ * the source files it lists changed since the project was last generated.
+ */
+function XcodegenButton({ sessionId, specs }: { sessionId: string; specs: { dir: string; stale: boolean }[] }) {
+	const [open, setOpen] = useState(false);
+	const [state, setState] = useState<XcodegenViewState | null>(null);
+	const generate = useRunXcodegen(sessionId);
+	const stale = specs.filter((spec) => spec.stale).map((spec) => (spec.dir === "." ? "project.yml" : `${spec.dir}/project.yml`));
+	const title = stale.length
+		? `${stale.join(", ")} changed since the project was last generated. Run xcodegen`
+		: "Run xcodegen";
+	return (
+		<>
+			<button
+				aria-label={stale.length ? "Run xcodegen (the project is out of date)" : "Run xcodegen"}
+				className="relative flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-overlay hover:text-foreground disabled:cursor-not-allowed"
+				disabled={generate.isPending}
+				onClick={() => {
+					setState({ phase: "running" });
+					setOpen(true);
+					generate.mutate(undefined, {
+						onSuccess: (result) => setState({ phase: "done", result }),
+						onError: () => setState({ phase: "error" }),
+					});
+				}}
+				title={title}
+				type="button"
+			>
+				{generate.isPending ? (
+					<Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+				) : (
+					<Wrench aria-hidden className="size-3.5" />
+				)}
+				{stale.length && !generate.isPending ? (
+					<span
+						aria-hidden
+						className="absolute top-1 right-1 size-1.5 rounded-full bg-warning ring-2 ring-raised"
+						data-testid="xcodegen-stale-dot"
+					/>
+				) : null}
+			</button>
+			<XcodegenResultSheet onOpenChange={setOpen} open={open} state={state} />
+		</>
 	);
 }
 
