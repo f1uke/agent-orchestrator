@@ -168,6 +168,7 @@ func newSessionCommand(ctx *commandContext) *cobra.Command {
 	cmd.AddCommand(newSessionCleanupCommand(ctx))
 	cmd.AddCommand(newSessionClaimPRCommand(ctx))
 	cmd.AddCommand(newSessionSetBranchCommand(ctx))
+	cmd.AddCommand(newSessionSetClaudeProfileCommand(ctx))
 	return cmd
 }
 
