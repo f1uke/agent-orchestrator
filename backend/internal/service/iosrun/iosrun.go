@@ -45,6 +45,9 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcresultstream"
 )
 
+// xcodegenTimeout bounds a generate over a whole worktree.
+const xcodegenTimeout = 15 * time.Minute
+
 // listingTTL is how long a project listing is reused. `xcodebuild -list` takes
 // seconds on a real project (~13 s cold on nter-ios-app) and the answer changes
 // when somebody edits the project file, which is rarely - so the bar opens
@@ -426,7 +429,11 @@ func (s *Service) Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.R
 	if err != nil {
 		return xcodegen.Result{}, err
 	}
-	result := s.xcodegen.Generate(ctx, dir)
+	// Not the request's context: the HTTP timeout is a minute, and a spec's
+	// postGenCommand (nter's runs pod install) can take longer.
+	genCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), xcodegenTimeout)
+	defer cancel()
+	result := s.xcodegen.Generate(genCtx, dir)
 	s.mu.Lock()
 	delete(s.cached, id)
 	s.mu.Unlock()
@@ -546,13 +553,15 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, req StartReque
 	}
 
 	handle := HandleID(id)
-	s.clearRun(id)
 	// Tear down whatever is under the handle first. Destroy is idempotent, so
 	// this is equally "no pane yet" and "the last run is still on screen", and
 	// it is what keeps tmux's new-session from failing on a keep-alive shell.
 	if err := s.runtime.Destroy(ctx, ports.RuntimeHandle{ID: handle}); err != nil {
 		return Run{}, fmt.Errorf("ios run: clear the previous pane: %w", err)
 	}
+	// Only once the previous command is gone, or it could still write its
+	// verdict over the new run's.
+	s.clearRun(id)
 	// --attach keeps the command with the app it launched, so Stop always has a
 	// process to reach: the build while it builds, the app once it runs.
 	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme, "--configuration", configuration}

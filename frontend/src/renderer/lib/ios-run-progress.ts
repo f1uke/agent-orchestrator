@@ -90,3 +90,22 @@ export function runTiming(run: IosRun, now: number): string | null {
 	}
 	return run.buildSeconds ? `last build ${formatDuration(run.buildSeconds)}` : null;
 }
+
+export type RingState = { key: string; fraction?: number; real: boolean };
+
+/**
+ * What the ring shows next: never less than before for the same run, except
+ * that the build's own counts replace an estimate as soon as they arrive. The
+ * two are different scales, and an estimate from a short incremental build
+ * would otherwise hold the ring near full while the counts start low.
+ */
+export function nextRing(prior: RingState | null, view: RunProgressView | null, key: string): RingState {
+	const same = prior?.key === key ? prior : null;
+	const value = view?.fraction;
+	if (value === undefined) return same ?? { key, real: false };
+	const real = view?.kind === "real";
+	if (!same || same.fraction === undefined || (real && !same.real) || (real === same.real && value > same.fraction)) {
+		return { key, fraction: value, real };
+	}
+	return same;
+}

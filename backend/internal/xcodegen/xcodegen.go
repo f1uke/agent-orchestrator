@@ -251,13 +251,18 @@ func (g *Generator) stale(ctx context.Context, binary, dir string) bool {
 	if rec, ok := records[dir]; ok && rec.ProjectModTime.Equal(info.ModTime()) {
 		return rec.Fingerprint != fingerprint
 	}
-	if specsNewerThan(dir, info.ModTime()) {
+	if specsNewerThan(dir, info.ModTime().Add(checkoutSkew)) {
 		return true
 	}
 	records[dir] = record{ProjectModTime: info.ModTime(), Fingerprint: fingerprint}
 	g.write(records)
 	return false
 }
+
+// checkoutSkew is how much newer than the project a spec may be and still count
+// as written with it: git checks out a committed X.xcodeproj before project.yml,
+// a fraction of a millisecond apart.
+const checkoutSkew = 2 * time.Second
 
 // baseline records the spec as it is right after a successful generate.
 func (g *Generator) baseline(ctx context.Context, binary, dir string) {

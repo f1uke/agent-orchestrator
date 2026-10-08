@@ -759,4 +759,23 @@ describe("IosRunBar", () => {
 		);
 		expect(window.localStorage.getItem(`ao-ios-run-console:${SESSION}`)).toBe("1");
 	});
+
+	it("leads a failed run with no compiler errors to the terminal, not to its warnings", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "failed",
+			summary: "`simctl install` failed on iPhone 17 Pro Max.",
+			startedAt: "2026-09-18T10:00:00Z",
+			warnings: 3,
+			issues: [{ severity: "warning", message: "unused" }],
+		};
+		answer({ ios: { project: project(), run } });
+		const { onShowRun } = renderBar();
+		await userEvent.click(await screen.findByRole("button", { name: /NterDev \(Debug\) failed/ }));
+		expect(onShowRun).toHaveBeenCalledWith("iosrun-mer-9");
+		expect(screen.queryByText("Build log")).not.toBeInTheDocument();
+	});
 });

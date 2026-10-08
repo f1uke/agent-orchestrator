@@ -53,8 +53,8 @@ function IssueRow({ issue, onOpen }: { issue: Issue; onOpen?: (file: WorkspaceFi
 	);
 }
 
-function LogExcerpt({ sessionId, open }: { sessionId: string; open: boolean }) {
-	const log = useIosBuildLog(sessionId, open);
+function LogExcerpt({ open, sessionId, startedAt }: { open: boolean; sessionId: string; startedAt: string }) {
+	const log = useIosBuildLog(sessionId, startedAt, open);
 	const errorRef = useRef<HTMLDivElement | null>(null);
 	useEffect(() => {
 		errorRef.current?.scrollIntoView({ block: "center" });
@@ -129,7 +129,7 @@ export function BuildIssuesSheet({
 			<SheetContent className="w-full gap-0 sm:max-w-xl" side="right">
 				<SheetHeader className="border-b border-border">
 					<SheetTitle>{builtName(run)} failed</SheetTitle>
-					<SheetDescription>{issueCounts(run) || run.summary}</SheetDescription>
+					<SheetDescription>{[run.summary, issueCounts(run)].filter(Boolean).join(" · ")}</SheetDescription>
 				</SheetHeader>
 				<div className="flex-1 space-y-4 overflow-y-auto p-4">
 					{errors.length ? (
@@ -146,7 +146,7 @@ export function BuildIssuesSheet({
 					) : null}
 					<section>
 						<h3 className="mb-1 text-[12px] font-medium text-foreground">Build log</h3>
-						<LogExcerpt open={open} sessionId={sessionId} />
+						<LogExcerpt open={open} sessionId={sessionId} startedAt={run.startedAt} />
 					</section>
 					{warnings.length ? (
 						<details>

@@ -25,7 +25,14 @@ import { useSessionNames } from "../hooks/useSessionNames";
 import { useSimDevices } from "../hooks/useSimDevices";
 import { useSimPower } from "../hooks/useSimPower";
 import type { Task } from "../lib/crew";
-import { builtName, runProgress, runTiming } from "../lib/ios-run-progress";
+import {
+	builtName,
+	nextRing,
+	type RingState,
+	runProgress,
+	runTiming,
+	type RunProgressView,
+} from "../lib/ios-run-progress";
 import type { WorkspaceFileOpen } from "../lib/open-workspace-file";
 import { isBase, isWatchable, sessionDevices } from "../lib/sim-devices";
 import { cn } from "../lib/utils";
@@ -514,11 +521,11 @@ function RunChip({
 	const built = builtName(run);
 	const now = useNow(run.state === "running");
 	const progress = run.state === "running" ? runProgress(run, now) : null;
-	const fraction = useMonotonic(progress?.fraction, run.startedAt);
+	const fraction = useRingFraction(progress, run.startedAt);
 	const timing = runTiming(run, now);
 	const [issuesOpen, setIssuesOpen] = useState(false);
 	const counts = run.state === "failed" ? issueCounts(run) : "";
-	const hasIssues = run.state === "failed" && (run.issues?.length ?? 0) > 0;
+	const hasIssues = run.state === "failed" && (run.errors ?? 0) > 0;
 	const state = {
 		running: {
 			icon:
@@ -706,9 +713,7 @@ function XcodegenButton({ sessionId, specs }: { sessionId: string; specs: { dir:
 	const stale = specs
 		.filter((spec) => spec.stale)
 		.map((spec) => (spec.dir === "." ? "project.yml" : `${spec.dir}/project.yml`));
-	const title = stale.length
-		? `The Xcode project is behind ${stale.join(", ")}. Run xcodegen`
-		: "Run xcodegen";
+	const title = stale.length ? `The Xcode project is behind ${stale.join(", ")}. Run xcodegen` : "Run xcodegen";
 	return (
 		<>
 			<button
@@ -777,12 +782,10 @@ function useNow(enabled: boolean): number {
 	return now;
 }
 
-/** The largest value seen for `key`: progress may switch source mid-build and must never go backwards. */
-function useMonotonic(value: number | undefined, key: string): number | undefined {
-	const seen = useRef<{ key: string; max: number } | null>(null);
-	if (value === undefined) return seen.current?.key === key ? seen.current.max : undefined;
-	if (seen.current?.key !== key || value > seen.current.max) seen.current = { key, max: value };
-	return seen.current.max;
+function useRingFraction(view: RunProgressView | null, key: string): number | undefined {
+	const seen = useRef<RingState | null>(null);
+	seen.current = nextRing(seen.current, view, key);
+	return seen.current?.fraction;
 }
 
 const RING_RADIUS = 5.25;

@@ -107,9 +107,9 @@ export function useStopIosRun(sessionId: string, onProblem: (message: string) =>
 
 export type IosBuildLog = components["schemas"]["IosrunBuildLog"];
 
-export function useIosBuildLog(sessionId: string, enabled: boolean) {
+export function useIosBuildLog(sessionId: string, startedAt: string, enabled: boolean) {
 	return useQuery<IosBuildLog | null>({
-		queryKey: ["ios-run-log", sessionId],
+		queryKey: ["ios-run-log", sessionId, startedAt],
 		enabled,
 		staleTime: 0,
 		queryFn: async ({ signal }) => {

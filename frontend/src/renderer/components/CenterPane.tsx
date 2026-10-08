@@ -287,6 +287,7 @@ export function CenterPane({
 			    build into the same DerivedData from two places at once. */}
 			{session && target.kind !== "reviewer" && onSelectRunTerminal ? (
 				<IosRunBar
+					key={session.id}
 					onOpenWorkspaceFile={onOpenWorkspaceFile}
 					onShowAgent={() => onSelectWorkerTerminal?.()}
 					onShowRun={onSelectRunTerminal}

@@ -40,6 +40,9 @@ type fakeRuntime struct {
 	alive     bool
 	aliveErr  error
 	createErr error
+	// onDestroy runs as a pane is torn down: the command in it may still be
+	// writing as it dies.
+	onDestroy func()
 }
 
 func (f *fakeRuntime) Create(_ context.Context, cfg ports.RuntimeConfig) (ports.RuntimeHandle, error) {
@@ -56,6 +59,9 @@ func (f *fakeRuntime) Destroy(_ context.Context, h ports.RuntimeHandle) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.destroys = append(f.destroys, h.ID)
+	if f.onDestroy != nil {
+		f.onDestroy()
+	}
 	return nil
 }
 

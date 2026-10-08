@@ -237,3 +237,16 @@ func TestStaleAgainstTheRealXcodegen(t *testing.T) {
 		t.Fatal("the real cache key lists source files, so an added file is stale")
 	}
 }
+
+func TestSpecsTrustsAProjectCheckedOutWithItsSpec(t *testing.T) {
+	g, _ := newGenerator(t)
+	root := project(t)
+	var none []string
+	if _, _, err := fakeXcodegen(t, &none)(context.Background(), filepath.Join(root, "App"), "xcodegen", "generate"); err != nil {
+		t.Fatal(err)
+	}
+	later(t, filepath.Join(root, "App", SpecFile), time.Millisecond)
+	if staleOf(t, g, root) {
+		t.Fatal("git writes a committed project a moment before project.yml; that is not a stale project")
+	}
+}

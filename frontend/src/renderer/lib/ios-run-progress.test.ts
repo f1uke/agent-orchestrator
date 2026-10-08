@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IosRun } from "../hooks/useIosProject";
-import { formatDuration, runProgress, runTiming } from "./ios-run-progress";
+import { formatDuration, nextRing, runProgress, runTiming } from "./ios-run-progress";
 
 const T0 = Date.parse("2026-10-08T09:00:00Z");
 
@@ -85,5 +85,34 @@ describe("runTiming", () => {
 	it("says how long the last build took once the run ended", () => {
 		expect(runTiming(running({ state: "succeeded", stage: undefined, buildSeconds: 102 }), T0)).toBe("last build 1m 42s");
 		expect(runTiming(running({ state: "failed", stage: undefined }), T0)).toBeNull();
+	});
+});
+
+describe("nextRing", () => {
+	const estimate = (fraction: number) => ({ kind: "estimate" as const, fraction, label: "", tooltip: "" });
+	const real = (fraction: number) => ({ kind: "real" as const, fraction, label: "", tooltip: "" });
+
+	it("never goes backwards within one source", () => {
+		let ring = nextRing(null, real(0.4), "run-1");
+		ring = nextRing(ring, real(0.3), "run-1");
+		expect(ring.fraction).toBe(0.4);
+	});
+
+	it("lets the build's own counts replace an estimate that ran ahead", () => {
+		let ring = nextRing(null, estimate(0.6), "run-1");
+		ring = nextRing(ring, real(0.05), "run-1");
+		expect(ring.fraction).toBe(0.05);
+		ring = nextRing(ring, estimate(0.7), "run-1");
+		expect(ring.fraction).toBe(0.05);
+	});
+
+	it("starts over for a new run", () => {
+		const ring = nextRing(nextRing(null, real(0.9), "run-1"), real(0.1), "run-2");
+		expect(ring.fraction).toBe(0.1);
+	});
+
+	it("keeps the last value while a step reports none", () => {
+		const ring = nextRing(nextRing(null, real(0.5), "run-1"), null, "run-1");
+		expect(ring.fraction).toBe(0.5);
 	});
 });

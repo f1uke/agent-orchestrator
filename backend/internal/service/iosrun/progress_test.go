@@ -355,3 +355,45 @@ func TestCurrent_EstimatesACleanBuildFromTheLastCleanBuild(t *testing.T) {
 		}
 	}
 }
+
+func TestStart_ClearsTheVerdictAnInterruptedCommandWroteAsItDied(t *testing.T) {
+	rt := &fakeRuntime{alive: true}
+	svc := stateful(t, worktree(t, "Nter.xcodeproj"), t.TempDir(), rt)
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev"}); err != nil {
+		t.Fatal(err)
+	}
+	rt.onDestroy = func() {
+		writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunStopped, Summary: "Stopped while building Nter."})
+	}
+	if _, err := svc.Start(context.Background(), "mer-9", StartRequest{Scheme: "Nter", Configuration: "Dev"}); err != nil {
+		t.Fatal(err)
+	}
+	if run, _, _ := svc.Current(context.Background(), "mer-9"); run.State != RunRunning {
+		t.Fatalf("state %q: the old command's verdict landed on the new run", run.State)
+	}
+}
+
+func TestXcodegen_OutlivesTheRequestThatStartedIt(t *testing.T) {
+	dir := worktree(t, "Nter.xcodeproj")
+	if err := os.WriteFile(filepath.Join(dir, "project.yml"), []byte("name: Nter\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var sawCancelled bool
+	gen := xcodegen.New("",
+		xcodegen.WithBinary(func() (string, error) { return "/bin/xcodegen", nil }),
+		xcodegen.WithExec(func(ctx context.Context, _, _ string, args ...string) ([]byte, int, error) {
+			if args[0] == "generate" && ctx.Err() != nil {
+				sawCancelled = true
+			}
+			return nil, 0, nil
+		}))
+	svc := New(fakeSessions{path: dir, found: true}, &fakeRuntime{}, "ao", WithXcodegen(gen))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := svc.Xcodegen(ctx, "mer-9"); err != nil {
+		t.Fatal(err)
+	}
+	if sawCancelled {
+		t.Fatal("generate ran under the request's context; the HTTP timeout would kill a long pod install")
+	}
+}
