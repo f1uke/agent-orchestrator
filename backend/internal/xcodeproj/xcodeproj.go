@@ -705,10 +705,8 @@ func isWithin(path, dir string) bool {
 	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// derivedDataOwner reads the WorkspacePath Xcode records in a DerivedData
-// folder's info.plist, when it wrote one.
 func derivedDataOwner(dd string) (string, bool) {
-	body, err := os.ReadFile(filepath.Join(dd, "info.plist")) //nolint:gosec // a DerivedData folder's own record
+	body, err := os.ReadFile(filepath.Join(dd, "info.plist"))
 	if err != nil {
 		return "", false
 	}

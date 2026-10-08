@@ -60,7 +60,6 @@ export function SimDevicePicker({
 	task,
 	width = "w-[190px] shrink-0",
 }: {
-	/** The trigger's width classes; the run bar lets it shrink in a narrow pane. */
 	width?: string;
 	chosen: string | null;
 	devices: SimDevice[];

@@ -72,7 +72,6 @@ func TestSimRun_NoBuildCannotBeClean(t *testing.T) {
 	}
 }
 
-// settingsSay makes -showBuildSettings answer with these settings.
 func settingsSay(deps *Deps, settings map[string]string) {
 	inner := deps.CommandOutputInDir
 	deps.CommandOutputInDir = func(ctx context.Context, dir, name string, args ...string) ([]byte, error) {

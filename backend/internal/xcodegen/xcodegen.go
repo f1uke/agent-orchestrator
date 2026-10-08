@@ -56,8 +56,7 @@ type Result struct {
 // code. A missing binary is exec.ErrNotFound.
 type Exec func(ctx context.Context, dir, name string, args ...string) (output []byte, exitCode int, err error)
 
-// skipDir names the directories a spec is never in: dependency checkouts, build
-// output (nter keeps DerivedData in-tree as `derivedDataPath`) and dot dirs.
+// nter keeps DerivedData in-tree as `derivedDataPath`.
 func skipDir(name string) bool {
 	if strings.HasPrefix(name, ".") {
 		return true
@@ -144,7 +143,7 @@ func lookPath() (string, error) {
 }
 
 func runInDir(ctx context.Context, dir, name string, args ...string) ([]byte, int, error) {
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // xcodegen, resolved by this package
+	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
@@ -230,11 +229,8 @@ type record struct {
 	Fingerprint    string    `json:"fingerprint"`
 }
 
-// stale compares xcodegen's own cache key for the spec - the resolved spec with
-// its includes merged, plus every source path it names - with the one recorded
-// when the project file was last written. xcodegen rewrites project.pbxproj on
-// every generate, so a project file newer than the record means somebody
-// generated (in a terminal too) and the record is taken again.
+// xcodegen rewrites project.pbxproj on every generate, so a project file newer
+// than the record means somebody generated (in a terminal too).
 func (g *Generator) stale(ctx context.Context, binary, dir string) bool {
 	fingerprint, name, err := g.fingerprint(ctx, binary, dir)
 	if err != nil {
@@ -251,20 +247,25 @@ func (g *Generator) stale(ctx context.Context, binary, dir string) bool {
 	if rec, ok := records[dir]; ok && rec.ProjectModTime.Equal(info.ModTime()) {
 		return rec.Fingerprint != fingerprint
 	}
-	if specsNewerThan(dir, info.ModTime().Add(checkoutSkew)) {
+	return g.firstSight(records, dir, info.ModTime(), fingerprint)
+}
+
+// firstSight judges a project AO has no record of for its current
+// project.pbxproj: one generated before AO looked, or by a generate it did not
+// run. Its spec cannot be compared with anything, so the files' times decide,
+// and only a project that is not behind becomes the record.
+func (g *Generator) firstSight(records map[string]record, dir string, generated time.Time, fingerprint string) bool {
+	if specsNewerThan(dir, generated.Add(checkoutSkew)) {
 		return true
 	}
-	records[dir] = record{ProjectModTime: info.ModTime(), Fingerprint: fingerprint}
+	records[dir] = record{ProjectModTime: generated, Fingerprint: fingerprint}
 	g.write(records)
 	return false
 }
 
-// checkoutSkew is how much newer than the project a spec may be and still count
-// as written with it: git checks out a committed X.xcodeproj before project.yml,
-// a fraction of a millisecond apart.
+// git checks out a committed X.xcodeproj before project.yml, a fraction of a millisecond apart.
 const checkoutSkew = 2 * time.Second
 
-// baseline records the spec as it is right after a successful generate.
 func (g *Generator) baseline(ctx context.Context, binary, dir string) {
 	fingerprint, name, err := g.fingerprint(ctx, binary, dir)
 	if err != nil {
@@ -281,9 +282,6 @@ func (g *Generator) baseline(ctx context.Context, binary, dir string) {
 	g.write(records)
 }
 
-// fingerprint runs `xcodegen cache`, which writes the cache key without
-// generating anything (0.45 s on nter), and returns its hash and the project
-// name the spec declares.
 func (g *Generator) fingerprint(ctx context.Context, binary, dir string) (string, string, error) {
 	f, err := os.CreateTemp(g.tempDir(), "ao-xcodegen-cache-")
 	if err != nil {
@@ -296,7 +294,7 @@ func (g *Generator) fingerprint(ctx context.Context, binary, dir string) (string
 	if err != nil || code != 0 {
 		return "", "", fmt.Errorf("xcodegen cache in %s: exit %d: %s", dir, code, strings.TrimSpace(string(out)))
 	}
-	body, err := os.ReadFile(path) //nolint:gosec // this package's own temp file
+	body, err := os.ReadFile(path)
 	if err != nil {
 		return "", "", err
 	}
@@ -308,7 +306,6 @@ func (g *Generator) fingerprint(ctx context.Context, binary, dir string) (string
 	return hex.EncodeToString(sum[:]), name, nil
 }
 
-// cachedProjectName reads `name` from the "# SPEC" JSON section of a cache file.
 func cachedProjectName(cache []byte) string {
 	_, rest, ok := bytes.Cut(cache, []byte("# SPEC\n"))
 	if !ok {
@@ -326,9 +323,6 @@ func cachedProjectName(cache []byte) string {
 	return spec.Name
 }
 
-// specsNewerThan is whether project.yml or any spec it includes changed after t.
-// It is the check for a project generated before AO first looked: a record
-// taken then would bless a spec that was already ahead of it.
 func specsNewerThan(dir string, t time.Time) bool {
 	seen := map[string]bool{}
 	var newer func(path string, depth int) bool
@@ -357,10 +351,8 @@ func specsNewerThan(dir string, t time.Time) bool {
 	return newer(filepath.Join(dir, SpecFile), 0)
 }
 
-// includesOf reads a spec's top-level `include`, which xcodegen accepts as one
-// path, a list of paths, or a list of {path: ...}.
 func includesOf(path string) []string {
-	body, err := os.ReadFile(path) //nolint:gosec // a spec inside the session's worktree
+	body, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}

@@ -105,7 +105,6 @@ func (s *processStream) Close() error {
 	return nil
 }
 
-// Interrupt asks the child to stop, as Ctrl-C would. Close still kills it.
 func (s *processStream) Interrupt() error {
 	if s.cmd.Process == nil {
 		return os.ErrProcessDone

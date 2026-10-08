@@ -40,8 +40,6 @@ type fakeRuntime struct {
 	alive     bool
 	aliveErr  error
 	createErr error
-	// onDestroy runs as a pane is torn down: the command in it may still be
-	// writing as it dies.
 	onDestroy func()
 }
 

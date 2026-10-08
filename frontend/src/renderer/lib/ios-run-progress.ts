@@ -1,12 +1,8 @@
 import type { IosRun } from "../hooks/useIosProject";
 
-export type RunProgressView = {
-	kind: "real" | "estimate" | "indeterminate" | "running";
-	/** 0-1; absent when indeterminate. */
-	fraction?: number;
-	label: string;
-	tooltip: string;
-};
+export type RunProgressView =
+	| { kind: "real" | "estimate"; fraction: number; label: string; tooltip: string }
+	| { kind: "indeterminate" | "running"; label: string; tooltip: string };
 
 const ESTIMATE_CAP = 0.95;
 
@@ -29,7 +25,6 @@ export function builtName(run: Pick<IosRun, "scheme" | "configuration">): string
 	return run.configuration ? `${run.scheme} (${run.configuration})` : run.scheme;
 }
 
-/** What the run bar shows for a run that is still going, at time `now` (ms). */
 export function runProgress(run: IosRun, now: number): RunProgressView {
 	const name = builtName(run);
 	switch (run.stage) {
@@ -81,7 +76,6 @@ function buildProgress(run: IosRun, now: number, name: string): RunProgressView 
 	return { kind: "indeterminate", label: phase, tooltip };
 }
 
-/** Elapsed time while a run works towards launching, and the build's duration once it has ended. */
 export function runTiming(run: IosRun, now: number): string | null {
 	if (run.state === "running") {
 		if (run.stage === "app-running") return null;
@@ -93,19 +87,12 @@ export function runTiming(run: IosRun, now: number): string | null {
 
 export type RingState = { key: string; fraction?: number; real: boolean };
 
-/**
- * What the ring shows next: never less than before for the same run, except
- * that the build's own counts replace an estimate as soon as they arrive. The
- * two are different scales, and an estimate from a short incremental build
- * would otherwise hold the ring near full while the counts start low.
- */
 export function nextRing(prior: RingState | null, view: RunProgressView | null, key: string): RingState {
 	const same = prior?.key === key ? prior : null;
-	const value = view?.fraction;
-	if (value === undefined) return same ?? { key, real: false };
-	const real = view?.kind === "real";
-	if (!same || same.fraction === undefined || (real && !same.real) || (real === same.real && value > same.fraction)) {
-		return { key, fraction: value, real };
-	}
-	return same;
+	if (!view || (view.kind !== "real" && view.kind !== "estimate")) return same ?? { key, real: false };
+	const next = { key, fraction: view.fraction, real: view.kind === "real" };
+	if (!same || same.fraction === undefined) return next;
+	const countsReplaceAnEstimate = next.real && !same.real;
+	const sameSourceMovedOn = next.real === same.real && next.fraction > same.fraction;
+	return countsReplaceAnEstimate || sameSourceMovedOn ? next : same;
 }

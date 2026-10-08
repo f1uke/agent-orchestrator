@@ -97,9 +97,7 @@ type simRunResult struct {
 	// project can disable signing in its OWN settings, and because a run that
 	// installs an app with no entitlements must never again be reported as a
 	// plain success. See simUnentitledWarning.
-	Warning string `json:"warning,omitempty"`
-	// BuildOnly is a run that built and stopped there; NoBuild one that ran
-	// the last build.
+	Warning   string       `json:"warning,omitempty"`
 	BuildOnly bool         `json:"buildOnly,omitempty"`
 	NoBuild   bool         `json:"noBuild,omitempty"`
 	Lease     simLeaseView `json:"lease"`
@@ -157,8 +155,6 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			// reads when a build fails, and holding them back until the end
 			// would make a three-minute build look like a hang. --json governs
 			// the RESULT, which is written last.
-			// Ctrl-C, or the run bar's Stop, ends the build or the app cleanly
-			// rather than killing this process out from under xcodebuild.
 			if opts.noBuild && (opts.buildOnly || opts.clean) {
 				return usageError{errors.New("--no-build runs the last build, so it cannot be combined with --build-only or --clean")}
 			}
@@ -566,13 +562,9 @@ func sweepResultBundles(parent string, now time.Time) {
 	}
 }
 
-// buildStopGrace is how long an interrupted xcodebuild gets to cancel its build
-// before it is killed.
 const buildStopGrace = 20 * time.Second
 
 func (c *commandContext) streamBuild(ctx context.Context, out io.Writer, name string, args ...string) error {
-	// The child outlives the context on purpose: a stop interrupts it and lets
-	// it cancel its build service work, and only kills it if it will not go.
 	stream, err := c.deps.StartStream(context.WithoutCancel(ctx), name, args...)
 	if err != nil {
 		return fmt.Errorf("could not start %s: %w", name, err)
@@ -808,8 +800,6 @@ func writeSimRun(out io.Writer, result simRunResult) error {
 	return err
 }
 
-// buildSimApp builds the scheme, reporting its progress to the run bar when the
-// bar asked for it.
 func (c *commandContext) buildSimApp(
 	ctx context.Context, progress io.Writer, project xcodeproj.Project, scheme, configuration string, device simDevice, report *runReport,
 ) error {
@@ -856,9 +846,6 @@ func (c *commandContext) buildSimApp(
 	return nil
 }
 
-// replayFailedOutput prints the failed tasks' output, which xcodebuild keeps off
-// stdout when it reports progress (see xcodeproj.ProgressFlag). It goes through
-// the signing watch so a signing failure is still recognised.
 func (c *commandContext) replayFailedOutput(ctx context.Context, out io.Writer, resultBundle string) {
 	log, err := c.deps.CommandOutput(ctx, "xcrun", "xcresulttool", "get", "log", "--path", resultBundle, "--type", "build")
 	if err != nil {
@@ -871,8 +858,6 @@ func (c *commandContext) replayFailedOutput(ctx context.Context, out io.Writer, 
 	noteProgress(out, "\nThe failed tasks printed:\n\n%s", recovered)
 }
 
-// cleanDerivedData deletes this worktree's own DerivedData folder, and only it:
-// see xcodeproj.OwnDerivedData for what counts as its own.
 func (c *commandContext) cleanDerivedData(ctx context.Context, progress io.Writer, dir string, project xcodeproj.Project, scheme, configuration string) error {
 	buildDir, err := xcodeproj.BuildDir(ctx, c.deps.CommandOutputInDir, dir, project, scheme, configuration)
 	if err != nil {
@@ -889,7 +874,6 @@ func (c *commandContext) cleanDerivedData(ctx context.Context, progress io.Write
 	return nil
 }
 
-// stoppedError is a run the human stopped: a sentence, not a failure's cause.
 type stoppedError struct{ message string }
 
 func (e stoppedError) Error() string { return e.message }

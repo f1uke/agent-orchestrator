@@ -45,8 +45,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcresultstream"
 )
 
-// xcodegenTimeout bounds a generate over a whole worktree.
-const xcodegenTimeout = 15 * time.Minute
+const xcodegenOutlivesTheRequest = 15 * time.Minute
 
 // listingTTL is how long a project listing is reused. `xcodebuild -list` takes
 // seconds on a real project (~13 s cold on nter-ios-app) and the answer changes
@@ -59,6 +58,9 @@ const xcodegenTimeout = 15 * time.Minute
 // because opening either dropdown asks with refresh=true, which skips this
 // entirely. See Project.
 const listingTTL = time.Minute
+
+// listingTimeout bounds one listing; ~13 s cold on nter-ios-app.
+const listingTimeout = 2 * time.Minute
 
 // Sessions is the slice of the session store this package needs: where a
 // session's worktree is. The SQLite store satisfies it.
@@ -129,13 +131,10 @@ type Mode string
 
 // The ways to run, one per item of the run bar's menu plus Run itself.
 const (
-	ModeRun Mode = "run"
-	// ModeRunWithoutBuilding installs and launches what the last build left.
+	ModeRun                Mode = "run"
 	ModeRunWithoutBuilding Mode = "run-without-building"
-	// ModeBuild builds and touches no device.
-	ModeBuild Mode = "build"
-	// ModeCleanBuild deletes this worktree's own DerivedData, then runs.
-	ModeCleanBuild Mode = "clean-build"
+	ModeBuild              Mode = "build"
+	ModeCleanBuild         Mode = "clean-build"
 )
 
 var modeFlags = map[Mode]string{
@@ -151,8 +150,7 @@ type StartRequest struct {
 	Configuration string
 	UDID          string
 	Mode          Mode
-	// Console launches the app with its stdout and stderr shown in the run's pane.
-	Console bool
+	Console       bool
 }
 
 // Run is a build the bar started, and what became of it.
@@ -186,22 +184,16 @@ type Run struct {
 	StartedAt time.Time `json:"startedAt"`
 	// FinishedAt is when the command reported its result; absent while running,
 	// and absent for a run that was stopped without reporting one.
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	// Stage is the step a running run is on, as the command last reported it.
-	Stage          Stage          `json:"stage,omitempty" enum:"preparing,booting,building,installing,launching,app-running" description:"The step a running run is on. Absent once it has ended."`
-	StageStartedAt *time.Time     `json:"stageStartedAt,omitempty"`
-	BuildStartedAt *time.Time     `json:"buildStartedAt,omitempty" description:"When the build itself started, which the estimate is measured from."`
-	Build          *BuildProgress `json:"build,omitempty" description:"How far the build is, while it runs."`
-	// LastBuildSeconds is how long the last successful build of the same
-	// project, scheme and configuration took: what the bar estimates against
-	// when the build's own counts are not available.
-	LastBuildSeconds float64 `json:"lastBuildSeconds,omitempty" description:"How long the last successful build of the same project, scheme and configuration took. Present while running when there is one."`
-	BuildSeconds     float64 `json:"buildSeconds,omitempty" description:"How long this run's build took, when it succeeded."`
-	Errors           int     `json:"errors,omitempty" description:"How many errors the build reported."`
-	Warnings         int     `json:"warnings,omitempty" description:"How many warnings the build reported."`
-	// Issues carry file paths relative to the session's worktree when they are
-	// inside it, which is what the in-app editor opens.
-	Issues []xcresultstream.Issue `json:"issues,omitempty" description:"The build's first errors, then its first warnings, each with its file and one-based line when it has one."`
+	FinishedAt       *time.Time             `json:"finishedAt,omitempty"`
+	Stage            Stage                  `json:"stage,omitempty" enum:"preparing,booting,building,installing,launching,app-running" description:"The step a running run is on. Absent once it has ended."`
+	StageStartedAt   *time.Time             `json:"stageStartedAt,omitempty"`
+	BuildStartedAt   *time.Time             `json:"buildStartedAt,omitempty" description:"When the build itself started, which the estimate is measured from."`
+	Build            *BuildProgress         `json:"build,omitempty" description:"How far the build is, while it runs."`
+	LastBuildSeconds float64                `json:"lastBuildSeconds,omitempty" description:"How long the last successful build of the same project, scheme and configuration took. Present while running when there is one."`
+	BuildSeconds     float64                `json:"buildSeconds,omitempty" description:"How long this run's build took, when it succeeded."`
+	Errors           int                    `json:"errors,omitempty" description:"How many errors the build reported."`
+	Warnings         int                    `json:"warnings,omitempty" description:"How many warnings the build reported."`
+	Issues           []xcresultstream.Issue `json:"issues,omitempty" description:"The build's first errors, then its first warnings, each with its file and one-based line when it has one. A file inside the session's worktree is relative to it, which is the path the editor opens."`
 }
 
 // Manager is the surface the HTTP controller depends on.
@@ -237,10 +229,8 @@ type Service struct {
 	now      func() time.Time
 	// log is where a failed listing's real output goes. The run bar gets a
 	// sentence; this keeps the evidence behind it.
-	log      *slog.Logger
-	xcodegen *xcodegen.Generator
-	// processArgs and interrupt reach the command a stop is for; injected so a
-	// test never signals a real process.
+	log         *slog.Logger
+	xcodegen    *xcodegen.Generator
 	processArgs func(ctx context.Context, pid int) (string, error)
 	interrupt   func(pid int) error
 
@@ -351,14 +341,16 @@ func (s *Service) Project(ctx context.Context, id domain.SessionID, refresh bool
 		}
 	}
 
+	// The listing is cached, so it must not die with the request that asked
+	// for it: a poll aborted mid-listing would cache "xcodebuild was killed".
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), listingTimeout)
+	defer cancel()
 	found, err := xcodeproj.Find(dir)
 	if err != nil {
 		if !errors.Is(err, xcodeproj.ErrNoProject) {
 			return Project{}, err
 		}
 		project := Project{}
-		// An xcodegen project that was never generated has no Xcode project to
-		// find yet, and the bar is how it gets one.
 		if xcodegen.HasRootSpec(dir) {
 			project.Xcodegen = s.xcodegenState(ctx, dir)
 			project.SchemesError = "There is no Xcode project yet. Run xcodegen to generate it."
@@ -429,9 +421,7 @@ func (s *Service) Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.R
 	if err != nil {
 		return xcodegen.Result{}, err
 	}
-	// Not the request's context: the HTTP timeout is a minute, and a spec's
-	// postGenCommand (nter's runs pod install) can take longer.
-	genCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), xcodegenTimeout)
+	genCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), xcodegenOutlivesTheRequest)
 	defer cancel()
 	result := s.xcodegen.Generate(genCtx, dir)
 	s.mu.Lock()
@@ -559,11 +549,7 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, req StartReque
 	if err := s.runtime.Destroy(ctx, ports.RuntimeHandle{ID: handle}); err != nil {
 		return Run{}, fmt.Errorf("ios run: clear the previous pane: %w", err)
 	}
-	// Only once the previous command is gone, or it could still write its
-	// verdict over the new run's.
 	s.clearRun(id)
-	// --attach keeps the command with the app it launched, so Stop always has a
-	// process to reach: the build while it builds, the app once it runs.
 	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme, "--configuration", configuration}
 	if mode != ModeBuild {
 		argv = append(argv, "--attach")
@@ -646,14 +632,14 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 			return Run{}, false, nil
 		}
 	}
-	project := s.projectOf(ctx, id)
+	project, known := s.projectOf(ctx, id)
 	if result, found := s.readResult(id); found {
 		run.State, run.Summary, run.FinishedAt = result.State, result.Summary, result.FinishedAt
 		run.Warning = result.Warning
 		run.BuildSeconds = result.BuildSeconds
 		run.Errors, run.Warnings = result.Errors, result.Warnings
 		run.Issues = s.relativeIssues(ctx, id, result.Issues)
-		if project != "" {
+		if known {
 			s.rememberBuild(project, run, result)
 		}
 		return run, true, nil
@@ -668,7 +654,7 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 			run.Stage, run.StageStartedAt = progress.Stage, &progress.StageStartedAt
 			run.BuildStartedAt, run.Build = progress.BuildStartedAt, progress.Build
 		}
-		if last, ok := s.lastBuild(project, run); ok && project != "" {
+		if last, ok := s.lastBuild(project, run); ok && known {
 			run.LastBuildSeconds = last.BuildSeconds
 		}
 		return run, true, nil
@@ -706,7 +692,7 @@ func (s *Service) Stop(ctx context.Context, id domain.SessionID) (Run, error) {
 }
 
 func processArgs(ctx context.Context, pid int) (string, error) {
-	out, err := exec.CommandContext(ctx, "ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output() //nolint:gosec // ps with a numeric pid
+	out, err := exec.CommandContext(ctx, "ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
 	return strings.TrimSpace(string(out)), err
 }
 
@@ -775,7 +761,7 @@ func (s *Service) BuildLog(ctx context.Context, id domain.SessionID) (BuildLog, 
 	if dir == "" {
 		return BuildLog{}, apierr.NotFound("IOS_RUN_NO_LOG", "This run kept no build log.")
 	}
-	body, err := os.ReadFile(filepath.Join(dir, LogFile)) //nolint:gosec // the path is this service's own, under its state dir
+	body, err := os.ReadFile(filepath.Join(dir, LogFile))
 	if err != nil {
 		return BuildLog{}, apierr.NotFound("IOS_RUN_NO_LOG", "This run kept no build log.")
 	}
@@ -786,9 +772,7 @@ func (s *Service) BuildLog(ctx context.Context, id domain.SessionID) (BuildLog, 
 	return excerpt(strings.Split(strings.TrimRight(text, "\n"), "\n")), nil
 }
 
-// withoutWorktreePrefix shortens every path inside the worktree to one relative
-// to it, so "NterApp/AppDelegate.swift:12:5: error:" fits the sheet. A path can
-// arrive through a symlink (/tmp and /private/tmp), so both spellings go.
+// A path can arrive through a symlink (/tmp and /private/tmp), so both spellings go.
 func withoutWorktreePrefix(text, worktree string) string {
 	prefixes := []string{worktree}
 	if resolved, err := filepath.EvalSymlinks(worktree); err == nil {
@@ -817,14 +801,12 @@ func excerpt(lines []string) BuildLog {
 	return log
 }
 
-// projectOf is the session's project, or "" when it cannot be read: the history
-// it keys is a convenience, never a reason to fail a poll.
-func (s *Service) projectOf(ctx context.Context, id domain.SessionID) domain.ProjectID {
+func (s *Service) projectOf(ctx context.Context, id domain.SessionID) (domain.ProjectID, bool) {
 	record, found, err := s.sessions.GetSession(ctx, id)
-	if err != nil || !found {
-		return ""
+	if err != nil || !found || record.ProjectID == "" {
+		return "", false
 	}
-	return record.ProjectID
+	return record.ProjectID, true
 }
 
 // workspace is the session's worktree, which is where everything here happens.

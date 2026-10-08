@@ -195,9 +195,6 @@ func graphTarget(line string) (string, bool) {
 
 var countPattern = regexp.MustCompile(`(\d+)[\s\x{2009}\x{202F}\x{00A0}]*/[\s\x{2009}\x{202F}\x{00A0}]*(\d+)`)
 
-// advise takes a progress event only when it names one of THIS build's targets:
-// the build service posts these machine-wide, so every xcodebuild with a result
-// stream also receives the counts of every other flagged build on the Mac.
 func (r *Reader) advise(message, progress string) {
 	target, rest, ok := strings.Cut(message, " : ")
 	if r.shared || !ok || !r.targets[strings.TrimSpace(target)] {
@@ -243,8 +240,6 @@ var phasePrefixes = []struct {
 	{"Sign ", PhaseSigning},
 }
 
-// section moves the phase only on a task that says what the build is doing;
-// the copies and header writes between compiles would make the label flicker.
 func (r *Reader) section(title string) {
 	for _, p := range phasePrefixes {
 		if strings.HasPrefix(title, p.prefix) {

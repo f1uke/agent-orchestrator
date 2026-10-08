@@ -30,9 +30,7 @@ const (
 	RunFile      = "run.json"
 	ResultFile   = "result.json"
 	ProgressFile = "progress.json"
-	// LogFile is the build's output as the terminal showed it, plus the failed
-	// tasks' output replayed from the result bundle.
-	LogFile = "build.log"
+	LogFile      = "build.log"
 )
 
 // Stage is the step of a run the command is on.
@@ -45,27 +43,20 @@ const (
 	StageBuilding   Stage = "building"
 	StageInstalling Stage = "installing"
 	StageLaunching  Stage = "launching"
-	// StageAppRunning is a run that launched its app and stays with it until it
-	// exits, so the bar can stop it.
 	StageAppRunning Stage = "app-running"
 )
 
 // BuildProgress is how far the build is, as its result stream says.
 type BuildProgress struct {
-	Phase xcresultstream.Phase `json:"phase,omitempty" enum:"resolving,planning,compiling,linking,signing,building" description:"What the build is doing, read from the tasks it starts."`
-	// Counts are the build service's own, and only ever this build's; see Shared.
-	Counts *xcresultstream.Counts `json:"counts,omitempty" description:"Tasks done and planned, and the build service's own fraction. Absent until the build has planned, and while another progress-reporting build runs on this Mac."`
-	// Shared is set while another build that reports progress runs on this Mac:
-	// the build service posts its counts machine-wide with nothing saying whose
-	// they are, so none are trusted until it ends.
-	Shared   bool `json:"shared,omitempty" description:"Another progress-reporting build is running on this Mac, so task counts cannot be told apart and are withheld."`
-	Errors   int  `json:"errors"`
-	Warnings int  `json:"warnings"`
+	Phase    xcresultstream.Phase   `json:"phase,omitempty" enum:"resolving,planning,compiling,linking,signing,building" description:"What the build is doing, read from the tasks it starts."`
+	Counts   *xcresultstream.Counts `json:"counts,omitempty" description:"Tasks done and planned, and the build service's own fraction. Absent until the build has planned, and while another progress-reporting build runs on this Mac."`
+	Shared   bool                   `json:"shared,omitempty" description:"Another progress-reporting build is running on this Mac, so task counts cannot be told apart and are withheld."`
+	Errors   int                    `json:"errors"`
+	Warnings int                    `json:"warnings"`
 }
 
 // Progress is what `ao sim run` writes while it runs, replaced whole each time.
 type Progress struct {
-	// PID is the command's own process, which is what a stop signals.
 	PID            int            `json:"pid"`
 	Stage          Stage          `json:"stage"`
 	StageStartedAt time.Time      `json:"stageStartedAt"`
@@ -89,13 +80,11 @@ type Result struct {
 	// failure that only showed up as a login that would not stick.
 	Warning string `json:"warning,omitempty"`
 	// FinishedAt is when the command ended, by the command's own clock.
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	// BuildSeconds is how long the build took, set only when it succeeded.
-	BuildSeconds float64 `json:"buildSeconds,omitempty"`
-	Errors       int     `json:"errors,omitempty"`
-	Warnings     int     `json:"warnings,omitempty"`
-	// Issues are the build's first errors, then its first warnings.
-	Issues []xcresultstream.Issue `json:"issues,omitempty"`
+	FinishedAt   *time.Time             `json:"finishedAt,omitempty"`
+	BuildSeconds float64                `json:"buildSeconds,omitempty"`
+	Errors       int                    `json:"errors,omitempty"`
+	Warnings     int                    `json:"warnings,omitempty"`
+	Issues       []xcresultstream.Issue `json:"issues,omitempty"`
 }
 
 // runDir is where this session's run record lives, or "" when no state dir was
@@ -126,10 +115,6 @@ func (s *Service) recordPath(id domain.SessionID) string {
 	return filepath.Join(dir, RunFile)
 }
 
-// clearRun removes what the previous run reported, before the next one starts:
-// a stale result.json beside a fresh run.json would report the previous build's
-// failure against this build, and clearing after the pane starts would race the
-// command's first progress write.
 func (s *Service) clearRun(id domain.SessionID) {
 	dir := s.runDir(id)
 	if dir == "" {
@@ -140,7 +125,6 @@ func (s *Service) clearRun(id domain.SessionID) {
 	_ = os.MkdirAll(dir, 0o750)
 }
 
-// record writes down the run that was just started.
 func (s *Service) record(id domain.SessionID, run Run) {
 	dir := s.runDir(id)
 	if dir == "" {
@@ -200,13 +184,12 @@ func (s *Service) readResult(id domain.SessionID) (Result, bool) {
 	return Result{}, false
 }
 
-// readProgress is what the command last said about the run it is in.
 func (s *Service) readProgress(id domain.SessionID) (Progress, bool) {
 	dir := s.runDir(id)
 	if dir == "" {
 		return Progress{}, false
 	}
-	body, err := os.ReadFile(filepath.Join(dir, ProgressFile)) //nolint:gosec // the path is this service's own, under its state dir
+	body, err := os.ReadFile(filepath.Join(dir, ProgressFile))
 	if err != nil {
 		return Progress{}, false
 	}
@@ -217,10 +200,6 @@ func (s *Service) readProgress(id domain.SessionID) (Progress, bool) {
 	return progress, true
 }
 
-// historyEntry is the last successful build of one project, scheme and
-// configuration, with clean builds kept apart: a clean nter build takes minutes
-// and an incremental one seconds. The device is not part of the key: the build
-// targets the Simulator generically, so the device cannot change it.
 type historyEntry struct {
 	BuildSeconds float64   `json:"buildSeconds"`
 	FinishedAt   time.Time `json:"finishedAt"`
@@ -247,7 +226,7 @@ func (s *Service) readHistory() map[string]historyEntry {
 	if path == "" {
 		return history
 	}
-	body, err := os.ReadFile(path) //nolint:gosec // the path is this service's own, under its state dir
+	body, err := os.ReadFile(path)
 	if err != nil {
 		return history
 	}
@@ -255,7 +234,6 @@ func (s *Service) readHistory() map[string]historyEntry {
 	return history
 }
 
-// lastBuild is the estimate a running build is measured against.
 func (s *Service) lastBuild(project domain.ProjectID, run Run) (historyEntry, bool) {
 	s.historyMu.Lock()
 	defer s.historyMu.Unlock()
@@ -263,8 +241,6 @@ func (s *Service) lastBuild(project domain.ProjectID, run Run) (historyEntry, bo
 	return entry, ok && entry.BuildSeconds > 0
 }
 
-// rememberBuild records a successful build once; reading the same verdict again
-// changes nothing.
 func (s *Service) rememberBuild(project domain.ProjectID, run Run, result Result) {
 	path := s.historyPath()
 	if path == "" || result.BuildSeconds <= 0 || result.FinishedAt == nil {

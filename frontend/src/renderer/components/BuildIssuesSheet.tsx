@@ -99,7 +99,6 @@ function LogExcerpt({ open, sessionId, startedAt }: { open: boolean; sessionId: 
 	);
 }
 
-/** A failed build's errors with their file and line, and its log at the first one. */
 export function BuildIssuesSheet({
 	onOpenChange,
 	onOpenWorkspaceFile,

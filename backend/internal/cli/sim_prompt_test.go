@@ -183,10 +183,7 @@ var simPromptDecisions = map[string]bool{
 	// `--console` is how `print` output is kept; taught with the debugging lines.
 	"launch --console": true,
 	"run --console":    false,
-	// `--attach` is how the run bar keeps a process to stop; an agent's run has
-	// no button, and the app outlives the command without it.
-	"run --attach": false,
-	// The run bar's menu items; an agent builds and runs with plain `ao sim run`.
+	"run --attach":     false,
 	"run --no-build":   false,
 	"run --build-only": false,
 	"run --clean":      false,

@@ -11340,7 +11340,8 @@ components:
           type: string
         issues:
           description: The build's first errors, then its first warnings, each with
-            its file and one-based line when it has one.
+            its file and one-based line when it has one. A file inside the session's
+            worktree is relative to it, which is the path the editor opens.
           items:
             $ref: '#/components/schemas/XcresultstreamIssue'
           type: array

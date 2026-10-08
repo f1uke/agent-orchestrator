@@ -11,15 +11,10 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 )
 
-// simRunAttachPoll is how often an attached run looks at the app and its console.
 var simRunAttachPoll = time.Second
 
-// simRunTerminateWait bounds how long a stop waits for the app to be gone.
 const simRunTerminateWait = 10 * time.Second
 
-// attachSimApp stays with the app a run launched until it exits or the run is
-// stopped, copying its console to out when it has one. A stop terminates the app
-// and waits until its process is gone, so nothing is left frozen or half-held.
 func (c *commandContext) attachSimApp(ctx context.Context, out io.Writer, result simRunResult, report *runReport) error {
 	pid, _ := strconv.Atoi(result.PID)
 	if pid <= 0 {
@@ -33,12 +28,12 @@ func (c *commandContext) attachSimApp(ctx context.Context, out io.Writer, result
 		if !c.deps.ProcessAlive(pid) {
 			console.copyTo(out)
 			noteProgress(out, "%s exited.\n", result.BundleID)
-			report.ended("exited")
+			report.ended(appExited)
 			return nil
 		}
 		select {
 		case <-ctx.Done():
-			report.ended("stopped")
+			report.ended(appStoppedByUser)
 			return c.terminateSimApp(out, result, pid)
 		case <-time.After(simRunAttachPoll):
 		}
@@ -60,7 +55,6 @@ func (c *commandContext) terminateSimApp(out io.Writer, result simRunResult, pid
 	return nil
 }
 
-// consoleTail copies what an app's console file gained since the last call.
 type consoleTail struct {
 	path   string
 	offset int64

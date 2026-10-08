@@ -18,9 +18,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/xcresultstream"
 )
 
-// runReport is how `ao sim run` tells the run bar what it is doing and how it
-// ended, through the directory the daemon named in iosrun.EnvRunDir. A nil
-// report is a command a human or an agent typed: it reports nothing.
 type runReport struct {
 	dir string
 	now func() time.Time
@@ -28,9 +25,8 @@ type runReport struct {
 	mu           sync.Mutex
 	progress     iosrun.Progress
 	buildSeconds float64
-	// end is how an attached app ended: "exited" or "stopped".
-	end    string
-	issues xcresultstream.Snapshot
+	end          appEnd
+	issues       xcresultstream.Snapshot
 }
 
 func newRunReport() *runReport {
@@ -84,7 +80,6 @@ func (r *runReport) buildSucceeded() {
 	}
 }
 
-// buildFinished keeps what the build's result stream said about its issues.
 func (r *runReport) buildFinished(snap xcresultstream.Snapshot) {
 	if r == nil {
 		return
@@ -94,7 +89,6 @@ func (r *runReport) buildFinished(snap xcresultstream.Snapshot) {
 	r.issues = snap
 }
 
-// buildLog is where the build's output is kept for the failure sheet, or nil.
 func (r *runReport) buildLog() *os.File {
 	if r == nil {
 		return nil
@@ -102,14 +96,22 @@ func (r *runReport) buildLog() *os.File {
 	if err := os.MkdirAll(r.dir, 0o750); err != nil {
 		return nil
 	}
-	f, err := os.Create(filepath.Join(r.dir, iosrun.LogFile)) //nolint:gosec // the run directory the daemon named
+	f, err := os.Create(filepath.Join(r.dir, iosrun.LogFile))
 	if err != nil {
 		return nil
 	}
 	return f
 }
 
-func (r *runReport) ended(how string) {
+// appEnd is how an attached app's run ended.
+type appEnd int
+
+const (
+	appExited appEnd = iota + 1
+	appStoppedByUser
+)
+
+func (r *runReport) ended(how appEnd) {
 	if r == nil {
 		return
 	}
@@ -126,12 +128,9 @@ func (r *runReport) writeLocked() {
 	if err := os.MkdirAll(r.dir, 0o750); err != nil {
 		return
 	}
-	// Progress is advisory: a write that fails leaves the bar on the last one.
 	_ = fsatomic.WriteFile(filepath.Join(r.dir, iosrun.ProgressFile), body, 0o600)
 }
 
-// finish writes the verdict. It is one sentence, never the build log: the
-// output is already in the pane the bar points at.
 func (r *runReport) finish(result simRunResult, runErr error, stopped bool) {
 	if r == nil {
 		return
@@ -159,13 +158,11 @@ func (r *runReport) finish(result simRunResult, runErr error, stopped bool) {
 		verdict.Summary = fmt.Sprintf("Built %s (%s) and launched %s on %s.",
 			result.Scheme, result.Configuration, result.BundleID, result.Name)
 		switch r.end {
-		case "stopped":
+		case appStoppedByUser:
 			verdict.Summary += " It ran until you stopped it."
-		case "exited":
+		case appExited:
 			verdict.Summary += " It has exited."
 		}
-		// A run that worked and installed a broken app is still a run that
-		// worked; the warning rides beside the verdict.
 		verdict.Warning = firstLine(result.Warning)
 	}
 	body, err := json.Marshal(verdict)
@@ -178,20 +175,15 @@ func (r *runReport) finish(result simRunResult, runErr error, stopped bool) {
 	_ = fsatomic.WriteFile(filepath.Join(r.dir, iosrun.ResultFile), body, 0o600)
 }
 
-// progressPoll is how often a build's result stream is read; the bar polls
-// every two seconds.
 const progressPoll = 500 * time.Millisecond
 
-// sharedCheckEvery is how many polls pass between process-table reads.
 const sharedCheckEvery = 6
 
-// watchBuildProgress follows the result stream at streamPath while the build
-// runs, and reports what it says. stop ends the watch after one last read.
 func (c *commandContext) watchBuildProgress(ctx context.Context, streamPath string, report *runReport) (stop func() xcresultstream.Snapshot) {
 	var reader xcresultstream.Reader
 	var offset int64
 	readMore := func() {
-		f, err := os.Open(streamPath) //nolint:gosec // the stream is this command's own temp file
+		f, err := os.Open(streamPath)
 		if err != nil {
 			return
 		}
@@ -241,9 +233,6 @@ func (c *commandContext) watchBuildProgress(ctx context.Context, streamPath stri
 	}
 }
 
-// otherProgressBuilds is whether any xcodebuild other than ours is posting
-// progress. Only `ao sim run` passes the flag, and its counts reach every result
-// stream on the Mac with nothing saying whose they are.
 func otherProgressBuilds(ps []byte, ownStream string) bool {
 	for _, line := range bytes.Split(ps, []byte("\n")) {
 		text := string(line)

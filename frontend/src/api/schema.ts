@@ -3924,7 +3924,7 @@ export interface components {
             /** Format: date-time */
             finishedAt?: null | string;
             handleId: string;
-            /** @description The build's first errors, then its first warnings, each with its file and one-based line when it has one. */
+            /** @description The build's first errors, then its first warnings, each with its file and one-based line when it has one. A file inside the session's worktree is relative to it, which is the path the editor opens. */
             issues?: components["schemas"]["XcresultstreamIssue"][];
             /**
              * Format: double

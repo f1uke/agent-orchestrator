@@ -397,3 +397,22 @@ func TestXcodegen_OutlivesTheRequestThatStartedIt(t *testing.T) {
 		t.Fatal("generate ran under the request's context; the HTTP timeout would kill a long pod install")
 	}
 }
+
+func TestProject_ListsToTheEndWhenTheRequestIsAbandoned(t *testing.T) {
+	svc := New(fakeSessions{path: worktree(t, "Nter.xcodeproj"), found: true}, &fakeRuntime{}, "ao",
+		WithRunner(func(ctx context.Context, _, _ string, _ ...string) ([]byte, error) {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return []byte(`{"project":{"schemes":["Nter"],"configurations":["Dev"]}}`), nil
+		}))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	project, err := svc.Project(ctx, "mer-9", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Schemes) != 1 || project.SchemesError != "" {
+		t.Fatalf("project = %+v: an abandoned poll must not cache a killed listing", project)
+	}
+}

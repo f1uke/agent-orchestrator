@@ -29,15 +29,14 @@ describe("runProgress", () => {
 
 	it("estimates from the last build when there are no counts, and says so", () => {
 		const view = runProgress(running({ lastBuildSeconds: 100, build: { phase: "compiling", errors: 0, warnings: 0 } }), T0 + 50_000);
-		expect(view.kind).toBe("estimate");
-		expect(view.fraction).toBeCloseTo(0.5);
+		expect(view).toMatchObject({ kind: "estimate" });
+		expect("fraction" in view && view.fraction).toBeCloseTo(0.5);
 		expect(view.label).toBe("Compiling");
 		expect(view.tooltip).toContain("Estimated from the last build of NterApp (Dev), 1m 40s");
 	});
 
 	it("caps an estimate below done while the build is still going", () => {
-		const view = runProgress(running({ lastBuildSeconds: 100 }), T0 + 500_000);
-		expect(view.fraction).toBe(0.95);
+		expect(runProgress(running({ lastBuildSeconds: 100 }), T0 + 500_000)).toMatchObject({ fraction: 0.95 });
 	});
 
 	it("estimates, and says why, while another build on this Mac makes the counts ambiguous", () => {

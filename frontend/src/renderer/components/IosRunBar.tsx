@@ -79,7 +79,6 @@ export function IosRunBar({
 	task,
 	terminalTarget,
 }: {
-	/** Open a file in the editor, which is where a build error's file:line goes. */
 	onOpenWorkspaceFile?: (file: WorkspaceFileOpen) => void;
 	/** Point the terminal at the run pane - what Run does, and what the chip re-does. */
 	onShowRun: (handleId: string) => void;
@@ -322,7 +321,6 @@ function blockedReason({
 	booted,
 	needsDevice = true,
 }: {
-	/** False for a build that installs nothing, which needs no simulator. */
 	needsDevice?: boolean;
 	project: IosProject;
 	/** The scheme list the component already normalised - never the raw payload. */
@@ -416,11 +414,6 @@ function ChoicePicker({
 	/** Why the list is empty, when it is. */
 	reason: string;
 	refreshing: boolean;
-	/**
-	 * The trigger's width: fixed so that choosing a long name cannot shift the
-	 * controls after it sideways, and allowed to shrink so the bar stays one row
-	 * in a narrow pane.
-	 */
 	width: string;
 }) {
 	const [open, setOpen] = useState(false);
@@ -532,7 +525,7 @@ function RunChip({
 				progress?.kind === "running" ? (
 					<Play aria-hidden className="size-3.5 text-success" fill="currentColor" />
 				) : (
-					<ProgressRing fraction={progress?.kind === "indeterminate" ? undefined : fraction} />
+					<ProgressRing fraction={progress?.kind === "real" || progress?.kind === "estimate" ? fraction : undefined} />
 				),
 			label: progress?.label ?? `Running ${built}`,
 			tone: "text-muted-foreground",
@@ -599,7 +592,7 @@ type RunMode = NonNullable<StartIosRunRequest["mode"]>;
 const RUN_MENU: { mode: RunMode; label: string; detail: string; buildsOnly?: boolean }[] = [
 	{ mode: "run-without-building", label: "Run without building", detail: "Install and launch the last build" },
 	{ mode: "build", label: "Build only", detail: "Build, and touch no simulator", buildsOnly: true },
-	{ mode: "clean-build", label: "Clean build", detail: "Delete this worktree's DerivedData, then build and run" },
+	{ mode: "clean-build", label: "Clean build", detail: "Delete this worktree's DerivedData, then run" },
 ];
 
 function RunMenu({
@@ -652,7 +645,6 @@ function RunMenu({
 	);
 }
 
-/** Xcode's own shorthand for a build's issues: a red count and a yellow one. */
 function IssueBadges({ errors, label, warnings }: { errors: number; label: string; warnings: number }) {
 	return (
 		<span className="flex shrink-0 items-center gap-1.5 tabular-nums">
@@ -673,10 +665,6 @@ function IssueBadges({ errors, label, warnings }: { errors: number; label: strin
 	);
 }
 
-/**
- * Always in the bar, so Run never moves; enabled while a run is going. What it
- * stops follows the run: the build while it builds, the app once it runs.
- */
 function StopButton({ onStop, pending, run }: { onStop: () => void; pending: boolean; run?: IosRun }) {
 	const running = run?.state === "running";
 	const title = !running
@@ -702,10 +690,6 @@ function StopButton({ onStop, pending, run }: { onStop: () => void; pending: boo
 	);
 }
 
-/**
- * Runs xcodegen over the worktree. The dot says a spec, a spec it includes, or
- * the source files it lists changed since the project was last generated.
- */
 function XcodegenButton({ sessionId, specs }: { sessionId: string; specs: { dir: string; stale: boolean }[] }) {
 	const [open, setOpen] = useState(false);
 	const [state, setState] = useState<XcodegenViewState | null>(null);
@@ -749,7 +733,6 @@ function XcodegenButton({ sessionId, specs }: { sessionId: string; specs: { dir:
 	);
 }
 
-/** The console switch, remembered per session in this browser only. */
 function useConsolePreference(sessionId: string): [boolean, (on: boolean) => void] {
 	const key = `ao-ios-run-console:${sessionId}`;
 	const [on, setOn] = useState(() => {
@@ -763,14 +746,11 @@ function useConsolePreference(sessionId: string): [boolean, (on: boolean) => voi
 		setOn(next);
 		try {
 			window.localStorage.setItem(key, next ? "1" : "0");
-		} catch {
-			// A browser that refuses storage still gets the switch for this visit.
-		}
+		} catch {}
 	};
 	return [on, set];
 }
 
-/** Re-renders every second while `enabled`, so elapsed time and the estimate move. */
 function useNow(enabled: boolean): number {
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {

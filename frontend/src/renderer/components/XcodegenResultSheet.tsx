@@ -5,11 +5,6 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 export type RunXcodegenResult = components["schemas"]["XcodegenResult"];
 type XcodegenDirResult = components["schemas"]["XcodegenDirResult"];
 
-/**
- * The lifecycle of a single "Run xcodegen" invocation as the menu sees it:
- * pending (`running`), a resolved backend `result`, or a request that failed
- * (`error`).
- */
 export type XcodegenViewState =
 	{ phase: "running" } | { phase: "error" } | { phase: "done"; result: RunXcodegenResult };
 

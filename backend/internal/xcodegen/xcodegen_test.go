@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// fakeXcodegen behaves like xcodegen where the stale check can tell: `cache`
-// writes the spec's text and its source file list, `generate` rewrites the
-// project file.
 func fakeXcodegen(t *testing.T, calls *[]string) Exec {
 	t.Helper()
 	return func(_ context.Context, dir, _ string, args ...string) ([]byte, int, error) {
@@ -71,7 +68,6 @@ func write(t *testing.T, path, body string) {
 	}
 }
 
-// later moves a file's mtime forward, so a test never sleeps for the clock.
 func later(t *testing.T, path string, by time.Duration) {
 	t.Helper()
 	at := time.Now().Add(by)

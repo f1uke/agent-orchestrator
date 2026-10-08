@@ -12,8 +12,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/iosrun"
 )
 
-// interruptibleStream is a build that ends when it is interrupted, the way
-// xcodebuild prints "** BUILD INTERRUPTED **" and exits on SIGINT.
 type interruptibleStream struct {
 	*fakeStream
 	interrupts atomic.Int32
