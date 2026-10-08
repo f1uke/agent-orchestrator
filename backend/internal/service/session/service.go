@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apierr"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
@@ -112,6 +113,9 @@ type commander interface {
 	// runtime, relaunching nothing; adopted=false leaves it as it was.
 	AdoptLiveAgent(ctx context.Context, id domain.SessionID) (rec domain.SessionRecord, adopted bool, err error)
 	Restart(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
+	// SetClaudeProfile switches a claude-code session to another Claude profile
+	// and restarts it onto it now, once idle, or on its next launch.
+	SetClaudeProfile(ctx context.Context, id domain.SessionID, profile string, restart bool) (domain.SessionRecord, domain.ClaudeProfileRestart, error)
 	// Wake is the user-open hook: resume a suspended session in place, or reset a
 	// live session's idle-close countdown; terminated sessions are left untouched.
 	Wake(ctx context.Context, id domain.SessionID) (domain.SessionRecord, error)
@@ -721,6 +725,19 @@ func (s *Service) RequestCrewReview(ctx context.Context, from domain.SessionID, 
 		return domain.Session{}, toAPIError(err)
 	}
 	return s.toSession(ctx, rec)
+}
+
+// SetClaudeProfile switches a claude-code session to another Claude profile.
+// With restart it restarts the agent onto it now when idle or parked, once it
+// is idle when it is mid-turn, and leaves a session with no runtime to its next
+// launch; the outcome says which.
+func (s *Service) SetClaudeProfile(ctx context.Context, id domain.SessionID, profile string, restart bool) (domain.Session, domain.ClaudeProfileRestart, error) {
+	rec, outcome, err := s.manager.SetClaudeProfile(ctx, id, profile, restart)
+	if err != nil {
+		return domain.Session{}, "", toAPIError(err)
+	}
+	sess, err := s.toSession(ctx, rec)
+	return sess, outcome, err
 }
 
 // Restart tears a session down and relaunches it in place (kill-then-restore),
@@ -1506,6 +1523,20 @@ func toAPIError(err error) error {
 		return apierr.Invalid("UNKNOWN_HARNESS", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrMissingHarness):
 		return apierr.Invalid("AGENT_REQUIRED", err.Error(), nil)
+	case errors.Is(err, claudeprofile.ErrUnknownProfile):
+		var unknown *claudeprofile.UnknownProfileError
+		if errors.As(err, &unknown) {
+			return apierr.Invalid("UNKNOWN_CLAUDE_PROFILE", unknown.Error(), map[string]any{"known": unknown.Known})
+		}
+		return apierr.Invalid("UNKNOWN_CLAUDE_PROFILE", err.Error(), nil)
+	case errors.Is(err, claudeprofile.ErrSettingsFile):
+		var unusable *claudeprofile.SettingsFileError
+		if errors.As(err, &unusable) {
+			return apierr.Invalid("CLAUDE_PROFILE_SETTINGS_INVALID", unusable.Error(), nil)
+		}
+		return apierr.Invalid("CLAUDE_PROFILE_SETTINGS_INVALID", err.Error(), nil)
+	case errors.Is(err, sessionmanager.ErrClaudeProfileUnsupported):
+		return apierr.Conflict("CLAUDE_PROFILE_UNSUPPORTED", "Claude profiles apply only to claude-code sessions", nil)
 	case errors.Is(err, ports.ErrWorkspaceBranchCheckedOutElsewhere):
 		return apierr.Conflict("BRANCH_CHECKED_OUT_ELSEWHERE", err.Error(), nil)
 	case errors.Is(err, ports.ErrWorkspaceBranchNotFetched):

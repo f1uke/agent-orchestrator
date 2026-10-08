@@ -244,14 +244,14 @@ func TestSetClaudeProfile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if outcome != ClaudeProfileRestarted || rec.ClaudeProfile != "Work" || f.rt.destroyed != 1 || f.agent.lastRestore.SettingsFile != f.work {
+		if outcome != domain.ClaudeProfileRestarted || rec.ClaudeProfile != "Work" || f.rt.destroyed != 1 || f.agent.lastRestore.SettingsFile != f.work {
 			t.Fatalf("outcome %q profile %q destroyed %d settings %q; want restarted on Work", outcome, rec.ClaudeProfile, f.rt.destroyed, f.agent.lastRestore.SettingsFile)
 		}
 	})
 	t.Run("parked session restarts now", func(t *testing.T) {
 		f := newProfileFixture(t)
 		f.liveClaudeSession("mer-1", "Subscription", domain.ActivityParked)
-		if _, outcome, err := f.m.SetClaudeProfile(ctx, "mer-1", "Work", true); err != nil || outcome != ClaudeProfileRestarted {
+		if _, outcome, err := f.m.SetClaudeProfile(ctx, "mer-1", "Work", true); err != nil || outcome != domain.ClaudeProfileRestarted {
 			t.Fatalf("outcome %q, err %v; want restarted", outcome, err)
 		}
 	})
@@ -263,7 +263,7 @@ func TestSetClaudeProfile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if outcome != ClaudeProfileRestartPending || !rec.RestartPending || rec.ClaudeProfile != "Work" || f.rt.destroyed != 0 {
+			if outcome != domain.ClaudeProfileRestartPending || !rec.RestartPending || rec.ClaudeProfile != "Work" || f.rt.destroyed != 0 {
 				t.Fatalf("outcome %q pending %v profile %q destroyed %d; want pending on Work, agent untouched", outcome, rec.RestartPending, rec.ClaudeProfile, f.rt.destroyed)
 			}
 		})
@@ -275,14 +275,14 @@ func TestSetClaudeProfile(t *testing.T) {
 		rec.IsTerminated = true
 		f.st.sessions["mer-1"] = rec
 		got, outcome, err := f.m.SetClaudeProfile(ctx, "mer-1", "Work", true)
-		if err != nil || outcome != ClaudeProfileNextLaunch || got.RestartPending || got.ClaudeProfile != "Work" || f.rt.created != 0 {
+		if err != nil || outcome != domain.ClaudeProfileNextLaunch || got.RestartPending || got.ClaudeProfile != "Work" || f.rt.created != 0 {
 			t.Fatalf("outcome %q pending %v profile %q err %v; want next launch on Work, nothing relaunched", outcome, got.RestartPending, got.ClaudeProfile, err)
 		}
 	})
 	t.Run("no restart asked applies on the next restart", func(t *testing.T) {
 		f := newProfileFixture(t)
 		f.liveClaudeSession("mer-1", "Subscription", domain.ActivityIdle)
-		if _, outcome, err := f.m.SetClaudeProfile(ctx, "mer-1", "Work", false); err != nil || outcome != ClaudeProfileNextLaunch || f.rt.destroyed != 0 {
+		if _, outcome, err := f.m.SetClaudeProfile(ctx, "mer-1", "Work", false); err != nil || outcome != domain.ClaudeProfileNextLaunch || f.rt.destroyed != 0 {
 			t.Fatalf("outcome %q err %v destroyed %d; want next launch", outcome, err, f.rt.destroyed)
 		}
 	})

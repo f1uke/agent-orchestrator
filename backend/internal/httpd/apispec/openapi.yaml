@@ -2931,6 +2931,64 @@ paths:
         about its children
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/claude-profile:
+    put:
+      operationId: setSessionClaudeProfile
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetSessionClaudeProfileRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetSessionClaudeProfileResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Switch a claude-code session to another Claude profile, optionally
+        restarting it onto it
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/comment-dispatch:
     post:
       operationId: sessionDispatchComment
@@ -13448,6 +13506,30 @@ components:
       required:
       - language
       type: object
+    SetSessionClaudeProfileRequest:
+      properties:
+        profile:
+          minLength: 1
+          type: string
+        restart:
+          type: boolean
+      required:
+      - profile
+      type: object
+    SetSessionClaudeProfileResponse:
+      properties:
+        restart:
+          enum:
+          - restarted
+          - pending
+          - next_launch
+          type: string
+        session:
+          $ref: '#/components/schemas/ControllersSessionView'
+      required:
+      - session
+      - restart
+      type: object
     SetSessionKeepWarmRequest:
       properties:
         enabled:
@@ -14444,6 +14526,8 @@ components:
           type: string
         branch:
           type: string
+        claudeProfile:
+          type: string
         createdBy:
           type: string
         displayName:
@@ -14926,6 +15010,10 @@ components:
           - "null"
           - string
         branch:
+          type:
+          - "null"
+          - string
+        claudeProfile:
           type:
           - "null"
           - string

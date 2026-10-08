@@ -120,6 +120,7 @@ type SessionService interface {
 	SetKeepWarmOnMerge(ctx context.Context, id domain.SessionID, enabled bool) (domain.Session, error)
 	SetTargetBranch(ctx context.Context, id domain.SessionID, target string) (domain.Session, error)
 	SetBranch(ctx context.Context, id domain.SessionID, branch string) (domain.Session, error)
+	SetClaudeProfile(ctx context.Context, id domain.SessionID, profile string, restart bool) (domain.Session, domain.ClaudeProfileRestart, error)
 	Send(ctx context.Context, id domain.SessionID, message string) (ports.SendOutcome, error)
 	DispatchCommentToWorker(ctx context.Context, id domain.SessionID, prURL, threadID, extraPrompt string) error
 	ReplyToThread(ctx context.Context, id domain.SessionID, prURL, threadID, body string) (sessionsvc.PRThreadComment, error)
@@ -188,6 +189,7 @@ func (c *SessionsController) Register(r chi.Router) {
 	r.Put("/sessions/{sessionId}/keep-warm", c.setKeepWarm)
 	r.Put("/sessions/{sessionId}/target", c.setTargetBranch)
 	r.Put("/sessions/{sessionId}/branch", c.setBranch)
+	r.Put("/sessions/{sessionId}/claude-profile", c.setClaudeProfile)
 	r.Get("/sessions/{sessionId}/preview/files/*", c.previewFile)
 	r.Get("/sessions/{sessionId}/diff-context", c.diffContext)
 	r.Get("/sessions/{sessionId}/workspace/resolve", c.resolveWorkspaceRef)
@@ -293,7 +295,7 @@ func (c *SessionsController) spawn(w http.ResponseWriter, r *http.Request) {
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "TASK_SIZE_INVALID", "taskSize must be one of mechanical, standard, deep", nil)
 		return
 	}
-	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy, KeepWarmOnMerge: in.KeepWarmOnMerge, TaskSize: in.TaskSize.WithDefault()}
+	cfg := ports.SpawnConfig{ProjectID: in.ProjectID, IssueID: in.IssueID, Kind: in.Kind, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, AutoNameBranch: in.AutoNameBranch, Prompt: in.Prompt, DisplayName: displayName, PRTarget: in.PRTarget, CreatedBy: in.CreatedBy, KeepWarmOnMerge: in.KeepWarmOnMerge, TaskSize: in.TaskSize.WithDefault(), ClaudeProfile: strings.TrimSpace(in.ClaudeProfile)}
 	// startImmediately absent/null/true keeps the current spawn-now behavior;
 	// false stages the worker as a prepared TODO on the board.
 	deferred := in.StartImmediately != nil && !*in.StartImmediately
@@ -343,7 +345,7 @@ func (c *SessionsController) updateSpec(w http.ResponseWriter, r *http.Request) 
 		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "PROMPT_TOO_LONG", "prompt is too long", nil)
 		return
 	}
-	patch := ports.TodoSpecPatch{DisplayName: in.DisplayName, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, PRTarget: in.PRTarget, Prompt: in.Prompt, AutoNameBranch: in.AutoNameBranch}
+	patch := ports.TodoSpecPatch{DisplayName: in.DisplayName, Harness: in.Harness, Branch: in.Branch, BaseBranch: in.BaseBranch, PRTarget: in.PRTarget, Prompt: in.Prompt, AutoNameBranch: in.AutoNameBranch, ClaudeProfile: in.ClaudeProfile}
 	sess, err := c.Svc.UpdateTodoSpec(r.Context(), sessionID(r), patch)
 	if err != nil {
 		envelope.WriteError(w, r, err)
@@ -610,6 +612,31 @@ func (c *SessionsController) setBranch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
+}
+
+// setClaudeProfile switches a claude-code session to another Claude profile
+// and, with restart, restarts its agent onto it now or once it is idle.
+func (c *SessionsController) setClaudeProfile(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/claude-profile")
+		return
+	}
+	var in SetSessionClaudeProfileRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	profile := strings.TrimSpace(in.Profile)
+	if profile == "" {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "CLAUDE_PROFILE_REQUIRED", "profile is required", nil)
+		return
+	}
+	updated, restart, err := c.Svc.SetClaudeProfile(r.Context(), sessionID(r), profile, in.Restart)
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, SetSessionClaudeProfileResponse{Session: sessionView(updated), Restart: restart})
 }
 
 // clearPreview resets a session's browser preview to empty (`ao preview

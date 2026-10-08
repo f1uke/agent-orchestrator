@@ -21,21 +21,6 @@ type ClaudeProfileRegistry interface {
 	Lookup(name string) (claudeprofile.Profile, error)
 }
 
-// ClaudeProfileRestart is what a profile switch did about the running agent.
-type ClaudeProfileRestart string
-
-const (
-	// ClaudeProfileRestarted means the agent was idle and was restarted on the
-	// new profile.
-	ClaudeProfileRestarted ClaudeProfileRestart = "restarted"
-	// ClaudeProfileRestartPending means the agent was mid-turn; the daemon
-	// restarts it once it is idle.
-	ClaudeProfileRestartPending ClaudeProfileRestart = "pending"
-	// ClaudeProfileNextLaunch means nothing was restarted; the session's next
-	// launch, restart or restore applies the profile.
-	ClaudeProfileNextLaunch ClaudeProfileRestart = "next_launch"
-)
-
 // spawnClaudeProfile is the canonical profile a new session launches with: none
 // for an agent other than Claude Code, else the override, else the project
 // default, else Subscription.
@@ -94,7 +79,7 @@ func withLaunchEnv(env map[string]string, agent ports.Agent) map[string]string {
 // when asked, restarts it onto it: now when the agent is idle or parked, once
 // it is idle when it is mid-turn, and never for a session with no runtime,
 // whose next launch applies the profile anyway.
-func (m *Manager) SetClaudeProfile(ctx context.Context, id domain.SessionID, name string, restart bool) (domain.SessionRecord, ClaudeProfileRestart, error) {
+func (m *Manager) SetClaudeProfile(ctx context.Context, id domain.SessionID, name string, restart bool) (domain.SessionRecord, domain.ClaudeProfileRestart, error) {
 	rec, err := m.getRecord(ctx, id)
 	if err != nil {
 		return domain.SessionRecord{}, "", err
@@ -121,19 +106,19 @@ func (m *Manager) SetClaudeProfile(ctx context.Context, id domain.SessionID, nam
 		return domain.SessionRecord{}, "", fmt.Errorf("set claude profile %s: %w", id, err)
 	}
 
-	outcome := ClaudeProfileNextLaunch
+	outcome := domain.ClaudeProfileNextLaunch
 	switch {
 	case !restart || rec.IsTerminated || rec.IsSuspended || rec.IsTodo:
 	case restartableNow(rec.Activity.State):
 		if _, err := m.Restart(ctx, id); err != nil {
 			return domain.SessionRecord{}, "", err
 		}
-		outcome = ClaudeProfileRestarted
+		outcome = domain.ClaudeProfileRestarted
 	default:
 		if _, err := m.store.SetSessionRestartPending(ctx, id, true, m.clock()); err != nil {
 			return domain.SessionRecord{}, "", fmt.Errorf("set claude profile %s: %w", id, err)
 		}
-		outcome = ClaudeProfileRestartPending
+		outcome = domain.ClaudeProfileRestartPending
 	}
 	rec, err = m.getRecord(ctx, id)
 	return rec, outcome, err

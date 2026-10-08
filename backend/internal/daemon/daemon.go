@@ -557,7 +557,7 @@ func Run() error {
 
 	learningSvc := learningService(ctx, store, cfg.DataDir, learnCollector, learnSettings, learnRules, learnDecider)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
-		Projects: projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
+		Projects: projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink, ClaudeProfiles: claudeProfiles}),
 		Agents:   agentSvc,
 		Sessions: sessionSvc,
 		Jira:     jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
