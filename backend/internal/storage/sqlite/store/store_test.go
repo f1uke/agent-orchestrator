@@ -816,6 +816,61 @@ func TestSessionReactivatedAloneFiresCDC(t *testing.T) {
 	}
 }
 
+// TestSessionBranchAndTargetAloneFireCDC: the branch-follow loop and
+// `ao session set-branch` change a running session's branch and nothing else, as
+// the target editor does its pr_target. Each must fire a session_updated event,
+// or the header and board keep the old name until something else moves. A
+// compare-and-swap that finds another branch writes nothing.
+func TestSessionBranchAndTargetAloneFireCDC(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	seedProject(t, s, "mer")
+	rec := sampleRecord("mer")
+	rec.Metadata.Branch = "feature/ABC-1-fix"
+	r, _ := s.CreateSession(ctx, rec)
+
+	sessionUpdates := func(after int64) int {
+		t.Helper()
+		evs, err := s.EventsAfter(ctx, after, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, e := range evs {
+			if string(e.Type) == "session_updated" {
+				n++
+			}
+		}
+		return n
+	}
+
+	base, _ := s.LatestSeq(ctx)
+	if ok, err := s.SetSessionBranch(ctx, r.ID, "feature/ABC-1-fix", "feature/ABC-2-fix", time.Now()); err != nil || !ok {
+		t.Fatalf("SetSessionBranch = %v, %v; want applied", ok, err)
+	}
+	if got, _, _ := s.GetSession(ctx, r.ID); got.Metadata.Branch != "feature/ABC-2-fix" {
+		t.Fatalf("branch = %q, want feature/ABC-2-fix", got.Metadata.Branch)
+	}
+	if n := sessionUpdates(base); n != 1 {
+		t.Fatalf("session_updated events on a branch-only change = %d, want 1", n)
+	}
+
+	base, _ = s.LatestSeq(ctx)
+	if ok, err := s.SetSessionBranch(ctx, r.ID, "feature/ABC-1-fix", "feature/ABC-3-fix", time.Now()); err != nil || ok {
+		t.Fatalf("stale SetSessionBranch = %v, %v; want not applied", ok, err)
+	}
+	if got, _, _ := s.GetSession(ctx, r.ID); got.Metadata.Branch != "feature/ABC-2-fix" {
+		t.Fatalf("branch after a stale swap = %q, want feature/ABC-2-fix", got.Metadata.Branch)
+	}
+
+	if _, err := s.SetSessionPRTarget(ctx, r.ID, "release/1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if n := sessionUpdates(base); n != 1 {
+		t.Fatalf("session_updated events after a stale swap and a target change = %d, want 1", n)
+	}
+}
+
 // TestSessionSleepProvenanceRoundTripAndCDC covers the two columns that say WHY a
 // session is asleep and WHAT woke it. Both must round-trip, and - the point of
 // having them at all - both must reach the session_updated payload, because
