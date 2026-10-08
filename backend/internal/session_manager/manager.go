@@ -125,6 +125,7 @@ const (
 	// reads it to allow `isolation: "worktree"` instead of denying it.
 	EnvChildWorktrees = "AO_CHILD_WORKTREES"
 	EnvProjectID      = "AO_PROJECT_ID"
+	EnvWorkspace      = "AO_WORKSPACE"
 	EnvIssueID        = "AO_ISSUE_ID"
 	// EnvDataDir tells a spawned agent's AO hook commands where the store lives.
 	EnvDataDir = "AO_DATA_DIR"
@@ -3936,6 +3937,7 @@ func simDeviceEnv(udid string) map[string]string {
 // logged so the degradation isn't silent.
 func (m *Manager) runtimeEnv(ctx context.Context, id domain.SessionID, project domain.ProjectID, issue domain.IssueID, kind domain.SessionKind, crew domain.SessionID, role domain.CrewRole, workspacePath string, projectEnv map[string]string, childWorktrees bool, scriptsStore string, wantsSim bool) map[string]string {
 	env := spawnEnv(id, project, issue, kind, crew, m.crewIDs(ctx, id, crew, role), m.dataDir, m.runFile, projectEnv)
+	env[EnvWorkspace] = workspacePath
 	if scriptsStore != "" {
 		env[EnvScriptsStore] = scriptsStore
 	}
