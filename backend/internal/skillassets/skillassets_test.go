@@ -1,10 +1,14 @@
 package skillassets
 
 import (
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 // TestInstall_WritesSkillAndIsIdempotent: Install must lay down the embedded
@@ -138,24 +142,126 @@ func TestInstall_MarkerNeverReachesDisk(t *testing.T) {
 }
 
 // TestInstall_VariantsShareEverythingElse guards against the two trees drifting:
-// only preview-marked content may differ, so a command file that has nothing to
-// do with the web UI must be byte-identical in both.
+// only web-UI-marked content may differ, so every embedded file that carries no
+// marker and is not web-only must be byte-identical in both.
 func TestInstall_VariantsShareEverythingElse(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := Install(dataDir); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	for _, name := range []string{"commands/spawn.md", "commands/session.md", "commands/project.md"} {
-		base, err := os.ReadFile(filepath.Join(Dir(dataDir, false), filepath.FromSlash(name)))
-		if err != nil {
-			t.Fatalf("read base %s: %v", name, err)
+	err := fs.WalkDir(files, SkillName, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || webUIOnlyFiles[p] {
+			return err
 		}
-		web, err := os.ReadFile(filepath.Join(Dir(dataDir, true), filepath.FromSlash(name)))
+		src, err := files.ReadFile(p)
 		if err != nil {
-			t.Fatalf("read web %s: %v", name, err)
+			return err
+		}
+		if strings.Contains(string(src), webUIMarker) {
+			return nil
+		}
+		name := filepath.FromSlash(strings.TrimPrefix(p, SkillName+"/"))
+		base, err := os.ReadFile(filepath.Join(Dir(dataDir, false), name))
+		if err != nil {
+			return err
+		}
+		web, err := os.ReadFile(filepath.Join(Dir(dataDir, true), name))
+		if err != nil {
+			return err
 		}
 		if string(base) != string(web) {
 			t.Errorf("%s differs between the two variants but has nothing to do with the web UI", name)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+var mdLink = regexp.MustCompile(`\]\(([^)#\s]+\.md)?(#[^)\s]+)?\)`)
+
+// installedPages returns every installed .md file of one variant, keyed by its
+// slash path relative to the skill dir.
+func installedPages(t *testing.T, hasWebUI bool) map[string]string {
+	t.Helper()
+	dataDir := t.TempDir()
+	if err := Install(dataDir); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	root := Dir(dataDir, hasWebUI)
+	pages := map[string]string{}
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		rel, _ := filepath.Rel(root, p)
+		pages[filepath.ToSlash(rel)] = string(b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pages
+}
+
+// headingAnchors lists the GitHub-style anchors of a page's headings.
+func headingAnchors(page string) map[string]bool {
+	anchors := map[string]bool{}
+	for _, line := range strings.Split(page, "\n") {
+		if !strings.HasPrefix(line, "#") {
+			continue
+		}
+		text := strings.ToLower(strings.TrimSpace(strings.TrimLeft(line, "#")))
+		var b strings.Builder
+		for _, r := range text {
+			switch {
+			case r == ' ':
+				b.WriteRune('-')
+			case r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r):
+				b.WriteRune(r)
+			}
+		}
+		anchors[b.String()] = true
+	}
+	return anchors
+}
+
+// The skill follows Anthropic's skill-authoring guidance, because an agent reads
+// it the way that guidance assumes: SKILL.md is the only page it is pointed at,
+// so every other page must be one link away from it (a page two links deep gets
+// read partially, or not at all); a link that resolves nowhere is a dead end
+// mid-task; and a page over 100 lines needs a table of contents, so a partial
+// read still shows what the page holds.
+func TestInstall_SkillPagesAreReachableAndNavigable(t *testing.T) {
+	for _, hasWebUI := range []bool{false, true} {
+		pages := installedPages(t, hasWebUI)
+		linkedFromSkill := map[string]bool{}
+		for _, m := range mdLink.FindAllStringSubmatch(pages["SKILL.md"], -1) {
+			linkedFromSkill[m[1]] = true
+		}
+		for name, page := range pages {
+			if name != "SKILL.md" && !linkedFromSkill[name] {
+				t.Errorf("web=%v: %s is not linked from SKILL.md", hasWebUI, name)
+			}
+			if lines := strings.Count(page, "\n"); lines > 100 && !strings.Contains(page, "\n## Contents\n") {
+				t.Errorf("web=%v: %s is %d lines and has no ## Contents", hasWebUI, name, lines)
+			}
+			for _, m := range mdLink.FindAllStringSubmatch(page, -1) {
+				target := name
+				if m[1] != "" {
+					target = path.Join(path.Dir(name), m[1])
+				}
+				dest, ok := pages[target]
+				if !ok {
+					t.Errorf("web=%v: %s links %s, which does not exist", hasWebUI, name, m[0])
+					continue
+				}
+				if m[2] != "" && !headingAnchors(dest)[strings.TrimPrefix(m[2], "#")] {
+					t.Errorf("web=%v: %s links %s, which has no such heading", hasWebUI, name, m[0])
+				}
+			}
 		}
 	}
 }

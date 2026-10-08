@@ -256,7 +256,8 @@ func newTestinyResultCommand(ctx *commandContext) *cobra.Command {
 			"status), or a batch read from --from-file as a JSON array of {caseId, status, comment, " +
 			"steps: [{n, status}]}. The run must be linked to the task. When the task has a qa, only qa " +
 			"may record, and an agent never overwrites a case or step status a person set: that is " +
-			"refused (exit 2), so report it in the handback instead. Sends $AO_SESSION_ID and the " +
+			"refused (exit 2), so report it in the handback instead and do not retry; a " +
+			"person sets it back to NOTRUN to ask for a re-run. Sends $AO_SESSION_ID and the " +
 			"checkout's HEAD commit with the results.",
 		Args: rangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {

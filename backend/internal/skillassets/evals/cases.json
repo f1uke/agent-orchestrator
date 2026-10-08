@@ -1,0 +1,284 @@
+{
+  "preamble": "You are an agent working in an AO (Agent Orchestrator) worker session on macOS. The reference for the `ao` CLI is the skill at {skill}/SKILL.md: read what you need from it. `ao <command> --help` also works here, but no other `ao` command does, so do not try to run one. Answer with the exact commands you would run, in order, and one short line on why for anything that is not obvious. Keep the answer under 200 words.\n\n",
+  "cases": [
+    {
+      "id": "sim-print-output",
+      "area": "sim",
+      "prompt": "I added `print(\"resp:\", body)` to my iOS app's network layer, but `ao sim log --process Nimbus` shows nothing for it. How do I see that output? Later I also need that payload while a Maestro flow runs the app.",
+      "assertions": [
+        {
+          "text": "print goes to stdout, not the unified log",
+          "pattern": "stdout"
+        },
+        {
+          "text": "launch with --console",
+          "pattern": "ao sim (launch|run)[^\\n`]*--console"
+        },
+        {
+          "text": "read it with ao sim console",
+          "pattern": "ao sim console"
+        },
+        {
+          "text": "across a Maestro flow: NSLog probe read with ao sim log",
+          "pattern": "NSLog[\\s\\S]*ao sim log|ao sim log[\\s\\S]*NSLog"
+        }
+      ]
+    },
+    {
+      "id": "sim-second-model",
+      "area": "sim",
+      "prompt": "I need to check my layout change on an iPhone SE-sized screen as well as on my usual device, then clean up. What do I run?",
+      "assertions": [
+        {
+          "text": "clones an SE with claim --model",
+          "pattern": "ao sim claim --model \"?iPhone SE"
+        },
+        {
+          "text": "addresses it by its label",
+          "pattern": "--device iphone-se"
+        },
+        {
+          "text": "deletes it with release --device",
+          "pattern": "ao sim release --device iphone-se"
+        },
+        {
+          "text": "does not boot or claim a base device by udid",
+          "pattern": "^(?![\\s\\S]*ao sim (boot|claim) --udid)"
+        }
+      ]
+    },
+    {
+      "id": "sim-install-build",
+      "area": "sim",
+      "prompt": "I just built my app with xcodebuild into ./build/Debug-iphonesimulator/MyApp.app. Put it on my simulator so the screen is actually running this new build, and confirm it is.",
+      "assertions": [
+        {
+          "text": "installs with ao sim install, not simctl",
+          "pattern": "ao sim install"
+        },
+        {
+          "text": "does not use xcrun simctl install",
+          "pattern": "^(?![\\s\\S]*\\n\\s*xcrun simctl install)"
+        },
+        {
+          "text": "relaunches so the old running instance is replaced",
+          "pattern": "--terminate-first|ao sim run"
+        },
+        {
+          "text": "confirms the build (Build: line or doctor --expect)",
+          "pattern": "Build:|--expect|cdhash"
+        }
+      ]
+    },
+    {
+      "id": "sim-blocked-main-thread",
+      "area": "sim",
+      "prompt": "I started my app with `xcrun simctl launch --console-pipe <udid> com.example.MyApp` so I could read its logs. Now `ao sim tap --label Continue` says it succeeded but nothing changes, and `ao sim ax` comes back with nothing. What is going on and how do I get going again?",
+      "assertions": [
+        {
+          "text": "names the blocked main thread",
+          "pattern": "main thread"
+        },
+        {
+          "text": "blames the undrained stdout pipe",
+          "pattern": "pipe"
+        },
+        {
+          "text": "relaunches without the pipe through ao sim launch",
+          "pattern": "ao sim launch"
+        },
+        {
+          "text": "points at ao sim log or --console instead",
+          "pattern": "ao sim log|--console"
+        }
+      ]
+    },
+    {
+      "id": "sim-stopped-by-debugger",
+      "area": "sim",
+      "prompt": "I attached lldb to my app on the simulator to look at a variable and quit my lldb session. Now my app looks frozen and `ao sim flow run` refuses to start. How do I find out what is holding it and fix it, and how should I run lldb next time?",
+      "assertions": [
+        {
+          "text": "checks state with ao sim pid or ao sim doctor",
+          "pattern": "ao sim (pid|doctor)"
+        },
+        {
+          "text": "resumes a SIGSTOPped app",
+          "pattern": "kill -CONT|--resume|SIGCONT"
+        },
+        {
+          "text": "next time uses the bounded ao sim lldb",
+          "pattern": "ao sim lldb"
+        }
+      ]
+    },
+    {
+      "id": "sim-type-unproven",
+      "area": "sim",
+      "prompt": "`ao sim type \"qa.user@example.com\"` printed `the text may be in the field ... but could not prove it`. Should I run it again?",
+      "assertions": [
+        {
+          "text": "says not to send it again",
+          "pattern": "(do not|don't|never|not)[^.\\n]{0,40}(again|re-?send|re-?type|retype|twice)|twice"
+        },
+        {
+          "text": "reads the field back with ao sim ax",
+          "pattern": "ao sim ax"
+        }
+      ]
+    },
+    {
+      "id": "testiny-record-failed-step",
+      "area": "testiny",
+      "prompt": "I'm the qa on task mer-3. I played case TC-7167 in Testiny run 632 (project MOB, already linked to the task). Steps 1 passed, step 2 failed because the confirm button never appeared, step 3 could not be reached. Record that.",
+      "assertions": [
+        {
+          "text": "uses ao testiny result",
+          "pattern": "ao testiny result"
+        },
+        {
+          "text": "case FAILED",
+          "pattern": "--status FAILED"
+        },
+        {
+          "text": "gives a comment",
+          "pattern": "--comment"
+        },
+        {
+          "text": "records step 2 failed",
+          "pattern": "--step 2=FAILED"
+        },
+        {
+          "text": "records step 3 as BLOCKED or NOTRUN (or leaves it NOTRUN), never SKIPPED",
+          "pattern": "--step 3=(BLOCKED|NOTRUN)|step 3[^\\n]{0,80}NOTRUN"
+        },
+        {
+          "text": "does not write through the testiny CLI",
+          "pattern": "^(?![\\s\\S]*\\n\\s*testiny run results set)"
+        }
+      ]
+    },
+    {
+      "id": "testiny-evidence-folder",
+      "area": "testiny",
+      "prompt": "Upload my QA evidence for task mer-3, Testiny run 632. Right now the screenshots are in ~/Desktop/shots as login.png and confirm-bug.mp4 (the bug is MOBILITY-4533; login passed as TC-2124, the confirm case TC-2130 failed).",
+      "assertions": [
+        {
+          "text": "puts the files in the run's QA Evidence folder (the tree, or the folder ao testiny runs prints)",
+          "pattern": "QA Evidence/|ao testiny runs"
+        },
+        {
+          "text": "names the run folder as Testiny gives it (TR-<n> - <run>, or the path ao testiny runs prints)",
+          "pattern": "TR-632 - |TR-<n> - |TR-\\d+ - |(path|folder)[^.\\n]{0,40}\\bruns\\b|\\bruns\\b[^.\\n]{0,60}(path|folder)"
+        },
+        {
+          "text": "README.md is required",
+          "pattern": "README\\.md"
+        },
+        {
+          "text": "pass file named TC-2124 pass",
+          "pattern": "TC-2124 pass"
+        },
+        {
+          "text": "fail file named TC-2130 FAIL MOBILITY-4533",
+          "pattern": "TC-2130 FAIL MOBILITY-4533"
+        },
+        {
+          "text": "uploads with ao testiny evidence",
+          "pattern": "ao testiny evidence (mer-3|\"?\\$AO_SESSION_ID\"?) 632"
+        }
+      ]
+    },
+    {
+      "id": "testiny-set-by-person",
+      "area": "testiny",
+      "prompt": "`ao testiny result mer-3 632 TC-7166 --status PASSED` failed with TESTINY_RESULT_SET_BY_PERSON (TC-7166 (FAILED)). I'm sure it passes now. What should I do?",
+      "assertions": [
+        {
+          "text": "does not retry or force it",
+          "pattern": "(do not|don't|never|not)[^.\\n]{0,30}(retry|overwrite|again|force)"
+        },
+        {
+          "text": "reports the result in the handback",
+          "pattern": "handback|hand back|report"
+        },
+        {
+          "text": "a person sets it back to NOTRUN for a re-run",
+          "pattern": "NOTRUN"
+        }
+      ]
+    },
+    {
+      "id": "project-mobile-scripts",
+      "area": "project",
+      "prompt": "Make the nter-ios-app project drive its simulators only through the nter scripts in the scripts store, with its verify skill at projects/nter/verify-ios. When does it take effect?",
+      "assertions": [
+        {
+          "text": "sets mobile-scripts to nter",
+          "pattern": "ao project set-config nter-ios-app[^\\n]*--mobile-scripts nter"
+        },
+        {
+          "text": "passes the platform with it",
+          "pattern": "--mobile-platform ios"
+        },
+        {
+          "text": "passes the verify skill",
+          "pattern": "--mobile-scripts-verify-skill projects/nter/verify-ios"
+        },
+        {
+          "text": "takes effect for the next spawned or restored worker",
+          "pattern": "next[^.\\n]{0,40}(spawn|worker|session|restor)"
+        }
+      ]
+    },
+    {
+      "id": "project-config-json",
+      "area": "project",
+      "prompt": "Add the env var FEATURE_X=1 to project nter-ios-app's sessions. I was going to run `ao project set-config nter-ios-app --config-json '{\"env\":{\"FEATURE_X\":\"1\"}}'`. Is that right?",
+      "assertions": [
+        {
+          "text": "warns --config-json replaces the whole config",
+          "pattern": "replac|overwrit|wipe|lose|drop"
+        },
+        {
+          "text": "uses the --env field flag instead",
+          "pattern": "--env \"?FEATURE_X=1"
+        },
+        {
+          "text": "keeps the existing env vars (re-passes them after reading the current config)",
+          "pattern": "get [^\\n]*--json|existing|current"
+        }
+      ]
+    },
+    {
+      "id": "session-restore-claim-pr",
+      "area": "session",
+      "prompt": "Worker session mer-3 got killed by accident. Bring it back, and attach PR 88 to it, but not if another active session already owns that PR.",
+      "assertions": [
+        {
+          "text": "restores the session",
+          "pattern": "ao session restore mer-3"
+        },
+        {
+          "text": "claims the PR without taking it over",
+          "pattern": "ao session claim-pr mer-3 88 --no-takeover"
+        }
+      ]
+    },
+    {
+      "id": "learn-undo-confirm",
+      "area": "learn",
+      "prompt": "The human told me to take back learning proposal p-12 that they approved yesterday. `ao learn undo p-12` printed a diff and a token and exited 1. What now?",
+      "assertions": [
+        {
+          "text": "shows the human the diff before confirming",
+          "pattern": "(show|ask|human|confirm with)[^.\\n]{0,60}diff|diff[^.\\n]{0,60}(human|them|approv)"
+        },
+        {
+          "text": "confirms with the token",
+          "pattern": "ao learn undo p-12 --confirm"
+        }
+      ]
+    }
+  ]
+}

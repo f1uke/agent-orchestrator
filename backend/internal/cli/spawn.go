@@ -261,16 +261,16 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.claimPR, "claim-pr", "", "Immediately claim an existing PR for the spawned session: a github.com PR URL/number, or a full GitLab merge-request URL")
 	f.BoolVar(&opts.noTakeover, "no-takeover", false, "Refuse if another active session owns the claimed PR (requires --claim-pr)")
 	f.BoolVar(&opts.skipAgentCheck, "skip-agent-check", false, "Skip advisory agent catalog install/auth preflight before spawning")
-	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until `ao session start <id>`)")
+	f.BoolVar(&opts.todo, "todo", false, "Stage the worker as a prepared TODO on the board instead of starting it now (no branch/worktree/tmux until ao session start <id>)")
 	f.BoolVar(&opts.keepWarm, "keep-warm", false, "Keep the worker running on the board when its PR merges instead of archiving it to Done: its tmux, and any build or test in it, carries on (it still sleeps after the idle window like any worker) - for a worker that will open more PRs")
 	f.StringVar(&opts.taskSize, "task-size", "", "How big the task is - it decides both the ceremony AND how many agents work it.\n"+
 		"  mechanical  ONE agent. Skips the up-front requirements/plan/test-first ceremony and goes\n"+
 		"              straight to edit + verify.\n"+
 		"              For a small, well-scoped change: a rename, a copy tweak, a config bump, a one-line fix.\n"+
-		"  standard    (default) TWO agents on one worktree: dev implements and owns the PR, qa writes,\n"+
-		"              runs and records the tests. Full ceremony. The qa is created - awake, beside dev - the first\n"+
-		"              time dev touches the app's runtime (`ao sim`, `ao preview`); a task with nothing to\n"+
-		"              exercise never gets one and costs nothing extra.\n"+
+		"  standard    (default) Up to TWO agents on one worktree: dev implements and owns the PR, qa writes,\n"+
+		"              runs and records the tests. Full ceremony. The qa is created only when dev asks for one\n"+
+		"              with ao crew review once the change is done (or a person adds one), so a task nobody\n"+
+		"              asks about never gets one and costs nothing extra.\n"+
 		"  deep        As standard, and flags a high-stakes task.\n"+
 		"Tag it mechanical when it really is small: a crew is cheaper than one agent on a long task and dearer on a short one")
 	return cmd
