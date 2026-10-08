@@ -354,7 +354,6 @@ func startDriftTestDaemon(t *testing.T, sessions controllers.SessionService, pro
 	})
 }
 
-// startDriftTestDaemonWith is startDriftTestDaemon over any set of API deps.
 func startDriftTestDaemonWith(t *testing.T, deps httpd.APIDeps) {
 	t.Helper()
 

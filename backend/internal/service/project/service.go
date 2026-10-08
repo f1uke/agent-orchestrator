@@ -456,8 +456,6 @@ func (m *Service) SetConfig(ctx context.Context, id domain.ProjectID, in SetConf
 	return m.projectFromRow(row), nil
 }
 
-// canonicalClaudeProfile refuses a default Claude profile the registry does not
-// hold and spells a known one the way the registry does.
 func (m *Service) canonicalClaudeProfile(name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", nil

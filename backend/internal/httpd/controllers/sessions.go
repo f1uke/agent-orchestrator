@@ -614,8 +614,6 @@ func (c *SessionsController) setBranch(w http.ResponseWriter, r *http.Request) {
 	envelope.WriteJSON(w, http.StatusOK, SessionResponse{Session: sessionView(updated)})
 }
 
-// setClaudeProfile switches a claude-code session to another Claude profile
-// and, with restart, restarts its agent onto it now or once it is idle.
 func (c *SessionsController) setClaudeProfile(w http.ResponseWriter, r *http.Request) {
 	if c.Svc == nil {
 		apispec.NotImplemented(w, r, "PUT", "/api/v1/sessions/{sessionId}/claude-profile")

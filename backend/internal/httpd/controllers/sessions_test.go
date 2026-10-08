@@ -108,7 +108,7 @@ type fakeSessionService struct {
 	updatedID    domain.SessionID
 	updatedPatch ports.TodoSpecPatch
 	updateErr    error
-	// Claude profile switch fakes.
+
 	claudeProfileReq claudeProfileCall
 	claudeProfileErr error
 }

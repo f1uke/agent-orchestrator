@@ -21,9 +21,6 @@ type ClaudeProfileRegistry interface {
 	Lookup(name string) (claudeprofile.Profile, error)
 }
 
-// spawnClaudeProfile is the canonical profile a new session launches with: none
-// for an agent other than Claude Code, else the override, else the project
-// default, else Subscription.
 func (m *Manager) spawnClaudeProfile(harness domain.AgentHarness, override string, project domain.ProjectRecord) (string, error) {
 	if harness != domain.HarnessClaudeCode {
 		return "", nil
@@ -39,9 +36,6 @@ func (m *Manager) spawnClaudeProfile(harness domain.AgentHarness, override strin
 	return p.Name, nil
 }
 
-// claudeSettingsFile is the `--settings` file a session launches with. It is
-// read at every launch, so an edited profile path applies on the next one, and
-// a legacy row with no profile launches as Subscription.
 func (m *Manager) claudeSettingsFile(harness domain.AgentHarness, profile string) (string, error) {
 	if harness != domain.HarnessClaudeCode {
 		return "", nil
@@ -53,8 +47,6 @@ func (m *Manager) claudeSettingsFile(harness domain.AgentHarness, profile string
 	return claudeprofile.SettingsPath(p)
 }
 
-// todoClaudeProfile is the override a prepared TODO keeps: validated now,
-// resolved against the project default only when the task starts.
 func (m *Manager) todoClaudeProfile(override string) (string, error) {
 	if strings.TrimSpace(override) == "" {
 		return "", nil
@@ -66,8 +58,6 @@ func (m *Manager) todoClaudeProfile(override string) (string, error) {
 	return p.Name, nil
 }
 
-// withLaunchEnv adds the adapter's launch env last, so a project's own env can
-// never override it.
 func withLaunchEnv(env map[string]string, agent ports.Agent) map[string]string {
 	for k, v := range ports.LaunchEnvOf(agent) {
 		env[k] = v
@@ -124,8 +114,6 @@ func (m *Manager) SetClaudeProfile(ctx context.Context, id domain.SessionID, nam
 	return rec, outcome, err
 }
 
-// restartableNow reports whether the agent sits at an empty prompt, so a
-// restart interrupts nothing.
 func restartableNow(state domain.ActivityState) bool {
 	return state == domain.ActivityIdle || state == domain.ActivityParked
 }
