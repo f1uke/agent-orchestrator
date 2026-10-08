@@ -14,23 +14,23 @@ import (
 type BranchFollowOutcome string
 
 const (
-	// BranchInSync: nothing to follow. The worktree is on the recorded branch,
+	// BranchInSync means nothing to follow. The worktree is on the recorded branch,
 	// or there is no worktree, recorded branch or comparable repo to read.
 	BranchInSync BranchFollowOutcome = "in_sync"
-	// BranchFollowed: the recorded branch was renamed in the worktree and the
+	// BranchFollowed means the recorded branch was renamed in the worktree and the
 	// session now records the new name.
 	BranchFollowed BranchFollowOutcome = "followed"
-	// BranchLeftDetached: the recorded branch is gone and HEAD is detached, so
+	// BranchLeftDetached means the recorded branch is gone and HEAD is detached, so
 	// there is no name to adopt.
 	BranchLeftDetached BranchFollowOutcome = "detached"
-	// BranchLeftSwitched: the recorded branch still exists and the worktree is on
+	// BranchLeftSwitched means the recorded branch still exists and the worktree is on
 	// another one. That is a checkout, not a rename (a baseline install, the next
 	// PR's branch), and the session keeps the branch it owns.
 	BranchLeftSwitched BranchFollowOutcome = "switched"
-	// BranchLeftTarget: the worktree is on a branch the session merges into or
+	// BranchLeftTarget means the worktree is on a branch the session merges into or
 	// was cut from, which can never be the session's own.
 	BranchLeftTarget BranchFollowOutcome = "target"
-	// BranchLeftOwned: the worktree is on a branch another live session records.
+	// BranchLeftOwned means the worktree is on a branch another live session records.
 	// Taking it would leave two sessions claiming one branch's PRs.
 	BranchLeftOwned BranchFollowOutcome = "owned"
 )
