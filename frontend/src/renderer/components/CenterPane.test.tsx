@@ -10,6 +10,7 @@ vi.mock("./TerminalPane", () => ({ TerminalPane: () => <div>terminal body</div> 
 vi.mock("./RestartSessionButton", () => ({ RestartSessionButton: () => <div>restart control</div> }));
 // Same for the kill control (react-query + router); stub to assert placement only.
 vi.mock("./KillSessionButton", () => ({ KillSessionButton: () => <div>kill control</div> }));
+vi.mock("./ClaudeProfileControl", () => ({ ClaudeProfileControl: () => <div>profile control</div> }));
 
 const worker = {
 	id: "sess-1",
@@ -46,6 +47,7 @@ describe("CenterPane restart control", () => {
 	it("offers restart for an active session", () => {
 		render(<CenterPane session={worker} theme="dark" daemonReady />);
 		expect(screen.getByText("restart control")).toBeInTheDocument();
+		expect(screen.getByText("profile control")).toBeInTheDocument();
 	});
 
 	it("offers restart for an active orchestrator session", () => {
@@ -56,6 +58,7 @@ describe("CenterPane restart control", () => {
 	it("hides restart for a terminated session", () => {
 		render(<CenterPane session={{ ...worker, status: "terminated" }} theme="dark" daemonReady />);
 		expect(screen.queryByText("restart control")).not.toBeInTheDocument();
+		expect(screen.queryByText("profile control")).not.toBeInTheDocument();
 	});
 
 	it("hides restart when there is no session", () => {
