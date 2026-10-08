@@ -41,6 +41,9 @@ const (
 	StageBuilding   Stage = "building"
 	StageInstalling Stage = "installing"
 	StageLaunching  Stage = "launching"
+	// StageAppRunning is a run that launched its app and stays with it until it
+	// exits, so the bar can stop it.
+	StageAppRunning Stage = "app-running"
 )
 
 // BuildProgress is how far the build is, as its result stream says.

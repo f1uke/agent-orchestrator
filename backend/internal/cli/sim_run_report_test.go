@@ -131,3 +131,13 @@ func TestOtherProgressBuilds(t *testing.T) {
 		t.Fatal("another posting build makes the counts ambiguous")
 	}
 }
+
+func readRunProgressIfAny(dir string) iosrun.Progress {
+	body, err := os.ReadFile(filepath.Join(dir, iosrun.ProgressFile))
+	if err != nil {
+		return iosrun.Progress{}
+	}
+	var progress iosrun.Progress
+	_ = json.Unmarshal(body, &progress)
+	return progress
+}

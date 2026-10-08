@@ -28,6 +28,8 @@ type runReport struct {
 	mu           sync.Mutex
 	progress     iosrun.Progress
 	buildSeconds float64
+	// end is how an attached app ended: "exited" or "stopped".
+	end string
 }
 
 func newRunReport() *runReport {
@@ -81,6 +83,15 @@ func (r *runReport) buildSucceeded() {
 	}
 }
 
+func (r *runReport) ended(how string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.end = how
+}
+
 func (r *runReport) writeLocked() {
 	body, err := json.Marshal(r.progress)
 	if err != nil {
@@ -95,7 +106,7 @@ func (r *runReport) writeLocked() {
 
 // finish writes the verdict. It is one sentence, never the build log: the
 // output is already in the pane the bar points at.
-func (r *runReport) finish(result simRunResult, runErr error) {
+func (r *runReport) finish(result simRunResult, runErr error, stopped bool) {
 	if r == nil {
 		return
 	}
@@ -103,12 +114,22 @@ func (r *runReport) finish(result simRunResult, runErr error) {
 	defer r.mu.Unlock()
 	finished := r.now().UTC()
 	verdict := iosrun.Result{State: iosrun.RunSucceeded, FinishedAt: &finished, BuildSeconds: r.buildSeconds}
-	if runErr != nil {
+	switch {
+	case runErr != nil && stopped:
+		verdict.State = iosrun.RunStopped
+		verdict.Summary = firstLineOf(runErr)
+	case runErr != nil:
 		verdict.State = iosrun.RunFailed
 		verdict.Summary = firstLineOf(runErr)
-	} else {
+	default:
 		verdict.Summary = fmt.Sprintf("Built %s (%s) and launched %s on %s.",
 			result.Scheme, result.Configuration, result.BundleID, result.Name)
+		switch r.end {
+		case "stopped":
+			verdict.Summary += " It ran until you stopped it."
+		case "exited":
+			verdict.Summary += " It has exited."
+		}
 		// A run that worked and installed a broken app is still a run that
 		// worked; the warning rides beside the verdict.
 		verdict.Warning = firstLine(result.Warning)

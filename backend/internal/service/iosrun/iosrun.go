@@ -28,8 +28,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -148,7 +150,7 @@ type Run struct {
 	// and absent for a run that was stopped without reporting one.
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	// Stage is the step a running run is on, as the command last reported it.
-	Stage          Stage          `json:"stage,omitempty" enum:"preparing,booting,building,installing,launching" description:"The step a running run is on. Absent once it has ended."`
+	Stage          Stage          `json:"stage,omitempty" enum:"preparing,booting,building,installing,launching,app-running" description:"The step a running run is on. Absent once it has ended."`
 	StageStartedAt *time.Time     `json:"stageStartedAt,omitempty"`
 	BuildStartedAt *time.Time     `json:"buildStartedAt,omitempty" description:"When the build itself started, which the estimate is measured from."`
 	Build          *BuildProgress `json:"build,omitempty" description:"How far the build is, while it runs."`
@@ -167,6 +169,7 @@ type Manager interface {
 	Start(ctx context.Context, id domain.SessionID, scheme, configuration, udid string) (Run, error)
 	Current(ctx context.Context, id domain.SessionID) (Run, bool, error)
 	Xcodegen(ctx context.Context, id domain.SessionID) (xcodegen.Result, error)
+	Stop(ctx context.Context, id domain.SessionID) (Run, error)
 }
 
 // Service is the production Manager.
@@ -192,6 +195,10 @@ type Service struct {
 	// sentence; this keeps the evidence behind it.
 	log      *slog.Logger
 	xcodegen *xcodegen.Generator
+	// processArgs and interrupt reach the command a stop is for; injected so a
+	// test never signals a real process.
+	processArgs func(ctx context.Context, pid int) (string, error)
+	interrupt   func(pid int) error
 
 	mu        sync.Mutex
 	historyMu sync.Mutex
@@ -219,6 +226,11 @@ func WithLogger(l *slog.Logger) Option { return func(s *Service) { s.log = l } }
 // WithXcodegen replaces the xcodegen runner; tests use it.
 func WithXcodegen(g *xcodegen.Generator) Option { return func(s *Service) { s.xcodegen = g } }
 
+// WithProcesses replaces how a stop reads and signals the run's command.
+func WithProcesses(args func(ctx context.Context, pid int) (string, error), interrupt func(pid int) error) Option {
+	return func(s *Service) { s.processArgs, s.interrupt = args, interrupt }
+}
+
 // WithStateDir is where runs are recorded. Production passes the daemon's data
 // dir; a test passes t.TempDir() or nothing.
 func WithStateDir(dir string) Option { return func(s *Service) { s.stateDir = dir } }
@@ -226,14 +238,16 @@ func WithStateDir(dir string) Option { return func(s *Service) { s.stateDir = di
 // New builds the service. aoBinary is the absolute path to this daemon's `ao`.
 func New(sessions Sessions, runtime Runtime, aoBinary string, opts ...Option) *Service {
 	s := &Service{
-		sessions: sessions,
-		runtime:  runtime,
-		run:      commandOutputInDir,
-		aoBinary: aoBinary,
-		now:      time.Now,
-		log:      slog.Default(),
-		runs:     map[domain.SessionID]Run{},
-		cached:   map[domain.SessionID]cachedListing{},
+		sessions:    sessions,
+		runtime:     runtime,
+		run:         commandOutputInDir,
+		aoBinary:    aoBinary,
+		processArgs: processArgs,
+		interrupt:   interruptProcess,
+		now:         time.Now,
+		log:         slog.Default(),
+		runs:        map[domain.SessionID]Run{},
+		cached:      map[domain.SessionID]cachedListing{},
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -489,7 +503,9 @@ func (s *Service) Start(ctx context.Context, id domain.SessionID, scheme, config
 	if err := s.runtime.Destroy(ctx, ports.RuntimeHandle{ID: handle}); err != nil {
 		return Run{}, fmt.Errorf("ios run: clear the previous pane: %w", err)
 	}
-	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme, "--configuration", configuration}
+	// --attach keeps the command with the app it launched, so Stop always has a
+	// process to reach: the build while it builds, the app once it runs.
+	argv := []string{s.aoBinary, "sim", "run", "--scheme", scheme, "--configuration", configuration, "--attach"}
 	if trimmed := strings.TrimSpace(udid); trimmed != "" {
 		argv = append(argv, "--udid", trimmed)
 	}
@@ -586,6 +602,46 @@ func (s *Service) Current(ctx context.Context, id domain.SessionID) (Run, bool, 
 	run.State = RunStopped
 	run.Summary = "The run ended without reporting how it went. Its output is still in the pane."
 	return run, true, nil
+}
+
+// Stop interrupts the session's running `ao sim run`, which decides what that
+// means from where it is: a build is cancelled, an app it stays with is
+// terminated. Either way the command reports how it ended, as it always does.
+func (s *Service) Stop(ctx context.Context, id domain.SessionID) (Run, error) {
+	run, ok, err := s.Current(ctx, id)
+	if err != nil {
+		return Run{}, err
+	}
+	if !ok || run.State != RunRunning {
+		return Run{}, apierr.Invalid("IOS_RUN_NOT_RUNNING", "Nothing is running to stop.", nil)
+	}
+	progress, ok := s.readProgress(id)
+	if !ok || progress.PID <= 0 {
+		return Run{}, apierr.Invalid("IOS_RUN_NOT_STARTED", "The run has not started yet. Try again in a moment.", nil)
+	}
+	// The pid is checked before it is signalled: a run that ended without
+	// reporting leaves a pid behind that the system may have handed to anything.
+	args, err := s.processArgs(ctx, progress.PID)
+	if err != nil || !strings.Contains(args, " sim run") {
+		return Run{}, apierr.Invalid("IOS_RUN_NOT_RUNNING", "The run's process is gone, so there is nothing to stop.", nil)
+	}
+	if err := s.interrupt(progress.PID); err != nil {
+		return Run{}, fmt.Errorf("ios run: stop pid %d: %w", progress.PID, err)
+	}
+	return run, nil
+}
+
+func processArgs(ctx context.Context, pid int) (string, error) {
+	out, err := exec.CommandContext(ctx, "ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output() //nolint:gosec // ps with a numeric pid
+	return strings.TrimSpace(string(out)), err
+}
+
+func interruptProcess(pid int) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Signal(os.Interrupt)
 }
 
 // projectOf is the session's project, or "" when it cannot be read: the history

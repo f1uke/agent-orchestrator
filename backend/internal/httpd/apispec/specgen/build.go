@@ -1744,6 +1744,18 @@ func iosRunOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/ios-runs/stop", id: "stopIOSRun", tag: "sessions",
+			summary:    "Stop the session's run: cancel its build, or terminate the app it launched",
+			pathParams: []any{controllers.SessionIDParam{}},
+			resps: []respUnit{
+				{http.StatusAccepted, controllers.StartIOSRunResponse{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusUnprocessableEntity, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodPost, path: "/api/v1/sessions/{sessionId}/xcodegen", id: "runXcodegen", tag: "sessions",
 			summary:    "Run xcodegen generate in every directory of the session's worktree that holds a project.yml",
 			pathParams: []any{controllers.SessionIDParam{}},

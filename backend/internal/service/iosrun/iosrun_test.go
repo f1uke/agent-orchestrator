@@ -311,7 +311,7 @@ func TestStart_RunsTheCLIInTheSessionsWorktree(t *testing.T) {
 		t.Fatalf("the build must run in the session's worktree: %s", cfg.WorkspacePath)
 	}
 	argv := strings.Join(cfg.Argv, " ")
-	if !strings.Contains(argv, "sim run --scheme NterDev --configuration Dev --udid UDID-1") {
+	if !strings.Contains(argv, "sim run --scheme NterDev --configuration Dev --attach --udid UDID-1") {
 		t.Fatalf("argv %q", argv)
 	}
 	if cfg.Argv[0] != "/usr/local/bin/ao" {

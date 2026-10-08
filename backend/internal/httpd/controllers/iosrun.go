@@ -53,7 +53,21 @@ type IOSRunController struct {
 func (c *IOSRunController) Register(r chi.Router) {
 	r.Get("/sessions/{sessionId}/ios-project", c.project)
 	r.Post("/sessions/{sessionId}/ios-runs", c.start)
+	r.Post("/sessions/{sessionId}/ios-runs/stop", c.stop)
 	r.Post("/sessions/{sessionId}/xcodegen", c.xcodegen)
+}
+
+func (c *IOSRunController) stop(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/sessions/{sessionId}/ios-runs/stop")
+		return
+	}
+	run, err := c.Svc.Stop(r.Context(), sessionID(r))
+	if err != nil {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusAccepted, StartIOSRunResponse{Run: run})
 }
 
 func (c *IOSRunController) xcodegen(w http.ResponseWriter, r *http.Request) {

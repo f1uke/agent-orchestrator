@@ -3650,6 +3650,52 @@ paths:
         in a pane of its own
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/ios-runs/stop:
+    post:
+      operationId: stopIOSRun
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersStartIOSRunResponse'
+          description: Accepted
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Stop the session''s run: cancel its build, or terminate the app it
+        launched'
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/jira:
     delete:
       operationId: unlinkSessionJira
@@ -11228,6 +11274,7 @@ components:
           - building
           - installing
           - launching
+          - app-running
           type: string
         stageStartedAt:
           format: date-time

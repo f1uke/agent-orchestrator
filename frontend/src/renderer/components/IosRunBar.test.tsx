@@ -592,4 +592,49 @@ describe("IosRunBar", () => {
 		expect(await screen.findByRole("button", { name: /Run xcodegen/ })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute("title", "There is no Xcode project yet. Run xcodegen to generate it.");
 	});
+
+	it("keeps Stop in place and disabled while nothing runs", async () => {
+		answer();
+		renderBar();
+		expect(await screen.findByRole("button", { name: "Stop" })).toBeDisabled();
+	});
+
+	it("stops a running build", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "running",
+			startedAt: "2026-09-18T10:00:00Z",
+			stage: "building",
+		};
+		answer({ ios: { project: project(), run } });
+		postMock.mockResolvedValue({ data: { run } });
+		renderBar();
+		const stop = await screen.findByRole("button", { name: "Stop" });
+		await waitFor(() => expect(stop).toBeEnabled());
+		expect(stop).toHaveAttribute("title", "Stop building NterDev (Debug)");
+		await userEvent.click(stop);
+		expect(postMock).toHaveBeenCalledWith("/api/v1/sessions/{sessionId}/ios-runs/stop", {
+			params: { path: { sessionId: SESSION } },
+		});
+	});
+
+	it("says Stop terminates an app that is running", async () => {
+		const run = {
+			handleId: "iosrun-mer-9",
+			scheme: "NterDev",
+			configuration: "Debug",
+			udid: "UDID-A",
+			state: "running",
+			startedAt: "2026-09-18T10:00:00Z",
+			stage: "app-running",
+		};
+		answer({ ios: { project: project(), run } });
+		renderBar();
+		expect(await screen.findByRole("button", { name: /Running NterDev \(Debug\)/ })).toBeInTheDocument();
+		await waitFor(() => expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled());
+		expect(screen.getByRole("button", { name: "Stop" })).toHaveAttribute("title", "Stop NterDev (Debug): terminate the app");
+	});
 });

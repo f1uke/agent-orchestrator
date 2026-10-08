@@ -183,6 +183,9 @@ var simPromptDecisions = map[string]bool{
 	// `--console` is how `print` output is kept; taught with the debugging lines.
 	"launch --console": true,
 	"run --console":    false,
+	// `--attach` is how the run bar keeps a process to stop; an agent's run has
+	// no button, and the app outlives the command without it.
+	"run --attach": false,
 	// `run --scheme` IS in the prompt because on a real project it is not
 	// optional: several schemes is the normal shape of an iOS app (Dev, Staging,
 	// Release), and `ao sim run` refuses rather than guesses between them. An
@@ -308,6 +311,7 @@ var mobileScriptDecisions = map[string]simScriptDecision{
 	// Debugging an app is not how a script-only project reads it; the ao
 	// skill page covers it for the developer who needs it.
 	"run --console": scriptOmits,
+	"run --attach":  scriptOmits,
 	// dev and a solo worker debug by hand (the human's rule, 2026-10-08), and
 	// these are the guarded ways to: named in their iOS debugging line, which
 	// qa does not get.

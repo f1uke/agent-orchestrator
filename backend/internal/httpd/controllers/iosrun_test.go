@@ -42,6 +42,10 @@ func (f *fakeIOSRun) Xcodegen(context.Context, domain.SessionID) (xcodegen.Resul
 	return xcodegen.Result{Status: xcodegen.StatusNoSpecs, Root: "/w"}, nil
 }
 
+func (f *fakeIOSRun) Stop(context.Context, domain.SessionID) (iosrunsvc.Run, error) {
+	return iosrunsvc.Run{}, nil
+}
+
 func newIOSRunTestServer(t *testing.T, svc iosrunsvc.Manager) *httptest.Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))

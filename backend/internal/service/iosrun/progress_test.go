@@ -154,3 +154,49 @@ func TestProject_IgnoresASpecDeepInANonIOSRepository(t *testing.T) {
 		t.Fatalf("project = %+v, want nothing: a test fixture's spec is not this repository's app", project)
 	}
 }
+
+func stoppable(t *testing.T, args string) (*Service, *[]int) {
+	t.Helper()
+	var signalled []int
+	svc := New(fakeSessions{path: worktree(t, "Nter.xcodeproj"), found: true}, &fakeRuntime{alive: true}, "ao",
+		WithStateDir(t.TempDir()),
+		WithRunner(func(context.Context, string, string, ...string) ([]byte, error) {
+			return []byte(`{"project":{"schemes":["Nter"],"configurations":["Dev"]}}`), nil
+		}),
+		WithProcesses(
+			func(context.Context, int) (string, error) { return args, nil },
+			func(pid int) error { signalled = append(signalled, pid); return nil },
+		))
+	if _, err := svc.Start(context.Background(), "mer-9", "Nter", "Dev", ""); err != nil {
+		t.Fatal(err)
+	}
+	return svc, &signalled
+}
+
+func TestStop_InterruptsTheRunsOwnCommand(t *testing.T) {
+	svc, signalled := stoppable(t, "/Applications/AO.app/ao sim run --scheme Nter --configuration Dev --attach")
+	writeProgress(t, svc, "mer-9", Progress{PID: 4242, Stage: StageBuilding, StageStartedAt: time.Now()})
+	if _, err := svc.Stop(context.Background(), "mer-9"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*signalled) != 1 || (*signalled)[0] != 4242 {
+		t.Fatalf("signalled %v, want the command's pid 4242", *signalled)
+	}
+}
+
+func TestStop_LeavesAReusedPidAlone(t *testing.T) {
+	svc, signalled := stoppable(t, "/usr/bin/vim notes.txt")
+	writeProgress(t, svc, "mer-9", Progress{PID: 4242, Stage: StageBuilding, StageStartedAt: time.Now()})
+	if _, err := svc.Stop(context.Background(), "mer-9"); err == nil || len(*signalled) != 0 {
+		t.Fatalf("err=%v signalled=%v, want a refusal and no signal: pid 4242 is somebody else's now", err, *signalled)
+	}
+}
+
+func TestStop_RefusesARunThatHasEnded(t *testing.T) {
+	svc, signalled := stoppable(t, "ao sim run")
+	writeProgress(t, svc, "mer-9", Progress{PID: 4242, Stage: StageLaunching, StageStartedAt: time.Now()})
+	writeVerdict(t, svc.resultPath("mer-9"), Result{State: RunSucceeded})
+	if _, err := svc.Stop(context.Background(), "mer-9"); err == nil || len(*signalled) != 0 {
+		t.Fatalf("err=%v signalled=%v, want nothing to stop", err, *signalled)
+	}
+}

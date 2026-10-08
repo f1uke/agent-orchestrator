@@ -8,9 +8,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -107,6 +109,7 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 		udid          string
 		ttl           string
 		console       bool
+		attach        bool
 		json          bool
 	}
 	cmd := &cobra.Command{
@@ -131,7 +134,10 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			"about rather than guessed at. With no --udid it uses the simulator assigned to " +
 			"this session ($AO_SIM_UDID).\n\n" +
 			"--console launches it with its stdout and stderr - where `print` goes - in a file " +
-			"`ao sim console` reads, exactly as `ao sim launch --console` does.",
+			"`ao sim console` reads, exactly as `ao sim launch --console` does.\n\n" +
+			"--attach stays with the app after launching it, printing its console when there is one, " +
+			"until it exits; Ctrl-C then terminates it. The run bar runs this way, so its Stop always " +
+			"has a process to stop. Ctrl-C during a build interrupts xcodebuild and installs nothing.",
 		Example: `  ao sim run
   ao sim run --scheme NterApp --configuration Dev
   ao sim run --scheme NterApp --configuration UAT
@@ -144,23 +150,31 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 			// reads when a build fails, and holding them back until the end
 			// would make a three-minute build look like a hang. --json governs
 			// the RESULT, which is written last.
+			// Ctrl-C, or the run bar's Stop, ends the build or the app cleanly
+			// rather than killing this process out from under xcodebuild.
+			runCtx, stopSignals := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stopSignals()
 			report := newRunReport()
-			result, err := ctx.runSimApp(cmd.Context(), cmd.ErrOrStderr(), simRunRequest{
+			result, err := ctx.runSimApp(runCtx, cmd.ErrOrStderr(), simRunRequest{
 				scheme: opts.scheme, configuration: opts.configuration, udid: opts.udid, ttl: opts.ttl, console: opts.console,
 				report: report,
 			})
+			if err == nil {
+				if opts.json {
+					err = writeJSON(cmd.OutOrStdout(), result)
+				} else {
+					err = writeSimRun(cmd.OutOrStdout(), result)
+				}
+			}
+			if err == nil && opts.attach {
+				err = ctx.attachSimApp(runCtx, cmd.ErrOrStderr(), result, report)
+			}
 			// Report the verdict before returning either way. The run bar
 			// started this command in a pane nothing waits on, so this file is
 			// the ONLY way the outcome gets back to it - and a failed run that
 			// reported nothing would leave the bar saying "running" for ever.
-			report.finish(result, err)
-			if err != nil {
-				return err
-			}
-			if opts.json {
-				return writeJSON(cmd.OutOrStdout(), result)
-			}
-			return writeSimRun(cmd.OutOrStdout(), result)
+			report.finish(result, err, runCtx.Err() != nil)
+			return err
 		},
 	}
 	f := cmd.Flags()
@@ -169,6 +183,7 @@ func newSimRunCommand(ctx *commandContext) *cobra.Command {
 	f.StringVar(&opts.udid, "udid", "", "Run on this simulator instead of this session's own")
 	f.StringVar(&opts.ttl, "ttl", "", "How long to hold the device afterwards (e.g. 30s, 10m, 1h). Default 30m")
 	f.BoolVar(&opts.console, "console", false, "Launch with stdout and stderr in a file that ao sim console reads")
+	f.BoolVar(&opts.attach, "attach", false, "Stay with the app after launching it until it exits; Ctrl-C terminates it")
 	f.BoolVar(&opts.json, "json", false, "Output the result as JSON")
 	return cmd
 }
@@ -516,8 +531,14 @@ func sweepResultBundles(parent string, now time.Time) {
 	}
 }
 
+// buildStopGrace is how long an interrupted xcodebuild gets to cancel its build
+// before it is killed.
+const buildStopGrace = 20 * time.Second
+
 func (c *commandContext) streamBuild(ctx context.Context, out io.Writer, name string, args ...string) error {
-	stream, err := c.deps.StartStream(ctx, name, args...)
+	// The child outlives the context on purpose: a stop interrupts it and lets
+	// it cancel its build service work, and only kills it if it will not go.
+	stream, err := c.deps.StartStream(context.WithoutCancel(ctx), name, args...)
 	if err != nil {
 		return fmt.Errorf("could not start %s: %w", name, err)
 	}
@@ -529,6 +550,13 @@ func (c *commandContext) streamBuild(ctx context.Context, out io.Writer, name st
 	go func() {
 		select {
 		case <-ctx.Done():
+			if child, ok := stream.(interface{ Interrupt() error }); ok && child.Interrupt() == nil {
+				select {
+				case <-reading:
+					return
+				case <-time.After(buildStopGrace):
+				}
+			}
 			_ = stream.Close()
 		case <-reading:
 		}
@@ -757,6 +785,9 @@ func (c *commandContext) buildSimApp(
 	err = c.streamBuild(ctx, watch, xcodeproj.Binary, xcodeproj.BuildArgs(project, scheme, configuration, outputs)...)
 	if stopWatching != nil {
 		stopWatching()
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("stopped while building %s. Nothing was installed on %s: %w", scheme, device.Name, ctx.Err())
 	}
 	if err != nil {
 		if outputs.ProgressStream != "" {

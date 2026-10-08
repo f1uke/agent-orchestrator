@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Play, Terminal, Wrench, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, Play, Square, Terminal, Wrench, XCircle } from "lucide-react";
 import {
 	useIosProject,
 	useRefreshIosProject,
 	useRunXcodegen,
 	useStartIosRun,
+	useStopIosRun,
 	type IosProject,
 	type IosRun,
 } from "../hooks/useIosProject";
@@ -82,6 +83,7 @@ export function IosRunBar({
 	const holderNames = useSessionNames();
 	const power = useSimPower(sessionId, setProblem);
 	const start = useStartIosRun(sessionId, setProblem);
+	const stop = useStopIosRun(sessionId, setProblem);
 	// Opening either picker re-reads the project. The human's workflow is
 	// `xcodegen` in the terminal and then straight to the dropdown, which the
 	// 30-second poll notices far too late; an idle window still costs nothing,
@@ -186,6 +188,7 @@ export function IosRunBar({
 				)}
 				Run
 			</button>
+			<StopButton onStop={() => stop.mutate()} pending={stop.isPending} run={run} />
 
 			{specs.length > 0 ? <XcodegenButton sessionId={sessionId} specs={specs} /> : null}
 			<ChoicePicker
@@ -451,7 +454,12 @@ function RunChip({
 	const fraction = useMonotonic(progress?.fraction, run.startedAt);
 	const state = {
 		running: {
-			icon: <ProgressRing fraction={progress?.kind === "indeterminate" ? undefined : fraction} />,
+			icon:
+				progress?.kind === "running" ? (
+					<Play aria-hidden className="size-3.5 text-success" fill="currentColor" />
+				) : (
+					<ProgressRing fraction={progress?.kind === "indeterminate" ? undefined : fraction} />
+				),
 			label: progress?.label ?? `Running ${built}`,
 			tone: "text-muted-foreground",
 		},
@@ -486,6 +494,35 @@ function RunChip({
 		>
 			{state.icon}
 			{watching ? "Back to agent" : state.label}
+		</button>
+	);
+}
+
+/**
+ * Always in the bar, so Run never moves; enabled while a run is going. What it
+ * stops follows the run: the build while it builds, the app once it runs.
+ */
+function StopButton({ onStop, pending, run }: { onStop: () => void; pending: boolean; run?: IosRun }) {
+	const running = run?.state === "running";
+	const title = !running
+		? "Nothing is running"
+		: run.stage === "app-running"
+			? `Stop ${builtName(run)}: terminate the app`
+			: `Stop building ${builtName(run)}`;
+	return (
+		<button
+			aria-label="Stop"
+			className="flex size-7 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-overlay disabled:cursor-not-allowed disabled:text-passive disabled:hover:bg-transparent"
+			disabled={!running || pending}
+			onClick={onStop}
+			title={title}
+			type="button"
+		>
+			{pending ? (
+				<Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+			) : (
+				<Square aria-hidden className="size-3" fill="currentColor" />
+			)}
 		</button>
 	);
 }

@@ -1,7 +1,7 @@
 import type { IosRun } from "../hooks/useIosProject";
 
 export type RunProgressView = {
-	kind: "real" | "estimate" | "indeterminate";
+	kind: "real" | "estimate" | "indeterminate" | "running";
 	/** 0-1; absent when indeterminate. */
 	fraction?: number;
 	label: string;
@@ -42,6 +42,8 @@ export function runProgress(run: IosRun, now: number): RunProgressView {
 			return { kind: "real", fraction: 1, label: "Installing", tooltip: `Built ${name}; installing it` };
 		case "launching":
 			return { kind: "real", fraction: 1, label: "Launching", tooltip: `Built ${name}; launching it` };
+		case "app-running":
+			return { kind: "running", label: `Running ${name}`, tooltip: `${name} is running. Stop terminates it.` };
 		case "building":
 			return buildProgress(run, now, name);
 	}

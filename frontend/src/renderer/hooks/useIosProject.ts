@@ -89,6 +89,22 @@ export function useRefreshIosProject(sessionId: string) {
 	});
 }
 
+export function useStopIosRun(sessionId: string, onProblem: (message: string) => void) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async (): Promise<IosRun> => {
+			const { data, error } = await apiClient.POST("/api/v1/sessions/{sessionId}/ios-runs/stop", {
+				params: { path: { sessionId } },
+			});
+			if (error || !data) throw error ?? new Error("Could not stop the run");
+			return data.run;
+		},
+		onMutate: () => onProblem(""),
+		onError: (error) => onProblem(apiErrorMessage(error, "Could not stop the run")),
+		onSettled: () => void queryClient.invalidateQueries({ queryKey: iosProjectQueryKey(sessionId) }),
+	});
+}
+
 export type XcodegenResult = components["schemas"]["XcodegenResult"];
 
 export function useRunXcodegen(sessionId: string) {
