@@ -138,10 +138,21 @@ const globalSimTrustResponse = {
 	error: undefined,
 };
 
+const claudeProfilesResponse = {
+	data: {
+		profiles: [
+			{ name: "Subscription", settingsFile: "", builtin: true },
+			{ name: "OmniRoute", settingsFile: "~/.claude/settings-omniroute.json", builtin: true },
+		],
+	},
+	error: undefined,
+};
+
 function mockProject(project: Record<string, unknown>) {
 	getMock.mockImplementation(async (path: string) => {
 		if (path === "/api/v1/agents") return agentCatalogResponse;
 		if (path === "/api/v1/settings/sim-trust") return globalSimTrustResponse;
+		if (path === "/api/v1/settings/claude-profiles") return claudeProfilesResponse;
 		return {
 			data: {
 				status: "ok",
@@ -295,6 +306,59 @@ describe("ProjectSettingsForm", () => {
 		expect(body.orchestrator).toEqual({ agent: "claude-code", agentConfig: { model: "sonnet" } });
 		expect(body.worker).toEqual({ agent: "claude-code", agentConfig: { model: "opus" } });
 		expect(body.env).toEqual({ FOO: "bar" }); // hidden config preserved
+	});
+
+	describe("Claude profile", () => {
+		const project = (config: Record<string, unknown>) => ({
+			id: "proj-1",
+			name: "P",
+			kind: "single_repo",
+			path: "/repo/p",
+			repo: "git@github.com:acme/p.git",
+			defaultBranch: "main",
+			config: { env: { FOO: "bar" }, ...config },
+		});
+
+		it("reads an unset profile as Subscription and saves the one picked", async () => {
+			mockProject(project({ worker: { agent: "claude-code" }, orchestrator: { agent: "codex" } }));
+			renderSettings();
+			await goToSection("Starting a task");
+
+			const select = await screen.findByRole("combobox", { name: "Claude profile" });
+			expect(select).toHaveTextContent("Subscription");
+			await chooseOption(select, "OmniRoute");
+			await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+			await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+			const body = putMock.mock.calls[0][1].body.config;
+			expect(body.claudeProfile).toBe("OmniRoute");
+			expect(body.env).toEqual({ FOO: "bar" });
+		});
+
+		it("saves Subscription back as an unset profile", async () => {
+			mockProject(
+				project({ worker: { agent: "codex" }, orchestrator: { agent: "claude-code" }, claudeProfile: "OmniRoute" }),
+			);
+			renderSettings();
+			await goToSection("Starting a task");
+
+			const select = await screen.findByRole("combobox", { name: "Claude profile" });
+			expect(select).toHaveTextContent("OmniRoute");
+			await chooseOption(select, "Subscription");
+			await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+			await waitFor(() => expect(putMock).toHaveBeenCalledTimes(1));
+			expect(putMock.mock.calls[0][1].body.config.claudeProfile).toBeUndefined();
+		});
+
+		it("is hidden when neither agent is Claude Code", async () => {
+			mockProject(project({ worker: { agent: "codex" }, orchestrator: { agent: "codex" } }));
+			renderSettings();
+			await goToSection("Starting a task");
+
+			await screen.findByRole("combobox", { name: "Worker model" });
+			expect(screen.queryByRole("button", { name: /^Claude profile/ })).not.toBeInTheDocument();
+		});
 	});
 
 	it("round-trips a free-typed custom model for an open-ended worker agent", async () => {

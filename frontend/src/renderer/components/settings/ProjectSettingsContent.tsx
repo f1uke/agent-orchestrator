@@ -12,6 +12,8 @@ import { SettingsReadOnlyPanel, ReadonlyRow } from "./SettingsReadOnlyPanel";
 import { RESPONSE_LANGUAGE_OPTIONS } from "./response-language";
 import { PROJECT_SECTIONS } from "./settings-sections";
 import type { SimTrustMode, useProjectSettingsForm } from "./useProjectSettingsForm";
+import { ClaudeProfileSelect } from "../ClaudeProfileSelect";
+import { profileDisplayName, usesClaudeProfiles } from "../../lib/claude-profiles";
 
 type Project = components["schemas"]["Project"];
 type AgentInfo = components["schemas"]["AgentInfo"];
@@ -219,6 +221,7 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 		refreshAgentsMutation,
 		missingRequiredAgent,
 		validationError,
+		claudeProfiles,
 	} = form;
 	// The supported list carries every agent's full identity, including its model
 	// tiers, so the per-kind model selectors resolve their options from the agent
@@ -341,6 +344,27 @@ function StartingATaskSection({ form }: { form: ProjectForm }) {
 						onChange={(v) => setField("orchestratorModel", v)}
 					/>
 				</SettingRow>
+
+				{(usesClaudeProfiles(draft.workerAgent) || usesClaudeProfiles(draft.orchestratorAgent)) && (
+					<SettingRow
+						name="Claude profile"
+						summary="Which Claude Code settings file this project's Claude Code sessions launch with: the subscription, or a profile such as OmniRoute."
+						detail="Applies to sessions started after saving; a running session keeps its profile. Switch a running session from its terminal toolbar. A new task can pick another profile when it is created. Profiles are managed in Global settings, Every agent."
+						ownership={{ kind: "project-only" }}
+						timing="next-worker"
+						value={profileDisplayName(draft.claudeProfile)}
+						modified={isFieldDirty("claudeProfile")}
+						controlId="claudeProfile"
+					>
+						<ClaudeProfileSelect
+							id="claudeProfile"
+							className="h-8 w-full max-w-[340px] text-[13px]"
+							profiles={claudeProfiles}
+							value={draft.claudeProfile}
+							onChange={(v) => setField("claudeProfile", v)}
+						/>
+					</SettingRow>
+				)}
 
 				<SettingRow
 					name="Permission mode"
