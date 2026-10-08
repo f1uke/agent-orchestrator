@@ -108,6 +108,10 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 		// without a piped payload can't block on EOF.
 		return nil
 	}
+	if problem := checkSessionEnv(); problem != nil && problem.refuse {
+		c.reportHookFailure(agent, event, sessionID, problem)
+		return nil
+	}
 	payload, err := io.ReadAll(c.deps.In)
 	if err != nil {
 		// Surface read errors for parity with the daemon-error path, but keep

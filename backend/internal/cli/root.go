@@ -5,6 +5,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -228,6 +229,12 @@ func NewRootCommand(deps Deps) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if problem := checkSessionEnv(); problem != nil && cmd.CommandPath() != "ao hooks" {
+				if problem.refuse {
+					return problem
+				}
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+problem.Error())
+			}
 			if shouldEmitCLIInvocation(cmd) {
 				ctx.emitCLIInvoked(cmd.Context(), cmd)
 			}
