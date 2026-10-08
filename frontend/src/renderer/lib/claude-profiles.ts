@@ -17,7 +17,7 @@ export async function fetchClaudeProfiles(): Promise<ClaudeProfile[]> {
 	if (usePreviewData) return mockClaudeProfiles();
 	const { data, error } = await apiClient.GET("/api/v1/settings/claude-profiles", {});
 	if (error) throw new Error(apiErrorMessage(error));
-	return (data as components["schemas"]["ClaudeProfilesResponse"]).profiles;
+	return (data as components["schemas"]["ClaudeProfilesResponse"] | undefined)?.profiles ?? [];
 }
 
 export function useClaudeProfiles(enabled = true) {

@@ -7,7 +7,7 @@ import { Input } from "./ui/input";
 import { BranchCombobox } from "./BranchCombobox";
 import { JiraIssuePicker } from "./JiraIssuePicker";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
-import type { components } from "../../api/schema";
+import { ClaudeProfileSelect } from "./ClaudeProfileSelect";
 import type { JiraIssueSummary } from "../hooks/useSessionJiraContext";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { returnFocusToTerminal } from "../lib/terminal-focus";
@@ -15,11 +15,11 @@ import { captureRendererEvent } from "../lib/telemetry";
 import type { AgentProvider } from "../types/workspace";
 import { agentsQueryKey, agentsQueryOptions, refreshAgents } from "../hooks/useAgentsQuery";
 import { useProjectBranches } from "../hooks/useProjectBranches";
+import { useProjectQuery } from "../hooks/useProjectQuery";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import { cn } from "../lib/utils";
 import { clampDisplayName } from "../lib/display-name";
-
-type Project = components["schemas"]["Project"];
+import { profileDisplayName, useClaudeProfiles, usesClaudeProfiles } from "../lib/claude-profiles";
 
 /** Create either spawns now or queues a deferred TODO on the board. */
 type StartMode = "now" | "todo";
@@ -61,6 +61,7 @@ export function NewTaskDialog({
 	const baseId = useId();
 	const prTargetId = useId();
 	const agentId = useId();
+	const claudeProfileId = useId();
 	const [title, setTitle] = useState("");
 	const [jiraQuery, setJiraQuery] = useState("");
 	const [linkedIssue, setLinkedIssue] = useState<JiraIssueSummary | null>(null);
@@ -72,22 +73,12 @@ export function NewTaskDialog({
 	const [prTargetTouched, setPrTargetTouched] = useState(false);
 	const [agent, setAgent] = useState("");
 	const [agentTouched, setAgentTouched] = useState(false);
+	const [claudeProfile, setClaudeProfile] = useState("");
 	const [startMode, setStartMode] = useState<StartMode>("now");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 
-	const projectQuery = useQuery({
-		queryKey: ["project", projectId],
-		enabled: open && Boolean(projectId),
-		queryFn: async () => {
-			const { data, error: apiError } = await apiClient.GET("/api/v1/projects/{id}", {
-				params: { path: { id: projectId as string } },
-			});
-			if (apiError) throw new Error(apiErrorMessage(apiError));
-			if (data?.status !== "ok") throw new Error("Project config is unavailable.");
-			return data.project as Project;
-		},
-	});
+	const projectQuery = useProjectQuery(projectId, open);
 	const agentsQuery = useQuery({
 		...agentsQueryOptions,
 		enabled: open,
@@ -96,7 +87,10 @@ export function NewTaskDialog({
 		mutationFn: refreshAgents,
 		onSuccess: (next) => queryClient.setQueryData(agentsQueryKey, next),
 	});
+	const claudeProfilesQuery = useClaudeProfiles(open);
 	const defaultWorkerAgent = projectQuery.data?.config?.worker?.agent ?? "";
+	const defaultClaudeProfile = profileDisplayName(projectQuery.data?.config?.claudeProfile);
+	const showClaudeProfile = usesClaudeProfiles(agent);
 	const defaultBaseBranch = projectQuery.data?.defaultBranch ?? "";
 	const agentCatalog = agentsQuery.data;
 	const { branches: fetchedBranches } = useProjectBranches(open ? projectId : undefined);
@@ -118,6 +112,7 @@ export function NewTaskDialog({
 			setPrTargetTouched(false);
 			setAgent("");
 			setAgentTouched(false);
+			setClaudeProfile("");
 			setStartMode("now");
 			setError(undefined);
 			setIsSubmitting(false);
@@ -204,6 +199,7 @@ export function NewTaskDialog({
 					projectId,
 					kind: "worker",
 					harness: agentTouched && agent ? (agent as AgentProvider) : undefined,
+					claudeProfile: showClaudeProfile && claudeProfile ? claudeProfile : undefined,
 					// A Jira-linked task binds issueId to the key and keeps the human
 					// title as the sidebar label (displayName, capped by the API at
 					// MAX_DISPLAY_NAME_LEN);
@@ -407,6 +403,22 @@ export function NewTaskDialog({
 									{refreshAgentsMutation.isPending ? "Refreshing agents..." : "Refresh agents"}
 								</button>
 							</div>
+
+							{showClaudeProfile && (
+								<div className="space-y-1.5">
+									<label className="text-[12px] font-medium text-muted-foreground" htmlFor={claudeProfileId}>
+										Claude profile
+									</label>
+									<ClaudeProfileSelect
+										id={claudeProfileId}
+										className="h-8 w-full text-[13px]"
+										profiles={claudeProfilesQuery.data ?? []}
+										value={claudeProfile}
+										inheritLabel={`Project default (${defaultClaudeProfile})`}
+										onChange={setClaudeProfile}
+									/>
+								</div>
+							)}
 
 							{error && (
 								<div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
