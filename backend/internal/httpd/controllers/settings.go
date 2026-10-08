@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
+	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
 	"github.com/aoagents/agent-orchestrator/backend/internal/messagetemplates"
@@ -39,6 +40,13 @@ type SettingsService interface {
 type SpawnConfirmService interface {
 	Get() spawnconfirm.Settings
 	Set(spawnconfirm.Settings) error
+}
+
+// ClaudeProfilesService is the Claude profile registry surface the controller
+// needs. *claudeprofile.Store satisfies this directly.
+type ClaudeProfilesService interface {
+	List() []claudeprofile.Profile
+	SetUser([]claudeprofile.Profile) error
 }
 
 // AutoNudgeService is the auto-nudge settings store surface the controller
@@ -112,6 +120,7 @@ type MessageTemplatesService interface {
 type SettingsController struct {
 	Svc              SettingsService
 	SpawnConfirm     SpawnConfirmService
+	ClaudeProfiles   ClaudeProfilesService
 	AutoNudge        AutoNudgeService
 	ResponseLanguage ResponseLanguageService
 	Wiki             WikiSettingsService
@@ -129,6 +138,8 @@ func (c *SettingsController) Register(r chi.Router) {
 	r.Put("/settings/reclaim", c.set)
 	r.Get("/settings/spawn-confirm", c.getSpawnConfirm)
 	r.Put("/settings/spawn-confirm", c.setSpawnConfirm)
+	r.Get("/settings/claude-profiles", c.getClaudeProfiles)
+	r.Put("/settings/claude-profiles", c.setClaudeProfiles)
 	r.Get("/settings/auto-nudge", c.getAutoNudge)
 	r.Put("/settings/auto-nudge", c.setAutoNudge)
 	r.Get("/settings/response-language", c.getResponseLanguage)
@@ -208,6 +219,43 @@ func (c *SettingsController) setSpawnConfirm(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	envelope.WriteJSON(w, http.StatusOK, SpawnConfirmSettingsResponse{Enabled: next.Enabled})
+}
+
+func (c *SettingsController) getClaudeProfiles(w http.ResponseWriter, r *http.Request) {
+	if c.ClaudeProfiles == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/settings/claude-profiles")
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, claudeProfilesResponse(c.ClaudeProfiles.List()))
+}
+
+func (c *SettingsController) setClaudeProfiles(w http.ResponseWriter, r *http.Request) {
+	if c.ClaudeProfiles == nil {
+		apispec.NotImplemented(w, r, "PUT", "/api/v1/settings/claude-profiles")
+		return
+	}
+	var in SetClaudeProfilesRequest
+	if err := decodeJSON(r, &in); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_JSON", "Invalid JSON body", nil)
+		return
+	}
+	user := make([]claudeprofile.Profile, 0, len(in.Profiles))
+	for _, p := range in.Profiles {
+		user = append(user, claudeprofile.Profile{Name: p.Name, SettingsFile: p.SettingsFile})
+	}
+	if err := c.ClaudeProfiles.SetUser(user); err != nil {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_CLAUDE_PROFILES", err.Error(), nil)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusOK, claudeProfilesResponse(c.ClaudeProfiles.List()))
+}
+
+func claudeProfilesResponse(profiles []claudeprofile.Profile) ClaudeProfilesResponse {
+	out := ClaudeProfilesResponse{Profiles: make([]ClaudeProfile, 0, len(profiles))}
+	for _, p := range profiles {
+		out.Profiles = append(out.Profiles, ClaudeProfile(p))
+	}
+	return out
 }
 
 func (c *SettingsController) getAutoNudge(w http.ResponseWriter, r *http.Request) {

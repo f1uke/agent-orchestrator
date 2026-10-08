@@ -57,6 +57,9 @@ type LaunchSpec struct {
 	// AgentSessionID is the unique-per-launch native agent session id (see
 	// ports.ReviewInvocation.AgentSessionID). Empty falls back to the handle id.
 	AgentSessionID string
+	// ClaudeSettingsFile is the settings file of the project's default Claude
+	// profile, for a claude-code reviewer. Empty means none.
+	ClaudeSettingsFile string
 }
 
 // reviewerRuntime is the runtime surface the launcher needs: create a pane,
@@ -126,6 +129,7 @@ func (l *agentLauncher) invocation(spec LaunchSpec) ports.ReviewInvocation {
 		WorkspacePath:   spec.WorkspacePath,
 		Prompt:          prompt,
 		SystemPrompt:    systemPrompt,
+		SettingsFile:    spec.ClaudeSettingsFile,
 	}
 }
 

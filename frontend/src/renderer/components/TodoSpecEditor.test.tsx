@@ -193,4 +193,62 @@ describe("TodoSpecEditor", () => {
 		expect(screen.getByRole("button", { name: "Close task detail" })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 	});
+	describe("Claude profile", () => {
+		const claudeTodo: WorkspaceSession = { ...todo, provider: "claude-code" };
+
+		beforeEach(() => {
+			const base = getMock.getMockImplementation()!;
+			getMock.mockImplementation(async (path: string, ...rest: unknown[]) => {
+				if (path === "/api/v1/settings/claude-profiles") {
+					return {
+						data: {
+							profiles: [
+								{ name: "Subscription", settingsFile: "", builtin: true },
+								{ name: "OmniRoute", settingsFile: "~/.claude/settings-omniroute.json", builtin: true },
+							],
+						},
+						error: undefined,
+					};
+				}
+				if (path === "/api/v1/projects/{id}") {
+					return {
+						data: { status: "ok", project: { id: "proj-1", config: { claudeProfile: "OmniRoute" } } },
+						error: undefined,
+					};
+				}
+				return base(path, ...rest);
+			});
+		});
+
+		it("saves the picked profile as the TODO's override", async () => {
+			renderEditor({ session: claudeTodo });
+			const user = userEvent.setup();
+
+			const select = await screen.findByRole("combobox", { name: "Claude profile" });
+			await waitFor(() => expect(select).toHaveTextContent("Project default (OmniRoute)"));
+			await user.click(select);
+			await user.click(await screen.findByRole("option", { name: "Subscription" }));
+
+			await waitFor(() => expect(patchMock).toHaveBeenCalledTimes(1));
+			expect(patchMock.mock.calls[0][1].body.claudeProfile).toBe("Subscription");
+		});
+
+		it("leaves the profile out of a PATCH that did not change it", async () => {
+			renderEditor({ session: { ...claudeTodo, claudeProfile: "OmniRoute" } });
+			const user = userEvent.setup();
+			await screen.findByRole("combobox", { name: "Claude profile" });
+
+			await user.type(screen.getByLabelText("Task name"), "-renamed");
+			await user.tab();
+
+			await waitFor(() => expect(patchMock).toHaveBeenCalledTimes(1));
+			expect(patchMock.mock.calls[0][1].body.claudeProfile).toBeUndefined();
+		});
+
+		it("is hidden for a TODO whose agent is not Claude Code", async () => {
+			renderEditor();
+			await screen.findByLabelText("Task name");
+			expect(screen.queryByRole("combobox", { name: "Claude profile" })).not.toBeInTheDocument();
+		});
+	});
 });

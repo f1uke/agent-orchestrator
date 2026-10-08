@@ -31,6 +31,7 @@ func fullProjectConfig() ProjectConfig {
 		GitConvention:           GitConventionConfig{Workflow: GitWorkflowGitflow, BranchPrefix: "feature/"},
 		SystemPromptAdditions:   SystemPromptAdditions{Orchestrator: "orch", Worker: "work", Reviewer: "rev"},
 		ResponseLanguage:        "Thai",
+		ClaudeProfile:           "OmniRoute",
 		HasWebUI:                true,
 		HasIOSSimulator:         true,
 		SimProfile:              &SimProfileConfig{Keep: []string{"com.apple.backboardd"}},
@@ -68,6 +69,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		HasIOSSimulator:         false,
 		UsesTestiny:             false,
 		TestinySkill:            "/skills/other-testiny",
+		ClaudeProfile:           "Work",
 		DisableAutoCrew:         false,
 		PauseBeforeImplementing: false,
 	}
@@ -99,6 +101,7 @@ func TestMergeConfigFields_WritesOnlyTheNamedField(t *testing.T) {
 		{"pauseBeforeImplementing", func(c ProjectConfig) any { return c.PauseBeforeImplementing }},
 		{"learnFromSessions", func(c ProjectConfig) any { return c.LearnFromSessions }},
 		{"responseLanguage", func(c ProjectConfig) any { return c.ResponseLanguage }},
+		{"claudeProfile", func(c ProjectConfig) any { return c.ClaudeProfile }},
 		{"reviewers", func(c ProjectConfig) any { return c.Reviewers }},
 		{"simProfile", func(c ProjectConfig) any { return c.SimProfile }},
 		{"simTrust", func(c ProjectConfig) any { return c.SimTrust }},

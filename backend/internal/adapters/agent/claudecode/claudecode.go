@@ -135,14 +135,17 @@ func (p *Plugin) GetConfigSpec(ctx context.Context) (ports.ConfigSpec, error) {
 	}, nil
 }
 
-// Claude Code 2.1.294: one Left arrow on an empty prompt moves the conversation to a
-// background job of its per-user daemon, which carries another AO session's environment.
-const sessionSettings = `{"disableAgentView":true}`
+// LaunchEnv turns off Claude Code's agent view on every launch and restore.
+// Claude Code 2.1.294 hands an empty-prompt Left arrow to its per-user daemon, which
+// carries another AO session's env; this is the documented equivalent of disableAgentView.
+func (p *Plugin) LaunchEnv() map[string]string {
+	return map[string]string{"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"}
+}
 
 // GetLaunchCommand builds the argv to start an interactive Claude Code
 // session. Shape:
 //
-//	claude --settings <sessionSettings> \
+//	claude [--settings <SettingsFile>] \
 //	       [--session-id <uuid>] \
 //	       [--permission-mode <mode>] \
 //	       [--append-system-prompt-file <path>] \
@@ -172,7 +175,8 @@ func (p *Plugin) GetLaunchCommand(ctx context.Context, cfg ports.LaunchConfig) (
 		return nil, err
 	}
 
-	cmd = []string{binary, "--settings", sessionSettings}
+	cmd = []string{binary}
+	appendSettingsFlag(&cmd, cfg.SettingsFile)
 	if cfg.SessionID != "" {
 		cmd = append(cmd, "--session-id", claudeSessionUUID(cfg.SessionID))
 	}
@@ -240,7 +244,7 @@ func (p *Plugin) PreLaunch(ctx context.Context, cfg ports.LaunchConfig) error {
 }
 
 // GetRestoreCommand rebuilds the argv that continues an existing Claude Code
-// session: `claude --settings <sessionSettings> [--permission-mode <mode>]
+// session: `claude [--settings <SettingsFile>] [--permission-mode <mode>]
 // [--append-system-prompt-file <path>] --resume <agentSessionId>`. It prefers the hook-captured native session id
 // from cfg.Session.Metadata["agentSessionId"]; for sessions created before hooks
 // captured it, it falls back to the deterministic UUID AO pins via
@@ -285,7 +289,8 @@ func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig)
 		return nil, false, err
 	}
 	cmd = make([]string, 0, 9)
-	cmd = append(cmd, binary, "--settings", sessionSettings)
+	cmd = append(cmd, binary)
+	appendSettingsFlag(&cmd, cfg.SettingsFile)
 	appendPermissionFlags(&cmd, cfg.Permissions)
 	// --resume rebuilds the system prompt from the current flags (it is not
 	// stored in the transcript), so standing instructions must be re-appended
@@ -295,6 +300,14 @@ func (p *Plugin) GetRestoreCommand(ctx context.Context, cfg ports.RestoreConfig)
 	}
 	cmd = append(cmd, "--resume", sessionID)
 	return cmd, true, nil
+}
+
+// appendSettingsFlag adds the profile's settings file. Two --settings flags do
+// not merge in Claude Code (the last one wins), so this is the only one.
+func appendSettingsFlag(cmd *[]string, file string) {
+	if file != "" {
+		*cmd = append(*cmd, "--settings", file)
+	}
 }
 
 // SessionInfo surfaces the normalized session metadata that the Claude Code

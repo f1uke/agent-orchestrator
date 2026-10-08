@@ -2931,6 +2931,64 @@ paths:
         about its children
       tags:
       - sessions
+  /api/v1/sessions/{sessionId}/claude-profile:
+    put:
+      operationId: setSessionClaudeProfile
+      parameters:
+      - description: Session identifier, e.g. project-1.
+        in: path
+        name: sessionId
+        required: true
+        schema:
+          description: Session identifier, e.g. project-1.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetSessionClaudeProfileRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetSessionClaudeProfileResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Switch a claude-code session to another Claude profile, optionally
+        restarting it onto it
+      tags:
+      - sessions
   /api/v1/sessions/{sessionId}/comment-dispatch:
     post:
       operationId: sessionDispatchComment
@@ -7247,6 +7305,55 @@ paths:
       summary: Replace the auto-nudge-on-comments gate setting
       tags:
       - settings
+  /api/v1/settings/claude-profiles:
+    get:
+      operationId: getClaudeProfiles
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeProfilesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: List the Claude profiles, built-ins first
+      tags:
+      - settings
+    put:
+      operationId: setClaudeProfiles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetClaudeProfilesRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaudeProfilesResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+      summary: Replace the user Claude profiles
+      tags:
+      - settings
   /api/v1/settings/message-templates:
     get:
       operationId: getMessageTemplates
@@ -8833,6 +8940,40 @@ components:
             (e.g. iPhone SE). Empty is the default.
           type: string
       type: object
+    ClaudeProfile:
+      properties:
+        builtin:
+          type: boolean
+        name:
+          type: string
+        settingsFile:
+          type: string
+      required:
+      - name
+      - settingsFile
+      - builtin
+      type: object
+    ClaudeProfileInput:
+      properties:
+        name:
+          minLength: 1
+          type: string
+        settingsFile:
+          minLength: 1
+          type: string
+      required:
+      - name
+      - settingsFile
+      type: object
+    ClaudeProfilesResponse:
+      properties:
+        profiles:
+          items:
+            $ref: '#/components/schemas/ClaudeProfile'
+          type: array
+      required:
+      - profiles
+      type: object
     CleanupSessionsResponse:
       properties:
         cleaned:
@@ -10174,6 +10315,8 @@ components:
           items:
             $ref: '#/components/schemas/SessionChild'
           type: array
+        claudeProfile:
+          type: string
         createdAt:
           format: date-time
           type: string
@@ -10249,6 +10392,8 @@ components:
           type: integer
         queuedMessagesFailed:
           type: integer
+        restartPending:
+          type: boolean
         runtimeTouch:
           description: 'What this session did with the running app: took the simulator
             lease, or pointed ao preview at it. Absent when it never drove one.'
@@ -12115,6 +12260,8 @@ components:
           $ref: '#/components/schemas/AgentConfig'
         approvalRule:
           $ref: '#/components/schemas/ApprovalRule'
+        claudeProfile:
+          type: string
         defaultBranch:
           type: string
         disableAutoCrew:
@@ -13279,6 +13426,15 @@ components:
       required:
       - override
       type: object
+    SetClaudeProfilesRequest:
+      properties:
+        profiles:
+          items:
+            $ref: '#/components/schemas/ClaudeProfileInput'
+          type: array
+      required:
+      - profiles
+      type: object
     SetMessageTemplateRequest:
       properties:
         template:
@@ -13349,6 +13505,30 @@ components:
           type: string
       required:
       - language
+      type: object
+    SetSessionClaudeProfileRequest:
+      properties:
+        profile:
+          minLength: 1
+          type: string
+        restart:
+          type: boolean
+      required:
+      - profile
+      type: object
+    SetSessionClaudeProfileResponse:
+      properties:
+        restart:
+          enum:
+          - restarted
+          - pending
+          - next_launch
+          type: string
+        session:
+          $ref: '#/components/schemas/ControllersSessionView'
+      required:
+      - session
+      - restart
       type: object
     SetSessionKeepWarmRequest:
       properties:
@@ -14346,6 +14526,8 @@ components:
           type: string
         branch:
           type: string
+        claudeProfile:
+          type: string
         createdBy:
           type: string
         displayName:
@@ -14828,6 +15010,10 @@ components:
           - "null"
           - string
         branch:
+          type:
+          - "null"
+          - string
+        claudeProfile:
           type:
           - "null"
           - string

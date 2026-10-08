@@ -15,6 +15,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/runtime/runtimeselect"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/scm/composite"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/gitworktree"
+	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/learn"
@@ -121,6 +122,9 @@ type sessionLifecycle interface {
 	Reconcile(ctx context.Context) error
 	RestoreAll(ctx context.Context) error
 	CloseIdleSessions(ctx context.Context) error
+	// RestartPendingSessions runs the restarts Claude profile switches left
+	// waiting for their agent to go idle.
+	RestartPendingSessions(ctx context.Context) error
 	SyncOrchestratorWorkspaces(ctx context.Context) error
 	// NoteRuntimeTouch records that a task drove the app: the simulator service
 	// reports a granted lease and the manager writes the fact onto the session's
@@ -154,7 +158,7 @@ type sessionLifecycle interface {
 // store + LCM, the per-session agent resolver, and the agent messenger. The
 // returned service is mounted at httpd APIDeps.Sessions. It also returns the
 // manager so the caller can wire Reconcile into the boot sequence.
-func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
+func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlite.Store, lcm *lifecycle.Manager, messenger ports.AgentMessenger, telemetry ports.EventSink, spawnConfirm *spawnconfirm.Store, claudeProfiles *claudeprofile.Store, promptOverrides *promptoverrides.Store, responseLang *responselang.Store, reclaimSettings func() reclaimsettings.Settings, treeWatchers reviewcore.Watcher, log *slog.Logger) (*sessionsvc.Service, reviewsvc.Manager, sessionLifecycle, error) {
 	defaultAgent := cfg.Agent
 	if defaultAgent == "" {
 		defaultAgent = config.DefaultAgent
@@ -206,6 +210,7 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// against the per-project override, so a settings edit takes effect on the
 		// next spawn/restore.
 		ResponseLanguage: func() string { return responseLang.Language() },
+		ClaudeProfiles:   claudeProfiles,
 	})
 	// A crew is one task on one worktree. When the reducer terminates a dev
 	// because its PR merged (or its issue closed) it writes one row and nothing
@@ -268,6 +273,13 @@ func startSession(cfg config.Config, runtime runtimeselect.Runtime, store *sqlit
 		// The reviewer's review comments follow the same language directive; resolve
 		// the global default here (the per-project override is applied in Trigger).
 		ResponseLanguage: func() string { return responseLang.Language() },
+		ClaudeSettings: func(profile string) (string, error) {
+			p, err := claudeProfiles.Lookup(profile)
+			if err != nil {
+				return "", err
+			}
+			return claudeprofile.SettingsPath(p)
+		},
 	})
 	reviewSvc := reviewsvc.New(reviewEngine, store, reviewsvc.WithLifecycleReducer(lcm))
 	// Tie the panes a session SPAWNS to the session itself: when it is torn down

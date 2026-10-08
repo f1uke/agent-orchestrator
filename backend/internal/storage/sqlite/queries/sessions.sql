@@ -10,8 +10,8 @@ INSERT INTO sessions (
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge, task_size,
     crew_id, crew_role, crew_join_reason, runtime_touch, sleep_reason, woken_by,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    created_at, updated_at, claude_profile
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: UpdateSession :exec
 UPDATE sessions SET
@@ -31,7 +31,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
+    claude_profile, restart_pending
 FROM sessions WHERE id = ?;
 
 -- name: ListSessionsByProject :many
@@ -41,7 +42,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
+    claude_profile, restart_pending
 FROM sessions WHERE project_id = ? ORDER BY num;
 
 -- name: ListAllSessions :many
@@ -51,7 +53,8 @@ SELECT id, project_id, num, issue_id, kind, harness,
     is_todo, base_branch, auto_name_branch, pr_target, created_by, is_suspended, last_opened_at, keep_warm_on_merge,
     token_input, token_cache_creation, token_cache_read, token_output, token_turns, tokens_updated_at, task_size, auto_resolve_on_reply,
     termination_source, termination_reason, termination_last_state, termination_transcript_path, terminated_at,
-    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at
+    crew_id, crew_role, sleep_reason, woken_by, crew_join_reason, runtime_touch, crew_round_started_at,
+    claude_profile, restart_pending
 FROM sessions ORDER BY project_id, num;
 
 
@@ -93,6 +96,17 @@ UPDATE sessions SET keep_warm_on_merge = ?, updated_at = ? WHERE id = ?;
 -- has agreed to. Bumps updated_at so the sessions_cdc_update trigger refreshes
 -- the board.
 UPDATE sessions SET pr_target = ?, updated_at = ? WHERE id = ?;
+
+-- name: SetSessionClaudeProfile :execrows
+-- Sole writer of claude_profile after the row is inserted, so the full-row
+-- lifecycle write can never put back a profile the human just switched away
+-- from. Bumps updated_at so the sessions_cdc_update trigger redraws the chip.
+UPDATE sessions SET claude_profile = ?, updated_at = ? WHERE id = ?;
+
+-- name: SetSessionRestartPending :execrows
+-- Sole writer of restart_pending: set when a profile switch asks for a restart
+-- while the agent is mid-turn, cleared by the relaunch that applies it.
+UPDATE sessions SET restart_pending = ?, updated_at = ? WHERE id = ?;
 
 -- name: SetSessionBranch :execrows
 -- Move a session onto the branch its worktree is on, after a rename there. A

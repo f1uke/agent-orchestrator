@@ -5,10 +5,13 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { BranchCombobox } from "./BranchCombobox";
 import { RequiredAgentField } from "./CreateProjectAgentSheet";
+import { ClaudeProfileSelect } from "./ClaudeProfileSelect";
 import type { components } from "../../api/schema";
 import { apiClient, apiErrorMessage } from "../lib/api-client";
 import { agentsQueryOptions } from "../hooks/useAgentsQuery";
 import { useProjectBranches } from "../hooks/useProjectBranches";
+import { useProjectQuery } from "../hooks/useProjectQuery";
+import { profileDisplayName, useClaudeProfiles, usesClaudeProfiles } from "../lib/claude-profiles";
 import { workspaceQueryKey } from "../hooks/useWorkspaceQuery";
 import type { AgentProvider, WorkspaceSession } from "../types/workspace";
 import { MAX_DISPLAY_NAME_LEN, clampDisplayName } from "../lib/display-name";
@@ -36,6 +39,8 @@ type Draft = {
 	branch: string;
 	prTarget: string;
 	agent: string;
+	// "" is the project default; a TODO stores only an override.
+	claudeProfile: string;
 	prompt: string;
 };
 
@@ -46,6 +51,7 @@ function draftFromSession(s: WorkspaceSession): Draft {
 		branch: s.autoNameBranch ? "" : (s.branch ?? ""),
 		prTarget: s.prTarget ?? "",
 		agent: s.provider ?? "",
+		claudeProfile: s.claudeProfile ?? "",
 		prompt: s.prompt ?? "",
 	};
 }
@@ -77,6 +83,7 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 	const branchId = useId();
 	const prTargetId = useId();
 	const agentId = useId();
+	const claudeProfileId = useId();
 	const promptId = useId();
 
 	const projectId = session.workspaceId;
@@ -100,6 +107,10 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 	const agentsQuery = useQuery(agentsQueryOptions);
 	const { branches } = useProjectBranches(projectId);
 	const agentCatalog = agentsQuery.data;
+	const showClaudeProfile = usesClaudeProfiles(draft.agent);
+	const claudeProfilesQuery = useClaudeProfiles(showClaudeProfile);
+	const projectQuery = useProjectQuery(projectId, showClaudeProfile);
+	const defaultClaudeProfile = profileDisplayName(projectQuery.data?.config?.claudeProfile);
 
 	const dirty = useMemo(() => {
 		const base = draftFromSession(session);
@@ -112,6 +123,7 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 		branch: d.branch,
 		prTarget: d.prTarget,
 		harness: (d.agent || undefined) as AgentProvider | undefined,
+		claudeProfile: d.claudeProfile !== (session.claudeProfile ?? "") ? d.claudeProfile : undefined,
 		prompt: d.prompt,
 		autoNameBranch: d.branch.trim() === "",
 	});
@@ -307,6 +319,28 @@ export function TodoSpecEditor({ session, onStarted, onDeleted, onClose }: TodoS
 							}}
 						/>
 					</div>
+
+					{showClaudeProfile && (
+						<>
+							<label className="text-[12.5px] text-muted-foreground" htmlFor={claudeProfileId}>
+								Claude profile
+							</label>
+							<ClaudeProfileSelect
+								id={claudeProfileId}
+								className="h-8 w-full text-[13px]"
+								profiles={claudeProfilesQuery.data ?? []}
+								value={draft.claudeProfile}
+								inheritLabel={`Project default (${defaultClaudeProfile})`}
+								onChange={(v) => {
+									setDraft((d) => {
+										const next = { ...d, claudeProfile: v };
+										saveSpec.mutate(next);
+										return next;
+									});
+								}}
+							/>
+						</>
+					)}
 				</div>
 
 				<div className="flex items-center gap-2">

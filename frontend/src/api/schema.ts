@@ -1000,6 +1000,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{sessionId}/claude-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Switch a claude-code session to another Claude profile, optionally restarting it onto it */
+        put: operations["setSessionClaudeProfile"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{sessionId}/comment-dispatch": {
         parameters: {
             query?: never;
@@ -2203,6 +2220,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/claude-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the Claude profiles, built-ins first */
+        get: operations["getClaudeProfiles"];
+        /** Replace the user Claude profiles */
+        put: operations["setClaudeProfiles"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/message-templates": {
         parameters: {
             query?: never;
@@ -2841,6 +2876,18 @@ export interface components {
             /** @description Base model to clone for a new device, matched by unique prefix (e.g. iPhone SE). Empty is the default. */
             model?: string;
         };
+        ClaudeProfile: {
+            builtin: boolean;
+            name: string;
+            settingsFile: string;
+        };
+        ClaudeProfileInput: {
+            name: string;
+            settingsFile: string;
+        };
+        ClaudeProfilesResponse: {
+            profiles: components["schemas"]["ClaudeProfile"][];
+        };
         CleanupSessionsResponse: {
             cleaned: string[];
             ok: boolean;
@@ -3414,6 +3461,7 @@ export interface components {
             baseBranch?: string;
             branch?: string;
             children?: components["schemas"]["SessionChild"][];
+            claudeProfile?: string;
             /** Format: date-time */
             createdAt: string;
             createdBy?: string;
@@ -3444,6 +3492,7 @@ export interface components {
             prs: components["schemas"]["SessionPRFacts"][];
             queuedMessages?: number;
             queuedMessagesFailed?: number;
+            restartPending?: boolean;
             /**
              * @description What this session did with the running app: took the simulator lease, or pointed ao preview at it. Absent when it never drove one.
              * @enum {string}
@@ -4234,6 +4283,7 @@ export interface components {
         ProjectConfig: {
             agentConfig?: components["schemas"]["AgentConfig"];
             approvalRule?: components["schemas"]["ApprovalRule"];
+            claudeProfile?: string;
             defaultBranch?: string;
             disableAutoCrew?: boolean;
             env?: {
@@ -4692,6 +4742,9 @@ export interface components {
         SetAutoResolveRequest: {
             override: null | boolean;
         };
+        SetClaudeProfilesRequest: {
+            profiles: components["schemas"]["ClaudeProfileInput"][];
+        };
         SetMessageTemplateRequest: {
             template: string;
         };
@@ -4719,6 +4772,15 @@ export interface components {
         };
         SetResponseLanguageSettingsRequest: {
             language: string;
+        };
+        SetSessionClaudeProfileRequest: {
+            profile: string;
+            restart?: boolean;
+        };
+        SetSessionClaudeProfileResponse: {
+            /** @enum {string} */
+            restart: "restarted" | "pending" | "next_launch";
+            session: components["schemas"]["ControllersSessionView"];
         };
         SetSessionKeepWarmRequest: {
             enabled: boolean;
@@ -5177,6 +5239,7 @@ export interface components {
             autoNameBranch?: boolean;
             baseBranch?: string;
             branch?: string;
+            claudeProfile?: string;
             createdBy?: string;
             displayName?: string;
             /** @enum {string} */
@@ -5378,6 +5441,7 @@ export interface components {
             autoNameBranch?: null | boolean;
             baseBranch?: null | string;
             branch?: null | string;
+            claudeProfile?: null | string;
             displayName?: null | string;
             /** @enum {null|string} */
             harness?: "claude-code" | "codex" | "aider" | "opencode" | "grok" | "droid" | "amp" | "agy" | "crush" | "cursor" | "qwen" | "copilot" | "goose" | "auggie" | "continue" | "devin" | "cline" | "kimi" | "kiro" | "kilocode" | "vibe" | "pi" | "autohand" | null;
@@ -9262,6 +9326,78 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setSessionClaudeProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session identifier, e.g. project-1. */
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSessionClaudeProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetSessionClaudeProfileResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14344,6 +14480,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AutoNudgeSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    getClaudeProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudeProfilesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setClaudeProfiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetClaudeProfilesRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaudeProfilesResponse"];
                 };
             };
             /** @description Bad Request */

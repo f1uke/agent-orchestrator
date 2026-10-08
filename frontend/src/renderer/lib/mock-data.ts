@@ -220,6 +220,8 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				workspaceName: "ao-demo",
 				title: "Resolve reviewer feedback on terminal polish",
 				provider: "claude-code",
+				claudeProfile: "OmniRoute",
+				restartPending: true,
 				branch: "demo/terminal-polish",
 				targetBranch: "main-fluke",
 				targetSource: "pr",
@@ -258,6 +260,7 @@ export const mockWorkspaces: WorkspaceSummary[] = [
 				workspaceName: "ao-demo",
 				title: "Port billing export to the new ledger schema",
 				provider: "claude-code",
+				claudeProfile: "Subscription",
 				branch: "demo/ledger-export",
 				targetBranch: "main-fluke",
 				targetSource: "project",
@@ -2733,4 +2736,12 @@ export function mockIosProject(): components["schemas"]["ControllersIOSProjectRe
 			finishedAt: "2026-09-18T10:03:12Z",
 		},
 	};
+}
+
+export function mockClaudeProfiles(): components["schemas"]["ClaudeProfile"][] {
+	return [
+		{ name: "Subscription", settingsFile: "", builtin: true },
+		{ name: "OmniRoute", settingsFile: "~/.claude/settings-omniroute.json", builtin: true },
+		{ name: "Bedrock", settingsFile: "~/.claude/settings-bedrock.json", builtin: false },
+	];
 }

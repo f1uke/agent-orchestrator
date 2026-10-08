@@ -137,6 +137,10 @@ var setConfigFlagCases = map[string]setConfigFlagCase{
 		args: []string{"--testiny-skill", "~/.claude/skills/managing-testiny-qa"},
 		want: domain.ProjectConfig{TestinySkill: "~/.claude/skills/managing-testiny-qa"},
 	},
+	"claude-profile": {
+		args: []string{"--claude-profile", "OmniRoute"},
+		want: domain.ProjectConfig{ClaudeProfile: "OmniRoute"},
+	},
 }
 
 // captureSetConfig runs `ao project set-config demo <args...>` against a stub

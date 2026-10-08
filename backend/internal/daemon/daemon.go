@@ -25,6 +25,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/workspace/storetree"
 	"github.com/aoagents/agent-orchestrator/backend/internal/autonudge"
 	"github.com/aoagents/agent-orchestrator/backend/internal/cdc"
+	"github.com/aoagents/agent-orchestrator/backend/internal/claudeprofile"
 	"github.com/aoagents/agent-orchestrator/backend/internal/config"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemon/supervisor"
 	"github.com/aoagents/agent-orchestrator/backend/internal/daemonlog"
@@ -384,6 +385,15 @@ func Run() error {
 		}
 		return fmt.Errorf("spawn-confirm settings: %w", err)
 	}
+	claudeProfiles, err := claudeprofile.NewStore(cfg.DataDir)
+	if err != nil {
+		stop()
+		lcStack.Stop()
+		if cdcErr := cdcPipe.Stop(); cdcErr != nil {
+			log.Error("cdc pipeline shutdown", "err", cdcErr)
+		}
+		return fmt.Errorf("claude profiles: %w", err)
+	}
 
 	// One jira client backs the display read, the status transitions and
 	// cross-project search, all over Jira Cloud REST v3 (a single API-token auth
@@ -413,7 +423,7 @@ func Run() error {
 	// counter per worktree: qa's `ao crew run` bracket, and a review pass over a
 	// crew's shared checkout.
 	treeWatchers := treewatch.NewRegistry(treewatch.Options{Logger: log})
-	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, promptOverrides, responseLangSettings, reclaimSettings.Get, treeWatchers, log)
+	sessionSvc, reviewSvc, sessMgr, err := startSession(cfg, gatedRuntime, store, lcStack.LCM, messenger, telemetrySink, spawnConfirmSettings, claudeProfiles, promptOverrides, responseLangSettings, reclaimSettings.Get, treeWatchers, log)
 	if err != nil {
 		stop()
 		lcStack.Stop()
@@ -547,7 +557,7 @@ func Run() error {
 
 	learningSvc := learningService(ctx, store, cfg.DataDir, learnCollector, learnSettings, learnRules, learnDecider)
 	srv, err := httpd.NewWithDeps(cfg, log, termMgr, httpd.APIDeps{
-		Projects: projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink}),
+		Projects: projectsvc.NewWithDeps(projectsvc.Deps{Store: store, Sessions: sessionSvc, DefaultHarness: domain.AgentHarness(cfg.Agent), Telemetry: telemetrySink, ClaudeProfiles: claudeProfiles}),
 		Agents:   agentSvc,
 		Sessions: sessionSvc,
 		Jira:     jirasvc.New(sessionSvc, jiraClient, jiraClient, jiraClient),
@@ -575,6 +585,7 @@ func Run() error {
 		Telemetry:          telemetrySink,
 		Settings:           reclaimSettings,
 		SpawnConfirm:       spawnConfirmSettings,
+		ClaudeProfiles:     claudeProfiles,
 		AutoNudge:          autoNudge,
 		ResponseLanguage:   responseLangSettings,
 		WikiSettings:       wikiSettings,
@@ -741,6 +752,17 @@ func Run() error {
 		return messageQueue.Drain(ctx)
 	}, log)
 
+	restartRec := loopReg.Register(looptelemetry.Spec{
+		Name:        "claude-profile-restart",
+		Display:     "Restart onto a new Claude profile",
+		Description: "Restarts a session switched to another Claude profile mid-turn once its agent is idle.",
+		Interval:    restartPendingSweepInterval,
+	})
+	restartPendingDone := startTickerSweep(ctx, "pending Claude profile restart", restartPendingSweepInterval, func(ctx context.Context) error {
+		restartRec.Tick()
+		return sessMgr.RestartPendingSessions(ctx)
+	}, log)
+
 	// Keep the machine-wide simulator registry following this daemon's own
 	// leases: one ended with its session (the sim_lease trigger) is dropped
 	// within a tick, so other AO daemons on the machine can claim the device.
@@ -840,6 +862,7 @@ func Run() error {
 	<-idleSweepDone
 	<-scriptsRefreshDone
 	<-queueSweepDone
+	<-restartPendingDone
 	<-simOwnerSyncDone
 	<-simCloneSweepDone
 	<-simBootSweepDone

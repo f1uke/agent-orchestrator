@@ -438,6 +438,10 @@ export type WorkspaceSession = {
 	 * the store does not. On the owner's card only; absent without a worktree.
 	 */
 	scriptsStore?: SessionScriptsStore;
+	/** The Claude profile this session launches with; "" is Subscription. A TODO holds its override. */
+	claudeProfile?: string;
+	/** A profile switch is waiting for the agent's current turn to end before it restarts. */
+	restartPending?: boolean;
 };
 
 export type TaskSize = "mechanical" | "standard" | "deep";

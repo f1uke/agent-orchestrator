@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 import { KillSessionButton } from "./KillSessionButton";
 import { OpenInMenu } from "./OpenInMenu";
 import { RestartSessionButton } from "./RestartSessionButton";
+import { ClaudeProfileControl } from "./ClaudeProfileControl";
 import { SessionGlyph } from "./SessionGlyph";
 import { IosRunBar } from "./IosRunBar";
 import { TerminalPane } from "./TerminalPane";
@@ -248,7 +249,10 @@ export function CenterPane({
 					    terminals, never on the reviewer terminal or a terminated session
 					    (which has its own Restore control). */}
 						{session && target.kind !== "reviewer" && sessionIsActive(session) ? (
-							<RestartSessionButton session={session} />
+							<>
+								<ClaudeProfileControl session={session} />
+								<RestartSessionButton session={session} />
+							</>
 						) : null}
 						{/* Kill the worker in place — moved here from the session header as an
 					    icon-only destructive control beside Restart. Worker-only (the

@@ -105,6 +105,7 @@ type APIDeps struct {
 	Import           controllers.ImportService
 	Settings         controllers.SettingsService
 	SpawnConfirm     controllers.SpawnConfirmService
+	ClaudeProfiles   controllers.ClaudeProfilesService
 	AutoNudge        controllers.AutoNudgeService
 	ResponseLanguage controllers.ResponseLanguageService
 	// Wiki is the personal note vault destination: the global vault-path
@@ -209,7 +210,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		notifications:  &controllers.NotificationsController{Svc: deps.Notifications, Stream: deps.NotificationStream},
 		activity:       &controllers.ActivityController{Stream: deps.ActivityStream},
 		imports:        &controllers.ImportController{Svc: deps.Import},
-		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, QAEvidence: deps.QAEvidence, SimTrust: simTrustSettings(deps.SimTrust), SimBoot: deps.SimBoot, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
+		settings:       &controllers.SettingsController{Svc: deps.Settings, SpawnConfirm: deps.SpawnConfirm, ClaudeProfiles: deps.ClaudeProfiles, AutoNudge: deps.AutoNudge, ResponseLanguage: deps.ResponseLanguage, Wiki: deps.WikiSettings, RefLinks: deps.RefLinks, QAEvidence: deps.QAEvidence, SimTrust: simTrustSettings(deps.SimTrust), SimBoot: deps.SimBoot, SystemPrompts: deps.SystemPrompts, MessageTemplates: deps.MessageTemplates},
 		wiki:           &controllers.WikiController{Svc: deps.Wiki},
 		daemon:         &controllers.DaemonController{Loops: deps.LoopTelemetry},
 		learning:       &controllers.LearningController{Svc: deps.Learning},
