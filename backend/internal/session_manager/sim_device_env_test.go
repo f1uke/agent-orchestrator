@@ -119,3 +119,14 @@ func TestRuntimeEnv_NoSimulatorWantedNeverMakesOne(t *testing.T) {
 		t.Fatalf("%s was exported as %q", EnvSimUDID, env[EnvSimUDID])
 	}
 }
+
+func TestRuntimeEnv_NamesTheSessionsOwnWorkspace(t *testing.T) {
+	m := layeredManager(newFakeStore(), nil)
+	project := map[string]string{"AO_WORKSPACE": "/elsewhere"}
+
+	env := m.runtimeEnv(context.Background(), "mer-1", "mer", "", domain.KindWorker, "", "", "/work", project, false, "", false)
+
+	if got := env["AO_WORKSPACE"]; got != "/work" {
+		t.Fatalf("AO_WORKSPACE = %q, want the session's workspace /work", got)
+	}
+}
