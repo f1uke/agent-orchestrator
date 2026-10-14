@@ -17,12 +17,14 @@ func Reconcile(in Inputs, env Env) Board {
 	phases(b.Trains, b.Today)
 	for i := range b.Trains {
 		t := &b.Trains[i]
+		t.DatesSplit = datesSplit(t)
 		for _, v := range t.Versions {
 			v.Cards = cardUnits(t, v, in.Config, in.Snap)
 			v.Stages = stages(t, v, b.Today, rs)
 		}
 	}
 	b.Alerts = alerts(&b, in, rs)
+	b.Catalogue = catalogue(in.Human.RuleSettings)
 	return b
 }
 

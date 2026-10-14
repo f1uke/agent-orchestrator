@@ -33,6 +33,20 @@ func (t TrainID) String() string {
 // MarshalJSON writes the train's key, "21-2026".
 func (t TrainID) MarshalJSON() ([]byte, error) { return json.Marshal(t.Key()) }
 
+// UnmarshalJSON reads a train key.
+func (t *TrainID) UnmarshalJSON(b []byte) error {
+	var key string
+	if err := json.Unmarshal(b, &key); err != nil {
+		return err
+	}
+	id, ok := ParseTrainKey(key)
+	if !ok {
+		return fmt.Errorf("train key %q is not like 21-2026", key)
+	}
+	*t = id
+	return nil
+}
+
 func (t TrainID) less(o TrainID) bool {
 	if t.Year != o.Year {
 		return t.Year < o.Year

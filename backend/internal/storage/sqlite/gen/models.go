@@ -362,12 +362,43 @@ type PromptFingerprint struct {
 	MatchedAt       sql.NullTime
 }
 
+type ReleaseHitHide struct {
+	HitID    string
+	Evidence string
+	Severity string
+	Reason   string
+	HiddenAt time.Time
+}
+
 type ReleaseItem struct {
 	Kind            string
 	Scope           string
 	ItemKey         string
 	Body            string
 	SourceUpdatedAt sql.NullTime
+}
+
+type ReleaseLlbPlan struct {
+	ID          string
+	Name        string
+	TargetKind  string
+	TargetTrain sql.NullString
+	Note        string
+	Version     int64
+	UpdatedBy   string
+	UpdatedAt   time.Time
+}
+
+type ReleaseLlbPlanAccepted struct {
+	PlanID string
+	MrRef  string
+	Reason string
+}
+
+type ReleaseLlbPlanBranch struct {
+	PlanID string
+	AppID  string
+	Branch string
 }
 
 type ReleaseResource struct {
@@ -386,6 +417,12 @@ type ReleaseResource struct {
 	NextAttemptAt sql.NullTime
 	PlannedAt     time.Time
 	Generation    int64
+}
+
+type ReleaseRuleSetting struct {
+	RuleID    string
+	Enabled   bool
+	UpdatedAt time.Time
 }
 
 type Review struct {

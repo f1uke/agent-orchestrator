@@ -49,8 +49,8 @@ func firedIDs(b Board, rule RuleID) []string {
 	return out
 }
 
-func TestRuleTableHasExactlyTheA2FIDs(t *testing.T) {
-	want := strings.Fields("A1 A2 A3 A4 A5 B1 B3 C1 C2 C3 C5 C6 C7 D1 D2 D3 E1 E2 E4 E5 F1 F2")
+func TestRuleTableHasExactlyTheBuiltIDs(t *testing.T) {
+	want := strings.Fields("A1 A2 A3 A4 A5 A7 B1 B3 C1 C2 C3 C5 C6 C7 D1 D2 D3 E1 E2 E4 E5 F1 F2")
 	var got []string
 	for _, r := range ruleTable() {
 		got = append(got, string(r.ID))
@@ -101,6 +101,30 @@ func TestEveryRuleFiresAndStaysQuiet(t *testing.T) {
 		{"A5 dates differ", "A5", today, func(f *fixture) {
 			healthy(f).jira.ReleaseDate = dayPtr(f.t, "2026-10-15")
 		}, []string{"A5~v/21-2026/di"}, "Jira release date Thu 15 Oct, milestone due Fri 16 Oct"},
+
+		{"A7 quiet: one app only", "A7", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"A7 quiet: every app agrees", "A7", today, func(f *fixture) {
+			healthy(f)
+			f.version("da", "21", "3.5.0", liveFreeze, liveDue)
+			f.version("pi", "21", "1.2.0", liveFreeze, liveDue)
+		}, nil, ""},
+		{"A7 quiet: an app without a start date is not counted", "A7", today, func(f *fixture) {
+			healthy(f)
+			f.version("da", "21", "3.5.0", liveFreeze, liveDue)
+			f.version("pi", "21", "1.2.0", liveFreeze, "2026-10-20").ms.Start = nil
+		}, nil, ""},
+		{"A7 one app off the majority", "A7", today, func(f *fixture) {
+			healthy(f)
+			f.version("da", "21", "3.5.0", liveFreeze, liveDue)
+			f.version("pi", "21", "1.2.0", liveFreeze, liveDue)
+			f.version("pa", "21", "1.2.0", "2026-10-12", "2026-10-20")
+		}, []string{"A7~v/21-2026/pa"}, "Milestone Mon 12 Oct → Tue 20 Oct, the rest of #21 runs Fri 9 Oct → Fri 16 Oct. Give it its own train or move the milestone"},
+		{"A7 two against two flags every app", "A7", today, func(f *fixture) {
+			healthy(f)
+			f.version("da", "21", "3.5.0", liveFreeze, liveDue)
+			f.version("pi", "21", "1.2.0", "2026-10-12", "2026-10-20")
+			f.version("pa", "21", "1.2.0", "2026-10-12", "2026-10-20")
+		}, []string{"A7~v/21-2026/da", "A7~v/21-2026/di", "A7~v/21-2026/pa", "A7~v/21-2026/pi"}, "Apps in #21 disagree on dates: "},
 
 		{"B1 quiet", "B1", today, func(f *fixture) { healthy(f) }, nil, ""},
 		{"B1 freeze passed with no release MR", "B1", today, func(f *fixture) {
@@ -274,5 +298,37 @@ func TestD3EndsAtPublishAndE1TakesOver(t *testing.T) {
 				t.Fatalf("D3+E1 hits = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDatesSplitIsTheAppsA7Flags(t *testing.T) {
+	f := newFixture(t, today)
+	healthy(f)
+	f.version("da", "21", "3.5.0", liveFreeze, liveDue)
+	f.version("pi", "21", "1.2.0", liveFreeze, liveDue)
+	f.version("pa", "21", "1.2.0", "2026-10-12", "2026-10-20")
+	f.version("di", "22", "3.6.0", "2026-10-20", "2026-10-27")
+	f.version("da", "22", "3.6.0", "2026-10-21", "2026-10-28")
+	f.version("di", "23", "3.7.0", "2026-11-02", "2026-11-09")
+	b := f.reconcile()
+
+	flagged := map[string][]string{}
+	for _, h := range firedHits(b, "A7") {
+		flagged[h.Train.Key()] = append(flagged[h.Train.Key()], string(h.App))
+	}
+	for _, tr := range b.Trains {
+		got := []string{}
+		for _, a := range tr.DatesSplit {
+			got = append(got, string(a))
+		}
+		want := append([]string{}, flagged[tr.ID.Key()]...)
+		sort.Strings(got)
+		sort.Strings(want)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("train %s datesSplit = %v, A7 flags %v", tr.ID, got, want)
+		}
+	}
+	if len(flagged) != 2 {
+		t.Fatalf("A7 flagged trains %v, want #21 and #22", flagged)
 	}
 }

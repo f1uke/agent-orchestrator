@@ -11,6 +11,7 @@ import (
 
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/apispec"
 	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/envelope"
+	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
 	rtsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
 )
 
@@ -24,6 +25,16 @@ type ReleaseTrainsService interface {
 	Board(ctx context.Context, ifNoneMatch string) ([]byte, string, error)
 	// Refresh returns rtsvc.ErrUnknownSource for a source no poller has.
 	Refresh(source string) error
+	// SetRule returns rtsvc.ErrUnknownRule for an id no rule has.
+	SetRule(ctx context.Context, id rt.RuleID, enabled *bool) (rt.RuleInfo, error)
+	// Hide returns rtsvc.ErrUnknownHit for a hit not on the current Board.
+	Hide(ctx context.Context, id rt.HitID, reason string) (rt.Hide, error)
+	// Unhide returns rtsvc.ErrUnknownHit for a hit that is not hidden.
+	Unhide(ctx context.Context, id rt.HitID) error
+	UnhideStale(ctx context.Context) ([]rt.HitID, error)
+	Plans(ctx context.Context) ([]rt.LlbPlan, error)
+	// PutPlan returns rt.ErrInvalidPlan, *rt.PlanVersionError or *rt.BranchTakenError.
+	PutPlan(ctx context.Context, p rt.LlbPlan, ifVersion int) (rt.LlbPlan, error)
 }
 
 // ReleaseTrainBoardResponse is the body of GET /api/v1/release-trains/board.
@@ -89,6 +100,12 @@ func (c *ReleaseTrainsController) Register(r chi.Router) {
 	r.Post("/release-trains/config", c.initConfig)
 	r.Get("/release-trains/board", c.board)
 	r.Post("/release-trains/refresh", c.refresh)
+	r.Put("/release-trains/rules/{ruleId}", c.setRule)
+	r.Put("/release-trains/hides/{hitId}", c.hide)
+	r.Delete("/release-trains/hides/{hitId}", c.unhide)
+	r.Delete("/release-trains/hides", c.unhideStale)
+	r.Get("/release-trains/llb-plans", c.plans)
+	r.Put("/release-trains/llb-plans/{planId}", c.putPlan)
 }
 
 func (c *ReleaseTrainsController) board(w http.ResponseWriter, r *http.Request) {

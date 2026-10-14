@@ -580,6 +580,77 @@ func releaseTrainOperations() []operation {
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},
 		},
+		{
+			method: http.MethodPut, path: "/api/v1/release-trains/rules/{ruleId}", id: "setReleaseTrainRule", tag: "release-trains",
+			summary:    "Turn a rule on or off, or with enabled null back to its default",
+			pathParams: []any{controllers.ReleaseTrainRuleIDParam{}},
+			reqBody:    controllers.ReleaseTrainRuleSettingRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainRuleSettingResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/release-trains/hides/{hitId}", id: "hideReleaseTrainHit", tag: "release-trains",
+			summary:    "Hide a hit on the current Board, keeping its evidence and severity; it returns to the badge if its severity rises",
+			pathParams: []any{controllers.ReleaseTrainHitIDParam{}},
+			reqBody:    controllers.ReleaseTrainHideRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainHideResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/release-trains/hides/{hitId}", id: "unhideReleaseTrainHit", tag: "release-trains",
+			summary:    "Remove one hide",
+			pathParams: []any{controllers.ReleaseTrainHitIDParam{}},
+			resps: []respUnit{
+				{http.StatusNoContent, nil},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodDelete, path: "/api/v1/release-trains/hides", id: "unhideStaleReleaseTrainHits", tag: "release-trains",
+			summary:    "Remove every hide the Board lists as no longer matching; stale=true is required",
+			pathParams: []any{controllers.ReleaseTrainStaleQuery{}},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainUnhideStaleResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/release-trains/llb-plans", id: "listReleaseTrainLlbPlans", tag: "release-trains",
+			summary: "List the long-lived-branch plans",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainLlbPlansResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPut, path: "/api/v1/release-trains/llb-plans/{planId}", id: "putReleaseTrainLlbPlan", tag: "release-trains",
+			summary:    "Create or replace a long-lived-branch plan; 409 when ifVersion is stale or a branch is in another plan",
+			pathParams: []any{controllers.ReleaseTrainPlanIDParam{}},
+			reqBody:    controllers.ReleaseTrainLlbPlanInput{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainLlbPlanResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
 	}
 }
 

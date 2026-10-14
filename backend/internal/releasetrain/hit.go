@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,20 @@ func (s Severity) String() string { return severityNames[s] }
 // MarshalJSON writes the severity's name.
 func (s Severity) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()) }
 
+// UnmarshalJSON reads a severity's name.
+func (s *Severity) UnmarshalJSON(b []byte) error {
+	var name string
+	if err := json.Unmarshal(b, &name); err != nil {
+		return err
+	}
+	sev, ok := ParseSeverity(name)
+	if !ok {
+		return fmt.Errorf("unknown severity %q", name)
+	}
+	*s = sev
+	return nil
+}
+
 // MoreSevereThan reports whether s outranks o.
 func (s Severity) MoreSevereThan(o Severity) bool { return s < o }
 
@@ -40,6 +55,22 @@ func (s Severity) MoreSevereThan(o Severity) bool { return s < o }
 type HitID string
 
 func hitID(rule RuleID, s Subject) HitID { return HitID(fmt.Sprintf("%s~%s", rule, s.subjectKey())) }
+
+// Rule is the rule the id names, the part before "~".
+func (id HitID) Rule() RuleID {
+	rule, _, _ := strings.Cut(string(id), "~")
+	return RuleID(rule)
+}
+
+// ParseSeverity reads a severity's name back.
+func ParseSeverity(s string) (Severity, bool) {
+	for sev, name := range severityNames {
+		if name == s {
+			return sev, true
+		}
+	}
+	return 0, false
+}
 
 // Evidence is the structured facts a hit's text renders from.
 type Evidence map[string]any
