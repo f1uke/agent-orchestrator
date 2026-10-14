@@ -7,11 +7,39 @@ import (
 
 // ResourceSpec is one resource a source wants observed.
 type ResourceSpec struct {
-	Kind   KindName
-	Scope  Scope
-	App    AppID
-	Mode   SyncMode
-	Budget time.Duration
+	Kind    KindName
+	Scope   Scope
+	App     AppID
+	Mode    SyncMode
+	Version int
+	Budget  time.Duration
+}
+
+// SpecFor is the spec of one resource of kind k, with the kind's mode, version and default budget.
+func SpecFor[T any](k Kind[T], scope Scope, app AppID) ResourceSpec {
+	return ResourceSpec{Kind: k.Name, Scope: scope, App: app, Mode: k.Mode, Version: k.Version, Budget: k.Budget}
+}
+
+// Resource is one stored resource row: its status plus what only the poller reads.
+type Resource struct {
+	ResourceStatus
+	Mode          SyncMode   `json:"mode"`
+	FactVersion   int        `json:"factVersion"`
+	Cursor        []byte     `json:"-"`
+	LastSuccessAt *time.Time `json:"lastSuccessAt,omitempty"`
+	ErrorMessage  string     `json:"errorMessage,omitempty"`
+	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
+	PlannedAt     time.Time  `json:"plannedAt"`
+	Generation    int64      `json:"generation"`
+}
+
+// Failure is a status-only write: why the last fetch failed and when to try again.
+type Failure struct {
+	At            time.Time
+	Failures      int
+	Class         ErrorClass
+	Message       string
+	NextAttemptAt time.Time
 }
 
 // PlanView is what the observed facts say the sources should fetch next.
