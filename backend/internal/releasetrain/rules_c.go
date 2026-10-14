@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const slowPipelineSeconds = 60 * 60
+const slowPipelineMinutes = 60
 
 var semgrepNotPassed = map[string]bool{"missing": true, "failed": true, "canceled": true, "skipped": true}
 
@@ -45,10 +45,13 @@ var ruleC3 = rule{
 	Check: func(b *Board) []Hit {
 		return forEachVersion(b, func(t *Train, v *AppVersion) *Hit {
 			r := v.ReleaseMR
-			if r == nil || r.Detail == nil || r.Detail.Pipeline == nil || r.Detail.Pipeline.Duration == nil || *r.Detail.Pipeline.Duration <= slowPipelineSeconds {
+			if r == nil || r.Detail == nil || r.Detail.Pipeline == nil || r.Detail.Pipeline.Duration == nil {
 				return nil
 			}
 			minutes := (*r.Detail.Pipeline.Duration + 30) / 60
+			if minutes <= slowPipelineMinutes {
+				return nil
+			}
 			return versionHit(t, v, fmt.Sprintf("!%d pipeline took %d min", r.MR.IID, minutes),
 				Evidence{"mr": r.MR.IID, "minutes": minutes}, pipelineLink(r))
 		})

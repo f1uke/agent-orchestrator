@@ -127,8 +127,8 @@ func TestEveryRuleFiresAndStaysQuiet(t *testing.T) {
 			j.Jobs = append(j.Jobs, JobFact{Name: "lint_report", Status: "failed", AllowFailure: true})
 		}, []string{"C2~v/21-2026/di"}, "allowed failures: lint_report"},
 
-		{"C3 quiet at exactly 60 minutes", "C3", today, func(f *fixture) {
-			d := 60 * 60
+		{"C3 quiet at 60 minutes 20 seconds", "C3", today, func(f *fixture) {
+			d := 60*60 + 20
 			healthy(f).detail().Pipeline.Duration = &d
 		}, nil, ""},
 		{"C3 slow pipeline", "C3", today, func(f *fixture) {
