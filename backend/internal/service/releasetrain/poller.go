@@ -222,7 +222,7 @@ func (p *Poller) pollHost(ctx context.Context, host string, res []planned, view 
 func pausesHost(c rt.ErrorClass) bool { return c == rt.ErrRateLimited || c == rt.ErrAuth }
 
 func dueOrder(res []planned, now time.Time) []planned {
-	var due []planned
+	due := make([]planned, 0, len(res))
 	for _, pl := range res {
 		r := pl.row
 		switch {
@@ -296,8 +296,8 @@ func (p *Poller) fetchOne(ctx context.Context, pl planned, view rt.PlanView, now
 			return nil
 		}
 		batch, err := pl.src.Fetch(ctx, pl.spec, view, cursor)
-		if ctx.Err() != nil && err != nil {
-			return nil
+		if err != nil && ctx.Err() != nil {
+			return cancelledByPause(err)
 		}
 		if err == nil && pl.spec.Mode != rt.Incremental && !batch.Complete {
 			err = &FetchError{Class: rt.ErrTruncated, Err: errIncompleteBatch}
@@ -326,6 +326,10 @@ func (p *Poller) fetchOne(ctx context.Context, pl planned, view rt.PlanView, now
 	}
 	return nil
 }
+
+// cancelledByPause drops a fetch another fetch's host pause cut short; that
+// pause already wrote this resource's backoff.
+func cancelledByPause(error) *FetchError { return nil }
 
 func (p *Poller) write(pl planned, err error) {
 	if err != nil {

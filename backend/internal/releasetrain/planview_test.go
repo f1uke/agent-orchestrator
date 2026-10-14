@@ -1,6 +1,7 @@
 package releasetrain
 
 import (
+	"errors"
 	"reflect"
 	"sort"
 	"testing"
@@ -76,7 +77,7 @@ func TestPutEncodedDecodesThroughTheKind(t *testing.T) {
 	if err := s.PutEncoded(ResourceStatus{Kind: KindMRs.Name, Scope: ProjectScope(7)}, [][]byte{[]byte("{")}); err == nil {
 		t.Fatal("a broken body decoded")
 	}
-	if err := s.PutEncoded(ResourceStatus{Kind: "gone.kind"}, nil); err != ErrUnknownKind {
+	if err := s.PutEncoded(ResourceStatus{Kind: "gone.kind"}, nil); !errors.Is(err, ErrUnknownKind) {
 		t.Fatalf("unknown kind err = %v", err)
 	}
 }
