@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 )
 
 // TrainID identifies a train: "#21" is {21, 0, year}, "#20-1" is {20, 1, year}.
@@ -54,14 +53,6 @@ func ParseTrainLabel(s string) (prefix string, id TrainID, ok bool) {
 	}
 	id.Year, _ = strconv.Atoi(m[4])
 	return m[1], id, true
-}
-
-func labelPrefix(trainLabel string) string {
-	fields := strings.Fields(trainLabel)
-	if len(fields) <= 2 {
-		return ""
-	}
-	return fields[len(fields)-3]
 }
 
 // Version is a semantic app version X.Y.Z.

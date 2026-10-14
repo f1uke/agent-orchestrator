@@ -126,7 +126,7 @@ func (r *readSet) coverageFor(reads []KindName, app AppID, versions []*AppVersio
 				if !r.live(v.Milestone.Due) {
 					continue
 				}
-				a, _ := r.cfg.app(v.App)
+				a := r.cfg.app(v.App)
 				for _, scope := range entityScopes(k, v, a.GitLabProject) {
 					st, ok := r.snap.Status(k, scope)
 					if !ok {

@@ -68,7 +68,7 @@ func joinTrains(b *Board, cfg Config, snap Snapshot) {
 				train := v.Train
 				b.Mismatches = append(b.Mismatches, Mismatch{Kind: MismatchNoJira, App: v.App, Train: &train, Milestone: &ms, Version: v.Version})
 			}
-			app, _ := cfg.app(v.App)
+			app := cfg.app(v.App)
 			joinGitLab(v, app, snap)
 			joinVersionFacts(v, snap)
 			v.ForceUpdate = forceUpdateFor(app, v.Version, snap)
@@ -76,7 +76,7 @@ func joinTrains(b *Board, cfg Config, snap Snapshot) {
 	}
 	for i := range b.Hotfixes {
 		h := &b.Hotfixes[i]
-		app, _ := cfg.app(h.App)
+		app := cfg.app(h.App)
 		h.Tag = tagFor(app, h.Version, snap)
 		h.ForceUpdate = forceUpdateFor(app, h.Version, snap)
 	}
@@ -195,12 +195,10 @@ func releaseMRFor(ms MilestoneFact, app App, snap Snapshot) *ReleaseMR {
 	})
 	r := &ReleaseMR{MR: linked[0]}
 	for _, d := range Items(snap, KindMRDetail, MRScope(app.GitLabProject, r.MR.IID)) {
-		d := d
 		r.Detail = &d
 	}
 	if r.Detail != nil && r.Detail.Pipeline != nil {
 		for _, j := range Items(snap, KindJobs, PipelineScope(app.GitLabProject, r.Detail.Pipeline.ID)) {
-			j := j
 			r.Jobs = &j
 		}
 	}
@@ -248,7 +246,6 @@ func joinVersionFacts(v *AppVersion, snap Snapshot) {
 	}
 	scope := VersionScope(v.Jira.ID)
 	for _, rw := range Items(snap, KindRelatedWork, scope) {
-		rw := rw
 		v.RelatedWork = &rw
 	}
 	for _, is := range Items(snap, KindCards, scope) {

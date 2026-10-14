@@ -80,8 +80,9 @@ func Items[T any](s Snapshot, k Kind[T], scope Scope) []T {
 
 // AllItems returns the items of every resource of a kind, ordered by scope.
 func AllItems[T any](s Snapshot, k Kind[T]) []T {
-	var out []T
-	for _, st := range s.Statuses(k.Name) {
+	sts := s.Statuses(k.Name)
+	out := make([]T, 0, len(sts))
+	for _, st := range sts {
 		out = append(out, unbox[T](s.res[resKey{k.Name, st.Scope}].items)...)
 	}
 	return out

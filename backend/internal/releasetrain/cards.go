@@ -70,7 +70,7 @@ func sprintOf(branch string) (int, bool) {
 }
 
 func cardUnits(t *Train, v *AppVersion, cfg Config, snap Snapshot) []CardUnit {
-	app, _ := cfg.app(v.App)
+	app := cfg.app(v.App)
 	byKey := map[string][]MRFact{}
 	for _, mr := range Items(snap, KindMRs, ProjectScope(app.GitLabProject)) {
 		for _, k := range mrKeys(mr) {

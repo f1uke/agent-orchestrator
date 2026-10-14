@@ -103,13 +103,13 @@ func (c Config) Validate() (*time.Location, error) {
 	return loc, nil
 }
 
-func (c Config) app(id AppID) (App, bool) {
+func (c Config) app(id AppID) App {
 	for _, a := range c.Apps {
 		if a.ID == id {
-			return a, true
+			return a
 		}
 	}
-	return App{}, false
+	return App{}
 }
 
 func (c Config) familyOf(id AppID) (Family, bool) {

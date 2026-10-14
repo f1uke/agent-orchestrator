@@ -81,7 +81,7 @@ func TestAMissingPerAppReadIsUnknown(t *testing.T) {
 	inputs := f.inputs()
 	var snap Snapshot
 	for k, r := range inputs.Snap.res {
-		if !(k.kind == KindTags.Name && r.status.App == "da") {
+		if k.kind != KindTags.Name || r.status.App != "da" {
 			if snap.res == nil {
 				snap.res = map[resKey]resource{}
 			}
