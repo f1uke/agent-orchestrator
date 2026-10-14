@@ -31,7 +31,14 @@ type ResourceStatus struct {
 	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
 	Failures      int        `json:"failures"`
 	ErrorClass    ErrorClass `json:"errorClass,omitempty"`
-	Settled       bool       `json:"settled"`
+	Budget        time.Duration `json:"budget,omitempty"`
+}
+
+func (st ResourceStatus) budget() time.Duration {
+	if st.Budget > 0 {
+		return st.Budget
+	}
+	return kinds[st.Kind].Budget
 }
 
 type resKey struct {

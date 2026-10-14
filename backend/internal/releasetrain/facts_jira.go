@@ -42,13 +42,14 @@ const (
 	CategoryReleaseNote = "Communication"
 )
 
-// IssueFact is one Jira issue with a fixVersion.
+// IssueFact is one Jira issue with a fixVersion; the source marks the version's release ticket.
 type IssueFact struct {
 	Key            string   `json:"key"`
 	Summary        string   `json:"summary"`
 	Status         string   `json:"status"`
 	StatusCategory string   `json:"statusCategory"`
 	Subtask        bool     `json:"subtask"`
+	ReleaseTicket  bool     `json:"releaseTicket"`
 	FixVersions    []string `json:"fixVersions"`
 	Assignee       *Person  `json:"assignee,omitempty"`
 	URL            string   `json:"url"`

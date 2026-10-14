@@ -17,7 +17,7 @@ type Fired struct {
 	Degraded []ResourceStatus `json:"degraded,omitempty"`
 }
 
-// Unknown means the rule found nothing but could not see everything it reads.
+// Unknown means the rule could not trust what it saw: a read never completed, or it found nothing in a stale read.
 type Unknown struct {
 	Missing []ResourceStatus `json:"missing"`
 }
@@ -25,6 +25,120 @@ type Unknown struct {
 func (Clean) outcome()   {}
 func (Fired) outcome()   {}
 func (Unknown) outcome() {}
+
+type coverage struct {
+	asOf     time.Time
+	blind    []ResourceStatus
+	degraded []ResourceStatus
+}
+
+func (c coverage) fresh() bool { return len(c.blind) == 0 && len(c.degraded) == 0 }
+
+func (c coverage) missing() []ResourceStatus {
+	return append(append([]ResourceStatus{}, c.blind...), c.degraded...)
+}
+
+func evaluate(hits []Hit, cov coverage) Outcome {
+	if len(cov.blind) > 0 {
+		return Unknown{Missing: cov.missing()}
+	}
+	if len(hits) > 0 {
+		for i := range hits {
+			hits[i].AsOf = cov.asOf
+		}
+		return Fired{Hits: hits, AsOf: cov.asOf, Degraded: cov.degraded}
+	}
+	if len(cov.degraded) > 0 {
+		return Unknown{Missing: cov.degraded}
+	}
+	return Clean{CheckedAt: cov.asOf}
+}
+
+type readSet struct {
+	snap   Snapshot
+	cfg    Config
+	now    time.Time
+	today  Day
+	ageOut int
+}
+
+func (r *readSet) live(due *Day) bool { return due == nil || r.today.Sub(*due) <= r.ageOut }
+
+func entityScopes(kind KindName, v *AppVersion, project int) []Scope {
+	switch kind {
+	case KindMRDetail.Name:
+		if v.ReleaseMR != nil {
+			return []Scope{MRScope(project, v.ReleaseMR.MR.IID)}
+		}
+	case KindJobs.Name:
+		if v.ReleaseMR != nil && v.ReleaseMR.Detail != nil && v.ReleaseMR.Detail.Pipeline != nil {
+			return []Scope{PipelineScope(project, v.ReleaseMR.Detail.Pipeline.ID)}
+		}
+	case KindCompare.Name:
+		if v.Tag != nil {
+			return []Scope{CompareScope(project, v.Tag.Name, "main")}
+		}
+	case KindRelatedWork.Name, KindCards.Name:
+		if v.Jira != nil {
+			return []Scope{VersionScope(v.Jira.ID)}
+		}
+	}
+	return nil
+}
+
+func (r *readSet) coverageFor(reads []KindName, app AppID, versions []*AppVersion) coverage {
+	var cov coverage
+	note := func(st ResourceStatus, entity bool) {
+		switch {
+		case st.CompleteAt == nil && !entity:
+			cov.blind = append(cov.blind, st)
+		case st.CompleteAt == nil, r.now.Sub(*st.CompleteAt) > st.budget():
+			cov.degraded = append(cov.degraded, st)
+		}
+		if st.CompleteAt != nil && (cov.asOf.IsZero() || st.CompleteAt.Before(cov.asOf)) {
+			cov.asOf = *st.CompleteAt
+		}
+	}
+	for _, k := range reads {
+		switch kinds[k].cover {
+		case perApp:
+			for _, a := range r.cfg.Apps {
+				if app != "" && a.ID != app {
+					continue
+				}
+				scope := ProjectScope(a.GitLabProject)
+				st, ok := r.snap.Status(k, scope)
+				if !ok {
+					st = ResourceStatus{Kind: k, Scope: scope, App: a.ID, ErrorClass: ErrUnconfigured}
+				}
+				note(st, false)
+			}
+		case global:
+			sts := r.snap.Statuses(k)
+			if len(sts) == 0 {
+				sts = []ResourceStatus{{Kind: k, ErrorClass: ErrUnconfigured}}
+			}
+			for _, st := range sts {
+				note(st, false)
+			}
+		case perEntity:
+			for _, v := range versions {
+				if !r.live(v.Milestone.Due) {
+					continue
+				}
+				a, _ := r.cfg.app(v.App)
+				for _, scope := range entityScopes(k, v, a.GitLabProject) {
+					st, ok := r.snap.Status(k, scope)
+					if !ok {
+						st = ResourceStatus{Kind: k, Scope: scope, App: v.App}
+					}
+					note(st, true)
+				}
+			}
+		}
+	}
+	return cov
+}
 
 // Alerts is the rule outcomes, the hits with their bucket, and the badge.
 type Alerts struct {
