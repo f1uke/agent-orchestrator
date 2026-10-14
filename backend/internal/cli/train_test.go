@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 )
 
 const trainSourcesJSON = `{
@@ -52,7 +54,7 @@ func TestTrainSourcesJSONIsTheDaemonsBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got trainSourcesResponse
+	var got controllers.ReleaseTrainSourcesResponse
 	if err := json.Unmarshal([]byte(out), &got); err != nil || len(got.Resources) != 3 || got.LastPass.Requests["gitlab"] != 12 {
 		t.Fatalf("--json = %s (%v)", out, err)
 	}

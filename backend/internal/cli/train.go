@@ -10,37 +10,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/httpd/controllers"
 )
-
-type trainSourcesResponse struct {
-	Config struct {
-		State   string `json:"state"`
-		Message string `json:"message,omitempty"`
-		Path    string `json:"path"`
-	} `json:"config"`
-	Resources []trainResource `json:"resources"`
-	LastPass  struct {
-		At       *time.Time     `json:"at,omitempty"`
-		Requests map[string]int `json:"requests"`
-	} `json:"lastPass"`
-}
-
-type trainResource struct {
-	Kind          string     `json:"kind"`
-	Scope         string     `json:"scope"`
-	App           string     `json:"app,omitempty"`
-	Mode          string     `json:"mode"`
-	CompleteAt    *time.Time `json:"completeAt,omitempty"`
-	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
-	ErrorClass    string     `json:"errorClass,omitempty"`
-	ErrorMessage  string     `json:"errorMessage,omitempty"`
-	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
-	Backfilling   bool       `json:"backfilling"`
-}
-
-type trainConfigInitResponse struct {
-	Path string `json:"path"`
-}
 
 func newTrainCommand(ctx *commandContext) *cobra.Command {
 	cmd := &cobra.Command{
@@ -62,7 +34,7 @@ func newTrainSourcesCommand(ctx *commandContext) *cobra.Command {
 		Short: "Show the config and how fresh each observed GitLab and Jira resource is",
 		Args:  exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var res trainSourcesResponse
+			var res controllers.ReleaseTrainSourcesResponse
 			if err := ctx.getJSON(cmd.Context(), "release-trains/sources", &res); err != nil {
 				return err
 			}
@@ -82,7 +54,7 @@ func newTrainConfigInitCommand(ctx *commandContext) *cobra.Command {
 		Short: "Write a template release-train.json to the data dir; never overwrites one",
 		Args:  exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var res trainConfigInitResponse
+			var res controllers.ReleaseTrainConfigInitResponse
 			if err := ctx.postJSON(cmd.Context(), "release-trains/config", struct{}{}, &res); err != nil {
 				var apiErr apiResponseError
 				if errors.As(err, &apiErr) && apiErr.ErrorBody.Code == "RELEASE_TRAIN_CONFIG_EXISTS" {
@@ -96,7 +68,7 @@ func newTrainConfigInitCommand(ctx *commandContext) *cobra.Command {
 	}
 }
 
-func writeTrainSources(w io.Writer, res trainSourcesResponse) error {
+func writeTrainSources(w io.Writer, res controllers.ReleaseTrainSourcesResponse) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "config: %s (%s)\n", res.Config.State, res.Config.Path)
 	if res.Config.Message != "" {
@@ -139,7 +111,7 @@ func writeTrainSources(w io.Writer, res trainSourcesResponse) error {
 	return err
 }
 
-func trainState(r trainResource) string {
+func trainState(r controllers.ReleaseTrainResourceDTO) string {
 	switch {
 	case r.ErrorClass != "":
 		return r.ErrorClass
