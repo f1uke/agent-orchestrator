@@ -77,9 +77,8 @@ func (e *BranchTakenError) Error() string {
 
 var planIDRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
-// Validate checks a plan before it is stored: an id fit for a URL, a name,
-// a known target with a train exactly when the target is a train, and no
-// branch or MR twice.
+// Validate checks a plan before it is stored: a URL-safe id, a name, a train
+// exactly when the target is a train, and no branch or MR twice.
 func (p LlbPlan) Validate() error {
 	var problems []string
 	if !planIDRE.MatchString(string(p.ID)) {

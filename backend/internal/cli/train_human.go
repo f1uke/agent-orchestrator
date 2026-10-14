@@ -218,7 +218,6 @@ func newTrainPlanSetCommand(ctx *commandContext) *cobra.Command {
 
 var trainNumberRE = regexp.MustCompile(`^#?(\d+)(-\d+)?$`)
 
-// trainKeyArg reads "22", "#20-1" (this year) or a full key "22-2026".
 func trainKeyArg(s string, year int) (string, error) {
 	if _, ok := rt.ParseTrainKey(s); ok {
 		return s, nil
