@@ -1,6 +1,7 @@
 package releasetrain
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -28,6 +29,9 @@ func (t TrainID) String() string {
 	}
 	return fmt.Sprintf("#%d", t.Number)
 }
+
+// MarshalJSON writes the train's key, "21-2026".
+func (t TrainID) MarshalJSON() ([]byte, error) { return json.Marshal(t.Key()) }
 
 func (t TrainID) less(o TrainID) bool {
 	if t.Year != o.Year {

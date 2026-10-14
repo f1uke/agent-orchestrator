@@ -31,7 +31,7 @@ type ResourceStatus struct {
 	LastAttemptAt *time.Time    `json:"lastAttemptAt,omitempty"`
 	Failures      int           `json:"failures"`
 	ErrorClass    ErrorClass    `json:"errorClass,omitempty"`
-	Budget        time.Duration `json:"budget,omitempty"`
+	Budget        time.Duration `json:"-"`
 }
 
 func (st ResourceStatus) budget() time.Duration {
@@ -167,5 +167,19 @@ func (s Snapshot) withoutItems(kind KindName) Snapshot {
 		}
 		out.res[k] = r
 	}
+	return out
+}
+
+func (s Snapshot) all() []ResourceStatus {
+	out := make([]ResourceStatus, 0, len(s.res))
+	for _, r := range s.res {
+		out = append(out, r.status)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].Scope < out[j].Scope
+	})
 	return out
 }
