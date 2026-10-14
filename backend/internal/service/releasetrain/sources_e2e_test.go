@@ -110,7 +110,11 @@ func (w *world) pass() (gitlab, jira []string) {
 	if err := w.poller.Poll(context.Background()); err != nil {
 		w.t.Fatal(err)
 	}
-	return paths(w.gl.TakeRequests()), paths(w.jira.TakeRequests())
+	gitlab, jira = paths(w.gl.TakeRequests()), paths(w.jira.TakeRequests())
+	if counted := w.poller.LastPass().Requests; counted["gitlab"] != len(gitlab) || counted["jira"] != len(jira) {
+		w.t.Fatalf("budget counted %v, servers saw gitlab %d jira %d", counted, len(gitlab), len(jira))
+	}
+	return gitlab, jira
 }
 
 func paths(reqs []string) []string {
