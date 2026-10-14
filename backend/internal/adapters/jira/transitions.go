@@ -5,25 +5,21 @@ package jira
 // so both listing and applying go through the Jira Cloud REST v3 transitions
 // endpoint (`GET`/`POST /rest/api/3/issue/{key}/transitions`).
 //
-// Auth mirrors the app's SCM pattern (AO_<SCM>_TOKEN → generic env → error): the
-// base URL + login come from env or jira-cli's own config file, and the API
-// token from AO_JIRA_TOKEN → JIRA_API_TOKEN (the var jira-cli itself honors).
-// The host is never hardcoded. A POST carries only `{"transition":{"id":...}}`
-// — no comment, no field edit — so this stays a pure status move.
+// Auth and the site come from adapters/atlassian. A POST carries only
+// `{"transition":{"id":...}}` — no comment, no field edit — so this stays a pure
+// status move.
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
 )
 
 // Transition is one available status transition for an issue, read live from
@@ -41,18 +37,6 @@ type Transition struct {
 // The underlying sentinel lives in client.go with the others.
 var ErrBadTransition = errBadTransition
 
-// restConfig is the base URL + basic-auth identity for the transition endpoints.
-type restConfig struct {
-	baseURL string
-	email   string
-	token   string
-}
-
-// ConfigSource yields the Jira REST config. A seam so tests point the client at
-// an httptest server with a static identity; the default resolves env then the
-// jira-cli config file.
-type ConfigSource func() (restConfig, error)
-
 // HTTPDoer performs one HTTP request. Seam for tests (httptest).
 type HTTPDoer func(*http.Request) (*http.Response, error)
 
@@ -62,7 +46,7 @@ type HTTPDoer func(*http.Request) (*http.Response, error)
 func WithHTTPDoer(d HTTPDoer) Option { return func(c *Client) { c.httpDo, c.transferDo = d, d } }
 
 // WithConfigSource injects the REST config resolver (tests inject a static one).
-func WithConfigSource(s ConfigSource) Option { return func(c *Client) { c.config = s } }
+func WithConfigSource(s atlassian.ConfigSource) Option { return func(c *Client) { c.config = s } }
 
 var transitionIDPattern = regexp.MustCompile(`^\d+$`)
 
@@ -161,36 +145,9 @@ func (c *Client) Move(ctx context.Context, key, transitionID string) error {
 
 // transitionRequest builds the authenticated request for the issue's transitions
 // endpoint. The key is already keyPattern-validated, so it is a safe path segment.
-func transitionRequest(ctx context.Context, cfg restConfig, method, key string, body []byte) (*http.Request, error) {
-	url := fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", cfg.baseURL, key)
-	return newJiraRequest(ctx, cfg, method, url, body)
-}
-
-// newJiraRequest builds an authenticated Jira Cloud REST request (Accept JSON +
-// basic auth from the resolved config). Shared by the transition and search
-// endpoints so the auth handling lives in one place. rawURL is fully built by
-// the caller (query already encoded).
-func newJiraRequest(ctx context.Context, cfg restConfig, method, rawURL string, body []byte) (*http.Request, error) {
-	var rdr io.Reader
-	if body != nil {
-		rdr = bytes.NewReader(body)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, rdr)
-	if err != nil {
-		return nil, fmt.Errorf("%w: build request: %w", ErrUnavailable, err)
-	}
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Authorization", basicAuth(cfg))
-	return req, nil
-}
-
-// basicAuth is the HTTP Basic Authorization header value for the resolved config
-// (base64 of "email:token").
-func basicAuth(cfg restConfig) string {
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(cfg.email+":"+cfg.token))
+func transitionRequest(ctx context.Context, cfg atlassian.Config, method, key string, body []byte) (*http.Request, error) {
+	url := fmt.Sprintf("%s/rest/api/3/issue/%s/transitions", cfg.BaseURL, key)
+	return atlassian.NewRequest(ctx, cfg, method, url, body)
 }
 
 // statusError maps a REST response status onto a sentinel. 2xx → nil. It reads a
@@ -245,72 +202,4 @@ func suffix(snippet string) string {
 		return ""
 	}
 	return ": " + snippet
-}
-
-// firstEnv returns the first non-empty (trimmed) env var from names.
-func firstEnv(names ...string) string {
-	for _, n := range names {
-		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-// defaultConfigSource resolves the REST config from env, then jira-cli's config
-// file for the non-secret base URL + login. Mirrors the SCM adapters' precedence
-// (an AO_-prefixed override, then the generic value jira-cli honors).
-func defaultConfigSource() (restConfig, error) {
-	cfg := restConfig{
-		baseURL: firstEnv("AO_JIRA_URL", "JIRA_SERVER"),
-		email:   firstEnv("AO_JIRA_EMAIL", "JIRA_LOGIN"),
-		token:   firstEnv("AO_JIRA_TOKEN", "JIRA_API_TOKEN"),
-	}
-	if cfg.baseURL == "" || cfg.email == "" {
-		server, login := readCLIConfig()
-		if cfg.baseURL == "" {
-			cfg.baseURL = server
-		}
-		if cfg.email == "" {
-			cfg.email = login
-		}
-	}
-	cfg.baseURL = strings.TrimRight(cfg.baseURL, "/")
-	if cfg.baseURL == "" || cfg.email == "" {
-		return restConfig{}, fmt.Errorf("%w: Jira server/login not configured — run `jira init` or set AO_JIRA_URL and AO_JIRA_EMAIL", ErrUnavailable)
-	}
-	if cfg.token == "" {
-		return restConfig{}, fmt.Errorf("%w: no Jira API token — set JIRA_API_TOKEN (or AO_JIRA_TOKEN) so AO can read transitions and move status", ErrAuthFailed)
-	}
-	return cfg, nil
-}
-
-// readCLIConfig line-scans jira-cli's config for the top-level `server:`/`login:`
-// values (no YAML dependency). Honors $JIRA_CONFIG_FILE, else the default path.
-func readCLIConfig() (server, login string) {
-	path := strings.TrimSpace(os.Getenv("JIRA_CONFIG_FILE"))
-	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", ""
-		}
-		path = filepath.Join(home, ".config", ".jira", ".config.yml")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", ""
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		switch {
-		case strings.HasPrefix(line, "server:"):
-			server = unquote(strings.TrimSpace(strings.TrimPrefix(line, "server:")))
-		case strings.HasPrefix(line, "login:"):
-			login = unquote(strings.TrimSpace(strings.TrimPrefix(line, "login:")))
-		}
-	}
-	return server, login
-}
-
-func unquote(s string) string {
-	return strings.Trim(s, `"'`)
 }

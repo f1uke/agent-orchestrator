@@ -688,7 +688,7 @@ const maxMRPipelinePages = 20
 // rely on one page. Offset pagination guarantees a short page (< perPage) is the
 // last one.
 func (p *Provider) fetchAllMRPipelines(ctx context.Context, mrPath string) ([]restPipeline, error) {
-	return fetchAllPages[restPipeline](ctx, p, mrPath+"/pipelines", maxMRPipelinePages, "MR pipelines")
+	return fetchAllPages[restPipeline](ctx, p.client, mrPath+"/pipelines", maxMRPipelinePages, "MR pipelines")
 }
 
 // fetchAllPages walks a GitLab offset-paginated list endpoint and returns every
@@ -698,14 +698,14 @@ func (p *Provider) fetchAllMRPipelines(ctx context.Context, mrPath string) ([]re
 // dropped when it did. Offset pagination guarantees a page shorter than perPage
 // is the last one; maxPages bounds the loop as a safety net against a server that
 // never signals a final page. what names the resource in decode errors.
-func fetchAllPages[T any](ctx context.Context, p *Provider, path string, maxPages int, what string) ([]T, error) {
+func fetchAllPages[T any](ctx context.Context, c *Client, path string, maxPages int, what string) ([]T, error) {
 	const perPage = 100
 	var all []T
 	for page := 1; page <= maxPages; page++ {
 		q := url.Values{}
 		q.Set("per_page", strconv.Itoa(perPage))
 		q.Set("page", strconv.Itoa(page))
-		resp, err := p.client.doREST(ctx, path, q)
+		resp, err := c.doREST(ctx, path, q)
 		if err != nil {
 			return nil, err
 		}
@@ -732,7 +732,7 @@ func fetchAllPages[T any](ctx context.Context, p *Provider, path string, maxPage
 // refresh). Offset pagination guarantees a short page (< perPage) is the last.
 func (p *Provider) fetchAllPipelineJobs(ctx context.Context, repo ports.SCMRepo, pipelineID int) ([]restJob, error) {
 	jobsPath := "projects/" + projectID(repo) + "/pipelines/" + strconv.Itoa(pipelineID) + "/jobs"
-	return fetchAllPages[restJob](ctx, p, jobsPath, maxPipelineJobPages, "pipeline jobs")
+	return fetchAllPages[restJob](ctx, p.client, jobsPath, maxPipelineJobPages, "pipeline jobs")
 }
 
 // fetchAllDiscussions pages through GitLab's MR discussions endpoint and returns
@@ -744,7 +744,7 @@ func (p *Provider) fetchAllPipelineJobs(ctx context.Context, repo ports.SCMRepo,
 // pagination guarantees a short page (< perPage, including empty) is the last
 // one, so the loop stops there.
 func (p *Provider) fetchAllDiscussions(ctx context.Context, mrPath string) ([]restDiscussion, error) {
-	return fetchAllPages[restDiscussion](ctx, p, mrPath+"/discussions", maxDiscussionPages, "MR discussions")
+	return fetchAllPages[restDiscussion](ctx, p.client, mrPath+"/discussions", maxDiscussionPages, "MR discussions")
 }
 
 // discussionToThread normalizes one discussion into a review thread. It

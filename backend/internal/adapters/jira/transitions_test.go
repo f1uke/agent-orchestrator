@@ -7,16 +7,16 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
 )
 
 // staticConfig points the client at a test server with a fixed identity.
-func staticConfig(baseURL string) ConfigSource {
-	return func() (restConfig, error) {
-		return restConfig{baseURL: baseURL, email: "alex@example.com", token: "tok-123"}, nil
+func staticConfig(baseURL string) atlassian.ConfigSource {
+	return func() (atlassian.Config, error) {
+		return atlassian.Config{BaseURL: baseURL, Email: "alex@example.com", Token: "tok-123"}, nil
 	}
 }
 
@@ -133,53 +133,5 @@ func TestBadRequestSurfacesJiraMessage(t *testing.T) {
 	err := c.Move(context.Background(), "DEMO-1", "11")
 	if err == nil || !strings.Contains(err.Error(), "resolution") {
 		t.Errorf("err should surface the Jira validator message, got %v", err)
-	}
-}
-
-func TestDefaultConfigSource_Resolution(t *testing.T) {
-	// Isolate: clear every env var the resolver reads, and point the config-file
-	// path at a temp file we control.
-	for _, k := range []string{"AO_JIRA_URL", "JIRA_SERVER", "AO_JIRA_EMAIL", "JIRA_LOGIN", "AO_JIRA_TOKEN", "JIRA_API_TOKEN"} {
-		t.Setenv(k, "")
-	}
-	cfgPath := filepath.Join(t.TempDir(), ".config.yml")
-	if err := os.WriteFile(cfgPath, []byte("server: https://acme.atlassian.net\nlogin: alex@example.com\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("JIRA_CONFIG_FILE", cfgPath)
-
-	// No token → ErrAuthFailed (with an actionable message).
-	if _, err := defaultConfigSource(); !errors.Is(err, ErrAuthFailed) {
-		t.Fatalf("no token: err = %v, want ErrAuthFailed", err)
-	}
-
-	// Token present → resolves base+login from the config file, token from env.
-	t.Setenv("JIRA_API_TOKEN", "tok-xyz")
-	cfg, err := defaultConfigSource()
-	if err != nil {
-		t.Fatalf("with token: %v", err)
-	}
-	if cfg.baseURL != "https://acme.atlassian.net" || cfg.email != "alex@example.com" || cfg.token != "tok-xyz" {
-		t.Errorf("cfg = %+v", cfg)
-	}
-
-	// AO_-prefixed env overrides the config file.
-	t.Setenv("AO_JIRA_URL", "https://override.example.net/")
-	cfg, err = defaultConfigSource()
-	if err != nil {
-		t.Fatalf("override: %v", err)
-	}
-	if cfg.baseURL != "https://override.example.net" { // trailing slash trimmed
-		t.Errorf("baseURL = %q, want the AO_ override (slash-trimmed)", cfg.baseURL)
-	}
-}
-
-func TestDefaultConfigSource_NoServerIsUnavailable(t *testing.T) {
-	for _, k := range []string{"AO_JIRA_URL", "JIRA_SERVER", "AO_JIRA_EMAIL", "JIRA_LOGIN", "AO_JIRA_TOKEN", "JIRA_API_TOKEN"} {
-		t.Setenv(k, "")
-	}
-	t.Setenv("JIRA_CONFIG_FILE", filepath.Join(t.TempDir(), "does-not-exist.yml"))
-	if _, err := defaultConfigSource(); !errors.Is(err, ErrUnavailable) {
-		t.Errorf("err = %v, want ErrUnavailable", err)
 	}
 }
