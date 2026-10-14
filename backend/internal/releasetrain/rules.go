@@ -32,7 +32,7 @@ var (
 
 func ruleTable() []rule {
 	return []rule{
-		ruleA1, ruleA2, ruleA3, ruleA4, ruleA5, ruleA7,
+		ruleA1, ruleA2, ruleA3, ruleA4, ruleA5, ruleA6, ruleA7,
 		ruleB1, ruleB3,
 		ruleC1, ruleC2, ruleC3, ruleC5, ruleC6, ruleC7,
 		ruleD1, ruleD2, ruleD3,

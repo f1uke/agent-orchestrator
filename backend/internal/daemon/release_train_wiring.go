@@ -10,6 +10,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/looptelemetry"
 	"github.com/aoagents/agent-orchestrator/backend/internal/observe"
 	rtsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain/confluencesrc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain/gitlabsrc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain/jirasrc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
@@ -29,7 +30,7 @@ func startReleaseTrains(ctx context.Context, store *sqlite.Store, dataDir string
 	rec := reg.Register(looptelemetry.Spec{
 		Name:        "release-trains",
 		Display:     "Release trains",
-		Description: "Reads the mobile release trains from GitLab and Jira, read-only, as release-train.json describes.",
+		Description: "Reads the mobile release trains from GitLab, Jira and Confluence, read-only, as release-train.json describes.",
 		Interval:    rtsvc.Tick,
 	})
 	path := filepath.Join(dataDir, rtsvc.ConfigFileName)
@@ -41,6 +42,7 @@ func startReleaseTrains(ctx context.Context, store *sqlite.Store, dataDir string
 		Sources: []rtsvc.Source{
 			gitlabsrc.New(gitlabsrc.Options{Tokens: gitlabTokenSource}),
 			jirasrc.New(jirasrc.Options{}),
+			confluencesrc.New(confluencesrc.Options{}),
 		},
 		Clock:  clock,
 		Rand:   rand.Float64, //nolint:gosec // backoff jitter, not security

@@ -76,6 +76,8 @@ type Train struct {
 	Versions []*AppVersion `json:"versions"`
 	// DatesSplit is the apps rule A7 flags, so a surface marks them without running rules.
 	DatesSplit []AppID `json:"datesSplit"`
+	// Pages is the release train page of each family that has one, in config order.
+	Pages []PageFact `json:"pages"`
 }
 
 // SourceFreshness is one system's resources at a glance: the oldest complete
@@ -102,6 +104,7 @@ type AppVersion struct {
 	Issues      []IssueFact      `json:"issues"`
 	Stages      []Stage          `json:"stages"`
 	Cards       []CardUnit       `json:"cards"`
+	page        *PageFact
 }
 
 // Hotfix is a milestone with no train label.

@@ -42,6 +42,9 @@ func New(opts Options) *Source {
 // System implements svc.Source.
 func (s *Source) System() string { return "jira" }
 
+// Host implements svc.Source: Jira shares the Atlassian budget and pauses with Confluence.
+func (s *Source) Host() string { return "atlassian" }
+
 // Credentials implements svc.Source.
 func (s *Source) Credentials(context.Context, rt.PlanView) (bool, error) {
 	if _, err := s.config(); err != nil {
@@ -89,6 +92,13 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 			svc.Job{Spec: related, Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.relatedWork(ctx, id) }},
 			svc.Job{Spec: cards, Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.cards(ctx, id) }},
 		)
+	}
+	for _, p := range view.Pages {
+		keys, spec := p.Keys, rt.SpecFor(rt.KindPageCards, rt.PageScope(p.ID), "")
+		if !p.Live {
+			spec.Budget = rt.SettledBudget
+		}
+		jobs = append(jobs, svc.Job{Spec: spec, Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.pageCards(ctx, keys) }})
 	}
 	for _, id := range view.ApproverIDs {
 		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindJiraUsers, rt.UserScope(id), ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.user(ctx, id) }})
@@ -140,7 +150,19 @@ func (r reader) relatedWork(ctx context.Context, versionID string) (svc.Batch, e
 }
 
 func (r reader) cards(ctx context.Context, versionID string) (svc.Batch, error) {
-	rows, err := r.c.SearchAllFields(ctx, "fixVersion = "+versionID+" ORDER BY key", nil, 0)
+	return r.issues(ctx, rt.KindCards, "fixVersion = "+versionID+" ORDER BY key")
+}
+
+// pageCards reads the cards a train page lists; keys Jira does not know are left out.
+func (r reader) pageCards(ctx context.Context, keys []string) (svc.Batch, error) {
+	if len(keys) == 0 {
+		return svc.SnapshotOf(rt.KindPageCards, nil)
+	}
+	return r.issues(ctx, rt.KindPageCards, "key in ("+strings.Join(keys, ", ")+") ORDER BY key")
+}
+
+func (r reader) issues(ctx context.Context, kind rt.Kind[rt.IssueFact], jql string) (svc.Batch, error) {
+	rows, err := r.c.SearchAllFields(ctx, jql, nil, 0)
 	if err != nil {
 		return svc.Batch{}, err
 	}
@@ -156,7 +178,7 @@ func (r reader) cards(ctx context.Context, versionID string) (svc.Batch, error) 
 		}
 		facts = append(facts, f)
 	}
-	return svc.SnapshotOf(rt.KindCards, facts)
+	return svc.SnapshotOf(kind, facts)
 }
 
 func (r reader) releaseTicketPattern() *regexp.Regexp {

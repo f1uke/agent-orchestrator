@@ -25,6 +25,7 @@ type fetchFunc func(spec rt.ResourceSpec, cursor []byte) (Batch, error)
 
 type fakeSource struct {
 	system string
+	host   string
 	specs  []rt.ResourceSpec
 	fetch  fetchFunc
 
@@ -36,6 +37,13 @@ type fakeSource struct {
 }
 
 func (f *fakeSource) System() string { return f.system }
+
+func (f *fakeSource) Host() string {
+	if f.host != "" {
+		return f.host
+	}
+	return f.system
+}
 
 func (f *fakeSource) Plan(rt.PlanView) []rt.ResourceSpec {
 	f.mu.Lock()

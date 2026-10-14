@@ -17,8 +17,10 @@ import (
 // Source plans and fetches one system's resources. It owns its fetch policy,
 // not freshness, backoff or storage.
 type Source interface {
-	// System names the host for request budgets and pauses: "gitlab" or "jira".
+	// System names the source for refreshes and the Board: "gitlab", "jira" or "confluence".
 	System() string
+	// Host names the request budget, concurrency and pauses the source shares: "gitlab" or "atlassian".
+	Host() string
 	Plan(view rt.PlanView) []rt.ResourceSpec
 	// Fetch reads one resource. An incremental resource returns one page per call.
 	Fetch(ctx context.Context, spec rt.ResourceSpec, view rt.PlanView, cursor []byte) (Batch, error)

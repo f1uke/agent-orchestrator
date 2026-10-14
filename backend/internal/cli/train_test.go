@@ -17,7 +17,7 @@ const trainSourcesJSON = `{
      "errorClass": "rate_limited", "errorMessage": "gitlab scm: 429 slow down", "nextAttemptAt": "2026-10-14T09:04:00Z", "backfilling": false},
     {"kind": "jira.myself", "scope": "me", "mode": "snapshot", "completeAt": "2026-10-14T09:00:30Z", "lastAttemptAt": "2026-10-14T09:00:30Z", "backfilling": false}
   ],
-  "lastPass": {"at": "2026-10-14T09:02:00Z", "requests": {"gitlab": 12, "jira": 3}}
+  "lastPass": {"at": "2026-10-14T09:02:00Z", "requests": {"gitlab": 12, "atlassian": 3}}
 }`
 
 func TestTrainSourcesPrintsATable(t *testing.T) {
@@ -32,7 +32,7 @@ func TestTrainSourcesPrintsATable(t *testing.T) {
 		t.Fatalf("request = %s %s", capture.method, capture.path)
 	}
 	want := `config: ok (/data/release-train.json)
-last pass 2026-10-14T09:02:00Z: gitlab 12 requests, jira 3 requests
+last pass 2026-10-14T09:02:00Z: atlassian 3 requests, gitlab 12 requests
 
 KIND         SCOPE   APP  STATE         COMPLETE              NEXT
 gitlab.mrs   p:1001  di   backfilling   -                     -

@@ -49,6 +49,8 @@ type fixture struct {
 	related    []*RelatedWorkFact
 	issues     map[string][]*IssueFact
 	techreq    []*ForceUpdateFact
+	pages      []*PageFact
+	pageCards  map[string][]*IssueFact
 	versionApp map[string]AppID
 	statuses   map[KindName]func(*ResourceStatus)
 	human      HumanState
@@ -67,6 +69,7 @@ func newFixture(t *testing.T, today string) *fixture {
 		now:        time.Date(d.Y, d.M, d.D, 10, 0, 0, 0, loc),
 		nextID:     100,
 		issues:     map[string][]*IssueFact{},
+		pageCards:  map[string][]*IssueFact{},
 		versionApp: map[string]AppID{},
 		statuses:   map[KindName]func(*ResourceStatus){},
 		human:      HumanState{RuleSettings: map[RuleID]bool{}, Hides: map[HitID]Hide{}},
@@ -171,7 +174,43 @@ func (f *fixture) snapshot() Snapshot {
 	for _, v := range f.versions {
 		Put(&s, KindCards, f.fresh(KindCards.Name, VersionScope(v.ID), f.appOfVersion(v.ID)), deref(f.issues[v.ID], nil))
 	}
+	Put(&s, KindPages, f.fresh(KindPages.Name, SpaceScope("DEMOSPACE"), ""), deref(f.pages, nil))
+	for _, p := range f.pages {
+		Put(&s, KindPageCards, f.fresh(KindPageCards.Name, PageScope(p.ID), ""), deref(f.pageCards[p.ID], nil))
+	}
 	return s
+}
+
+// page adds family's train page created on created, with the dates its table gives.
+func (f *fixture) page(family FamilyID, train, created, freeze, publish string) *PageFact {
+	var number, extra int
+	if _, err := fmt.Sscanf(train, "%d-%d", &number, &extra); err != nil {
+		number, _ = strconv.Atoi(train)
+	}
+	id := strconv.Itoa(8000 + f.id())
+	p := &PageFact{
+		ID: id, Title: fmt.Sprintf("Train page #%s", train), URL: "https://wiki.example.com/pages/" + id,
+		Created: day(f.t, created), Family: family, Number: number, Extra: extra, Keys: []string{},
+	}
+	if freeze != "" {
+		p.Freeze = dayPtr(f.t, freeze)
+	}
+	if publish != "" {
+		p.Publish = dayPtr(f.t, publish)
+	}
+	f.pages = append(f.pages, p)
+	return p
+}
+
+// card lists key on the page, as Jira reads it, in the given fixVersions.
+func (f *fixture) card(p *PageFact, key string, fixVersions ...string) *IssueFact {
+	is := &IssueFact{
+		Key: key, Summary: "Card " + key, Status: "In Progress", StatusCategory: "indeterminate",
+		FixVersions: fixVersions, URL: "https://jira.example.com/browse/" + key,
+	}
+	p.Keys = append(p.Keys, key)
+	f.pageCards[p.ID] = append(f.pageCards[p.ID], is)
+	return is
 }
 
 func deref[T any](items []*T, keep func(*T) bool) []T {

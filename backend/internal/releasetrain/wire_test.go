@@ -179,8 +179,8 @@ func TestBoardSourcesListStaleAndFailingResourcesPerSystem(t *testing.T) {
 		}
 	}
 	sort.Strings(systems)
-	if len(systems) != 2 || systems[0] != "gitlab" || systems[1] != "jira" {
-		t.Fatalf("sources = %v, want gitlab and jira", systems)
+	if len(systems) != 3 || systems[0] != "confluence" || systems[1] != "gitlab" || systems[2] != "jira" {
+		t.Fatalf("sources = %v, want confluence, gitlab and jira", systems)
 	}
 	if len(issues["jira"]) != 1 || issues["jira"][0] != "jira.versions unavailable" {
 		t.Fatalf("jira issues = %v, want the stale jira.versions", issues["jira"])

@@ -11,6 +11,23 @@ type SubjVersion struct {
 	App   AppID
 }
 
+// SubjVersionDate is one date of an app's version that its train page disagrees with.
+type SubjVersionDate struct {
+	Train TrainID
+	App   AppID
+	Field DateField
+}
+
+// DateField names which date a SubjVersionDate is about; DatePage is the whole page, unreadable.
+type DateField string
+
+// Date fields.
+const (
+	DateFreeze  DateField = "freeze"
+	DatePublish DateField = "publish"
+	DatePage    DateField = "page"
+)
+
 // SubjJiraVersion is a Jira version that joined no train or hotfix.
 type SubjJiraVersion struct{ ID string }
 
@@ -38,9 +55,12 @@ type SubjHotfixTrain struct {
 
 func (s SubjVersion) subjectKey() string     { return fmt.Sprintf("v/%s/%s", s.Train.Key(), s.App) }
 func (s SubjJiraVersion) subjectKey() string { return "jv/" + s.ID }
-func (s SubjMilestone) subjectKey() string   { return fmt.Sprintf("m/%s/%d", s.App, s.ID) }
-func (s SubjHotfix) subjectKey() string      { return fmt.Sprintf("h/%s/%s", s.App, s.Version) }
-func (s SubjTrainPair) subjectKey() string   { return fmt.Sprintf("tt/%s/%s", s.A.Key(), s.B.Key()) }
+func (s SubjVersionDate) subjectKey() string {
+	return fmt.Sprintf("vd/%s/%s/%s", s.Train.Key(), s.App, s.Field)
+}
+func (s SubjMilestone) subjectKey() string { return fmt.Sprintf("m/%s/%d", s.App, s.ID) }
+func (s SubjHotfix) subjectKey() string    { return fmt.Sprintf("h/%s/%s", s.App, s.Version) }
+func (s SubjTrainPair) subjectKey() string { return fmt.Sprintf("tt/%s/%s", s.A.Key(), s.B.Key()) }
 func (s SubjHotfixTrain) subjectKey() string {
 	return fmt.Sprintf("ht/%s/%s/%s", s.App, s.Version, s.Train.Key())
 }
