@@ -24,13 +24,13 @@ const (
 
 // ResourceStatus is what the core knows about one fetched resource besides its items.
 type ResourceStatus struct {
-	Kind          KindName   `json:"kind"`
-	Scope         Scope      `json:"scope"`
-	App           AppID      `json:"app,omitempty"`
-	CompleteAt    *time.Time `json:"completeAt,omitempty"`
-	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
-	Failures      int        `json:"failures"`
-	ErrorClass    ErrorClass `json:"errorClass,omitempty"`
+	Kind          KindName      `json:"kind"`
+	Scope         Scope         `json:"scope"`
+	App           AppID         `json:"app,omitempty"`
+	CompleteAt    *time.Time    `json:"completeAt,omitempty"`
+	LastAttemptAt *time.Time    `json:"lastAttemptAt,omitempty"`
+	Failures      int           `json:"failures"`
+	ErrorClass    ErrorClass    `json:"errorClass,omitempty"`
 	Budget        time.Duration `json:"budget,omitempty"`
 }
 

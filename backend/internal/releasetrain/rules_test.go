@@ -1,0 +1,278 @@
+package releasetrain
+
+import (
+	"fmt"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+)
+
+const (
+	today      = "2026-10-14"
+	liveFreeze = "2026-10-09"
+	liveDue    = "2026-10-16"
+)
+
+func healthy(f *fixture) *fv {
+	v := f.version("di", "21", "3.5.0", liveFreeze, liveDue)
+	v.approvers("Ann:APPROVED", "Bob:APPROVED")
+	v.relatedWork(CategoryScanPage, CategoryReleaseNote)
+	v.releaseMR(liveFreeze, MROpened)
+	v.issue("DEMO-1", "Ready for QA", "indeterminate")
+	v.forceUpdate("REQ-1", "To Do", "new", "2026-10-20")
+	return v
+}
+
+func shipped(f *fixture) *fv {
+	v := f.published("di", "20", "3.4.0", "2026-10-01", "2026-10-08")
+	v.issue("DEMO-2", "Done", StatusCategoryDone)
+	return v
+}
+
+func firedHits(b Board, rule RuleID) []Hit {
+	var out []Hit
+	for _, o := range b.Alerts.Rules {
+		if fired, ok := o.Outcome.(Fired); ok && o.Rule == rule {
+			out = append(out, fired.Hits...)
+		}
+	}
+	return out
+}
+
+func firedIDs(b Board, rule RuleID) []string {
+	var out []string
+	for _, h := range firedHits(b, rule) {
+		out = append(out, string(h.ID))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestRuleTableHasExactlyTheA2FIDs(t *testing.T) {
+	want := strings.Fields("A1 A2 A3 A4 A5 B1 B3 C1 C2 C3 C5 C6 C7 D1 D2 D3 E1 E2 E4 E5 F1 F2")
+	var got []string
+	for _, r := range ruleTable() {
+		got = append(got, string(r.ID))
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rule ids = %v, want %v", got, want)
+	}
+}
+
+func TestEveryRuleFiresAndStaysQuiet(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rule  RuleID
+		today string
+		setup func(f *fixture)
+		want  []string
+		text  string
+	}{
+		{"A1 quiet", "A1", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"A1 milestone and Jira disagree", "A1", today, func(f *fixture) {
+			healthy(f).jira.Name = "iOS 3.5.1"
+		}, []string{"A1~v/21-2026/di"}, "Milestone says 3.5.0, Jira release says 3.5.1"},
+
+		{"A2 quiet", "A2", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"A2 Jira label with no milestone", "A2", today, func(f *fixture) {
+			healthy(f)
+			jv := f.jiraVersion("da", "3.6.0", f.label("da", "22"), "2026-10-30")
+			jv.ID = "7001"
+		}, []string{"A2~jv/7001"}, "says train #22"},
+
+		{"A3 quiet", "A3", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"A3 milestone label with no Jira", "A3", today, func(f *fixture) {
+			healthy(f)
+			f.milestone("pi", "Release 1.2.0", f.label("pi", "21"), liveFreeze, liveDue).ID = 9001
+		}, []string{"A3~m/pi/9001"}, "has no Jira release"},
+
+		{"A4 quiet: unlabelled Jira matches a hotfix", "A4", today, func(f *fixture) {
+			healthy(f)
+			f.milestone("di", "Hotfix 3.4.1", "crash on launch", "2026-10-01", "2026-10-03")
+			f.jiraVersion("di", "3.4.1", "", "2026-10-03")
+		}, nil, ""},
+		{"A4 unlabelled Jira with no hotfix", "A4", today, func(f *fixture) {
+			healthy(f)
+			f.jiraVersion("di", "3.4.2", "", "2026-10-03").ID = "7002"
+		}, []string{"A4~jv/7002"}, "no train label"},
+
+		{"A5 quiet", "A5", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"A5 dates differ", "A5", today, func(f *fixture) {
+			healthy(f).jira.ReleaseDate = dayPtr(f.t, "2026-10-15")
+		}, []string{"A5~v/21-2026/di"}, "Jira release date Thu 15 Oct, milestone due Fri 16 Oct"},
+
+		{"B1 quiet", "B1", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"B1 freeze passed with no release MR", "B1", today, func(f *fixture) {
+			f.version("da", "21", "3.5.0", liveFreeze, liveDue)
+		}, []string{"B1~v/21-2026/da"}, "Freeze was 5 day(s) ago"},
+
+		{"B3 quiet", "B3", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"B3 card in progress after freeze", "B3", today, func(f *fixture) {
+			healthy(f).issue("DEMO-3", "In Progress", "indeterminate")
+		}, []string{"B3~v/21-2026/di"}, "1 card(s) still In Progress: DEMO-3"},
+
+		{"C1 quiet", "C1", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"C1 required job failed", "C1", today, func(f *fixture) {
+			j := healthy(f).jobList()
+			j.Jobs = append(j.Jobs, JobFact{Name: "build_test", Status: "failed"})
+		}, []string{"C1~v/21-2026/di"}, "failed: build_test"},
+
+		{"C2 quiet: required failure is C1's", "C2", today, func(f *fixture) {
+			j := healthy(f).jobList()
+			j.Jobs = append(j.Jobs, JobFact{Name: "build_test", Status: "failed"})
+		}, nil, ""},
+		{"C2 allowed job failed", "C2", today, func(f *fixture) {
+			j := healthy(f).jobList()
+			j.Jobs = append(j.Jobs, JobFact{Name: "lint_report", Status: "failed", AllowFailure: true})
+		}, []string{"C2~v/21-2026/di"}, "allowed failures: lint_report"},
+
+		{"C3 quiet at exactly 60 minutes", "C3", today, func(f *fixture) {
+			d := 60 * 60
+			healthy(f).detail().Pipeline.Duration = &d
+		}, nil, ""},
+		{"C3 slow pipeline", "C3", today, func(f *fixture) {
+			d := 71 * 60
+			healthy(f).detail().Pipeline.Duration = &d
+		}, []string{"C3~v/21-2026/di"}, "took 71 min"},
+
+		{"C5 quiet", "C5", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"C5 conflicts", "C5", today, func(f *fixture) {
+			healthy(f).detail().Conflicts = true
+		}, []string{"C5~v/21-2026/di"}, "has merge conflicts"},
+
+		{"C6 quiet: jobs not fetched yet", "C6", today, func(f *fixture) {
+			v := healthy(f)
+			v.detail().Pipeline.ID = 99999
+		}, nil, ""},
+		{"C6 semgrep skipped", "C6", today, func(f *fixture) {
+			j := healthy(f).jobList()
+			j.Jobs[1].Status = "skipped"
+		}, []string{"C6~v/21-2026/di"}, "semgrep-sast is skipped"},
+		{"C6 semgrep missing", "C6", today, func(f *fixture) {
+			j := healthy(f).jobList()
+			j.Jobs = j.Jobs[:1]
+		}, []string{"C6~v/21-2026/di"}, "semgrep-sast is missing"},
+
+		{"C7 quiet: a newer version tag exists", "C7", today, func(f *fixture) {
+			v := shipped(f)
+			v.compare().Commits = []CommitFact{{Title: "Merge branch 'fix/crash' into 'main'", CreatedOn: day(f.t, "2026-10-10")}}
+			f.tags = append(f.tags, &TagFact{Project: 1001, Name: "3.4.1", CommitOn: day(f.t, "2026-10-11")})
+		}, nil, ""},
+		{"C7 merges after the newest tag", "C7", today, func(f *fixture) {
+			v := shipped(f)
+			v.compare().Commits = []CommitFact{
+				{Title: "Merge branch 'release/release-3.4.0' into 'main'", CreatedOn: day(f.t, "2026-10-08")},
+				{Title: "Merge branch 'fix/crash' into 'main'", CreatedOn: day(f.t, "2026-10-10")},
+			}
+			f.tags = append(f.tags, &TagFact{Project: 1001, Name: "3.4.1-rc1", CommitOn: day(f.t, "2026-10-11")})
+		}, []string{"C7~v/20-2026/di"}, "After tag 3.4.0: fix/crash (Sat 10 Oct)"},
+
+		{"D1 quiet on freeze plus two", "D1", "2026-10-11", func(f *fixture) {
+			healthy(f).approvers()
+		}, nil, ""},
+		{"D1 no approvers", "D1", today, func(f *fixture) {
+			healthy(f).approvers()
+		}, []string{"D1~v/21-2026/di"}, "did not set approvers"},
+
+		{"D2 quiet: related work not fetched", "D2", today, func(f *fixture) {
+			healthy(f)
+			f.related = nil
+		}, nil, ""},
+		{"D2 release note missing", "D2", today, func(f *fixture) {
+			healthy(f)
+			f.related[0].Links = f.related[0].Links[:1]
+		}, []string{"D2~v/21-2026/di"}, "Missing on the Jira release: release note"},
+
+		{"D3 quiet before the day before publish", "D3", today, func(f *fixture) {
+			healthy(f).approvers("Ann:APPROVED", "Bob:PENDING")
+		}, nil, ""},
+		{"D3 pending the day before publish", "D3", "2026-10-15", func(f *fixture) {
+			healthy(f).approvers("Ann:APPROVED", "Bob:PENDING")
+		}, []string{"D3~v/21-2026/di"}, "1 of 2 not approved: Bob"},
+
+		{"E1 quiet", "E1", today, func(f *fixture) { shipped(f) }, nil, ""},
+		{"E1 train and hotfix unreleased", "E1", today, func(f *fixture) {
+			shipped(f).jira.Released = false
+			f.milestone("da", "Hotfix 3.3.1", "crash on launch", "2026-10-06", "2026-10-08")
+			f.jiraVersion("da", "3.3.1", "", "2026-10-08")
+		}, []string{"E1~h/da/3.3.1", "E1~v/20-2026/di"}, "Jira release still unreleased"},
+
+		{"E2 quiet", "E2", today, func(f *fixture) { shipped(f) }, nil, ""},
+		{"E2 card not done after publish", "E2", today, func(f *fixture) {
+			shipped(f).issue("DEMO-4", "Ready for UAT", "indeterminate")
+		}, []string{"E2~v/20-2026/di"}, "1 card(s) not Done: DEMO-4 Ready for UAT"},
+
+		{"E4 quiet when done", "E4", today, func(f *fixture) {
+			shipped(f).forceUpdate("REQ-2", "Closed", StatusCategoryDone, "2026-10-12")
+		}, nil, ""},
+		{"E4 open after due", "E4", today, func(f *fixture) {
+			shipped(f).forceUpdate("REQ-2", "In Progress", "indeterminate", "2026-10-12")
+		}, []string{"E4~v/20-2026/di"}, "REQ-2 still In Progress, due Mon 12 Oct"},
+
+		{"E5 quiet", "E5", today, func(f *fixture) { healthy(f) }, nil, ""},
+		{"E5 no due date", "E5", today, func(f *fixture) {
+			shipped(f).forceUpdate("REQ-3", "To Do", "new", "")
+		}, []string{"E5~v/20-2026/di"}, "REQ-3 has no due date"},
+
+		{"F1 quiet", "F1", today, func(f *fixture) {
+			shipped(f)
+			healthy(f)
+		}, nil, ""},
+		{"F1 trains overlap", "F1", today, func(f *fixture) {
+			healthy(f)
+			f.version("di", "22", "3.6.0", "2026-10-15", "2026-10-23")
+		}, []string{"F1~tt/21-2026/22-2026"}, "#22 freezes Thu 15 Oct, before #21 publishes Fri 16 Oct"},
+
+		{"F2 quiet", "F2", today, func(f *fixture) {
+			healthy(f)
+			f.milestone("di", "Hotfix 3.4.1", "crash", "2026-10-01", "2026-10-03")
+		}, nil, ""},
+		{"F2 hotfix inside a train", "F2", today, func(f *fixture) {
+			healthy(f)
+			f.milestone("di", "Hotfix 3.4.1", "crash", "2026-10-10", "2026-10-13")
+		}, []string{"F2~ht/di/3.4.1/21-2026"}, "inside train #21"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, tc.today)
+			tc.setup(f)
+			b := f.reconcile()
+			got := firedIDs(b, tc.rule)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("%s hits = %v, want %v", tc.rule, got, tc.want)
+			}
+			for _, h := range firedHits(b, tc.rule) {
+				if !strings.Contains(h.Text, tc.text) {
+					t.Fatalf("%s text = %q, want it to contain %q", h.ID, h.Text, tc.text)
+				}
+			}
+		})
+	}
+}
+
+func TestD3EndsAtPublishAndE1TakesOver(t *testing.T) {
+	for _, tc := range []struct {
+		today  string
+		tagged bool
+		want   []string
+	}{
+		{"2026-10-15", true, []string{"D3~v/21-2026/di"}},
+		{"2026-10-16", true, []string{"D3~v/21-2026/di"}},
+		{"2026-10-17", true, []string{"E1~v/21-2026/di"}},
+		{"2026-10-17", false, []string{"D3~v/21-2026/di"}},
+	} {
+		t.Run(fmt.Sprintf("%s tagged=%v", tc.today, tc.tagged), func(t *testing.T) {
+			f := newFixture(t, tc.today)
+			v := healthy(f)
+			v.approvers("Ann:APPROVED", "Bob:PENDING")
+			if tc.tagged {
+				v.tagOn("2026-10-15")
+			}
+			b := f.reconcile()
+			got := append(firedIDs(b, "D3"), firedIDs(b, "E1")...)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("D3+E1 hits = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
