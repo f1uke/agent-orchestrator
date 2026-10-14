@@ -1,0 +1,263 @@
+// Package jirasrc is the release-train monitor's Jira source: it plans and
+// fetches project versions, their related work and cards, force-update
+// tickets, approver profiles and the token's own account.
+package jirasrc
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira"
+	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
+	svc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
+)
+
+// Options wires a Source. Config defaults to the shared Atlassian chain.
+type Options struct {
+	Config    atlassian.ConfigSource
+	Transport http.RoundTripper
+}
+
+// Source is the Jira Source.
+type Source struct {
+	config atlassian.ConfigSource
+	client *jira.Client
+}
+
+var _ svc.Source = (*Source)(nil)
+
+// New returns a Jira Source whose requests all go through svc.CountingTransport.
+func New(opts Options) *Source {
+	if opts.Config == nil {
+		opts.Config = atlassian.DefaultConfigSource
+	}
+	httpClient := &http.Client{Timeout: 15 * time.Second, Transport: svc.CountingTransport{Base: opts.Transport}}
+	return &Source{config: opts.Config, client: jira.NewClient(jira.WithHTTPDoer(httpClient.Do), jira.WithConfigSource(opts.Config))}
+}
+
+// System implements svc.Source.
+func (s *Source) System() string { return "jira" }
+
+// Credentials implements svc.Source: a site, login and token from the chain, without a request.
+func (s *Source) Credentials(context.Context, rt.PlanView) (bool, error) {
+	if _, err := s.config(); err != nil {
+		if errors.Is(err, atlassian.ErrAuthFailed) || errors.Is(err, atlassian.ErrUnavailable) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// Plan implements svc.Source.
+func (s *Source) Plan(view rt.PlanView) []rt.ResourceSpec { return svc.Specs(s.jobs(view)) }
+
+// Fetch implements svc.Source.
+func (s *Source) Fetch(ctx context.Context, spec rt.ResourceSpec, view rt.PlanView, cursor []byte) (svc.Batch, error) {
+	b, err := svc.FetchJob(ctx, s.jobs(view), spec, cursor)
+	if err != nil {
+		return svc.Batch{}, classify(err)
+	}
+	return b, nil
+}
+
+func projectScope(key string) rt.Scope { return rt.Scope("project:" + key) }
+
+func (s *Source) jobs(view rt.PlanView) []svc.Job {
+	r := reader{c: s.client, view: view}
+	cfg := view.Config.Jira
+	jobs := []svc.Job{{Spec: rt.SpecFor(rt.KindJiraVersions, projectScope(cfg.Project), ""), Fetch: r.versions}}
+	if cfg.TechRequestProject != "" {
+		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindTechReq, projectScope(cfg.TechRequestProject), ""), Fetch: r.techReq})
+	}
+	seen := map[string]bool{}
+	for _, v := range view.Versions {
+		id, app := v.JiraVersionID, v.App
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		related, cards := rt.SpecFor(rt.KindRelatedWork, rt.VersionScope(id), app), rt.SpecFor(rt.KindCards, rt.VersionScope(id), app)
+		if !v.Live {
+			related.Budget, cards.Budget = svc.SettledBudget, svc.SettledBudget
+		}
+		jobs = append(jobs,
+			svc.Job{Spec: related, Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.relatedWork(ctx, id) }},
+			svc.Job{Spec: cards, Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.cards(ctx, id) }},
+		)
+	}
+	for _, id := range view.ApproverIDs {
+		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindJiraUsers, rt.UserScope(id), ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.user(ctx, id) }})
+	}
+	return append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindJiraMyself, rt.MyselfScope, ""), Fetch: r.myself})
+}
+
+type reader struct {
+	c    *jira.Client
+	view rt.PlanView
+}
+
+func (r reader) versions(ctx context.Context, _ []byte) (svc.Batch, error) {
+	rows, err := r.c.ProjectVersions(ctx, r.view.Config.Jira.Project, 0)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	facts := make([]rt.JiraVersionFact, 0, len(rows))
+	for _, v := range rows {
+		f := rt.JiraVersionFact{ID: v.ID, Name: v.Name, Description: v.Description, Released: v.Released, URL: v.URL, Approvers: make([]rt.Approver, 0, len(v.Approvers))}
+		if v.ReleaseDate != "" {
+			d, err := rt.ParseDay(v.ReleaseDate)
+			if err != nil {
+				return svc.Batch{}, &svc.FetchError{Class: rt.ErrDecode, Err: err}
+			}
+			if d.Before(r.view.HistoryFrom) {
+				continue
+			}
+			f.ReleaseDate = &d
+		}
+		for _, a := range v.Approvers {
+			f.Approvers = append(f.Approvers, rt.Approver{AccountID: a.AccountID, Status: a.Status})
+		}
+		facts = append(facts, f)
+	}
+	return svc.SnapshotOf(rt.KindJiraVersions, facts)
+}
+
+func (r reader) relatedWork(ctx context.Context, versionID string) (svc.Batch, error) {
+	links, err := r.c.VersionRelatedWork(ctx, versionID)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	f := rt.RelatedWorkFact{VersionID: versionID, Links: make([]rt.RelatedWork, 0, len(links))}
+	for _, l := range links {
+		f.Links = append(f.Links, rt.RelatedWork{Category: l.Category, Title: l.Title, URL: l.URL})
+	}
+	return svc.SnapshotOf(rt.KindRelatedWork, []rt.RelatedWorkFact{f})
+}
+
+func (r reader) cards(ctx context.Context, versionID string) (svc.Batch, error) {
+	rows, err := r.c.SearchAllFields(ctx, "fixVersion = "+versionID+" ORDER BY key", nil, 0)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	ticket := r.releaseTicketPattern()
+	facts := make([]rt.IssueFact, 0, len(rows))
+	for _, row := range rows {
+		f := rt.IssueFact{
+			Key: row.Key, Summary: row.Summary, Status: row.Status, StatusCategory: row.StatusCategory, Subtask: row.Subtask,
+			ReleaseTicket: ticket != nil && !row.Subtask && ticket.MatchString(row.Summary), FixVersions: row.FixVersionIDs, URL: row.URL,
+		}
+		if a := row.Assignee; a != nil {
+			f.Assignee = &rt.Person{AccountID: a.AccountID, Name: a.DisplayName}
+		}
+		facts = append(facts, f)
+	}
+	return svc.SnapshotOf(rt.KindCards, facts)
+}
+
+// releaseTicketPattern matches any family's release ticket summary, e.g. "Release Demo 3.5.0".
+func (r reader) releaseTicketPattern() *regexp.Regexp {
+	var labels []string
+	for _, f := range r.view.Config.Families {
+		if f.Label != "" {
+			labels = append(labels, regexp.QuoteMeta(f.Label))
+		}
+	}
+	if len(labels) == 0 {
+		return nil
+	}
+	return regexp.MustCompile(`(?i)\bRelease\s+(?:` + strings.Join(labels, "|") + `)\s+\d`)
+}
+
+var platformRE = regexp.MustCompile(`(?i)\b(iOS|ADR|Android)\b`)
+
+func (r reader) techReq(ctx context.Context, _ []byte) (svc.Batch, error) {
+	cfg := r.view.Config.Jira
+	jql := fmt.Sprintf(`project = %s AND summary ~ %s AND created >= "%s" ORDER BY key`, cfg.TechRequestProject, jqlString(cfg.ForceUpdateSummary), r.view.HistoryFrom)
+	rows, err := r.c.SearchAllFields(ctx, jql, nil, 0)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	facts := make([]rt.ForceUpdateFact, 0, len(rows))
+	for _, row := range rows {
+		f, ok := r.forceUpdate(row)
+		if ok {
+			facts = append(facts, f)
+		}
+	}
+	return svc.SnapshotOf(rt.KindTechReq, facts)
+}
+
+func (r reader) forceUpdate(row jira.IssueRow) (rt.ForceUpdateFact, bool) {
+	if !strings.Contains(strings.ToLower(row.Summary), strings.ToLower(r.view.Config.Jira.ForceUpdateSummary)) {
+		return rt.ForceUpdateFact{}, false
+	}
+	pm := platformRE.FindString(row.Summary)
+	v, ok := rt.ParseVersion(row.Summary)
+	if pm == "" || !ok {
+		return rt.ForceUpdateFact{}, false
+	}
+	platform := rt.PlatformAndroid
+	if strings.EqualFold(pm, "ios") {
+		platform = rt.PlatformIOS
+	}
+	f := rt.ForceUpdateFact{
+		Key: row.Key, Status: row.Status, StatusCategory: row.StatusCategory, Platform: platform, Version: v.String(),
+		CreatedOn: rt.DayOf(row.Created, r.view.Loc), URL: row.URL,
+	}
+	if row.DueDate != "" {
+		if d, err := rt.ParseDay(row.DueDate); err == nil {
+			f.Due = &d
+		}
+	}
+	return f, true
+}
+
+func jqlString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+}
+
+func (r reader) user(ctx context.Context, accountID string) (svc.Batch, error) {
+	u, err := r.c.User(ctx, accountID)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	return svc.SnapshotOf(rt.KindJiraUsers, []rt.JiraUserFact{{AccountID: u.AccountID, DisplayName: u.DisplayName, AvatarURL: u.AvatarURL}})
+}
+
+func (r reader) myself(ctx context.Context, _ []byte) (svc.Batch, error) {
+	u, err := r.c.Myself(ctx)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	return svc.SnapshotOf(rt.KindJiraMyself, []rt.JiraMyselfFact{{AccountID: u.AccountID, DisplayName: u.DisplayName}})
+}
+
+// classify maps adapter errors to classes. A 400 is a query naming a project
+// or version that does not exist, so it is not_found.
+func classify(err error) error {
+	var fe *svc.FetchError
+	if errors.As(err, &fe) {
+		return fe
+	}
+	var rl *atlassian.RateLimitError
+	switch {
+	case errors.As(err, &rl):
+		return &svc.FetchError{Class: rt.ErrRateLimited, RetryAfter: rl.RetryAfter, Err: err}
+	case errors.Is(err, atlassian.ErrAuthFailed):
+		return &svc.FetchError{Class: rt.ErrAuth, Err: err}
+	case errors.Is(err, jira.ErrIncomplete):
+		return &svc.FetchError{Class: rt.ErrTruncated, Err: err}
+	case errors.Is(err, jira.ErrNotFound), errors.Is(err, jira.ErrBadQuery), errors.Is(err, jira.ErrBadRequest):
+		return &svc.FetchError{Class: rt.ErrNotFound, Err: err}
+	case svc.IsDecodeError(err):
+		return &svc.FetchError{Class: rt.ErrDecode, Err: err}
+	}
+	return &svc.FetchError{Class: rt.ErrUnavailable, Err: err}
+}
