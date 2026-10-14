@@ -1,6 +1,4 @@
-// Package jirasrc is the release-train monitor's Jira source: it plans and
-// fetches project versions, their related work and cards, force-update
-// tickets, approver profiles and the token's own account.
+// Package jirasrc is the release-train monitor's Jira source.
 package jirasrc
 
 import (
@@ -18,7 +16,7 @@ import (
 	svc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
 )
 
-// Options wires a Source. Config defaults to the shared Atlassian chain.
+// Options configures a Source.
 type Options struct {
 	Config    atlassian.ConfigSource
 	Transport http.RoundTripper
@@ -32,7 +30,7 @@ type Source struct {
 
 var _ svc.Source = (*Source)(nil)
 
-// New returns a Jira Source whose requests all go through svc.CountingTransport.
+// New returns a Jira Source.
 func New(opts Options) *Source {
 	if opts.Config == nil {
 		opts.Config = atlassian.DefaultConfigSource
@@ -44,7 +42,7 @@ func New(opts Options) *Source {
 // System implements svc.Source.
 func (s *Source) System() string { return "jira" }
 
-// Credentials implements svc.Source: a site, login and token from the chain, without a request.
+// Credentials implements svc.Source.
 func (s *Source) Credentials(context.Context, rt.PlanView) (bool, error) {
 	if _, err := s.config(); err != nil {
 		if errors.Is(err, atlassian.ErrAuthFailed) || errors.Is(err, atlassian.ErrUnavailable) {
@@ -161,7 +159,6 @@ func (r reader) cards(ctx context.Context, versionID string) (svc.Batch, error) 
 	return svc.SnapshotOf(rt.KindCards, facts)
 }
 
-// releaseTicketPattern matches any family's release ticket summary, e.g. "Release Demo 3.5.0".
 func (r reader) releaseTicketPattern() *regexp.Regexp {
 	var labels []string
 	for _, f := range r.view.Config.Families {
@@ -239,8 +236,7 @@ func (r reader) myself(ctx context.Context, _ []byte) (svc.Batch, error) {
 	return svc.SnapshotOf(rt.KindJiraMyself, []rt.JiraMyselfFact{{AccountID: u.AccountID, DisplayName: u.DisplayName}})
 }
 
-// classify maps adapter errors to classes. A 400 is a query naming a project
-// or version that does not exist, so it is not_found.
+// Jira answers a JQL query naming a missing project or version with a 400.
 func classify(err error) error {
 	var fe *svc.FetchError
 	if errors.As(err, &fe) {

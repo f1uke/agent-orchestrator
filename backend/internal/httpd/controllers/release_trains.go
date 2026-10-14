@@ -13,10 +13,10 @@ import (
 	rtsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
 )
 
-// ReleaseTrainsService is the controller-facing contract over the release-train monitor.
+// ReleaseTrainsService backs ReleaseTrainsController.
 type ReleaseTrainsService interface {
 	Report(ctx context.Context) (rtsvc.Report, error)
-	// InitConfig writes the template config and returns its path, or rtsvc.ErrConfigExists.
+	// InitConfig returns rtsvc.ErrConfigExists when the config file is already there.
 	InitConfig() (string, error)
 }
 

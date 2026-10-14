@@ -1,5 +1,4 @@
-// Package rttest holds httptest fakes of GitLab and Jira for the release-train
-// source and poller tests. Every id, host and name in them is fictional.
+// Package rttest holds httptest fakes of GitLab and Jira for the release-train tests.
 package rttest
 
 import (
@@ -119,7 +118,7 @@ func (h *Host) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// NewGitLab returns a fake GitLab REST v4 API rooted at its URL; route keys are paths such as "/projects/1001/milestones".
+// NewGitLab returns a fake GitLab REST v4 API whose route keys are paths.
 func NewGitLab(t *testing.T) *Host {
 	return newHost(t, func(r *http.Request) string { return r.URL.Path })
 }
@@ -140,7 +139,7 @@ type MR struct {
 	WebURL      string
 }
 
-// SetMRs makes project's MR list page through mrs by updated_after (inclusive), updated_at ascending, as GitLab does.
+// SetMRs serves project's MR list as GitLab pages it: updated_after inclusive, updated_at ascending.
 func (h *Host) SetMRs(project int, mrs []MR) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

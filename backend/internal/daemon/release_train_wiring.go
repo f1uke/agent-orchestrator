@@ -1,9 +1,5 @@
 package daemon
 
-// This file wires the release-train monitor: it polls GitLab and Jira,
-// read-only, for the trains <dataDir>/release-train.json describes. Without
-// that file the loop runs and does nothing.
-
 import (
 	"context"
 	"log/slog"
@@ -19,7 +15,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
-// releaseTrains is the controller-facing service: the poller's report and the template write.
 type releaseTrains struct {
 	*rtsvc.Poller
 	configPath string

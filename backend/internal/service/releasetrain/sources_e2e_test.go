@@ -132,7 +132,6 @@ func paths(reqs []string) []string {
 	return out
 }
 
-// settle polls every Tick until a pass plans no new resource and every one is complete, and returns the passes it took.
 func (w *world) settle() int {
 	w.t.Helper()
 	for passes := 1; passes <= 10; passes++ {

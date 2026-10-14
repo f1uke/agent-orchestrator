@@ -216,8 +216,7 @@ func (e *RateLimitError) Error() string {
 // Is matches ErrRateLimited.
 func (e *RateLimitError) Is(target error) bool { return target == ErrRateLimited }
 
-// ErrNotFound is a 404: the project, MR, pipeline or ref does not exist or the
-// token cannot see it.
+// ErrNotFound is a 404, which GitLab also returns for a resource the token cannot see.
 var ErrNotFound = errors.New("gitlab scm: not found")
 
 type notFoundError struct{ text string }

@@ -22,12 +22,10 @@ type Source interface {
 	Plan(view rt.PlanView) []rt.ResourceSpec
 	// Fetch reads one resource. An incremental resource returns one page per call.
 	Fetch(ctx context.Context, spec rt.ResourceSpec, view rt.PlanView, cursor []byte) (Batch, error)
-	// Credentials probes the credential chain for the host the config names. It prints nothing.
 	Credentials(ctx context.Context, view rt.PlanView) (bool, error)
 }
 
-// SettledBudget is how often a settled (aged-out) version's per-entity reads refetch,
-// so a late edit still shows.
+// SettledBudget is how often a settled version's per-entity reads refetch.
 const SettledBudget = 6 * time.Hour
 
 // IsDecodeError reports whether err is a response the source could not parse.
@@ -44,7 +42,7 @@ type Job struct {
 	Fetch func(ctx context.Context, cursor []byte) (Batch, error)
 }
 
-// FetchJob runs the job planned for spec, so Plan and Fetch share one table.
+// FetchJob runs the job planned for spec.
 func FetchJob(ctx context.Context, jobs []Job, spec rt.ResourceSpec, cursor []byte) (Batch, error) {
 	for _, j := range jobs {
 		if j.Spec.Kind == spec.Kind && j.Spec.Scope == spec.Scope {
@@ -142,8 +140,7 @@ func withRequestCounter(ctx context.Context, c *atomic.Int64) context.Context {
 // ErrNotARead is a request the monitor refused to send because it was not a GET.
 var ErrNotARead = errors.New("release trains: only GET requests may leave the monitor")
 
-// CountingTransport counts every request it sends against the pass's budget
-// and refuses any method but GET, so the monitor cannot write to a source.
+// CountingTransport counts each request against the pass's budget and refuses any method but GET.
 type CountingTransport struct{ Base http.RoundTripper }
 
 // RoundTrip implements http.RoundTripper.

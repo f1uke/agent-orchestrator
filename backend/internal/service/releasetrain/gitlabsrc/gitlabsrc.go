@@ -1,6 +1,4 @@
-// Package gitlabsrc is the release-train monitor's GitLab source: it plans and
-// fetches milestones, MRs, MR details, pipeline jobs, tags, compares and the
-// token's own user.
+// Package gitlabsrc is the release-train monitor's GitLab source.
 package gitlabsrc
 
 import (
@@ -16,10 +14,9 @@ import (
 	svc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
 )
 
-// Options wires a Source. Tokens builds the credential chain for a host.
+// Options configures a Source.
 type Options struct {
-	Tokens func(host string) scmgitlab.TokenSource
-	// APIBase defaults to https://<host>/api/v4.
+	Tokens    func(host string) scmgitlab.TokenSource
 	APIBase   func(host string) string
 	Transport http.RoundTripper
 }
@@ -35,7 +32,7 @@ type Source struct {
 
 var _ svc.Source = (*Source)(nil)
 
-// New returns a GitLab Source whose requests all go through svc.CountingTransport.
+// New returns a GitLab Source.
 func New(opts Options) *Source {
 	if opts.APIBase == nil {
 		opts.APIBase = func(host string) string { return "https://" + host + "/api/v4" }
@@ -62,7 +59,7 @@ func (s *Source) client(host string) (*scmgitlab.Client, scmgitlab.TokenSource) 
 	return c, tokens
 }
 
-// Credentials implements svc.Source: a token for the configured host, without a request.
+// Credentials implements svc.Source.
 func (s *Source) Credentials(ctx context.Context, view rt.PlanView) (bool, error) {
 	_, tokens := s.client(view.Config.GitLabHost)
 	if _, err := tokens.Token(ctx); err != nil {
@@ -220,8 +217,7 @@ func (r reader) user(ctx context.Context, _ []byte) (svc.Batch, error) {
 	return svc.SnapshotOf(rt.KindGitLabUser, []rt.GitLabUserFact{{Username: u.Username, Name: u.Name}})
 }
 
-// mrCursor is the keyset position: updated_after (inclusive, whole seconds as
-// GitLab's filter takes them) and the page within that second's run.
+// GitLab's updated_after filter is inclusive, so MRs sharing the last second need Page.
 type mrCursor struct {
 	UpdatedAfter time.Time `json:"updatedAfter"`
 	Page         int       `json:"page"`

@@ -11,8 +11,7 @@ import (
 	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
 )
 
-// Report is what `ao train sources` shows: the config's state, every resource's
-// freshness and the last pass's requests per host.
+// Report is what `ao train sources` shows.
 type Report struct {
 	Config    ConfigReport
 	Resources []ResourceReport
@@ -26,8 +25,7 @@ type ConfigReport struct {
 	Path    string
 }
 
-// ResourceReport is one resource's freshness. Backfilling is an incremental
-// resource that has a cursor but has not caught up once.
+// ResourceReport is one resource's freshness.
 type ResourceReport struct {
 	Kind          rt.KindName
 	Scope         rt.Scope
@@ -41,7 +39,7 @@ type ResourceReport struct {
 	Backfilling   bool
 }
 
-// Report reads the current state from the config file and the store.
+// Report reads the config file's state and the store.
 func (p *Poller) Report(ctx context.Context) (Report, error) {
 	cfg := p.d.Config.Load()
 	r := Report{Config: ConfigReport{State: cfg.State, Message: cfg.Message, Path: cfg.Path}, LastPass: p.LastPass()}
@@ -64,7 +62,7 @@ func (p *Poller) Report(ctx context.Context) (Report, error) {
 // ErrConfigExists is a template write refused because the config file is already there.
 var ErrConfigExists = errors.New("release trains: config file already exists")
 
-// WriteExampleConfig writes the fictional template to path, and never over an existing file.
+// WriteExampleConfig writes the template config to path, never over an existing file.
 func WriteExampleConfig(path string) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // path is the daemon's own data-dir file
 	if errors.Is(err, fs.ErrExist) {

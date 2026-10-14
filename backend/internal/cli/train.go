@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// trainSourcesResponse mirrors controllers.ReleaseTrainSourcesResponse.
 type trainSourcesResponse struct {
 	Config struct {
 		State   string `json:"state"`
@@ -39,7 +38,6 @@ type trainResource struct {
 	Backfilling   bool       `json:"backfilling"`
 }
 
-// trainConfigInitResponse mirrors controllers.ReleaseTrainConfigInitResponse.
 type trainConfigInitResponse struct {
 	Path string `json:"path"`
 }

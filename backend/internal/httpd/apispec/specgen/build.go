@@ -537,8 +537,6 @@ func operations() []operation {
 	return ops
 }
 
-// releaseTrainOperations declares the release-train monitor's operations. Must
-// stay 1:1 with the routes ReleaseTrainsController.Register mounts.
 func releaseTrainOperations() []operation {
 	return []operation{
 		{
