@@ -45,6 +45,19 @@ func (s *Store) LoadReleaseSnapshot(ctx context.Context) (rt.Snapshot, []rt.Reso
 	return snap, resources, nil
 }
 
+// LoadReleaseResources reads every release-train resource row without its items.
+func (s *Store) LoadReleaseResources(ctx context.Context) ([]rt.Resource, error) {
+	rows, err := s.qr.ListReleaseResources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list release resources: %w", err)
+	}
+	out := make([]rt.Resource, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, releaseResource(r))
+	}
+	return out, nil
+}
+
 func releaseResource(r gen.ReleaseResource) rt.Resource {
 	res := rt.Resource{
 		ResourceStatus: rt.ResourceStatus{

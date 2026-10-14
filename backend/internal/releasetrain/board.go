@@ -73,12 +73,12 @@ type Train struct {
 }
 
 // SourceFreshness is one system's resources at a glance: the oldest complete
-// read and every resource that is not fresh.
+// read and every resource that is stale, never complete, or failing.
 type SourceFreshness struct {
 	System    string           `json:"system"`
 	Resources int              `json:"resources"`
 	AsOf      *time.Time       `json:"asOf,omitempty"`
-	Missing   []ResourceStatus `json:"missing"`
+	Issues    []ResourceStatus `json:"issues"`
 }
 
 // AppVersion is one app's version on one train.
@@ -181,7 +181,7 @@ func (r *readSet) sources() []SourceFreshness {
 		name, _, _ := strings.Cut(string(k), ".")
 		s := bySystem[name]
 		if s == nil {
-			s = &SourceFreshness{System: name, Missing: []ResourceStatus{}}
+			s = &SourceFreshness{System: name, Issues: []ResourceStatus{}}
 			bySystem[name] = s
 		}
 		return s
@@ -192,8 +192,8 @@ func (r *readSet) sources() []SourceFreshness {
 	for _, st := range r.snap.all() {
 		s := system(st.Kind)
 		s.Resources++
-		if st.CompleteAt == nil || r.now.Sub(*st.CompleteAt) > st.budget() {
-			s.Missing = append(s.Missing, st)
+		if st.ErrorClass != "" || st.CompleteAt == nil || r.now.Sub(*st.CompleteAt) > st.budget() {
+			s.Issues = append(s.Issues, st)
 		}
 		if st.CompleteAt != nil && (s.AsOf == nil || st.CompleteAt.Before(*s.AsOf)) {
 			at := *st.CompleteAt

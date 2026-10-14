@@ -19,8 +19,8 @@ type wireBoard struct {
 		} `json:"versions"`
 	} `json:"trains"`
 	Sources []struct {
-		System  string           `json:"system"`
-		Missing []map[string]any `json:"missing"`
+		System string           `json:"system"`
+		Issues []map[string]any `json:"issues"`
 	} `json:"sources"`
 	Alerts struct {
 		Hits []struct {
@@ -123,25 +123,29 @@ func TestBoardJSONNamesTrainsByKeyWithALabelAndAPhase(t *testing.T) {
 	}
 }
 
-func TestBoardSourcesSaySystemByStaleSystem(t *testing.T) {
+func TestBoardSourcesListStaleAndFailingResourcesPerSystem(t *testing.T) {
 	f := newFixture(t, today)
 	healthy(f)
 	f.stale(KindJiraVersions.Name)
+	f.statuses[KindTags.Name] = func(st *ResourceStatus) { st.ErrorClass = ErrRateLimited }
 	w := wire(t, f.reconcile())
 
-	missing := map[string][]string{}
+	issues := map[string][]string{}
 	var systems []string
 	for _, s := range w.Sources {
 		systems = append(systems, s.System)
-		for _, m := range s.Missing {
-			missing[s.System] = append(missing[s.System], m["kind"].(string))
+		for _, m := range s.Issues {
+			issues[s.System] = append(issues[s.System], m["kind"].(string)+" "+m["errorClass"].(string))
 		}
 	}
 	sort.Strings(systems)
 	if len(systems) != 2 || systems[0] != "gitlab" || systems[1] != "jira" {
 		t.Fatalf("sources = %v, want gitlab and jira", systems)
 	}
-	if len(missing["gitlab"]) != 0 || len(missing["jira"]) != 1 || missing["jira"][0] != "jira.versions" {
-		t.Fatalf("missing = %v, want only jira.versions under jira", missing)
+	if len(issues["jira"]) != 1 || issues["jira"][0] != "jira.versions unavailable" {
+		t.Fatalf("jira issues = %v, want the stale jira.versions", issues["jira"])
+	}
+	if len(issues["gitlab"]) != 4 || issues["gitlab"][0] != "gitlab.tags rate_limited" {
+		t.Fatalf("gitlab issues = %v, want the four apps' rate-limited tags, still fresh", issues["gitlab"])
 	}
 }
