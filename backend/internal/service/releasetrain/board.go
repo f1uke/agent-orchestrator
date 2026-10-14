@@ -118,7 +118,7 @@ func (s *BoardService) build(ctx context.Context, cfg ConfigStatus, now time.Tim
 func rowsFingerprint(rows []rt.Resource) string {
 	h := sha256.New()
 	for _, r := range rows {
-		fmt.Fprintf(h, "%s\x00%s\x00%d\n", r.Kind, r.Scope, r.Generation)
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00%d\n", r.Kind, r.Scope, r.Generation)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

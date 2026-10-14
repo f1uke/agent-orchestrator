@@ -108,7 +108,7 @@ func (c *ReleaseTrainsController) board(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
+		_, _ = w.Write(body) //nolint:gosec // G705: our own json.Marshal output, served as application/json
 	}
 }
 

@@ -147,8 +147,7 @@ type Mismatch struct {
 func boardApps(cfg Config) []BoardApp {
 	out := make([]BoardApp, 0, len(cfg.Apps))
 	for _, a := range cfg.Apps {
-		fam, _ := cfg.familyOf(a.ID)
-		out = append(out, BoardApp{ID: a.ID, Name: a.Name, Family: fam.ID, Platform: a.Platform})
+		out = append(out, BoardApp{ID: a.ID, Name: a.Name, Family: cfg.familyOf(a.ID).ID, Platform: a.Platform})
 	}
 	return out
 }

@@ -540,8 +540,8 @@ func writeFilteredBoardJSON(w io.Writer, raw json.RawMessage, f trainFilter) err
 				continue
 			}
 			versions, _ := tm["versions"].([]any)
-			tm["versions"] = keepByApp(versions, f)
-			if len(tm["versions"].([]any)) > 0 {
+			if versions = keepByApp(versions, f); len(versions) > 0 {
+				tm["versions"] = versions
 				kept = append(kept, tm)
 			}
 		}

@@ -29,7 +29,7 @@ func Reconcile(in Inputs, env Env) Board {
 func joinTrains(b *Board, cfg Config, snap Snapshot) {
 	trains := map[TrainID]*Train{}
 	for _, app := range cfg.Apps {
-		fam, _ := cfg.familyOf(app.ID)
+		fam := cfg.familyOf(app.ID)
 		milestones := Items(snap, KindMilestones, ProjectScope(app.GitLabProject))
 		sort.Slice(milestones, func(i, j int) bool { return milestones[i].ID < milestones[j].ID })
 		for _, ms := range milestones {
