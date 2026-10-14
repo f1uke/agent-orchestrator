@@ -27,6 +27,8 @@ func TestReleaseTrainUnionTwinsMatchWhatTheCoreWrites(t *testing.T) {
 		{rt.LLBPlanned{Train: rt.TrainID{Number: 20, Extra: 1, Year: 2026}}, rtLLBPlanned{}},
 		{rt.LLBNoTarget{}, rtLLBNoTarget{}},
 		{rt.LLBDropped{}, rtLLBDropped{}},
+		{rt.IdentityKnown{JiraAccountID: "acc-dee", GitLabUsername: "dee", DisplayName: "Dee"}, rtIdentityKnown{}},
+		{rt.IdentityUnknown{Reason: "the GitLab user (gitlab.user) has not been read"}, rtIdentityUnknown{}},
 		{rt.CodeOpen{MRs: []int{8}}, rtCodeOpen{}},
 		{rt.CodeElsewhere{Branch: "feature/demo", On: rt.Day{Y: 2026, M: 10, D: 1}}, rtCodeElsewhere{}},
 		{rt.CodeNone{}, rtCodeNone{}},

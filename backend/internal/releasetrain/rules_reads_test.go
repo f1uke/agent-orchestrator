@@ -26,6 +26,10 @@ func everyRuleFires(t *testing.T) *fixture {
 		{Name: "semgrep-sast", Status: "skipped"},
 	}
 	live.issue("DEMO-1", "In Progress", "indeterminate")
+	live.issue("DEMO-3", "In Progress", "indeterminate")
+	f.mr("di", "DEMO-90 other", "feat/DEMO-90", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-01")
+	f.mr("di", "DEMO-3 wallet", "feat/DEMO-3", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+	f.mr("di", "wallet", "feature/demo-wallet", "develop", MROpened, "2026-10-12", "")
 	live.forceUpdate("REQ-1", "To Do", "new", "")
 	f.page("demo", "21", "2026-09-20", "2026-10-08", liveDue)
 

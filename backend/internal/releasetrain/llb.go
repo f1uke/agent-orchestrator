@@ -82,6 +82,7 @@ type LLBGroup struct {
 	Plan     *LlbPlan          `json:"plan,omitempty"`
 	Target   LLBTarget         `json:"target"`
 	Branches []LongLivedBranch `json:"branches"`
+	Mine     []MineReason      `json:"mine,omitempty"`
 }
 
 var (
@@ -90,11 +91,8 @@ var (
 	planUnsafe = regexp.MustCompile(`[^a-z0-9._-]+`)
 )
 
-// detectLLBs finds every long-lived branch in gitlab.mrs: the non-closed
-// target of an MR that is no trunk, release, hotfix or sprint branch. A
-// branch named after a card is that card's own branch until a second MR
-// goes in or one comes out. It also returns each app's cutover, the day of
-// its first merge into a sprint branch.
+// A branch named after a card is that card's own branch until a second MR
+// goes in or one comes out.
 func detectLLBs(cfg Config, snap Snapshot) ([]LongLivedBranch, map[AppID]Day) {
 	jira := map[string]IssueFact{}
 	for _, is := range AllItems(snap, KindLLBCards) {
@@ -215,9 +213,8 @@ func llbState(b LongLivedBranch, ins []MRFact, cutover Day, hasCutover bool) LLB
 	return LLBLandedWrong
 }
 
-// groupLLBs pairs twins across apps by a shared card key or a shared name
-// stem; a plan takes the branches it names (or, naming none, the derived
-// group with its id) and names the group.
+// A plan naming no branches takes the derived group with its id, so
+// `ao train plan set <id> --target dropped` needs no --branch.
 func groupLLBs(branches []LongLivedBranch, plans []LlbPlan, trains []Train, cfg Config) []LLBGroup {
 	claimed := map[PlanBranch]bool{}
 	used := map[string]bool{}
@@ -398,9 +395,8 @@ func llbTarget(g LLBGroup, trains []Train) LLBTarget {
 	return LLBNoTarget{}
 }
 
-// trainForLanding is the train a landing MR's code rides: sprint N's branch
-// ships in train N+1; any other target ships in the first train of the app
-// that freezes on or after the landing.
+// Sprint N's branch ships in train N+1; any other target ships in the
+// app's first train that freezes on or after the landing.
 func trainForLanding(b LongLivedBranch, trains []Train) *TrainID {
 	l := b.Landing
 	if l == nil {
@@ -445,7 +441,6 @@ func sprintTrain(branch string) (TrainID, bool) {
 	return TrainID{Number: num + 1, Year: y}, true
 }
 
-// llbsByApp indexes the long-lived branches by app and branch name.
 func llbsByApp(groups []LLBGroup) map[AppID]map[string]*LongLivedBranch {
 	out := map[AppID]map[string]*LongLivedBranch{}
 	for gi := range groups {

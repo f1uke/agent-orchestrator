@@ -46,13 +46,14 @@ func (CodeNone) codeState()      {}
 
 // CardUnit is one card on one app's version.
 type CardUnit struct {
-	Key            string    `json:"key"`
-	App            AppID     `json:"app"`
-	Status         string    `json:"status"`
-	StatusCategory string    `json:"statusCategory"`
-	Assignee       *Person   `json:"assignee,omitempty"`
-	Why            []CardWhy `json:"why"`
-	Code           CodeState `json:"code"`
+	Key            string       `json:"key"`
+	App            AppID        `json:"app"`
+	Status         string       `json:"status"`
+	StatusCategory string       `json:"statusCategory"`
+	Assignee       *Person      `json:"assignee,omitempty"`
+	Why            []CardWhy    `json:"why"`
+	Code           CodeState    `json:"code"`
+	Mine           []MineReason `json:"mine,omitempty"`
 }
 
 // CardWhy is why a card is on a version.
@@ -240,9 +241,7 @@ func codeOf(all []MRFact, cut *Day, source int, hasSource bool, llbs map[string]
 	return CodeNone{}
 }
 
-// parkedOrCarried is a card whose last merge went into a long-lived branch:
-// merged via it once its landing ships in this train with the card already
-// in, parked until it lands (or when the card came in after the landing).
+// A card merged into the branch after its landing missed that landing, so it stays parked.
 func parkedOrCarried(b *LongLivedBranch, mrs []MRFact, shipsIn func(string, Day) bool, last MRFact) CodeState {
 	var in []int
 	for _, mr := range mrs {

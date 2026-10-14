@@ -34,6 +34,24 @@ func (CodeParked) Variant() string { return "parked" }
 // MarshalJSON writes the code state with "kind": "parked".
 func (c CodeParked) MarshalJSON() ([]byte, error) { type plain CodeParked; return tagged(c, plain(c)) }
 
+// Variant is "known".
+func (IdentityKnown) Variant() string { return "known" }
+
+// Variant is "unknown".
+func (IdentityUnknown) Variant() string { return "unknown" }
+
+// MarshalJSON writes the identity with "kind": "known".
+func (i IdentityKnown) MarshalJSON() ([]byte, error) {
+	type plain IdentityKnown
+	return tagged(i, plain(i))
+}
+
+// MarshalJSON writes the identity with "kind": "unknown".
+func (i IdentityUnknown) MarshalJSON() ([]byte, error) {
+	type plain IdentityUnknown
+	return tagged(i, plain(i))
+}
+
 // Variant is "landed".
 func (LLBLandedIn) Variant() string { return "landed" }
 

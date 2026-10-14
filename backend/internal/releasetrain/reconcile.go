@@ -27,6 +27,8 @@ func Reconcile(in Inputs, env Env) Board {
 			v.Stages = stages(t, v, b.Today, rs)
 		}
 	}
+	b.Identity = identityOf(in.Snap)
+	mine(&b, meOf(b.Identity, in.Snap), mrs, in.Snap, in.Config)
 	b.Alerts = alerts(&b, in, rs)
 	b.Catalogue = catalogue(in.Human.RuleSettings)
 	return b

@@ -38,6 +38,7 @@ func ruleTable() []rule {
 		ruleD1, ruleD2, ruleD3,
 		ruleE1, ruleE2, ruleE4, ruleE5,
 		ruleF1, ruleF2,
+		ruleL1, ruleL3,
 	}
 }
 
@@ -135,6 +136,7 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 			if hits[i].Severity == 0 {
 				hits[i].Severity = r.Severity
 			}
+			hits[i].Mine = mineOfSubject(b, hits[i].Subject)
 			matched[hits[i].ID] = true
 		}
 		for _, cell := range cells(b, in.Config, r, hits) {

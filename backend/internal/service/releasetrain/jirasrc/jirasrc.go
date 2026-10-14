@@ -108,6 +108,11 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 			return r.issues(ctx, rt.KindLLBCards, "key in ("+strings.Join(keys, ", ")+") ORDER BY key")
 		}})
 	}
+	if me, keys := view.MyAccountID, view.WatchedCardKeys; me != "" && len(keys) > 0 {
+		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindMySubtasks, rt.MySubtasksScope, ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) {
+			return r.issues(ctx, rt.KindMySubtasks, "parent in ("+strings.Join(keys, ", ")+") AND assignee = "+jqlString(me)+" ORDER BY key")
+		}})
+	}
 	return append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindJiraMyself, rt.MyselfScope, ""), Fetch: r.myself})
 }
 
@@ -176,7 +181,7 @@ func (r reader) issues(ctx context.Context, kind rt.Kind[rt.IssueFact], jql stri
 	for _, row := range rows {
 		f := rt.IssueFact{
 			Key: row.Key, Summary: row.Summary, Status: row.Status, StatusCategory: row.StatusCategory, Subtask: row.Subtask,
-			ReleaseTicket: ticket != nil && !row.Subtask && ticket.MatchString(row.Summary), FixVersions: row.FixVersionIDs, URL: row.URL,
+			ReleaseTicket: ticket != nil && !row.Subtask && ticket.MatchString(row.Summary), FixVersions: row.FixVersionIDs, Parent: row.ParentKey, URL: row.URL,
 		}
 		if a := row.Assignee; a != nil {
 			f.Assignee = &rt.Person{AccountID: a.AccountID, Name: a.DisplayName}

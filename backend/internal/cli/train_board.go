@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -45,8 +44,9 @@ type trainBoard struct {
 		Freeze   string `json:"freeze"`
 		Publish  string `json:"publish"`
 		Versions []struct {
-			App       string `json:"app"`
-			Version   string `json:"version"`
+			App       string    `json:"app"`
+			Version   string    `json:"version"`
+			Mine      trainMine `json:"mine"`
 			ReleaseMR *struct {
 				MR struct {
 					IID    int    `json:"iid"`
@@ -69,7 +69,8 @@ type trainBoard struct {
 			} `json:"cards"`
 		} `json:"versions"`
 	} `json:"trains"`
-	Catalogue []trainRule `json:"catalogue"`
+	Identity  trainIdentity `json:"identity"`
+	Catalogue []trainRule   `json:"catalogue"`
 	Alerts    struct {
 		Hits       []trainHit `json:"hits"`
 		StaleHides []struct {
@@ -87,15 +88,26 @@ type trainBoard struct {
 	} `json:"alerts"`
 }
 
+type trainMine []struct {
+	Why string `json:"why"`
+}
+
+type trainIdentity struct {
+	Kind        string `json:"kind"`
+	DisplayName string `json:"displayName"`
+	Reason      string `json:"reason"`
+}
+
 type trainHit struct {
-	ID                 string `json:"id"`
-	Rule               string `json:"rule"`
-	Severity           string `json:"severity"`
-	Train              string `json:"train"`
-	App                string `json:"app"`
-	Text               string `json:"text"`
-	Bucket             string `json:"bucket"`
-	ChangedSinceHidden bool   `json:"changedSinceHidden,omitempty"`
+	Mine               trainMine `json:"mine"`
+	ID                 string    `json:"id"`
+	Rule               string    `json:"rule"`
+	Severity           string    `json:"severity"`
+	Train              string    `json:"train"`
+	App                string    `json:"app"`
+	Text               string    `json:"text"`
+	Bucket             string    `json:"bucket"`
+	ChangedSinceHidden bool      `json:"changedSinceHidden,omitempty"`
 }
 
 type trainRule struct {
@@ -120,6 +132,7 @@ func severityLabel(s string) string {
 type trainFilter struct {
 	train string
 	apps  []string
+	me    bool
 }
 
 func (f trainFilter) app(id string) bool { return len(f.apps) == 0 || slices.Contains(f.apps, id) }
@@ -129,17 +142,29 @@ func (f trainFilter) trainKey(key string) bool {
 }
 
 func (f trainFilter) hit(h trainHit) bool {
-	return f.app(h.App) && (f.train == "" || f.trainKey(h.Train))
+	return f.app(h.App) && (f.train == "" || f.trainKey(h.Train)) && f.mine(h.Mine)
 }
 
-var errTrainMe = usageError{errors.New("--me needs the identity facts (jira.myself, gitlab.user) on the Board, which arrive with sprint rows and identity; until then filter with --app")}
+func (f trainFilter) mine(m trainMine) bool { return !f.me || len(m) > 0 }
+
+func meUnavailable(w io.Writer, b *trainBoard, f trainFilter) (bool, error) {
+	if !f.me || b.Identity.Kind == "known" {
+		return false, nil
+	}
+	reason := b.Identity.Reason
+	if reason == "" {
+		reason = "the Board carries no identity"
+	}
+	_, err := fmt.Fprintf(w, "Only me is unavailable: %s\n", reason)
+	return true, err
+}
 
 func addTrainFilterFlags(cmd *cobra.Command, train *string, apps *[]string, me *bool) {
 	if train != nil {
 		cmd.Flags().StringVar(train, "train", "", "Only this train number, e.g. 22 or 20-1")
 	}
 	cmd.Flags().StringSliceVar(apps, "app", nil, "Only these app ids, e.g. di,da")
-	cmd.Flags().BoolVar(me, "me", false, "Only what concerns you (needs identity, not yet available)")
+	cmd.Flags().BoolVar(me, "me", false, "Only what concerns you: your cards, release MRs, approvals, hotfixes and long-lived branches")
 }
 
 func (c *commandContext) trainBoard(cmd *cobra.Command) (trainBoardBody, json.RawMessage, error) {
@@ -215,15 +240,12 @@ func (b *trainBoard) subject(h trainHit) string {
 
 func newTrainBoardCommand(ctx *commandContext, cmd *cobra.Command) {
 	var f trainFilter
-	var asJSON, gate, me bool
-	addTrainFilterFlags(cmd, &f.train, &f.apps, &me)
+	var asJSON, gate bool
+	addTrainFilterFlags(cmd, &f.train, &f.apps, &f.me)
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Print the daemon's JSON, filtered")
 	cmd.Flags().BoolVar(&gate, "gate", false, "Exit 1 when an active block hit exists")
 	cmd.Args = exactArgs(0)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		if me {
-			return errTrainMe
-		}
 		body, raw, err := ctx.trainBoard(cmd)
 		if err != nil {
 			return err
@@ -233,6 +255,9 @@ func newTrainBoardCommand(ctx *commandContext, cmd *cobra.Command) {
 			return writeTrainNoBoard(out, body)
 		}
 		if err := body.Board.checkApps(f.apps); err != nil {
+			return err
+		}
+		if stop, err := meUnavailable(out, body.Board, f); stop || err != nil {
 			return err
 		}
 		if asJSON {
@@ -270,9 +295,6 @@ func newTrainAlertsCommand(ctx *commandContext) *cobra.Command {
 		Short: "List the release-train alerts that need attention",
 		Args:  exactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if me {
-				return errTrainMe
-			}
 			body, _, err := ctx.trainBoard(cmd)
 			if err != nil {
 				return err
@@ -284,7 +306,10 @@ func newTrainAlertsCommand(ctx *commandContext) *cobra.Command {
 			if err := body.Board.checkApps(apps); err != nil {
 				return err
 			}
-			f := trainFilter{apps: apps}
+			f := trainFilter{apps: apps, me: me}
+			if stop, err := meUnavailable(out, body.Board, f); stop || err != nil {
+				return err
+			}
 			var hits []trainHit
 			for _, h := range sortedHits(body.Board.Alerts.Hits) {
 				if f.hit(h) && (h.Bucket == "badge" || (history && h.Bucket == "history") || (hidden && h.Bucket == "hidden")) {
@@ -330,6 +355,9 @@ func writeTrainBoard(w io.Writer, body trainBoardBody, f trainFilter, now time.T
 	b := body.Board
 	var s strings.Builder
 	fmt.Fprintf(&s, "Release trains · %s\n", longDay(b.Today))
+	if f.me {
+		fmt.Fprintf(&s, "Only me: %s\n", b.Identity.DisplayName)
+	}
 	if body.Config.State != "ok" {
 		fmt.Fprintf(&s, "Config %s, showing the last good one: %s\n", body.Config.State, body.Config.Message)
 	}
@@ -341,7 +369,7 @@ func writeTrainBoard(w io.Writer, body trainBoardBody, f trainFilter, now time.T
 		}
 		rows := 0
 		for _, v := range t.Versions {
-			if f.app(v.App) {
+			if f.app(v.App) && f.mine(v.Mine) {
 				rows++
 			}
 		}
@@ -351,7 +379,7 @@ func writeTrainBoard(w io.Writer, body trainBoardBody, f trainFilter, now time.T
 		_ = tw.Flush()
 		fmt.Fprintf(&s, "\n%s  freeze %s → publish %s  %s\n", t.Label, shortDay(t.Freeze), shortDay(t.Publish), t.Phase)
 		for _, v := range t.Versions {
-			if !f.app(v.App) {
+			if !f.app(v.App) || !f.mine(v.Mine) {
 				continue
 			}
 			key, status := nowStage(v.Stages)
@@ -569,7 +597,7 @@ func writeFilteredBoardJSON(w io.Writer, raw json.RawMessage, f trainFilter) err
 		return err
 	}
 	board, _ := body["board"].(map[string]any)
-	if board != nil && (f.train != "" || len(f.apps) > 0) {
+	if board != nil && (f.train != "" || len(f.apps) > 0 || f.me) {
 		trains, _ := board["trains"].([]any)
 		var kept []any
 		for _, t := range trains {
@@ -594,7 +622,7 @@ func writeFilteredBoardJSON(w io.Writer, raw json.RawMessage, f trainFilter) err
 				hm, _ := h.(map[string]any)
 				app, _ := hm["app"].(string)
 				train, _ := hm["train"].(string)
-				if f.hit(trainHit{App: app, Train: train}) {
+				if f.hit(trainHit{App: app, Train: train, Mine: mineOf(hm)}) {
 					keptHits = append(keptHits, hm)
 				}
 			}
@@ -607,11 +635,16 @@ func writeFilteredBoardJSON(w io.Writer, raw json.RawMessage, f trainFilter) err
 	return writeJSON(w, body)
 }
 
+func mineOf(m map[string]any) trainMine {
+	list, _ := m["mine"].([]any)
+	return make(trainMine, len(list))
+}
+
 func keepByApp(items []any, f trainFilter) []any {
 	out := []any{}
 	for _, it := range items {
 		m, _ := it.(map[string]any)
-		if app, _ := m["app"].(string); f.app(app) {
+		if app, _ := m["app"].(string); f.app(app) && f.mine(mineOf(m)) {
 			out = append(out, m)
 		}
 	}

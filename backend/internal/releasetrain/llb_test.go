@@ -11,7 +11,7 @@ func (f *fixture) mr(app AppID, title, source, target, state, created, merged st
 	iid := f.id()
 	mr := &MRFact{
 		Project: f.app(app).GitLabProject, IID: iid, Title: title, SourceBranch: source, TargetBranch: target,
-		State: state, Author: "Dee", AuthorUsername: "dee", CreatedOn: day(f.t, created),
+		State: state, Author: "Kai", AuthorUsername: "kai", CreatedOn: day(f.t, created),
 		URL: "https://gitlab.example.com/mr/" + strconv.Itoa(iid),
 	}
 	if merged != "" {

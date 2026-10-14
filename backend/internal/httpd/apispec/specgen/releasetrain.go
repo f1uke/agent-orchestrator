@@ -40,6 +40,18 @@ type (
 		MRs    []int  `json:"mrs"`
 	}
 
+	rtIdentity      struct{}
+	rtIdentityKnown struct {
+		Kind           string `json:"kind" const:"known"`
+		JiraAccountID  string `json:"jiraAccountId"`
+		GitLabUsername string `json:"gitlabUsername"`
+		DisplayName    string `json:"displayName"`
+	}
+	rtIdentityUnknown struct {
+		Kind   string `json:"kind" const:"unknown"`
+		Reason string `json:"reason"`
+	}
+
 	rtLLBTarget   struct{}
 	rtLLBLandedIn struct {
 		Kind  string     `json:"kind" const:"landed"`
@@ -77,6 +89,11 @@ func (rtOutcome) JSONSchemaOneOf() []interface{} {
 // JSONSchemaOneOf lists the code state variants.
 func (rtCodeState) JSONSchemaOneOf() []interface{} {
 	return []interface{}{rtCodeMerged{}, rtCodeOpen{}, rtCodeParked{}, rtCodeElsewhere{}, rtCodeNone{}}
+}
+
+// JSONSchemaOneOf lists the identity variants.
+func (rtIdentity) JSONSchemaOneOf() []interface{} {
+	return []interface{}{rtIdentityKnown{}, rtIdentityUnknown{}}
 }
 
 // JSONSchemaOneOf lists the long-lived branch target variants.
@@ -138,6 +155,11 @@ func init() {
 		"SpecgenRtCodeNone":                          "ReleaseTrainCodeNone",
 		"SpecgenRtCodeParked":                        "ReleaseTrainCodeParked",
 		"SpecgenRtLLBTarget":                         "ReleaseTrainLLBTarget",
+		"SpecgenRtIdentity":                          "ReleaseTrainIdentity",
+		"SpecgenRtIdentityKnown":                     "ReleaseTrainIdentityKnown",
+		"SpecgenRtIdentityUnknown":                   "ReleaseTrainIdentityUnknown",
+		"ReleasetrainMineReason":                     "ReleaseTrainMineReason",
+		"ReleasetrainMineWhy":                        "ReleaseTrainMineWhy",
 		"SpecgenRtLLBLandedIn":                       "ReleaseTrainLLBLandedIn",
 		"SpecgenRtLLBPlanned":                        "ReleaseTrainLLBPlanned",
 		"SpecgenRtLLBNoTarget":                       "ReleaseTrainLLBNoTarget",
@@ -176,6 +198,7 @@ func mapReleaseTrainTypes(r *openapi31.Reflector) {
 	js.AddTypeMapping((*rt.Outcome)(nil), rtOutcome{})
 	js.AddTypeMapping((*rt.CodeState)(nil), rtCodeState{})
 	js.AddTypeMapping((*rt.LLBTarget)(nil), rtLLBTarget{})
+	js.AddTypeMapping((*rt.IdentityState)(nil), rtIdentity{})
 	day := jsonschema.Schema{}
 	day.WithType(jsonschema.String.Type()).WithFormat("date")
 	js.AddTypeMapping(rt.Day{}, day)
