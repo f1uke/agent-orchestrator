@@ -96,124 +96,162 @@ func (c *Client) SearchIssues(ctx context.Context, jql string, limit int) ([]Iss
 	}
 	// Enhanced endpoint (nextPageToken paging) first; fall back to the classic one
 	// (startAt paging) only when it is absent (404/410).
-	issues, status, err := c.searchAll(ctx, cfg, "/rest/api/3/search/jql", jql, limit, true)
+	issues, status, err := c.searchIssueSummaries(ctx, cfg, "/rest/api/3/search/jql", jql, limit, true)
 	if err == nil {
 		return issues, nil
 	}
 	if status == http.StatusNotFound || status == http.StatusGone {
-		issues, _, err = c.searchAll(ctx, cfg, "/rest/api/3/search", jql, limit, false)
+		issues, _, err = c.searchIssueSummaries(ctx, cfg, "/rest/api/3/search", jql, limit, false)
 		return issues, err
 	}
 	return nil, err
 }
 
-// searchAll pages one endpoint until it has `limit` rows or the endpoint is
-// exhausted. enhanced selects token paging (nextPageToken) over classic offset
-// paging (startAt). It returns the FIRST page's HTTP status so SearchIssues can
-// decide whether to fall back to the classic endpoint. A failure mid-pagination
-// (after at least one page succeeded) returns the rows already gathered rather
-// than erroring, so a transient later-page hiccup degrades to a partial list.
-func (c *Client) searchAll(ctx context.Context, cfg atlassian.Config, path, jql string, limit int, enhanced bool) ([]IssueSummary, int, error) {
-	var out []IssueSummary
+// searchIssueSummaries is SearchIssues' best-effort policy: a later-page failure
+// keeps the rows read, with no error. It returns the first page's status for the fallback.
+func (c *Client) searchIssueSummaries(ctx context.Context, cfg atlassian.Config, path, jql string, limit int, enhanced bool) ([]IssueSummary, int, error) {
+	spec := searchSpec{
+		path: path, jql: jql, fields: searchFields, limit: limit, maxPages: limit, enhanced: enhanced,
+		classify:  searchStatusError,
+		transport: func(err error) error { return fmt.Errorf("%w: search: %w", ErrUnavailable, err) },
+	}
+	raw, res := c.searchAll(ctx, cfg, spec)
+	if res.err != nil && len(raw) == 0 {
+		return nil, res.firstStatus, res.err
+	}
+	out := make([]IssueSummary, 0, len(raw))
+	for _, it := range raw {
+		out = append(out, c.issueSummary(cfg, it))
+	}
+	return out, res.firstStatus, nil
+}
+
+// searchSpec is one paged search: which endpoint, what to ask for, where to
+// stop, and how to classify a failed page or a failed round trip.
+type searchSpec struct {
+	path      string
+	jql       string
+	fields    string
+	limit     int
+	maxPages  int
+	enhanced  bool
+	classify  func(*http.Response) error
+	transport func(error) error
+}
+
+// searchResult says how a searchAll walk ended. complete means the endpoint
+// signalled its last page; err is the page failure that stopped it, if any.
+type searchResult struct {
+	complete    bool
+	firstStatus int
+	err         error
+}
+
+type rawSearchIssue struct {
+	Key    string                     `json:"key"`
+	Fields map[string]json.RawMessage `json:"fields"`
+}
+
+// searchAll pages one endpoint (token or startAt paging) until a limit, the last
+// page, or a failure; it keeps the rows read and leaves the policy to its caller.
+func (c *Client) searchAll(ctx context.Context, cfg atlassian.Config, spec searchSpec) ([]rawSearchIssue, searchResult) {
+	var out []rawSearchIssue
+	var res searchResult
 	var pageToken string
 	startAt := 0
-	firstStatus := 0
-	for len(out) < limit {
-		pageLimit := limit - len(out)
+	for pages := 0; len(out) < spec.limit && pages < spec.maxPages; pages++ {
+		pageLimit := spec.limit - len(out)
 		if pageLimit > searchPageSize {
 			pageLimit = searchPageSize
 		}
-		page, next, status, err := c.searchPage(ctx, cfg, path, jql, pageLimit, enhanced, pageToken, startAt)
-		if firstStatus == 0 {
-			firstStatus = status
+		page, next, status, err := c.searchPage(ctx, cfg, spec, pageLimit, pageToken, startAt)
+		if res.firstStatus == 0 {
+			res.firstStatus = status
 		}
 		if err != nil {
-			if len(out) > 0 {
-				return out, firstStatus, nil // partial: keep the pages we did get
-			}
-			return nil, firstStatus, err
+			res.err = err
+			return out, res
 		}
 		out = append(out, page...)
 		if len(page) == 0 {
-			break // defensive: no progress, avoid an infinite loop
+			res.complete = true // defensive: no progress, avoid an infinite loop
+			return out, res
 		}
-		if enhanced {
+		if spec.enhanced {
 			if next == "" {
-				break // no nextPageToken → last page
+				res.complete = true
+				return out, res
 			}
 			pageToken = next
 		} else {
 			startAt += len(page)
 			if len(page) < pageLimit {
-				break // short page → last page
+				res.complete = true
+				return out, res
 			}
 		}
 	}
-	return out, firstStatus, nil
+	return out, res
 }
 
 // searchPage hits one search endpoint for a single page. It returns the page's
-// issues, the nextPageToken (enhanced endpoint only; "" when there is no further
-// page), and the HTTP status so searchAll can page and fall back.
-func (c *Client) searchPage(ctx context.Context, cfg atlassian.Config, path, jql string, limit int, enhanced bool, pageToken string, startAt int) ([]IssueSummary, string, int, error) {
+// raw issues, the nextPageToken (enhanced endpoint only; "" when there is no
+// further page), and the HTTP status so searchAll can page and fall back.
+func (c *Client) searchPage(ctx context.Context, cfg atlassian.Config, spec searchSpec, limit int, pageToken string, startAt int) ([]rawSearchIssue, string, int, error) {
 	q := url.Values{}
-	q.Set("jql", jql)
-	q.Set("fields", searchFields)
+	q.Set("jql", spec.jql)
+	q.Set("fields", spec.fields)
 	q.Set("maxResults", strconv.Itoa(limit))
-	if enhanced {
+	if spec.enhanced {
 		if pageToken != "" {
 			q.Set("nextPageToken", pageToken)
 		}
 	} else {
 		q.Set("startAt", strconv.Itoa(startAt))
 	}
-	req, err := atlassian.NewRequest(ctx, cfg, http.MethodGet, cfg.BaseURL+path+"?"+q.Encode(), nil)
+	req, err := atlassian.NewRequest(ctx, cfg, http.MethodGet, cfg.BaseURL+spec.path+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, "", 0, err
 	}
 	resp, err := c.httpDo(req)
 	if err != nil {
-		return nil, "", 0, fmt.Errorf("%w: search: %w", ErrUnavailable, err)
+		return nil, "", 0, spec.transport(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if err := searchStatusError(resp); err != nil {
+	if err := spec.classify(resp); err != nil {
 		return nil, "", resp.StatusCode, err
 	}
-	// Decode fields as a raw map (like the display path) so the sprint custom-field
-	// — whose id varies per instance — can be located by detectSprint alongside the
-	// known summary/type/status/assignee fields.
 	var payload struct {
-		Issues []struct {
-			Key    string                     `json:"key"`
-			Fields map[string]json.RawMessage `json:"fields"`
-		} `json:"issues"`
-		NextPageToken string `json:"nextPageToken"`
+		Issues        []rawSearchIssue `json:"issues"`
+		NextPageToken string           `json:"nextPageToken"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, "", resp.StatusCode, fmt.Errorf("%w: decode search: %w", ErrUnavailable, err)
 	}
-	out := make([]IssueSummary, 0, len(payload.Issues))
-	for _, it := range payload.Issues {
-		f := it.Fields
-		assignee := decodeNamed(f["assignee"])
-		sum := IssueSummary{
-			Key:               it.Key,
-			Type:              decodeNamed(f["issuetype"]).Name,
-			Title:             decodeString(f["summary"]),
-			Assignee:          assignee.DisplayName,
-			AssigneeAccountId: assignee.AccountId,
-			Parent:            decodeParent(f["parent"]),
-			Sprint:            c.detectSprint(f),
-			URL:               cfg.BaseURL + "/browse/" + it.Key,
-		}
-		if st := decodeStatus(f["status"]); st != nil {
-			sum.Status = st.Name
-			sum.StatusCategory = st.StatusCategory.Key
-			sum.StatusColor = st.StatusCategory.ColorName
-		}
-		out = append(out, sum)
+	return payload.Issues, payload.NextPageToken, resp.StatusCode, nil
+}
+
+// issueSummary maps one raw row. Fields stay a raw map so detectSprint can find
+// the sprint custom-field, whose id varies per instance.
+func (c *Client) issueSummary(cfg atlassian.Config, it rawSearchIssue) IssueSummary {
+	f := it.Fields
+	assignee := decodeNamed(f["assignee"])
+	sum := IssueSummary{
+		Key:               it.Key,
+		Type:              decodeNamed(f["issuetype"]).Name,
+		Title:             decodeString(f["summary"]),
+		Assignee:          assignee.DisplayName,
+		AssigneeAccountId: assignee.AccountId,
+		Parent:            decodeParent(f["parent"]),
+		Sprint:            c.detectSprint(f),
+		URL:               cfg.BaseURL + "/browse/" + it.Key,
 	}
-	return out, payload.NextPageToken, resp.StatusCode, nil
+	if st := decodeStatus(f["status"]); st != nil {
+		sum.Status = st.Name
+		sum.StatusCategory = st.StatusCategory.Key
+		sum.StatusColor = st.StatusCategory.ColorName
+	}
+	return sum
 }
 
 // ListProjects returns the user's Jira projects, optionally filtered by a query

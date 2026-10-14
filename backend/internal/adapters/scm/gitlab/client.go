@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -196,12 +197,52 @@ func (c *Client) restURL(path string, q url.Values) (string, error) {
 // needed here.
 var ErrAuthFailed = errors.New("gitlab scm: authentication failed")
 
+// ErrRateLimited is the class of a 429; *RateLimitError carries the wait.
+var ErrRateLimited = errors.New("gitlab scm: rate limited")
+
+// RateLimitError is a 429 from GitLab. RetryAfter is zero when the server
+// named no usable wait.
+type RateLimitError struct {
+	RetryAfter time.Duration
+	Message    string
+}
+
+// Error keeps the text a 429 had before it was typed, so existing callers
+// that surface err.Error() read the same message.
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("gitlab scm: %d %s", http.StatusTooManyRequests, e.Message)
+}
+
+// Is matches ErrRateLimited.
+func (e *RateLimitError) Is(target error) bool { return target == ErrRateLimited }
+
 func classifyError(resp *http.Response, body []byte) error {
 	msg := gitlabMessage(body)
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	switch resp.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden:
 		return fmt.Errorf("%w: %s", ErrAuthFailed, msg)
+	case http.StatusTooManyRequests:
+		return &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()), Message: msg}
 	}
 	return fmt.Errorf("gitlab scm: %d %s", resp.StatusCode, msg)
+}
+
+// parseRetryAfter reads Retry-After as delta seconds or an HTTP date.
+func parseRetryAfter(v string, now time.Time) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if sec, err := strconv.Atoi(v); err == nil {
+		if sec < 0 {
+			return 0
+		}
+		return time.Duration(sec) * time.Second
+	}
+	if at, err := http.ParseTime(v); err == nil && at.After(now) {
+		return at.Sub(now)
+	}
+	return 0
 }
 
 func gitlabMessage(body []byte) string {
