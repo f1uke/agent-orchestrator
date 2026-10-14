@@ -20,17 +20,18 @@ type MilestoneFact struct {
 
 // MRFact is one merge request from the project's MR list.
 type MRFact struct {
-	Project      int    `json:"project"`
-	IID          int    `json:"iid"`
-	Title        string `json:"title"`
-	SourceBranch string `json:"sourceBranch"`
-	TargetBranch string `json:"targetBranch"`
-	State        string `json:"state"`
-	Author       string `json:"author"`
-	CreatedOn    Day    `json:"createdOn"`
-	MergedOn     *Day   `json:"mergedOn,omitempty"`
-	MilestoneID  *int   `json:"milestoneId,omitempty"`
-	URL          string `json:"url"`
+	Project        int    `json:"project"`
+	IID            int    `json:"iid"`
+	Title          string `json:"title"`
+	SourceBranch   string `json:"sourceBranch"`
+	TargetBranch   string `json:"targetBranch"`
+	State          string `json:"state"`
+	Author         string `json:"author"`
+	AuthorUsername string `json:"authorUsername,omitempty"`
+	CreatedOn      Day    `json:"createdOn"`
+	MergedOn       *Day   `json:"mergedOn,omitempty"`
+	MilestoneID    *int   `json:"milestoneId,omitempty"`
+	URL            string `json:"url"`
 }
 
 // MR states as GitLab reports them.
