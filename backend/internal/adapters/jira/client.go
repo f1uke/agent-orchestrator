@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/jira/adf"
 )
 
@@ -33,10 +34,10 @@ var (
 	// conflates the two in its 404, so we cannot distinguish them).
 	ErrNotFound = errors.New("jira: issue not found")
 	// ErrAuthFailed is a rejected/absent credential.
-	ErrAuthFailed = errors.New("jira: authentication failed")
+	ErrAuthFailed = atlassian.ErrAuthFailed
 	// ErrUnavailable is a transport/tooling failure: Jira is unreachable, times
 	// out, or returns unparseable output.
-	ErrUnavailable = errors.New("jira: unavailable")
+	ErrUnavailable = atlassian.ErrUnavailable
 	// ErrBadKey is a syntactically invalid issue key.
 	ErrBadKey = errors.New("jira: malformed issue key")
 	// errBadTransition backs ErrBadTransition (surfaced in transitions.go): an
@@ -56,8 +57,8 @@ var (
 var keyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
 
 // Client reads Jira issues, lists/applies status transitions, and runs
-// cross-project search — all via the Jira Cloud REST v3 API over a shared auth
-// seam (see transitions.go). httpDo + config are seams so tests drive an httptest
+// cross-project search — all via the Jira Cloud REST v3 API over the shared
+// adapters/atlassian auth. httpDo + config are seams so tests drive an httptest
 // server with a static identity instead of a real network.
 type Client struct {
 	// sprintFieldID is an optional explicit sprint custom-field id. Empty means
@@ -70,7 +71,7 @@ type Client struct {
 	// budget than a JSON read.
 	// WithHTTPDoer sets both, so an injected test doer still sees every call.
 	transferDo HTTPDoer
-	config     ConfigSource
+	config     atlassian.ConfigSource
 }
 
 // Option configures a Client.
@@ -82,10 +83,10 @@ func WithSprintField(id string) Option {
 }
 
 // NewClient returns a Client backed by the Jira Cloud REST v3 API. Auth resolves
-// from env then jira-cli's config file (see defaultConfigSource); a missing token
-// surfaces as ErrAuthFailed at call time, never a panic.
+// through atlassian.DefaultConfigSource; a missing token surfaces as
+// ErrAuthFailed at call time, never a panic.
 func NewClient(opts ...Option) *Client {
-	c := &Client{httpDo: defaultHTTPClient.Do, transferDo: defaultTransferHTTPClient.Do, config: defaultConfigSource}
+	c := &Client{httpDo: defaultHTTPClient.Do, transferDo: defaultTransferHTTPClient.Do, config: atlassian.DefaultConfigSource}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -109,7 +110,7 @@ func (c *Client) Get(ctx context.Context, key string) (Issue, error) {
 	}
 	q := url.Values{}
 	q.Set("fields", issueFields)
-	req, err := newJiraRequest(ctx, cfg, http.MethodGet, cfg.baseURL+"/rest/api/3/issue/"+key+"?"+q.Encode(), nil)
+	req, err := atlassian.NewRequest(ctx, cfg, http.MethodGet, cfg.BaseURL+"/rest/api/3/issue/"+key+"?"+q.Encode(), nil)
 	if err != nil {
 		return Issue{}, err
 	}
