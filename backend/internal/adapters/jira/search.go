@@ -3,9 +3,8 @@ package jira
 // Cross-project issue search + the project list, via Jira Cloud REST v3. jira-cli
 // `issue list` is unusable here (it scopes to the configured scrum board's active
 // sprint and returns empty even with a project JQL), so search bypasses it and
-// goes straight to REST — reusing the same auth seam as the status transitions
-// (transitions.go): base URL + login from env/jira-cli config, API token from
-// AO_JIRA_TOKEN → JIRA_API_TOKEN. Read-only (GET only).
+// goes straight to REST over the shared adapters/atlassian auth. Read-only (GET
+// only).
 //
 // Endpoint choice: Jira Cloud's classic `/rest/api/3/search` is deprecated and
 // removed on current instances in favor of the enhanced `/rest/api/3/search/jql`.
@@ -20,6 +19,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
 )
 
 // ErrBadQuery is a rejected search — usually invalid JQL (e.g. a project key that
@@ -112,7 +113,7 @@ func (c *Client) SearchIssues(ctx context.Context, jql string, limit int) ([]Iss
 // decide whether to fall back to the classic endpoint. A failure mid-pagination
 // (after at least one page succeeded) returns the rows already gathered rather
 // than erroring, so a transient later-page hiccup degrades to a partial list.
-func (c *Client) searchAll(ctx context.Context, cfg restConfig, path, jql string, limit int, enhanced bool) ([]IssueSummary, int, error) {
+func (c *Client) searchAll(ctx context.Context, cfg atlassian.Config, path, jql string, limit int, enhanced bool) ([]IssueSummary, int, error) {
 	var out []IssueSummary
 	var pageToken string
 	startAt := 0
@@ -154,7 +155,7 @@ func (c *Client) searchAll(ctx context.Context, cfg restConfig, path, jql string
 // searchPage hits one search endpoint for a single page. It returns the page's
 // issues, the nextPageToken (enhanced endpoint only; "" when there is no further
 // page), and the HTTP status so searchAll can page and fall back.
-func (c *Client) searchPage(ctx context.Context, cfg restConfig, path, jql string, limit int, enhanced bool, pageToken string, startAt int) ([]IssueSummary, string, int, error) {
+func (c *Client) searchPage(ctx context.Context, cfg atlassian.Config, path, jql string, limit int, enhanced bool, pageToken string, startAt int) ([]IssueSummary, string, int, error) {
 	q := url.Values{}
 	q.Set("jql", jql)
 	q.Set("fields", searchFields)
@@ -166,7 +167,7 @@ func (c *Client) searchPage(ctx context.Context, cfg restConfig, path, jql strin
 	} else {
 		q.Set("startAt", strconv.Itoa(startAt))
 	}
-	req, err := newJiraRequest(ctx, cfg, http.MethodGet, cfg.baseURL+path+"?"+q.Encode(), nil)
+	req, err := atlassian.NewRequest(ctx, cfg, http.MethodGet, cfg.BaseURL+path+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -203,7 +204,7 @@ func (c *Client) searchPage(ctx context.Context, cfg restConfig, path, jql strin
 			AssigneeAccountId: assignee.AccountId,
 			Parent:            decodeParent(f["parent"]),
 			Sprint:            c.detectSprint(f),
-			URL:               cfg.baseURL + "/browse/" + it.Key,
+			URL:               cfg.BaseURL + "/browse/" + it.Key,
 		}
 		if st := decodeStatus(f["status"]); st != nil {
 			sum.Status = st.Name
@@ -229,7 +230,7 @@ func (c *Client) ListProjects(ctx context.Context, query string) ([]ProjectRef, 
 	}
 	q.Set("maxResults", "100")
 	q.Set("orderBy", "key")
-	req, err := newJiraRequest(ctx, cfg, http.MethodGet, cfg.baseURL+"/rest/api/3/project/search?"+q.Encode(), nil)
+	req, err := atlassian.NewRequest(ctx, cfg, http.MethodGet, cfg.BaseURL+"/rest/api/3/project/search?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}

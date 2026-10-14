@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
 )
 
 // CurrentUser is the Jira account that owns the configured API token — used to
@@ -22,7 +24,7 @@ func (c *Client) Myself(ctx context.Context) (CurrentUser, error) {
 	if err != nil {
 		return CurrentUser{}, err
 	}
-	req, err := newJiraRequest(ctx, cfg, http.MethodGet, cfg.baseURL+"/rest/api/3/myself", nil)
+	req, err := atlassian.NewRequest(ctx, cfg, http.MethodGet, cfg.BaseURL+"/rest/api/3/myself", nil)
 	if err != nil {
 		return CurrentUser{}, err
 	}

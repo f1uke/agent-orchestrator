@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
 )
 
 // restClient wires a Client to an httptest server + a static REST identity so the
@@ -21,8 +23,8 @@ func restClient(t *testing.T, handler http.HandlerFunc) *Client {
 	t.Cleanup(srv.Close)
 	return NewClient(
 		WithHTTPDoer(srv.Client().Do),
-		WithConfigSource(func() (restConfig, error) {
-			return restConfig{baseURL: srv.URL, email: "e@example.com", token: "tok"}, nil
+		WithConfigSource(func() (atlassian.Config, error) {
+			return atlassian.Config{BaseURL: srv.URL, Email: "e@example.com", Token: "tok"}, nil
 		}),
 	)
 }
@@ -225,11 +227,45 @@ func TestGet_ClassifiesHTTPStatus(t *testing.T) {
 // A missing/invalid credential resolves to a config error the caller surfaces
 // (degrade to an inline error, never a crash) — the same as the other REST paths.
 func TestGet_ConfigErrorPropagates(t *testing.T) {
-	c := NewClient(WithConfigSource(func() (restConfig, error) {
-		return restConfig{}, fmt.Errorf("%w: no Jira API token", ErrAuthFailed)
+	c := NewClient(WithConfigSource(func() (atlassian.Config, error) {
+		return atlassian.Config{}, fmt.Errorf("%w: no Jira API token", ErrAuthFailed)
 	}))
 	if _, err := c.Get(context.Background(), "DEMO-1"); !errors.Is(err, ErrAuthFailed) {
 		t.Errorf("config err = %v, want ErrAuthFailed", err)
+	}
+}
+
+func TestDefaultConfigErrorsMatchJiraSentinels(t *testing.T) {
+	for _, k := range []string{"AO_JIRA_URL", "JIRA_SERVER", "AO_JIRA_EMAIL", "JIRA_LOGIN", "AO_JIRA_TOKEN", "JIRA_API_TOKEN"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("JIRA_CONFIG_FILE", filepath.Join(t.TempDir(), "does-not-exist.yml"))
+	calls := map[string]func(*Client) error{
+		"Get":                func(c *Client) error { _, err := c.Get(context.Background(), "DEMO-1"); return err },
+		"Transitions":        func(c *Client) error { _, err := c.Transitions(context.Background(), "DEMO-1"); return err },
+		"Move":               func(c *Client) error { return c.Move(context.Background(), "DEMO-1", "11") },
+		"Myself":             func(c *Client) error { _, err := c.Myself(context.Background()); return err },
+		"SearchIssues":       func(c *Client) error { _, err := c.SearchIssues(context.Background(), "text ~ \"x\"", 5); return err },
+		"ListProjects":       func(c *Client) error { _, err := c.ListProjects(context.Background(), ""); return err },
+		"DownloadAttachment": func(c *Client) error { _, _, err := c.DownloadAttachment(context.Background(), "1"); return err },
+	}
+	unreachable := WithHTTPDoer(func(*http.Request) (*http.Response, error) {
+		t.Fatal("HTTP must not be called without a resolved config")
+		return nil, nil
+	})
+
+	for name, call := range calls {
+		if err := call(NewClient(unreachable)); !errors.Is(err, ErrUnavailable) || !strings.HasPrefix(err.Error(), "jira: unavailable: ") {
+			t.Errorf("%s with no server: err = %v, want ErrUnavailable with the jira: prefix", name, err)
+		}
+	}
+
+	t.Setenv("AO_JIRA_URL", "https://example.atlassian.net")
+	t.Setenv("AO_JIRA_EMAIL", "alex@example.com")
+	for name, call := range calls {
+		if err := call(NewClient(unreachable)); !errors.Is(err, ErrAuthFailed) || !strings.HasPrefix(err.Error(), "jira: authentication failed: ") {
+			t.Errorf("%s with no token: err = %v, want ErrAuthFailed with the jira: prefix", name, err)
+		}
 	}
 }
 
@@ -239,8 +275,8 @@ func TestGet_TransportErrorIsUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	base := srv.URL
 	srv.Close()
-	c := NewClient(WithConfigSource(func() (restConfig, error) {
-		return restConfig{baseURL: base, email: "e@example.com", token: "tok"}, nil
+	c := NewClient(WithConfigSource(func() (atlassian.Config, error) {
+		return atlassian.Config{BaseURL: base, Email: "e@example.com", Token: "tok"}, nil
 	}))
 	if _, err := c.Get(context.Background(), "DEMO-1"); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("transport err = %v, want ErrUnavailable", err)

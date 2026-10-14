@@ -2,9 +2,7 @@ package jira
 
 // Attachment reads. An issue's attachments arrive with the issue (client.go
 // decodes them); DownloadAttachment streams one back for inline display. Both go
-// through the same Jira Cloud REST v3 auth seam as the other calls
-// (transitions.go): base URL + login from env/jira-cli config, API token from
-// AO_JIRA_TOKEN -> JIRA_API_TOKEN.
+// through the same adapters/atlassian auth as the other calls.
 
 import (
 	"context"
@@ -12,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/atlassian"
 )
 
 // ErrBadRequest is a 400 from Jira, or a request AO refuses before sending it
@@ -42,8 +42,8 @@ func (c *Client) DownloadAttachment(ctx context.Context, attachmentID string) (i
 	if err != nil {
 		return nil, "", err
 	}
-	url := cfg.baseURL + "/rest/api/3/attachment/content/" + attachmentID
-	req, err := newJiraRequest(ctx, cfg, http.MethodGet, url, nil)
+	url := cfg.BaseURL + "/rest/api/3/attachment/content/" + attachmentID
+	req, err := atlassian.NewRequest(ctx, cfg, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
 	}
