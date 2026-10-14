@@ -8,7 +8,7 @@ const ExampleConfigJSON = `{
   "fixWrites": "off",
   "gitlabHost": "gitlab.example.com",
   "jira": { "project": "DEMO", "techRequestProject": "DEMOREQ", "forceUpdateSummary": "force update" },
-  "confluence": { "space": "DEMOSPACE", "trainPageTitle": "Release train" },
+  "confluence": { "space": "DEMOSPACE", "trainPageTitle": "Release train", "freezeCell": "Code freeze", "publishCell": "Store release" },
   "families": [
     { "id": "demo", "label": "Demo", "trainLabel": "Release Train", "apps": ["di", "da"] }
   ],

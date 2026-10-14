@@ -15,11 +15,13 @@ func Reconcile(in Inputs, env Env) Board {
 	}
 	b.Sources = rs.sources(b.Trains)
 	phases(b.Trains, b.Today)
+	mrs := indexMRs(in.Config, in.Snap)
 	for i := range b.Trains {
 		t := &b.Trains[i]
 		t.DatesSplit = datesSplit(t)
+		fromPages := pageMembers(t, in.Config, in.Snap, mrs)
 		for _, v := range t.Versions {
-			v.Cards = cardUnits(t, v, in.Config, in.Snap)
+			v.Cards = cardUnits(t, v, mrs, fromPages[v.App])
 			v.Stages = stages(t, v, b.Today, rs)
 		}
 	}
@@ -68,6 +70,7 @@ func joinTrains(b *Board, cfg Config, snap Snapshot) {
 	sort.Slice(b.Trains, func(i, j int) bool { return b.Trains[i].ID.less(b.Trains[j].ID) })
 
 	joinJira(b, cfg, snap)
+	attachPages(b, cfg, snap)
 	for i := range b.Trains {
 		for _, v := range b.Trains[i].Versions {
 			if v.Jira == nil {
