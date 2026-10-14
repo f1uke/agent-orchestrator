@@ -699,27 +699,37 @@ func (p *Provider) fetchAllMRPipelines(ctx context.Context, mrPath string) ([]re
 // is the last one; maxPages bounds the loop as a safety net against a server that
 // never signals a final page. what names the resource in decode errors.
 func fetchAllPages[T any](ctx context.Context, c *Client, path string, maxPages int, what string) ([]T, error) {
-	const perPage = 100
-	var all []T
+	all, _, err := walkPages[T](ctx, c, path, nil, maxPages, what)
+	return all, err
+}
+
+// walkPages is the one offset pager. capped reports that the loop stopped at
+// maxPages on a full page, so more rows may exist.
+func walkPages[T any](ctx context.Context, c *Client, path string, extra url.Values, maxPages int, what string) (all []T, capped bool, err error) {
 	for page := 1; page <= maxPages; page++ {
 		q := url.Values{}
+		for k, v := range extra {
+			q[k] = v
+		}
 		q.Set("per_page", strconv.Itoa(perPage))
 		q.Set("page", strconv.Itoa(page))
 		resp, err := c.doREST(ctx, path, q)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		var batch []T
 		if err := json.Unmarshal(resp.Body, &batch); err != nil {
-			return nil, fmt.Errorf("gitlab scm: decode %s page %d: %w", what, page, err)
+			return nil, false, fmt.Errorf("gitlab scm: decode %s page %d: %w", what, page, err)
 		}
 		all = append(all, batch...)
 		if len(batch) < perPage {
-			break
+			return all, false, nil
 		}
 	}
-	return all, nil
+	return all, true, nil
 }
+
+const perPage = 100
 
 // fetchAllPipelineJobs pages through a pipeline's jobs endpoint and returns every
 // job. GitLab paginates /pipelines/:id/jobs (default 20, max 100 per page) and
