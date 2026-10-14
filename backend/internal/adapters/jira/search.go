@@ -107,10 +107,8 @@ func (c *Client) SearchIssues(ctx context.Context, jql string, limit int) ([]Iss
 	return nil, err
 }
 
-// searchIssueSummaries is SearchIssues' best-effort policy over searchAll: a
-// failure after at least one page returns the rows already gathered and no
-// error, so a transient later-page hiccup degrades to a partial list. It
-// returns the FIRST page's HTTP status so SearchIssues can fall back.
+// searchIssueSummaries is SearchIssues' best-effort policy: a later-page failure
+// keeps the rows read, with no error. It returns the first page's status for the fallback.
 func (c *Client) searchIssueSummaries(ctx context.Context, cfg atlassian.Config, path, jql string, limit int, enhanced bool) ([]IssueSummary, int, error) {
 	spec := searchSpec{
 		path: path, jql: jql, fields: searchFields, limit: limit, maxPages: limit, enhanced: enhanced,
@@ -154,10 +152,8 @@ type rawSearchIssue struct {
 	Fields map[string]json.RawMessage `json:"fields"`
 }
 
-// searchAll pages one endpoint until it has spec.limit rows, the endpoint is
-// exhausted, spec.maxPages pages were read, or a page fails. enhanced selects
-// token paging (nextPageToken) over classic offset paging (startAt). It keeps
-// the rows already gathered on a failure; each caller picks its own policy.
+// searchAll pages one endpoint (token or startAt paging) until a limit, the last
+// page, or a failure; it keeps the rows read and leaves the policy to its caller.
 func (c *Client) searchAll(ctx context.Context, cfg atlassian.Config, spec searchSpec) ([]rawSearchIssue, searchResult) {
 	var out []rawSearchIssue
 	var res searchResult
@@ -235,9 +231,8 @@ func (c *Client) searchPage(ctx context.Context, cfg atlassian.Config, spec sear
 	return payload.Issues, payload.NextPageToken, resp.StatusCode, nil
 }
 
-// issueSummary maps one raw row. Fields stay a raw map (like the display path)
-// so the sprint custom-field, whose id varies per instance, can be located by
-// detectSprint alongside the known summary/type/status/assignee fields.
+// issueSummary maps one raw row. Fields stay a raw map so detectSprint can find
+// the sprint custom-field, whose id varies per instance.
 func (c *Client) issueSummary(cfg atlassian.Config, it rawSearchIssue) IssueSummary {
 	f := it.Fields
 	assignee := decodeNamed(f["assignee"])
