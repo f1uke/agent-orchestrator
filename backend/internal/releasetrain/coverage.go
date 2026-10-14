@@ -107,6 +107,10 @@ func entityScopes(kind KindName, v *AppVersion, project int) []Scope {
 		if v.Jira != nil {
 			return []Scope{VersionScope(v.Jira.ID)}
 		}
+	case KindPageCards.Name:
+		if v.page != nil {
+			return []Scope{PageScope(v.page.ID)}
+		}
 	}
 	return nil
 }

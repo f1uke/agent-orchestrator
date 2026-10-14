@@ -2,6 +2,7 @@ package releasetrain
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,7 +42,85 @@ type CardUnit struct {
 	Status         string    `json:"status"`
 	StatusCategory string    `json:"statusCategory"`
 	Assignee       *Person   `json:"assignee,omitempty"`
+	Why            []CardWhy `json:"why"`
 	Code           CodeState `json:"code"`
+}
+
+// CardWhy is why a card is on a version.
+type CardWhy string
+
+// Reasons a card is on a version.
+const (
+	WhyFixVersion CardWhy = "fixVersion"
+	WhyPage       CardWhy = "release train page"
+)
+
+// Enum lists the reasons for the API schema.
+func (CardWhy) Enum() []any { return []any{WhyFixVersion, WhyPage} }
+
+type mrIndex map[AppID]map[string][]MRFact
+
+func indexMRs(cfg Config, snap Snapshot) mrIndex {
+	out := mrIndex{}
+	for _, app := range cfg.Apps {
+		byKey := map[string][]MRFact{}
+		for _, mr := range Items(snap, KindMRs, ProjectScope(app.GitLabProject)) {
+			for _, k := range mrKeys(mr) {
+				byKey[k] = append(byKey[k], mr)
+			}
+		}
+		out[app.ID] = byKey
+	}
+	return out
+}
+
+// pageMembers puts each card a train's pages list on the train's apps of the
+// families whose page lists it: those whose Jira version is in the card's
+// fixVersions, else those where the card has an MR, else all of them.
+func pageMembers(t *Train, cfg Config, snap Snapshot, mrs mrIndex) map[AppID][]IssueFact {
+	cards := map[string]IssueFact{}
+	families := map[string][]FamilyID{}
+	for _, p := range t.Pages {
+		for _, is := range Items(snap, KindPageCards, PageScope(p.ID)) {
+			if is.Subtask || is.ReleaseTicket {
+				continue
+			}
+			cards[is.Key] = is
+			families[is.Key] = append(families[is.Key], p.Family)
+		}
+	}
+	out := map[AppID][]IssueFact{}
+	for key, is := range cards {
+		var apps []*AppVersion
+		for _, v := range t.Versions {
+			if slices.Contains(families[key], cfg.familyOf(v.App).ID) {
+				apps = append(apps, v)
+			}
+		}
+		for _, v := range pinned(apps, is, mrs) {
+			out[v.App] = append(out[v.App], is)
+		}
+	}
+	return out
+}
+
+func pinned(apps []*AppVersion, is IssueFact, mrs mrIndex) []*AppVersion {
+	var byVersion, byMR []*AppVersion
+	for _, v := range apps {
+		if v.Jira != nil && slices.Contains(is.FixVersions, v.Jira.ID) {
+			byVersion = append(byVersion, v)
+		}
+		if len(mrs[v.App][is.Key]) > 0 {
+			byMR = append(byMR, v)
+		}
+	}
+	switch {
+	case len(byVersion) > 0:
+		return byVersion
+	case len(byMR) > 0:
+		return byMR
+	}
+	return apps
 }
 
 var (
@@ -69,14 +148,8 @@ func sprintOf(branch string) (int, bool) {
 	return v, true
 }
 
-func cardUnits(t *Train, v *AppVersion, cfg Config, snap Snapshot) []CardUnit {
-	app := cfg.app(v.App)
-	byKey := map[string][]MRFact{}
-	for _, mr := range Items(snap, KindMRs, ProjectScope(app.GitLabProject)) {
-		for _, k := range mrKeys(mr) {
-			byKey[k] = append(byKey[k], mr)
-		}
-	}
+func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact) []CardUnit {
+	byKey := mrs[v.App]
 	var cut *Day
 	if v.ReleaseMR != nil {
 		c := v.ReleaseMR.MR.CreatedOn
@@ -86,13 +159,28 @@ func cardUnits(t *Train, v *AppVersion, cfg Config, snap Snapshot) []CardUnit {
 	if hasSource {
 		source = t.ID.Number - 1
 	}
-	units := make([]CardUnit, 0, len(v.Issues))
-	for _, is := range v.Issues {
+	units := make([]CardUnit, 0, len(v.Issues)+len(fromPage))
+	at := map[string]int{}
+	add := func(is IssueFact, why CardWhy) {
+		if i, ok := at[is.Key]; ok {
+			if !slices.Contains(units[i].Why, why) {
+				units[i].Why = append(units[i].Why, why)
+			}
+			return
+		}
+		at[is.Key] = len(units)
 		units = append(units, CardUnit{
 			Key: is.Key, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
-			Code: codeOf(byKey[is.Key], cut, source, hasSource),
+			Why: []CardWhy{why}, Code: codeOf(byKey[is.Key], cut, source, hasSource),
 		})
 	}
+	for _, is := range v.Issues {
+		add(is, WhyFixVersion)
+	}
+	for _, is := range fromPage {
+		add(is, WhyPage)
+	}
+	sort.Slice(units, func(i, j int) bool { return units[i].Key < units[j].Key })
 	return units
 }
 

@@ -61,6 +61,52 @@ var ruleA5 = rule{
 	},
 }
 
+var ruleA6 = rule{
+	ID: "A6", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: []KindName{KindMilestones.Name, KindPages.Name},
+	Title: "Release train page dates differ from the milestone",
+	Check: func(b *Board) []Hit {
+		var out []Hit
+		for i := range b.Trains {
+			t := &b.Trains[i]
+			for _, v := range t.Versions {
+				out = append(out, pageDateHits(t, v)...)
+			}
+		}
+		return out
+	},
+}
+
+func pageDateHits(t *Train, v *AppVersion) []Hit {
+	p := v.page
+	if p == nil {
+		return nil
+	}
+	hit := func(field DateField, text string, ev Evidence) Hit {
+		h := versionHit(t, v, text, ev, Link{Label: "Open page", URL: p.URL})
+		h.Subject = SubjVersionDate{Train: t.ID, App: v.App, Field: field}
+		return *h
+	}
+	if p.ParseError != "" {
+		return []Hit{hit(DatePage, "Page unreadable: "+p.ParseError, Evidence{"page": p.ID, "parseError": p.ParseError})}
+	}
+	var out []Hit
+	for _, d := range []struct {
+		field               DateField
+		onPage, onMilestone string
+		page, milestone     *Day
+	}{
+		{DateFreeze, "freeze", "milestone starts", p.Freeze, v.Milestone.Start},
+		{DatePublish, "publish", "milestone due", p.Publish, v.Milestone.Due},
+	} {
+		if d.page == nil || d.milestone == nil || *d.page == *d.milestone {
+			continue
+		}
+		out = append(out, hit(d.field, fmt.Sprintf("Page says %s %s, %s %s", d.onPage, d.page.label(), d.onMilestone, d.milestone.label()),
+			Evidence{"page": *d.page, "milestone": *d.milestone}))
+	}
+	return out
+}
+
 var ruleA7 = rule{
 	ID: "A7", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: []KindName{KindMilestones.Name},
 	Title: "An app's milestone dates differ from the rest of its train",

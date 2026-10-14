@@ -43,6 +43,9 @@ func New(opts Options) *Source {
 // System implements svc.Source.
 func (s *Source) System() string { return "gitlab" }
 
+// Host implements svc.Source.
+func (s *Source) Host() string { return "gitlab" }
+
 func (s *Source) client(host string) (*scmgitlab.Client, scmgitlab.TokenSource) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

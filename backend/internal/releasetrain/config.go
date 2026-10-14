@@ -44,10 +44,14 @@ type JiraConfig struct {
 	ForceUpdateSummary string `json:"forceUpdateSummary,omitempty"`
 }
 
-// ConfluenceConfig names where the train pages live.
+// ConfluenceConfig names where the train pages live and the table cells that
+// hold their freeze and publish dates. A page belongs to the family whose
+// trainLabel ends its title before "#<train>".
 type ConfluenceConfig struct {
 	Space          string `json:"space"`
 	TrainPageTitle string `json:"trainPageTitle"`
+	FreezeCell     string `json:"freezeCell"`
+	PublishCell    string `json:"publishCell"`
 }
 
 // BoardConfig is one Jira agile board whose sprint the monitor follows.
@@ -156,8 +160,10 @@ func (c Config) validateSources() error {
 		return configErr("jira.project", "required")
 	case c.Jira.TechRequestProject != "" && c.Jira.ForceUpdateSummary == "":
 		return configErr("jira.forceUpdateSummary", "required when techRequestProject is set")
-	case c.Confluence != nil && (c.Confluence.Space == "" || c.Confluence.TrainPageTitle == ""):
-		return configErr("confluence", "needs a space and a trainPageTitle")
+	case c.Confluence != nil && (c.Confluence.Space == "" || c.Confluence.TrainPageTitle == "" || c.Confluence.FreezeCell == "" || c.Confluence.PublishCell == ""):
+		return configErr("confluence", "needs a space, a trainPageTitle, a freezeCell and a publishCell")
+	case c.Confluence != nil && strings.ContainsAny(c.Confluence.Space+c.Confluence.TrainPageTitle, `"\`):
+		return configErr("confluence", "space and trainPageTitle must not contain quotes or backslashes")
 	}
 	boards := map[int]bool{}
 	for _, b := range c.Boards {

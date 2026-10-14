@@ -27,7 +27,15 @@ type PlanView struct {
 	HistoryFrom Day
 	Apps        []App
 	Versions    []PlannedVersion
+	Pages       []PlannedPage
 	ApproverIDs []string
+}
+
+// PlannedPage is a train page attached to a train, with the card keys it lists.
+type PlannedPage struct {
+	ID   string
+	Keys []string
+	Live bool
 }
 
 // PlannedVersion is one app version on a train with the entity ids its per-entity reads need.
@@ -50,6 +58,15 @@ func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 	approvers := map[string]bool{}
 	for i := range b.Trains {
 		t := &b.Trains[i]
+		for _, page := range t.Pages {
+			pp := PlannedPage{ID: page.ID, Keys: page.Keys}
+			for _, v := range t.Versions {
+				if v.page != nil && v.page.ID == page.ID && rs.live(dueOf(t, v)) {
+					pp.Live = true
+				}
+			}
+			pv.Pages = append(pv.Pages, pp)
+		}
 		for _, v := range t.Versions {
 			p := PlannedVersion{App: v.App, Project: v.Milestone.Project, Live: rs.live(dueOf(t, v))}
 			if v.Jira != nil {

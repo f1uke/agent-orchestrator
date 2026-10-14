@@ -27,6 +27,7 @@ func everyRuleFires(t *testing.T) *fixture {
 	}
 	live.issue("DEMO-1", "In Progress", "indeterminate")
 	live.forceUpdate("REQ-1", "To Do", "new", "")
+	f.page("demo", "21", "2026-09-20", "2026-10-08", liveDue)
 
 	noApprovers := f.version("da", "21", "3.5.1", liveFreeze, liveDue)
 	noApprovers.jira.Name = "Android 3.5.2"

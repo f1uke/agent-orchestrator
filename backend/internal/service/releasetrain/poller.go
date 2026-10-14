@@ -31,10 +31,11 @@ type HostLimits struct {
 	Concurrency int
 }
 
-// DefaultLimits are the per-pass budgets from the architecture: GitLab 40/4, Atlassian 20/2.
+// DefaultLimits are the per-pass budgets per host from the architecture:
+// GitLab 40/4, Atlassian 20/2. Jira and Confluence share the Atlassian host.
 var DefaultLimits = map[string]HostLimits{
-	"gitlab": {Requests: 40, Concurrency: 4},
-	"jira":   {Requests: 20, Concurrency: 2},
+	"gitlab":    {Requests: 40, Concurrency: 4},
+	"atlassian": {Requests: 20, Concurrency: 2},
 }
 
 // Store is what the poller needs from storage.
@@ -92,10 +93,10 @@ func (p *Poller) Refresh(source string) error {
 	return nil
 }
 
-func (p *Poller) refreshedAt(host string) time.Time {
+func (p *Poller) refreshedAt(source string) time.Time {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.refreshes[host]
+	return p.refreshes[source]
 }
 
 type probeState struct {
@@ -104,7 +105,7 @@ type probeState struct {
 	logged bool
 }
 
-// PassStats is what the last pass did, per host.
+// PassStats is what the last pass did, per host (Source.Host).
 type PassStats struct {
 	At       *time.Time     `json:"at,omitempty"`
 	Requests map[string]int `json:"requests"`
@@ -171,7 +172,7 @@ func (p *Poller) Poll(ctx context.Context) error {
 	var order []string
 	for _, pl := range all {
 		pl.row = byKey[specKey(pl.spec)]
-		h := pl.src.System()
+		h := pl.src.Host()
 		if _, ok := hosts[h]; !ok {
 			order = append(order, h)
 		}
@@ -206,7 +207,8 @@ func (p *Poller) LastPass() PassStats {
 }
 
 func (p *Poller) pollHost(ctx context.Context, host string, res []planned, view rt.PlanView, now time.Time) int {
-	if !p.credentialsOK(ctx, host, res, view, now) {
+	res = p.withCredentials(ctx, res, view, now)
+	if len(res) == 0 {
 		return 0
 	}
 	var pausedUntil time.Time
@@ -218,7 +220,7 @@ func (p *Poller) pollHost(ctx context.Context, host string, res []planned, view 
 	if now.Before(pausedUntil) {
 		return 0
 	}
-	due := dueOrder(res, now, p.refreshedAt(host))
+	due := p.dueOrder(res, now)
 	limits := p.d.Limits[host]
 	if limits.Concurrency < 1 {
 		limits.Concurrency = 1
@@ -253,11 +255,11 @@ func (p *Poller) pollHost(ctx context.Context, host string, res []planned, view 
 
 func pausesHost(c rt.ErrorClass) bool { return c == rt.ErrRateLimited || c == rt.ErrAuth }
 
-func dueOrder(res []planned, now, refreshed time.Time) []planned {
+func (p *Poller) dueOrder(res []planned, now time.Time) []planned {
 	due := make([]planned, 0, len(res))
 	for _, pl := range res {
 		r := pl.row
-		asked := r.LastAttemptAt == nil || r.LastAttemptAt.Before(refreshed)
+		asked := r.LastAttemptAt == nil || r.LastAttemptAt.Before(p.refreshedAt(pl.src.System()))
 		switch {
 		case r.NextAttemptAt != nil:
 			if now.Before(*r.NextAttemptAt) {
@@ -281,41 +283,55 @@ func dueOrder(res []planned, now, refreshed time.Time) []planned {
 	return due
 }
 
-func (p *Poller) credentialsOK(ctx context.Context, host string, res []planned, view rt.PlanView, now time.Time) bool {
+// withCredentials keeps the resources of the host's sources whose
+// credentials are usable. A probe that finds none marks that source's
+// resources unconfigured until the next probe.
+func (p *Poller) withCredentials(ctx context.Context, res []planned, view rt.PlanView, now time.Time) []planned {
+	type verdict struct{ ok, probed bool }
+	seen := map[Source]verdict{}
+	out := res[:0:0]
+	for _, pl := range res {
+		v, done := seen[pl.src]
+		if !done {
+			v.ok, v.probed = p.credentialsOK(ctx, pl.src, view, now)
+			seen[pl.src] = v
+		}
+		switch {
+		case v.ok:
+			out = append(out, pl)
+		case v.probed:
+			f := rt.Failure{At: now, Failures: pl.row.Failures, Class: rt.ErrUnconfigured, Message: "no " + pl.src.System() + " credentials", NextAttemptAt: now.Add(reprobeEvery)}
+			if err := p.d.Store.MarkReleaseFailure(ctx, pl.spec, f); err != nil {
+				p.d.Logger.Warn("release trains: record unconfigured", "resource", specKey(pl.spec), "err", err)
+			}
+		}
+	}
+	return out
+}
+
+func (p *Poller) credentialsOK(ctx context.Context, src Source, view rt.PlanView, now time.Time) (ok, probed bool) {
+	name := src.System()
 	p.mu.Lock()
-	st := p.probes[host]
+	st := p.probes[name]
 	if st == nil {
 		st = &probeState{}
-		p.probes[host] = st
+		p.probes[name] = st
 	}
 	probe := !now.Before(st.next)
 	p.mu.Unlock()
 	if !probe {
-		return st.ok
+		return st.ok, false
 	}
-	ok, err := res[0].src.Credentials(ctx, view)
+	found, err := src.Credentials(ctx, view)
 	p.mu.Lock()
-	st.ok, st.next = ok && err == nil, now.Add(reprobeEvery)
+	st.ok, st.next = found && err == nil, now.Add(reprobeEvery)
 	firstMiss := !st.ok && !st.logged
-	if st.ok {
-		st.logged = false
-	} else {
-		st.logged = true
-	}
+	st.logged = !st.ok
 	p.mu.Unlock()
-	if st.ok {
-		return true
-	}
 	if firstMiss {
-		p.d.Logger.Warn("release trains: no usable credentials, sources unconfigured until they appear", "host", host, "err", err)
+		p.d.Logger.Warn("release trains: no usable credentials, sources unconfigured until they appear", "source", name, "err", err)
 	}
-	for _, pl := range res {
-		f := rt.Failure{At: now, Failures: pl.row.Failures, Class: rt.ErrUnconfigured, Message: "no " + host + " credentials", NextAttemptAt: now.Add(reprobeEvery)}
-		if err := p.d.Store.MarkReleaseFailure(ctx, pl.spec, f); err != nil {
-			p.d.Logger.Warn("release trains: record unconfigured", "resource", specKey(pl.spec), "err", err)
-		}
-	}
-	return false
+	return st.ok, true
 }
 
 func (p *Poller) fetchOne(ctx context.Context, pl planned, view rt.PlanView, now time.Time, budget int, used *atomic.Int64) *FetchError {

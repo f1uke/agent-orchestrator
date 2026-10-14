@@ -32,7 +32,7 @@ func TestRateLimitErrorMatchesErrRateLimited(t *testing.T) {
 	if errors.Is(err, ErrUnavailable) || errors.Is(err, ErrAuthFailed) {
 		t.Error("a 429 must match no other class")
 	}
-	if err.Error() != "jira: rate limited: slow down" {
+	if err.Error() != "atlassian: rate limited: slow down" {
 		t.Errorf("Error() = %q", err.Error())
 	}
 }

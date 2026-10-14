@@ -84,6 +84,8 @@ func init() {
 		"ReleasetrainMilestoneFact":                  "ReleaseTrainMilestoneFact",
 		"ReleasetrainMismatch":                       "ReleaseTrainMismatch",
 		"ReleasetrainPerson":                         "ReleaseTrainPerson",
+		"ReleasetrainPageFact":                       "ReleaseTrainPageFact",
+		"ReleasetrainCardWhy":                        "ReleaseTrainCardWhy",
 		"ReleasetrainPipelineFact":                   "ReleaseTrainPipelineFact",
 		"ReleasetrainRelatedWork":                    "ReleaseTrainRelatedWork",
 		"ReleasetrainRelatedWorkFact":                "ReleaseTrainRelatedWorkFact",
