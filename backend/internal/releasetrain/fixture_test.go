@@ -12,8 +12,14 @@ const fixtureYear = 2026
 
 func fixtureConfig() Config {
 	return Config{
-		Timezone:   "Asia/Bangkok",
-		AgeOutDays: 7,
+		Timezone:    "Asia/Bangkok",
+		HistoryFrom: Day{fixtureYear, time.April, 1},
+		AgeOutDays:  7,
+		FixWrites:   "off",
+		GitLabHost:  "gitlab.example.com",
+		Jira:        JiraConfig{Project: "DEMO", TechRequestProject: "DEMOREQ", ForceUpdateSummary: "force update"},
+		Boards:      []BoardConfig{{ID: 42, Key: "DEMO", OwnsSprintBranch: true}, {ID: 43, Key: "OTHER"}},
+		Mobile:      MobileConfig{Projects: []string{"DEMO"}, SubtaskPattern: `^(iOS|Android)\b`},
 		Families: []Family{
 			{ID: "demo", Label: "Demo", TrainLabel: "Release Train", Apps: []AppID{"di", "da"}},
 			{ID: "pilot", Label: "Pilot", TrainLabel: "Pilot Release Train", Apps: []AppID{"pi", "pa"}},

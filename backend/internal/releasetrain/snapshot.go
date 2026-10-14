@@ -69,6 +69,27 @@ func Put[T any](s *Snapshot, k Kind[T], st ResourceStatus, items []T) {
 	s.res[resKey{k.Name, st.Scope}] = resource{status: st, items: boxed}
 }
 
+// PutEncoded decodes stored item bodies through st.Kind's handle and stores the resource.
+func (s *Snapshot) PutEncoded(st ResourceStatus, bodies [][]byte) error {
+	meta, ok := kinds[st.Kind]
+	if !ok {
+		return ErrUnknownKind
+	}
+	items := make([]any, 0, len(bodies))
+	for _, b := range bodies {
+		v, err := meta.decode(b)
+		if err != nil {
+			return err
+		}
+		items = append(items, v)
+	}
+	if s.res == nil {
+		s.res = map[resKey]resource{}
+	}
+	s.res[resKey{st.Kind, st.Scope}] = resource{status: st, items: items}
+	return nil
+}
+
 // Items returns the decoded items of one resource.
 func Items[T any](s Snapshot, k Kind[T], scope Scope) []T {
 	r, ok := s.res[resKey{k.Name, scope}]
