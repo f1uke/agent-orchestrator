@@ -2,12 +2,14 @@ package releasetrain_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	scmgitlab "github.com/aoagents/agent-orchestrator/backend/internal/adapters/scm/gitlab"
 	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
 	svc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain/confluencesrc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain/gitlabsrc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain/jirasrc"
 	"github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain/rttest"
@@ -27,6 +30,7 @@ const demoConfig = `{
   "timezone": "Asia/Bangkok", "historyFrom": "2026-04-01", "ageOutDays": 7, "fixWrites": "off",
   "gitlabHost": "gitlab.example.com",
   "jira": { "project": "DEMO", "techRequestProject": "DEMOREQ", "forceUpdateSummary": "force update" },
+  "confluence": { "space": "DEMOSPACE", "trainPageTitle": "Release train", "freezeCell": "Code freeze", "publishCell": "Store release" },
   "families": [ { "id": "demo", "label": "Demo", "trainLabel": "Release Train", "apps": ["di"] } ],
   "apps": [ { "id": "di", "name": "Demo iOS", "platform": "ios", "gitlabProject": 1001, "jiraVersionPrefix": "iOS" } ]
 }`
@@ -74,6 +78,10 @@ func newWorld(t *testing.T) *world {
 	w.jira.Set(`/rest/api/3/search/jql?jql=project = DEMOREQ AND summary ~ "force update" AND created >= "2026-04-01" ORDER BY key`, `{"issues":[]}`)
 	w.jira.Set("/rest/api/3/user?accountId=acc-ann", `{"accountId":"acc-ann","displayName":"Ann Example"}`)
 	w.jira.Set("/rest/api/3/myself", `{"accountId":"acc-dee","displayName":"Dee Example"}`)
+	w.jira.Set(`/wiki/rest/api/content/search?cql=space = "DEMOSPACE" AND title ~ "Release train" AND created >= "2026-01-31"`,
+		`{"results":[{"id":"801","title":"2026.10.12 - Release train #21","history":{"createdDate":"2026-09-14T06:30:00.000Z"},"_links":{"webui":"/spaces/DEMOSPACE/pages/801"},`+
+			`"body":{"storage":{"value":"<table><tr><th>Code freeze</th><td><time datetime=\"2026-10-12\" /></td></tr><tr><th>Store release</th><td><time datetime=\"2026-10-20\" /></td></tr></table><p>DEMO-1 DEMO-40</p>"}}}],"_links":{}}`)
+	w.jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-1, DEMO-40) ORDER BY key`, `{"issues":[{"key":"DEMO-40","fields":{"summary":"Wallet top up","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"issuetype":{"subtask":false},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, svc.ConfigFileName), []byte(demoConfig), 0o600); err != nil {
@@ -97,6 +105,7 @@ func newWorld(t *testing.T) *world {
 				Tokens:  func(string) scmgitlab.TokenSource { return scmgitlab.StaticTokenSource("t") },
 			}),
 			jirasrc.New(jirasrc.Options{Config: func() (atlassian.Config, error) { return jiraCfg, nil }}),
+			confluencesrc.New(confluencesrc.Options{Config: func() (atlassian.Config, error) { return jiraCfg, nil }}),
 		},
 		Clock:  func() time.Time { return w.now },
 		Rand:   func() float64 { return 0.5 },
@@ -105,16 +114,18 @@ func newWorld(t *testing.T) *world {
 	return w
 }
 
-func (w *world) pass() (gitlab, jira []string) {
+// pass runs one poll pass and returns the paths each host served; jira and
+// confluence share the one Atlassian site and its budget.
+func (w *world) pass() (gitlab, atlassian []string) {
 	w.t.Helper()
 	if err := w.poller.Poll(context.Background()); err != nil {
 		w.t.Fatal(err)
 	}
-	gitlab, jira = paths(w.gl.TakeRequests()), paths(w.jira.TakeRequests())
-	if counted := w.poller.LastPass().Requests; counted["gitlab"] != len(gitlab) || counted["jira"] != len(jira) {
-		w.t.Fatalf("budget counted %v, servers saw gitlab %d jira %d", counted, len(gitlab), len(jira))
+	gitlab, atlassian = paths(w.gl.TakeRequests()), paths(w.jira.TakeRequests())
+	if counted := w.poller.LastPass().Requests; counted["gitlab"] != len(gitlab) || counted["atlassian"] != len(atlassian) {
+		w.t.Fatalf("budget counted %v, servers saw gitlab %d atlassian %d", counted, len(gitlab), len(atlassian))
 	}
-	return gitlab, jira
+	return gitlab, atlassian
 }
 
 func paths(reqs []string) []string {
@@ -196,9 +207,67 @@ func TestBothSourcesBackfillToCompleteThenFetchOnlyWhatIsDue(t *testing.T) {
 	}
 	w.now = w.now.Add(5 * time.Minute)
 	_, jira = w.pass()
-	wantJira := []string{"/rest/api/3/project/DEMO/version", "/rest/api/3/search/jql"}
+	wantJira := []string{"/rest/api/3/project/DEMO/version", "/rest/api/3/search/jql", "/rest/api/3/search/jql"}
 	if strings.Join(jira, " ") != strings.Join(wantJira, " ") {
-		t.Fatalf("steady pass after 5m fetched jira %v; want %v", jira, wantJira)
+		t.Fatalf("steady pass after 5m fetched atlassian %v; want versions, the version's cards and the page's cards", jira)
+	}
+	w.now = w.now.Add(10 * time.Minute)
+	_, atl := w.pass()
+	if !slices.Contains(atl, "/wiki/rest/api/content/search") {
+		t.Fatalf("steady pass after 15m fetched atlassian %v; want the Confluence pages refetched", atl)
+	}
+}
+
+func TestAPageOnlyCardRidesItsTrainEndToEnd(t *testing.T) {
+	w := newWorld(t)
+	w.settle()
+	cfg := svc.NewConfigLoader(w.configPath)
+	board := svc.NewBoardService(svc.BoardDeps{Config: cfg, Store: w.store, Clock: func() time.Time { return w.now }})
+	body, _, err := board.Board(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp struct {
+		Board struct {
+			Trains []struct {
+				Pages []struct {
+					ID     string `json:"id"`
+					Freeze string `json:"freeze"`
+				} `json:"pages"`
+				Versions []struct {
+					Cards []struct {
+						Key    string   `json:"key"`
+						Status string   `json:"status"`
+						Why    []string `json:"why"`
+					} `json:"cards"`
+				} `json:"versions"`
+			} `json:"trains"`
+			Alerts struct {
+				Hits []struct {
+					ID string `json:"id"`
+				} `json:"hits"`
+			} `json:"alerts"`
+		} `json:"board"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatal(err)
+	}
+	tr := resp.Board.Trains[0]
+	if len(tr.Pages) != 1 || tr.Pages[0].ID != "801" || tr.Pages[0].Freeze != "2026-10-12" {
+		t.Fatalf("pages = %+v, want page 801 attached", tr.Pages)
+	}
+	cards := tr.Versions[0].Cards
+	if len(cards) != 1 || cards[0].Key != "DEMO-40" || cards[0].Status != "In Progress" || strings.Join(cards[0].Why, ",") != "release train page" {
+		t.Fatalf("cards = %+v; want the page-only DEMO-40 with its status and the page as why (DEMO-1 is the release ticket)", cards)
+	}
+	var a6 []string
+	for _, h := range resp.Board.Alerts.Hits {
+		if strings.HasPrefix(h.ID, "A6~") {
+			a6 = append(a6, h.ID)
+		}
+	}
+	if strings.Join(a6, " ") != "A6~vd/21-2026/di/publish" {
+		t.Fatalf("A6 hits = %v; the page says publish 20 Oct, the milestone is due 19 Oct", a6)
 	}
 }
 
@@ -223,7 +292,10 @@ func TestEveryKindHasExactlyOneProducingSource(t *testing.T) {
 		t.Fatalf("config: %s", cfg.Message)
 	}
 	view := rt.NewPlanView(*cfg.Config, snap, rt.Env{Now: w.now, Loc: cfg.Loc, AgeOut: cfg.Config.AgeOutDays})
-	sources := []svc.Source{gitlabsrc.New(gitlabsrc.Options{Tokens: func(string) scmgitlab.TokenSource { return scmgitlab.StaticTokenSource("t") }}), jirasrc.New(jirasrc.Options{})}
+	sources := []svc.Source{
+		gitlabsrc.New(gitlabsrc.Options{Tokens: func(string) scmgitlab.TokenSource { return scmgitlab.StaticTokenSource("t") }}),
+		jirasrc.New(jirasrc.Options{}), confluencesrc.New(confluencesrc.Options{}),
+	}
 	producers := map[rt.KindName][]string{}
 	for _, src := range sources {
 		seen := map[rt.KindName]bool{}

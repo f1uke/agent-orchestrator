@@ -1,6 +1,7 @@
 package releasetrain
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -294,6 +295,35 @@ func TestA6WithoutConfluenceIsUnknownNotClean(t *testing.T) {
 	}
 	if _, ok := outcomeOf(Reconcile(in, f.env()), "A6", "di").(Unknown); !ok {
 		t.Fatalf("A6 with no confluence.pages resource = %#v, want Unknown", outcomeOf(Reconcile(in, f.env()), "A6", "di"))
+	}
+}
+
+func TestBoardJSONCarriesEachTrainsPagesForThePage(t *testing.T) {
+	f := newFixture(t, today)
+	healthy(f)
+	p := f.page("demo", "21", "2026-09-20", liveFreeze, liveDue)
+	p.Tasks, p.Ticked, p.ParseError = 7, 3, "no freeze cell"
+	raw, err := json.Marshal(f.reconcile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w struct {
+		Trains []struct {
+			Pages []map[string]any `json:"pages"`
+		} `json:"trains"`
+	}
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatal(err)
+	}
+	got := w.Trains[0].Pages
+	want := map[string]any{"title": p.Title, "url": p.URL, "freeze": liveFreeze, "publish": liveDue, "tasks": 7.0, "ticked": 3.0, "parseError": "no freeze cell", "family": "demo"}
+	if len(got) != 1 {
+		t.Fatalf("pages = %v", got)
+	}
+	for k, v := range want {
+		if got[0][k] != v {
+			t.Errorf("page %s = %v, want %v", k, got[0][k], v)
+		}
 	}
 }
 

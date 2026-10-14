@@ -13162,13 +13162,23 @@ components:
           type: string
         statusCategory:
           type: string
+        why:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainCardWhy'
+          type: array
       required:
       - key
       - app
       - status
       - statusCategory
+      - why
       - code
       type: object
+    ReleaseTrainCardWhy:
+      enum:
+      - fixVersion
+      - release train page
+      type: string
     ReleaseTrainCodeElsewhere:
       properties:
         branch:
@@ -13688,6 +13698,47 @@ components:
       - kind
       - missing
       type: object
+    ReleaseTrainPageFact:
+      properties:
+        created:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        extra:
+          type: integer
+        family:
+          type: string
+        freeze:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        id:
+          type: string
+        keys:
+          items:
+            type: string
+          type: array
+        number:
+          type: integer
+        parseError:
+          type: string
+        publish:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        tasks:
+          type: integer
+        ticked:
+          type: integer
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - title
+      - url
+      - created
+      - family
+      - number
+      - keys
+      - tasks
+      - ticked
+      type: object
     ReleaseTrainPerson:
       properties:
         accountId:
@@ -14010,6 +14061,10 @@ components:
           type: string
         label:
           type: string
+        pages:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainPageFact'
+          type: array
         phase:
           $ref: '#/components/schemas/ReleaseTrainTrainPhase'
         publish:
@@ -14025,6 +14080,7 @@ components:
       - families
       - versions
       - datesSplit
+      - pages
       type: object
     ReleaseTrainTrainPhase:
       enum:

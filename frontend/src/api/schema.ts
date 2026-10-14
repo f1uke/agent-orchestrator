@@ -4641,7 +4641,10 @@ export interface components {
             key: string;
             status: string;
             statusCategory: string;
+            why: components["schemas"]["ReleaseTrainCardWhy"][];
         };
+        /** @enum {string} */
+        ReleaseTrainCardWhy: "fixVersion" | "release train page";
         ReleaseTrainCodeElsewhere: {
             branch: string;
             /** @constant */
@@ -4846,6 +4849,21 @@ export interface components {
             kind: "unknown";
             missing: components["schemas"]["ReleaseTrainResourceStatus"][];
         };
+        ReleaseTrainPageFact: {
+            created: components["schemas"]["ReleaseTrainDay"];
+            extra?: number;
+            family: string;
+            freeze?: components["schemas"]["ReleaseTrainDay"];
+            id: string;
+            keys: string[];
+            number: number;
+            parseError?: string;
+            publish?: components["schemas"]["ReleaseTrainDay"];
+            tasks: number;
+            ticked: number;
+            title: string;
+            url: string;
+        };
         ReleaseTrainPerson: {
             accountId: string;
             name: string;
@@ -4969,6 +4987,7 @@ export interface components {
             /** @description Train key, "21-2026" or "20-1-2026". */
             id: string;
             label: string;
+            pages: components["schemas"]["ReleaseTrainPageFact"][];
             phase: components["schemas"]["ReleaseTrainTrainPhase"];
             publish?: components["schemas"]["ReleaseTrainDay"];
             versions: components["schemas"]["ReleaseTrainAppVersion"][];

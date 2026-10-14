@@ -191,15 +191,23 @@ func mrPage(mrs []MR, r *http.Request) []byte {
 	return b
 }
 
-// NewJira returns a fake Jira Cloud site. Route keys are paths, except search
-// ("/rest/api/3/search/jql?jql=<jql>") and user ("/rest/api/3/user?accountId=<id>").
+// NewJira returns a fake Atlassian site serving Jira and Confluence. Route keys
+// are paths, except Jira search ("/rest/api/3/search/jql?jql=<jql>"), user
+// ("/rest/api/3/user?accountId=<id>") and Confluence search
+// ("/wiki/rest/api/content/search?cql=<cql>", or "...?cursor=<cursor>" for a next link).
 func NewJira(t *testing.T) *Host {
 	return newHost(t, func(r *http.Request) string {
+		q := r.URL.Query()
 		switch r.URL.Path {
 		case "/rest/api/3/search/jql":
-			return r.URL.Path + "?jql=" + r.URL.Query().Get("jql")
+			return r.URL.Path + "?jql=" + q.Get("jql")
 		case "/rest/api/3/user":
-			return r.URL.Path + "?accountId=" + r.URL.Query().Get("accountId")
+			return r.URL.Path + "?accountId=" + q.Get("accountId")
+		case "/wiki/rest/api/content/search":
+			if c := q.Get("cursor"); c != "" {
+				return r.URL.Path + "?cursor=" + c
+			}
+			return r.URL.Path + "?cql=" + q.Get("cql")
 		}
 		return r.URL.Path
 	})

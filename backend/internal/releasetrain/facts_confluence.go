@@ -58,8 +58,8 @@ const pageWindow = 60
 var (
 	pageKeyRE   = regexp.MustCompile(`\b([A-Z][A-Z0-9]+-\d+)\b`)
 	tagRE       = regexp.MustCompile(`<[^>]+>`)
-	timeAttrRE  = regexp.MustCompile(`datetime="([0-9]{4}-[0-9]{2}-[0-9]{2})"`)
-	plainDateRE = regexp.MustCompile(`([0-9]{4}-[0-9]{2}-[0-9]{2})`)
+	timeAttrRE  = regexp.MustCompile(`datetime="(\d{4}-\d{2}-\d{2})"`)
+	plainDateRE = regexp.MustCompile(`(\d{4}-\d{2}-\d{2})`)
 )
 
 // ParseTrainPage reads a page whose title names a family's train, or false
