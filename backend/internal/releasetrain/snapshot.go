@@ -41,6 +41,28 @@ func (st ResourceStatus) budget() time.Duration {
 	return kinds[st.Kind].Budget
 }
 
+// Resource is one stored resource row: its status plus what only the poller reads.
+type Resource struct {
+	ResourceStatus
+	Mode          SyncMode   `json:"mode"`
+	FactVersion   int        `json:"factVersion"`
+	Cursor        []byte     `json:"-"`
+	LastSuccessAt *time.Time `json:"lastSuccessAt,omitempty"`
+	ErrorMessage  string     `json:"errorMessage,omitempty"`
+	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
+	PlannedAt     time.Time  `json:"plannedAt"`
+	Generation    int64      `json:"generation"`
+}
+
+// Failure is a status-only write: why the last fetch failed and when to try again.
+type Failure struct {
+	At            time.Time
+	Failures      int
+	Class         ErrorClass
+	Message       string
+	NextAttemptAt time.Time
+}
+
 type resKey struct {
 	kind  KindName
 	scope Scope
@@ -67,6 +89,27 @@ func Put[T any](s *Snapshot, k Kind[T], st ResourceStatus, items []T) {
 		boxed[i] = it
 	}
 	s.res[resKey{k.Name, st.Scope}] = resource{status: st, items: boxed}
+}
+
+// PutEncoded decodes stored item bodies through st.Kind's handle and stores the resource.
+func (s *Snapshot) PutEncoded(st ResourceStatus, bodies [][]byte) error {
+	meta, ok := kinds[st.Kind]
+	if !ok {
+		return ErrUnknownKind
+	}
+	items := make([]any, 0, len(bodies))
+	for _, b := range bodies {
+		v, err := meta.decode(b)
+		if err != nil {
+			return err
+		}
+		items = append(items, v)
+	}
+	if s.res == nil {
+		s.res = map[resKey]resource{}
+	}
+	s.res[resKey{st.Kind, st.Scope}] = resource{status: st, items: items}
+	return nil
 }
 
 // Items returns the decoded items of one resource.

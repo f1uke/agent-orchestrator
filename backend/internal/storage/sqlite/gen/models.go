@@ -362,6 +362,32 @@ type PromptFingerprint struct {
 	MatchedAt       sql.NullTime
 }
 
+type ReleaseItem struct {
+	Kind            string
+	Scope           string
+	ItemKey         string
+	Body            string
+	SourceUpdatedAt sql.NullTime
+}
+
+type ReleaseResource struct {
+	Kind          string
+	Scope         string
+	AppID         sql.NullString
+	SyncMode      string
+	FactVersion   int64
+	Cursor        sql.NullString
+	CompleteAt    sql.NullTime
+	LastAttemptAt sql.NullTime
+	LastSuccessAt sql.NullTime
+	Failures      int64
+	ErrorClass    sql.NullString
+	ErrorMessage  sql.NullString
+	NextAttemptAt sql.NullTime
+	PlannedAt     time.Time
+	Generation    int64
+}
+
 type Review struct {
 	ID               string
 	SessionID        domain.SessionID

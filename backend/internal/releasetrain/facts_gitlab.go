@@ -2,6 +2,7 @@ package releasetrain
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -101,6 +102,24 @@ var (
 	KindTags       = newKind[TagFact]("gitlab.tags", Snapshotted, 10*time.Minute, perApp)
 	KindCompare    = newKind[CompareFact]("gitlab.compare", Snapshotted, 30*time.Minute, perEntity)
 )
+
+// ItemKey keys a MilestoneFact within its resource.
+func (f MilestoneFact) ItemKey() string { return strconv.Itoa(f.ID) }
+
+// ItemKey keys an MRFact within its resource.
+func (f MRFact) ItemKey() string { return strconv.Itoa(f.IID) }
+
+// ItemKey keys an MRDetailFact within its resource.
+func (f MRDetailFact) ItemKey() string { return strconv.Itoa(f.IID) }
+
+// ItemKey keys a JobsFact within its resource.
+func (f JobsFact) ItemKey() string { return strconv.Itoa(f.Pipeline) }
+
+// ItemKey keys a TagFact within its resource.
+func (f TagFact) ItemKey() string { return f.Name }
+
+// ItemKey keys a CompareFact within its resource.
+func (f CompareFact) ItemKey() string { return f.From + ".." + f.To }
 
 // ProjectScope is the scope of a per-project resource.
 func ProjectScope(project int) Scope { return Scope(fmt.Sprintf("p:%d", project)) }
