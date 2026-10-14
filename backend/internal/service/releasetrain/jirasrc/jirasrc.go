@@ -83,7 +83,7 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 		seen[id] = true
 		related, cards := rt.SpecFor(rt.KindRelatedWork, rt.VersionScope(id), app), rt.SpecFor(rt.KindCards, rt.VersionScope(id), app)
 		if !v.Live {
-			related.Budget, cards.Budget = svc.SettledBudget, svc.SettledBudget
+			related.Budget, cards.Budget = rt.SettledBudget, rt.SettledBudget
 		}
 		jobs = append(jobs,
 			svc.Job{Spec: related, Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.relatedWork(ctx, id) }},

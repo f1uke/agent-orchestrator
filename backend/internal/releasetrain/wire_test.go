@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 	"testing"
+	"time"
 )
 
 type wireBoard struct {
@@ -120,6 +121,27 @@ func TestBoardJSONNamesTrainsByKeyWithALabelAndAPhase(t *testing.T) {
 	}
 	if len(w.Apps) != 4 || w.Apps[0]["id"] != "di" || w.Apps[0]["name"] != "Demo iOS" || w.Apps[0]["family"] != "demo" {
 		t.Fatalf("apps = %v, want the four configured apps with name and family", w.Apps)
+	}
+}
+
+func TestBoardSourcesJudgeASettledVersionsReadsByTheSettledBudget(t *testing.T) {
+	f := newFixture(t, today)
+	live := healthy(f)
+	f.published("da", "18", "3.2.0", "2026-08-01", "2026-08-08")
+	f.statuses[KindCards.Name] = func(st *ResourceStatus) {
+		at := f.now.Add(-time.Hour)
+		st.CompleteAt = &at
+	}
+	w := wire(t, f.reconcile())
+
+	var stale []string
+	for _, s := range w.Sources {
+		for _, m := range s.Issues {
+			stale = append(stale, m["kind"].(string)+" "+m["scope"].(string))
+		}
+	}
+	if want := "jira.cards " + string(VersionScope(live.jira.ID)); len(stale) != 1 || stale[0] != want {
+		t.Fatalf("not fresh = %v, want only the live version's cards (%s); a settled version refetches every 6h", stale, want)
 	}
 }
 

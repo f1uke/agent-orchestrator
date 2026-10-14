@@ -9,11 +9,11 @@ import (
 func Reconcile(in Inputs, env Env) Board {
 	b := Board{Today: DayOf(env.Now, env.Loc), Apps: boardApps(in.Config), Hotfixes: []Hotfix{}, Mismatches: []Mismatch{}}
 	rs := &readSet{snap: in.Snap, cfg: in.Config, now: env.Now, today: b.Today, ageOut: env.AgeOut}
-	b.Sources = rs.sources()
 	joinTrains(&b, in.Config, in.Snap)
 	if b.Trains == nil {
 		b.Trains = []Train{}
 	}
+	b.Sources = rs.sources(b.Trains)
 	phases(b.Trains, b.Today)
 	for i := range b.Trains {
 		t := &b.Trains[i]

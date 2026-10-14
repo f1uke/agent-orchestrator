@@ -174,7 +174,8 @@ func phases(trains []Train, today Day) {
 	}
 }
 
-func (r *readSet) sources() []SourceFreshness {
+func (r *readSet) sources(trains []Train) []SourceFreshness {
+	live := r.liveEntities(trains)
 	bySystem := map[string]*SourceFreshness{}
 	system := func(k KindName) *SourceFreshness {
 		name, _, _ := strings.Cut(string(k), ".")
@@ -191,7 +192,11 @@ func (r *readSet) sources() []SourceFreshness {
 	for _, st := range r.snap.all() {
 		s := system(st.Kind)
 		s.Resources++
-		if st.ErrorClass != "" || st.CompleteAt == nil || r.now.Sub(*st.CompleteAt) > st.budget() {
+		budget := st.budget()
+		if kinds[st.Kind].cover == perEntity && !live[resKey{st.Kind, st.Scope}] {
+			budget = SettledBudget
+		}
+		if st.ErrorClass != "" || st.CompleteAt == nil || r.now.Sub(*st.CompleteAt) > budget {
 			s.Issues = append(s.Issues, st)
 		}
 		if st.CompleteAt != nil && (s.AsOf == nil || st.CompleteAt.Before(*s.AsOf)) {
