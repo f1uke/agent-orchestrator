@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,15 +16,30 @@ import (
 
 	rt "github.com/aoagents/agent-orchestrator/backend/internal/releasetrain"
 	rtsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/releasetrain"
+	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite"
 )
 
 type fakeReleaseTrains struct {
-	report  rtsvc.Report
-	initErr error
-	inits   int
+	report    rtsvc.Report
+	initErr   error
+	inits     int
+	board     *rtsvc.BoardService
+	refreshed []string
 }
 
 func (f *fakeReleaseTrains) Report(context.Context) (rtsvc.Report, error) { return f.report, nil }
+
+func (f *fakeReleaseTrains) Board(ctx context.Context, ifNoneMatch string) ([]byte, string, error) {
+	return f.board.Board(ctx, ifNoneMatch)
+}
+
+func (f *fakeReleaseTrains) Refresh(source string) error {
+	if source != "" && source != "gitlab" && source != "jira" {
+		return rtsvc.ErrUnknownSource
+	}
+	f.refreshed = append(f.refreshed, source)
+	return nil
+}
 
 func (f *fakeReleaseTrains) InitConfig() (string, error) {
 	f.inits++
@@ -102,13 +119,123 @@ func TestReleaseTrainConfigInitWritesOnceThenConflicts(t *testing.T) {
 }
 
 func TestReleaseTrainRoutesWithoutAServiceAreNotImplemented(t *testing.T) {
-	for _, m := range []string{http.MethodGet, http.MethodPost} {
-		path := "/release-trains/sources"
-		if m == http.MethodPost {
-			path = "/release-trains/config"
+	for _, route := range [][2]string{
+		{http.MethodGet, "/release-trains/sources"}, {http.MethodPost, "/release-trains/config"},
+		{http.MethodGet, "/release-trains/board"}, {http.MethodPost, "/release-trains/refresh"},
+	} {
+		if w := serveReleaseTrains(t, nil, route[0], route[1]); w.Code != http.StatusNotImplemented {
+			t.Fatalf("%s %s = %d", route[0], route[1], w.Code)
 		}
-		if w := serveReleaseTrains(t, nil, m, path); w.Code != http.StatusNotImplemented {
-			t.Fatalf("%s %s = %d", m, path, w.Code)
-		}
+	}
+}
+
+type boardFixture struct {
+	t     *testing.T
+	svc   *fakeReleaseTrains
+	store *sqlite.Store
+	now   time.Time
+	tags  rt.ResourceSpec
+}
+
+func newBoardFixture(t *testing.T) *boardFixture {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, rtsvc.ConfigFileName)
+	if err := os.WriteFile(path, []byte(rt.ExampleConfigJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := sqlite.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	f := &boardFixture{t: t, store: st, now: time.Date(2026, 10, 14, 3, 0, 0, 0, time.UTC), tags: rt.SpecFor(rt.KindTags, rt.ProjectScope(1001), "di")}
+	f.svc = &fakeReleaseTrains{board: rtsvc.NewBoardService(rtsvc.BoardDeps{
+		Config: rtsvc.NewConfigLoader(path), Store: st, Clock: func() time.Time { return f.now }})}
+	ctx := context.Background()
+	if err := st.PlanReleaseResources(ctx, []rt.ResourceSpec{f.tags}, f.now); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.WriteReleaseSnapshot(ctx, f.tags, nil, f.now); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func (f *boardFixture) get(ifNoneMatch string) *httptest.ResponseRecorder {
+	r := chi.NewRouter()
+	(&ReleaseTrainsController{Svc: f.svc}).Register(r)
+	req := httptest.NewRequest(http.MethodGet, "/release-trains/board", nil)
+	if ifNoneMatch != "" {
+		req.Header.Set("If-None-Match", ifNoneMatch)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestReleaseTrainBoardAnswers304WhileNothingChanges(t *testing.T) {
+	f := newBoardFixture(t)
+	first := f.get("")
+	etag := first.Header().Get("ETag")
+	if first.Code != http.StatusOK || etag == "" || first.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("first = %d etag %q cache %q", first.Code, etag, first.Header().Get("Cache-Control"))
+	}
+	var body struct {
+		Config struct{ State string } `json:"config"`
+		Board  *struct {
+			Apps []struct{ ID string } `json:"apps"`
+		} `json:"board"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &body); err != nil || body.Config.State != "ok" || body.Board == nil || len(body.Board.Apps) != 2 {
+		t.Fatalf("body = %s (%v)", first.Body, err)
+	}
+
+	again := f.get(etag)
+	if again.Code != http.StatusNotModified || again.Header().Get("ETag") != etag || again.Body.Len() != 0 {
+		t.Fatalf("matching If-None-Match = %d etag %q body %q", again.Code, again.Header().Get("ETag"), again.Body)
+	}
+	if stale := f.get(`"something-else"`); stale.Code != http.StatusOK || stale.Header().Get("ETag") != etag {
+		t.Fatalf("an old ETag = %d", stale.Code)
+	}
+}
+
+func TestReleaseTrainBoardETagChangesWhenASourceFails(t *testing.T) {
+	f := newBoardFixture(t)
+	etag := f.get("").Header().Get("ETag")
+	err := f.store.MarkReleaseFailure(context.Background(), f.tags, rt.Failure{At: f.now, Failures: 1, Class: rt.ErrUnavailable,
+		Message: "gitlab scm: 503", NextAttemptAt: f.now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := f.get(etag)
+	if w.Code != http.StatusOK || w.Header().Get("ETag") == etag || !strings.Contains(w.Body.String(), `"errorClass":"unavailable"`) {
+		t.Fatalf("after a failed fetch = %d, etag changed %v, body %s", w.Code, w.Header().Get("ETag") != etag, w.Body)
+	}
+}
+
+func TestReleaseTrainRefreshAccepts(t *testing.T) {
+	svc := &fakeReleaseTrains{}
+	r := chi.NewRouter()
+	(&ReleaseTrainsController{Svc: svc}).Register(r)
+	post := func(body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/release-trains/refresh", strings.NewReader(body)))
+		return w
+	}
+	if w := post(`{"source":"gitlab"}`); w.Code != http.StatusAccepted || !strings.Contains(w.Body.String(), `"source":"gitlab"`) {
+		t.Fatalf("refresh gitlab = %d %s", w.Code, w.Body)
+	}
+	if w := post(``); w.Code != http.StatusAccepted {
+		t.Fatalf("refresh with no body = %d %s", w.Code, w.Body)
+	}
+	if w := post(`{"source":"confluence"}`); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"code":"UNKNOWN_SOURCE"`) {
+		t.Fatalf("refresh confluence = %d %s", w.Code, w.Body)
+	}
+	if w := post(`{"source":`); w.Code != http.StatusBadRequest {
+		t.Fatalf("refresh with a broken body = %d", w.Code)
+	}
+	if len(svc.refreshed) != 2 || svc.refreshed[0] != "gitlab" || svc.refreshed[1] != "" {
+		t.Fatalf("refreshed = %q", svc.refreshed)
 	}
 }

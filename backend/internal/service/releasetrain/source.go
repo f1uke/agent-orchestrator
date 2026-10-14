@@ -25,9 +25,6 @@ type Source interface {
 	Credentials(ctx context.Context, view rt.PlanView) (bool, error)
 }
 
-// SettledBudget is how often a settled version's per-entity reads refetch.
-const SettledBudget = 6 * time.Hour
-
 // IsDecodeError reports whether err is a response the source could not parse.
 func IsDecodeError(err error) bool {
 	var syntax *json.SyntaxError

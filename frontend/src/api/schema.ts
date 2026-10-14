@@ -809,6 +809,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/release-trains/board": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the release-train Board; send If-None-Match with the last ETag to get 304 while nothing changed */
+        get: operations["getReleaseTrainBoard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/release-trains/config": {
         parameters: {
             query?: never;
@@ -820,6 +837,23 @@ export interface paths {
         put?: never;
         /** Write the template release-train config to the data dir, never over an existing file */
         post: operations["initReleaseTrainConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make one source's resources (or every source's) due on the next poll pass; pauses and budgets still apply */
+        post: operations["refreshReleaseTrainSources"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4444,6 +4478,332 @@ export interface components {
             /** @description True when the caller's lease was dropped. */
             released: boolean;
         };
+        ReleaseTrainAlertHit: {
+            agesOn?: components["schemas"]["ReleaseTrainDay"];
+            app?: string;
+            /** Format: date-time */
+            asOf: string;
+            bucket: components["schemas"]["ReleaseTrainBucket"];
+            changedSinceHidden?: boolean;
+            evidence: components["schemas"]["ReleaseTrainEvidence"];
+            id: string;
+            link: components["schemas"]["ReleaseTrainLink"];
+            rule: string;
+            severity: components["schemas"]["ReleaseTrainSeverity"];
+            text: string;
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train?: string;
+        };
+        ReleaseTrainAlerts: {
+            badge: components["schemas"]["ReleaseTrainBadge"];
+            hits: components["schemas"]["ReleaseTrainAlertHit"][];
+            rules: components["schemas"]["ReleaseTrainRuleOutcome"][];
+        };
+        ReleaseTrainAppVersion: {
+            app: string;
+            cards: components["schemas"]["ReleaseTrainCardUnit"][];
+            forceUpdate?: components["schemas"]["ReleaseTrainForceUpdateFact"];
+            issues: components["schemas"]["ReleaseTrainIssueFact"][];
+            jira?: components["schemas"]["ReleaseTrainJiraVersionFact"];
+            milestone: components["schemas"]["ReleaseTrainMilestoneFact"];
+            relatedWork?: components["schemas"]["ReleaseTrainRelatedWorkFact"];
+            releaseMr?: components["schemas"]["ReleaseTrainReleaseMR"];
+            stages: components["schemas"]["ReleaseTrainStage"][];
+            tag?: components["schemas"]["ReleaseTrainTag"];
+            ticket?: components["schemas"]["ReleaseTrainIssueFact"];
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+            version: string;
+        };
+        ReleaseTrainApprover: {
+            accountId: string;
+            name: string;
+            status: string;
+        };
+        ReleaseTrainBadge: {
+            count: number;
+            unknown: number;
+            worst?: components["schemas"]["ReleaseTrainSeverity"];
+        };
+        ReleaseTrainBoard: {
+            alerts: components["schemas"]["ReleaseTrainAlerts"];
+            apps: components["schemas"]["ReleaseTrainBoardApp"][];
+            hotfixes: components["schemas"]["ReleaseTrainHotfix"][];
+            mismatches: components["schemas"]["ReleaseTrainMismatch"][];
+            sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
+            today: components["schemas"]["ReleaseTrainDay"];
+            trains: components["schemas"]["ReleaseTrainTrain"][];
+        };
+        ReleaseTrainBoardApp: {
+            family: string;
+            id: string;
+            name: string;
+            platform: components["schemas"]["ReleaseTrainPlatform"];
+        };
+        ReleaseTrainBoardResponse: {
+            board?: components["schemas"]["ReleaseTrainBoard"];
+            config: components["schemas"]["ReleaseTrainConfigReport"];
+        };
+        /** @enum {string} */
+        ReleaseTrainBucket: "badge" | "history" | "hidden";
+        ReleaseTrainCardUnit: {
+            app: string;
+            assignee?: components["schemas"]["ReleaseTrainPerson"];
+            code: components["schemas"]["ReleaseTrainCodeState"];
+            key: string;
+            status: string;
+            statusCategory: string;
+        };
+        ReleaseTrainCodeElsewhere: {
+            branch: string;
+            /** @constant */
+            kind: "elsewhere";
+            on: components["schemas"]["ReleaseTrainDay"];
+        };
+        ReleaseTrainCodeMerged: {
+            /** @constant */
+            kind: "merged";
+            mrs: number[];
+        };
+        ReleaseTrainCodeNone: {
+            /** @constant */
+            kind: "none";
+        };
+        ReleaseTrainCodeOpen: {
+            /** @constant */
+            kind: "open";
+            mrs: number[];
+        };
+        ReleaseTrainCodeState: components["schemas"]["ReleaseTrainCodeMerged"] | components["schemas"]["ReleaseTrainCodeOpen"] | components["schemas"]["ReleaseTrainCodeElsewhere"] | components["schemas"]["ReleaseTrainCodeNone"];
+        ReleaseTrainCommitFact: {
+            createdOn: components["schemas"]["ReleaseTrainDay"];
+            title: string;
+            url: string;
+        };
+        ReleaseTrainConfigReport: {
+            /** @description Why the file is invalid, or how to create it when absent. */
+            message?: string;
+            path: string;
+            /** @enum {string} */
+            state: "absent" | "invalid" | "ok";
+        };
+        /** Format: date */
+        ReleaseTrainDay: string;
+        /** @enum {string} */
+        ReleaseTrainErrorClass: "auth" | "rate_limited" | "unavailable" | "not_found" | "decode" | "truncated" | "unconfigured";
+        ReleaseTrainEvidence: {
+            [key: string]: unknown;
+        };
+        ReleaseTrainForceUpdateFact: {
+            createdOn: components["schemas"]["ReleaseTrainDay"];
+            due?: components["schemas"]["ReleaseTrainDay"];
+            key: string;
+            platform: components["schemas"]["ReleaseTrainPlatform"];
+            status: string;
+            statusCategory: string;
+            url: string;
+            version: string;
+        };
+        ReleaseTrainHotfix: {
+            app: string;
+            forceUpdate?: components["schemas"]["ReleaseTrainForceUpdateFact"];
+            jira?: components["schemas"]["ReleaseTrainJiraVersionFact"];
+            milestone: components["schemas"]["ReleaseTrainMilestoneFact"];
+            tag?: components["schemas"]["ReleaseTrainTag"];
+            version: string;
+        };
+        ReleaseTrainIssueFact: {
+            assignee?: components["schemas"]["ReleaseTrainPerson"];
+            fixVersions: string[];
+            key: string;
+            releaseTicket: boolean;
+            status: string;
+            statusCategory: string;
+            subtask: boolean;
+            summary: string;
+            url: string;
+        };
+        ReleaseTrainJiraVersionFact: {
+            approvers: components["schemas"]["ReleaseTrainApprover"][];
+            description: string;
+            id: string;
+            name: string;
+            releaseDate?: components["schemas"]["ReleaseTrainDay"];
+            released: boolean;
+            url: string;
+        };
+        ReleaseTrainJobFact: {
+            allowFailure: boolean;
+            name: string;
+            status: string;
+        };
+        ReleaseTrainJobsFact: {
+            jobs: components["schemas"]["ReleaseTrainJobFact"][];
+            pipeline: number;
+            project: number;
+        };
+        ReleaseTrainLink: {
+            label: string;
+            url?: string;
+        };
+        ReleaseTrainMRDetailFact: {
+            conflicts: boolean;
+            iid: number;
+            pipeline?: components["schemas"]["ReleaseTrainPipelineFact"];
+            project: number;
+        };
+        ReleaseTrainMRFact: {
+            author: string;
+            authorUsername?: string;
+            createdOn: components["schemas"]["ReleaseTrainDay"];
+            iid: number;
+            mergedOn?: components["schemas"]["ReleaseTrainDay"];
+            milestoneId?: null | number;
+            project: number;
+            sourceBranch: string;
+            state: string;
+            targetBranch: string;
+            title: string;
+            url: string;
+        };
+        ReleaseTrainMilestoneFact: {
+            description: string;
+            due?: components["schemas"]["ReleaseTrainDay"];
+            id: number;
+            project: number;
+            start?: components["schemas"]["ReleaseTrainDay"];
+            state: string;
+            title: string;
+            url: string;
+        };
+        ReleaseTrainMismatch: {
+            app: string;
+            jira?: components["schemas"]["ReleaseTrainJiraVersionFact"];
+            kind: components["schemas"]["ReleaseTrainMismatchKind"];
+            milestone?: components["schemas"]["ReleaseTrainMilestoneFact"];
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train?: string;
+            version?: string;
+        };
+        /** @enum {string} */
+        ReleaseTrainMismatchKind: "version" | "no-milestone" | "no-jira" | "no-label";
+        ReleaseTrainOutcome: components["schemas"]["ReleaseTrainOutcomeClean"] | components["schemas"]["ReleaseTrainOutcomeFired"] | components["schemas"]["ReleaseTrainOutcomeUnknown"];
+        ReleaseTrainOutcomeClean: {
+            /** Format: date-time */
+            checkedAt: string;
+            /** @constant */
+            kind: "clean";
+        };
+        ReleaseTrainOutcomeFired: {
+            /** Format: date-time */
+            asOf: string;
+            degraded?: components["schemas"]["ReleaseTrainResourceStatus"][];
+            /** @description Hit ids; the alert list carries the hits. */
+            hits: string[];
+            /** @constant */
+            kind: "fired";
+        };
+        ReleaseTrainOutcomeUnknown: {
+            /** @constant */
+            kind: "unknown";
+            missing: components["schemas"]["ReleaseTrainResourceStatus"][];
+        };
+        ReleaseTrainPerson: {
+            accountId: string;
+            name: string;
+        };
+        ReleaseTrainPipelineFact: {
+            durationSeconds?: null | number;
+            id: number;
+            status: string;
+            url: string;
+        };
+        /** @enum {string} */
+        ReleaseTrainPlatform: "ios" | "android";
+        ReleaseTrainRefreshRequest: {
+            /**
+             * @description Refresh one source; every source when absent.
+             * @enum {string}
+             */
+            source?: "gitlab" | "jira";
+        };
+        ReleaseTrainRefreshResponse: {
+            source?: string;
+        };
+        ReleaseTrainRelatedWork: {
+            category: string;
+            title: string;
+            url: string;
+        };
+        ReleaseTrainRelatedWorkFact: {
+            links: components["schemas"]["ReleaseTrainRelatedWork"][];
+            versionId: string;
+        };
+        ReleaseTrainReleaseMR: {
+            detail?: components["schemas"]["ReleaseTrainMRDetailFact"];
+            jobs?: components["schemas"]["ReleaseTrainJobsFact"];
+            mr: components["schemas"]["ReleaseTrainMRFact"];
+        };
+        ReleaseTrainResourceStatus: {
+            app?: string;
+            /** Format: date-time */
+            completeAt?: null | string;
+            errorClass?: components["schemas"]["ReleaseTrainErrorClass"];
+            failures: number;
+            kind: string;
+            /** Format: date-time */
+            lastAttemptAt?: null | string;
+            scope: string;
+        };
+        ReleaseTrainRuleOutcome: {
+            app?: string;
+            on: boolean;
+            outcome: components["schemas"]["ReleaseTrainOutcome"];
+            rule: string;
+        };
+        /** @enum {string} */
+        ReleaseTrainSeverity: "block" | "data" | "risk" | "hygiene" | "info";
+        ReleaseTrainSourceFreshness: {
+            /** Format: date-time */
+            asOf?: null | string;
+            issues: components["schemas"]["ReleaseTrainResourceStatus"][];
+            resources: number;
+            system: string;
+        };
+        ReleaseTrainStage: {
+            conventional?: boolean;
+            date?: components["schemas"]["ReleaseTrainDay"];
+            detail: string;
+            key: components["schemas"]["ReleaseTrainStageKey"];
+            missing?: components["schemas"]["ReleaseTrainResourceStatus"][];
+            reads: string[];
+            status: components["schemas"]["ReleaseTrainStageStatus"];
+        };
+        /** @enum {string} */
+        ReleaseTrainStageKey: "freeze" | "scan" | "approve" | "tag" | "publish" | "force";
+        /** @enum {string} */
+        ReleaseTrainStageStatus: "done" | "running" | "waiting" | "failed" | "late" | "todo" | "unknown" | "not_observable";
+        ReleaseTrainTag: {
+            commitOn: components["schemas"]["ReleaseTrainDay"];
+            compareUrl?: string;
+            mergesAfter: components["schemas"]["ReleaseTrainCommitFact"][];
+            name: string;
+            newest: boolean;
+            project: number;
+            url: string;
+        };
+        ReleaseTrainTrain: {
+            families: string[];
+            freeze?: components["schemas"]["ReleaseTrainDay"];
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            id: string;
+            label: string;
+            phase: components["schemas"]["ReleaseTrainTrainPhase"];
+            publish?: components["schemas"]["ReleaseTrainDay"];
+            versions: components["schemas"]["ReleaseTrainAppVersion"][];
+        };
+        /** @enum {string} */
+        ReleaseTrainTrainPhase: "past" | "current" | "next";
         RemoveProjectResult: {
             projectId: string;
             removedStorageDir: boolean;
@@ -8568,6 +8928,51 @@ export interface operations {
             };
         };
     };
+    getReleaseTrainBoard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainBoardResponse"];
+                };
+            };
+            /** @description Not Modified */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     initReleaseTrainConfig: {
         parameters: {
             query?: never;
@@ -8588,6 +8993,57 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    refreshReleaseTrainSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseTrainRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainRefreshResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

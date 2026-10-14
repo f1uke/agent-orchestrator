@@ -17,6 +17,7 @@ import (
 
 type releaseTrains struct {
 	*rtsvc.Poller
+	*rtsvc.BoardService
 	configPath string
 }
 
@@ -32,17 +33,20 @@ func startReleaseTrains(ctx context.Context, store *sqlite.Store, dataDir string
 		Interval:    rtsvc.Tick,
 	})
 	path := filepath.Join(dataDir, rtsvc.ConfigFileName)
+	config := rtsvc.NewConfigLoader(path)
+	clock := func() time.Time { return time.Now().UTC() }
 	poller := rtsvc.NewPoller(rtsvc.PollerDeps{
-		Config: rtsvc.NewConfigLoader(path),
+		Config: config,
 		Store:  store,
 		Sources: []rtsvc.Source{
 			gitlabsrc.New(gitlabsrc.Options{Tokens: gitlabTokenSource}),
 			jirasrc.New(jirasrc.Options{}),
 		},
-		Clock:  func() time.Time { return time.Now().UTC() },
+		Clock:  clock,
 		Rand:   rand.Float64, //nolint:gosec // backoff jitter, not security
 		Logger: logger,
 	})
+	board := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, Store: store, Clock: clock})
 	done := observe.StartPollLoop(ctx, rtsvc.Tick, poller.Poll, logger, "release trains", rec.Tick)
-	return releaseTrains{Poller: poller, configPath: path}, done
+	return releaseTrains{Poller: poller, BoardService: board, configPath: path}, done
 }

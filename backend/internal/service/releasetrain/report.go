@@ -20,9 +20,9 @@ type Report struct {
 
 // ConfigReport is the config file's state.
 type ConfigReport struct {
-	State   ConfigState
-	Message string
-	Path    string
+	State   ConfigState `json:"state" enum:"absent,invalid,ok"`
+	Message string      `json:"message,omitempty" description:"Why the file is invalid, or how to create it when absent."`
+	Path    string      `json:"path"`
 }
 
 // ResourceReport is one resource's freshness.

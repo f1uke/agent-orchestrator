@@ -49,6 +49,7 @@ func Build() ([]byte, error) {
 		// swaggest defaults to PackageType, e.g. "ProjectProject", "EnvelopeAPIError".
 		jsonschema.InterceptDefName(schemaName),
 	)
+	mapReleaseTrainTypes(r)
 
 	r.Spec.SetTitle("Agent Orchestrator HTTP daemon")
 	r.Spec.SetVersion("0.1.0-route-shell")
@@ -554,6 +555,27 @@ func releaseTrainOperations() []operation {
 			resps: []respUnit{
 				{http.StatusCreated, controllers.ReleaseTrainConfigInitResponse{}},
 				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/release-trains/board", id: "getReleaseTrainBoard", tag: "release-trains",
+			summary: "Read the release-train Board; send If-None-Match with the last ETag to get 304 while nothing changed",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainBoardResponse{}},
+				{http.StatusNotModified, nil},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/release-trains/refresh", id: "refreshReleaseTrainSources", tag: "release-trains",
+			summary: "Make one source's resources (or every source's) due on the next poll pass; pauses and budgets still apply",
+			reqBody: controllers.ReleaseTrainRefreshRequest{},
+			resps: []respUnit{
+				{http.StatusAccepted, controllers.ReleaseTrainRefreshResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
 				{http.StatusInternalServerError, envelope.APIError{}},
 				{http.StatusNotImplemented, envelope.APIError{}},
 			},

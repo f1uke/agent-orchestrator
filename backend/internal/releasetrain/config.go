@@ -181,13 +181,13 @@ func (c Config) app(id AppID) App {
 	return App{}
 }
 
-func (c Config) familyOf(id AppID) (Family, bool) {
+func (c Config) familyOf(id AppID) Family {
 	for _, f := range c.Families {
 		for _, a := range f.Apps {
 			if a == id {
-				return f, true
+				return f
 			}
 		}
 	}
-	return Family{}, false
+	return Family{}
 }
