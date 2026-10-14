@@ -9,7 +9,7 @@ import (
 )
 
 // ErrRateLimited is the class of a 429; *RateLimitError carries the wait.
-var ErrRateLimited = errors.New("jira: rate limited")
+var ErrRateLimited = errors.New("atlassian: rate limited")
 
 // RateLimitError is a 429 from an Atlassian site. RetryAfter is zero when the
 // server named no usable wait.
