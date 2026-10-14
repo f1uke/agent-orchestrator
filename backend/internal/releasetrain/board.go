@@ -73,7 +73,7 @@ type Train struct {
 }
 
 // SourceFreshness is one system's resources at a glance: the oldest complete
-// read and every resource that is stale, never complete, or failing.
+// read of live data, and every resource that is stale, never complete, or failing.
 type SourceFreshness struct {
 	System    string           `json:"system"`
 	Resources int              `json:"resources"`
@@ -192,14 +192,14 @@ func (r *readSet) sources(trains []Train) []SourceFreshness {
 	for _, st := range r.snap.all() {
 		s := system(st.Kind)
 		s.Resources++
-		budget := st.budget()
-		if kinds[st.Kind].cover == perEntity && !live[resKey{st.Kind, st.Scope}] {
+		budget, settled := st.budget(), kinds[st.Kind].cover == perEntity && !live[resKey{st.Kind, st.Scope}]
+		if settled {
 			budget = SettledBudget
 		}
 		if st.ErrorClass != "" || st.CompleteAt == nil || r.now.Sub(*st.CompleteAt) > budget {
 			s.Issues = append(s.Issues, st)
 		}
-		if st.CompleteAt != nil && (s.AsOf == nil || st.CompleteAt.Before(*s.AsOf)) {
+		if !settled && st.CompleteAt != nil && (s.AsOf == nil || st.CompleteAt.Before(*s.AsOf)) {
 			at := *st.CompleteAt
 			s.AsOf = &at
 		}

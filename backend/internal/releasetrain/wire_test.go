@@ -145,6 +145,24 @@ func TestBoardSourcesJudgeASettledVersionsReadsByTheSettledBudget(t *testing.T) 
 	}
 }
 
+func TestBoardSourcesAgeIsTheOldestLiveRead(t *testing.T) {
+	f := newFixture(t, today)
+	healthy(f)
+	settled := f.published("da", "18", "3.2.0", "2026-08-01", "2026-08-08")
+	f.statuses[KindCards.Name] = func(st *ResourceStatus) {
+		if st.Scope == VersionScope(settled.jira.ID) {
+			at := f.now.Add(-5 * time.Hour)
+			st.CompleteAt = &at
+		}
+	}
+	b := f.reconcile()
+	for _, s := range b.Sources {
+		if s.System == "jira" && (s.AsOf == nil || f.now.Sub(*s.AsOf) > time.Minute) {
+			t.Fatalf("jira age = %v; a settled read 5h old within its 6h budget must not age the source", s.AsOf)
+		}
+	}
+}
+
 func TestBoardSourcesListStaleAndFailingResourcesPerSystem(t *testing.T) {
 	f := newFixture(t, today)
 	healthy(f)
