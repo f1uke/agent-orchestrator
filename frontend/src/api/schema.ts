@@ -4862,6 +4862,7 @@ export interface components {
             app: string;
             branch: string;
             cards: components["schemas"]["ReleaseTrainLLBCard"][];
+            gone?: boolean;
             landing?: components["schemas"]["ReleaseTrainMRFact"];
             lastIn: components["schemas"]["ReleaseTrainDay"];
             openedOn: components["schemas"]["ReleaseTrainDay"];

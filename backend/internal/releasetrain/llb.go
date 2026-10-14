@@ -45,7 +45,9 @@ type LongLivedBranch struct {
 	Cards    []LLBCard `json:"cards"`
 	Landing  *MRFact   `json:"landing,omitempty"`
 	Ahead    *int      `json:"ahead,omitempty"`
-	State    LLBState  `json:"state"`
+	// Gone means GitLab no longer has the branch: it was deleted without landing.
+	Gone  bool     `json:"gone,omitempty"`
+	State LLBState `json:"state"`
 	// Train is the train a merged landing rides.
 	Train *TrainID `json:"train,omitempty"`
 	outs  []MRFact
@@ -179,10 +181,13 @@ func llbOf(app App, name string, ins, outs []MRFact, snap Snapshot, jira map[str
 		b.Landing = &landing
 	}
 	if b.Landing == nil || b.Landing.MergedOn == nil {
-		for _, c := range Items(snap, KindCompare, CompareScope(app.GitLabProject, "develop", name)) {
+		scope := CompareScope(app.GitLabProject, "develop", name)
+		for _, c := range Items(snap, KindCompare, scope) {
 			n := len(c.Commits)
 			b.Ahead = &n
 		}
+		st, ok := snap.Status(KindCompare.Name, scope)
+		b.Gone = ok && st.ErrorClass == ErrNotFound
 	}
 	b.State = llbState(b, ins, cutover[app.ID], hasDay(cutover, app.ID))
 	return b

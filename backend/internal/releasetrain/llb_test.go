@@ -132,6 +132,25 @@ func TestLLBBranchFacts(t *testing.T) {
 	}
 }
 
+func TestLLBIsGoneWhenItsCompareFindsNoBranch(t *testing.T) {
+	f := newFixture(t, today)
+	f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+	f.mr("di", "DEMO-2 bond", "feat/DEMO-2", "feature/demo-bond", MRMerged, "2026-09-01", "2026-09-02")
+	f.ahead("di", "feature/demo-wallet", 0)
+	f.ahead("di", "feature/demo-bond", 0)
+	f.statuses[KindCompare.Name] = func(st *ResourceStatus) {
+		if st.Scope == CompareScope(1001, "develop", "feature/demo-wallet") {
+			st.CompleteAt, st.ErrorClass = nil, ErrNotFound
+		}
+	}
+	b := f.reconcile()
+	_, wallet := llbBranch(t, b, "di", "feature/demo-wallet")
+	_, bond := llbBranch(t, b, "di", "feature/demo-bond")
+	if !wallet.Gone || bond.Gone {
+		t.Fatalf("gone: wallet %v bond %v; want only the branch GitLab cannot find", wallet.Gone, bond.Gone)
+	}
+}
+
 func TestLLBStates(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

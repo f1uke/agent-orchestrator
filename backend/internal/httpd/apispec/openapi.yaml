@@ -13737,6 +13737,8 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainLLBCard'
           type: array
+        gone:
+          type: boolean
         landing:
           $ref: '#/components/schemas/ReleaseTrainMRFact'
         lastIn:
