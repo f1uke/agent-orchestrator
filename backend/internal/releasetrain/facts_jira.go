@@ -52,6 +52,7 @@ type IssueFact struct {
 	ReleaseTicket  bool     `json:"releaseTicket"`
 	FixVersions    []string `json:"fixVersions"`
 	Assignee       *Person  `json:"assignee,omitempty"`
+	Parent         string   `json:"parent,omitempty"`
 	URL            string   `json:"url"`
 }
 
@@ -82,7 +83,15 @@ var (
 	KindRelatedWork  = newKind[RelatedWorkFact]("jira.relatedwork", Snapshotted, 15*time.Minute, perEntity)
 	KindCards        = newKind[IssueFact]("jira.cards", Snapshotted, 5*time.Minute, perEntity)
 	KindTechReq      = newKind[ForceUpdateFact]("jira.techreq", Snapshotted, 30*time.Minute, global)
+	KindLLBCards     = newKind[IssueFact]("jira.llb_cards", Snapshotted, 10*time.Minute, global)
+	KindMySubtasks   = newKind[IssueFact]("jira.my_subtasks", Snapshotted, 5*time.Minute, global)
 )
+
+// LLBCardsScope is the scope of the Jira read of every long-lived-branch card.
+const LLBCardsScope Scope = "llb"
+
+// MySubtasksScope is the scope of the Jira read of my subtasks under the cards the Board shows.
+const MySubtasksScope Scope = "mine"
 
 // ItemKey keys a JiraVersionFact within its resource.
 func (f JiraVersionFact) ItemKey() string { return f.ID }

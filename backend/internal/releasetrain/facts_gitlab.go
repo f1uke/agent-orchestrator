@@ -38,6 +38,7 @@ type MRFact struct {
 const (
 	MROpened = "opened"
 	MRMerged = "merged"
+	MRClosed = "closed"
 )
 
 // MRDetailFact is the single-MR read that carries the head pipeline and conflicts.

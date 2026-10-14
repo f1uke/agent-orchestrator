@@ -53,6 +53,24 @@ type SubjHotfixTrain struct {
 	Train   TrainID
 }
 
+// SubjCardOnTrain is one card on one app's version of a train.
+type SubjCardOnTrain struct {
+	Train TrainID
+	App   AppID
+	Key   string
+}
+
+// SubjMR is one merge request.
+type SubjMR struct {
+	App AppID
+	IID int
+}
+
+func (s SubjCardOnTrain) subjectKey() string {
+	return fmt.Sprintf("ct/%s/%s/%s", s.Train.Key(), s.App, s.Key)
+}
+func (s SubjMR) subjectKey() string { return fmt.Sprintf("mr/%s/%d", s.App, s.IID) }
+
 func (s SubjVersion) subjectKey() string     { return fmt.Sprintf("v/%s/%s", s.Train.Key(), s.App) }
 func (s SubjJiraVersion) subjectKey() string { return "jv/" + s.ID }
 func (s SubjVersionDate) subjectKey() string {

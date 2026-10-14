@@ -217,12 +217,61 @@ func TestTrainWithoutConfigSaysHowToCreateOneAndExitsZero(t *testing.T) {
 	}
 }
 
-func TestTrainMeSaysIdentityIsNotThereYet(t *testing.T) {
-	setConfigEnv(t)
-	for _, args := range [][]string{{"train", "--me"}, {"train", "alerts", "--me"}} {
-		_, _, err := executeCLI(t, aliveDeps(), args...)
-		if ExitCode(err) != 2 || !strings.Contains(err.Error(), "--me") || !strings.Contains(err.Error(), "identity") {
-			t.Fatalf("%v = %v", args, err)
+func TestTrainMeKeepsOnlyWhatConcernsMe(t *testing.T) {
+	body := strings.Replace(trainBoardJSON, `"mismatches": [],`, `"mismatches": [], "identity": {"kind": "known", "jiraAccountId": "acc-ex", "gitlabUsername": "ex", "displayName": "Example Person"},`, 1)
+	body = strings.Replace(body, `"releaseMr": {"mr": {"iid": 77, "author": "Example Person"}},`, `"releaseMr": {"mr": {"iid": 77, "author": "Example Person"}}, "mine": [{"why": "release_mr_author", "ref": "!77"}],`, 1)
+	body = strings.Replace(body, `"text": "!77 failed: build_test", "bucket": "badge"`, `"text": "!77 failed: build_test", "bucket": "badge", "mine": [{"why": "release_mr_author", "ref": "!77"}]`, 1)
+
+	out, err := runTrain(t, body, "--me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Only me: Example Person\n") || !strings.Contains(out, "  Demo iOS  2.4.0  scan") || strings.Contains(out, "  Demo Android  2.4.0") {
+		t.Fatalf("--me =\n%s", out)
+	}
+	if !strings.Contains(out, "Needs attention  1 block\n") || strings.Contains(out, "risk") {
+		t.Fatalf("--me attention =\n%s", out)
+	}
+
+	out, err = runTrain(t, body, "alerts", "--me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "BLOCK  C1  #21 Demo iOS 2.4.0  !77 failed: build_test  C1~v/21-2026/di\n" {
+		t.Fatalf("alerts --me =\n%s", out)
+	}
+
+	out, err = runTrain(t, body, "--json", "--me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Board struct {
+			Trains []struct {
+				Versions []struct{ App string } `json:"versions"`
+			} `json:"trains"`
+			Alerts struct {
+				Hits []struct{ ID string } `json:"hits"`
+			} `json:"alerts"`
+		} `json:"board"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Board.Trains) != 1 || len(got.Board.Trains[0].Versions) != 1 || got.Board.Trains[0].Versions[0].App != "di" || len(got.Board.Alerts.Hits) != 1 {
+		t.Fatalf("--json --me = %+v", got.Board)
+	}
+}
+
+func TestTrainMeWithUnknownIdentitySaysWhyAndExitsZero(t *testing.T) {
+	body := strings.Replace(trainBoardJSON, `"mismatches": [],`, `"mismatches": [], "identity": {"kind": "unknown", "reason": "the GitLab user (gitlab.user) has not been read"},`, 1)
+	for _, args := range [][]string{{"--me"}, {"alerts", "--me"}, {"--me", "--json"}} {
+		out, err := runTrain(t, body, args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if out != "Only me is unavailable: the GitLab user (gitlab.user) has not been read\n" {
+			t.Fatalf("%v = %q", args, out)
 		}
 	}
 }

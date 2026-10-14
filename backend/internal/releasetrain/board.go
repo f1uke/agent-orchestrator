@@ -43,8 +43,13 @@ type Board struct {
 	Trains     []Train           `json:"trains"`
 	Hotfixes   []Hotfix          `json:"hotfixes"`
 	Mismatches []Mismatch        `json:"mismatches"`
-	Alerts     Alerts            `json:"alerts"`
-	Catalogue  []RuleInfo        `json:"catalogue"`
+	LLBs       []LLBGroup        `json:"llbs"`
+	// Cutover is each app's first merge into a sprint branch; apps with none are absent.
+	Cutover map[AppID]Day `json:"cutover"`
+	// Identity is who "me" is for every Mine on the Board.
+	Identity  IdentityState `json:"identity"`
+	Alerts    Alerts        `json:"alerts"`
+	Catalogue []RuleInfo    `json:"catalogue"`
 }
 
 // BoardApp is one configured app as every surface names it.
@@ -104,6 +109,7 @@ type AppVersion struct {
 	Issues      []IssueFact      `json:"issues"`
 	Stages      []Stage          `json:"stages"`
 	Cards       []CardUnit       `json:"cards"`
+	Mine        []MineReason     `json:"mine,omitempty"`
 	page        *PageFact
 }
 
@@ -115,6 +121,7 @@ type Hotfix struct {
 	Jira        *JiraVersionFact `json:"jira,omitempty"`
 	Tag         *Tag             `json:"tag,omitempty"`
 	ForceUpdate *ForceUpdateFact `json:"forceUpdate,omitempty"`
+	Mine        []MineReason     `json:"mine,omitempty"`
 }
 
 // ReleaseMR is a version's release MR with what its detail and jobs reads say.

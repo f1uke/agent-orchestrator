@@ -12967,6 +12967,10 @@ components:
           type: string
         link:
           $ref: '#/components/schemas/ReleaseTrainLink'
+        mine:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMineReason'
+          type: array
         rule:
           type: string
         severity:
@@ -13026,6 +13030,10 @@ components:
           $ref: '#/components/schemas/ReleaseTrainJiraVersionFact'
         milestone:
           $ref: '#/components/schemas/ReleaseTrainMilestoneFact'
+        mine:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMineReason'
+          type: array
         relatedWork:
           $ref: '#/components/schemas/ReleaseTrainRelatedWorkFact'
         releaseMr:
@@ -13089,9 +13097,21 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainRuleInfo'
           type: array
+        cutover:
+          additionalProperties:
+            $ref: '#/components/schemas/ReleaseTrainDay'
+          type:
+          - object
+          - "null"
         hotfixes:
           items:
             $ref: '#/components/schemas/ReleaseTrainHotfix'
+          type: array
+        identity:
+          $ref: '#/components/schemas/ReleaseTrainIdentity'
+        llbs:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainLLBGroup'
           type: array
         mismatches:
           items:
@@ -13114,6 +13134,9 @@ components:
       - trains
       - hotfixes
       - mismatches
+      - llbs
+      - cutover
+      - identity
       - alerts
       - catalogue
       type: object
@@ -13158,6 +13181,10 @@ components:
           $ref: '#/components/schemas/ReleaseTrainCodeState'
         key:
           type: string
+        mine:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMineReason'
+          type: array
         status:
           type: string
         statusCategory:
@@ -13202,6 +13229,9 @@ components:
           items:
             type: integer
           type: array
+        via:
+          description: The long-lived branch that carried the MRs into the train.
+          type: string
       required:
       - kind
       - mrs
@@ -13227,10 +13257,27 @@ components:
       - kind
       - mrs
       type: object
+    ReleaseTrainCodeParked:
+      properties:
+        branch:
+          type: string
+        kind:
+          const: parked
+          type: string
+        mrs:
+          items:
+            type: integer
+          type: array
+      required:
+      - kind
+      - branch
+      - mrs
+      type: object
     ReleaseTrainCodeState:
       oneOf:
       - $ref: '#/components/schemas/ReleaseTrainCodeMerged'
       - $ref: '#/components/schemas/ReleaseTrainCodeOpen'
+      - $ref: '#/components/schemas/ReleaseTrainCodeParked'
       - $ref: '#/components/schemas/ReleaseTrainCodeElsewhere'
       - $ref: '#/components/schemas/ReleaseTrainCodeNone'
       type: object
@@ -13341,6 +13388,10 @@ components:
           $ref: '#/components/schemas/ReleaseTrainJiraVersionFact'
         milestone:
           $ref: '#/components/schemas/ReleaseTrainMilestoneFact'
+        mine:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMineReason'
+          type: array
         tag:
           $ref: '#/components/schemas/ReleaseTrainTag'
         version:
@@ -13349,6 +13400,39 @@ components:
       - app
       - version
       - milestone
+      type: object
+    ReleaseTrainIdentity:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainIdentityKnown'
+      - $ref: '#/components/schemas/ReleaseTrainIdentityUnknown'
+      type: object
+    ReleaseTrainIdentityKnown:
+      properties:
+        displayName:
+          type: string
+        gitlabUsername:
+          type: string
+        jiraAccountId:
+          type: string
+        kind:
+          const: known
+          type: string
+      required:
+      - kind
+      - jiraAccountId
+      - gitlabUsername
+      - displayName
+      type: object
+    ReleaseTrainIdentityUnknown:
+      properties:
+        kind:
+          const: unknown
+          type: string
+        reason:
+          type: string
+      required:
+      - kind
+      - reason
       type: object
     ReleaseTrainIssueFact:
       properties:
@@ -13359,6 +13443,8 @@ components:
             type: string
           type: array
         key:
+          type: string
+        parent:
           type: string
         releaseTicket:
           type: boolean
@@ -13435,6 +13521,104 @@ components:
       - project
       - pipeline
       - jobs
+      type: object
+    ReleaseTrainLLBCard:
+      properties:
+        assignee:
+          $ref: '#/components/schemas/ReleaseTrainPerson'
+        key:
+          type: string
+        mr:
+          $ref: '#/components/schemas/ReleaseTrainMRFact'
+        status:
+          type: string
+        statusCategory:
+          type: string
+        summary:
+          type: string
+      required:
+      - key
+      - mr
+      type: object
+    ReleaseTrainLLBDropped:
+      properties:
+        kind:
+          const: dropped
+          type: string
+      required:
+      - kind
+      type: object
+    ReleaseTrainLLBGroup:
+      properties:
+        branches:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainLongLivedBranch'
+          type: array
+        id:
+          type: string
+        mine:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMineReason'
+          type: array
+        name:
+          type: string
+        plan:
+          $ref: '#/components/schemas/ReleaseTrainLlbPlan'
+        target:
+          $ref: '#/components/schemas/ReleaseTrainLLBTarget'
+      required:
+      - id
+      - name
+      - target
+      - branches
+      type: object
+    ReleaseTrainLLBLandedIn:
+      properties:
+        kind:
+          const: landed
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      type: object
+    ReleaseTrainLLBNoTarget:
+      properties:
+        kind:
+          const: none
+          type: string
+      required:
+      - kind
+      type: object
+    ReleaseTrainLLBPlanned:
+      properties:
+        kind:
+          const: planned
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      type: object
+    ReleaseTrainLLBState:
+      enum:
+      - open
+      - landing
+      - landing_wrong
+      - landed
+      - landed_wrong
+      - stranded
+      type: string
+    ReleaseTrainLLBTarget:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainLLBLandedIn'
+      - $ref: '#/components/schemas/ReleaseTrainLLBPlanned'
+      - $ref: '#/components/schemas/ReleaseTrainLLBNoTarget'
+      - $ref: '#/components/schemas/ReleaseTrainLLBDropped'
       type: object
     ReleaseTrainLink:
       properties:
@@ -13539,6 +13723,41 @@ components:
       required:
       - plans
       type: object
+    ReleaseTrainLongLivedBranch:
+      properties:
+        ahead:
+          type:
+          - "null"
+          - integer
+        app:
+          type: string
+        branch:
+          type: string
+        cards:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainLLBCard'
+          type: array
+        gone:
+          type: boolean
+        landing:
+          $ref: '#/components/schemas/ReleaseTrainMRFact'
+        lastIn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        openedOn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        state:
+          $ref: '#/components/schemas/ReleaseTrainLLBState'
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - app
+      - branch
+      - openedOn
+      - lastIn
+      - cards
+      - state
+      type: object
     ReleaseTrainMRDetailFact:
       properties:
         conflicts:
@@ -13619,6 +13838,26 @@ components:
       - state
       - url
       type: object
+    ReleaseTrainMineReason:
+      properties:
+        ref:
+          type: string
+        why:
+          $ref: '#/components/schemas/ReleaseTrainMineWhy'
+      required:
+      - why
+      type: object
+    ReleaseTrainMineWhy:
+      enum:
+      - assignee
+      - subtask
+      - mr_author
+      - release_mr_author
+      - release_ticket_assignee
+      - approver
+      - card
+      - landing_author
+      type: string
     ReleaseTrainMismatch:
       properties:
         app:

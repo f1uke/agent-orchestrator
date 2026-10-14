@@ -83,17 +83,18 @@ type Link struct {
 
 // Hit is one rule finding about one subject.
 type Hit struct {
-	ID       HitID     `json:"id"`
-	Rule     RuleID    `json:"rule"`
-	Subject  Subject   `json:"-"`
-	Severity Severity  `json:"severity"`
-	Train    *TrainID  `json:"train,omitempty"`
-	App      AppID     `json:"app,omitempty"`
-	AgesOn   *Day      `json:"agesOn,omitempty"`
-	Evidence Evidence  `json:"evidence"`
-	Text     string    `json:"text"`
-	Link     Link      `json:"link"`
-	AsOf     time.Time `json:"asOf"`
+	ID       HitID        `json:"id"`
+	Rule     RuleID       `json:"rule"`
+	Subject  Subject      `json:"-"`
+	Severity Severity     `json:"severity"`
+	Train    *TrainID     `json:"train,omitempty"`
+	App      AppID        `json:"app,omitempty"`
+	AgesOn   *Day         `json:"agesOn,omitempty"`
+	Evidence Evidence     `json:"evidence"`
+	Text     string       `json:"text"`
+	Link     Link         `json:"link"`
+	AsOf     time.Time    `json:"asOf"`
+	Mine     []MineReason `json:"mine,omitempty"`
 }
 
 // Fingerprint hashes the evidence, so a hide can tell when the facts behind a hit changed.

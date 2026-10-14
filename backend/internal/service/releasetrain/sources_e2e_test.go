@@ -70,7 +70,11 @@ func newWorld(t *testing.T) *world {
 	}
 	mrs = append(mrs, rttest.MR{IID: 301, Title: "Release 3.5.0", Source: "release/3.5.0", Target: "main", State: "opened",
 		Author: "Rae Example", Username: "rae", MilestoneID: 11, CreatedAt: at("2026-10-12T02:00:00Z"), UpdatedAt: at("2026-10-12T02:00:00Z")})
+	mrs = append(mrs, rttest.MR{IID: 302, Title: "DEMO-30 wallet", Source: "feature/DEMO-30", Target: "feature/demo-wallet", State: "merged",
+		Author: "Dee Example", Username: "dee", CreatedAt: at("2026-10-01T02:00:00Z"), UpdatedAt: at("2026-10-12T03:00:00Z")})
 	w.gl.SetMRs(1001, mrs)
+	w.jira.Set(`/rest/api/3/search/jql?jql=parent in (DEMO-1, DEMO-30, DEMO-40) AND assignee = "acc-dee" ORDER BY key`, `{"issues":[{"key":"DEMO-41","fields":{"summary":"iOS top up","status":{"name":"To Do","statusCategory":{"key":"new"}},"issuetype":{"subtask":true},"parent":{"key":"DEMO-40"},"assignee":{"accountId":"acc-dee","displayName":"Dee Example"},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
+	w.jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-30) ORDER BY key`, `{"issues":[{"key":"DEMO-30","fields":{"summary":"Wallet","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"issuetype":{"subtask":false},"assignee":{"accountId":"acc-dee","displayName":"Dee Example"},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
 
 	w.jira.Set("/rest/api/3/project/DEMO/version", `{"isLast":true,"values":[{"id":"5001","name":"iOS 3.5.0","description":"Release Train #21/2026","releaseDate":"2026-10-19","approvers":[{"accountId":"acc-ann","status":"PENDING"}]}]}`)
 	w.jira.Set("/rest/api/3/version/5001/relatedwork", `[]`)
@@ -207,9 +211,9 @@ func TestBothSourcesBackfillToCompleteThenFetchOnlyWhatIsDue(t *testing.T) {
 	}
 	w.now = w.now.Add(5 * time.Minute)
 	_, jira = w.pass()
-	wantJira := []string{"/rest/api/3/project/DEMO/version", "/rest/api/3/search/jql", "/rest/api/3/search/jql"}
+	wantJira := []string{"/rest/api/3/project/DEMO/version", "/rest/api/3/search/jql", "/rest/api/3/search/jql", "/rest/api/3/search/jql", "/rest/api/3/search/jql"}
 	if strings.Join(jira, " ") != strings.Join(wantJira, " ") {
-		t.Fatalf("steady pass after 5m fetched atlassian %v; want versions, the version's cards and the page's cards", jira)
+		t.Fatalf("steady pass after 6m fetched atlassian %v; want versions, the version's cards, the page's cards, the long-lived cards and my subtasks", jira)
 	}
 	w.now = w.now.Add(10 * time.Minute)
 	_, atl := w.pass()
@@ -239,9 +243,25 @@ func TestAPageOnlyCardRidesItsTrainEndToEnd(t *testing.T) {
 						Key    string   `json:"key"`
 						Status string   `json:"status"`
 						Why    []string `json:"why"`
+						Mine   []struct {
+							Why string `json:"why"`
+							Ref string `json:"ref"`
+						} `json:"mine"`
 					} `json:"cards"`
 				} `json:"versions"`
 			} `json:"trains"`
+			Identity struct {
+				Kind string `json:"kind"`
+			} `json:"identity"`
+			LLBs []struct {
+				ID       string `json:"id"`
+				Branches []struct {
+					Cards []struct {
+						Key    string `json:"key"`
+						Status string `json:"status"`
+					} `json:"cards"`
+				} `json:"branches"`
+			} `json:"llbs"`
 			Alerts struct {
 				Hits []struct {
 					ID string `json:"id"`
@@ -268,6 +288,13 @@ func TestAPageOnlyCardRidesItsTrainEndToEnd(t *testing.T) {
 	}
 	if strings.Join(a6, " ") != "A6~vd/21-2026/di/publish" {
 		t.Fatalf("A6 hits = %v; the page says publish 20 Oct, the milestone is due 19 Oct", a6)
+	}
+	if resp.Board.Identity.Kind != "known" || len(cards[0].Mine) != 1 || cards[0].Mine[0].Why != "subtask" || cards[0].Mine[0].Ref != "DEMO-41" {
+		t.Fatalf("identity %s, DEMO-40 mine %+v; want known and my subtask DEMO-41", resp.Board.Identity.Kind, cards[0].Mine)
+	}
+	llbs := resp.Board.LLBs
+	if len(llbs) != 1 || llbs[0].ID != "demo-wallet" || llbs[0].Branches[0].Cards[0].Status != "In Progress" {
+		t.Fatalf("llbs = %+v; want demo-wallet with DEMO-30's Jira status", llbs)
 	}
 }
 
@@ -314,7 +341,7 @@ func TestEveryKindHasExactlyOneProducingSource(t *testing.T) {
 			t.Errorf("kind %s is read by a rule or stage and produced by %v; want exactly one source", k, producers[k])
 		}
 	}
-	for _, k := range []rt.KindName{rt.KindJiraUsers.Name, rt.KindJiraMyself.Name, rt.KindGitLabUser.Name, rt.KindPageCards.Name} {
+	for _, k := range []rt.KindName{rt.KindJiraUsers.Name, rt.KindJiraMyself.Name, rt.KindGitLabUser.Name, rt.KindPageCards.Name, rt.KindLLBCards.Name, rt.KindMySubtasks.Name} {
 		if len(producers[k]) != 1 {
 			t.Errorf("kind %s produced by %v; want exactly one source", k, producers[k])
 		}

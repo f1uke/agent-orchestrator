@@ -117,6 +117,10 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 			add(svc.Job{Spec: rt.SpecFor(rt.KindCompare, rt.CompareScope(p, tag, "main"), v.App), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.compare(ctx, p, tag, "main") }})
 		}
 	}
+	for _, l := range view.LLBs {
+		p, branch := l.Project, l.Branch
+		add(svc.Job{Spec: rt.SpecFor(rt.KindCompare, rt.CompareScope(p, "develop", branch), l.App), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.compare(ctx, p, "develop", branch) }})
+	}
 	jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindGitLabUser, rt.MyselfScope, ""), Fetch: r.user})
 	return jobs
 }

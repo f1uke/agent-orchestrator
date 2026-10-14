@@ -29,6 +29,21 @@ type PlanView struct {
 	Versions    []PlannedVersion
 	Pages       []PlannedPage
 	ApproverIDs []string
+	// LLBs are the long-lived branches not yet landed.
+	LLBs []PlannedLLB
+	// LLBCardKeys are the card keys every long-lived branch carries.
+	LLBCardKeys []string
+	// MyAccountID is the Jira account jira.myself read; empty until it is read.
+	MyAccountID string
+	// WatchedCardKeys are the cards whose subtasks may be mine.
+	WatchedCardKeys []string
+}
+
+// PlannedLLB is one long-lived branch whose ahead count is read.
+type PlannedLLB struct {
+	App     AppID
+	Project int
+	Branch  string
 }
 
 // PlannedPage is a train page attached to a train, with the card keys it lists.
@@ -91,5 +106,63 @@ func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 		pv.ApproverIDs = append(pv.ApproverIDs, id)
 	}
 	sort.Strings(pv.ApproverIDs)
+	pv.LLBs, pv.LLBCardKeys = plannedLLBs(cfg, snap)
+	for _, m := range AllItems(snap, KindJiraMyself) {
+		pv.MyAccountID = m.AccountID
+	}
+	pv.WatchedCardKeys = watchedCards(b.Trains, rs, pv.LLBCardKeys)
 	return pv
+}
+
+func watchedCards(trains []Train, rs readSet, llbKeys []string) []string {
+	keys := map[string]bool{}
+	for _, k := range llbKeys {
+		keys[k] = true
+	}
+	for i := range trains {
+		t := &trains[i]
+		live := false
+		for _, v := range t.Versions {
+			if !rs.live(dueOf(t, v)) {
+				continue
+			}
+			live = true
+			for _, is := range v.Issues {
+				keys[is.Key] = true
+			}
+		}
+		for _, p := range t.Pages {
+			for _, k := range p.Keys {
+				if live {
+					keys[k] = true
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(keys))
+	for k := range keys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func plannedLLBs(cfg Config, snap Snapshot) ([]PlannedLLB, []string) {
+	branches, _ := detectLLBs(cfg, snap)
+	var out []PlannedLLB
+	keys := map[string]bool{}
+	for _, b := range branches {
+		if b.Landing == nil || b.Landing.MergedOn == nil {
+			out = append(out, PlannedLLB{App: b.App, Project: cfg.app(b.App).GitLabProject, Branch: b.Branch})
+		}
+		for _, c := range b.Cards {
+			keys[c.Key] = true
+		}
+	}
+	sorted := make([]string, 0, len(keys))
+	for k := range keys {
+		sorted = append(sorted, k)
+	}
+	sort.Strings(sorted)
+	return out, sorted
 }

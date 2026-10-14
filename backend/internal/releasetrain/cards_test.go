@@ -42,10 +42,10 @@ func TestCardCodeState(t *testing.T) {
 		{"open MR into develop", "21", false, func(v *fv) []int {
 			return []int{v.cardMR("DEMO-1 login", "feat/login", "develop", MROpened, "2026-10-08", "")}
 		}, func(ids []int) CodeState { return CodeOpen{MRs: ids} }},
-		{"merged into a feature branch only", "21", false, func(v *fv) []int {
-			v.cardMR("DEMO-1 login", "feat/login", "feature/wallet", MRMerged, "2026-10-01", "2026-10-03")
+		{"merged into another card's branch only", "21", false, func(v *fv) []int {
+			v.cardMR("DEMO-1 login", "feat/login", "feature/DEMO-7-chat", MRMerged, "2026-10-01", "2026-10-03")
 			return nil
-		}, func([]int) CodeState { return CodeElsewhere{Branch: "feature/wallet", On: Day{2026, 10, 3}} }},
+		}, func([]int) CodeState { return CodeElsewhere{Branch: "feature/DEMO-7-chat", On: Day{2026, 10, 3}} }},
 		{"MR into an older sprint branch is ignored", "21", false, func(v *fv) []int {
 			v.cardMR("DEMO-1 login", "feat/login", "sprint-19-2026", MRMerged, "2026-09-20", "2026-09-22")
 			return nil
@@ -61,6 +61,36 @@ func TestCardCodeState(t *testing.T) {
 		{"branch key when the title has none", "21", false, func(v *fv) []int {
 			return []int{v.cardMR("login screen", "feat/DEMO-1-login", "develop", MRMerged, "2026-10-01", "2026-10-02")}
 		}, func(ids []int) CodeState { return CodeMerged{MRs: ids} }},
+		{"merged only into a long-lived branch is parked", "21", false, func(v *fv) []int {
+			return []int{v.cardMR("DEMO-1 login", "feat/login", "feature/demo-wallet", MRMerged, "2026-10-01", "2026-10-03")}
+		}, func(ids []int) CodeState { return CodeParked{Branch: "feature/demo-wallet", MRs: ids} }},
+		{"a long-lived branch without the feature prefix parks too", "21", false, func(v *fv) []int {
+			return []int{v.cardMR("DEMO-1 login", "feat/login", "demo-wallet", MRMerged, "2026-10-01", "2026-10-03")}
+		}, func(ids []int) CodeState { return CodeParked{Branch: "demo-wallet", MRs: ids} }},
+		{"parked while the landing MR is open", "21", false, func(v *fv) []int {
+			ids := []int{v.cardMR("DEMO-1 login", "feat/login", "feature/demo-wallet", MRMerged, "2026-10-01", "2026-10-03")}
+			v.cardMR("wallet", "feature/demo-wallet", "feature/sprint-20-2026", MROpened, "2026-10-05", "")
+			return ids
+		}, func(ids []int) CodeState { return CodeParked{Branch: "feature/demo-wallet", MRs: ids} }},
+		{"merged via a long-lived branch that landed in the source sprint before the cut", "21", false, func(v *fv) []int {
+			ids := []int{v.cardMR("DEMO-1 login", "feat/login", "feature/demo-wallet", MRMerged, "2026-10-01", "2026-10-03")}
+			v.cardMR("wallet", "feature/demo-wallet", "feature/sprint-20-2026", MRMerged, "2026-10-05", "2026-10-06")
+			return ids
+		}, func(ids []int) CodeState { return CodeMerged{MRs: ids, Via: "feature/demo-wallet"} }},
+		{"a long-lived branch that landed in the next sprint branch rides the next train", "21", false, func(v *fv) []int {
+			v.cardMR("DEMO-1 login", "feat/login", "feature/demo-wallet", MRMerged, "2026-10-01", "2026-10-03")
+			v.cardMR("wallet", "feature/demo-wallet", "feature/sprint-21-2026", MRMerged, "2026-10-05", "2026-10-06")
+			return nil
+		}, func([]int) CodeState { return CodeElsewhere{Branch: "feature/demo-wallet", On: Day{2026, 10, 3}} }},
+		{"a long-lived branch that landed in develop after the cut ships later", "21", false, func(v *fv) []int {
+			v.cardMR("DEMO-1 login", "feat/login", "feature/demo-wallet", MRMerged, "2026-10-01", "2026-10-03")
+			v.cardMR("wallet", "feature/demo-wallet", "develop", MRMerged, "2026-10-11", "2026-10-12")
+			return nil
+		}, func([]int) CodeState { return CodeElsewhere{Branch: "feature/demo-wallet", On: Day{2026, 10, 3}} }},
+		{"a card merged after its branch landed is parked: it missed the landing", "21", false, func(v *fv) []int {
+			v.cardMR("wallet", "feature/demo-wallet", "feature/sprint-20-2026", MRMerged, "2026-10-02", "2026-10-02")
+			return []int{v.cardMR("DEMO-1 login", "feat/login", "feature/demo-wallet", MRMerged, "2026-10-03", "2026-10-04")}
+		}, func(ids []int) CodeState { return CodeParked{Branch: "feature/demo-wallet", MRs: ids} }},
 		{"no release MR means no cut", "21", true, func(v *fv) []int {
 			return []int{v.cardMR("DEMO-1 login", "feat/login", "develop", MRMerged, "2026-10-12", "2026-10-13")}
 		}, func(ids []int) CodeState { return CodeMerged{MRs: ids} }},

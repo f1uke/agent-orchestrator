@@ -51,6 +51,10 @@ type fixture struct {
 	techreq    []*ForceUpdateFact
 	pages      []*PageFact
 	pageCards  map[string][]*IssueFact
+	myself     *JiraMyselfFact
+	gitlabUser *GitLabUserFact
+	subtasks   []*IssueFact
+	llbCards   []*IssueFact
 	versionApp map[string]AppID
 	statuses   map[KindName]func(*ResourceStatus)
 	human      HumanState
@@ -178,8 +182,24 @@ func (f *fixture) snapshot() Snapshot {
 	for _, p := range f.pages {
 		Put(&s, KindPageCards, f.fresh(KindPageCards.Name, PageScope(p.ID), ""), deref(f.pageCards[p.ID], nil))
 	}
+	if f.myself != nil {
+		Put(&s, KindJiraMyself, f.fresh(KindJiraMyself.Name, MyselfScope, ""), []JiraMyselfFact{*f.myself})
+	}
+	if f.gitlabUser != nil {
+		Put(&s, KindGitLabUser, f.fresh(KindGitLabUser.Name, MyselfScope, ""), []GitLabUserFact{*f.gitlabUser})
+	}
+	Put(&s, KindMySubtasks, f.fresh(KindMySubtasks.Name, MySubtasksScope, ""), deref(f.subtasks, nil))
+	Put(&s, KindLLBCards, f.fresh(KindLLBCards.Name, LLBCardsScope, ""), deref(f.llbCards, nil))
 	return s
 }
+
+// me makes the tokens belong to Dee: Jira account acc-dee, GitLab user dee.
+func (f *fixture) me() {
+	f.myself = &JiraMyselfFact{AccountID: "acc-dee", DisplayName: "Dee"}
+	f.gitlabUser = &GitLabUserFact{Username: "dee", Name: "Dee"}
+}
+
+var dee = &Person{AccountID: "acc-dee", Name: "Dee"}
 
 // page adds family's train page created on created, with the dates its table gives.
 func (f *fixture) page(family FamilyID, train, created, freeze, publish string) *PageFact {

@@ -28,6 +28,60 @@ func (CodeOpen) Variant() string { return "open" }
 // Variant is "elsewhere".
 func (CodeElsewhere) Variant() string { return "elsewhere" }
 
+// Variant is "parked".
+func (CodeParked) Variant() string { return "parked" }
+
+// MarshalJSON writes the code state with "kind": "parked".
+func (c CodeParked) MarshalJSON() ([]byte, error) { type plain CodeParked; return tagged(c, plain(c)) }
+
+// Variant is "known".
+func (IdentityKnown) Variant() string { return "known" }
+
+// Variant is "unknown".
+func (IdentityUnknown) Variant() string { return "unknown" }
+
+// MarshalJSON writes the identity with "kind": "known".
+func (i IdentityKnown) MarshalJSON() ([]byte, error) {
+	type plain IdentityKnown
+	return tagged(i, plain(i))
+}
+
+// MarshalJSON writes the identity with "kind": "unknown".
+func (i IdentityUnknown) MarshalJSON() ([]byte, error) {
+	type plain IdentityUnknown
+	return tagged(i, plain(i))
+}
+
+// Variant is "landed".
+func (LLBLandedIn) Variant() string { return "landed" }
+
+// Variant is "planned".
+func (LLBPlanned) Variant() string { return "planned" }
+
+// Variant is "none".
+func (LLBNoTarget) Variant() string { return "none" }
+
+// Variant is "dropped".
+func (LLBDropped) Variant() string { return "dropped" }
+
+// MarshalJSON writes the target with "kind": "landed".
+func (t LLBLandedIn) MarshalJSON() ([]byte, error) {
+	type plain LLBLandedIn
+	return tagged(t, plain(t))
+}
+
+// MarshalJSON writes the target with "kind": "planned".
+func (t LLBPlanned) MarshalJSON() ([]byte, error) { type plain LLBPlanned; return tagged(t, plain(t)) }
+
+// MarshalJSON writes the target with "kind": "none".
+func (t LLBNoTarget) MarshalJSON() ([]byte, error) {
+	type plain LLBNoTarget
+	return tagged(t, plain(t))
+}
+
+// MarshalJSON writes the target with "kind": "dropped".
+func (t LLBDropped) MarshalJSON() ([]byte, error) { type plain LLBDropped; return tagged(t, plain(t)) }
+
 // Variant is "none".
 func (CodeNone) Variant() string { return "none" }
 

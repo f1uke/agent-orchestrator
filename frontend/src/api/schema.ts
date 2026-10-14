@@ -4574,6 +4574,7 @@ export interface components {
             evidence: components["schemas"]["ReleaseTrainEvidence"];
             id: string;
             link: components["schemas"]["ReleaseTrainLink"];
+            mine?: components["schemas"]["ReleaseTrainMineReason"][];
             rule: string;
             severity: components["schemas"]["ReleaseTrainSeverity"];
             text: string;
@@ -4593,6 +4594,7 @@ export interface components {
             issues: components["schemas"]["ReleaseTrainIssueFact"][];
             jira?: components["schemas"]["ReleaseTrainJiraVersionFact"];
             milestone: components["schemas"]["ReleaseTrainMilestoneFact"];
+            mine?: components["schemas"]["ReleaseTrainMineReason"][];
             relatedWork?: components["schemas"]["ReleaseTrainRelatedWorkFact"];
             releaseMr?: components["schemas"]["ReleaseTrainReleaseMR"];
             stages: components["schemas"]["ReleaseTrainStage"][];
@@ -4616,7 +4618,12 @@ export interface components {
             alerts: components["schemas"]["ReleaseTrainAlerts"];
             apps: components["schemas"]["ReleaseTrainBoardApp"][];
             catalogue: components["schemas"]["ReleaseTrainRuleInfo"][];
+            cutover: {
+                [key: string]: components["schemas"]["ReleaseTrainDay"];
+            } | null;
             hotfixes: components["schemas"]["ReleaseTrainHotfix"][];
+            identity: components["schemas"]["ReleaseTrainIdentity"];
+            llbs: components["schemas"]["ReleaseTrainLLBGroup"][];
             mismatches: components["schemas"]["ReleaseTrainMismatch"][];
             sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
             today: components["schemas"]["ReleaseTrainDay"];
@@ -4639,6 +4646,7 @@ export interface components {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             code: components["schemas"]["ReleaseTrainCodeState"];
             key: string;
+            mine?: components["schemas"]["ReleaseTrainMineReason"][];
             status: string;
             statusCategory: string;
             why: components["schemas"]["ReleaseTrainCardWhy"][];
@@ -4655,6 +4663,8 @@ export interface components {
             /** @constant */
             kind: "merged";
             mrs: number[];
+            /** @description The long-lived branch that carried the MRs into the train. */
+            via?: string;
         };
         ReleaseTrainCodeNone: {
             /** @constant */
@@ -4665,7 +4675,13 @@ export interface components {
             kind: "open";
             mrs: number[];
         };
-        ReleaseTrainCodeState: components["schemas"]["ReleaseTrainCodeMerged"] | components["schemas"]["ReleaseTrainCodeOpen"] | components["schemas"]["ReleaseTrainCodeElsewhere"] | components["schemas"]["ReleaseTrainCodeNone"];
+        ReleaseTrainCodeParked: {
+            branch: string;
+            /** @constant */
+            kind: "parked";
+            mrs: number[];
+        };
+        ReleaseTrainCodeState: components["schemas"]["ReleaseTrainCodeMerged"] | components["schemas"]["ReleaseTrainCodeOpen"] | components["schemas"]["ReleaseTrainCodeParked"] | components["schemas"]["ReleaseTrainCodeElsewhere"] | components["schemas"]["ReleaseTrainCodeNone"];
         ReleaseTrainCommitFact: {
             createdOn: components["schemas"]["ReleaseTrainDay"];
             title: string;
@@ -4712,13 +4728,28 @@ export interface components {
             forceUpdate?: components["schemas"]["ReleaseTrainForceUpdateFact"];
             jira?: components["schemas"]["ReleaseTrainJiraVersionFact"];
             milestone: components["schemas"]["ReleaseTrainMilestoneFact"];
+            mine?: components["schemas"]["ReleaseTrainMineReason"][];
             tag?: components["schemas"]["ReleaseTrainTag"];
             version: string;
+        };
+        ReleaseTrainIdentity: components["schemas"]["ReleaseTrainIdentityKnown"] | components["schemas"]["ReleaseTrainIdentityUnknown"];
+        ReleaseTrainIdentityKnown: {
+            displayName: string;
+            gitlabUsername: string;
+            jiraAccountId: string;
+            /** @constant */
+            kind: "known";
+        };
+        ReleaseTrainIdentityUnknown: {
+            /** @constant */
+            kind: "unknown";
+            reason: string;
         };
         ReleaseTrainIssueFact: {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             fixVersions: string[];
             key: string;
+            parent?: string;
             releaseTicket: boolean;
             status: string;
             statusCategory: string;
@@ -4745,6 +4776,45 @@ export interface components {
             pipeline: number;
             project: number;
         };
+        ReleaseTrainLLBCard: {
+            assignee?: components["schemas"]["ReleaseTrainPerson"];
+            key: string;
+            mr: components["schemas"]["ReleaseTrainMRFact"];
+            status?: string;
+            statusCategory?: string;
+            summary?: string;
+        };
+        ReleaseTrainLLBDropped: {
+            /** @constant */
+            kind: "dropped";
+        };
+        ReleaseTrainLLBGroup: {
+            branches: components["schemas"]["ReleaseTrainLongLivedBranch"][];
+            id: string;
+            mine?: components["schemas"]["ReleaseTrainMineReason"][];
+            name: string;
+            plan?: components["schemas"]["ReleaseTrainLlbPlan"];
+            target: components["schemas"]["ReleaseTrainLLBTarget"];
+        };
+        ReleaseTrainLLBLandedIn: {
+            /** @constant */
+            kind: "landed";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+        };
+        ReleaseTrainLLBNoTarget: {
+            /** @constant */
+            kind: "none";
+        };
+        ReleaseTrainLLBPlanned: {
+            /** @constant */
+            kind: "planned";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+        };
+        /** @enum {string} */
+        ReleaseTrainLLBState: "open" | "landing" | "landing_wrong" | "landed" | "landed_wrong" | "stranded";
+        ReleaseTrainLLBTarget: components["schemas"]["ReleaseTrainLLBLandedIn"] | components["schemas"]["ReleaseTrainLLBPlanned"] | components["schemas"]["ReleaseTrainLLBNoTarget"] | components["schemas"]["ReleaseTrainLLBDropped"];
         ReleaseTrainLink: {
             label: string;
             url?: string;
@@ -4787,6 +4857,19 @@ export interface components {
         ReleaseTrainLlbPlansResponse: {
             plans: components["schemas"]["ReleaseTrainLlbPlan"][];
         };
+        ReleaseTrainLongLivedBranch: {
+            ahead?: null | number;
+            app: string;
+            branch: string;
+            cards: components["schemas"]["ReleaseTrainLLBCard"][];
+            gone?: boolean;
+            landing?: components["schemas"]["ReleaseTrainMRFact"];
+            lastIn: components["schemas"]["ReleaseTrainDay"];
+            openedOn: components["schemas"]["ReleaseTrainDay"];
+            state: components["schemas"]["ReleaseTrainLLBState"];
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train?: string;
+        };
         ReleaseTrainMRDetailFact: {
             conflicts: boolean;
             iid: number;
@@ -4817,6 +4900,12 @@ export interface components {
             title: string;
             url: string;
         };
+        ReleaseTrainMineReason: {
+            ref?: string;
+            why: components["schemas"]["ReleaseTrainMineWhy"];
+        };
+        /** @enum {string} */
+        ReleaseTrainMineWhy: "assignee" | "subtask" | "mr_author" | "release_mr_author" | "release_ticket_assignee" | "approver" | "card" | "landing_author";
         ReleaseTrainMismatch: {
             app: string;
             jira?: components["schemas"]["ReleaseTrainJiraVersionFact"];

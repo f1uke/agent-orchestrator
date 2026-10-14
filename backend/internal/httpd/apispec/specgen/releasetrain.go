@@ -32,6 +32,40 @@ type (
 	rtCodeMerged struct {
 		Kind string `json:"kind" const:"merged"`
 		MRs  []int  `json:"mrs"`
+		Via  string `json:"via,omitempty" description:"The long-lived branch that carried the MRs into the train."`
+	}
+	rtCodeParked struct {
+		Kind   string `json:"kind" const:"parked"`
+		Branch string `json:"branch"`
+		MRs    []int  `json:"mrs"`
+	}
+
+	rtIdentity      struct{}
+	rtIdentityKnown struct {
+		Kind           string `json:"kind" const:"known"`
+		JiraAccountID  string `json:"jiraAccountId"`
+		GitLabUsername string `json:"gitlabUsername"`
+		DisplayName    string `json:"displayName"`
+	}
+	rtIdentityUnknown struct {
+		Kind   string `json:"kind" const:"unknown"`
+		Reason string `json:"reason"`
+	}
+
+	rtLLBTarget   struct{}
+	rtLLBLandedIn struct {
+		Kind  string     `json:"kind" const:"landed"`
+		Train rt.TrainID `json:"train"`
+	}
+	rtLLBPlanned struct {
+		Kind  string     `json:"kind" const:"planned"`
+		Train rt.TrainID `json:"train"`
+	}
+	rtLLBNoTarget struct {
+		Kind string `json:"kind" const:"none"`
+	}
+	rtLLBDropped struct {
+		Kind string `json:"kind" const:"dropped"`
 	}
 	rtCodeOpen struct {
 		Kind string `json:"kind" const:"open"`
@@ -54,7 +88,17 @@ func (rtOutcome) JSONSchemaOneOf() []interface{} {
 
 // JSONSchemaOneOf lists the code state variants.
 func (rtCodeState) JSONSchemaOneOf() []interface{} {
-	return []interface{}{rtCodeMerged{}, rtCodeOpen{}, rtCodeElsewhere{}, rtCodeNone{}}
+	return []interface{}{rtCodeMerged{}, rtCodeOpen{}, rtCodeParked{}, rtCodeElsewhere{}, rtCodeNone{}}
+}
+
+// JSONSchemaOneOf lists the identity variants.
+func (rtIdentity) JSONSchemaOneOf() []interface{} {
+	return []interface{}{rtIdentityKnown{}, rtIdentityUnknown{}}
+}
+
+// JSONSchemaOneOf lists the long-lived branch target variants.
+func (rtLLBTarget) JSONSchemaOneOf() []interface{} {
+	return []interface{}{rtLLBLandedIn{}, rtLLBPlanned{}, rtLLBNoTarget{}, rtLLBDropped{}}
 }
 
 func init() {
@@ -109,6 +153,21 @@ func init() {
 		"SpecgenRtCodeElsewhere":                     "ReleaseTrainCodeElsewhere",
 		"SpecgenRtCodeMerged":                        "ReleaseTrainCodeMerged",
 		"SpecgenRtCodeNone":                          "ReleaseTrainCodeNone",
+		"SpecgenRtCodeParked":                        "ReleaseTrainCodeParked",
+		"SpecgenRtLLBTarget":                         "ReleaseTrainLLBTarget",
+		"SpecgenRtIdentity":                          "ReleaseTrainIdentity",
+		"SpecgenRtIdentityKnown":                     "ReleaseTrainIdentityKnown",
+		"SpecgenRtIdentityUnknown":                   "ReleaseTrainIdentityUnknown",
+		"ReleasetrainMineReason":                     "ReleaseTrainMineReason",
+		"ReleasetrainMineWhy":                        "ReleaseTrainMineWhy",
+		"SpecgenRtLLBLandedIn":                       "ReleaseTrainLLBLandedIn",
+		"SpecgenRtLLBPlanned":                        "ReleaseTrainLLBPlanned",
+		"SpecgenRtLLBNoTarget":                       "ReleaseTrainLLBNoTarget",
+		"SpecgenRtLLBDropped":                        "ReleaseTrainLLBDropped",
+		"ReleasetrainLLBGroup":                       "ReleaseTrainLLBGroup",
+		"ReleasetrainLLBCard":                        "ReleaseTrainLLBCard",
+		"ReleasetrainLLBState":                       "ReleaseTrainLLBState",
+		"ReleasetrainLongLivedBranch":                "ReleaseTrainLongLivedBranch",
 		"SpecgenRtCodeOpen":                          "ReleaseTrainCodeOpen",
 		"SpecgenRtCodeState":                         "ReleaseTrainCodeState",
 		"SpecgenRtOutcome":                           "ReleaseTrainOutcome",
@@ -138,6 +197,8 @@ func mapReleaseTrainTypes(r *openapi31.Reflector) {
 	js := r.JSONSchemaReflector()
 	js.AddTypeMapping((*rt.Outcome)(nil), rtOutcome{})
 	js.AddTypeMapping((*rt.CodeState)(nil), rtCodeState{})
+	js.AddTypeMapping((*rt.LLBTarget)(nil), rtLLBTarget{})
+	js.AddTypeMapping((*rt.IdentityState)(nil), rtIdentity{})
 	day := jsonschema.Schema{}
 	day.WithType(jsonschema.String.Type()).WithFormat("date")
 	js.AddTypeMapping(rt.Day{}, day)

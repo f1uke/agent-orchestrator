@@ -15,16 +15,20 @@ func Reconcile(in Inputs, env Env) Board {
 	}
 	b.Sources = rs.sources(b.Trains)
 	phases(b.Trains, b.Today)
-	mrs := indexMRs(in.Config, in.Snap)
+	branches, cutover := detectLLBs(in.Config, in.Snap)
+	b.LLBs, b.Cutover = groupLLBs(branches, in.Human.Plans, b.Trains, in.Config), cutover
+	mrs, llbs := indexMRs(in.Config, in.Snap), llbsByApp(b.LLBs)
 	for i := range b.Trains {
 		t := &b.Trains[i]
 		t.DatesSplit = datesSplit(t)
 		fromPages := pageMembers(t, in.Config, in.Snap, mrs)
 		for _, v := range t.Versions {
-			v.Cards = cardUnits(t, v, mrs, fromPages[v.App])
+			v.Cards = cardUnits(t, v, mrs, fromPages[v.App], llbs[v.App])
 			v.Stages = stages(t, v, b.Today, rs)
 		}
 	}
+	b.Identity = identityOf(in.Snap)
+	mine(&b, meOf(b.Identity, in.Snap), mrs, in.Snap, in.Config)
 	b.Alerts = alerts(&b, in, rs)
 	b.Catalogue = catalogue(in.Human.RuleSettings)
 	return b
