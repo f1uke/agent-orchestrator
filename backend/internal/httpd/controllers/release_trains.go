@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -18,6 +19,24 @@ type ReleaseTrainsService interface {
 	Report(ctx context.Context) (rtsvc.Report, error)
 	// InitConfig returns rtsvc.ErrConfigExists when the config file is already there.
 	InitConfig() (string, error)
+	// Board returns the serialized ReleaseTrainBoardResponse and its ETag, or
+	// rtsvc.ErrNotModified when ifNoneMatch names it.
+	Board(ctx context.Context, ifNoneMatch string) ([]byte, string, error)
+	// Refresh returns rtsvc.ErrUnknownSource for a source no poller has.
+	Refresh(source string) error
+}
+
+// ReleaseTrainBoardResponse is the body of GET /api/v1/release-trains/board.
+type ReleaseTrainBoardResponse = rtsvc.BoardResponse
+
+// ReleaseTrainRefreshRequest is the body of POST /api/v1/release-trains/refresh.
+type ReleaseTrainRefreshRequest struct {
+	Source string `json:"source,omitempty" enum:"gitlab,jira" description:"Refresh one source; every source when absent."`
+}
+
+// ReleaseTrainRefreshResponse is the body of a 202 from POST /api/v1/release-trains/refresh.
+type ReleaseTrainRefreshResponse struct {
+	Source string `json:"source,omitempty"`
 }
 
 // ReleaseTrainsController owns the /release-trains routes.
@@ -68,6 +87,51 @@ type ReleaseTrainConfigInitResponse struct {
 func (c *ReleaseTrainsController) Register(r chi.Router) {
 	r.Get("/release-trains/sources", c.sources)
 	r.Post("/release-trains/config", c.initConfig)
+	r.Get("/release-trains/board", c.board)
+	r.Post("/release-trains/refresh", c.refresh)
+}
+
+func (c *ReleaseTrainsController) board(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/release-trains/board")
+		return
+	}
+	body, etag, err := c.Svc.Board(r.Context(), r.Header.Get("If-None-Match"))
+	switch {
+	case errors.Is(err, rtsvc.ErrNotModified):
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusNotModified)
+	case err != nil:
+		envelope.WriteError(w, r, err)
+	default:
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body) //nolint:gosec // G705: our own json.Marshal output, served as application/json
+	}
+}
+
+func (c *ReleaseTrainsController) refresh(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "POST", "/api/v1/release-trains/refresh")
+		return
+	}
+	var req ReleaseTrainRefreshRequest
+	if err := decodeJSONStrict(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "INVALID_BODY", "Invalid request body", nil)
+		return
+	}
+	if err := c.Svc.Refresh(req.Source); err != nil {
+		if errors.Is(err, rtsvc.ErrUnknownSource) {
+			envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "UNKNOWN_SOURCE",
+				"source must be gitlab, jira or absent", map[string]any{"source": req.Source})
+			return
+		}
+		envelope.WriteError(w, r, err)
+		return
+	}
+	envelope.WriteJSON(w, http.StatusAccepted, ReleaseTrainRefreshResponse(req))
 }
 
 func (c *ReleaseTrainsController) sources(w http.ResponseWriter, r *http.Request) {

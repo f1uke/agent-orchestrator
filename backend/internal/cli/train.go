@@ -19,11 +19,13 @@ func newTrainCommand(ctx *commandContext) *cobra.Command {
 		Use:   "train",
 		Short: "Watch the mobile release trains (read-only)",
 		Long: "The daemon polls GitLab and Jira, read-only, for the release trains that " +
-			"release-train.json in the data dir describes.",
+			"release-train.json in the data dir describes. Without a subcommand it prints " +
+			"the live trains, what needs attention and what is unknown.",
 	}
+	newTrainBoardCommand(ctx, cmd)
 	config := &cobra.Command{Use: "config", Short: "Create the release-train config file"}
 	config.AddCommand(newTrainConfigInitCommand(ctx))
-	cmd.AddCommand(newTrainSourcesCommand(ctx), config)
+	cmd.AddCommand(newTrainSourcesCommand(ctx), newTrainAlertsCommand(ctx), config)
 	return cmd
 }
 

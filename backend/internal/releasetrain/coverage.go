@@ -62,7 +62,32 @@ type readSet struct {
 	ageOut int
 }
 
+// SettledBudget is how often a settled (aged-out) version's per-entity reads refetch.
+const SettledBudget = 6 * time.Hour
+
 func (r *readSet) live(due *Day) bool { return due == nil || r.today.Sub(*due) <= r.ageOut }
+
+// liveEntities is every per-entity resource a live version reads; any other
+// per-entity resource belongs to a settled version and is fresh for SettledBudget.
+func (r *readSet) liveEntities(trains []Train) map[resKey]bool {
+	out := map[resKey]bool{}
+	for i := range trains {
+		for _, v := range trains[i].Versions {
+			if !r.live(v.Milestone.Due) {
+				continue
+			}
+			for name, meta := range kinds {
+				if meta.cover != perEntity {
+					continue
+				}
+				for _, scope := range entityScopes(name, v, r.cfg.app(v.App).GitLabProject) {
+					out[resKey{name, scope}] = true
+				}
+			}
+		}
+	}
+	return out
+}
 
 func entityScopes(kind KindName, v *AppVersion, project int) []Scope {
 	switch kind {
