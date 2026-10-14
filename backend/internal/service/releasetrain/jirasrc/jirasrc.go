@@ -179,7 +179,7 @@ var platformRE = regexp.MustCompile(`(?i)\b(iOS|ADR|Android)\b`)
 
 func (r reader) techReq(ctx context.Context, _ []byte) (svc.Batch, error) {
 	cfg := r.view.Config.Jira
-	jql := fmt.Sprintf(`project = %s AND summary ~ %s AND created >= "%s" ORDER BY key`, cfg.TechRequestProject, jqlString(cfg.ForceUpdateSummary), r.view.HistoryFrom)
+	jql := fmt.Sprintf(`project = %s AND summary ~ %s AND created >= %q ORDER BY key`, cfg.TechRequestProject, jqlString(cfg.ForceUpdateSummary), r.view.HistoryFrom.String())
 	rows, err := r.c.SearchAllFields(ctx, jql, nil, 0)
 	if err != nil {
 		return svc.Batch{}, err

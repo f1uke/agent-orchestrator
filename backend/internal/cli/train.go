@@ -123,10 +123,10 @@ func writeTrainSources(w io.Writer, res trainSourcesResponse) error {
 	}
 	b.WriteString("\n")
 	tw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "KIND\tSCOPE\tAPP\tSTATE\tCOMPLETE\tNEXT")
+	_, _ = fmt.Fprintln(tw, "KIND\tSCOPE\tAPP\tSTATE\tCOMPLETE\tNEXT")
 	var errs []string
 	for _, r := range res.Resources {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Kind, r.Scope, orDash(r.App), trainState(r), stamp(r.CompleteAt), stamp(r.NextAttemptAt))
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Kind, r.Scope, orDash(r.App), trainState(r), stamp(r.CompleteAt), stamp(r.NextAttemptAt))
 		if r.ErrorMessage != "" {
 			errs = append(errs, fmt.Sprintf("%s %s: %s", r.Kind, r.Scope, r.ErrorMessage))
 		}
