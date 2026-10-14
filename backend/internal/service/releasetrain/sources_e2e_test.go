@@ -314,7 +314,7 @@ func TestEveryKindHasExactlyOneProducingSource(t *testing.T) {
 			t.Errorf("kind %s is read by a rule or stage and produced by %v; want exactly one source", k, producers[k])
 		}
 	}
-	for _, k := range []rt.KindName{rt.KindJiraUsers.Name, rt.KindJiraMyself.Name, rt.KindGitLabUser.Name} {
+	for _, k := range []rt.KindName{rt.KindJiraUsers.Name, rt.KindJiraMyself.Name, rt.KindGitLabUser.Name, rt.KindPageCards.Name} {
 		if len(producers[k]) != 1 {
 			t.Errorf("kind %s produced by %v; want exactly one source", k, producers[k])
 		}
