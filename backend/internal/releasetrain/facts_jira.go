@@ -82,7 +82,11 @@ var (
 	KindRelatedWork  = newKind[RelatedWorkFact]("jira.relatedwork", Snapshotted, 15*time.Minute, perEntity)
 	KindCards        = newKind[IssueFact]("jira.cards", Snapshotted, 5*time.Minute, perEntity)
 	KindTechReq      = newKind[ForceUpdateFact]("jira.techreq", Snapshotted, 30*time.Minute, global)
+	KindLLBCards     = newKind[IssueFact]("jira.llb_cards", Snapshotted, 10*time.Minute, global)
 )
+
+// LLBCardsScope is the scope of the Jira read of every long-lived-branch card.
+const LLBCardsScope Scope = "llb"
 
 // ItemKey keys a JiraVersionFact within its resource.
 func (f JiraVersionFact) ItemKey() string { return f.ID }

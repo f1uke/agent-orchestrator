@@ -70,7 +70,10 @@ func newWorld(t *testing.T) *world {
 	}
 	mrs = append(mrs, rttest.MR{IID: 301, Title: "Release 3.5.0", Source: "release/3.5.0", Target: "main", State: "opened",
 		Author: "Rae Example", Username: "rae", MilestoneID: 11, CreatedAt: at("2026-10-12T02:00:00Z"), UpdatedAt: at("2026-10-12T02:00:00Z")})
+	mrs = append(mrs, rttest.MR{IID: 302, Title: "DEMO-30 wallet", Source: "feature/DEMO-30", Target: "feature/demo-wallet", State: "merged",
+		Author: "Dee Example", Username: "dee", CreatedAt: at("2026-10-01T02:00:00Z"), UpdatedAt: at("2026-10-12T03:00:00Z")})
 	w.gl.SetMRs(1001, mrs)
+	w.jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-30) ORDER BY key`, `{"issues":[{"key":"DEMO-30","fields":{"summary":"Wallet","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"issuetype":{"subtask":false},"assignee":{"accountId":"acc-dee","displayName":"Dee Example"},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
 
 	w.jira.Set("/rest/api/3/project/DEMO/version", `{"isLast":true,"values":[{"id":"5001","name":"iOS 3.5.0","description":"Release Train #21/2026","releaseDate":"2026-10-19","approvers":[{"accountId":"acc-ann","status":"PENDING"}]}]}`)
 	w.jira.Set("/rest/api/3/version/5001/relatedwork", `[]`)
@@ -207,9 +210,9 @@ func TestBothSourcesBackfillToCompleteThenFetchOnlyWhatIsDue(t *testing.T) {
 	}
 	w.now = w.now.Add(5 * time.Minute)
 	_, jira = w.pass()
-	wantJira := []string{"/rest/api/3/project/DEMO/version", "/rest/api/3/search/jql", "/rest/api/3/search/jql"}
+	wantJira := []string{"/rest/api/3/project/DEMO/version", "/rest/api/3/search/jql", "/rest/api/3/search/jql", "/rest/api/3/search/jql"}
 	if strings.Join(jira, " ") != strings.Join(wantJira, " ") {
-		t.Fatalf("steady pass after 5m fetched atlassian %v; want versions, the version's cards and the page's cards", jira)
+		t.Fatalf("steady pass after 6m fetched atlassian %v; want versions, the version's cards, the page's cards and the long-lived cards", jira)
 	}
 	w.now = w.now.Add(10 * time.Minute)
 	_, atl := w.pass()
@@ -314,7 +317,7 @@ func TestEveryKindHasExactlyOneProducingSource(t *testing.T) {
 			t.Errorf("kind %s is read by a rule or stage and produced by %v; want exactly one source", k, producers[k])
 		}
 	}
-	for _, k := range []rt.KindName{rt.KindJiraUsers.Name, rt.KindJiraMyself.Name, rt.KindGitLabUser.Name, rt.KindPageCards.Name} {
+	for _, k := range []rt.KindName{rt.KindJiraUsers.Name, rt.KindJiraMyself.Name, rt.KindGitLabUser.Name, rt.KindPageCards.Name, rt.KindLLBCards.Name} {
 		if len(producers[k]) != 1 {
 			t.Errorf("kind %s produced by %v; want exactly one source", k, producers[k])
 		}

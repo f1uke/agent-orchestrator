@@ -43,8 +43,11 @@ type Board struct {
 	Trains     []Train           `json:"trains"`
 	Hotfixes   []Hotfix          `json:"hotfixes"`
 	Mismatches []Mismatch        `json:"mismatches"`
-	Alerts     Alerts            `json:"alerts"`
-	Catalogue  []RuleInfo        `json:"catalogue"`
+	LLBs       []LLBGroup        `json:"llbs"`
+	// Cutover is each app's first merge into a sprint branch; apps with none are absent.
+	Cutover   map[AppID]Day `json:"cutover"`
+	Alerts    Alerts        `json:"alerts"`
+	Catalogue []RuleInfo    `json:"catalogue"`
 }
 
 // BoardApp is one configured app as every surface names it.

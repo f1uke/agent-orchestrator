@@ -11,9 +11,17 @@ import (
 // CodeState is where a card's code stands in one app's repo.
 type CodeState interface{ codeState() }
 
-// CodeMerged means the card's MRs reached the branch the train ships before the release cut.
+// CodeMerged means the card's MRs reached the branch the train ships before
+// the release cut; Via names the long-lived branch that carried them there.
 type CodeMerged struct {
-	MRs []int `json:"mrs"`
+	MRs []int  `json:"mrs"`
+	Via string `json:"via,omitempty"`
+}
+
+// CodeParked means the card's MRs merged into a long-lived branch that has not landed.
+type CodeParked struct {
+	Branch string `json:"branch"`
+	MRs    []int  `json:"mrs"`
 }
 
 // CodeOpen means the card has an open MR toward the train.
@@ -33,6 +41,7 @@ type CodeNone struct{}
 func (CodeMerged) codeState()    {}
 func (CodeOpen) codeState()      {}
 func (CodeElsewhere) codeState() {}
+func (CodeParked) codeState()    {}
 func (CodeNone) codeState()      {}
 
 // CardUnit is one card on one app's version.
@@ -148,7 +157,7 @@ func sprintOf(branch string) (int, bool) {
 	return v, true
 }
 
-func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact) []CardUnit {
+func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact, llbs map[string]*LongLivedBranch) []CardUnit {
 	byKey := mrs[v.App]
 	var cut *Day
 	if v.ReleaseMR != nil {
@@ -171,7 +180,7 @@ func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact) []Car
 		at[is.Key] = len(units)
 		units = append(units, CardUnit{
 			Key: is.Key, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
-			Why: []CardWhy{why}, Code: codeOf(byKey[is.Key], cut, source, hasSource),
+			Why: []CardWhy{why}, Code: codeOf(byKey[is.Key], cut, source, hasSource, llbs),
 		})
 	}
 	for _, is := range v.Issues {
@@ -184,11 +193,15 @@ func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact) []Car
 	return units
 }
 
-func codeOf(all []MRFact, cut *Day, source int, hasSource bool) CodeState {
+func codeOf(all []MRFact, cut *Day, source int, hasSource bool, llbs map[string]*LongLivedBranch) CodeState {
+	shipsIn := func(target string, merged Day) bool {
+		sprint, isSprint := sprintOf(target)
+		return (target == "develop" || (isSprint && hasSource && sprint == source)) && (cut == nil || !merged.After(*cut))
+	}
 	var mrs []MRFact
 	for _, mr := range all {
 		sprint, isSprint := sprintOf(mr.TargetBranch)
-		towardTrain := mr.TargetBranch == "develop" || isSprint || strings.HasPrefix(mr.TargetBranch, "feature/")
+		towardTrain := mr.TargetBranch == "develop" || isSprint || strings.HasPrefix(mr.TargetBranch, "feature/") || llbs[mr.TargetBranch] != nil
 		if towardTrain && (!isSprint || (hasSource && sprint == source)) {
 			mrs = append(mrs, mr)
 		}
@@ -205,8 +218,7 @@ func codeOf(all []MRFact, cut *Day, source int, hasSource bool) CodeState {
 		mr := mrs[i]
 		if mr.MergedOn != nil {
 			lastMerged = &mrs[i]
-			_, isSprint := sprintOf(mr.TargetBranch)
-			if (mr.TargetBranch == "develop" || isSprint) && (cut == nil || !mr.MergedOn.After(*cut)) {
+			if shipsIn(mr.TargetBranch, *mr.MergedOn) {
 				shipped = append(shipped, mr.IID)
 			}
 		}
@@ -220,7 +232,30 @@ func codeOf(all []MRFact, cut *Day, source int, hasSource bool) CodeState {
 	case len(open) > 0:
 		return CodeOpen{MRs: open}
 	case lastMerged != nil:
+		if b := llbs[lastMerged.TargetBranch]; b != nil {
+			return parkedOrCarried(b, mrs, shipsIn, *lastMerged)
+		}
 		return CodeElsewhere{Branch: lastMerged.TargetBranch, On: *lastMerged.MergedOn}
 	}
 	return CodeNone{}
+}
+
+// parkedOrCarried is a card whose last merge went into a long-lived branch:
+// merged via it once its landing ships in this train with the card already
+// in, parked until it lands (or when the card came in after the landing).
+func parkedOrCarried(b *LongLivedBranch, mrs []MRFact, shipsIn func(string, Day) bool, last MRFact) CodeState {
+	var in []int
+	for _, mr := range mrs {
+		if mr.TargetBranch == b.Branch && mr.MergedOn != nil {
+			in = append(in, mr.IID)
+		}
+	}
+	l := b.Landing
+	switch {
+	case l == nil || l.MergedOn == nil || last.MergedOn.After(*l.MergedOn):
+		return CodeParked{Branch: b.Branch, MRs: in}
+	case shipsIn(l.TargetBranch, *l.MergedOn):
+		return CodeMerged{MRs: in, Via: b.Branch}
+	}
+	return CodeElsewhere{Branch: b.Branch, On: *last.MergedOn}
 }

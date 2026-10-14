@@ -48,6 +48,7 @@ func testView() rt.PlanView {
 			{App: "da", Project: 1002, Live: false, ReleaseMR: 42, Pipeline: 9002, Tag: "3.4.0"},
 			{App: "da", Project: 1002, Live: true},
 		},
+		LLBs: []rt.PlannedLLB{{App: "da", Project: 1002, Branch: "feature/demo-wallet"}},
 	}
 }
 
@@ -80,6 +81,7 @@ func TestPlanListsEveryGitLabResourceTheViewNeeds(t *testing.T) {
 		"gitlab.jobs p:1001:pipeline:9001 di 1m0s",
 		"gitlab.compare p:1001:3.5.0..main di 30m0s",
 		"gitlab.compare p:1002:3.4.0..main da 30m0s",
+		"gitlab.compare p:1002:develop..feature/demo-wallet da 30m0s",
 		"gitlab.user me  24h0m0s",
 	}
 	if !reflect.DeepEqual(got, want) {

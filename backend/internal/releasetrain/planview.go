@@ -29,6 +29,17 @@ type PlanView struct {
 	Versions    []PlannedVersion
 	Pages       []PlannedPage
 	ApproverIDs []string
+	// LLBs are the long-lived branches not yet landed, each needing develop..branch.
+	LLBs []PlannedLLB
+	// LLBCardKeys are the card keys every long-lived branch carries, sorted.
+	LLBCardKeys []string
+}
+
+// PlannedLLB is one long-lived branch whose ahead count is read.
+type PlannedLLB struct {
+	App     AppID
+	Project int
+	Branch  string
 }
 
 // PlannedPage is a train page attached to a train, with the card keys it lists.
@@ -91,5 +102,26 @@ func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 		pv.ApproverIDs = append(pv.ApproverIDs, id)
 	}
 	sort.Strings(pv.ApproverIDs)
+	pv.LLBs, pv.LLBCardKeys = plannedLLBs(cfg, snap)
 	return pv
+}
+
+func plannedLLBs(cfg Config, snap Snapshot) ([]PlannedLLB, []string) {
+	branches, _ := detectLLBs(cfg, snap)
+	var out []PlannedLLB
+	keys := map[string]bool{}
+	for _, b := range branches {
+		if b.Landing == nil || b.Landing.MergedOn == nil {
+			out = append(out, PlannedLLB{App: b.App, Project: cfg.app(b.App).GitLabProject, Branch: b.Branch})
+		}
+		for _, c := range b.Cards {
+			keys[c.Key] = true
+		}
+	}
+	sorted := make([]string, 0, len(keys))
+	for k := range keys {
+		sorted = append(sorted, k)
+	}
+	sort.Strings(sorted)
+	return out, sorted
 }

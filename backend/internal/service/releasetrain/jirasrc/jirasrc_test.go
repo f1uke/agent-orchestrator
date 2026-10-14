@@ -46,6 +46,7 @@ func testView() rt.PlanView {
 			{App: "pi", Project: 1003, Live: true},
 		},
 		ApproverIDs: []string{"acc-ann", "acc-bob"},
+		LLBCardKeys: []string{"DEMO-30", "DEMO-31"},
 	}
 }
 
@@ -69,6 +70,7 @@ func TestPlanListsEveryJiraResourceTheViewNeeds(t *testing.T) {
 		"jira.cards v:5002 da 6h0m0s",
 		"jira.users u:acc-ann  24h0m0s",
 		"jira.users u:acc-bob  24h0m0s",
+		"jira.llb_cards llb  10m0s",
 		"jira.myself me  24h0m0s",
 	}
 	if !reflect.DeepEqual(got, want) {

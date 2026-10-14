@@ -13089,9 +13089,19 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainRuleInfo'
           type: array
+        cutover:
+          additionalProperties:
+            $ref: '#/components/schemas/ReleaseTrainDay'
+          type:
+          - object
+          - "null"
         hotfixes:
           items:
             $ref: '#/components/schemas/ReleaseTrainHotfix'
+          type: array
+        llbs:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainLLBGroup'
           type: array
         mismatches:
           items:
@@ -13114,6 +13124,8 @@ components:
       - trains
       - hotfixes
       - mismatches
+      - llbs
+      - cutover
       - alerts
       - catalogue
       type: object
@@ -13202,6 +13214,9 @@ components:
           items:
             type: integer
           type: array
+        via:
+          description: The long-lived branch that carried the MRs into the train.
+          type: string
       required:
       - kind
       - mrs
@@ -13227,10 +13242,27 @@ components:
       - kind
       - mrs
       type: object
+    ReleaseTrainCodeParked:
+      properties:
+        branch:
+          type: string
+        kind:
+          const: parked
+          type: string
+        mrs:
+          items:
+            type: integer
+          type: array
+      required:
+      - kind
+      - branch
+      - mrs
+      type: object
     ReleaseTrainCodeState:
       oneOf:
       - $ref: '#/components/schemas/ReleaseTrainCodeMerged'
       - $ref: '#/components/schemas/ReleaseTrainCodeOpen'
+      - $ref: '#/components/schemas/ReleaseTrainCodeParked'
       - $ref: '#/components/schemas/ReleaseTrainCodeElsewhere'
       - $ref: '#/components/schemas/ReleaseTrainCodeNone'
       type: object
@@ -13436,6 +13468,100 @@ components:
       - pipeline
       - jobs
       type: object
+    ReleaseTrainLLBCard:
+      properties:
+        assignee:
+          $ref: '#/components/schemas/ReleaseTrainPerson'
+        key:
+          type: string
+        mr:
+          $ref: '#/components/schemas/ReleaseTrainMRFact'
+        status:
+          type: string
+        statusCategory:
+          type: string
+        summary:
+          type: string
+      required:
+      - key
+      - mr
+      type: object
+    ReleaseTrainLLBDropped:
+      properties:
+        kind:
+          const: dropped
+          type: string
+      required:
+      - kind
+      type: object
+    ReleaseTrainLLBGroup:
+      properties:
+        branches:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainLongLivedBranch'
+          type: array
+        id:
+          type: string
+        name:
+          type: string
+        plan:
+          $ref: '#/components/schemas/ReleaseTrainLlbPlan'
+        target:
+          $ref: '#/components/schemas/ReleaseTrainLLBTarget'
+      required:
+      - id
+      - name
+      - target
+      - branches
+      type: object
+    ReleaseTrainLLBLandedIn:
+      properties:
+        kind:
+          const: landed
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      type: object
+    ReleaseTrainLLBNoTarget:
+      properties:
+        kind:
+          const: none
+          type: string
+      required:
+      - kind
+      type: object
+    ReleaseTrainLLBPlanned:
+      properties:
+        kind:
+          const: planned
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      type: object
+    ReleaseTrainLLBState:
+      enum:
+      - open
+      - landing
+      - landing_wrong
+      - landed
+      - landed_wrong
+      - stranded
+      type: string
+    ReleaseTrainLLBTarget:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainLLBLandedIn'
+      - $ref: '#/components/schemas/ReleaseTrainLLBPlanned'
+      - $ref: '#/components/schemas/ReleaseTrainLLBNoTarget'
+      - $ref: '#/components/schemas/ReleaseTrainLLBDropped'
+      type: object
     ReleaseTrainLink:
       properties:
         label:
@@ -13538,6 +13664,39 @@ components:
           type: array
       required:
       - plans
+      type: object
+    ReleaseTrainLongLivedBranch:
+      properties:
+        ahead:
+          type:
+          - "null"
+          - integer
+        app:
+          type: string
+        branch:
+          type: string
+        cards:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainLLBCard'
+          type: array
+        landing:
+          $ref: '#/components/schemas/ReleaseTrainMRFact'
+        lastIn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        openedOn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        state:
+          $ref: '#/components/schemas/ReleaseTrainLLBState'
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - app
+      - branch
+      - openedOn
+      - lastIn
+      - cards
+      - state
       type: object
     ReleaseTrainMRDetailFact:
       properties:
