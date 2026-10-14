@@ -1,9 +1,6 @@
 package releasetrain
 
-import (
-	"strconv"
-	"time"
-)
+import "time"
 
 // JiraUserFact is a Jira user's display name and avatar, cached per account.
 type JiraUserFact struct {
@@ -37,41 +34,11 @@ func UserScope(accountID string) Scope { return Scope("u:" + accountID) }
 // MyselfScope is the scope of a token's own account.
 const MyselfScope Scope = "me"
 
-// ItemKey implements Keyed.
+// ItemKey keys a JiraUserFact within its resource.
 func (f JiraUserFact) ItemKey() string { return f.AccountID }
 
-// ItemKey implements Keyed.
+// ItemKey keys a JiraMyselfFact within its resource.
 func (f JiraMyselfFact) ItemKey() string { return f.AccountID }
 
-// ItemKey implements Keyed.
+// ItemKey keys a GitLabUserFact within its resource.
 func (f GitLabUserFact) ItemKey() string { return f.Username }
-
-// ItemKey implements Keyed.
-func (f MilestoneFact) ItemKey() string { return strconv.Itoa(f.ID) }
-
-// ItemKey implements Keyed.
-func (f MRFact) ItemKey() string { return strconv.Itoa(f.IID) }
-
-// ItemKey implements Keyed.
-func (f MRDetailFact) ItemKey() string { return strconv.Itoa(f.IID) }
-
-// ItemKey implements Keyed.
-func (f JobsFact) ItemKey() string { return strconv.Itoa(f.Pipeline) }
-
-// ItemKey implements Keyed.
-func (f TagFact) ItemKey() string { return f.Name }
-
-// ItemKey implements Keyed.
-func (f CompareFact) ItemKey() string { return f.From + ".." + f.To }
-
-// ItemKey implements Keyed.
-func (f JiraVersionFact) ItemKey() string { return f.ID }
-
-// ItemKey implements Keyed.
-func (f RelatedWorkFact) ItemKey() string { return f.VersionID }
-
-// ItemKey implements Keyed.
-func (f IssueFact) ItemKey() string { return f.Key }
-
-// ItemKey implements Keyed.
-func (f ForceUpdateFact) ItemKey() string { return f.Key }
