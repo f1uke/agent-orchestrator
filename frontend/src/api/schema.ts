@@ -809,6 +809,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/release-trains/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Write the template release-train config to the data dir, never over an existing file */
+        post: operations["initReleaseTrainConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Show the release-train config state and each observed resource's freshness */
+        get: operations["listReleaseTrainSources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions": {
         parameters: {
             query?: never;
@@ -3432,6 +3466,51 @@ export interface components {
              * @enum {string}
              */
             via?: "app" | "cli" | "api";
+        };
+        ControllersReleaseTrainConfigDTO: {
+            /** @description Why the file is invalid, or how to create it when absent. */
+            message?: string;
+            path: string;
+            /** @enum {string} */
+            state: "absent" | "invalid" | "ok";
+        };
+        ControllersReleaseTrainConfigInitResponse: {
+            path: string;
+        };
+        ControllersReleaseTrainPassDTO: {
+            /** Format: date-time */
+            at?: null | string;
+            /** @description HTTP requests sent per host (gitlab, jira) in the last pass. */
+            requests: {
+                [key: string]: number;
+            } | null;
+        };
+        ControllersReleaseTrainResourceDTO: {
+            app?: string;
+            /** @description An incremental resource that has a cursor but has not caught up once. */
+            backfilling: boolean;
+            /**
+             * Format: date-time
+             * @description When the last complete fetch finished; absent until one has.
+             */
+            completeAt?: null | string;
+            /** @enum {string} */
+            errorClass?: "auth" | "rate_limited" | "unavailable" | "not_found" | "decode" | "truncated" | "unconfigured";
+            /** @description Sanitized: no query strings, at most 300 bytes. */
+            errorMessage?: string;
+            kind: string;
+            /** Format: date-time */
+            lastAttemptAt?: null | string;
+            /** @enum {string} */
+            mode: "snapshot" | "incremental";
+            /** Format: date-time */
+            nextAttemptAt?: null | string;
+            scope: string;
+        };
+        ControllersReleaseTrainSourcesResponse: {
+            config: components["schemas"]["ControllersReleaseTrainConfigDTO"];
+            lastPass: components["schemas"]["ControllersReleaseTrainPassDTO"];
+            resources: components["schemas"]["ControllersReleaseTrainResourceDTO"][];
         };
         ControllersRenameSimFlowInput: {
             /** @description What to call it. Slugified; an empty name puts it back to its timestamp alone. */
@@ -8471,6 +8550,91 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    initReleaseTrainConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersReleaseTrainConfigInitResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listReleaseTrainSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControllersReleaseTrainSourcesResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -129,6 +129,7 @@ type APIDeps struct {
 	LearningRules controllers.LearningRulesService
 	// LearningDecide draws proposals from finished tasks and lists them.
 	LearningDecide controllers.LearningDecideService
+	ReleaseTrains  controllers.ReleaseTrainsService
 }
 
 // API owns one controller per resource and is the single Register call the
@@ -163,6 +164,7 @@ type API struct {
 	learning       *controllers.LearningController
 	learningRules  *controllers.LearningRulesController
 	learningDecide *controllers.LearningDecideController
+	releaseTrains  *controllers.ReleaseTrainsController
 	events         *EventsController
 }
 
@@ -216,6 +218,7 @@ func NewAPI(cfg config.Config, deps APIDeps) *API {
 		learning:       &controllers.LearningController{Svc: deps.Learning},
 		learningRules:  &controllers.LearningRulesController{Svc: deps.LearningRules},
 		learningDecide: &controllers.LearningDecideController{Svc: deps.LearningDecide},
+		releaseTrains:  &controllers.ReleaseTrainsController{Svc: deps.ReleaseTrains},
 		events:         &EventsController{Source: deps.CDC, Live: deps.Events},
 	}
 }
@@ -282,6 +285,7 @@ func (a *API) Register(root chi.Router) {
 			a.learning.Register(r)
 			a.learningRules.Register(r)
 			a.learningDecide.Register(r)
+			a.releaseTrains.Register(r)
 			// Sibling REST controllers plug in here.
 
 			// THE TASK-SCOPED SURFACES, and the only place that list lives.

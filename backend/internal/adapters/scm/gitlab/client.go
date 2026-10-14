@@ -216,6 +216,15 @@ func (e *RateLimitError) Error() string {
 // Is matches ErrRateLimited.
 func (e *RateLimitError) Is(target error) bool { return target == ErrRateLimited }
 
+// ErrNotFound is a 404, which GitLab also returns for a resource the token cannot see.
+var ErrNotFound = errors.New("gitlab scm: not found")
+
+type notFoundError struct{ text string }
+
+func (e *notFoundError) Error() string { return e.text }
+
+func (e *notFoundError) Is(target error) bool { return target == ErrNotFound }
+
 func classifyError(resp *http.Response, body []byte) error {
 	msg := gitlabMessage(body)
 	switch resp.StatusCode {
@@ -223,6 +232,8 @@ func classifyError(resp *http.Response, body []byte) error {
 		return fmt.Errorf("%w: %s", ErrAuthFailed, msg)
 	case http.StatusTooManyRequests:
 		return &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()), Message: msg}
+	case http.StatusNotFound:
+		return &notFoundError{text: fmt.Sprintf("gitlab scm: %d %s", resp.StatusCode, msg)}
 	}
 	return fmt.Errorf("gitlab scm: %d %s", resp.StatusCode, msg)
 }

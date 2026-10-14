@@ -2209,6 +2209,63 @@ paths:
       summary: Resolve review threads on a pull request
       tags:
       - prs
+  /api/v1/release-trains/config:
+    post:
+      operationId: initReleaseTrainConfig
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersReleaseTrainConfigInitResponse'
+          description: Created
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Write the template release-train config to the data dir, never over
+        an existing file
+      tags:
+      - release-trains
+  /api/v1/release-trains/sources:
+    get:
+      operationId: listReleaseTrainSources
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControllersReleaseTrainSourcesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Show the release-train config state and each observed resource's freshness
+      tags:
+      - release-trains
   /api/v1/sessions:
     get:
       operationId: listSessions
@@ -10253,6 +10310,114 @@ components:
           - api
           type: string
       type: object
+    ControllersReleaseTrainConfigDTO:
+      properties:
+        message:
+          description: Why the file is invalid, or how to create it when absent.
+          type: string
+        path:
+          type: string
+        state:
+          enum:
+          - absent
+          - invalid
+          - ok
+          type: string
+      required:
+      - state
+      - path
+      type: object
+    ControllersReleaseTrainConfigInitResponse:
+      properties:
+        path:
+          type: string
+      required:
+      - path
+      type: object
+    ControllersReleaseTrainPassDTO:
+      properties:
+        at:
+          format: date-time
+          type:
+          - "null"
+          - string
+        requests:
+          additionalProperties:
+            type: integer
+          description: HTTP requests sent per host (gitlab, jira) in the last pass.
+          type:
+          - object
+          - "null"
+      required:
+      - requests
+      type: object
+    ControllersReleaseTrainResourceDTO:
+      properties:
+        app:
+          type: string
+        backfilling:
+          description: An incremental resource that has a cursor but has not caught
+            up once.
+          type: boolean
+        completeAt:
+          description: When the last complete fetch finished; absent until one has.
+          format: date-time
+          type:
+          - "null"
+          - string
+        errorClass:
+          enum:
+          - auth
+          - rate_limited
+          - unavailable
+          - not_found
+          - decode
+          - truncated
+          - unconfigured
+          type: string
+        errorMessage:
+          description: 'Sanitized: no query strings, at most 300 bytes.'
+          type: string
+        kind:
+          type: string
+        lastAttemptAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        mode:
+          enum:
+          - snapshot
+          - incremental
+          type: string
+        nextAttemptAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        scope:
+          type: string
+      required:
+      - kind
+      - scope
+      - mode
+      - backfilling
+      type: object
+    ControllersReleaseTrainSourcesResponse:
+      properties:
+        config:
+          $ref: '#/components/schemas/ControllersReleaseTrainConfigDTO'
+        lastPass:
+          $ref: '#/components/schemas/ControllersReleaseTrainPassDTO'
+        resources:
+          items:
+            $ref: '#/components/schemas/ControllersReleaseTrainResourceDTO'
+          type: array
+      required:
+      - config
+      - resources
+      - lastPass
+      type: object
     ControllersRenameSimFlowInput:
       properties:
         name:
@@ -15666,3 +15831,6 @@ tags:
 - description: 'Personal note vault: its index, its notes, and the one agent running
     inside it'
   name: wiki
+- description: 'Read-only monitor of the mobile release trains: its config and source
+    freshness'
+  name: release-trains
