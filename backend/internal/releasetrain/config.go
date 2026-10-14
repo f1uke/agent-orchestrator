@@ -2,6 +2,8 @@ package releasetrain
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -22,11 +24,47 @@ const (
 
 // Config is the monitor's configuration, read from release-train.json.
 type Config struct {
-	Timezone   string   `json:"timezone"`
-	AgeOutDays int      `json:"ageOutDays"`
-	Families   []Family `json:"families"`
-	Apps       []App    `json:"apps"`
+	Timezone    string            `json:"timezone"`
+	HistoryFrom Day               `json:"historyFrom"`
+	AgeOutDays  int               `json:"ageOutDays"`
+	FixWrites   string            `json:"fixWrites"`
+	GitLabHost  string            `json:"gitlabHost"`
+	Jira        JiraConfig        `json:"jira"`
+	Confluence  *ConfluenceConfig `json:"confluence,omitempty"`
+	Families    []Family          `json:"families"`
+	Apps        []App             `json:"apps"`
+	Boards      []BoardConfig     `json:"boards,omitempty"`
+	Mobile      MobileConfig      `json:"mobile"`
 }
+
+// JiraConfig names the Jira projects the monitor reads.
+type JiraConfig struct {
+	Project            string `json:"project"`
+	TechRequestProject string `json:"techRequestProject,omitempty"`
+	ForceUpdateSummary string `json:"forceUpdateSummary,omitempty"`
+}
+
+// ConfluenceConfig names where the train pages live.
+type ConfluenceConfig struct {
+	Space          string `json:"space"`
+	TrainPageTitle string `json:"trainPageTitle"`
+}
+
+// BoardConfig is one Jira agile board whose sprint the monitor follows.
+type BoardConfig struct {
+	ID               int    `json:"id"`
+	Key              string `json:"key"`
+	OwnsSprintBranch bool   `json:"ownsSprintBranch"`
+}
+
+// MobileConfig says which Jira projects and subtasks touch the mobile apps.
+type MobileConfig struct {
+	Projects       []string `json:"projects,omitempty"`
+	SubtaskPattern string   `json:"subtaskPattern,omitempty"`
+}
+
+// FixWritesOff is the only fixWrites value accepted: every fix except L3 is a dry run.
+const FixWritesOff = "off"
 
 // Family is a set of apps that ride the same trains under one train label.
 type Family struct {
@@ -66,6 +104,9 @@ func (c Config) Validate() (*time.Location, error) {
 	if c.AgeOutDays < 0 {
 		return nil, configErr("ageOutDays", "must not be negative")
 	}
+	if err := c.validateSources(); err != nil {
+		return nil, err
+	}
 	apps := map[AppID]bool{}
 	for _, a := range c.Apps {
 		switch {
@@ -101,6 +142,34 @@ func (c Config) Validate() (*time.Location, error) {
 		}
 	}
 	return loc, nil
+}
+
+func (c Config) validateSources() error {
+	switch {
+	case c.HistoryFrom == Day{}:
+		return configErr("historyFrom", "required, as YYYY-MM-DD")
+	case c.FixWrites != FixWritesOff:
+		return configErr("fixWrites", "only %q is supported", FixWritesOff)
+	case strings.TrimSpace(c.GitLabHost) == "" || strings.ContainsAny(c.GitLabHost, "/: "):
+		return configErr("gitlabHost", "a host name such as gitlab.example.com is required")
+	case c.Jira.Project == "":
+		return configErr("jira.project", "required")
+	case c.Jira.TechRequestProject != "" && c.Jira.ForceUpdateSummary == "":
+		return configErr("jira.forceUpdateSummary", "required when techRequestProject is set")
+	case c.Confluence != nil && (c.Confluence.Space == "" || c.Confluence.TrainPageTitle == ""):
+		return configErr("confluence", "needs a space and a trainPageTitle")
+	}
+	boards := map[int]bool{}
+	for _, b := range c.Boards {
+		if b.ID <= 0 || b.Key == "" || boards[b.ID] {
+			return configErr("boards", "board %d needs a unique positive id and a key", b.ID)
+		}
+		boards[b.ID] = true
+	}
+	if _, err := regexp.Compile(c.Mobile.SubtaskPattern); err != nil {
+		return configErr("mobile.subtaskPattern", "%v", err)
+	}
+	return nil
 }
 
 func (c Config) app(id AppID) App {

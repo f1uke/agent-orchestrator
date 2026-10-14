@@ -113,7 +113,7 @@ func joinJira(b *Board, cfg Config, snap Snapshot) {
 	versions := AllItems(snap, KindJiraVersions)
 	sort.SliceStable(versions, func(i, j int) bool { return versions[i].ID < versions[j].ID })
 	for i := range versions {
-		jv := versions[i]
+		jv := withApproverNames(versions[i], snap)
 		app, ok := appForJiraName(cfg, jv.Name)
 		if !ok {
 			continue
@@ -148,6 +148,21 @@ func joinJira(b *Board, cfg Config, snap Snapshot) {
 			b.Mismatches = append(b.Mismatches, Mismatch{Kind: MismatchVersion, App: app.ID, Train: &train, Milestone: &ms, Jira: &jv, Version: version})
 		}
 	}
+}
+
+func withApproverNames(jv JiraVersionFact, snap Snapshot) JiraVersionFact {
+	approvers := make([]Approver, len(jv.Approvers))
+	for i, a := range jv.Approvers {
+		if a.Name == "" {
+			a.Name = a.AccountID
+			for _, u := range Items(snap, KindJiraUsers, UserScope(a.AccountID)) {
+				a.Name = u.DisplayName
+			}
+		}
+		approvers[i] = a
+	}
+	jv.Approvers = approvers
+	return jv
 }
 
 func attachHotfixJira(b *Board, app AppID, version string, jv *JiraVersionFact) bool {

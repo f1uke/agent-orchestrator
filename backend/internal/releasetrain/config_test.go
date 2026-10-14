@@ -33,6 +33,15 @@ func TestConfigValidateRejects(t *testing.T) {
 		{"app in two families", func(c *Config) { c.Families[1].Apps = append(c.Families[1].Apps, "di") }, "families"},
 		{"family without train label", func(c *Config) { c.Families[0].TrainLabel = "" }, "families"},
 		{"app in no family", func(c *Config) { c.Families[1].Apps = []AppID{"pi"} }, "families"},
+		{"missing history start", func(c *Config) { c.HistoryFrom = Day{} }, "historyFrom"},
+		{"fix writes on", func(c *Config) { c.FixWrites = "on" }, "fixWrites"},
+		{"missing gitlab host", func(c *Config) { c.GitLabHost = "" }, "gitlabHost"},
+		{"missing jira project", func(c *Config) { c.Jira.Project = "" }, "jira.project"},
+		{"tech request project without summary", func(c *Config) { c.Jira.ForceUpdateSummary = "" }, "jira.forceUpdateSummary"},
+		{"confluence space without page title", func(c *Config) { c.Confluence = &ConfluenceConfig{Space: "DOCS"} }, "confluence"},
+		{"duplicate board", func(c *Config) { c.Boards = append(c.Boards, c.Boards[0]) }, "boards"},
+		{"board without key", func(c *Config) { c.Boards[0].Key = "" }, "boards"},
+		{"bad subtask pattern", func(c *Config) { c.Mobile.SubtaskPattern = "(" }, "mobile.subtaskPattern"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fixtureConfig()
@@ -49,17 +58,26 @@ func TestConfigValidateRejects(t *testing.T) {
 	}
 }
 
-func TestConfigJSONTags(t *testing.T) {
-	raw := `{"timezone":"Asia/Bangkok","ageOutDays":7,
-	  "families":[{"id":"demo","label":"Demo","trainLabel":"Release Train","apps":["di"]}],
-	  "apps":[{"id":"di","name":"Demo iOS","platform":"ios","gitlabProject":1001,"jiraVersionPrefix":"iOS"}]}`
+func TestExampleConfigDecodesAndValidates(t *testing.T) {
 	var c Config
-	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+	if err := json.Unmarshal([]byte(ExampleConfigJSON), &c); err != nil {
 		t.Fatal(err)
 	}
-	if c.Apps[0].GitLabProject != 1001 || c.Apps[0].JiraVersionPrefix != "iOS" || c.Families[0].TrainLabel != "Release Train" || c.AgeOutDays != 7 {
+	if _, err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if c.Apps[0].GitLabProject != 1001 || c.Apps[0].JiraVersionPrefix != "iOS" || c.Families[0].TrainLabel != "Release Train" ||
+		c.AgeOutDays != 7 || c.HistoryFrom.String() != "2026-04-01" || c.FixWrites != "off" || c.Jira.TechRequestProject != "DEMOREQ" ||
+		c.Confluence == nil || c.Confluence.TrainPageTitle == "" || len(c.Boards) != 2 || !c.Boards[0].OwnsSprintBranch ||
+		c.Mobile.SubtaskPattern == "" || len(c.Mobile.Projects) != 1 {
 		t.Fatalf("decoded = %+v", c)
 	}
+}
+
+func TestConfigWithoutOptionalBlocksValidates(t *testing.T) {
+	c := fixtureConfig()
+	c.Confluence, c.Boards, c.Mobile = nil, nil, MobileConfig{}
+	c.Jira.TechRequestProject, c.Jira.ForceUpdateSummary = "", ""
 	if _, err := c.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}

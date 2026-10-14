@@ -84,5 +84,17 @@ var (
 	KindTechReq      = newKind[ForceUpdateFact]("jira.techreq", Snapshotted, 30*time.Minute, global)
 )
 
+// ItemKey keys a JiraVersionFact within its resource.
+func (f JiraVersionFact) ItemKey() string { return f.ID }
+
+// ItemKey keys a RelatedWorkFact within its resource.
+func (f RelatedWorkFact) ItemKey() string { return f.VersionID }
+
+// ItemKey keys an IssueFact within its resource.
+func (f IssueFact) ItemKey() string { return f.Key }
+
+// ItemKey keys a ForceUpdateFact within its resource.
+func (f ForceUpdateFact) ItemKey() string { return f.Key }
+
 // VersionScope is the scope of a per-Jira-version resource.
 func VersionScope(id string) Scope { return Scope("v:" + id) }
