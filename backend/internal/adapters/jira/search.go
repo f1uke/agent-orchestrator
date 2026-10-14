@@ -112,7 +112,11 @@ func (c *Client) SearchIssues(ctx context.Context, jql string, limit int) ([]Iss
 // error, so a transient later-page hiccup degrades to a partial list. It
 // returns the FIRST page's HTTP status so SearchIssues can fall back.
 func (c *Client) searchIssueSummaries(ctx context.Context, cfg atlassian.Config, path, jql string, limit int, enhanced bool) ([]IssueSummary, int, error) {
-	spec := searchSpec{path: path, jql: jql, fields: searchFields, limit: limit, maxPages: limit, enhanced: enhanced, classify: searchStatusError}
+	spec := searchSpec{
+		path: path, jql: jql, fields: searchFields, limit: limit, maxPages: limit, enhanced: enhanced,
+		classify:  searchStatusError,
+		transport: func(err error) error { return fmt.Errorf("%w: search: %w", ErrUnavailable, err) },
+	}
 	raw, res := c.searchAll(ctx, cfg, spec)
 	if res.err != nil && len(raw) == 0 {
 		return nil, res.firstStatus, res.err
@@ -125,15 +129,16 @@ func (c *Client) searchIssueSummaries(ctx context.Context, cfg atlassian.Config,
 }
 
 // searchSpec is one paged search: which endpoint, what to ask for, where to
-// stop, and how to classify a failed page.
+// stop, and how to classify a failed page or a failed round trip.
 type searchSpec struct {
-	path     string
-	jql      string
-	fields   string
-	limit    int
-	maxPages int
-	enhanced bool
-	classify func(*http.Response) error
+	path      string
+	jql       string
+	fields    string
+	limit     int
+	maxPages  int
+	enhanced  bool
+	classify  func(*http.Response) error
+	transport func(error) error
 }
 
 // searchResult says how a searchAll walk ended. complete means the endpoint
@@ -214,7 +219,7 @@ func (c *Client) searchPage(ctx context.Context, cfg atlassian.Config, spec sear
 	}
 	resp, err := c.httpDo(req)
 	if err != nil {
-		return nil, "", 0, fmt.Errorf("%w: search: %w", ErrUnavailable, err)
+		return nil, "", 0, spec.transport(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if err := spec.classify(resp); err != nil {
