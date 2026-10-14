@@ -66,6 +66,35 @@ func (c CodeElsewhere) MarshalJSON() ([]byte, error) {
 // MarshalJSON writes the code state with "kind": "none".
 func (c CodeNone) MarshalJSON() ([]byte, error) { type plain CodeNone; return tagged(c, plain(c)) }
 
+// Enum lists the phases for the API schema.
+func (TrainPhase) Enum() []any { return []any{PhasePast, PhaseCurrent, PhaseNext} }
+
+// Enum lists the buckets for the API schema.
+func (Bucket) Enum() []any { return []any{BucketBadge, BucketHistory, BucketHidden} }
+
+// Enum lists the stage keys for the API schema.
+func (StageKey) Enum() []any {
+	return []any{StageFreeze, StageScan, StageApprove, StageTag, StagePublish, StageForce}
+}
+
+// Enum lists the stage statuses for the API schema.
+func (StageStatus) Enum() []any {
+	return []any{StatusDone, StatusRunning, StatusWaiting, StatusFailed, StatusLate, StatusTodo, StatusUnknown, StatusNotObservable}
+}
+
+// Enum lists the mismatch kinds for the API schema.
+func (MismatchKind) Enum() []any {
+	return []any{MismatchVersion, MismatchNoMilestone, MismatchNoJira, MismatchNoLabel}
+}
+
+// Enum lists the error classes for the API schema.
+func (ErrorClass) Enum() []any {
+	return []any{ErrAuth, ErrRateLimited, ErrUnavailable, ErrNotFound, ErrDecode, ErrTruncated, ErrUnconfigured}
+}
+
+// Enum lists the platforms for the API schema.
+func (Platform) Enum() []any { return []any{PlatformIOS, PlatformAndroid} }
+
 func tagged(v Variant, fields any) ([]byte, error) {
 	body, err := json.Marshal(fields)
 	if err != nil {

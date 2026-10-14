@@ -2209,6 +2209,34 @@ paths:
       summary: Resolve review threads on a pull request
       tags:
       - prs
+  /api/v1/release-trains/board:
+    get:
+      operationId: getReleaseTrainBoard
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainBoardResponse'
+          description: OK
+        "304":
+          description: Not Modified
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Read the release-train Board; send If-None-Match with the last ETag
+        to get 304 while nothing changed
+      tags:
+      - release-trains
   /api/v1/release-trains/config:
     post:
       operationId: initReleaseTrainConfig
@@ -2239,6 +2267,44 @@ paths:
           description: Not Implemented
       summary: Write the template release-train config to the data dir, never over
         an existing file
+      tags:
+      - release-trains
+  /api/v1/release-trains/refresh:
+    post:
+      operationId: refreshReleaseTrainSources
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTrainRefreshRequest'
+        required: true
+      responses:
+        "202":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainRefreshResponse'
+          description: Accepted
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Make one source's resources (or every source's) due on the next poll
+        pass; pauses and budgets still apply
       tags:
       - release-trains
   /api/v1/release-trains/sources:
@@ -12621,6 +12687,876 @@ components:
       required:
       - released
       type: object
+    ReleaseTrainAlertHit:
+      properties:
+        agesOn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        app:
+          type: string
+        asOf:
+          format: date-time
+          type: string
+        bucket:
+          $ref: '#/components/schemas/ReleaseTrainBucket'
+        changedSinceHidden:
+          type: boolean
+        evidence:
+          $ref: '#/components/schemas/ReleaseTrainEvidence'
+        id:
+          type: string
+        link:
+          $ref: '#/components/schemas/ReleaseTrainLink'
+        rule:
+          type: string
+        severity:
+          $ref: '#/components/schemas/ReleaseTrainSeverity'
+        text:
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - id
+      - rule
+      - severity
+      - evidence
+      - text
+      - link
+      - asOf
+      - bucket
+      type: object
+    ReleaseTrainAlerts:
+      properties:
+        badge:
+          $ref: '#/components/schemas/ReleaseTrainBadge'
+        hits:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainAlertHit'
+          type: array
+        rules:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainRuleOutcome'
+          type: array
+      required:
+      - badge
+      - hits
+      - rules
+      type: object
+    ReleaseTrainAppVersion:
+      properties:
+        app:
+          type: string
+        cards:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainCardUnit'
+          type: array
+        forceUpdate:
+          $ref: '#/components/schemas/ReleaseTrainForceUpdateFact'
+        issues:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainIssueFact'
+          type: array
+        jira:
+          $ref: '#/components/schemas/ReleaseTrainJiraVersionFact'
+        milestone:
+          $ref: '#/components/schemas/ReleaseTrainMilestoneFact'
+        relatedWork:
+          $ref: '#/components/schemas/ReleaseTrainRelatedWorkFact'
+        releaseMr:
+          $ref: '#/components/schemas/ReleaseTrainReleaseMR'
+        stages:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainStage'
+          type: array
+        tag:
+          $ref: '#/components/schemas/ReleaseTrainTag'
+        ticket:
+          $ref: '#/components/schemas/ReleaseTrainIssueFact'
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        version:
+          type: string
+      required:
+      - train
+      - app
+      - version
+      - milestone
+      - issues
+      - stages
+      - cards
+      type: object
+    ReleaseTrainApprover:
+      properties:
+        accountId:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+      required:
+      - accountId
+      - name
+      - status
+      type: object
+    ReleaseTrainBadge:
+      properties:
+        count:
+          type: integer
+        unknown:
+          type: integer
+        worst:
+          $ref: '#/components/schemas/ReleaseTrainSeverity'
+      required:
+      - count
+      - unknown
+      type: object
+    ReleaseTrainBoard:
+      properties:
+        alerts:
+          $ref: '#/components/schemas/ReleaseTrainAlerts'
+        apps:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainBoardApp'
+          type: array
+        hotfixes:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainHotfix'
+          type: array
+        mismatches:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMismatch'
+          type: array
+        sources:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainSourceFreshness'
+          type: array
+        today:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        trains:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainTrain'
+          type: array
+      required:
+      - today
+      - apps
+      - sources
+      - trains
+      - hotfixes
+      - mismatches
+      - alerts
+      type: object
+    ReleaseTrainBoardApp:
+      properties:
+        family:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+        platform:
+          $ref: '#/components/schemas/ReleaseTrainPlatform'
+      required:
+      - id
+      - name
+      - family
+      - platform
+      type: object
+    ReleaseTrainBoardResponse:
+      properties:
+        board:
+          $ref: '#/components/schemas/ReleaseTrainBoard'
+        config:
+          $ref: '#/components/schemas/ReleaseTrainConfigReport'
+      required:
+      - config
+      type: object
+    ReleaseTrainBucket:
+      enum:
+      - badge
+      - history
+      - hidden
+      type: string
+    ReleaseTrainCardUnit:
+      properties:
+        app:
+          type: string
+        assignee:
+          $ref: '#/components/schemas/ReleaseTrainPerson'
+        code:
+          $ref: '#/components/schemas/ReleaseTrainCodeState'
+        key:
+          type: string
+        status:
+          type: string
+        statusCategory:
+          type: string
+      required:
+      - key
+      - app
+      - status
+      - statusCategory
+      - code
+      type: object
+    ReleaseTrainCodeElsewhere:
+      properties:
+        branch:
+          type: string
+        kind:
+          const: elsewhere
+          type: string
+        "on":
+          $ref: '#/components/schemas/ReleaseTrainDay'
+      required:
+      - kind
+      - branch
+      - "on"
+      type: object
+    ReleaseTrainCodeMerged:
+      properties:
+        kind:
+          const: merged
+          type: string
+        mrs:
+          items:
+            type: integer
+          type: array
+      required:
+      - kind
+      - mrs
+      type: object
+    ReleaseTrainCodeNone:
+      properties:
+        kind:
+          const: none
+          type: string
+      required:
+      - kind
+      type: object
+    ReleaseTrainCodeOpen:
+      properties:
+        kind:
+          const: open
+          type: string
+        mrs:
+          items:
+            type: integer
+          type: array
+      required:
+      - kind
+      - mrs
+      type: object
+    ReleaseTrainCodeState:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainCodeMerged'
+      - $ref: '#/components/schemas/ReleaseTrainCodeOpen'
+      - $ref: '#/components/schemas/ReleaseTrainCodeElsewhere'
+      - $ref: '#/components/schemas/ReleaseTrainCodeNone'
+      type: object
+    ReleaseTrainCommitFact:
+      properties:
+        createdOn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - title
+      - createdOn
+      - url
+      type: object
+    ReleaseTrainConfigReport:
+      properties:
+        message:
+          description: Why the file is invalid, or how to create it when absent.
+          type: string
+        path:
+          type: string
+        state:
+          enum:
+          - absent
+          - invalid
+          - ok
+          type: string
+      required:
+      - state
+      - path
+      type: object
+    ReleaseTrainDay:
+      format: date
+      type: string
+    ReleaseTrainErrorClass:
+      enum:
+      - auth
+      - rate_limited
+      - unavailable
+      - not_found
+      - decode
+      - truncated
+      - unconfigured
+      type: string
+    ReleaseTrainEvidence:
+      additionalProperties: {}
+      type: object
+    ReleaseTrainForceUpdateFact:
+      properties:
+        createdOn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        due:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        key:
+          type: string
+        platform:
+          $ref: '#/components/schemas/ReleaseTrainPlatform'
+        status:
+          type: string
+        statusCategory:
+          type: string
+        url:
+          type: string
+        version:
+          type: string
+      required:
+      - key
+      - status
+      - statusCategory
+      - platform
+      - version
+      - createdOn
+      - url
+      type: object
+    ReleaseTrainHotfix:
+      properties:
+        app:
+          type: string
+        forceUpdate:
+          $ref: '#/components/schemas/ReleaseTrainForceUpdateFact'
+        jira:
+          $ref: '#/components/schemas/ReleaseTrainJiraVersionFact'
+        milestone:
+          $ref: '#/components/schemas/ReleaseTrainMilestoneFact'
+        tag:
+          $ref: '#/components/schemas/ReleaseTrainTag'
+        version:
+          type: string
+      required:
+      - app
+      - version
+      - milestone
+      type: object
+    ReleaseTrainIssueFact:
+      properties:
+        assignee:
+          $ref: '#/components/schemas/ReleaseTrainPerson'
+        fixVersions:
+          items:
+            type: string
+          type: array
+        key:
+          type: string
+        releaseTicket:
+          type: boolean
+        status:
+          type: string
+        statusCategory:
+          type: string
+        subtask:
+          type: boolean
+        summary:
+          type: string
+        url:
+          type: string
+      required:
+      - key
+      - summary
+      - status
+      - statusCategory
+      - subtask
+      - releaseTicket
+      - fixVersions
+      - url
+      type: object
+    ReleaseTrainJiraVersionFact:
+      properties:
+        approvers:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainApprover'
+          type: array
+        description:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+        releaseDate:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        released:
+          type: boolean
+        url:
+          type: string
+      required:
+      - id
+      - name
+      - description
+      - released
+      - approvers
+      - url
+      type: object
+    ReleaseTrainJobFact:
+      properties:
+        allowFailure:
+          type: boolean
+        name:
+          type: string
+        status:
+          type: string
+      required:
+      - name
+      - status
+      - allowFailure
+      type: object
+    ReleaseTrainJobsFact:
+      properties:
+        jobs:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainJobFact'
+          type: array
+        pipeline:
+          type: integer
+        project:
+          type: integer
+      required:
+      - project
+      - pipeline
+      - jobs
+      type: object
+    ReleaseTrainLink:
+      properties:
+        label:
+          type: string
+        url:
+          type: string
+      required:
+      - label
+      type: object
+    ReleaseTrainMRDetailFact:
+      properties:
+        conflicts:
+          type: boolean
+        iid:
+          type: integer
+        pipeline:
+          $ref: '#/components/schemas/ReleaseTrainPipelineFact'
+        project:
+          type: integer
+      required:
+      - project
+      - iid
+      - conflicts
+      type: object
+    ReleaseTrainMRFact:
+      properties:
+        author:
+          type: string
+        authorUsername:
+          type: string
+        createdOn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        iid:
+          type: integer
+        mergedOn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        milestoneId:
+          type:
+          - "null"
+          - integer
+        project:
+          type: integer
+        sourceBranch:
+          type: string
+        state:
+          type: string
+        targetBranch:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - project
+      - iid
+      - title
+      - sourceBranch
+      - targetBranch
+      - state
+      - author
+      - createdOn
+      - url
+      type: object
+    ReleaseTrainMilestoneFact:
+      properties:
+        description:
+          type: string
+        due:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        id:
+          type: integer
+        project:
+          type: integer
+        start:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        state:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - project
+      - id
+      - title
+      - description
+      - state
+      - url
+      type: object
+    ReleaseTrainMismatch:
+      properties:
+        app:
+          type: string
+        jira:
+          $ref: '#/components/schemas/ReleaseTrainJiraVersionFact'
+        kind:
+          $ref: '#/components/schemas/ReleaseTrainMismatchKind'
+        milestone:
+          $ref: '#/components/schemas/ReleaseTrainMilestoneFact'
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        version:
+          type: string
+      required:
+      - kind
+      - app
+      type: object
+    ReleaseTrainMismatchKind:
+      enum:
+      - version
+      - no-milestone
+      - no-jira
+      - no-label
+      type: string
+    ReleaseTrainOutcome:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainOutcomeClean'
+      - $ref: '#/components/schemas/ReleaseTrainOutcomeFired'
+      - $ref: '#/components/schemas/ReleaseTrainOutcomeUnknown'
+      type: object
+    ReleaseTrainOutcomeClean:
+      properties:
+        checkedAt:
+          format: date-time
+          type: string
+        kind:
+          const: clean
+          type: string
+      required:
+      - kind
+      - checkedAt
+      type: object
+    ReleaseTrainOutcomeFired:
+      properties:
+        asOf:
+          format: date-time
+          type: string
+        degraded:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainResourceStatus'
+          type: array
+        hits:
+          description: Hit ids; the alert list carries the hits.
+          items:
+            type: string
+          type: array
+        kind:
+          const: fired
+          type: string
+      required:
+      - kind
+      - hits
+      - asOf
+      type: object
+    ReleaseTrainOutcomeUnknown:
+      properties:
+        kind:
+          const: unknown
+          type: string
+        missing:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainResourceStatus'
+          type: array
+      required:
+      - kind
+      - missing
+      type: object
+    ReleaseTrainPerson:
+      properties:
+        accountId:
+          type: string
+        name:
+          type: string
+      required:
+      - accountId
+      - name
+      type: object
+    ReleaseTrainPipelineFact:
+      properties:
+        durationSeconds:
+          type:
+          - "null"
+          - integer
+        id:
+          type: integer
+        status:
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - status
+      - url
+      type: object
+    ReleaseTrainPlatform:
+      enum:
+      - ios
+      - android
+      type: string
+    ReleaseTrainRefreshRequest:
+      properties:
+        source:
+          description: Refresh one source; every source when absent.
+          enum:
+          - gitlab
+          - jira
+          type: string
+      type: object
+    ReleaseTrainRefreshResponse:
+      properties:
+        source:
+          type: string
+      type: object
+    ReleaseTrainRelatedWork:
+      properties:
+        category:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - category
+      - title
+      - url
+      type: object
+    ReleaseTrainRelatedWorkFact:
+      properties:
+        links:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainRelatedWork'
+          type: array
+        versionId:
+          type: string
+      required:
+      - versionId
+      - links
+      type: object
+    ReleaseTrainReleaseMR:
+      properties:
+        detail:
+          $ref: '#/components/schemas/ReleaseTrainMRDetailFact'
+        jobs:
+          $ref: '#/components/schemas/ReleaseTrainJobsFact'
+        mr:
+          $ref: '#/components/schemas/ReleaseTrainMRFact'
+      required:
+      - mr
+      type: object
+    ReleaseTrainResourceStatus:
+      properties:
+        app:
+          type: string
+        completeAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        errorClass:
+          $ref: '#/components/schemas/ReleaseTrainErrorClass'
+        failures:
+          type: integer
+        kind:
+          type: string
+        lastAttemptAt:
+          format: date-time
+          type:
+          - "null"
+          - string
+        scope:
+          type: string
+      required:
+      - kind
+      - scope
+      - failures
+      type: object
+    ReleaseTrainRuleOutcome:
+      properties:
+        app:
+          type: string
+        "on":
+          type: boolean
+        outcome:
+          $ref: '#/components/schemas/ReleaseTrainOutcome'
+        rule:
+          type: string
+      required:
+      - rule
+      - "on"
+      - outcome
+      type: object
+    ReleaseTrainSeverity:
+      enum:
+      - block
+      - data
+      - risk
+      - hygiene
+      - info
+      type: string
+    ReleaseTrainSourceFreshness:
+      properties:
+        asOf:
+          format: date-time
+          type:
+          - "null"
+          - string
+        issues:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainResourceStatus'
+          type: array
+        resources:
+          type: integer
+        system:
+          type: string
+      required:
+      - system
+      - resources
+      - issues
+      type: object
+    ReleaseTrainStage:
+      properties:
+        conventional:
+          type: boolean
+        date:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        detail:
+          type: string
+        key:
+          $ref: '#/components/schemas/ReleaseTrainStageKey'
+        missing:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainResourceStatus'
+          type: array
+        reads:
+          items:
+            type: string
+          type: array
+        status:
+          $ref: '#/components/schemas/ReleaseTrainStageStatus'
+      required:
+      - key
+      - status
+      - detail
+      - reads
+      type: object
+    ReleaseTrainStageKey:
+      enum:
+      - freeze
+      - scan
+      - approve
+      - tag
+      - publish
+      - force
+      type: string
+    ReleaseTrainStageStatus:
+      enum:
+      - done
+      - running
+      - waiting
+      - failed
+      - late
+      - todo
+      - unknown
+      - not_observable
+      type: string
+    ReleaseTrainTag:
+      properties:
+        commitOn:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        compareUrl:
+          type: string
+        mergesAfter:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainCommitFact'
+          type: array
+        name:
+          type: string
+        newest:
+          type: boolean
+        project:
+          type: integer
+        url:
+          type: string
+      required:
+      - project
+      - name
+      - commitOn
+      - url
+      - newest
+      - mergesAfter
+      type: object
+    ReleaseTrainTrain:
+      properties:
+        families:
+          items:
+            type: string
+          type: array
+        freeze:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        id:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        label:
+          type: string
+        phase:
+          $ref: '#/components/schemas/ReleaseTrainTrainPhase'
+        publish:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        versions:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainAppVersion'
+          type: array
+      required:
+      - id
+      - label
+      - phase
+      - families
+      - versions
+      type: object
+    ReleaseTrainTrainPhase:
+      enum:
+      - past
+      - current
+      - next
+      type: string
     RemoveProjectResult:
       properties:
         projectId:
