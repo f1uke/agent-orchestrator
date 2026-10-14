@@ -55,3 +55,66 @@ WHERE kind = ? AND scope = ?;
 
 -- name: DeleteUnplannedReleaseResources :execrows
 DELETE FROM release_resource WHERE planned_at < ?;
+
+-- name: ListReleaseRuleSettings :many
+SELECT * FROM release_rule_setting ORDER BY rule_id;
+
+-- name: UpsertReleaseRuleSetting :exec
+INSERT INTO release_rule_setting (rule_id, enabled, updated_at) VALUES (?, ?, ?)
+ON CONFLICT (rule_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at;
+
+-- name: DeleteReleaseRuleSetting :exec
+DELETE FROM release_rule_setting WHERE rule_id = ?;
+
+-- name: ListReleaseHitHides :many
+SELECT * FROM release_hit_hide ORDER BY hit_id;
+
+-- name: UpsertReleaseHitHide :exec
+INSERT INTO release_hit_hide (hit_id, evidence, severity, reason, hidden_at) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (hit_id) DO UPDATE SET
+    evidence = excluded.evidence,
+    severity = excluded.severity,
+    reason = excluded.reason,
+    hidden_at = excluded.hidden_at;
+
+-- name: DeleteReleaseHitHide :execrows
+DELETE FROM release_hit_hide WHERE hit_id = ?;
+
+-- name: ListReleaseLlbPlans :many
+SELECT * FROM release_llb_plan ORDER BY id;
+
+-- name: ListReleaseLlbPlanBranches :many
+SELECT * FROM release_llb_plan_branch ORDER BY plan_id, app_id, branch;
+
+-- name: ListReleaseLlbPlanAccepted :many
+SELECT * FROM release_llb_plan_accepted ORDER BY plan_id, mr_ref;
+
+-- name: GetReleaseLlbPlanVersion :one
+SELECT version FROM release_llb_plan WHERE id = ?;
+
+-- name: UpsertReleaseLlbPlan :exec
+INSERT INTO release_llb_plan (id, name, target_kind, target_train, note, version, updated_by, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET
+    name = excluded.name,
+    target_kind = excluded.target_kind,
+    target_train = excluded.target_train,
+    note = excluded.note,
+    version = excluded.version,
+    updated_by = excluded.updated_by,
+    updated_at = excluded.updated_at;
+
+-- name: ReleaseLlbBranchOwner :one
+SELECT plan_id FROM release_llb_plan_branch WHERE app_id = ? AND branch = ? AND plan_id != ?;
+
+-- name: DeleteReleaseLlbPlanBranches :exec
+DELETE FROM release_llb_plan_branch WHERE plan_id = ?;
+
+-- name: InsertReleaseLlbPlanBranch :exec
+INSERT INTO release_llb_plan_branch (plan_id, app_id, branch) VALUES (?, ?, ?);
+
+-- name: DeleteReleaseLlbPlanAccepted :exec
+DELETE FROM release_llb_plan_accepted WHERE plan_id = ?;
+
+-- name: InsertReleaseLlbPlanAccepted :exec
+INSERT INTO release_llb_plan_accepted (plan_id, mr_ref, reason) VALUES (?, ?, ?);

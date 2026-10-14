@@ -11,6 +11,18 @@ import (
 	"time"
 )
 
+const deleteReleaseHitHide = `-- name: DeleteReleaseHitHide :execrows
+DELETE FROM release_hit_hide WHERE hit_id = ?
+`
+
+func (q *Queries) DeleteReleaseHitHide(ctx context.Context, hitID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteReleaseHitHide, hitID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteReleaseItem = `-- name: DeleteReleaseItem :exec
 DELETE FROM release_item WHERE kind = ? AND scope = ? AND item_key = ?
 `
@@ -26,6 +38,33 @@ func (q *Queries) DeleteReleaseItem(ctx context.Context, arg DeleteReleaseItemPa
 	return err
 }
 
+const deleteReleaseLlbPlanAccepted = `-- name: DeleteReleaseLlbPlanAccepted :exec
+DELETE FROM release_llb_plan_accepted WHERE plan_id = ?
+`
+
+func (q *Queries) DeleteReleaseLlbPlanAccepted(ctx context.Context, planID string) error {
+	_, err := q.db.ExecContext(ctx, deleteReleaseLlbPlanAccepted, planID)
+	return err
+}
+
+const deleteReleaseLlbPlanBranches = `-- name: DeleteReleaseLlbPlanBranches :exec
+DELETE FROM release_llb_plan_branch WHERE plan_id = ?
+`
+
+func (q *Queries) DeleteReleaseLlbPlanBranches(ctx context.Context, planID string) error {
+	_, err := q.db.ExecContext(ctx, deleteReleaseLlbPlanBranches, planID)
+	return err
+}
+
+const deleteReleaseRuleSetting = `-- name: DeleteReleaseRuleSetting :exec
+DELETE FROM release_rule_setting WHERE rule_id = ?
+`
+
+func (q *Queries) DeleteReleaseRuleSetting(ctx context.Context, ruleID string) error {
+	_, err := q.db.ExecContext(ctx, deleteReleaseRuleSetting, ruleID)
+	return err
+}
+
 const deleteUnplannedReleaseResources = `-- name: DeleteUnplannedReleaseResources :execrows
 DELETE FROM release_resource WHERE planned_at < ?
 `
@@ -36,6 +75,80 @@ func (q *Queries) DeleteUnplannedReleaseResources(ctx context.Context, plannedAt
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const getReleaseLlbPlanVersion = `-- name: GetReleaseLlbPlanVersion :one
+SELECT version FROM release_llb_plan WHERE id = ?
+`
+
+func (q *Queries) GetReleaseLlbPlanVersion(ctx context.Context, id string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getReleaseLlbPlanVersion, id)
+	var version int64
+	err := row.Scan(&version)
+	return version, err
+}
+
+const insertReleaseLlbPlanAccepted = `-- name: InsertReleaseLlbPlanAccepted :exec
+INSERT INTO release_llb_plan_accepted (plan_id, mr_ref, reason) VALUES (?, ?, ?)
+`
+
+type InsertReleaseLlbPlanAcceptedParams struct {
+	PlanID string
+	MrRef  string
+	Reason string
+}
+
+func (q *Queries) InsertReleaseLlbPlanAccepted(ctx context.Context, arg InsertReleaseLlbPlanAcceptedParams) error {
+	_, err := q.db.ExecContext(ctx, insertReleaseLlbPlanAccepted, arg.PlanID, arg.MrRef, arg.Reason)
+	return err
+}
+
+const insertReleaseLlbPlanBranch = `-- name: InsertReleaseLlbPlanBranch :exec
+INSERT INTO release_llb_plan_branch (plan_id, app_id, branch) VALUES (?, ?, ?)
+`
+
+type InsertReleaseLlbPlanBranchParams struct {
+	PlanID string
+	AppID  string
+	Branch string
+}
+
+func (q *Queries) InsertReleaseLlbPlanBranch(ctx context.Context, arg InsertReleaseLlbPlanBranchParams) error {
+	_, err := q.db.ExecContext(ctx, insertReleaseLlbPlanBranch, arg.PlanID, arg.AppID, arg.Branch)
+	return err
+}
+
+const listReleaseHitHides = `-- name: ListReleaseHitHides :many
+SELECT hit_id, evidence, severity, reason, hidden_at FROM release_hit_hide ORDER BY hit_id
+`
+
+func (q *Queries) ListReleaseHitHides(ctx context.Context) ([]ReleaseHitHide, error) {
+	rows, err := q.db.QueryContext(ctx, listReleaseHitHides)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReleaseHitHide{}
+	for rows.Next() {
+		var i ReleaseHitHide
+		if err := rows.Scan(
+			&i.HitID,
+			&i.Evidence,
+			&i.Severity,
+			&i.Reason,
+			&i.HiddenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listReleaseItemKeys = `-- name: ListReleaseItemKeys :many
@@ -103,6 +216,96 @@ func (q *Queries) ListReleaseItems(ctx context.Context) ([]ListReleaseItemsRow, 
 	return items, nil
 }
 
+const listReleaseLlbPlanAccepted = `-- name: ListReleaseLlbPlanAccepted :many
+SELECT plan_id, mr_ref, reason FROM release_llb_plan_accepted ORDER BY plan_id, mr_ref
+`
+
+func (q *Queries) ListReleaseLlbPlanAccepted(ctx context.Context) ([]ReleaseLlbPlanAccepted, error) {
+	rows, err := q.db.QueryContext(ctx, listReleaseLlbPlanAccepted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReleaseLlbPlanAccepted{}
+	for rows.Next() {
+		var i ReleaseLlbPlanAccepted
+		if err := rows.Scan(&i.PlanID, &i.MrRef, &i.Reason); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReleaseLlbPlanBranches = `-- name: ListReleaseLlbPlanBranches :many
+SELECT plan_id, app_id, branch FROM release_llb_plan_branch ORDER BY plan_id, app_id, branch
+`
+
+func (q *Queries) ListReleaseLlbPlanBranches(ctx context.Context) ([]ReleaseLlbPlanBranch, error) {
+	rows, err := q.db.QueryContext(ctx, listReleaseLlbPlanBranches)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReleaseLlbPlanBranch{}
+	for rows.Next() {
+		var i ReleaseLlbPlanBranch
+		if err := rows.Scan(&i.PlanID, &i.AppID, &i.Branch); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReleaseLlbPlans = `-- name: ListReleaseLlbPlans :many
+SELECT id, name, target_kind, target_train, note, version, updated_by, updated_at FROM release_llb_plan ORDER BY id
+`
+
+func (q *Queries) ListReleaseLlbPlans(ctx context.Context) ([]ReleaseLlbPlan, error) {
+	rows, err := q.db.QueryContext(ctx, listReleaseLlbPlans)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReleaseLlbPlan{}
+	for rows.Next() {
+		var i ReleaseLlbPlan
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.TargetKind,
+			&i.TargetTrain,
+			&i.Note,
+			&i.Version,
+			&i.UpdatedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReleaseResources = `-- name: ListReleaseResources :many
 SELECT kind, scope, app_id, sync_mode, fact_version, cursor, complete_at, last_attempt_at, last_success_at, failures, error_class, error_message, next_attempt_at, planned_at, generation FROM release_resource ORDER BY kind, scope
 `
@@ -133,6 +336,33 @@ func (q *Queries) ListReleaseResources(ctx context.Context) ([]ReleaseResource, 
 			&i.PlannedAt,
 			&i.Generation,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReleaseRuleSettings = `-- name: ListReleaseRuleSettings :many
+SELECT rule_id, enabled, updated_at FROM release_rule_setting ORDER BY rule_id
+`
+
+func (q *Queries) ListReleaseRuleSettings(ctx context.Context) ([]ReleaseRuleSetting, error) {
+	rows, err := q.db.QueryContext(ctx, listReleaseRuleSettings)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReleaseRuleSetting{}
+	for rows.Next() {
+		var i ReleaseRuleSetting
+		if err := rows.Scan(&i.RuleID, &i.Enabled, &i.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -219,6 +449,51 @@ func (q *Queries) MarkReleaseResourceFetched(ctx context.Context, arg MarkReleas
 	return result.RowsAffected()
 }
 
+const releaseLlbBranchOwner = `-- name: ReleaseLlbBranchOwner :one
+SELECT plan_id FROM release_llb_plan_branch WHERE app_id = ? AND branch = ? AND plan_id != ?
+`
+
+type ReleaseLlbBranchOwnerParams struct {
+	AppID  string
+	Branch string
+	PlanID string
+}
+
+func (q *Queries) ReleaseLlbBranchOwner(ctx context.Context, arg ReleaseLlbBranchOwnerParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, releaseLlbBranchOwner, arg.AppID, arg.Branch, arg.PlanID)
+	var plan_id string
+	err := row.Scan(&plan_id)
+	return plan_id, err
+}
+
+const upsertReleaseHitHide = `-- name: UpsertReleaseHitHide :exec
+INSERT INTO release_hit_hide (hit_id, evidence, severity, reason, hidden_at) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (hit_id) DO UPDATE SET
+    evidence = excluded.evidence,
+    severity = excluded.severity,
+    reason = excluded.reason,
+    hidden_at = excluded.hidden_at
+`
+
+type UpsertReleaseHitHideParams struct {
+	HitID    string
+	Evidence string
+	Severity string
+	Reason   string
+	HiddenAt time.Time
+}
+
+func (q *Queries) UpsertReleaseHitHide(ctx context.Context, arg UpsertReleaseHitHideParams) error {
+	_, err := q.db.ExecContext(ctx, upsertReleaseHitHide,
+		arg.HitID,
+		arg.Evidence,
+		arg.Severity,
+		arg.Reason,
+		arg.HiddenAt,
+	)
+	return err
+}
+
 const upsertReleaseItem = `-- name: UpsertReleaseItem :exec
 INSERT INTO release_item (kind, scope, item_key, body, source_updated_at)
 VALUES (?, ?, ?, ?, ?)
@@ -242,6 +517,44 @@ func (q *Queries) UpsertReleaseItem(ctx context.Context, arg UpsertReleaseItemPa
 		arg.ItemKey,
 		arg.Body,
 		arg.SourceUpdatedAt,
+	)
+	return err
+}
+
+const upsertReleaseLlbPlan = `-- name: UpsertReleaseLlbPlan :exec
+INSERT INTO release_llb_plan (id, name, target_kind, target_train, note, version, updated_by, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (id) DO UPDATE SET
+    name = excluded.name,
+    target_kind = excluded.target_kind,
+    target_train = excluded.target_train,
+    note = excluded.note,
+    version = excluded.version,
+    updated_by = excluded.updated_by,
+    updated_at = excluded.updated_at
+`
+
+type UpsertReleaseLlbPlanParams struct {
+	ID          string
+	Name        string
+	TargetKind  string
+	TargetTrain sql.NullString
+	Note        string
+	Version     int64
+	UpdatedBy   string
+	UpdatedAt   time.Time
+}
+
+func (q *Queries) UpsertReleaseLlbPlan(ctx context.Context, arg UpsertReleaseLlbPlanParams) error {
+	_, err := q.db.ExecContext(ctx, upsertReleaseLlbPlan,
+		arg.ID,
+		arg.Name,
+		arg.TargetKind,
+		arg.TargetTrain,
+		arg.Note,
+		arg.Version,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
 	)
 	return err
 }
@@ -278,5 +591,21 @@ func (q *Queries) UpsertReleaseResourceSpec(ctx context.Context, arg UpsertRelea
 		arg.FactVersion,
 		arg.PlannedAt,
 	)
+	return err
+}
+
+const upsertReleaseRuleSetting = `-- name: UpsertReleaseRuleSetting :exec
+INSERT INTO release_rule_setting (rule_id, enabled, updated_at) VALUES (?, ?, ?)
+ON CONFLICT (rule_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at
+`
+
+type UpsertReleaseRuleSettingParams struct {
+	RuleID    string
+	Enabled   bool
+	UpdatedAt time.Time
+}
+
+func (q *Queries) UpsertReleaseRuleSetting(ctx context.Context, arg UpsertReleaseRuleSettingParams) error {
+	_, err := q.db.ExecContext(ctx, upsertReleaseRuleSetting, arg.RuleID, arg.Enabled, arg.UpdatedAt)
 	return err
 }
