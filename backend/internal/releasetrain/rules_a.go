@@ -61,6 +61,74 @@ var ruleA5 = rule{
 	},
 }
 
+var ruleA7 = rule{
+	ID: "A7", Group: "A", Severity: SevData, DefaultOn: true, Scope: scopePerApp, Reads: []KindName{KindMilestones.Name},
+	Title: "An app's milestone dates differ from the rest of its train",
+	Check: func(b *Board) []Hit {
+		var out []Hit
+		for i := range b.Trains {
+			t := &b.Trains[i]
+			off, usual := trainDateSplit(t)
+			for _, v := range off {
+				start, due := *v.Milestone.Start, *v.Milestone.Due
+				ev := Evidence{"start": start, "due": due}
+				text := fmt.Sprintf("Apps in %s disagree on dates: %s → %s here", t.ID, start.label(), due.label())
+				if usual != nil {
+					ev["usualStart"], ev["usualDue"] = usual.start, usual.due
+					text = fmt.Sprintf("Milestone %s → %s, the rest of %s runs %s → %s. Give it its own train or move the milestone",
+						start.label(), due.label(), t.ID, usual.start.label(), usual.due.label())
+				}
+				out = append(out, *versionHit(t, v, text, ev, Link{Label: "Open milestone", URL: v.Milestone.URL}))
+			}
+		}
+		return out
+	},
+}
+
+type datePair struct{ start, due Day }
+
+// trainDateSplit finds the start+due pair most of a train's dated apps share.
+// A strict majority gives the apps off that pair and the pair; no majority
+// gives every dated app and nil; fewer than two dated apps, or all agreeing, gives nothing.
+func trainDateSplit(t *Train) ([]*AppVersion, *datePair) {
+	var dated []*AppVersion
+	counts := map[datePair]int{}
+	for _, v := range t.Versions {
+		if v.Milestone.Start != nil && v.Milestone.Due != nil {
+			dated = append(dated, v)
+			counts[datePair{*v.Milestone.Start, *v.Milestone.Due}]++
+		}
+	}
+	var top datePair
+	for p, n := range counts {
+		if n > counts[top] {
+			top = p
+		}
+	}
+	switch n := counts[top]; {
+	case len(dated) < 2 || n == len(dated):
+		return nil, nil
+	case n*2 <= len(dated):
+		return dated, nil
+	}
+	var off []*AppVersion
+	for _, v := range dated {
+		if (datePair{*v.Milestone.Start, *v.Milestone.Due}) != top {
+			off = append(off, v)
+		}
+	}
+	return off, &top
+}
+
+func datesSplit(t *Train) []AppID {
+	off, _ := trainDateSplit(t)
+	out := make([]AppID, len(off))
+	for i, v := range off {
+		out[i] = v.App
+	}
+	return out
+}
+
 func versionOf(ms *MilestoneFact) string {
 	if v, ok := ParseVersion(ms.Title); ok {
 		return v.String()

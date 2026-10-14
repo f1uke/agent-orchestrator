@@ -185,6 +185,102 @@ func TestHideSurvivesEvidenceChangeAndReturnsOnEscalation(t *testing.T) {
 	}
 }
 
+func staleIDs(b Board) []HitID {
+	out := []HitID{}
+	for _, s := range b.Alerts.StaleHides {
+		out = append(out, s.ID)
+	}
+	return out
+}
+
+func TestAHideWhoseHitIsGoneIsListedStale(t *testing.T) {
+	f := newFixture(t, "2026-10-15")
+	v := healthy(f)
+	v.approvers("Ann:APPROVED", "Bob:PENDING")
+	hit, _ := alertHit(f.reconcile(), "D3~v/21-2026/di")
+	f.human.Hides[hit.ID] = Hide{Fingerprint: hit.Fingerprint(), Severity: hit.Severity, Reason: "waiting on Bob"}
+
+	if got := staleIDs(f.reconcile()); len(got) != 0 {
+		t.Fatalf("stale hides while the hit matches = %v, want none", got)
+	}
+
+	v.approvers("Ann:APPROVED", "Bob:APPROVED")
+	b := f.reconcile()
+	if len(b.Alerts.StaleHides) != 1 || b.Alerts.StaleHides[0].ID != hit.ID || b.Alerts.StaleHides[0].Reason != "waiting on Bob" {
+		t.Fatalf("stale hides after Bob approved = %+v, want the D3 hide with its reason", b.Alerts.StaleHides)
+	}
+}
+
+func TestAHideIsNotStaleWhileItsRuleCannotSee(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		blind func(f *fixture)
+	}{
+		{"stale read", func(f *fixture) { f.stale(KindJiraVersions.Name) }},
+		{"never completed", func(f *fixture) { f.neverComplete(KindJiraVersions.Name) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, "2026-10-15")
+			healthy(f)
+			f.human.Hides["D3~v/21-2026/di"] = Hide{Severity: SevRisk}
+			tc.blind(f)
+			if got := staleIDs(f.reconcile()); len(got) != 0 {
+				t.Fatalf("stale hides over a %s = %v, want none: the rule could not see", tc.name, got)
+			}
+		})
+	}
+}
+
+func TestAHideOfAnOffRulesHitIsNotStale(t *testing.T) {
+	f := newFixture(t, today)
+	d := 71 * 60
+	healthy(f).detail().Pipeline.Duration = &d
+	f.human.Hides["C3~v/21-2026/di"] = Hide{Severity: SevInfo}
+	if got := staleIDs(f.reconcile()); len(got) != 0 {
+		t.Fatalf("stale hides for an off rule that still fires = %v, want none", got)
+	}
+	f.human.Hides["Z9~v/21-2026/di"] = Hide{Severity: SevInfo}
+	if got := staleIDs(f.reconcile()); len(got) != 1 || got[0] != "Z9~v/21-2026/di" {
+		t.Fatalf("stale hides with a hide of a rule that no longer exists = %v, want it listed", got)
+	}
+}
+
+func TestCatalogueListsEveryRuleWithItsEffectiveSetting(t *testing.T) {
+	f := newFixture(t, today)
+	healthy(f)
+	f.human.RuleSettings["C3"] = true
+	f.human.RuleSettings["A7"] = false
+	b := f.reconcile()
+
+	if len(b.Catalogue) != len(ruleTable()) {
+		t.Fatalf("catalogue has %d rules, the table %d", len(b.Catalogue), len(ruleTable()))
+	}
+	byID := map[RuleID]RuleInfo{}
+	for _, r := range b.Catalogue {
+		byID[r.ID] = r
+	}
+	for _, tc := range []struct {
+		id            RuleID
+		defaultOn, on bool
+	}{
+		{"C3", false, true},
+		{"A7", true, false},
+		{"C2", false, false},
+		{"C1", true, true},
+	} {
+		got := byID[tc.id]
+		if got.DefaultOn != tc.defaultOn || got.On != tc.on {
+			t.Fatalf("%s defaultOn=%v on=%v, want %v %v", tc.id, got.DefaultOn, got.On, tc.defaultOn, tc.on)
+		}
+	}
+	if a7 := byID["A7"]; a7.Group != "A" || a7.Severity != SevData || a7.Title == "" {
+		t.Fatalf("A7 catalogue row = %+v", a7)
+	}
+	if d3 := byID["D3"]; d3.Hint == "" {
+		t.Fatalf("D3 catalogue row lost its hint: %+v", d3)
+	}
+}
+
 func TestHitsAgeToHistoryAfterAgeOutDays(t *testing.T) {
 	for _, tc := range []struct {
 		today string

@@ -90,6 +90,8 @@ func init() {
 		"ReleasetrainReleaseMR":                  "ReleaseTrainReleaseMR",
 		"ReleasetrainResourceStatus":             "ReleaseTrainResourceStatus",
 		"ReleasetrainRuleOutcome":                "ReleaseTrainRuleOutcome",
+		"ReleasetrainRuleInfo":                   "ReleaseTrainRuleInfo",
+		"ReleasetrainStaleHide":                  "ReleaseTrainStaleHide",
 		"ReleasetrainSeverity":                   "ReleaseTrainSeverity",
 		"ReleasetrainBucket":                     "ReleaseTrainBucket",
 		"ReleasetrainErrorClass":                 "ReleaseTrainErrorClass",

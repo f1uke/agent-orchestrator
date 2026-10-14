@@ -4498,6 +4498,7 @@ export interface components {
             badge: components["schemas"]["ReleaseTrainBadge"];
             hits: components["schemas"]["ReleaseTrainAlertHit"][];
             rules: components["schemas"]["ReleaseTrainRuleOutcome"][];
+            staleHides: components["schemas"]["ReleaseTrainStaleHide"][];
         };
         ReleaseTrainAppVersion: {
             app: string;
@@ -4528,6 +4529,7 @@ export interface components {
         ReleaseTrainBoard: {
             alerts: components["schemas"]["ReleaseTrainAlerts"];
             apps: components["schemas"]["ReleaseTrainBoardApp"][];
+            catalogue: components["schemas"]["ReleaseTrainRuleInfo"][];
             hotfixes: components["schemas"]["ReleaseTrainHotfix"][];
             mismatches: components["schemas"]["ReleaseTrainMismatch"][];
             sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
@@ -4755,6 +4757,15 @@ export interface components {
             lastAttemptAt?: null | string;
             scope: string;
         };
+        ReleaseTrainRuleInfo: {
+            defaultOn: boolean;
+            group: string;
+            hint?: string;
+            id: string;
+            on: boolean;
+            severity: components["schemas"]["ReleaseTrainSeverity"];
+            title: string;
+        };
         ReleaseTrainRuleOutcome: {
             app?: string;
             on: boolean;
@@ -4783,6 +4794,12 @@ export interface components {
         ReleaseTrainStageKey: "freeze" | "scan" | "approve" | "tag" | "publish" | "force";
         /** @enum {string} */
         ReleaseTrainStageStatus: "done" | "running" | "waiting" | "failed" | "late" | "todo" | "unknown" | "not_observable";
+        ReleaseTrainStaleHide: {
+            /** Format: date-time */
+            hiddenAt: string;
+            id: string;
+            reason?: string;
+        };
         ReleaseTrainTag: {
             commitOn: components["schemas"]["ReleaseTrainDay"];
             compareUrl?: string;
@@ -4793,6 +4810,7 @@ export interface components {
             url: string;
         };
         ReleaseTrainTrain: {
+            datesSplit: string[];
             families: string[];
             freeze?: components["schemas"]["ReleaseTrainDay"];
             /** @description Train key, "21-2026" or "20-1-2026". */

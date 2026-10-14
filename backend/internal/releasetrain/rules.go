@@ -32,13 +32,51 @@ var (
 
 func ruleTable() []rule {
 	return []rule{
-		ruleA1, ruleA2, ruleA3, ruleA4, ruleA5,
+		ruleA1, ruleA2, ruleA3, ruleA4, ruleA5, ruleA7,
 		ruleB1, ruleB3,
 		ruleC1, ruleC2, ruleC3, ruleC5, ruleC6, ruleC7,
 		ruleD1, ruleD2, ruleD3,
 		ruleE1, ruleE2, ruleE4, ruleE5,
 		ruleF1, ruleF2,
 	}
+}
+
+// RuleInfo is one rule as the catalogue serves it, with its effective on/off.
+type RuleInfo struct {
+	ID        RuleID   `json:"id"`
+	Group     string   `json:"group"`
+	Severity  Severity `json:"severity"`
+	DefaultOn bool     `json:"defaultOn"`
+	On        bool     `json:"on"`
+	Title     string   `json:"title"`
+	Hint      string   `json:"hint,omitempty"`
+}
+
+// KnownRule reports whether id names a rule in the table.
+func KnownRule(id RuleID) bool {
+	for _, r := range ruleTable() {
+		if r.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func catalogue(settings map[RuleID]bool) []RuleInfo {
+	table := ruleTable()
+	out := make([]RuleInfo, len(table))
+	for i, r := range table {
+		out[i] = RuleInfo{ID: r.ID, Group: r.Group, Severity: r.Severity, DefaultOn: r.DefaultOn,
+			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint}
+	}
+	return out
+}
+
+func (r rule) effectiveOn(settings map[RuleID]bool) bool {
+	if on, set := settings[r.ID]; set {
+		return on
+	}
+	return r.DefaultOn
 }
 
 func forEachVersion(b *Board, fn func(t *Train, v *AppVersion) *Hit) []Hit {
@@ -85,12 +123,11 @@ func published(t *Train, v *AppVersion, today Day) bool {
 }
 
 func alerts(b *Board, in Inputs, rs *readSet) Alerts {
-	var a Alerts
+	a := Alerts{StaleHides: []StaleHide{}}
+	matched := map[HitID]bool{}
+	unsure := map[RuleID]bool{}
 	for _, r := range ruleTable() {
-		on, set := in.Human.RuleSettings[r.ID]
-		if !set {
-			on = r.DefaultOn
-		}
+		on := r.effectiveOn(in.Human.RuleSettings)
 		hits := r.Check(b)
 		for i := range hits {
 			hits[i].Rule = r.ID
@@ -98,10 +135,14 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 			if hits[i].Severity == 0 {
 				hits[i].Severity = r.Severity
 			}
+			matched[hits[i].ID] = true
 		}
 		for _, cell := range cells(b, in.Config, r, hits) {
 			o := evaluate(cell.hits, rs.coverageFor(r.Reads, cell.app, cell.versions))
 			a.Rules = append(a.Rules, RuleOutcome{Rule: r.ID, App: cell.app, On: on, Outcome: o})
+			if _, ok := o.(Unknown); ok {
+				unsure[r.ID] = true
+			}
 			if !on {
 				continue
 			}
@@ -131,6 +172,12 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 			a.Badge.Worst = &s
 		}
 	}
+	for id, hide := range in.Human.Hides {
+		if !matched[id] && !unsure[id.Rule()] {
+			a.StaleHides = append(a.StaleHides, StaleHide{ID: id, Reason: hide.Reason, HiddenAt: hide.HiddenAt})
+		}
+	}
+	sort.Slice(a.StaleHides, func(i, j int) bool { return a.StaleHides[i].ID < a.StaleHides[j].ID })
 	return a
 }
 

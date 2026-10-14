@@ -12737,10 +12737,15 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainRuleOutcome'
           type: array
+        staleHides:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainStaleHide'
+          type: array
       required:
       - badge
       - hits
       - rules
+      - staleHides
       type: object
     ReleaseTrainAppVersion:
       properties:
@@ -12819,6 +12824,10 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainBoardApp'
           type: array
+        catalogue:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainRuleInfo'
+          type: array
         hotfixes:
           items:
             $ref: '#/components/schemas/ReleaseTrainHotfix'
@@ -12845,6 +12854,7 @@ components:
       - hotfixes
       - mismatches
       - alerts
+      - catalogue
       type: object
     ReleaseTrainBoardApp:
       properties:
@@ -13408,6 +13418,30 @@ components:
       - scope
       - failures
       type: object
+    ReleaseTrainRuleInfo:
+      properties:
+        defaultOn:
+          type: boolean
+        group:
+          type: string
+        hint:
+          type: string
+        id:
+          type: string
+        "on":
+          type: boolean
+        severity:
+          $ref: '#/components/schemas/ReleaseTrainSeverity'
+        title:
+          type: string
+      required:
+      - id
+      - group
+      - severity
+      - defaultOn
+      - "on"
+      - title
+      type: object
     ReleaseTrainRuleOutcome:
       properties:
         app:
@@ -13497,6 +13531,19 @@ components:
       - unknown
       - not_observable
       type: string
+    ReleaseTrainStaleHide:
+      properties:
+        hiddenAt:
+          format: date-time
+          type: string
+        id:
+          type: string
+        reason:
+          type: string
+      required:
+      - id
+      - hiddenAt
+      type: object
     ReleaseTrainTag:
       properties:
         commitOn:
@@ -13525,6 +13572,10 @@ components:
       type: object
     ReleaseTrainTrain:
       properties:
+        datesSplit:
+          items:
+            type: string
+          type: array
         families:
           items:
             type: string
@@ -13550,6 +13601,7 @@ components:
       - phase
       - families
       - versions
+      - datesSplit
       type: object
     ReleaseTrainTrainPhase:
       enum:
