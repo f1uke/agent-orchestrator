@@ -2,6 +2,8 @@ package releasetrain
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"sort"
@@ -57,13 +59,43 @@ type PollerDeps struct {
 }
 
 // Poller runs poll passes. Its only memory between passes is the credential
-// probe schedule; backoff and pauses live in the rows.
+// probe schedule and refresh requests; backoff and pauses live in the rows.
 type Poller struct {
 	d PollerDeps
 
-	mu       sync.Mutex
-	probes   map[string]*probeState
-	lastPass PassStats
+	mu        sync.Mutex
+	probes    map[string]*probeState
+	refreshes map[string]time.Time
+	lastPass  PassStats
+}
+
+// ErrUnknownSource is a refresh that names no configured source.
+var ErrUnknownSource = errors.New("release trains: unknown source")
+
+// Refresh makes every resource of source (every source when empty) that has
+// not been attempted since now due on the next pass. Host pauses, backoff and
+// request budgets still apply.
+func (p *Poller) Refresh(source string) error {
+	now := p.d.Clock().UTC()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	matched := false
+	for _, src := range p.d.Sources {
+		if source == "" || src.System() == source {
+			p.refreshes[src.System()] = now
+			matched = true
+		}
+	}
+	if !matched {
+		return fmt.Errorf("%w: %q", ErrUnknownSource, source)
+	}
+	return nil
+}
+
+func (p *Poller) refreshedAt(host string) time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.refreshes[host]
 }
 
 type probeState struct {
@@ -86,7 +118,7 @@ func NewPoller(d PollerDeps) *Poller {
 	if d.Logger == nil {
 		d.Logger = slog.Default()
 	}
-	return &Poller{d: d, probes: map[string]*probeState{}}
+	return &Poller{d: d, probes: map[string]*probeState{}, refreshes: map[string]time.Time{}}
 }
 
 type planned struct {
@@ -186,7 +218,7 @@ func (p *Poller) pollHost(ctx context.Context, host string, res []planned, view 
 	if now.Before(pausedUntil) {
 		return 0
 	}
-	due := dueOrder(res, now)
+	due := dueOrder(res, now, p.refreshedAt(host))
 	limits := p.d.Limits[host]
 	if limits.Concurrency < 1 {
 		limits.Concurrency = 1
@@ -221,16 +253,17 @@ func (p *Poller) pollHost(ctx context.Context, host string, res []planned, view 
 
 func pausesHost(c rt.ErrorClass) bool { return c == rt.ErrRateLimited || c == rt.ErrAuth }
 
-func dueOrder(res []planned, now time.Time) []planned {
+func dueOrder(res []planned, now, refreshed time.Time) []planned {
 	due := make([]planned, 0, len(res))
 	for _, pl := range res {
 		r := pl.row
+		asked := r.LastAttemptAt == nil || r.LastAttemptAt.Before(refreshed)
 		switch {
 		case r.NextAttemptAt != nil:
 			if now.Before(*r.NextAttemptAt) {
 				continue
 			}
-		case r.CompleteAt != nil && now.Before(r.CompleteAt.Add(pl.spec.Budget/2)):
+		case r.CompleteAt != nil && now.Before(r.CompleteAt.Add(pl.spec.Budget/2)) && !asked:
 			continue
 		}
 		due = append(due, pl)
