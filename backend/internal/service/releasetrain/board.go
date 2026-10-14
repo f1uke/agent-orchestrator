@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,10 +29,16 @@ type BoardResponse struct {
 	Board  *rt.Board    `json:"board,omitempty"`
 }
 
-// BoardStore is what the Board read needs from storage.
+// BoardStore is what the Board and the human-state commands need from storage.
 type BoardStore interface {
 	LoadReleaseSnapshot(ctx context.Context) (rt.Snapshot, []rt.Resource, error)
 	LoadReleaseResources(ctx context.Context) ([]rt.Resource, error)
+	LoadReleaseHumanState(ctx context.Context) (rt.HumanState, error)
+	SetReleaseRuleSetting(ctx context.Context, id rt.RuleID, enabled *bool, at time.Time) error
+	HideReleaseHit(ctx context.Context, id rt.HitID, h rt.Hide) error
+	UnhideReleaseHits(ctx context.Context, ids []rt.HitID) ([]rt.HitID, error)
+	ListReleaseLlbPlans(ctx context.Context) ([]rt.LlbPlan, error)
+	PutReleaseLlbPlan(ctx context.Context, p rt.LlbPlan, ifVersion int) (rt.LlbPlan, error)
 }
 
 // BoardDeps wires a BoardService.
@@ -52,10 +59,11 @@ type BoardService struct {
 }
 
 type cachedBoard struct {
-	key  boardKey
-	at   time.Time
-	body []byte
-	etag string
+	key   boardKey
+	at    time.Time
+	board *rt.Board
+	body  []byte
+	etag  string
 }
 
 type boardKey struct {
@@ -63,6 +71,7 @@ type boardKey struct {
 	message string
 	config  *rt.Config
 	rows    string
+	human   string
 }
 
 // NewBoardService returns a BoardService.
@@ -71,31 +80,45 @@ func NewBoardService(d BoardDeps) *BoardService { return &BoardService{d: d} }
 // Board returns the serialized BoardResponse and its ETag, or ErrNotModified
 // with the ETag when ifNoneMatch already names it.
 func (s *BoardService) Board(ctx context.Context, ifNoneMatch string) ([]byte, string, error) {
-	cfg := s.d.Config.Load()
-	rows, err := s.d.Store.LoadReleaseResources(ctx)
+	c, err := s.current(ctx)
 	if err != nil {
 		return nil, "", err
 	}
-	key := boardKey{state: cfg.State, message: cfg.Message, config: cfg.Config, rows: rowsFingerprint(rows)}
+	if etagMatches(ifNoneMatch, c.etag) {
+		return nil, c.etag, ErrNotModified
+	}
+	return c.body, c.etag, nil
+}
+
+// current returns the cached Board, rebuilt when a row, the human state, the
+// config or BoardTTL moved.
+func (s *BoardService) current(ctx context.Context) (*cachedBoard, error) {
+	cfg := s.d.Config.Load()
+	rows, err := s.d.Store.LoadReleaseResources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	human, err := s.d.Store.LoadReleaseHumanState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	key := boardKey{state: cfg.State, message: cfg.Message, config: cfg.Config, rows: rowsFingerprint(rows), human: humanFingerprint(human)}
 	now := s.d.Clock()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if c := s.cached; c == nil || c.key != key || now.Sub(c.at) >= BoardTTL || now.Before(c.at) {
-		body, err := s.build(ctx, cfg, now)
+		board, body, err := s.build(ctx, cfg, human, now)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		sum := sha256.Sum256(body)
-		s.cached = &cachedBoard{key: key, at: now, body: body, etag: `"` + hex.EncodeToString(sum[:12]) + `"`}
+		s.cached = &cachedBoard{key: key, at: now, board: board, body: body, etag: `"` + hex.EncodeToString(sum[:12]) + `"`}
 	}
-	if etagMatches(ifNoneMatch, s.cached.etag) {
-		return nil, s.cached.etag, ErrNotModified
-	}
-	return s.cached.body, s.cached.etag, nil
+	return s.cached, nil
 }
 
-func (s *BoardService) build(ctx context.Context, cfg ConfigStatus, now time.Time) ([]byte, error) {
+func (s *BoardService) build(ctx context.Context, cfg ConfigStatus, human rt.HumanState, now time.Time) (*rt.Board, []byte, error) {
 	if s.onBuild != nil {
 		s.onBuild()
 	}
@@ -103,16 +126,16 @@ func (s *BoardService) build(ctx context.Context, cfg ConfigStatus, now time.Tim
 	if cfg.Config != nil {
 		snap, _, err := s.d.Store.LoadReleaseSnapshot(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		b := rt.Reconcile(rt.Inputs{Config: *cfg.Config, Snap: snap}, rt.Env{Now: now, Loc: cfg.Loc, AgeOut: cfg.Config.AgeOutDays})
+		b := rt.Reconcile(rt.Inputs{Config: *cfg.Config, Snap: snap, Human: human}, rt.Env{Now: now, Loc: cfg.Loc, AgeOut: cfg.Config.AgeOutDays})
 		resp.Board = &b
 	}
 	body, err := json.Marshal(resp)
 	if err != nil {
-		return nil, fmt.Errorf("release trains: encode board: %w", err)
+		return nil, nil, fmt.Errorf("release trains: encode board: %w", err)
 	}
-	return body, nil
+	return resp.Board, body, nil
 }
 
 func rowsFingerprint(rows []rt.Resource) string {
@@ -121,6 +144,25 @@ func rowsFingerprint(rows []rt.Resource) string {
 		_, _ = fmt.Fprintf(h, "%s\x00%s\x00%d\n", r.Kind, r.Scope, r.Generation)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func humanFingerprint(h rt.HumanState) string {
+	rules := make([]string, 0, len(h.RuleSettings))
+	for id, on := range h.RuleSettings {
+		rules = append(rules, fmt.Sprintf("%s=%v", id, on))
+	}
+	hides := make([]string, 0, len(h.Hides))
+	for id, hide := range h.Hides {
+		hides = append(hides, fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s", id, hide.Fingerprint, hide.Severity, hide.Reason, hide.HiddenAt.Format(time.RFC3339Nano)))
+	}
+	sort.Strings(rules)
+	sort.Strings(hides)
+	plans := make([]string, len(h.Plans))
+	for i, p := range h.Plans {
+		plans[i] = fmt.Sprintf("%s@%d", p.ID, p.Version)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(rules, "\n") + "\n\n" + strings.Join(hides, "\n") + "\n\n" + strings.Join(plans, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
 func etagMatches(header, etag string) bool {

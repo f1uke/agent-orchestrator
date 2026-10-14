@@ -11,8 +11,12 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/storage/sqlite/gen"
 )
 
-// LoadReleaseHumanState reads the rule settings and hides Reconcile applies.
+// LoadReleaseHumanState reads the rule settings, hides and plans Reconcile applies.
 func (s *Store) LoadReleaseHumanState(ctx context.Context) (rt.HumanState, error) {
+	plans, err := s.ListReleaseLlbPlans(ctx)
+	if err != nil {
+		return rt.HumanState{}, err
+	}
 	settings, err := s.qr.ListReleaseRuleSettings(ctx)
 	if err != nil {
 		return rt.HumanState{}, fmt.Errorf("list release rule settings: %w", err)
@@ -21,7 +25,7 @@ func (s *Store) LoadReleaseHumanState(ctx context.Context) (rt.HumanState, error
 	if err != nil {
 		return rt.HumanState{}, fmt.Errorf("list release hit hides: %w", err)
 	}
-	human := rt.HumanState{RuleSettings: make(map[rt.RuleID]bool, len(settings)), Hides: make(map[rt.HitID]rt.Hide, len(hides))}
+	human := rt.HumanState{RuleSettings: make(map[rt.RuleID]bool, len(settings)), Hides: make(map[rt.HitID]rt.Hide, len(hides)), Plans: plans}
 	for _, r := range settings {
 		human.RuleSettings[rt.RuleID(r.RuleID)] = r.Enabled
 	}

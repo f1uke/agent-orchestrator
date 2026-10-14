@@ -20,10 +20,11 @@ type Inputs struct {
 	Human  HumanState
 }
 
-// HumanState is what people set: rule toggles and hides.
+// HumanState is what people set: rule toggles, hides and long-lived-branch plans.
 type HumanState struct {
 	RuleSettings map[RuleID]bool
 	Hides        map[HitID]Hide
+	Plans        []LlbPlan
 }
 
 // Hide records a hidden hit's evidence and severity at hide time.

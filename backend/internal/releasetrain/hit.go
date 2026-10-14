@@ -34,6 +34,20 @@ func (s Severity) String() string { return severityNames[s] }
 // MarshalJSON writes the severity's name.
 func (s Severity) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()) }
 
+// UnmarshalJSON reads a severity's name.
+func (s *Severity) UnmarshalJSON(b []byte) error {
+	var name string
+	if err := json.Unmarshal(b, &name); err != nil {
+		return err
+	}
+	sev, ok := ParseSeverity(name)
+	if !ok {
+		return fmt.Errorf("unknown severity %q", name)
+	}
+	*s = sev
+	return nil
+}
+
 // MoreSevereThan reports whether s outranks o.
 func (s Severity) MoreSevereThan(o Severity) bool { return s < o }
 

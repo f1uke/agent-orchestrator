@@ -843,6 +843,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/release-trains/hides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove every hide the Board lists as no longer matching; stale=true is required */
+        delete: operations["unhideStaleReleaseTrainHits"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/hides/{hitId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Hide a hit on the current Board, keeping its evidence and severity; it returns to the badge if its severity rises */
+        put: operations["hideReleaseTrainHit"];
+        post?: never;
+        /** Remove one hide */
+        delete: operations["unhideReleaseTrainHit"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/llb-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the long-lived-branch plans */
+        get: operations["listReleaseTrainLlbPlans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/llb-plans/{planId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Create or replace a long-lived-branch plan; 409 when ifVersion is stale or a branch is in another plan */
+        put: operations["putReleaseTrainLlbPlan"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/release-trains/refresh": {
         parameters: {
             query?: never;
@@ -854,6 +923,23 @@ export interface paths {
         put?: never;
         /** Make one source's resources (or every source's) due on the next poll pass; pauses and budgets still apply */
         post: operations["refreshReleaseTrainSources"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/release-trains/rules/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Turn a rule on or off, or with enabled null back to its default */
+        put: operations["setReleaseTrainRule"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4606,6 +4692,18 @@ export interface components {
             url: string;
             version: string;
         };
+        ReleaseTrainHideRequest: {
+            /** @description Why it is hidden; shown in the Hidden list. */
+            reason?: string;
+        };
+        ReleaseTrainHideResponse: {
+            /** Format: date-time */
+            hiddenAt: string;
+            hitId: string;
+            reason?: string;
+            /** @description The hit's severity when hidden; a higher one brings it back to the badge. */
+            severity: components["schemas"]["ReleaseTrainSeverity"];
+        };
         ReleaseTrainHotfix: {
             app: string;
             forceUpdate?: components["schemas"]["ReleaseTrainForceUpdateFact"];
@@ -4647,6 +4745,44 @@ export interface components {
         ReleaseTrainLink: {
             label: string;
             url?: string;
+        };
+        ReleaseTrainLlbPlan: {
+            accepted: components["schemas"]["ReleaseTrainPlanAccepted"][];
+            branches: components["schemas"]["ReleaseTrainPlanBranch"][];
+            id: string;
+            name: string;
+            note: string;
+            targetKind: components["schemas"]["ReleaseTrainTargetKind"];
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            targetTrain?: string;
+            /** Format: date-time */
+            updatedAt: string;
+            updatedBy: string;
+            version: number;
+        };
+        ReleaseTrainLlbPlanInput: {
+            accepted?: components["schemas"]["ReleaseTrainPlanAccepted"][];
+            branches?: components["schemas"]["ReleaseTrainPlanBranch"][];
+            /** @description The version this edit started from; 0 or absent creates a plan that does not exist yet. */
+            ifVersion?: number;
+            name: string;
+            note?: string;
+            /** @description The AO session that ran the decision, e.g. an orchestrator acting on the person's word. */
+            session?: string;
+            targetKind: components["schemas"]["ReleaseTrainTargetKind"];
+            /** @description Train key, e.g. 22-2026; required when targetKind is train. */
+            targetTrain?: string;
+            /**
+             * @description The surface deciding: the app, the ao CLI, or a bare API call (the default).
+             * @enum {string}
+             */
+            via?: "app" | "cli" | "api";
+        };
+        ReleaseTrainLlbPlanResponse: {
+            plan: components["schemas"]["ReleaseTrainLlbPlan"];
+        };
+        ReleaseTrainLlbPlansResponse: {
+            plans: components["schemas"]["ReleaseTrainLlbPlan"][];
         };
         ReleaseTrainMRDetailFact: {
             conflicts: boolean;
@@ -4720,6 +4856,14 @@ export interface components {
             status: string;
             url: string;
         };
+        ReleaseTrainPlanAccepted: {
+            mrRef: string;
+            reason: string;
+        };
+        ReleaseTrainPlanBranch: {
+            app: string;
+            branch: string;
+        };
         /** @enum {string} */
         ReleaseTrainPlatform: "ios" | "android";
         ReleaseTrainRefreshRequest: {
@@ -4772,6 +4916,13 @@ export interface components {
             outcome: components["schemas"]["ReleaseTrainOutcome"];
             rule: string;
         };
+        ReleaseTrainRuleSettingRequest: {
+            /** @description true or false overrides the rule's default; null goes back to it. */
+            enabled: null | boolean;
+        };
+        ReleaseTrainRuleSettingResponse: {
+            rule: components["schemas"]["ReleaseTrainRuleInfo"];
+        };
         /** @enum {string} */
         ReleaseTrainSeverity: "block" | "data" | "risk" | "hygiene" | "info";
         ReleaseTrainSourceFreshness: {
@@ -4809,6 +4960,8 @@ export interface components {
             project: number;
             url: string;
         };
+        /** @enum {string} */
+        ReleaseTrainTargetKind: "train" | "unplanned" | "dropped";
         ReleaseTrainTrain: {
             datesSplit: string[];
             families: string[];
@@ -4822,6 +4975,9 @@ export interface components {
         };
         /** @enum {string} */
         ReleaseTrainTrainPhase: "past" | "current" | "next";
+        ReleaseTrainUnhideStaleResponse: {
+            removed: string[];
+        };
         RemoveProjectResult: {
             projectId: string;
             removedStorageDir: boolean;
@@ -9038,6 +9194,277 @@ export interface operations {
             };
         };
     };
+    unhideStaleReleaseTrainHits: {
+        parameters: {
+            query?: {
+                /** @description Must be true: removes every hide the Board lists as no longer matching. */
+                stale?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainUnhideStaleResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    hideReleaseTrainHit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Hit id, percent-encoded: its slashes are %2F, e.g. B1~v%2F21-2026%2Fdi. */
+                hitId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseTrainHideRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainHideResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    unhideReleaseTrainHit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Hit id, percent-encoded: its slashes are %2F, e.g. B1~v%2F21-2026%2Fdi. */
+                hitId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listReleaseTrainLlbPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainLlbPlansResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    putReleaseTrainLlbPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plan id: 1-64 of a-z, 0-9, '.', '_', '-'. */
+                planId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseTrainLlbPlanInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainLlbPlanResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     refreshReleaseTrainSources: {
         parameters: {
             query?: never;
@@ -9062,6 +9489,69 @@ export interface operations {
             };
             /** @description Bad Request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    setReleaseTrainRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Rule id from the Board's catalogue, e.g. C2. */
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseTrainRuleSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReleaseTrainRuleSettingResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

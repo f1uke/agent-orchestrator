@@ -52,14 +52,14 @@ type RuleInfo struct {
 	Hint      string   `json:"hint,omitempty"`
 }
 
-// KnownRule reports whether id names a rule in the table.
-func KnownRule(id RuleID) bool {
-	for _, r := range ruleTable() {
+// LookupRule returns the catalogue row of id under settings, or false when no rule has that id.
+func LookupRule(id RuleID, settings map[RuleID]bool) (RuleInfo, bool) {
+	for _, r := range catalogue(settings) {
 		if r.ID == id {
-			return true
+			return r, true
 		}
 	}
-	return false
+	return RuleInfo{}, false
 }
 
 func catalogue(settings map[RuleID]bool) []RuleInfo {

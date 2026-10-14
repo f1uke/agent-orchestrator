@@ -2269,6 +2269,216 @@ paths:
         an existing file
       tags:
       - release-trains
+  /api/v1/release-trains/hides:
+    delete:
+      operationId: unhideStaleReleaseTrainHits
+      parameters:
+      - description: 'Must be true: removes every hide the Board lists as no longer
+          matching.'
+        in: query
+        name: stale
+        schema:
+          description: 'Must be true: removes every hide the Board lists as no longer
+            matching.'
+          type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainUnhideStaleResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Remove every hide the Board lists as no longer matching; stale=true
+        is required
+      tags:
+      - release-trains
+  /api/v1/release-trains/hides/{hitId}:
+    delete:
+      operationId: unhideReleaseTrainHit
+      parameters:
+      - description: 'Hit id, percent-encoded: its slashes are %2F, e.g. B1~v%2F21-2026%2Fdi.'
+        in: path
+        name: hitId
+        required: true
+        schema:
+          description: 'Hit id, percent-encoded: its slashes are %2F, e.g. B1~v%2F21-2026%2Fdi.'
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Remove one hide
+      tags:
+      - release-trains
+    put:
+      operationId: hideReleaseTrainHit
+      parameters:
+      - description: 'Hit id, percent-encoded: its slashes are %2F, e.g. B1~v%2F21-2026%2Fdi.'
+        in: path
+        name: hitId
+        required: true
+        schema:
+          description: 'Hit id, percent-encoded: its slashes are %2F, e.g. B1~v%2F21-2026%2Fdi.'
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTrainHideRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainHideResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Hide a hit on the current Board, keeping its evidence and severity;
+        it returns to the badge if its severity rises
+      tags:
+      - release-trains
+  /api/v1/release-trains/llb-plans:
+    get:
+      operationId: listReleaseTrainLlbPlans
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainLlbPlansResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List the long-lived-branch plans
+      tags:
+      - release-trains
+  /api/v1/release-trains/llb-plans/{planId}:
+    put:
+      operationId: putReleaseTrainLlbPlan
+      parameters:
+      - description: 'Plan id: 1-64 of a-z, 0-9, ''.'', ''_'', ''-''.'
+        in: path
+        name: planId
+        required: true
+        schema:
+          description: 'Plan id: 1-64 of a-z, 0-9, ''.'', ''_'', ''-''.'
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTrainLlbPlanInput'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainLlbPlanResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Create or replace a long-lived-branch plan; 409 when ifVersion is stale
+        or a branch is in another plan
+      tags:
+      - release-trains
   /api/v1/release-trains/refresh:
     post:
       operationId: refreshReleaseTrainSources
@@ -2305,6 +2515,57 @@ paths:
           description: Not Implemented
       summary: Make one source's resources (or every source's) due on the next poll
         pass; pauses and budgets still apply
+      tags:
+      - release-trains
+  /api/v1/release-trains/rules/{ruleId}:
+    put:
+      operationId: setReleaseTrainRule
+      parameters:
+      - description: Rule id from the Board's catalogue, e.g. C2.
+        in: path
+        name: ruleId
+        required: true
+        schema:
+          description: Rule id from the Board's catalogue, e.g. C2.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTrainRuleSettingRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainRuleSettingResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Turn a rule on or off, or with enabled null back to its default
       tags:
       - release-trains
   /api/v1/release-trains/sources:
@@ -13036,6 +13297,30 @@ components:
       - createdOn
       - url
       type: object
+    ReleaseTrainHideRequest:
+      properties:
+        reason:
+          description: Why it is hidden; shown in the Hidden list.
+          type: string
+      type: object
+    ReleaseTrainHideResponse:
+      properties:
+        hiddenAt:
+          format: date-time
+          type: string
+        hitId:
+          type: string
+        reason:
+          type: string
+        severity:
+          $ref: '#/components/schemas/ReleaseTrainSeverity'
+          description: The hit's severity when hidden; a higher one brings it back
+            to the badge.
+      required:
+      - hitId
+      - severity
+      - hiddenAt
+      type: object
     ReleaseTrainHotfix:
       properties:
         app:
@@ -13149,6 +13434,100 @@ components:
           type: string
       required:
       - label
+      type: object
+    ReleaseTrainLlbPlan:
+      properties:
+        accepted:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainPlanAccepted'
+          type: array
+        branches:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainPlanBranch'
+          type: array
+        id:
+          type: string
+        name:
+          type: string
+        note:
+          type: string
+        targetKind:
+          $ref: '#/components/schemas/ReleaseTrainTargetKind'
+        targetTrain:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+        updatedBy:
+          type: string
+        version:
+          type: integer
+      required:
+      - id
+      - name
+      - targetKind
+      - note
+      - branches
+      - accepted
+      - version
+      - updatedBy
+      - updatedAt
+      type: object
+    ReleaseTrainLlbPlanInput:
+      properties:
+        accepted:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainPlanAccepted'
+          type: array
+        branches:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainPlanBranch'
+          type: array
+        ifVersion:
+          description: The version this edit started from; 0 or absent creates a plan
+            that does not exist yet.
+          type: integer
+        name:
+          type: string
+        note:
+          type: string
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        targetKind:
+          $ref: '#/components/schemas/ReleaseTrainTargetKind'
+        targetTrain:
+          description: Train key, e.g. 22-2026; required when targetKind is train.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
+          type: string
+      required:
+      - name
+      - targetKind
+      type: object
+    ReleaseTrainLlbPlanResponse:
+      properties:
+        plan:
+          $ref: '#/components/schemas/ReleaseTrainLlbPlan'
+      required:
+      - plan
+      type: object
+    ReleaseTrainLlbPlansResponse:
+      properties:
+        plans:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainLlbPlan'
+          type: array
+      required:
+      - plans
       type: object
     ReleaseTrainMRDetailFact:
       properties:
@@ -13336,6 +13715,26 @@ components:
       - status
       - url
       type: object
+    ReleaseTrainPlanAccepted:
+      properties:
+        mrRef:
+          type: string
+        reason:
+          type: string
+      required:
+      - mrRef
+      - reason
+      type: object
+    ReleaseTrainPlanBranch:
+      properties:
+        app:
+          type: string
+        branch:
+          type: string
+      required:
+      - app
+      - branch
+      type: object
     ReleaseTrainPlatform:
       enum:
       - ios
@@ -13457,6 +13856,24 @@ components:
       - "on"
       - outcome
       type: object
+    ReleaseTrainRuleSettingRequest:
+      properties:
+        enabled:
+          description: true or false overrides the rule's default; null goes back
+            to it.
+          type:
+          - "null"
+          - boolean
+      required:
+      - enabled
+      type: object
+    ReleaseTrainRuleSettingResponse:
+      properties:
+        rule:
+          $ref: '#/components/schemas/ReleaseTrainRuleInfo'
+      required:
+      - rule
+      type: object
     ReleaseTrainSeverity:
       enum:
       - block
@@ -13570,6 +13987,12 @@ components:
       - newest
       - mergesAfter
       type: object
+    ReleaseTrainTargetKind:
+      enum:
+      - train
+      - unplanned
+      - dropped
+      type: string
     ReleaseTrainTrain:
       properties:
         datesSplit:
@@ -13609,6 +14032,15 @@ components:
       - current
       - next
       type: string
+    ReleaseTrainUnhideStaleResponse:
+      properties:
+        removed:
+          items:
+            type: string
+          type: array
+      required:
+      - removed
+      type: object
     RemoveProjectResult:
       properties:
         projectId:
