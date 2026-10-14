@@ -174,7 +174,7 @@ func (p *Poller) LastPass() PassStats {
 }
 
 func (p *Poller) pollHost(ctx context.Context, host string, res []planned, view rt.PlanView, now time.Time) int {
-	if !p.credentialsOK(ctx, host, res, now) {
+	if !p.credentialsOK(ctx, host, res, view, now) {
 		return 0
 	}
 	var pausedUntil time.Time
@@ -248,7 +248,7 @@ func dueOrder(res []planned, now time.Time) []planned {
 	return due
 }
 
-func (p *Poller) credentialsOK(ctx context.Context, host string, res []planned, now time.Time) bool {
+func (p *Poller) credentialsOK(ctx context.Context, host string, res []planned, view rt.PlanView, now time.Time) bool {
 	p.mu.Lock()
 	st := p.probes[host]
 	if st == nil {
@@ -260,7 +260,7 @@ func (p *Poller) credentialsOK(ctx context.Context, host string, res []planned, 
 	if !probe {
 		return st.ok
 	}
-	ok, err := res[0].src.Credentials(ctx)
+	ok, err := res[0].src.Credentials(ctx, view)
 	p.mu.Lock()
 	st.ok, st.next = ok && err == nil, now.Add(reprobeEvery)
 	firstMiss := !st.ok && !st.logged

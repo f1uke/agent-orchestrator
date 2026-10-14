@@ -54,6 +54,36 @@ func TestDoRESTClassifies429WithRetryAfterAsHTTPDate(t *testing.T) {
 	}
 }
 
+func TestDoRESTTypes404AsNotFoundAndKeepsItsText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"404 Project Not Found"}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(ClientOptions{APIBase: srv.URL, Token: StaticTokenSource("t")})
+
+	_, err := c.doREST(context.Background(), "projects/1/milestones", nil)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if err.Error() != "gitlab scm: 404 404 Project Not Found" {
+		t.Errorf("text = %q, want the pre-typing text", err.Error())
+	}
+}
+
+func TestDoRESTLeaves5xxOutOfNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(srv.Close)
+	c := NewClient(ClientOptions{APIBase: srv.URL, Token: StaticTokenSource("t")})
+
+	_, err := c.doREST(context.Background(), "user", nil)
+	if err == nil || errors.Is(err, ErrNotFound) || err.Error() != "gitlab scm: 502 " {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestRetryAfterInThePastOrUnparseableIsZero(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
 	for _, h := range []string{"", "soon", "-5", now.Add(-time.Minute).Format(http.TimeFormat)} {

@@ -52,7 +52,7 @@ func (f *fakeSource) Fetch(ctx context.Context, spec rt.ResourceSpec, _ rt.PlanV
 	return f.fetch(spec, cursor)
 }
 
-func (f *fakeSource) Credentials(context.Context) (bool, error) {
+func (f *fakeSource) Credentials(context.Context, rt.PlanView) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.probes++

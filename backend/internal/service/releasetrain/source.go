@@ -2,6 +2,7 @@ package releasetrain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,7 +22,61 @@ type Source interface {
 	Plan(view rt.PlanView) []rt.ResourceSpec
 	// Fetch reads one resource. An incremental resource returns one page per call.
 	Fetch(ctx context.Context, spec rt.ResourceSpec, view rt.PlanView, cursor []byte) (Batch, error)
-	Credentials(ctx context.Context) (bool, error)
+	Credentials(ctx context.Context, view rt.PlanView) (bool, error)
+}
+
+// SettledBudget is how often a settled version's per-entity reads refetch.
+const SettledBudget = 6 * time.Hour
+
+// IsDecodeError reports whether err is a response the source could not parse.
+func IsDecodeError(err error) bool {
+	var syntax *json.SyntaxError
+	var typ *json.UnmarshalTypeError
+	var parse *time.ParseError
+	return errors.As(err, &syntax) || errors.As(err, &typ) || errors.As(err, &parse)
+}
+
+// Job is one planned resource and the read that fetches it.
+type Job struct {
+	Spec  rt.ResourceSpec
+	Fetch func(ctx context.Context, cursor []byte) (Batch, error)
+}
+
+// FetchJob runs the job planned for spec.
+func FetchJob(ctx context.Context, jobs []Job, spec rt.ResourceSpec, cursor []byte) (Batch, error) {
+	for _, j := range jobs {
+		if j.Spec.Kind == spec.Kind && j.Spec.Scope == spec.Scope {
+			return j.Fetch(ctx, cursor)
+		}
+	}
+	return Batch{}, &FetchError{Class: rt.ErrNotFound, Err: fmt.Errorf("%s %s is no longer planned", spec.Kind, spec.Scope)}
+}
+
+// Specs lists the jobs' specs.
+func Specs(jobs []Job) []rt.ResourceSpec {
+	out := make([]rt.ResourceSpec, len(jobs))
+	for i, j := range jobs {
+		out[i] = j.Spec
+	}
+	return out
+}
+
+// SnapshotOf encodes a complete snapshot of facts of kind k.
+func SnapshotOf[T rt.Keyed](k rt.Kind[T], facts []T) (Batch, error) {
+	items, err := encodeAll(k, facts)
+	return Batch{Items: items, Complete: true}, err
+}
+
+func encodeAll[T rt.Keyed](k rt.Kind[T], facts []T) ([]rt.Item, error) {
+	items := make([]rt.Item, 0, len(facts))
+	for _, f := range facts {
+		it, err := rt.EncodeItem(k, f, nil)
+		if err != nil {
+			return nil, &FetchError{Class: rt.ErrDecode, Err: err}
+		}
+		items = append(items, it)
+	}
+	return items, nil
 }
 
 // Batch is what one Fetch read.
@@ -82,11 +137,20 @@ func withRequestCounter(ctx context.Context, c *atomic.Int64) context.Context {
 	return context.WithValue(ctx, requestCounterKey{}, c)
 }
 
-// CountingTransport counts every request it sends against the pass's budget.
+// ErrNotARead is a request the monitor refused to send because it was not a GET.
+var ErrNotARead = errors.New("release trains: only GET requests may leave the monitor")
+
+// CountingTransport counts each request against the pass's budget and refuses any method but GET.
 type CountingTransport struct{ Base http.RoundTripper }
 
 // RoundTrip implements http.RoundTripper.
 func (t CountingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodGet {
+		if req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return nil, fmt.Errorf("%w: %s %s", ErrNotARead, req.Method, req.URL.Path)
+	}
 	CountRequest(req.Context())
 	base := t.Base
 	if base == nil {
