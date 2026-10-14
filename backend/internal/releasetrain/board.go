@@ -20,16 +20,19 @@ type Inputs struct {
 	Human  HumanState
 }
 
-// HumanState is what people set: rule toggles and hides.
+// HumanState is what people set: rule toggles, hides and long-lived-branch plans.
 type HumanState struct {
 	RuleSettings map[RuleID]bool
 	Hides        map[HitID]Hide
+	Plans        []LlbPlan
 }
 
 // Hide records a hidden hit's evidence and severity at hide time.
 type Hide struct {
 	Fingerprint string
 	Severity    Severity
+	Reason      string
+	HiddenAt    time.Time
 }
 
 // Board is the read model every surface renders.
@@ -41,6 +44,7 @@ type Board struct {
 	Hotfixes   []Hotfix          `json:"hotfixes"`
 	Mismatches []Mismatch        `json:"mismatches"`
 	Alerts     Alerts            `json:"alerts"`
+	Catalogue  []RuleInfo        `json:"catalogue"`
 }
 
 // BoardApp is one configured app as every surface names it.
@@ -70,6 +74,8 @@ type Train struct {
 	Freeze   *Day          `json:"freeze,omitempty"`
 	Publish  *Day          `json:"publish,omitempty"`
 	Versions []*AppVersion `json:"versions"`
+	// DatesSplit is the apps rule A7 flags, so a surface marks them without running rules.
+	DatesSplit []AppID `json:"datesSplit"`
 }
 
 // SourceFreshness is one system's resources at a glance: the oldest complete

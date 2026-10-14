@@ -69,8 +69,13 @@ type trainBoard struct {
 			} `json:"cards"`
 		} `json:"versions"`
 	} `json:"trains"`
-	Alerts struct {
-		Hits  []trainHit `json:"hits"`
+	Catalogue []trainRule `json:"catalogue"`
+	Alerts    struct {
+		Hits       []trainHit `json:"hits"`
+		StaleHides []struct {
+			ID     string `json:"id"`
+			Reason string `json:"reason"`
+		} `json:"staleHides"`
 		Rules []struct {
 			Rule    string `json:"rule"`
 			App     string `json:"app"`
@@ -83,13 +88,23 @@ type trainBoard struct {
 }
 
 type trainHit struct {
-	ID       string `json:"id"`
-	Rule     string `json:"rule"`
-	Severity string `json:"severity"`
-	Train    string `json:"train"`
-	App      string `json:"app"`
-	Text     string `json:"text"`
-	Bucket   string `json:"bucket"`
+	ID                 string `json:"id"`
+	Rule               string `json:"rule"`
+	Severity           string `json:"severity"`
+	Train              string `json:"train"`
+	App                string `json:"app"`
+	Text               string `json:"text"`
+	Bucket             string `json:"bucket"`
+	ChangedSinceHidden bool   `json:"changedSinceHidden,omitempty"`
+}
+
+type trainRule struct {
+	ID        string `json:"id"`
+	Group     string `json:"group"`
+	Severity  string `json:"severity"`
+	DefaultOn bool   `json:"defaultOn"`
+	On        bool   `json:"on"`
+	Title     string `json:"title"`
 }
 
 var severityOrder = []string{"block", "data", "risk", "hygiene", "info"}
@@ -282,7 +297,10 @@ func newTrainAlertsCommand(ctx *commandContext) *cobra.Command {
 				}
 				return writeJSON(out, hits)
 			}
-			return writeTrainHits(out, body.Board, hits, history || hidden)
+			if err := writeTrainHits(out, body.Board, hits, history || hidden); err != nil || !hidden {
+				return err
+			}
+			return writeStaleHides(out, body.Board)
 		},
 	}
 	addTrainFilterFlags(cmd, nil, &apps, &me)
@@ -494,12 +512,32 @@ func writeTrainHits(w io.Writer, b *trainBoard, hits []trainHit, withBucket bool
 	return err
 }
 
+func writeStaleHides(w io.Writer, b *trainBoard) error {
+	if len(b.Alerts.StaleHides) == 0 {
+		return nil
+	}
+	var s strings.Builder
+	s.WriteString("\nNo longer matching (clear with `ao train unhide --stale`)\n")
+	tw := tabwriter.NewWriter(&s, 0, 4, 2, ' ', 0)
+	for _, h := range b.Alerts.StaleHides {
+		_, _ = fmt.Fprintf(tw, "  %s\t%s\n", h.ID, h.Reason)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, s.String())
+	return err
+}
+
 func writeTrainHitRows(s *strings.Builder, b *trainBoard, hits []trainHit, withBucket bool, indent string) error {
 	tw := tabwriter.NewWriter(s, 0, 4, 2, ' ', 0)
 	for _, h := range hits {
 		row := fmt.Sprintf("%s%s\t%s\t%s\t%s\t%s", indent, severityLabel(h.Severity), h.Rule, b.subject(h), h.Text, h.ID)
 		if withBucket {
 			row += "\t" + h.Bucket
+			if h.ChangedSinceHidden {
+				row += ", changed since hidden"
+			}
 		}
 		_, _ = fmt.Fprintln(tw, row)
 	}

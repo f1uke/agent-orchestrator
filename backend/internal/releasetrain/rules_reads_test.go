@@ -31,6 +31,8 @@ func everyRuleFires(t *testing.T) *fixture {
 	noApprovers := f.version("da", "21", "3.5.1", liveFreeze, liveDue)
 	noApprovers.jira.Name = "Android 3.5.2"
 
+	f.version("pa", "21", "1.2.1", "2026-10-10", liveDue)
+
 	next := f.version("pi", "22", "1.3.0", "2026-10-15", "2026-10-23")
 	next.approvers()
 	next.jira.ID = "7100"

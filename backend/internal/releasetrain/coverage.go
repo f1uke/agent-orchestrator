@@ -167,9 +167,18 @@ func (r *readSet) coverageFor(reads []KindName, app AppID, versions []*AppVersio
 
 // Alerts is the rule outcomes, the hits with their bucket, and the badge.
 type Alerts struct {
-	Badge Badge         `json:"badge"`
-	Hits  []AlertHit    `json:"hits"`
-	Rules []RuleOutcome `json:"rules"`
+	Badge      Badge         `json:"badge"`
+	Hits       []AlertHit    `json:"hits"`
+	Rules      []RuleOutcome `json:"rules"`
+	StaleHides []StaleHide   `json:"staleHides"`
+}
+
+// StaleHide is a hide whose hit no longer matches: its rule ran over fresh
+// enough reads and found nothing with that id, so the hide can be cleared.
+type StaleHide struct {
+	ID       HitID     `json:"id"`
+	Reason   string    `json:"reason,omitempty"`
+	HiddenAt time.Time `json:"hiddenAt"`
 }
 
 // Badge counts active hits and unknown (rule, app) cells of enabled rules.
