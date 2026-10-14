@@ -80,6 +80,8 @@ func Build() ([]byte, error) {
 			"User-editable daemon settings (auto-reclaim, etc.)"),
 		*(&openapi31.Tag{Name: "wiki"}).WithDescription(
 			"Personal note vault: its index, its notes, and the one agent running inside it"),
+		*(&openapi31.Tag{Name: "release-trains"}).WithDescription(
+			"Read-only monitor of the mobile release trains: its config and source freshness"),
 	}
 
 	for _, op := range operations() {
@@ -531,7 +533,34 @@ func operations() []operation {
 	ops = append(ops, importOperations()...)
 	ops = append(ops, daemonOperations()...)
 	ops = append(ops, learningOperations()...)
+	ops = append(ops, releaseTrainOperations()...)
 	return ops
+}
+
+// releaseTrainOperations declares the release-train monitor's operations. Must
+// stay 1:1 with the routes ReleaseTrainsController.Register mounts.
+func releaseTrainOperations() []operation {
+	return []operation{
+		{
+			method: http.MethodGet, path: "/api/v1/release-trains/sources", id: "listReleaseTrainSources", tag: "release-trains",
+			summary: "Show the release-train config state and each observed resource's freshness",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainSourcesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/release-trains/config", id: "initReleaseTrainConfig", tag: "release-trains",
+			summary: "Write the template release-train config to the data dir, never over an existing file",
+			resps: []respUnit{
+				{http.StatusCreated, controllers.ReleaseTrainConfigInitResponse{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+	}
 }
 
 // daemonOperations declares the /daemon inspection operations. Must stay 1:1
