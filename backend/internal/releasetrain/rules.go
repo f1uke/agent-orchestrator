@@ -1,0 +1,182 @@
+package releasetrain
+
+import (
+	"sort"
+	"strings"
+)
+
+type ruleScope int
+
+const (
+	scopePerApp ruleScope = iota + 1
+	scopeGlobal
+)
+
+type rule struct {
+	ID        RuleID
+	Group     string
+	Severity  Severity
+	DefaultOn bool
+	Title     string
+	Hint      string
+	Reads     []KindName
+	Scope     ruleScope
+	Check     func(b *Board) []Hit
+}
+
+var (
+	readsJoin        = []KindName{KindMilestones.Name, KindJiraVersions.Name}
+	readsReleaseMR   = []KindName{KindMilestones.Name, KindMRs.Name, KindMRDetail.Name}
+	readsReleaseJobs = []KindName{KindMilestones.Name, KindMRs.Name, KindMRDetail.Name, KindJobs.Name}
+)
+
+func ruleTable() []rule {
+	return []rule{
+		ruleA1, ruleA2, ruleA3, ruleA4, ruleA5,
+		ruleB1, ruleB3,
+		ruleC1, ruleC2, ruleC3, ruleC5, ruleC6, ruleC7,
+		ruleD1, ruleD2, ruleD3,
+		ruleE1, ruleE2, ruleE4, ruleE5,
+		ruleF1, ruleF2,
+	}
+}
+
+func forEachVersion(b *Board, fn func(t *Train, v *AppVersion) *Hit) []Hit {
+	var out []Hit
+	for i := range b.Trains {
+		t := &b.Trains[i]
+		for _, v := range t.Versions {
+			if h := fn(t, v); h != nil {
+				out = append(out, *h)
+			}
+		}
+	}
+	return out
+}
+
+func versionHit(t *Train, v *AppVersion, text string, ev Evidence, link Link) *Hit {
+	train := t.ID
+	return &Hit{
+		Subject: SubjVersion{Train: t.ID, App: v.App}, Train: &train, App: v.App,
+		AgesOn: dueOf(t, v), Evidence: ev, Text: text, Link: link,
+	}
+}
+
+func jiraLink(j *JiraVersionFact) Link {
+	if j == nil {
+		return Link{Label: "Open Jira release"}
+	}
+	return Link{Label: "Open Jira release", URL: j.URL}
+}
+
+func pendingApprovers(j *JiraVersionFact) []string {
+	var out []string
+	for _, a := range j.Approvers {
+		if a.Status != ApproverApproved {
+			out = append(out, a.Name)
+		}
+	}
+	return out
+}
+
+func published(t *Train, v *AppVersion, today Day) bool {
+	due := dueOf(t, v)
+	return v.Tag != nil && due != nil && due.Before(today)
+}
+
+func alerts(b *Board, in Inputs, rs *readSet) Alerts {
+	var a Alerts
+	for _, r := range ruleTable() {
+		on, set := in.Human.RuleSettings[r.ID]
+		if !set {
+			on = r.DefaultOn
+		}
+		hits := r.Check(b)
+		for i := range hits {
+			hits[i].Rule = r.ID
+			hits[i].ID = hitID(r.ID, hits[i].Subject)
+			if hits[i].Severity == 0 {
+				hits[i].Severity = r.Severity
+			}
+		}
+		for _, cell := range cells(b, in.Config, r, hits) {
+			o := evaluate(cell.hits, rs.coverageFor(r.Reads, cell.app, cell.versions))
+			a.Rules = append(a.Rules, RuleOutcome{Rule: r.ID, App: cell.app, On: on, Outcome: o})
+			if !on {
+				continue
+			}
+			switch o := o.(type) {
+			case Unknown:
+				a.Badge.Unknown++
+			case Fired:
+				for _, h := range o.Hits {
+					a.Hits = append(a.Hits, bucket(h, rs, in.Human))
+				}
+			}
+		}
+	}
+	sort.SliceStable(a.Hits, func(i, j int) bool {
+		if a.Hits[i].Severity != a.Hits[j].Severity {
+			return a.Hits[i].Severity < a.Hits[j].Severity
+		}
+		return a.Hits[i].ID < a.Hits[j].ID
+	})
+	for _, h := range a.Hits {
+		if h.Bucket != BucketBadge {
+			continue
+		}
+		a.Badge.Count++
+		if a.Badge.Worst == nil || h.Severity.MoreSevereThan(*a.Badge.Worst) {
+			s := h.Severity
+			a.Badge.Worst = &s
+		}
+	}
+	return a
+}
+
+type cell struct {
+	app      AppID
+	hits     []Hit
+	versions []*AppVersion
+}
+
+func cells(b *Board, cfg Config, r rule, hits []Hit) []cell {
+	if r.Scope == scopeGlobal {
+		var all []*AppVersion
+		for i := range b.Trains {
+			all = append(all, b.Trains[i].Versions...)
+		}
+		return []cell{{hits: hits, versions: all}}
+	}
+	out := make([]cell, 0, len(cfg.Apps))
+	for _, app := range cfg.Apps {
+		c := cell{app: app.ID}
+		for _, h := range hits {
+			if h.App == app.ID {
+				c.hits = append(c.hits, h)
+			}
+		}
+		for i := range b.Trains {
+			if v := b.Trains[i].version(app.ID); v != nil {
+				c.versions = append(c.versions, v)
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func bucket(h Hit, rs *readSet, human HumanState) AlertHit {
+	ah := AlertHit{Hit: h, Bucket: BucketBadge}
+	if hide, ok := human.Hides[h.ID]; ok && !h.Severity.MoreSevereThan(hide.Severity) {
+		ah.Bucket = BucketHidden
+		ah.ChangedSinceHidden = hide.Fingerprint != h.Fingerprint()
+		return ah
+	}
+	if h.AgesOn != nil && !rs.live(h.AgesOn) {
+		ah.Bucket = BucketHistory
+	}
+	return ah
+}
+
+func joinNames(names []string) string { return strings.Join(names, ", ") }
