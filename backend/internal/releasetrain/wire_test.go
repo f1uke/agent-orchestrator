@@ -189,3 +189,33 @@ func TestBoardSourcesListStaleAndFailingResourcesPerSystem(t *testing.T) {
 		t.Fatalf("gitlab issues = %v, want the four apps' rate-limited tags, still fresh", issues["gitlab"])
 	}
 }
+
+func TestBoardSourcesStopCountingTheCompareOfAGoneLongLivedBranch(t *testing.T) {
+	f := newFixture(t, today)
+	healthy(f)
+	f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+	f.ahead("di", "feature/demo-wallet", 0)
+	f.compares = append(f.compares, &CompareFact{Project: 1001, From: "9.9.9", To: "main", Commits: []CommitFact{}})
+	f.statuses[KindCompare.Name] = func(st *ResourceStatus) { st.CompleteAt, st.ErrorClass = nil, ErrNotFound }
+	b := f.reconcile()
+
+	if _, wallet := llbBranch(t, b, "di", "feature/demo-wallet"); !wallet.Gone {
+		t.Fatalf("wallet gone = false; the test needs a branch GitLab cannot find")
+	}
+	var gitlab SourceFreshness
+	for _, s := range b.Sources {
+		if s.System == "gitlab" {
+			gitlab = s
+		}
+	}
+	var issues []string
+	for _, st := range gitlab.Issues {
+		issues = append(issues, string(st.Scope))
+	}
+	if want := string(CompareScope(1001, "9.9.9", "main")); len(issues) != 1 || issues[0] != want {
+		t.Fatalf("gitlab issues = %v, want only %s: a gone branch's compare stops counting, any other 404 still does", issues, want)
+	}
+	if gitlab.AsOf == nil || f.now.Sub(*gitlab.AsOf) > time.Minute {
+		t.Fatalf("gitlab age = %v, want the fresh reads' age", gitlab.AsOf)
+	}
+}

@@ -13,10 +13,10 @@ func Reconcile(in Inputs, env Env) Board {
 	if b.Trains == nil {
 		b.Trains = []Train{}
 	}
-	b.Sources = rs.sources(b.Trains)
 	phases(b.Trains, b.Today)
 	branches, cutover := detectLLBs(in.Config, in.Snap)
 	b.LLBs, b.Cutover = groupLLBs(branches, in.Human.Plans, b.Trains, in.Config), cutover
+	b.Sources = rs.sources(b.Trains, b.LLBs)
 	mrs, llbs := indexMRs(in.Config, in.Snap), llbsByApp(b.LLBs)
 	jira, live := branchCards(in.Snap), liveTrains(b.Trains, *rs)
 	for i := range b.Trains {

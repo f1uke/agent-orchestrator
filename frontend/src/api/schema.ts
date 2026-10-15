@@ -4674,6 +4674,7 @@ export interface components {
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
             status: string;
             statusCategory: string;
+            summary: string;
             url: string;
             why: components["schemas"]["ReleaseTrainCardWhy"][];
         };

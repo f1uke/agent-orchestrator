@@ -192,8 +192,10 @@ func phases(trains []Train, today Day) {
 	}
 }
 
-func (r *readSet) sources(trains []Train) []SourceFreshness {
-	live := r.liveEntities(trains)
+// sources skips the compare of a long-lived branch GitLab no longer has: it
+// can never complete, and would leave the whole system unknown for good.
+func (r *readSet) sources(trains []Train, llbs []LLBGroup) []SourceFreshness {
+	live, gone := r.liveEntities(trains), goneCompares(llbs, r.cfg)
 	bySystem := map[string]*SourceFreshness{}
 	system := func(k KindName) *SourceFreshness {
 		name, _, _ := strings.Cut(string(k), ".")
@@ -208,6 +210,9 @@ func (r *readSet) sources(trains []Train) []SourceFreshness {
 		system(k)
 	}
 	for _, st := range r.snap.all() {
+		if gone[resKey{st.Kind, st.Scope}] {
+			continue
+		}
 		s := system(st.Kind)
 		s.Resources++
 		budget, settled := st.budget(), kinds[st.Kind].cover == perEntity && !live[resKey{st.Kind, st.Scope}]
@@ -227,6 +232,18 @@ func (r *readSet) sources(trains []Train) []SourceFreshness {
 		out = append(out, *s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].System < out[j].System })
+	return out
+}
+
+func goneCompares(llbs []LLBGroup, cfg Config) map[resKey]bool {
+	out := map[resKey]bool{}
+	for _, g := range llbs {
+		for _, b := range g.Branches {
+			if b.Gone {
+				out[resKey{KindCompare.Name, CompareScope(cfg.app(b.App).GitLabProject, "develop", b.Branch)}] = true
+			}
+		}
+	}
 	return out
 }
 
