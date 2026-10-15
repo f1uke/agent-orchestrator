@@ -172,6 +172,11 @@ export function ageText(ms: number): string {
 	return h < 48 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
+export function agoText(ms: number): string {
+	const age = ageText(ms);
+	return age === "now" ? "just now" : `${age} ago`;
+}
+
 export type SourceAge = { system: string; age: string; unknown: boolean; why: string };
 
 /** fetchError: the Board itself could not be refetched, so every age is the last one known. */

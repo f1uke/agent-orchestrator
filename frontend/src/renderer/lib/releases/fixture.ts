@@ -4,6 +4,7 @@ import type {
 	AppVersion,
 	Board,
 	BoardResponse,
+	FixKind,
 	RuleInfo,
 	Severity,
 	Stage,
@@ -174,6 +175,15 @@ const RULES: [string, Severity, string][] = [
 	["F1", "info", "Two trains overlap"],
 ];
 
+const FIX_KINDS: Readonly<Record<string, FixKind>> = {
+	A5: "choose",
+	C1: "queue",
+	D1: "queue",
+	E1: "queue",
+	G5: "copy",
+	L3: "apply",
+};
+
 function withCards(b: Board): Board {
 	attachCards(b);
 	b.llbs = demoLlbs(b);
@@ -285,7 +295,7 @@ function baseBoard(today: string): Board {
 	});
 	const hits: AlertHit[] = [
 		hit("C5~v/21-2026/di", "C5", "block", "!77 has merge conflicts", { app: "di", train: "21-2026" }),
-		hit("C1~v/21-2026/di", "C1", "block", "!77 failed: build_test", { app: "di", train: "21-2026" }),
+		hit("C1~v/21-2026/di", "C1", "block", "!77 failed: build_test", { app: "di", train: "21-2026", fix: "queue" }),
 		hit(
 			"A7~v/21-2026/pa",
 			"A7",
@@ -307,6 +317,7 @@ function baseBoard(today: string): Board {
 			app: "di",
 			train: "20-2026",
 			bucket: "history",
+			fix: "queue",
 		}),
 		hit("D1~v/22-2026/da", "D1", "risk", "No approvers set on the Jira release", {
 			app: "da",
@@ -321,6 +332,7 @@ function baseBoard(today: string): Board {
 		title,
 		on: id !== "F1",
 		defaultOn: true,
+		...(FIX_KINDS[id] ? { fix: FIX_KINDS[id] } : {}),
 	}));
 	const badge = hits.filter((h) => h.bucket === "badge");
 	return {
@@ -864,6 +876,86 @@ export function failedSourceBoard(today: string): Board {
 	t21.versions[0].stages = t21.versions[0].stages.map((s) =>
 		s.key === "scan" ? { ...s, status: "unknown", detail: "", missing } : s,
 	);
+	return b;
+}
+
+/** One fixable hit per plan mode: E1 queue, A5 choose, G5 copy, L3 apply (blocked until demo-chat has a plan). */
+export function fixesBoard(today: string): Board {
+	const b = demoBoard(today);
+	const t20 = b.trains[0];
+	const t21 = b.trains[1];
+	const da21 = t21.versions.find((v) => v.app === "da");
+	if (da21?.jira && da21.milestone.due) da21.jira.releaseDate = addDays(da21.milestone.due, 2);
+	t21.pages = [
+		{
+			id: "page-21-demo",
+			family: "demo",
+			title: "Release Train #21 Demo",
+			url: "https://wiki.example.com/pages/21-demo",
+			number: 21,
+			created: t21.freeze ?? today,
+			keys: ["DEMO-101", "DEMO-102"],
+			tasks: 2,
+			ticked: 0,
+		},
+	];
+	const at = `${today}T02:00:00Z`;
+	const fixable = (id: string, severity: Severity, text: string, over: Partial<AlertHit>): AlertHit => ({
+		id,
+		rule: id.slice(0, id.indexOf("~")),
+		severity,
+		bucket: "badge",
+		text,
+		evidence: {},
+		link: { label: "Open", url: `${HOST}/x` },
+		asOf: at,
+		fix: FIX_KINDS[id.slice(0, id.indexOf("~"))],
+		...over,
+	});
+	const added = [
+		fixable("A5~v/21-2026/da", "data", "Jira release date is 2 days after the milestone due date", {
+			app: "da",
+			train: "21-2026",
+		}),
+		fixable(
+			"L3~ct/21-2026/di/DEMO-110",
+			"risk",
+			"DEMO-110 is on train 21-2026, but its code sits in feature/demo-chat (no target train)",
+			{
+				app: "di",
+				train: "21-2026",
+				evidence: { card: "DEMO-110", group: "demo-chat", branch: "feature/demo-chat" },
+				link: { label: "Open card", url: `${JIRA}/browse/DEMO-110` },
+			},
+		),
+		fixable(
+			"G5~pf/21-2026/demo/merged",
+			"risk",
+			"2 card(s) ship with #21 but are not on Release Train #21 Demo: DEMO-103, DEMO-106",
+			{
+				train: "21-2026",
+				evidence: { page: "page-21-demo", cards: ["DEMO-103", "DEMO-106"], bucket: "merged" },
+			},
+		),
+	];
+	const e1 = b.alerts.hits.find((h) => h.id === "E1~v/20-2026/di");
+	if (e1) e1.bucket = "badge";
+	if (t20.versions[0].jira) t20.versions[0].jira.released = false;
+	b.alerts.hits.push(...added);
+	for (const [id, severity, title] of [
+		["G5", "risk", "Card ships with a train but is not on its release train page"],
+		["L3", "risk", "Card is on a train page but parked in a long-lived branch that does not target it"],
+	] as const)
+		b.catalogue.push({ id, group: "G", severity, title, on: true, defaultOn: true, fix: FIX_KINDS[id] });
+	b.alerts.rules = b.catalogue.map((r) => {
+		const ids = b.alerts.hits.filter((h) => h.rule === r.id && h.bucket === "badge").map((h) => h.id);
+		return {
+			rule: r.id,
+			on: r.on,
+			outcome: ids.length ? { kind: "fired" as const, asOf: at, hits: ids } : { kind: "clean" as const, checkedAt: at },
+		};
+	});
+	b.alerts.badge = { ...b.alerts.badge, count: b.alerts.hits.filter((h) => h.bucket === "badge").length };
 	return b;
 }
 

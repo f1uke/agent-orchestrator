@@ -8,6 +8,8 @@ export type SheetEntry =
 	| { kind: "card"; key: string }
 	| { kind: "sprint"; board: string }
 	| { kind: "llb"; id: string }
+	| { kind: "fix"; hit: HitId; choice?: string }
+	| { kind: "fixes"; fix?: string }
 	| { kind: "attention" | "rules" | "key" | "llbs" };
 
 export type Layer = "sprint" | "llb" | "cards" | "past";
@@ -45,14 +47,24 @@ function flag(v: unknown): boolean | null {
 function parseSheet(raw: string | null): SheetEntry | null {
 	if (!raw) return null;
 	const at = raw.indexOf(":");
-	const kind = at < 0 ? raw : raw.slice(0, at);
+	const head = at < 0 ? raw : raw.slice(0, at);
 	const rest = at < 0 ? "" : raw.slice(at + 1);
+	const dot = head.indexOf(".");
+	const kind = dot < 0 ? head : head.slice(0, dot);
+	if (kind === "fix") {
+		const choice = dot < 0 ? undefined : head.slice(dot + 1);
+		if (!rest || choice === "") return null;
+		return choice ? { kind, hit: rest, choice } : { kind, hit: rest };
+	}
+	if (dot >= 0) return null;
 	switch (kind) {
 		case "attention":
 		case "rules":
 		case "key":
 		case "llbs":
 			return { kind };
+		case "fixes":
+			return rest ? { kind, fix: rest } : { kind };
 		case "train":
 			return rest ? { kind, train: rest } : null;
 		case "card":
@@ -92,6 +104,10 @@ export function sheetParam(s: SheetEntry): string {
 			return `sprint:${s.board}`;
 		case "llb":
 			return `llb:${s.id}`;
+		case "fix":
+			return s.choice ? `fix.${s.choice}:${s.hit}` : `fix:${s.hit}`;
+		case "fixes":
+			return s.fix ? `fixes:${s.fix}` : "fixes";
 		default:
 			return s.kind;
 	}

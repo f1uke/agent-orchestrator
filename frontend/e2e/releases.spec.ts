@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const SHOTS = process.env.AO_RELEASES_SHOTS;
 
-async function open(page: Page, query = "", variant?: "failed-source" | "identity-unknown") {
+async function open(page: Page, query = "", variant?: "failed-source" | "identity-unknown" | "fixes") {
 	await page.addInitScript((v) => {
 		try {
 			if (!sessionStorage.getItem("releases-spec")) {
@@ -418,6 +418,175 @@ test.describe("releases page", () => {
 		});
 		await page.goto("/#/releases");
 		await expect(page.getByTestId("releases-page")).toContainText("ao train config init");
+	});
+});
+
+test.describe("release fixes", () => {
+	test.use({ viewport: { width: 1512, height: 945 } });
+
+	const sheet = (page: Page) => page.getByRole("dialog", { name: "Release details" });
+	const alertRow = (page: Page, hit: string) => page.locator(`.al[data-hit="${hit}"]`);
+
+	test("an E1 fix shows its request, records a dry run on the hit, and is withdrawn from the Fixes list", async ({
+		page,
+	}) => {
+		await open(page, "?sheet=attention", "fixes");
+		await alertRow(page, "E1~v/20-2026/di").getByRole("button", { name: "Fix ›" }).click();
+		const s = sheet(page);
+		await expect(s.getByTestId("fix-title")).toHaveText("Mark di 2.3.0 released");
+		await expect(s.getByTestId("fix-mode")).toContainText("Nothing is sent to Jira, GitLab or Confluence");
+		await expect(s.getByTestId("fix-request")).toContainText(
+			"PUT https://demo.example.com/rest/api/3/version/20-2026-di",
+		);
+		await expect(s.getByTestId("fix-request")).toContainText('"released": true');
+		await expect(s.getByTestId("fix-step")).toContainText("dry run: nothing is sent");
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-fix-e1.png` });
+		await s.getByRole("button", { name: "Record as a dry run" }).click();
+		await expect(s.getByTestId("fix-recorded")).toContainText("fix recorded (dry run)");
+		await s.getByRole("button", { name: "Back" }).click();
+		await expect(alertRow(page, "E1~v/20-2026/di").getByTestId("hit-fix-state")).toHaveText("fix recorded (dry run)");
+		await alertRow(page, "E1~v/20-2026/di").getByTestId("hit-fix-state").click();
+		const row = s.locator(".fixrow").first();
+		await expect(row).toContainText("E1");
+		await expect(row.getByTestId("fix-state")).toHaveText("fix recorded (dry run)");
+		await expect(row).toContainText("by the app");
+		await expect(row.getByTestId("fix-events")).toContainText("dry_run_recorded");
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-fixes-list.png` });
+		await row.getByRole("button", { name: "Withdraw" }).click();
+		await expect(row.getByTestId("fix-state")).toHaveText("withdrawn");
+		await s.getByRole("tab", { name: "Alerts" }).click();
+		await expect(alertRow(page, "E1~v/20-2026/di").getByRole("button", { name: "Fix ›" })).toBeVisible();
+	});
+
+	test("A5 shows two choices, neither picked, and picking one replans", async ({ page }) => {
+		await open(page, "?sheet=fix:A5~v/21-2026/da", "fixes");
+		const s = sheet(page);
+		await expect(s.locator(".fixpick")).toHaveCount(2);
+		await expect(s.getByTestId("fix-step")).toHaveCount(0);
+		await expect(s.getByRole("button", { name: "Record as a dry run" })).toHaveCount(0);
+		await s.getByRole("button", { name: /^Milestone due ← Jira release date/ }).click();
+		await expect(page).toHaveURL(/sheet=fix\.gitlab/);
+		await expect(s.getByTestId("fix-request")).toContainText(
+			"PUT https://gitlab.example.com/api/v4/projects/1/milestones/1",
+		);
+		await expect(s.getByRole("button", { name: /^Milestone due/ })).toHaveAttribute("aria-pressed", "true");
+		await s.getByRole("button", { name: /^Jira release date ← milestone due/ }).click();
+		await expect(s.getByTestId("fix-request")).toContainText("rest/api/3/version/21-2026-da");
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-fix-a5.png` });
+		await s.getByRole("button", { name: "Record as a dry run" }).click();
+		await expect(s.getByTestId("fix-recorded")).toContainText("fix recorded (dry run)");
+	});
+
+	test("G5 copies the keys and has no confirm", async ({ page, context }) => {
+		await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+		await open(page, "?sheet=fix:G5~pf/21-2026/demo/merged", "fixes");
+		const s = sheet(page);
+		await expect(s.getByTestId("fix-step")).toContainText("nothing is sent: paste it by hand");
+		await expect(s.getByRole("button", { name: "Record as a dry run" })).toHaveCount(0);
+		await expect(s.getByRole("button", { name: "Apply" })).toHaveCount(0);
+		await s.getByRole("button", { name: "Copy keys" }).click();
+		await expect(s).toContainText("Copied");
+		expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("DEMO-103\nDEMO-106");
+	});
+
+	test("L3 is blocked until its group has a plan, then applies and undoes", async ({ page }) => {
+		await open(page, "?sheet=fix:L3~ct/21-2026/di/DEMO-110", "fixes");
+		const s = sheet(page);
+		await expect(s.getByTestId("fix-blocked")).toContainText("demo-chat has no plan yet");
+		await expect(s.getByTestId("fix-mode")).toHaveCount(0);
+		await page.waitForTimeout(400);
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-fix-l3-blocked.png` });
+		await s.getByRole("button", { name: "Make a plan first ›" }).click();
+		await expect(page).toHaveURL(/sheet=llb%3Ademo-chat|sheet=llb:demo-chat/);
+		const form = page.getByTestId("plan-form");
+		await form.getByLabel("Note").fill("Advisor chat, no train yet.");
+		await form.getByRole("button", { name: "Save plan" }).click();
+		await expect(form).toContainText("Saved");
+		await s.getByRole("button", { name: "Back" }).click();
+		await expect(s.getByTestId("fix-mode")).toContainText("Nothing is written to GitLab, Jira or Confluence");
+		await expect(s.getByTestId("fix-request")).toContainText("PUT /api/v1/release-trains/llb-plans/demo-chat");
+		await s.getByRole("button", { name: "Apply" }).click();
+		await expect(s.getByTestId("fix-recorded")).toContainText("applied");
+		await s.getByRole("button", { name: "See it in Fixes ›" }).click();
+		const row = s.locator('.fixrow[data-focus="true"]');
+		await expect(row.getByTestId("fix-state")).toHaveText("applied");
+		await expect(row.getByTestId("fix-events")).toContainText("applied");
+		await row.getByRole("button", { name: "Undo" }).click();
+		await expect(row.getByTestId("fix-state")).toHaveText("undone");
+		await s.getByRole("tab", { name: "Alerts" }).click();
+		await expect(alertRow(page, "L3~ct/21-2026/di/DEMO-110").getByRole("button", { name: "Fix ›" })).toBeVisible();
+	});
+
+	test("an L3 undo refused because the plan moved on keeps the fix applied", async ({ page }) => {
+		await open(page, "?sheet=llb:demo-chat", "fixes");
+		await page.getByTestId("plan-form").getByLabel("Note").fill("Advisor chat, no train yet.");
+		await page.getByTestId("plan-form").getByRole("button", { name: "Save plan" }).click();
+		await expect(page.getByTestId("plan-form")).toContainText("Saved");
+		await page.evaluate(() => {
+			location.hash = "#/releases?sheet=fix:L3~ct/21-2026/di/DEMO-110";
+		});
+		const s = sheet(page);
+		await s.getByRole("button", { name: "Apply" }).click();
+		await expect(s.getByTestId("fix-recorded")).toContainText("applied");
+		await page.evaluate(() => {
+			type Seam = { __aoReleaseBoard?: { board: { llbs: { id: string; plan?: { version: number } }[] } } };
+			(globalThis as Seam).__aoReleaseBoard!.board.llbs.find((g) => g.id === "demo-chat")!.plan!.version += 1;
+		});
+		await s.getByRole("button", { name: "See it in Fixes ›" }).click();
+		const row = s.locator('.fixrow[data-focus="true"]');
+		await row.getByRole("button", { name: "Undo" }).click();
+		await expect(row.getByTestId("undo-refused")).toContainText("reload it and try again");
+		await expect(row.getByTestId("undo-refused")).toContainText("The fix stays applied.");
+		await expect(row.getByTestId("fix-state")).toHaveText("applied");
+		await expect(row.getByTestId("fix-events")).toContainText("undo_failed");
+	});
+
+	test("a confirm after the data changed shows the new plan and asks for a second review", async ({ page }) => {
+		await open(page, "?sheet=fix:E1~v/20-2026/di", "fixes");
+		const s = sheet(page);
+		await expect(s.getByTestId("fix-request")).toContainText('"releaseDate"');
+		const due = await page.evaluate(() => {
+			type Seam = {
+				__aoReleaseBoard?: {
+					board: { trains: { id: string; versions: { app: string; milestone: { due?: string } }[] }[] };
+				};
+			};
+			const v = (globalThis as Seam).__aoReleaseBoard!.board.trains[0].versions.find((x) => x.app === "di")!;
+			v.milestone.due = "2026-01-02";
+			return v.milestone.due;
+		});
+		await s.getByRole("button", { name: "Record as a dry run" }).click();
+		await expect(s.getByTestId("fix-changed")).toHaveText(
+			"The data changed, review again. The plan above is the new one.",
+		);
+		await expect(s.getByTestId("fix-request")).toContainText(due);
+		await expect(s.getByTestId("fix-recorded")).toHaveCount(0);
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-fix-changed.png` });
+		await s.getByRole("button", { name: "Record as a dry run" }).click();
+		await expect(s.getByTestId("fix-recorded")).toContainText("fix recorded (dry run)");
+	});
+
+	test("the Key sheet explains fixes and opens the Fixes list", async ({ page }) => {
+		await open(page, "?sheet=key", "fixes");
+		const s = sheet(page);
+		await expect(s).toContainText("Every fix except L3 is a dry run");
+		await s.getByRole("button", { name: "Open the Fixes list ›" }).click();
+		await expect(s.getByRole("heading", { name: "Fixes" })).toBeVisible();
+		await expect(s).toContainText("No fixes yet");
+	});
+
+	test("the card sheet lists the card's alerts with their Fix button", async ({ page }) => {
+		await open(page, "?sheet=card:DEMO-110", "fixes");
+		const row = alertRow(page, "L3~ct/21-2026/di/DEMO-110");
+		await expect(row).toBeVisible();
+		await row.getByRole("button", { name: "Fix ›" }).click();
+		await expect(sheet(page).getByTestId("fix-blocked")).toBeVisible();
+	});
+
+	test("the version sheet's alerts carry the Fix button", async ({ page }) => {
+		await open(page, "?sheet=version:21-2026:di", "fixes");
+		await expect(alertRow(page, "C1~v/21-2026/di").getByRole("button", { name: "Fix ›" })).toBeVisible();
+		await expect(alertRow(page, "C5~v/21-2026/di").getByRole("button", { name: "Fix ›" })).toHaveCount(0);
 	});
 });
 

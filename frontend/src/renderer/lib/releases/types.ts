@@ -37,6 +37,15 @@ export type SprintDest = S["ReleaseTrainSprintDest"];
 export type Dest = S["ReleaseTrainDest"];
 export type DestKind = S["ReleaseTrainDestKind"];
 export type Route = S["ReleaseTrainRoute"];
+export type Fix = S["ReleaseTrainFix"];
+export type FixEvent = S["ReleaseTrainFixEvent"];
+export type FixKind = S["ReleaseTrainFixKind"];
+export type FixMode = S["ReleaseTrainFixMode"];
+export type FixPlan = S["ReleaseTrainFixPlan"];
+export type FixRef = S["ReleaseTrainFixRef"];
+export type FixState = S["ReleaseTrainFixState"];
+export type FixStep = S["ReleaseTrainFixStep"];
+export type ShownRequest = S["ReleaseTrainShownRequest"];
 
 /** "2026-10-15": a civil date in the Board's timezone, never a Date. */
 export type Day = string;
