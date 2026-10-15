@@ -99,8 +99,8 @@ type CommitFact struct {
 var (
 	KindMilestones = newKind[MilestoneFact]("gitlab.milestones", Snapshotted, 10*time.Minute, perApp)
 	KindMRs        = newKind[MRFact]("gitlab.mrs", Incremental, 2*time.Minute, perApp)
-	KindMRDetail   = newKind[MRDetailFact]("gitlab.mr_detail", Snapshotted, time.Minute, perEntity)
-	KindJobs       = newKind[JobsFact]("gitlab.jobs", Snapshotted, time.Minute, perEntity)
+	KindMRDetail   = newKind[MRDetailFact]("gitlab.mr_detail", Snapshotted, 2*time.Minute, perEntity)
+	KindJobs       = newKind[JobsFact]("gitlab.jobs", Snapshotted, 2*time.Minute, perEntity)
 	KindTags       = newKind[TagFact]("gitlab.tags", Snapshotted, 10*time.Minute, perApp)
 	KindCompare    = newKind[CompareFact]("gitlab.compare", Snapshotted, 30*time.Minute, perEntity)
 )

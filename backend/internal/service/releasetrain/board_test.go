@@ -169,13 +169,13 @@ func TestBoardRecomputesAfterThirtySecondsSoABudgetCrossingTurnsCleanToUnknown(t
 	if _, e := w.mustBoard(); e != etag || w.builds != 1 {
 		t.Fatalf("rebuilt before 30 s (builds %d)", w.builds)
 	}
-	w.now = w.now.Add(32 * time.Second)
+	w.now = w.now.Add(92 * time.Second)
 	body, e := w.mustBoard()
 	if e == etag || w.builds != 2 {
-		t.Fatalf("after 61 s with no write: etag same=%v builds=%d", e == etag, w.builds)
+		t.Fatalf("after 121 s with no write: etag same=%v builds=%d", e == etag, w.builds)
 	}
 	if got := outcome(t, body, "C5", "di"); got != "unknown" {
-		t.Fatalf("C5 over a 1 m read 61 s old = %s, want unknown", got)
+		t.Fatalf("C5 over a 2 m read 121 s old = %s, want unknown", got)
 	}
 }
 
