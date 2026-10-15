@@ -26,7 +26,8 @@ func forEachSprintCard(b *Board, fn func(row *SprintRow, c *SprintCard) []Hit) [
 
 func cardHit(row *SprintRow, c *SprintCard, text string, ev Evidence, mrs ...SprintMR) Hit {
 	ev["board"], ev["sprint"] = row.Board.Key, row.Number
-	links := []Link{{Label: "Open card", URL: c.URL}}
+	links := make([]Link, 0, 1+len(mrs))
+	links = append(links, Link{Label: "Open card", URL: c.URL})
 	for _, m := range mrs {
 		links = append(links, Link{Label: fmt.Sprintf("Open !%d", m.IID), URL: m.URL})
 	}
