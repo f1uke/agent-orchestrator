@@ -11,7 +11,7 @@ import {
 	type RefObject,
 } from "react";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
-import { releaseMotion, type MoveKeys, type ReleaseMotion } from "../../lib/releases/motion";
+import { enterKeyframes, releaseMotion, type MoveKeys, type ReleaseMotion } from "../../lib/releases/motion";
 
 const MotionSet = createContext<ReleaseMotion>(releaseMotion(false));
 
@@ -216,8 +216,8 @@ export function useLabelStagger(root: RefObject<HTMLElement | null>, focus: stri
 			.filter((_, i) => prev.texts.length !== texts.length || prev.texts[i] !== texts[i])
 			.forEach((part, i) => {
 				const p = mo.label(i);
-				if (p.initial && typeof p.initial.opacity === "number" && typeof p.animate.opacity === "number")
-					animate(part, { opacity: [p.initial.opacity, p.animate.opacity] }, p.transition);
+				const frames = enterKeyframes(p);
+				if (frames) animate(part, frames, p.transition);
 			});
 	});
 }

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DURATION, momentumDistance, moveKeys, releaseMotion, type Presence } from "./motion";
+import { DURATION, enterKeyframes, momentumDistance, moveKeys, releaseMotion, type Presence } from "./motion";
 import { DEFAULT_LAYERS, parseReleasesSearch } from "./url";
 
 const COMPONENTS = path.resolve(__dirname, "../../components/releases");
@@ -19,7 +19,7 @@ function sources(dir: string): string[] {
 /** Text of each `animate=`, `initial=`, `exit=` prop and `keyframes` value, braces balanced. */
 function motionProps(src: string): string[] {
 	const out: string[] = [];
-	const re = /\b(animate|initial|exit|keyframes)\s*[=:]\s*\{/g;
+	const re = /\b(?:(?:animate|initial|exit|keyframes)\s*[=:]|animate\(\s*[\w.]+\s*,)\s*\{/g;
 	for (let m = re.exec(src); m; m = re.exec(src)) {
 		let depth = 0;
 		let i = m.index + m[0].length - 1;
@@ -59,6 +59,11 @@ const keysOf = (p: Presence) =>
 const seconds = (t: { duration?: number; delay?: number }) => (t.duration ?? 0) + (t.delay ?? 0);
 
 describe("releases motion", () => {
+	it("reads keyframes passed to an imperative animate(el, ...) too", () => {
+		expect(motionViolations(`animate(part, { transform: ["scaleX(0)", "none"] }, t)`)).toHaveLength(2);
+		expect(motionViolations(`animate(el.scrollLeft, to, { ...mo.axis })`)).toEqual([]);
+	});
+
 	it("catches the d3 mistake in a sample", () => {
 		expect(motionViolations(`<m.div animate={{ transform: ["scaleX(0.4)", "none"] }} />`)).toHaveLength(2);
 		expect(motionViolations(`<m.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} />`)).toEqual([]);
@@ -116,6 +121,11 @@ describe("releases motion", () => {
 		}
 		for (const [name, t] of Object.entries({ fold: s.fold, row: s.row, axis: s.axis, momentum: s.momentum }))
 			expect(seconds(t), name).toBe(0);
+	});
+
+	it("turns a presence into from-to keyframes over its own keys, and none when it starts at its end", () => {
+		expect(enterKeyframes(releaseMotion(false).label(2))).toEqual({ opacity: [0, 1] });
+		expect(enterKeyframes(releaseMotion(true).label(2))).toBeNull();
 	});
 
 	it("gives a flick momentum and a slow release none", () => {

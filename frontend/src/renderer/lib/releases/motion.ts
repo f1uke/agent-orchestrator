@@ -90,6 +90,17 @@ const STILL: ReleaseMotion = {
 	momentum: instant,
 };
 
+export function enterKeyframes(p: Presence): Record<string, (number | string)[]> | null {
+	const from = p.initial;
+	if (!from) return null;
+	const out: Record<string, (number | string)[]> = {};
+	for (const [k, to] of Object.entries(p.animate)) {
+		const start = from[k as keyof MotionValues];
+		if (start !== undefined && to !== undefined) out[k] = [start, to].flat();
+	}
+	return out;
+}
+
 export function releaseMotion(reduced: boolean): ReleaseMotion {
 	return reduced ? STILL : MOVING;
 }
