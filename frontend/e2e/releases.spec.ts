@@ -125,6 +125,28 @@ test.describe("releases page", () => {
 		expect(report.zero).toBe(0);
 	});
 
+	test("the sticky app label stays opaque over the lanes when hovered, focused and under Only me", async ({ page }) => {
+		await open(page, "?me=1");
+		await page.getByTestId("release-timeline").evaluate((el) => (el.scrollLeft = el.scrollWidth));
+		await page.waitForTimeout(200);
+		const label = page.getByTestId("label-di");
+		const fill = () =>
+			label.evaluate((el) => {
+				const parse = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
+				const lab = el.closest(".rel-lab") as HTMLElement;
+				const [, , , a = 1] = parse(getComputedStyle(lab).backgroundColor);
+				const r = lab.getBoundingClientRect();
+				const hit = document.elementsFromPoint(r.left + r.width - 12, r.top + r.height / 2);
+				const above = hit.indexOf(lab) >= 0 && hit.slice(0, hit.indexOf(lab)).every((e) => lab.contains(e));
+				return { alpha: a, opacity: getComputedStyle(lab).opacity, above };
+			});
+		await expect.poll(fill).toEqual({ alpha: 1, opacity: "1", above: true });
+		await label.hover();
+		await expect.poll(fill).toEqual({ alpha: 1, opacity: "1", above: true });
+		await label.focus();
+		await expect.poll(fill).toEqual({ alpha: 1, opacity: "1", above: true });
+	});
+
 	test("a failed source shows unknown with its age, never a blank", async ({ page }) => {
 		await open(page, "", "failed-source");
 		await expect(page.getByTestId("release-sources").locator('[data-source="gitlab"]')).toHaveText(

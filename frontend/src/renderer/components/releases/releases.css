@@ -530,8 +530,9 @@
 	.rel-app > .rel-lab > * {
 		flex: none;
 	}
-	.rel-app > .rel-lab:hover {
-		background: var(--interactive-hover);
+	.rel-app > .rel-lab:hover,
+	.rel-app > .rel-lab:focus-visible {
+		background: color-mix(in srgb, var(--fg) 4%, var(--bg));
 	}
 	.rel-app > .rel-trk {
 		align-self: stretch;
