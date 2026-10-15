@@ -486,9 +486,8 @@
 		position: absolute;
 		top: 5px;
 		height: 20px;
-		border-left: 2px solid var(--fg-off);
-		border-right: 1px solid var(--border-1);
-		border-radius: 2px;
+		border: 1px solid var(--border-1);
+		border-radius: 4px;
 		padding: 0;
 		font-size: 11.5px;
 		color: var(--fg-muted);
@@ -509,7 +508,7 @@
 	}
 	.rel-spr.active {
 		color: var(--fg);
-		border-left-color: var(--accent);
+		border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 		background-color: rgb(77 141 255 / 0.07);
 	}
 	.rel-spr.active .sl {
@@ -1057,14 +1056,26 @@
 	}
 	.rel-sheet .al {
 		display: grid;
-		grid-template-columns: 3px 1fr auto;
+		grid-template-columns: 1fr auto;
 		gap: 10px;
 		padding: 9px 0;
 		border-bottom: 1px solid var(--border);
 	}
-	.rel-sheet .al .bar3 {
+	.rel-sheet .al .sev {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--c);
+	}
+	.rel-sheet .al .sev::before {
+		content: "";
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
 		background: var(--c);
-		border-radius: 2px;
+		box-shadow: 0 0 7px color-mix(in srgb, var(--c) 60%, transparent);
 	}
 	.rel-sheet .al .who {
 		font-size: 12px;
@@ -1327,9 +1338,7 @@
 		color: var(--c);
 	}
 	.rel .llbgrp .nest {
-		margin-left: 20px;
-		padding-left: 2px;
-		border-left: 1px solid color-mix(in srgb, var(--purple) 35%, transparent);
+		margin-left: 22px;
 	}
 	.rel .llbgrp .nest .crow {
 		width: 474px;
@@ -1735,8 +1744,8 @@
 	.rel-lab .meline.off {
 		color: var(--fg-passive);
 	}
-	.rel .crow.mine {
-		box-shadow: inset 2px 0 0 var(--accent);
+	.rel .crow.sp.mine .av {
+		box-shadow: 0 0 0 1.5px var(--accent);
 	}
 	.rel .crow .mecell {
 		display: inline-grid;
@@ -1854,7 +1863,6 @@
 		color: var(--fg-muted);
 		white-space: nowrap;
 		background: color-mix(in srgb, var(--c) 10%, var(--bg));
-		box-shadow: inset 2px 0 0 var(--c);
 	}
 	.rel .dsum:hover {
 		background: color-mix(in srgb, var(--c) 17%, var(--bg));
@@ -1893,9 +1901,7 @@
 		text-decoration: underline;
 	}
 	.rel-cg.dest .crows {
-		margin-left: 10px;
-		padding-left: 4px;
-		border-left: 1px solid color-mix(in srgb, var(--c) 35%, transparent);
+		margin-left: 14px;
 		background: var(--bg);
 	}
 	.rel .crow.sp {

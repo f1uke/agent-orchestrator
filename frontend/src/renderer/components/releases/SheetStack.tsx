@@ -483,9 +483,9 @@ function UnknownCells({ rules, c }: { rules: RuleOutcome[]; c: Ctx }) {
 		>
 			{rules.map((r) => (
 				<div key={`${r.rule}:${r.app ?? ""}`} className="al" data-st="unknown" data-testid="unknown-cell">
-					<span className="bar3" />
 					<div>
 						<div className="who">
+							<span className="sev">Unknown</span>
 							<HitWho board={c.board} app={r.app} />
 							<span className="rid">{r.rule}</span>
 						</div>
@@ -542,7 +542,6 @@ function AttentionBody({ c }: { c: Ctx }) {
 				<Fold label={`${stale.length} hide(s) no longer matching`} testid="stale-fold">
 					{stale.map((s) => (
 						<div key={s.id} className="al dim">
-							<span className="bar3" />
 							<div>
 								<div className="who mono">{s.id}</div>
 								<div className="tx">

@@ -125,6 +125,47 @@ test.describe("releases page", () => {
 		expect(report.zero).toBe(0);
 	});
 
+	test("no row, block or alert draws a coloured stripe on its left edge, and severity reads as a word", async ({
+		page,
+	}) => {
+		const stripes = () =>
+			page.evaluate(() =>
+				[
+					...document.querySelectorAll<HTMLElement>(
+						".crow, .crows, .nest, .dsum, .csum, .rel-cg, .rel-llbsum .ls, .al, .al > *, .rel-spr",
+					),
+				]
+					.filter((el) => {
+						const cs = getComputedStyle(el);
+						return parseFloat(cs.borderLeftWidth) > 0 && cs.borderLeftColor !== cs.borderRightColor
+							? true
+							: /\)\s+[1-9][\d.]*px 0px 0px 0px inset/.test(cs.boxShadow) ||
+									(parseFloat(cs.borderLeftWidth) > 0 && parseFloat(cs.borderTopWidth) === 0);
+					})
+					.map((el) => el.className),
+			);
+		await open(page, "?layers=sprint,llb,cards");
+		const demo = page.getByTestId("sprint-row-DEMO");
+		await demo.locator(".spsrc .csum").click();
+		await settle(page);
+		for (const key of ["t:21-2026", "l:demo-wallet", "carried"]) {
+			await demo.locator(`[data-dest="${key}"] .dsum`).click();
+			await settle(page);
+		}
+		await page.getByTestId("cards-di:21-2026").locator(".csum").click();
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
+		await settle(page);
+		expect(await stripes()).toEqual([]);
+		await open(page, "?layers=sprint,llb,cards&me=1");
+		await demo.locator(".spsrc .csum").click();
+		await expect(page.locator(".crow.mine").first()).toBeVisible();
+		expect(await stripes()).toEqual([]);
+		await open(page, "?sheet=attention");
+		const hit = page.locator('.al[data-hit="C5~v/21-2026/di"]');
+		await expect(hit.locator(".sev")).toHaveText("Block");
+		expect(await stripes()).toEqual([]);
+	});
+
 	test("the sticky app label stays opaque over the lanes when hovered, focused and under Only me", async ({ page }) => {
 		await open(page, "?me=1");
 		await page.getByTestId("release-timeline").evaluate((el) => (el.scrollLeft = el.scrollWidth));

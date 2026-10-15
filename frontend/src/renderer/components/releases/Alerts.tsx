@@ -95,9 +95,9 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 	const target = sheetFor(h);
 	return (
 		<div className={`al${hidden ? " dim" : ""}`} data-st={SEVERITY_META[h.severity].tone} data-hit={h.id}>
-			<span className="bar3" />
 			<div>
 				<div className="who">
+					<span className="sev">{SEVERITY_META[h.severity].label}</span>
 					<HitWho board={c.board} train={h.train} app={h.app} />
 					<span className="rid">{h.rule}</span>
 					{h.changedSinceHidden && (

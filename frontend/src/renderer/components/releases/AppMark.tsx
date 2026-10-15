@@ -20,7 +20,7 @@ export function PlatformGlyph({ platform }: { platform: BoardApp["platform"] }) 
 export function AppMark({ mark, size = "md" }: { mark: AppMarkData | null; size?: "sm" | "md" }) {
 	if (!mark) return <span className="appmark">all apps</span>;
 	return (
-		<span className={`appmark ${size}`} title={mark.name} aria-label={mark.name} data-testid="app-mark">
+		<span className={`appmark ${size}`} role="img" title={mark.name} aria-label={mark.name} data-testid="app-mark">
 			<span aria-hidden="true">{mark.family}</span>
 			<PlatformGlyph platform={mark.platform} />
 		</span>
