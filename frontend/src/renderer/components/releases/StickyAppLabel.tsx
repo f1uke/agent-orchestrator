@@ -1,7 +1,7 @@
 import { approvals, nowStage, owner, unknownText, versionOf, type Lens } from "../../lib/releases/lens";
 import type { BoardApp, Stage } from "../../lib/releases/types";
 import { SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
-import { mineText } from "../../lib/releases/sprint";
+import { versionMineText } from "../../lib/releases/sprint";
 import type { PageActions } from "./ReleasesPage";
 
 export function Stepper({ stages, big = false }: { stages: Stage[]; big?: boolean }) {
@@ -21,9 +21,8 @@ function MineLine({ app, lens }: { app: string; lens: Lens }) {
 	const t = lens.focus;
 	const v = t ? versionOf(t, app) : undefined;
 	const units = (v?.cards ?? []).filter((u) => u.mine?.length);
-	const role = (v?.mine ?? []).filter((m) => m.why !== "card");
 	const bits = [
-		role.length ? mineText(role) : "",
+		v ? versionMineText(v, lens.identity) : "",
 		units.length ? `${units.length} of my card${units.length === 1 ? "" : "s"}` : "",
 	].filter(Boolean);
 	return bits.length ? (

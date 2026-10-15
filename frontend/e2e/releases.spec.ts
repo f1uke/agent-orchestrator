@@ -438,6 +438,11 @@ for (const [width, height] of [
 			}
 		}
 		await expect(page.getByRole("button", { name: /Needs attention/ })).toBeInViewport({ ratio: 1 });
+		const chips = await page.getByRole("group", { name: "Apps" }).boundingBox();
+		const lastChip = await page.getByRole("group", { name: "Apps" }).getByRole("button").last().boundingBox();
+		expect(lastChip!.x + lastChip!.width, "top bar chips stay inside their group").toBeLessThanOrEqual(
+			chips!.x + chips!.width + 1,
+		);
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-${width}.png` });
 	});
 

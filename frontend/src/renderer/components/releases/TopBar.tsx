@@ -92,7 +92,7 @@ export function TopBar({
 					</button>
 				</span>
 			</SimpleTooltip>
-			<div className="flex min-w-0 gap-1.5" role="group" aria-label="Apps">
+			<div className="flex flex-none gap-1.5" role="group" aria-label="Apps">
 				{board.apps.map((a) => (
 					<SimpleTooltip key={a.id} label={a.name}>
 						<button

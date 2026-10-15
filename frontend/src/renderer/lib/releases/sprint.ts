@@ -1,7 +1,20 @@
 import { statusTone } from "./cards";
 import { shortDay } from "./day";
 import { shortBranch, trainLabel, urgency } from "./llb";
-import type { Board, BoardApp, Day, Dest, DestKind, MineReason, Route, SprintCard, SprintRow, Train } from "./types";
+import type {
+	AppVersion,
+	Board,
+	BoardApp,
+	Day,
+	Dest,
+	DestKind,
+	Identity,
+	MineReason,
+	Route,
+	SprintCard,
+	SprintRow,
+	Train,
+} from "./types";
 import type { Tone } from "./vocab";
 
 export const DEST_META: Readonly<Record<DestKind, { tone: Tone; glyph: string; label: string }>> = {
@@ -186,7 +199,15 @@ export function destTally(to: Dest | null, cards: readonly SprintCard[]): string
 		.join(" · ");
 }
 
-export type DestHead = { to: string; tone: Tone; freeze?: Day; note?: string; target?: { text: string; tone: Tone } };
+/** `note` reads before the card count, `tail` after it, as d4 lays them out. */
+export type DestHead = {
+	to: string;
+	tone: Tone;
+	freeze?: Day;
+	note?: string;
+	tail?: string;
+	target?: { text: string; tone: Tone };
+};
 
 const READY_NOTE = (cards: readonly SprintCard[]) =>
 	`${cards.filter((c) => statusTone(c.status, c.statusCategory) === "done").length} ready or deployed in Jira`;
@@ -196,7 +217,7 @@ export function destHead(b: Board, to: Dest | null, cards: readonly SprintCard[]
 		return {
 			to: "↺ carried over",
 			tone: "todo",
-			note: `in an earlier sprint, mobile work done before this one · ${READY_NOTE(cards)}`,
+			tail: `in an earlier sprint, mobile work done before this one · ${READY_NOTE(cards)}`,
 		};
 	const head = { to: destLabel(b, to), tone: destTone(b, to) };
 	switch (to.kind) {
@@ -222,9 +243,9 @@ export function destHead(b: Board, to: Dest | null, cards: readonly SprintCard[]
 		case "before":
 			return { ...head, note: "already shipped, older than this timeline" };
 		case "off":
-			return { ...head, note: "straight into develop or another branch" };
+			return { ...head, tail: "straight into develop or another branch" };
 		case "none":
-			return { ...head, note: "no MR in any repo" };
+			return { ...head, tail: "no MR in any repo" };
 	}
 }
 
@@ -310,4 +331,13 @@ const MINE_TEXT: Readonly<Record<MineReason["why"], string>> = {
 
 export function mineText(mine: readonly MineReason[]): string {
 	return mine.map((m) => (m.ref ? `${MINE_TEXT[m.why]} ${m.ref}` : MINE_TEXT[m.why])).join(" · ");
+}
+
+export function versionMineText(v: AppVersion, me: Identity): string {
+	const mine = (v.mine ?? []).filter((m) => m.why !== "card");
+	const approved =
+		me.kind === "known" && v.jira?.approvers.some((a) => a.accountId === me.jiraAccountId && a.status === "APPROVED");
+	return mine
+		.map((m) => (m.why === "approver" ? (approved ? "approved" : "approver, pending") : mineText([m])))
+		.join(" · ");
 }

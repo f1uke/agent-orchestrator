@@ -10,6 +10,7 @@ import {
 	destTone,
 	mineText,
 	mrPills,
+	versionMineText,
 	shortAppName,
 	sprintCount,
 	sprintShipsIn,
@@ -163,9 +164,9 @@ describe("destination blocks", () => {
 		});
 		expect(destHead(b, wallet, [cards[1]])).toMatchObject({ to: "⑂ demo-wallet", target: { text: "then → #22" } });
 		expect(destHead(b2, wallet, [cards[1]]).target).toEqual({ text: "landed in #21", tone: "done" });
-		expect(destHead(b, { kind: "off" }, []).note).toBe("straight into develop or another branch");
-		expect(destHead(b, { kind: "none" }, []).note).toBe("no MR in any repo");
-		expect(destHead(b, null, cards.slice(4)).note).toBe(
+		expect(destHead(b, { kind: "off" }, []).tail).toBe("straight into develop or another branch");
+		expect(destHead(b, { kind: "none" }, []).tail).toBe("no MR in any repo");
+		expect(destHead(b, null, cards.slice(4)).tail).toBe(
 			"in an earlier sprint, mobile work done before this one · 0 ready or deployed in Jira",
 		);
 	});
@@ -281,5 +282,26 @@ describe("mineText", () => {
 		expect(mineText([{ why: "assignee" }, { why: "mr_author", ref: "!12" }, { why: "subtask", ref: "DEMO-9" }])).toBe(
 			"assignee · your MR !12 · subtask DEMO-9",
 		);
+	});
+
+	it("says whether my approval is done on a version, as d4's label does", () => {
+		const me = { kind: "known" as const, jiraAccountId: "acc-dee", gitlabUsername: "dee", displayName: "Dee" };
+		const v = version("21-2026", "di", "2.4.0", "2026-10-13", "2026-10-20", {
+			jira: {
+				id: "1",
+				name: "di 2.4.0",
+				description: "",
+				released: false,
+				url: "",
+				approvers: [{ accountId: "acc-dee", name: "Dee", status: "APPROVED" }],
+			},
+			mine: [{ why: "release_mr_author", ref: "!7" }, { why: "approver" }],
+		});
+		expect(versionMineText(v, me)).toBe("your release MR !7 · approved");
+		const pending = {
+			...v,
+			jira: { ...v.jira!, approvers: [{ accountId: "acc-dee", name: "Dee", status: "PENDING" }] },
+		};
+		expect(versionMineText(pending, me)).toBe("your release MR !7 · approver, pending");
 	});
 });

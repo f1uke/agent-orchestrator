@@ -235,7 +235,8 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 	const cards = c.lens.sprintCards(row);
 	const active = cards.filter((x) => x.active);
 	const isNew = active.filter((x) => x.activeWhy.includes("new this sprint")).length;
-	const shown = cards.length === row.cards.length ? "" : ` ${cards.length} shown with the current filter.`;
+	const filtered = c.lens.me || c.lens.apps.length < c.board.apps.length;
+	const shown = filtered ? ` ${cards.length} shown with the current filter.` : "";
 	return {
 		title: (
 			<>

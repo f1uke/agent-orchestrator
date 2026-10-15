@@ -1,5 +1,5 @@
 import { Snowflake } from "lucide-react";
-import { shortDay } from "../../lib/releases/day";
+import { dayLabel } from "../../lib/releases/day";
 import { DW, type Timeline } from "../../lib/releases/layout";
 import type { Lens } from "../../lib/releases/lens";
 import { trainLabel } from "../../lib/releases/llb";
@@ -168,7 +168,7 @@ function DestSummary({
 				<span className="passive">
 					{h.freeze && (
 						<>
-							<Snowflake className="snow" strokeWidth={2.8} aria-hidden="true" /> {shortDay(h.freeze)}
+							<Snowflake className="snow" strokeWidth={2.8} aria-hidden="true" /> {dayLabel(h.freeze)}
 						</>
 					)}
 					{h.freeze && h.note ? " · " : ""}
@@ -178,6 +178,7 @@ function DestSummary({
 			<b>
 				{n} card{n === 1 ? "" : "s"}
 			</b>
+			{h.tail && <span className="passive">{h.tail}</span>}
 			{tally && <span>{tally}</span>}
 			{group && (
 				<span

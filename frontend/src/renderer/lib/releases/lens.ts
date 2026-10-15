@@ -7,6 +7,7 @@ import type {
 	BoardApp,
 	CardUnit,
 	Hotfix,
+	Identity,
 	LLBGroup,
 	MineReason,
 	SprintCard,
@@ -91,6 +92,7 @@ export type Lens = {
 	appHits: (app: AppId) => AlertHit[];
 	/** Only me is on and the identity is known; with an unknown identity ?me=1 filters nothing. */
 	me: boolean;
+	identity: Identity;
 	keepVersion: (v: AppVersion) => boolean;
 	keepCard: (u: CardUnit) => boolean;
 	keepHotfix: (h: Hotfix) => boolean;
@@ -115,6 +117,7 @@ export function makeLens(b: Board, url: ReleasesSearch): Lens {
 		hidden: bucket("hidden"),
 		appHits: (app) => attention.filter((h) => h.app === app && h.train === focus?.id),
 		me,
+		identity: b.identity,
 		keepVersion: keep,
 		keepCard: keep,
 		keepHotfix: keep,
