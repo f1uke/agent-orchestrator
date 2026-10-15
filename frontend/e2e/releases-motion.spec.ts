@@ -44,11 +44,26 @@ function boxes(page: Page): Promise<Box[]> {
 
 async function startFrames(page: Page) {
 	await page.evaluate((sel) => {
-		const w = window as unknown as { __frames: Box[][]; __stop: boolean };
+		const w = window as unknown as { __frames: Box[][]; __covered: string[]; __stop: boolean };
 		w.__frames = [];
+		w.__covered = [];
 		w.__stop = false;
+		const before = new Set(document.querySelectorAll(".rel-row > .rel-lab"));
 		const tick = () => {
 			if (w.__stop) return;
+			for (const lab of document.querySelectorAll<HTMLElement>(".rel-row > .rel-lab")) {
+				if (!before.has(lab)) continue;
+				const r = lab.getBoundingClientRect();
+				for (const [x, y] of [
+					[r.left + 12, r.top + 6],
+					[r.left + 12, r.bottom - 6],
+				]) {
+					if (y < 0 || y > innerHeight || r.height < 12) continue;
+					const hit = document.elementFromPoint(x, y);
+					if (hit && !lab.contains(hit) && !hit.closest(".rel-axis, .rel-sheet, .rel-scrim, .rel-top, .rel-strip"))
+						w.__covered.push(`${lab.dataset.testid ?? lab.className} by ${hit.className}`);
+				}
+			}
 			const c = document.querySelector(".rel-canvas")!.getBoundingClientRect();
 			w.__frames.push(
 				[...document.querySelectorAll<HTMLElement>(sel)].map((e, i) => {
@@ -71,12 +86,12 @@ async function startFrames(page: Page) {
 	}, WATCHED);
 }
 
-async function stopFrames(page: Page): Promise<Box[][]> {
+async function stopFrames(page: Page): Promise<{ frames: Box[][]; covered: string[] }> {
 	await page.waitForTimeout(400);
 	return page.evaluate(() => {
-		const w = window as unknown as { __frames: Box[][]; __stop: boolean };
+		const w = window as unknown as { __frames: Box[][]; __covered: string[]; __stop: boolean };
 		w.__stop = true;
-		return w.__frames;
+		return { frames: w.__frames, covered: [...new Set(w.__covered)] };
 	});
 }
 
@@ -120,8 +135,9 @@ for (const reduced of [false, true]) {
 			await startFrames(page);
 			await click();
 			await done();
-			const frames = await stopFrames(page);
+			const { frames, covered } = await stopFrames(page);
 			expect(frameViolations(frames)).toEqual([]);
+			expect(covered, "no row covers a label while it moves").toEqual([]);
 			const shapes = new Set(frames.map((f) => f.map(key).join("\n")).filter((f) => f !== before));
 			if (reduced) expect(shapes.size, "reduced motion jumps straight to the end").toBeLessThanOrEqual(1);
 			else expect(shapes.size, "the change animates").toBeGreaterThan(2);

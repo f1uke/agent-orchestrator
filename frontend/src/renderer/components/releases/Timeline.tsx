@@ -16,7 +16,7 @@ import {
 } from "../../lib/releases/layout";
 import type { Lens } from "../../lib/releases/lens";
 import { llbGroupsFor, llbLanes } from "../../lib/releases/llb";
-import { momentumDistance, moveKey, type ReleaseMotion } from "../../lib/releases/motion";
+import { momentumDistance, moveKeys, type ReleaseMotion } from "../../lib/releases/motion";
 import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib/releases/stickyFit";
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
@@ -110,7 +110,7 @@ export function Timeline({
 
 	return (
 		<div className="rel-sc" ref={sc} data-testid="release-timeline">
-			<MoveRoot move={moveKey(url, layers, folds)}>
+			<MoveRoot keys={moveKeys(url, layers, folds)}>
 				<div className="rel-canvas" ref={canvas} style={{ width: LABEL_W + tl.width }}>
 					<Background tl={tl} />
 					<Axis tl={tl} layers={layers} />
@@ -202,10 +202,11 @@ function AppRow({
 	const cardsBottom = Math.max(0, ...boxes.map((b) => b.bottom));
 	return (
 		<Moving
+			track="rows"
 			appear
 			className="rel-row rel-app"
 			data={{ "data-app": a.id }}
-			style={{ minHeight: rowHeight({ llbH, lanesH: L.lanesH, cardsBottom }) }}
+			height={rowHeight({ llbH, lanesH: L.lanesH, cardsBottom })}
 		>
 			<StickyAppLabel app={a} lens={lens} actions={actions} />
 			<div className="rel-trk" style={{ width: tl.width }}>
@@ -223,7 +224,7 @@ function AppRow({
 						actions={actions}
 					/>
 				)}
-				<Moving className="rel-below" style={{ top: llbH, width: tl.width }}>
+				<Moving track="blocks" className="rel-below" style={{ top: llbH, width: tl.width }}>
 					<VersionLanes board={scoped} tl={tl} lanes={L} top={0} lens={lens} actions={actions} />
 					{boxes.map(({ g, left, top }) => (
 						<CardGroupBox

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { DURATION, momentumDistance, moveKey, releaseMotion, type Presence } from "./motion";
+import { DURATION, momentumDistance, moveKeys, releaseMotion, type Presence } from "./motion";
 import { DEFAULT_LAYERS, parseReleasesSearch } from "./url";
 
 const COMPONENTS = path.resolve(__dirname, "../../components/releases");
@@ -124,24 +124,32 @@ describe("releases motion", () => {
 		expect(momentumDistance(-1)).toBeLessThan(0);
 	});
 
-	it("moves rows when apps, Only me, hotfixes, a layer or a fold change, never on focus, a sheet or a refetch", () => {
+	it("moves rows when apps, Only me, hotfixes or a layer change, and blocks also on a fold, never on focus or a refetch", () => {
 		const url = parseReleasesSearch({});
 		const folds = new Set(["di:21-2026"]);
-		const base = moveKey(url, DEFAULT_LAYERS, folds);
-		expect(moveKey(parseReleasesSearch({}), DEFAULT_LAYERS, new Set(folds))).toBe(base);
-		expect(moveKey({ ...url, focus: "20-2026", sheet: { kind: "key" } }, DEFAULT_LAYERS, folds)).toBe(base);
-		const moved = [
-			moveKey({ ...url, apps: new Set(["di"]) }, DEFAULT_LAYERS, folds),
-			moveKey({ ...url, me: true }, DEFAULT_LAYERS, folds),
-			moveKey({ ...url, hotfixes: !url.hotfixes }, DEFAULT_LAYERS, folds),
-			moveKey(url, { ...DEFAULT_LAYERS, sprint: true }, folds),
-			moveKey(url, DEFAULT_LAYERS, new Set([...folds, "di:llbs"])),
-			moveKey(url, DEFAULT_LAYERS, new Set()),
+		const base = moveKeys(url, DEFAULT_LAYERS, folds);
+		expect(moveKeys(parseReleasesSearch({}), DEFAULT_LAYERS, new Set(folds))).toEqual(base);
+		expect(moveKeys({ ...url, focus: "20-2026", sheet: { kind: "key" } }, DEFAULT_LAYERS, folds)).toEqual(base);
+		const filters = [
+			moveKeys({ ...url, apps: new Set(["di"]) }, DEFAULT_LAYERS, folds),
+			moveKeys({ ...url, me: true }, DEFAULT_LAYERS, folds),
+			moveKeys({ ...url, hotfixes: !url.hotfixes }, DEFAULT_LAYERS, folds),
+			moveKeys(url, { ...DEFAULT_LAYERS, sprint: true }, folds),
 		];
-		for (const k of moved) expect(k).not.toBe(base);
-		expect(new Set(moved).size).toBe(moved.length);
-		expect(moveKey({ ...url, apps: new Set(["da", "di"]) }, DEFAULT_LAYERS, folds)).toBe(
-			moveKey({ ...url, apps: new Set(["di", "da"]) }, DEFAULT_LAYERS, folds),
+		for (const k of filters) {
+			expect(k.rows).not.toBe(base.rows);
+			expect(k.blocks).not.toBe(base.blocks);
+		}
+		expect(new Set(filters.map((k) => k.rows)).size).toBe(filters.length);
+		for (const k of [
+			moveKeys(url, DEFAULT_LAYERS, new Set([...folds, "di:llbs"])),
+			moveKeys(url, DEFAULT_LAYERS, new Set()),
+		]) {
+			expect(k.rows, "a fold grows its own row, it does not FLIP the rows").toBe(base.rows);
+			expect(k.blocks).not.toBe(base.blocks);
+		}
+		expect(moveKeys({ ...url, apps: new Set(["da", "di"]) }, DEFAULT_LAYERS, folds)).toEqual(
+			moveKeys({ ...url, apps: new Set(["di", "da"]) }, DEFAULT_LAYERS, folds),
 		);
 	});
 });

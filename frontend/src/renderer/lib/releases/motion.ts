@@ -30,6 +30,8 @@ export type ReleaseMotion = {
 	row: Transition;
 	axis: Transition;
 	momentum: Transition;
+	/** A change that must not animate: a focus switch or a refetch resizing a row. */
+	snap: Transition;
 };
 
 export const DURATION = { micro: 0.08, short: 0.16, medium: 0.24 } as const;
@@ -78,6 +80,7 @@ const MOVING: ReleaseMotion = {
 	row: moving,
 	axis: moving,
 	momentum: { duration: DURATION.medium, ease: ease.coast },
+	snap: instant,
 };
 
 function still(p: Presence): Presence {
@@ -94,21 +97,27 @@ const STILL: ReleaseMotion = {
 	row: instant,
 	axis: instant,
 	momentum: instant,
+	snap: instant,
 };
 
 export function releaseMotion(reduced: boolean): ReleaseMotion {
 	return reduced ? STILL : MOVING;
 }
 
-/** Rows FLIP only when this changes, so a refetch or a focus switch never moves them. */
-export function moveKey(url: ReleasesSearch, layers: Layers, folds: ReadonlySet<string>): string {
-	return [
+export type MoveKeys = { rows: string; blocks: string };
+
+/**
+ * Rows FLIP when `rows` changes, blocks inside a row when `blocks` does (a fold too). A focus switch or a
+ * refetch changes neither, so nothing moves.
+ */
+export function moveKeys(url: ReleasesSearch, layers: Layers, folds: ReadonlySet<string>): MoveKeys {
+	const rows = [
 		url.apps ? [...url.apps].sort().join(",") : "*",
 		url.me ? "me" : "",
 		url.hotfixes ? "hf" : "",
 		LAYER_ORDER.filter((k) => layers[k]).join(","),
-		[...folds].sort().join(","),
 	].join("|");
+	return { rows, blocks: `${rows}|${[...folds].sort().join(",")}` };
 }
 
 export const PAN_MOMENTUM_MS = 260;

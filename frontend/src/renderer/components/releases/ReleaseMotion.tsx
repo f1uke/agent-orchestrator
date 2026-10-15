@@ -11,7 +11,7 @@ import {
 	type RefObject,
 } from "react";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
-import { releaseMotion, type ReleaseMotion } from "../../lib/releases/motion";
+import { releaseMotion, type MoveKeys, type ReleaseMotion } from "../../lib/releases/motion";
 
 const MotionSet = createContext<ReleaseMotion>(releaseMotion(false));
 
@@ -33,33 +33,60 @@ export function useReleaseMotion(): ReleaseMotion {
 type Data = Record<`data-${string}`, string | undefined>;
 type Box = { className?: string; style?: CSSProperties; data?: Data; children?: ReactNode };
 
-const MoveScope = createContext<{ move: string; loaded: boolean }>({ move: "", loaded: false });
+const MoveScope = createContext<MoveKeys & { loaded: boolean }>({ rows: "", blocks: "", loaded: false });
 
-/** Rows inside glide when `move` changes; ones that mount after the first render fade in. */
-export function MoveRoot({ move, children }: { move: string; children: ReactNode }) {
+/** Rows and blocks inside glide when their key changes; rows that mount after the first render fade in. */
+export function MoveRoot({ keys, children }: { keys: MoveKeys; children: ReactNode }) {
 	const [loaded, setLoaded] = useState(false);
 	useEffect(() => setLoaded(true), []);
-	return <MoveScope.Provider value={{ move, loaded }}>{children}</MoveScope.Provider>;
+	return <MoveScope.Provider value={{ ...keys, loaded }}>{children}</MoveScope.Provider>;
 }
 
-/** Glides to its new place when the move key changes. With `appear` it fades in when it mounts after load. */
-export function Moving({ appear = false, className, style, data, children }: Box & { appear?: boolean }) {
+/**
+ * Glides to its new place when its key changes. A row (`height`) grows or shrinks with a fold instead of
+ * jumping, and resizes at once on anything else. With `appear` it fades in when it mounts after load.
+ */
+export function Moving({
+	track,
+	height,
+	appear = false,
+	className,
+	style,
+	data,
+	children,
+}: Box & { track: keyof MoveKeys; height?: number; appear?: boolean }) {
 	const mo = useReleaseMotion();
 	const scope = useContext(MoveScope);
 	const [fresh] = useState(() => appear && scope.loaded);
+	const el = useRef<HTMLDivElement>(null);
+	const last = useRef({ blocks: scope.blocks, height });
+	useLayoutEffect(() => {
+		const prev = last.current;
+		last.current = { blocks: scope.blocks, height };
+		const node = el.current;
+		if (!node || height === undefined) return;
+		const from = parseFloat(node.style.minHeight) || prev.height;
+		node.style.minHeight = `${height}px`;
+		if (mo.reduced || from === undefined || from === height || prev.blocks === scope.blocks) return;
+		node.style.minHeight = `${from}px`;
+		const a = animate(node, { minHeight: [`${from}px`, `${height}px`] }, mo.fold);
+		return () => a.stop();
+	}, [scope.blocks, height, mo]);
+	const box = height === undefined ? style : { ...style, minHeight: height };
 	if (mo.reduced)
 		return (
-			<div className={className} style={style} {...data}>
+			<div className={className} style={box} {...data}>
 				{children}
 			</div>
 		);
 	return (
 		<m.div
+			ref={el}
 			className={className}
-			style={style}
+			style={box}
 			{...data}
 			layout="position"
-			layoutDependency={scope.move}
+			layoutDependency={scope[track]}
 			initial={fresh ? mo.appear.initial : false}
 			animate={mo.appear.animate}
 			transition={{ ...mo.appear.transition, layout: mo.row }}

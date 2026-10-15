@@ -30,6 +30,7 @@ const BLOCK_HEAD = 28;
 const ROW_H = 24;
 const HEAD_ROW_H = 20;
 const MIN_H = 76;
+const ROW_BORDER = 1;
 const DESTS_TOP = SRC_TOP + SUM_H;
 const INDENT = 44;
 const BLOCK_W = 683;
@@ -290,14 +291,15 @@ export function BoardSprintRow({
 	const h = Math.max(L.bottom + 4, SRC_TOP + SUM_H + 8, MIN_H);
 	return (
 		<Moving
+			track="rows"
 			appear
+			height={h + ROW_BORDER}
 			className="rel-row rel-sprow"
 			data={{ "data-board": row.board.key, "data-testid": `sprint-row-${row.board.key}` }}
 		>
 			<button
 				type="button"
 				className="rel-lab top"
-				style={{ height: h }}
 				onClick={() => actions.openSheet({ kind: "sprint", board: row.board.key })}
 			>
 				<span className="spn">
@@ -319,7 +321,7 @@ export function BoardSprintRow({
 					)}
 				</span>
 			</button>
-			<div className="rel-trk" style={{ width: tl.width, height: h }}>
+			<div className="rel-trk" style={{ width: tl.width }}>
 				<div className="rel-cg spsrc" style={{ left: x0, top: SRC_TOP, width }}>
 					<button type="button" className="csum" aria-expanded={open.has(fk)} onClick={() => toggle(fk)}>
 						<span className="sl" data-sticky>
@@ -343,6 +345,7 @@ export function BoardSprintRow({
 					{L.placed.length > 0 && <Wires board={board} placed={L.placed} x0={x0} tl={tl} />}
 					{L.placed.map((bk) => (
 						<Moving
+							track="blocks"
 							key={bk.key}
 							className="rel-cg dest"
 							data={{ "data-st": bk.tone, "data-dest": bk.key, "data-testid": "sprint-dest-block" }}
