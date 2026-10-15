@@ -4,6 +4,7 @@ import {
 	badgeLabel,
 	focusTrain,
 	lensBadge,
+	llbGroupsFor,
 	makeLens,
 	nowStage,
 	owner,
@@ -14,6 +15,7 @@ import {
 	worstTone,
 } from "./lens";
 import { board, stage, train, version } from "./testkit";
+import type { LLBGroup } from "./types";
 import type { AlertHit, Badge, RuleOutcome } from "./types";
 import { parseReleasesSearch } from "./url";
 
@@ -212,6 +214,58 @@ describe("stage summaries", () => {
 			"unknown: jira.versions never read",
 		);
 		expect(unknownText(undefined, now)).toBe("unknown");
+	});
+});
+
+describe("llbGroupsFor", () => {
+	const branch = (app: string, state: LLBGroup["branches"][number]["state"], mergedOn?: string) => ({
+		app,
+		branch: `feature/${app}-${state}`,
+		openedOn: "2026-08-01",
+		lastIn: "2026-10-01",
+		state,
+		cards: [],
+		landing: mergedOn
+			? {
+					iid: 1,
+					project: 1,
+					title: "",
+					state: "merged",
+					author: "",
+					sourceBranch: "",
+					targetBranch: "sprint",
+					createdOn: mergedOn,
+					mergedOn,
+					url: "",
+				}
+			: undefined,
+	});
+	const group = (id: string, target: LLBGroup["target"], ...branches: ReturnType<typeof branch>[]): LLBGroup => ({
+		id,
+		name: id,
+		target,
+		branches,
+	});
+	const b = board({
+		today: "2026-10-15",
+		llbs: [
+			group("open", { kind: "none" }, branch("di", "open")),
+			group(
+				"just-landed",
+				{ kind: "landed", train: "21-2026" },
+				branch("di", "landed_wrong", "2026-10-12"),
+				branch("da", "landed", "2026-10-12"),
+			),
+			group("old", { kind: "landed", train: "18-2026" }, branch("di", "landed", "2026-09-14")),
+			group("dropped", { kind: "dropped" }, branch("di", "open")),
+			group("other-app", { kind: "none" }, branch("pa", "open")),
+		],
+	});
+
+	it("keeps groups still open or landed within the last 21 days, for the app's own branches", () => {
+		expect(llbGroupsFor(b, "di").map((g) => g.id)).toEqual(["open", "just-landed"]);
+		expect(llbGroupsFor(b, "da").map((g) => g.id)).toEqual(["just-landed"]);
+		expect(llbGroupsFor(b, "pi")).toEqual([]);
 	});
 });
 

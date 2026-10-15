@@ -147,6 +147,13 @@ jobs:
   # ⌘Z after Return leaves no stray whitespace behind, or that a formatter's
   # refusal reaches the caret and leaves the buffer byte-for-byte alone.
   #
+  # e2e/releases.spec.ts is the thirteenth: the Releases page is a timeline of
+  # sticky labels inside clipped bars, drag-to-pan with momentum and Motion
+  # sheets. jsdom has no layout, no sticky and no clipping, so whether a label is
+  # half visible after a pan, whether every app's stage and blocker fit at
+  # 1280x800, and whether a failed source reads "unknown" with its age can only
+  # be measured in a real browser.
+  #
   # The rest of frontend/e2e/ rides along: the specs that targeted the
   # `api-gateway` demo fixtures 2cb20c23e replaced with `ao-demo` now read
   # `ao-demo`, so the job runs the whole folder and a new spec is guarded the day

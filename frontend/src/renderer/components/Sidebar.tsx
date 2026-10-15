@@ -23,6 +23,7 @@ import {
 	X,
 	XCircle,
 	GraduationCap,
+	TrainFront,
 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import type { ImportFolderScan } from "../../preload";
@@ -89,6 +90,9 @@ import { cn } from "../lib/utils";
 import { useUiStore } from "../stores/ui-store";
 import { useWikiStatus } from "../hooks/useWiki";
 import { isWaiting, useLearningStatus, useProposals } from "../hooks/useMemory";
+import { useReleaseBoard } from "../hooks/useReleaseBoard";
+import { badgeLabel } from "../lib/releases/lens";
+import { SEVERITY_META, TONE_COLOR } from "../lib/releases/vocab";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
 import { ClaudeProfileChip } from "./ClaudeProfileChip";
@@ -187,12 +191,15 @@ function useSelection() {
 		isHome: pathname === "/",
 		isWiki: pathname === "/wiki",
 		isMemory: pathname === "/memory",
+		isReleases: pathname === "/releases",
 		activeProjectId: params.projectId,
 		activeSessionId: params.sessionId,
 		goHome: () => void navigate({ to: "/" }),
 		goPrs: () => void navigate({ to: "/prs" }),
 		goWiki: () => void navigate({ to: "/wiki" }),
 		goMemory: () => void navigate({ to: "/memory" }),
+		goReleases: () => void navigate({ to: "/releases", search: {} }),
+		goAlertRules: () => void navigate({ to: "/releases", search: { sheet: "rules" } }),
 		goGlobalSettings: () => void navigate({ to: "/settings" }),
 		goSettings: (projectId: string) => void navigate({ to: "/projects/$projectId/settings", params: { projectId } }),
 		// Search opens the settings two-pane (where the in-settings search field
@@ -1362,13 +1369,82 @@ function TopDestinations({ selection }: { selection: ReturnType<typeof useSelect
 	const learning = useLearningStatus().data?.projects?.some((p) => p.enabled) ?? false;
 	const proposals = useProposals().data?.proposals ?? [];
 	const memory = learning || proposals.length > 0;
-	if (!wiki && !memory) return null;
 	return (
 		<>
+			<ReleasesNavItem selection={selection} />
 			{wiki && <WikiNavItem selection={selection} />}
 			{memory && <MemoryNavItem selection={selection} waiting={proposals.filter((p) => isWaiting(p)).length} />}
 			<div className="mx-2 my-3 h-px bg-border group-data-[collapsible=icon]:mx-0 group-data-[collapsible=icon]:w-5" />
 		</>
+	);
+}
+
+/**
+ * The Releases row and its "Alert rules" child. The badge reads the page's
+ * cache entry without a poll of its own: the Board is large, and the page
+ * polls while it is open.
+ */
+function ReleasesNavItem({ selection }: { selection: ReturnType<typeof useSelection> }) {
+	const { state } = useSidebar();
+	const badge = useReleaseBoard({ poll: false }).data?.board?.alerts.badge;
+	const showBadge = badge !== undefined && (badge.count > 0 || badge.unknown > 0);
+	const tone = badge?.worst ? TONE_COLOR[SEVERITY_META[badge.worst].tone] : TONE_COLOR.passive;
+	return (
+		<SidebarMenu className="gap-0 pb-0">
+			<SidebarMenuItem>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<SidebarMenuButton
+							aria-label={showBadge ? `Releases, ${badgeLabel(badge)} need attention` : "Releases"}
+							isActive={selection.isReleases}
+							onClick={selection.goReleases}
+							className={cn(
+								"h-8 gap-2.5 rounded-md px-2 text-[12.5px] font-semibold",
+								"group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:rounded-lg group-data-[collapsible=icon]:p-0!",
+								selection.isReleases
+									? "bg-accent-weak text-accent shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_28%,transparent)]"
+									: "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
+							)}
+						>
+							<span className="relative grid shrink-0 place-items-center">
+								<TrainFront aria-hidden="true" className="size-[15px]!" />
+								{showBadge && (
+									<span
+										className="absolute -right-1.5 -top-1.5 hidden size-2 rounded-full ring-2 ring-sidebar group-data-[collapsible=icon]:block"
+										style={{ background: tone }}
+									/>
+								)}
+							</span>
+							<span className="min-w-0 flex-1 truncate tracking-[-0.006em] group-data-[collapsible=icon]:hidden">
+								Releases
+							</span>
+							{showBadge && (
+								<span
+									className="shrink-0 rounded-full px-1.5 font-mono text-[10.5px] font-semibold leading-[17px] group-data-[collapsible=icon]:hidden"
+									style={{ color: tone, background: `color-mix(in srgb, ${tone} 14%, transparent)` }}
+								>
+									{badgeLabel(badge)}
+								</span>
+							)}
+						</SidebarMenuButton>
+					</TooltipTrigger>
+					<TooltipContent side="right" hidden={state !== "collapsed"}>
+						Releases
+					</TooltipContent>
+				</Tooltip>
+				<SidebarMenuSub className="mt-0.5">
+					<SidebarMenuSubItem>
+						<button
+							type="button"
+							onClick={selection.goAlertRules}
+							className="flex h-7 w-full items-center rounded-md px-2 text-left text-[12px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+						>
+							Alert rules
+						</button>
+					</SidebarMenuSubItem>
+				</SidebarMenuSub>
+			</SidebarMenuItem>
+		</SidebarMenu>
 	);
 }
 

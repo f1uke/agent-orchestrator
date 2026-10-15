@@ -14,6 +14,7 @@ import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellWikiRouteImport } from './routes/_shell.wiki'
 import { Route as ShellSkillsRouteImport } from './routes/_shell.skills'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
+import { Route as ShellReleasesRouteImport } from './routes/_shell.releases'
 import { Route as ShellPrsRouteImport } from './routes/_shell.prs'
 import { Route as ShellMemoryRouteImport } from './routes/_shell.memory'
 import { Route as ShellSessionsSessionIdRouteImport } from './routes/_shell.sessions.$sessionId'
@@ -44,6 +45,11 @@ const ShellSkillsRoute = ShellSkillsRouteImport.update({
 const ShellSettingsRoute = ShellSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => ShellRoute,
+} as any)
+const ShellReleasesRoute = ShellReleasesRouteImport.update({
+  id: '/releases',
+  path: '/releases',
   getParentRoute: () => ShellRoute,
 } as any)
 const ShellPrsRoute = ShellPrsRouteImport.update({
@@ -89,6 +95,7 @@ export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
   '/memory': typeof ShellMemoryRoute
   '/prs': typeof ShellPrsRoute
+  '/releases': typeof ShellReleasesRoute
   '/settings': typeof ShellSettingsRoute
   '/skills': typeof ShellSkillsRoute
   '/wiki': typeof ShellWikiRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/memory': typeof ShellMemoryRoute
   '/prs': typeof ShellPrsRoute
+  '/releases': typeof ShellReleasesRoute
   '/settings': typeof ShellSettingsRoute
   '/skills': typeof ShellSkillsRoute
   '/wiki': typeof ShellWikiRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/_shell': typeof ShellRouteWithChildren
   '/_shell/memory': typeof ShellMemoryRoute
   '/_shell/prs': typeof ShellPrsRoute
+  '/_shell/releases': typeof ShellReleasesRoute
   '/_shell/settings': typeof ShellSettingsRoute
   '/_shell/skills': typeof ShellSkillsRoute
   '/_shell/wiki': typeof ShellWikiRoute
@@ -132,6 +141,7 @@ export interface FileRouteTypes {
     | '/'
     | '/memory'
     | '/prs'
+    | '/releases'
     | '/settings'
     | '/skills'
     | '/wiki'
@@ -144,6 +154,7 @@ export interface FileRouteTypes {
   to:
     | '/memory'
     | '/prs'
+    | '/releases'
     | '/settings'
     | '/skills'
     | '/wiki'
@@ -158,6 +169,7 @@ export interface FileRouteTypes {
     | '/_shell'
     | '/_shell/memory'
     | '/_shell/prs'
+    | '/_shell/releases'
     | '/_shell/settings'
     | '/_shell/skills'
     | '/_shell/wiki'
@@ -208,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof ShellSettingsRouteImport
+      parentRoute: typeof ShellRoute
+    }
+    '/_shell/releases': {
+      id: '/_shell/releases'
+      path: '/releases'
+      fullPath: '/releases'
+      preLoaderRoute: typeof ShellReleasesRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/prs': {
@@ -265,6 +284,7 @@ declare module '@tanstack/react-router' {
 interface ShellRouteChildren {
   ShellMemoryRoute: typeof ShellMemoryRoute
   ShellPrsRoute: typeof ShellPrsRoute
+  ShellReleasesRoute: typeof ShellReleasesRoute
   ShellSettingsRoute: typeof ShellSettingsRoute
   ShellSkillsRoute: typeof ShellSkillsRoute
   ShellWikiRoute: typeof ShellWikiRoute
@@ -279,6 +299,7 @@ interface ShellRouteChildren {
 const ShellRouteChildren: ShellRouteChildren = {
   ShellMemoryRoute: ShellMemoryRoute,
   ShellPrsRoute: ShellPrsRoute,
+  ShellReleasesRoute: ShellReleasesRoute,
   ShellSettingsRoute: ShellSettingsRoute,
   ShellSkillsRoute: ShellSkillsRoute,
   ShellWikiRoute: ShellWikiRoute,
