@@ -313,15 +313,21 @@ function baseBoard(today: string): Board {
 				{ label: "Open milestone", url: `${HOST}/milestones/1` },
 			],
 		}),
-		hit("A6~vd/21-2026/di/freeze", "A6", "data", `Page says freeze ${dayLabel(addDays(f21, 1))}, milestone starts ${dayLabel(f21)}`, {
-			app: "di",
-			train: "21-2026",
-			evidence: { page: addDays(f21, 1), milestone: f21 },
-			links: [
-				{ label: "Open page", url: "https://wiki.example.com/pages/21-demo" },
-				{ label: "Open milestone", url: `${HOST}/milestones/1` },
-			],
-		}),
+		hit(
+			"A6~vd/21-2026/di/freeze",
+			"A6",
+			"data",
+			`Page says freeze ${dayLabel(addDays(f21, 1))}, milestone starts ${dayLabel(f21)}`,
+			{
+				app: "di",
+				train: "21-2026",
+				evidence: { page: addDays(f21, 1), milestone: f21 },
+				links: [
+					{ label: "Open page", url: "https://wiki.example.com/pages/21-demo" },
+					{ label: "Open milestone", url: `${HOST}/milestones/1` },
+				],
+			},
+		),
 		hit("D3~v/21-2026/da", "D3", "risk", "0 of 9 approvers approved, publish in 6 days", {
 			app: "da",
 			train: "21-2026",

@@ -1,3 +1,4 @@
+import { appMark } from "./appMark";
 import { statusTone } from "./cards";
 import { shortDay } from "./day";
 import { shortBranch, trainLabel, urgency } from "./llb";
@@ -295,20 +296,12 @@ export type PillApp = {
 };
 export type MrPill = { family: string; label: string; apps: PillApp[] };
 
-function shortFamily(a: BoardApp): string {
-	return (a.name.replace(/\s*(iOS|Android)\s*$/i, "").trim() || a.family).slice(0, 3);
-}
-
-export function shortAppName(a: BoardApp): string {
-	return `${shortFamily(a)} ${a.platform === "ios" ? "iOS" : "And"}`;
-}
-
 /** Colour and link come from the app's route, so a pill always agrees with the row's lead glyph. */
 export function mrPills(c: SprintCard, apps: readonly BoardApp[]): MrPill[] {
 	const families = [...new Set(apps.map((a) => a.family))];
 	return families.map((family) => ({
 		family,
-		label: shortFamily(apps.find((a) => a.family === family) ?? apps[0]),
+		label: appMark(apps.find((a) => a.family === family) ?? apps[0]).family,
 		apps: apps
 			.filter((a) => a.family === family)
 			.flatMap((a) => {

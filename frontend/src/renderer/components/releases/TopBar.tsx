@@ -2,11 +2,12 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRefreshSources } from "../../hooks/useReleaseBoard";
 import { badgeLabel, sourceAges, type Lens } from "../../lib/releases/lens";
-import { shortAppName } from "../../lib/releases/sprint";
+import { appMark } from "../../lib/releases/appMark";
 import type { Board } from "../../lib/releases/types";
 import type { ReleasesSearch } from "../../lib/releases/url";
 import { SEVERITY_META, SEVERITY_ORDER } from "../../lib/releases/vocab";
 import { SimpleTooltip } from "../ui/tooltip";
+import { AppMark } from "./AppMark";
 import { Avatar } from "./Avatar";
 import type { PageActions } from "./ReleasesPage";
 
@@ -101,7 +102,7 @@ export function TopBar({
 							aria-pressed={!url.apps || url.apps.has(a.id)}
 							onClick={() => toggleApp(a.id)}
 						>
-							{shortAppName(a)}
+							<AppMark mark={appMark(a)} />
 						</button>
 					</SimpleTooltip>
 				))}

@@ -12,13 +12,11 @@ import {
 	type PlanDraft,
 } from "../../lib/releases/plan";
 import type { Board, LLBGroup } from "../../lib/releases/types";
+import { appMarkOf } from "../../lib/releases/appMark";
+import { AppMark } from "./AppMark";
 import { CardLine } from "./CardGroups";
 import { jiraUrl } from "../../lib/releases/cards";
 import type { PageActions } from "./ReleasesPage";
-
-function appName(b: Board, id: string): string {
-	return b.apps.find((a) => a.id === id)?.name ?? id;
-}
 
 function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 	const t = g.target;
@@ -40,7 +38,7 @@ function StatusLine({ g, board }: { g: LLBGroup; board: Board }) {
 	} else {
 		tone = urgency(g, board);
 		const freeze = board.trains.find((x) => x.id === t.train)?.freeze;
-		const left = g.branches.filter((b) => !b.landing?.mergedOn).map((b) => appName(board, b.app));
+		const left = g.branches.filter((b) => !b.landing?.mergedOn).map((b) => appMarkOf(board.apps, b.app)?.name ?? b.app);
 		const days = freeze ? dayDiff(board.today, freeze) : null;
 		const when =
 			days === null
@@ -164,7 +162,9 @@ function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 			<div className="fl2">Branches</div>
 			{draft.branches.map((b, i) => (
 				<div key={`${b.app}:${b.branch}:${i}`} className="brow">
-					<span className="plat-pill">{appName(board, b.app)}</span>
+					<span className="plat-pill">
+						<AppMark mark={appMarkOf(board.apps, b.app)} size="sm" />
+					</span>
 					<span className="mono">{b.branch}</span>
 					<button
 						type="button"
@@ -189,7 +189,7 @@ function PlanForm({ g, board }: { g: LLBGroup; board: Board }) {
 					<option value="">Add a branch the matching missed…</option>
 					{others.map((b) => (
 						<option key={`${b.app}:${b.branch}`} value={`${b.app}:${b.branch}`}>
-							{appName(board, b.app)} · {b.branch}
+							{appMarkOf(board.apps, b.app)?.name ?? b.app} · {b.branch}
 						</option>
 					))}
 				</select>
@@ -312,7 +312,9 @@ export function llbSheet(id: string, board: Board, actions: PageActions): { titl
 					return (
 						<div key={`${b.app}:${b.branch}`} className="sec" data-testid="llb-branch">
 							<div className="sec-h">
-								<span className="plat-pill">{appName(board, b.app)}</span>
+								<span className="plat-pill">
+									<AppMark mark={appMarkOf(board.apps, b.app)} size="sm" />
+								</span>
 								<span className="mono">{b.branch}</span>
 								<span className="badge" data-st={st.tone}>
 									{st.label}
@@ -416,7 +418,7 @@ export function llbsSheet(
 						const st = branchState(g, b);
 						return (
 							<span key={`${b.app}:${b.branch}`} className="plat-pill c" data-st={st.tone}>
-								{appName(board, b.app)} · {st.label}
+								<AppMark mark={appMarkOf(board.apps, b.app)} size="sm" /> · {st.label}
 							</span>
 						);
 					})}

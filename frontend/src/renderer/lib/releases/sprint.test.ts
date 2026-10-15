@@ -11,7 +11,6 @@ import {
 	mineText,
 	mrPills,
 	versionMineText,
-	shortAppName,
 	sprintCount,
 	sprintShipsIn,
 } from "./sprint";
@@ -300,10 +299,9 @@ describe("MR family pills", () => {
 		]);
 	});
 
-	it("labels a pill with the short family name the top bar's app chips use", () => {
+	it("labels a pill with the short family name the app mark uses", () => {
 		const apps = [{ id: "xi", name: "F4A iOS", family: "f4a", platform: "ios" as const }];
 		expect(mrPills(card("DEMO-4"), apps)[0].label).toBe("F4A");
-		expect(shortAppName(apps[0])).toBe("F4A iOS");
 	});
 
 	it("colours an app by its merged MR before an open one", () => {

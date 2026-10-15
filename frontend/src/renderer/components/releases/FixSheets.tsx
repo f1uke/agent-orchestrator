@@ -13,7 +13,7 @@ import {
 } from "../../lib/releases/fix";
 import { agoText } from "../../lib/releases/lens";
 import type { Board, Fix, FixPlan, FixRef, FixStep } from "../../lib/releases/types";
-import { appName, Sec } from "./Alerts";
+import { HitWho, Sec } from "./Alerts";
 import type { PageActions } from "./ReleasesPage";
 
 type Ctx = { board: Board; actions: PageActions; now: number };
@@ -123,12 +123,9 @@ function FixBody({ hitId, choice, c }: { hitId: string; choice?: string; c: Ctx 
 			</div>
 			{hit && (
 				<div className="sec muted text-[12.5px]">
-					{[
-						hit.train ? c.board.trains.find((t) => t.id === hit.train)?.label : null,
-						hit.app ? appName(c.board, hit.app) : null,
-					]
-						.filter(Boolean)
-						.join(" ")}{" "}
+					<span className="who">
+						<HitWho board={c.board} train={hit.train} app={hit.app} />
+					</span>{" "}
 					· {hit.text}
 				</div>
 			)}

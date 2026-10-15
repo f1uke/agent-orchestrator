@@ -43,7 +43,7 @@ test.describe("releases page", () => {
 		await open(page);
 		await page.getByTestId("bar-da-22-2026").click({ position: { x: 4, y: 4 } });
 		const sheet = page.getByRole("dialog", { name: "Release details" });
-		await expect(sheet).toContainText("Demo Android");
+		await expect(sheet.getByLabel("Demo Android").first()).toBeVisible();
 		await expect(sheet).toContainText("2.5.0");
 		await page.keyboard.press("Escape");
 		await expect(sheet).toHaveCount(0);
@@ -131,7 +131,7 @@ test.describe("releases page", () => {
 			/gitlab unknown · \d+[mhd]/,
 		);
 		await expect(page.getByTestId("release-sources").locator('[data-source="jira"]')).not.toContainText("unknown");
-		await expect(page.getByTestId("attention-count")).toHaveText("7 · 1 unknown");
+		await expect(page.getByTestId("attention-count")).toHaveText("8 · 1 unknown");
 		await expect(page.locator('.rel-app[data-app="di"] .rel-mk[data-stage="scan"]')).toHaveAttribute(
 			"data-st",
 			"unknown",
@@ -171,7 +171,8 @@ test.describe("releases page", () => {
 		const sheet = page.getByRole("dialog", { name: "Release details" });
 		await expect(sheet.getByTestId("card-summary")).toHaveText("Show the fee before the order");
 		await expect(sheet.getByTestId("card-unit")).toHaveCount(2);
-		await expect(sheet.getByTestId("card-unit").first()).toContainText("Demo iOS · #21");
+		await expect(sheet.getByTestId("card-unit").first()).toContainText("Dem · #21");
+		await expect(sheet.getByTestId("card-unit").first().getByLabel("Demo iOS")).toBeVisible();
 		await expect(sheet.getByRole("link", { name: "Open card" })).toHaveAttribute("target", "_blank");
 	});
 
@@ -330,7 +331,8 @@ test.describe("releases page", () => {
 		await expect(sheet.getByTestId("card-summary")).toHaveText("Filter the fund list by risk level");
 		const routes = sheet.getByTestId("card-route");
 		await expect(routes).toHaveCount(2);
-		await expect(routes.nth(0)).toContainText("Demo iOS · sprint branch · ships in #21");
+		await expect(routes.nth(0)).toContainText("Dem · sprint branch · ships in #21");
+		await expect(routes.nth(0).getByLabel("Demo iOS")).toBeVisible();
 		await expect(routes.nth(1)).toContainText("MR open → sprint branch");
 		await expect(routes.nth(1)).toContainText("!402");
 		await expect(sheet.getByText("Subtasks (2)")).toBeVisible();
@@ -353,11 +355,11 @@ test.describe("releases page", () => {
 
 	test("Only me filters every kind of thing and changes the badge", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
-		await expect(page.getByTestId("attention-count")).toHaveText("7");
+		await expect(page.getByTestId("attention-count")).toHaveText("8");
 		await page.getByTestId("only-me").click();
 		await expect(page).toHaveURL(/me=%221%22/);
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
-		await expect(page.getByTestId("attention-count")).toHaveText("2");
+		await expect(page.getByTestId("attention-count")).toHaveText("3");
 		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveText(
 			"your release MR !77 · 1 of my card",
 		);
@@ -370,7 +372,7 @@ test.describe("releases page", () => {
 		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-scope")).toHaveText("1 new · 1 carried, done");
 		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-scope")).toHaveText("1 new");
 		await page.getByRole("button", { name: /Needs attention/ }).click();
-		await expect(page.locator(".al[data-hit]")).toHaveCount(2);
+		await expect(page.locator(".al[data-hit]")).toHaveCount(3);
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-only-me.png` });
 	});
 
@@ -435,7 +437,7 @@ test.describe("releases page", () => {
 		await expect(hit).toContainText(
 			"!415 feat/DEMO-203 → feat/DEMO-201-base: not a sprint branch, a long-lived branch or develop",
 		);
-		await expect(hit).toContainText("Demo Android");
+		await expect(hit.getByLabel("Demo Android")).toBeVisible();
 		await expect(hit.getByRole("link", { name: "Open MR" })).toHaveAttribute(
 			"href",
 			"https://gitlab.example.com/demo/merge_requests/415",
@@ -444,6 +446,50 @@ test.describe("releases page", () => {
 		await expect(page.locator('.rule[data-rule="L9"]')).toContainText(
 			"MR into a branch that is not a sprint branch, a long-lived branch or develop",
 		);
+	});
+
+	test("every place that names an app uses the family short name and a platform glyph", async ({ page }) => {
+		const noLongName = async (scope: ReturnType<Page["locator"]>) => {
+			const text = await scope.evaluate((el) => {
+				const clone = el.cloneNode(true) as HTMLElement;
+				for (const m of clone.querySelectorAll("[aria-label], [title]")) {
+					m.removeAttribute("aria-label");
+					m.removeAttribute("title");
+				}
+				return clone.innerText;
+			});
+			expect(text).not.toMatch(/\b(Demo|Pilot) (iOS|Android)\b/);
+			expect(text).not.toMatch(/\b(di|da|pi|pa)\b/);
+		};
+		const marks = (scope: ReturnType<Page["locator"]>) => scope.getByTestId("app-mark");
+
+		await open(page, "?sheet=train:21-2026");
+		const apps = page.getByRole("group", { name: "Apps" });
+		await expect(marks(apps)).toHaveCount(4);
+		await expect(apps.locator('svg[data-platform="android"]')).toHaveCount(2);
+		await noLongName(apps);
+		for (const id of ["di", "da", "pi", "pa"]) {
+			await expect(marks(page.getByTestId(`label-${id}`))).toHaveCount(1);
+			await noLongName(page.getByTestId(`label-${id}`).locator(".nm"));
+		}
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		await expect(marks(sheet.locator(".tapp"))).toHaveCount(4);
+		const chips = sheet.getByTestId("approver-chip");
+		await expect(chips.first()).toBeVisible();
+		for (const chip of await chips.all()) {
+			await expect(marks(chip)).toHaveCount(1);
+			await noLongName(chip);
+		}
+		await noLongName(sheet.locator(".al .who").first());
+
+		await open(page, "?sheet=attention");
+		const who = page.locator(".rel-sheet .al .who");
+		for (const w of await who.all()) await noLongName(w);
+		await expect(marks(page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"]'))).toHaveCount(1);
+
+		await open(page, "?sheet=version:21-2026:da");
+		await expect(marks(page.getByRole("dialog", { name: "Release details" }).locator(".sh-h"))).toHaveCount(1);
+		await noLongName(page.getByRole("dialog", { name: "Release details" }).locator(".sh-h"));
 	});
 
 	test("an A6 hit opens both sources it compares, in Attention and the version sheet", async ({ page }) => {
@@ -482,7 +528,7 @@ test.describe("releases page", () => {
 		await expect(page.getByRole("tooltip")).toContainText(
 			"Only me needs your Jira and GitLab accounts: gitlab.user has not been read yet",
 		);
-		await expect(page.getByTestId("attention-count")).toHaveText("7");
+		await expect(page.getByTestId("attention-count")).toHaveText("8");
 		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveCount(0);
 	});
 

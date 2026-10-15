@@ -16,16 +16,14 @@ import {
 import type { Board, CardUnit, MineReason, SprintCard, SprintRow, Train } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
 import { cardHits } from "../../lib/releases/fix";
+import { appMarkOf } from "../../lib/releases/appMark";
 import { AlertList } from "./Alerts";
+import { AppMark } from "./AppMark";
 import { CardLine, Face, JiraKey } from "./CardGroups";
 import type { PageActions } from "./ReleasesPage";
 
 type Ctx = { board: Board; lens: Lens; actions: PageActions };
 type Sheet = { title: ReactNode; body: ReactNode };
-
-function appName(b: Board, id: string): string {
-	return b.apps.find((a) => a.id === id)?.name ?? id;
-}
 
 function Sec({ title, children }: { title: string; children: ReactNode }) {
 	return (
@@ -152,7 +150,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 											className="lnk"
 											onClick={() => c.actions.openSheet({ kind: "version", train: train.id, app: unit.app }, "push")}
 										>
-											{appName(b, unit.app)} · {train.label}
+											<AppMark mark={appMarkOf(b.apps, unit.app)} size="sm" /> · {train.label}
 										</button>{" "}
 										<span className="c" data-st={m.tone}>
 											{m.label}
@@ -176,7 +174,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 										{m.glyph}
 									</span>
 									<span>
-										<b>{appName(b, r.app)}</b> ·{" "}
+										<AppMark mark={appMarkOf(b.apps, r.app)} size="sm" /> ·{" "}
 										<span className="c" data-st={m.tone}>
 											{m.label}
 										</span>{" "}
