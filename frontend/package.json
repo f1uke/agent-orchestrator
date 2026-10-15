@@ -76,6 +76,7 @@
 		"lucide-react": "^1.23.0",
 		"marked": "^18.0.11",
 		"monaco-editor": "0.56.0",
+		"motion": "13.4.6",
 		"openapi-fetch": "^0.17.0",
 		"posthog-js": "^1.399.0",
 		"radix-ui": "^1.6.2",
