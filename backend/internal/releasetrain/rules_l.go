@@ -95,7 +95,7 @@ var ruleL9 = rule{
 	ID: "L9", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
 	Reads: []KindName{KindMRs.Name},
 	Title: "MR into a branch that is not a sprint branch, a long-lived branch or develop",
-	Hint:  "No train takes code from that branch, so the change is stranded or the target is a typo.",
+	Hint:  "No train takes code from that branch, so the change stays there until someone moves it on.",
 	Check: func(b *Board) []Hit {
 		llbs := groupsByBranch(b.LLBs)
 		var out []Hit
