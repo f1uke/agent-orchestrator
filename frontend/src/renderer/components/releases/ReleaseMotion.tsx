@@ -55,17 +55,30 @@ export function Moving({
 	const [fresh] = useState(() => appear && scope.loaded);
 	const el = useRef<HTMLDivElement>(null);
 	const last = useRef({ blocks: scope.blocks, height });
+	const shown = useRef<number | null>(null);
 	useLayoutEffect(() => {
 		const prev = last.current;
 		last.current = { blocks: scope.blocks, height };
+		const from = shown.current ?? prev.height;
+		shown.current = null;
 		const node = el.current;
 		if (!node || height === undefined) return;
-		const from = parseFloat(node.style.minHeight) || prev.height;
 		node.style.minHeight = `${height}px`;
 		if (mo.reduced || from === undefined || from === height || prev.blocks === scope.blocks) return;
+		// Motion 13.5.1 never applies animate={{ minHeight }} on an element that also has `layout`,
+		// and animate() starts a frame late, so the start value is set before paint.
 		node.style.minHeight = `${from}px`;
-		const a = animate(node, { minHeight: [`${from}px`, `${height}px`] }, mo.fold);
-		return () => a.stop();
+		let running = true;
+		const a = animate(
+			node,
+			{ minHeight: [`${from}px`, `${height}px`] },
+			{ ...mo.fold, onComplete: () => (running = false) },
+		);
+		return () => {
+			if (!running) return;
+			shown.current = parseFloat(getComputedStyle(node).minHeight);
+			a.stop();
+		};
 	}, [scope.blocks, height, mo]);
 	const box = height === undefined ? style : { ...style, minHeight: height };
 	if (mo.reduced)

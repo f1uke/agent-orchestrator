@@ -127,7 +127,7 @@ for (const reduced of [false, true]) {
 			await page.emulateMedia({ reducedMotion: reduced ? "reduce" : "no-preference" });
 		});
 
-		async function act(page: Page, click: () => Promise<void>, done: () => Promise<void>) {
+		async function act(page: Page, click: () => Promise<void>, done: () => Promise<void>, grows?: string) {
 			await settle(page);
 			const before = (await boxes(page)).map(key).join("\n");
 			await startFrames(page);
@@ -139,6 +139,11 @@ for (const reduced of [false, true]) {
 			const shapes = new Set(frames.map((f) => f.map(key).join("\n")).filter((f) => f !== before));
 			if (reduced) expect(shapes.size, "reduced motion jumps straight to the end").toBeLessThanOrEqual(1);
 			else expect(shapes.size, "the change animates").toBeGreaterThan(2);
+			if (grows) {
+				const heights = new Set(frames.map((f) => f.find((b) => b.id === grows)?.h));
+				if (reduced) expect(heights.size, `${grows} resizes in one step`).toBeLessThanOrEqual(2);
+				else expect(heights.size, `${grows} grows or shrinks over several frames`).toBeGreaterThan(3);
+			}
 		}
 
 		test("a card group unfolds and folds back", async ({ page }) => {
@@ -149,6 +154,7 @@ for (const reduced of [false, true]) {
 				page,
 				() => group.locator(".csum").click(),
 				() => expect(rows).toHaveCount(7),
+				"DIV.di",
 			);
 			if (reduced) await expect(group.locator(".crows")).toHaveCSS("opacity", "1");
 			const fit = await group
@@ -166,6 +172,7 @@ for (const reduced of [false, true]) {
 				page,
 				() => group.locator(".csum").click(),
 				() => expect(rows).toHaveCount(0),
+				"DIV.di",
 			);
 			await expectSameAsColdLoad(page);
 		});
@@ -180,6 +187,7 @@ for (const reduced of [false, true]) {
 				page,
 				() => sum.click(),
 				() => expect(lanes).toHaveCount(3),
+				"DIV.di",
 			);
 			if (reduced) expect((await bar.boundingBox())!.y).toBe(y0 + 3 * 24 + 2);
 			await expectSameAsColdLoad(page);
@@ -188,6 +196,7 @@ for (const reduced of [false, true]) {
 				page,
 				() => sum.click(),
 				() => expect(lanes).toHaveCount(0),
+				"DIV.di",
 			);
 			await expectSameAsColdLoad(page);
 			expect((await bar.boundingBox())!.y).toBe(y0);
@@ -201,6 +210,7 @@ for (const reduced of [false, true]) {
 				page,
 				() => demo.locator(".spsrc .csum").click(),
 				() => expect(blocks).toHaveCount(6),
+				"DIV.sprint-row-DEMO",
 			);
 			const t21 = demo.locator('[data-dest="t:21-2026"]');
 			const below = demo.locator('[data-dest="l:demo-wallet"]');
@@ -209,6 +219,7 @@ for (const reduced of [false, true]) {
 				page,
 				() => t21.locator(".dsum").click(),
 				() => expect(t21.locator(".crows .crow[data-key]")).toHaveCount(3),
+				"DIV.sprint-row-DEMO",
 			);
 			await expectSameAsColdLoad(page);
 			expect((await below.boundingBox())!.y).toBe(y0 + 20 + 3 * 24 + 4);
@@ -217,6 +228,7 @@ for (const reduced of [false, true]) {
 				page,
 				() => t21.locator(".dsum").click(),
 				() => expect(t21.locator(".crow[data-key]")).toHaveCount(0),
+				"DIV.sprint-row-DEMO",
 			);
 			await expectSameAsColdLoad(page);
 			expect((await below.boundingBox())!.y).toBe(y0);
