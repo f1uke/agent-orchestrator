@@ -5034,8 +5034,10 @@ export interface components {
         ReleaseTrainIssueFact: {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             fixVersions: string[];
+            issueType?: string;
             key: string;
             parent?: string;
+            parentType?: string;
             releaseTicket: boolean;
             status: string;
             statusCategory: string;
@@ -5065,6 +5067,7 @@ export interface components {
         };
         ReleaseTrainLLBCard: {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
+            epic?: string;
             key: string;
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
             mr: components["schemas"]["ReleaseTrainMRFact"];
@@ -5075,6 +5078,20 @@ export interface components {
         ReleaseTrainLLBDropped: {
             /** @constant */
             kind: "dropped";
+        };
+        ReleaseTrainLLBFromEpic: {
+            /** @description Later unpublished trains whose pages list the same epic. */
+            also?: string[];
+            /** @description Distinct cards of the group under the epic. */
+            covered: number;
+            /** @description The epic a train page lists that holds most of the group's cards. */
+            epic: string;
+            /** @constant */
+            kind: "epic";
+            /** @description Distinct cards of the group. */
+            total: number;
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
         };
         ReleaseTrainLLBGroup: {
             branches: components["schemas"]["ReleaseTrainLongLivedBranch"][];
@@ -5102,7 +5119,7 @@ export interface components {
         };
         /** @enum {string} */
         ReleaseTrainLLBState: "open" | "landing" | "landing_wrong" | "landed" | "landed_wrong" | "stranded";
-        ReleaseTrainLLBTarget: components["schemas"]["ReleaseTrainLLBLandedIn"] | components["schemas"]["ReleaseTrainLLBPlanned"] | components["schemas"]["ReleaseTrainLLBNoTarget"] | components["schemas"]["ReleaseTrainLLBDropped"];
+        ReleaseTrainLLBTarget: components["schemas"]["ReleaseTrainLLBLandedIn"] | components["schemas"]["ReleaseTrainLLBPlanned"] | components["schemas"]["ReleaseTrainLLBFromEpic"] | components["schemas"]["ReleaseTrainLLBNoTarget"] | components["schemas"]["ReleaseTrainLLBDropped"];
         ReleaseTrainLLBTargetInput: {
             targetKind: components["schemas"]["ReleaseTrainTargetKind"];
             /** @description Train key, "21-2026" or "20-1-2026". */

@@ -203,6 +203,22 @@ func TestPlanFixL1IsBlockedUntilTheGroupHasATarget(t *testing.T) {
 	}
 }
 
+func TestPlanFixL1StaysBlockedOnAnEpicTargetUntilAPlanConfirmsIt(t *testing.T) {
+	f, _ := llbFixture(t, nil)
+	f.version("di", "21", "3.5.0", liveFreeze, liveDue)
+	f.epic(f.page("demo", "21", "2026-09-20", liveFreeze, liveDue), "DEMO-500")
+	f.parent("DEMO-1", "DEMO-500", IssueTypeEpic)
+	b := f.reconcile()
+	if g, _ := llbBranch(t, b, "di", "feature/demo-wallet"); !reflect.DeepEqual(g.Target, LLBFromEpic{Train: TrainID{Number: 21, Year: fixtureYear}, Epic: "DEMO-500", Covered: 1, Total: 1}) {
+		t.Fatalf("target = %#v, want #21 from epic DEMO-500", g.Target)
+	}
+	p := planHit(t, b, "L1", "")
+	wantMode(t, p, ModeBlocked)
+	if !strings.Contains(p.Note, "Only an epic suggests #21") || p.Need == nil || p.Need.LLB != "demo-wallet" {
+		t.Fatalf("L1 on an epic target = %q, need %+v; want it to ask for a plan confirming #21", p.Note, p.Need)
+	}
+}
+
 func TestPlanFixL1RetargetsToTheObservedSprintBranchOfTheTarget(t *testing.T) {
 	f, mr := llbFixture(t, &LlbPlan{ID: "demo-wallet", Name: "Wallet", TargetKind: TargetTrain, TargetTrain: &TrainID{Number: 21, Year: fixtureYear}, Version: 1})
 	p := planHit(t, f.reconcile(), "L1", "")

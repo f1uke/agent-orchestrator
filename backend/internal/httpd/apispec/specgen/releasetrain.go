@@ -61,6 +61,14 @@ type (
 		Kind  string     `json:"kind" const:"planned"`
 		Train rt.TrainID `json:"train"`
 	}
+	rtLLBFromEpic struct {
+		Kind    string       `json:"kind" const:"epic"`
+		Train   rt.TrainID   `json:"train"`
+		Epic    string       `json:"epic" description:"The epic a train page lists that holds most of the group's cards."`
+		Covered int          `json:"covered" description:"Distinct cards of the group under the epic."`
+		Total   int          `json:"total" description:"Distinct cards of the group."`
+		Also    []rt.TrainID `json:"also,omitempty" description:"Later unpublished trains whose pages list the same epic."`
+	}
 	rtLLBNoTarget struct {
 		Kind string `json:"kind" const:"none"`
 	}
@@ -125,7 +133,7 @@ func (rtIdentity) JSONSchemaOneOf() []interface{} {
 
 // JSONSchemaOneOf lists the long-lived branch target variants.
 func (rtLLBTarget) JSONSchemaOneOf() []interface{} {
-	return []interface{}{rtLLBLandedIn{}, rtLLBPlanned{}, rtLLBNoTarget{}, rtLLBDropped{}}
+	return []interface{}{rtLLBLandedIn{}, rtLLBPlanned{}, rtLLBFromEpic{}, rtLLBNoTarget{}, rtLLBDropped{}}
 }
 
 func init() {
@@ -189,6 +197,7 @@ func init() {
 		"ReleasetrainMineWhy":                        "ReleaseTrainMineWhy",
 		"SpecgenRtLLBLandedIn":                       "ReleaseTrainLLBLandedIn",
 		"SpecgenRtLLBPlanned":                        "ReleaseTrainLLBPlanned",
+		"SpecgenRtLLBFromEpic":                       "ReleaseTrainLLBFromEpic",
 		"SpecgenRtLLBNoTarget":                       "ReleaseTrainLLBNoTarget",
 		"SpecgenRtLLBDropped":                        "ReleaseTrainLLBDropped",
 		"ReleasetrainLLBGroup":                       "ReleaseTrainLLBGroup",

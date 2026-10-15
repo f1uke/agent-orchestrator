@@ -58,6 +58,9 @@ func (LLBLandedIn) Variant() string { return "landed" }
 // Variant is "planned".
 func (LLBPlanned) Variant() string { return "planned" }
 
+// Variant is "epic".
+func (LLBFromEpic) Variant() string { return "epic" }
+
 // Variant is "none".
 func (LLBNoTarget) Variant() string { return "none" }
 
@@ -72,6 +75,12 @@ func (t LLBLandedIn) MarshalJSON() ([]byte, error) {
 
 // MarshalJSON writes the target with "kind": "planned".
 func (t LLBPlanned) MarshalJSON() ([]byte, error) { type plain LLBPlanned; return tagged(t, plain(t)) }
+
+// MarshalJSON writes the target with "kind": "epic".
+func (t LLBFromEpic) MarshalJSON() ([]byte, error) {
+	type plain LLBFromEpic
+	return tagged(t, plain(t))
+}
 
 // MarshalJSON writes the target with "kind": "none".
 func (t LLBNoTarget) MarshalJSON() ([]byte, error) {

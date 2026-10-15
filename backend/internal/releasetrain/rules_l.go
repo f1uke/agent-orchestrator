@@ -53,7 +53,7 @@ func accepted(p *LlbPlan, app AppID, iid int) bool {
 
 var ruleL3 = rule{
 	ID: "L3", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
-	Reads: []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name, KindMRs.Name, KindPages.Name, KindPageCards.Name},
+	Reads: []KindName{KindMilestones.Name, KindJiraVersions.Name, KindCards.Name, KindMRs.Name, KindPages.Name, KindPageCards.Name, KindLLBCards.Name},
 	Title: "Card is on a train page but parked in a long-lived branch that does not target it",
 	Hint:  "Its code will not ride this train unless the branch lands in the sprint branch before the cut.",
 	Check: func(b *Board) []Hit {
@@ -71,7 +71,7 @@ var ruleL3 = rule{
 					if g == nil {
 						continue
 					}
-					if p, ok := g.Target.(LLBPlanned); ok && p.Train == t.ID {
+					if aimed, ok := aimedTrain(g.Target); ok && aimed == t.ID {
 						continue
 					}
 					train := t.ID
@@ -133,10 +133,23 @@ func mrsByApp(cfg Config, snap Snapshot) map[AppID][]MRFact {
 	return out
 }
 
+// aimedTrain is the train an open group is meant for: a plan's, or an epic's when no plan names one.
+func aimedTrain(t LLBTarget) (TrainID, bool) {
+	switch t := t.(type) {
+	case LLBPlanned:
+		return t.Train, true
+	case LLBFromEpic:
+		return t.Train, true
+	}
+	return TrainID{}, false
+}
+
 func targetText(t LLBTarget) string {
 	switch t := t.(type) {
 	case LLBPlanned:
 		return "targets " + t.Train.String()
+	case LLBFromEpic:
+		return fmt.Sprintf("targets %s from epic %s, %d of %d cards", t.Train, t.Epic, t.Covered, t.Total)
 	case LLBLandedIn:
 		return "landed for " + t.Train.String()
 	case LLBDropped:

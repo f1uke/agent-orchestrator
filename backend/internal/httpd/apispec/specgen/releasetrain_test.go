@@ -25,6 +25,8 @@ func TestReleaseTrainUnionTwinsMatchWhatTheCoreWrites(t *testing.T) {
 		{rt.CodeParked{Branch: "feature/demo-wallet", MRs: []int{9}}, rtCodeParked{}},
 		{rt.LLBLandedIn{Train: rt.TrainID{Number: 21, Year: 2026}}, rtLLBLandedIn{}},
 		{rt.LLBPlanned{Train: rt.TrainID{Number: 20, Extra: 1, Year: 2026}}, rtLLBPlanned{}},
+		{rt.LLBFromEpic{Train: rt.TrainID{Number: 22, Year: 2026}, Epic: "DEMO-500", Covered: 10, Total: 11}, rtLLBFromEpic{}},
+		{rt.LLBFromEpic{Train: rt.TrainID{Number: 21, Year: 2026}, Epic: "DEMO-500", Covered: 2, Total: 2, Also: []rt.TrainID{{Number: 22, Year: 2026}}}, rtLLBFromEpic{}},
 		{rt.LLBNoTarget{}, rtLLBNoTarget{}},
 		{rt.LLBDropped{}, rtLLBDropped{}},
 		{rt.IdentityKnown{JiraAccountID: "acc-dee", GitLabUsername: "dee", DisplayName: "Dee"}, rtIdentityKnown{}},

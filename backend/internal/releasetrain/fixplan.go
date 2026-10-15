@@ -340,6 +340,10 @@ func planRetarget(b *Board, h *AlertHit) FixPlan {
 		case LLBLandedIn:
 			train = &t.Train
 		}
+		if e, ok := g.Target.(LLBFromEpic); ok {
+			return blocked(title, fmt.Sprintf("Only an epic suggests %s for %s; confirm it as a plan first, then this fix retargets the MR.", e.Train, br.Branch),
+				&FixNeed{Label: "Confirm the target train", LLB: g.ID})
+		}
 		if train == nil {
 			return blocked(title, br.Branch+" has no target train yet, so the sprint branch to merge into is unknown.",
 				&FixNeed{Label: "Set a target train first", LLB: g.ID})

@@ -128,6 +128,45 @@ func TestL3CardOnATrainParkedInALongLivedBranchThatDoesNotTargetIt(t *testing.T)
 	}
 }
 
+func TestL3FollowsAnEpicTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		epicOn string
+		want   []string
+		text   string
+	}{
+		{"the epic's page is the card's train", "21", nil, ""},
+		{"the epic's page is another train", "22", []string{"L3~ct/21-2026/di/DEMO-7"},
+			"DEMO-7 is on train #21, but its code sits in feature/demo-wallet (targets #22 from epic DEMO-500, 2 of 2 cards)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, today)
+			v := f.version("di", "21", "3.5.0", liveFreeze, liveDue)
+			v.releaseMR(liveFreeze, MROpened)
+			f.version("di", "22", "3.6.0", "2026-10-20", "2026-10-27")
+			p21 := f.page("demo", "21", "2026-09-20", liveFreeze, liveDue)
+			p22 := f.page("demo", "22", "2026-10-01", "2026-10-20", "2026-10-27")
+			f.card(p21, "DEMO-7")
+			if tc.epicOn == "21" {
+				f.epic(p21, "DEMO-500")
+			} else {
+				f.epic(p22, "DEMO-500")
+			}
+			f.mr("di", "DEMO-7 wallet", "feat/DEMO-7", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+			f.mr("di", "DEMO-8 wallet", "feat/DEMO-8", "feature/demo-wallet", MRMerged, "2026-09-03", "2026-09-04")
+			f.parent("DEMO-7", "DEMO-500", IssueTypeEpic)
+			f.parent("DEMO-8", "DEMO-500", IssueTypeEpic)
+			b := f.reconcile()
+			if got := firedIDs(b, "L3"); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("L3 hits = %v, want %v", got, tc.want)
+			}
+			if tc.text != "" && firedHits(b, "L3")[0].Text != tc.text {
+				t.Fatalf("L3 text = %q, want %q", firedHits(b, "L3")[0].Text, tc.text)
+			}
+		})
+	}
+}
+
 func TestL3QuietOnceTheBranchLandsInTheSourceSprint(t *testing.T) {
 	f := newFixture(t, today)
 	v := f.version("di", "21", "3.5.0", liveFreeze, liveDue)
