@@ -192,10 +192,18 @@ func phases(trains []Train, today Day) {
 	}
 }
 
-// sources skips the compare of a long-lived branch GitLab no longer has: it
-// can never complete, and would leave the whole system unknown for good.
+// sources counts only what the last pass planned (a dropped resource is never
+// fetched again but lingers until the unplanned sweep) and skips the compare
+// of a long-lived branch GitLab no longer has, which can never complete.
 func (r *readSet) sources(trains []Train, llbs []LLBGroup) []SourceFreshness {
 	live, gone := r.liveEntities(trains), goneCompares(llbs, r.cfg)
+	all := r.snap.all()
+	var lastPlan time.Time
+	for _, st := range all {
+		if st.PlannedAt.After(lastPlan) {
+			lastPlan = st.PlannedAt
+		}
+	}
 	bySystem := map[string]*SourceFreshness{}
 	system := func(k KindName) *SourceFreshness {
 		name, _, _ := strings.Cut(string(k), ".")
@@ -209,8 +217,8 @@ func (r *readSet) sources(trains []Train, llbs []LLBGroup) []SourceFreshness {
 	for _, k := range ReadKinds() {
 		system(k)
 	}
-	for _, st := range r.snap.all() {
-		if gone[resKey{st.Kind, st.Scope}] {
+	for _, st := range all {
+		if gone[resKey{st.Kind, st.Scope}] || st.PlannedAt.Before(lastPlan) {
 			continue
 		}
 		s := system(st.Kind)
