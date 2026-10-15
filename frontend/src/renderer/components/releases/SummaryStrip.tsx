@@ -1,5 +1,5 @@
 import { addDays, dayDiff, dayLabel } from "../../lib/releases/day";
-import { trainApprovers, type Lens } from "../../lib/releases/lens";
+import { trainApprovers, trainChips, type Lens } from "../../lib/releases/lens";
 import type { Board, Train } from "../../lib/releases/types";
 import { Avatar } from "./Avatar";
 import type { PageActions } from "./ReleasesPage";
@@ -31,7 +31,17 @@ export function phaseTone(t: Train): "done" | "accent" | "todo" {
 	return t.phase === "past" ? "done" : t.phase === "current" ? "accent" : "todo";
 }
 
-export function SummaryStrip({ board, lens, actions }: { board: Board; lens: Lens; actions: PageActions }) {
+export function SummaryStrip({
+	board,
+	lens,
+	history,
+	actions,
+}: {
+	board: Board;
+	lens: Lens;
+	history: boolean;
+	actions: PageActions;
+}) {
 	const t = lens.focus;
 	const sprint = t
 		? board.sprints.find((s) => s.board.ownsSprintBranch && String(s.number + 1) === t.label.slice(1))
@@ -47,7 +57,7 @@ export function SummaryStrip({ board, lens, actions }: { board: Board; lens: Len
 	return (
 		<div className="rel-strip">
 			<div className="pick" role="group" aria-label="Train in focus">
-				{board.trains.map((x) => (
+				{trainChips(board, history, t?.id ?? null).map((x) => (
 					<button
 						key={x.id}
 						type="button"

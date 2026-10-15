@@ -4,18 +4,17 @@ import {
 	badgeLabel,
 	focusTrain,
 	lensBadge,
-	llbGroupsFor,
 	makeLens,
 	nowStage,
 	owner,
 	sourceAges,
+	trainChips,
 	trainApprovers,
 	unknownText,
 	visibleApps,
 	worstTone,
 } from "./lens";
 import { board, stage, train, version } from "./testkit";
-import type { LLBGroup } from "./types";
 import type { AlertHit, Badge, RuleOutcome } from "./types";
 import { parseReleasesSearch } from "./url";
 
@@ -217,58 +216,6 @@ describe("stage summaries", () => {
 	});
 });
 
-describe("llbGroupsFor", () => {
-	const branch = (app: string, state: LLBGroup["branches"][number]["state"], mergedOn?: string) => ({
-		app,
-		branch: `feature/${app}-${state}`,
-		openedOn: "2026-08-01",
-		lastIn: "2026-10-01",
-		state,
-		cards: [],
-		landing: mergedOn
-			? {
-					iid: 1,
-					project: 1,
-					title: "",
-					state: "merged",
-					author: "",
-					sourceBranch: "",
-					targetBranch: "sprint",
-					createdOn: mergedOn,
-					mergedOn,
-					url: "",
-				}
-			: undefined,
-	});
-	const group = (id: string, target: LLBGroup["target"], ...branches: ReturnType<typeof branch>[]): LLBGroup => ({
-		id,
-		name: id,
-		target,
-		branches,
-	});
-	const b = board({
-		today: "2026-10-15",
-		llbs: [
-			group("open", { kind: "none" }, branch("di", "open")),
-			group(
-				"just-landed",
-				{ kind: "landed", train: "21-2026" },
-				branch("di", "landed_wrong", "2026-10-12"),
-				branch("da", "landed", "2026-10-12"),
-			),
-			group("old", { kind: "landed", train: "18-2026" }, branch("di", "landed", "2026-09-14")),
-			group("dropped", { kind: "dropped" }, branch("di", "open")),
-			group("other-app", { kind: "none" }, branch("pa", "open")),
-		],
-	});
-
-	it("keeps groups still open or landed within the last 21 days, for the app's own branches", () => {
-		expect(llbGroupsFor(b, "di").map((g) => g.id)).toEqual(["open", "just-landed"]);
-		expect(llbGroupsFor(b, "da").map((g) => g.id)).toEqual(["just-landed"]);
-		expect(llbGroupsFor(b, "pi")).toEqual([]);
-	});
-});
-
 describe("source ages", () => {
 	const now = Date.parse("2026-10-14T03:10:00Z");
 	const sources = [
@@ -301,5 +248,25 @@ describe("source ages", () => {
 		expect(ageText(5 * 60_000)).toBe("5m");
 		expect(ageText(3 * 3_600_000)).toBe("3h");
 		expect(ageText(50 * 3_600_000)).toBe("2d");
+	});
+});
+
+describe("train chips", () => {
+	const t = (n: number, phase: "past" | "current" | "next") =>
+		train(`${n}-2026`, "2026-01-01", "2026-01-08", phase, [
+			version(`${n}-2026`, "di", `1.${n}.0`, "2026-01-01", "2026-01-08"),
+		]);
+	const b = board({ trains: [t(18, "past"), t(19, "past"), t(20, "past"), t(21, "current"), t(22, "next")] });
+
+	it("shows the live trains and the last published one", () => {
+		expect(trainChips(b, false, null).map((x) => x.id)).toEqual(["20-2026", "21-2026", "22-2026"]);
+	});
+
+	it("shows every train with the History layer on", () => {
+		expect(trainChips(b, true, null).map((x) => x.id)).toEqual(["18-2026", "19-2026", "20-2026", "21-2026", "22-2026"]);
+	});
+
+	it("keeps an older train the URL focuses", () => {
+		expect(trainChips(b, false, "18-2026").map((x) => x.id)).toEqual(["18-2026", "20-2026", "21-2026", "22-2026"]);
 	});
 });

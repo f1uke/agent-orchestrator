@@ -2,14 +2,28 @@ import { animate } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { usePrefersReducedMotion } from "../../hooks/usePrefersReducedMotion";
 import { addDays, dayOfMonth, monthYear, weekday, weekdayShort } from "../../lib/releases/day";
-import { appLanes, DW, LABEL_W, LLB_LINE_H, rowHeight, timeline, type Timeline as TL } from "../../lib/releases/layout";
-import { llbGroupsFor, type Lens } from "../../lib/releases/lens";
+import { cardGroups, groupRowCount, jiraUrl } from "../../lib/releases/cards";
+import {
+	appLanes,
+	barBox,
+	cardGroupTop,
+	DW,
+	LABEL_W,
+	llbBlockH,
+	rowHeight,
+	timeline,
+	type AppLanes,
+	type Timeline as TL,
+} from "../../lib/releases/layout";
+import type { Lens } from "../../lib/releases/lens";
+import { llbGroupsFor, llbLanes } from "../../lib/releases/llb";
 import { momentumDistance } from "../../lib/releases/motion";
 import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib/releases/stickyFit";
-import type { Board } from "../../lib/releases/types";
+import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
 import { useReleasesUi } from "../../stores/releases-ui";
-import { LongLivedSummary } from "./LongLivedSummary";
+import { CardGroupBox } from "./CardGroups";
+import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
 import type { PageActions } from "./ReleasesPage";
 import { StickyAppLabel } from "./StickyAppLabel";
 import { VersionLanes } from "./VersionLanes";
@@ -127,31 +141,96 @@ export function Timeline({
 						</div>
 					</div>
 				</div>
-				{lens.apps.map((a) => {
-					const L = appLanes(board, tl, a.id, {
-						focus: lens.focus?.id ?? null,
-						past: layers.past,
-						hotfixes: url.hotfixes,
-					});
-					const llbs = layers.llb ? llbGroupsFor(board, a.id) : [];
-					const top = llbs.length ? LLB_LINE_H : 0;
-					return (
-						<div
-							key={a.id}
-							className="rel-row rel-app"
-							data-app={a.id}
-							style={{ minHeight: rowHeight({ llbLine: llbs.length > 0, lanesH: L.lanesH }) }}
-						>
-							<StickyAppLabel app={a} lens={lens} actions={actions} />
-							<div className="rel-trk" style={{ width: tl.width }}>
-								{llbs.length > 0 && (
-									<LongLivedSummary groups={llbs} board={board} focus={lens.focus} width={tl.width} />
-								)}
-								<VersionLanes board={board} tl={tl} lanes={L} top={top} lens={lens} actions={actions} />
-							</div>
-						</div>
-					);
-				})}
+				{lens.apps.map((a) => (
+					<AppRow key={a.id} app={a} board={board} tl={tl} url={url} lens={lens} layers={layers} actions={actions} />
+				))}
+			</div>
+		</div>
+	);
+}
+
+const SUM_H = 26;
+const CARD_ROW_H = 24;
+
+function barSpot(L: AppLanes, tl: TL, llbH: number, train: TrainKey): BarSpot | null {
+	const it = L.items.find((x) => x.kind === "train" && x.key === train);
+	if (!it) return null;
+	const box = barBox(tl, it.freeze, it.publish);
+	return { left: box.left, right: box.left + box.width, top: llbH + L.laneTop[it.lane] };
+}
+
+function AppRow({
+	app: a,
+	board,
+	tl,
+	url,
+	lens,
+	layers,
+	actions,
+}: {
+	app: BoardApp;
+	board: Board;
+	tl: TL;
+	url: ReleasesSearch;
+	lens: Lens;
+	layers: Layers;
+	actions: PageActions;
+}) {
+	const open = useReleasesUi((s) => s.open);
+	const L = appLanes(board, tl, a.id, { focus: lens.focus?.id ?? null, past: layers.past, hotfixes: url.hotfixes });
+	const groups = layers.llb ? llbGroupsFor(board, a.id) : [];
+	const lanes = groups.length ? llbLanes(board, a.id, tl) : [];
+	const llbH = llbBlockH(lanes.length, open.has(`${a.id}:llbs`));
+	const isOpen = (k: string) => open.has(k);
+	const jira = (key: string) => jiraUrl(board, key);
+	const boxes = (layers.cards ? cardGroups(board, a.id) : []).map((g) => {
+		const it = L.items.find((x) => x.kind === "train" && x.key === g.train.id);
+		const top = it ? cardGroupTop(L, it, tl, llbH) : llbH + 8 + L.lanesH + 2;
+		const rows = open.has(g.key) ? groupRowCount(g, isOpen) : 0;
+		return {
+			g,
+			left: tl.x(it?.freeze ?? g.train.freeze ?? tl.start) + 2,
+			top,
+			bottom: top + SUM_H + rows * CARD_ROW_H,
+		};
+	});
+	const cardsBottom = Math.max(0, ...boxes.map((b) => b.bottom));
+	return (
+		<div
+			className="rel-row rel-app"
+			data-app={a.id}
+			style={{ minHeight: rowHeight({ llbH, lanesH: L.lanesH, cardsBottom }) }}
+		>
+			<StickyAppLabel app={a} lens={lens} actions={actions} />
+			<div className="rel-trk" style={{ width: tl.width }}>
+				{groups.length > 0 && (
+					<LongLivedSummary
+						app={a.id}
+						groups={groups}
+						lanes={lanes}
+						board={board}
+						focus={lens.focus}
+						width={tl.width}
+						height={llbH + L.lanesH + 8}
+						barOf={(t) => barSpot(L, tl, llbH, t)}
+						mine={false}
+						actions={actions}
+					/>
+				)}
+				<VersionLanes board={board} tl={tl} lanes={L} top={llbH} lens={lens} actions={actions} />
+				{boxes.map(({ g, left, top }) => (
+					<CardGroupBox
+						key={g.key}
+						g={g}
+						board={board}
+						left={left}
+						top={top}
+						focused={g.train.id === lens.focus?.id}
+						mine={false}
+						actions={actions}
+						jira={jira}
+					/>
+				))}
 			</div>
 		</div>
 	);

@@ -5,7 +5,9 @@ export type SheetEntry =
 	| { kind: "version"; train: TrainKey; app: AppId }
 	| { kind: "hotfix"; app: AppId; version: string }
 	| { kind: "mismatch"; hit: HitId }
-	| { kind: "attention" | "rules" | "key" };
+	| { kind: "card"; key: string }
+	| { kind: "llb"; id: string }
+	| { kind: "attention" | "rules" | "key" | "llbs" };
 
 export type Layer = "sprint" | "llb" | "cards" | "past";
 export type Layers = Readonly<Record<Layer, boolean>>;
@@ -48,9 +50,14 @@ function parseSheet(raw: string | null): SheetEntry | null {
 		case "attention":
 		case "rules":
 		case "key":
+		case "llbs":
 			return { kind };
 		case "train":
 			return rest ? { kind, train: rest } : null;
+		case "card":
+			return rest ? { kind, key: rest } : null;
+		case "llb":
+			return rest ? { kind, id: rest } : null;
 		case "mismatch":
 			return rest ? { kind, hit: rest } : null;
 		case "version": {
@@ -76,6 +83,10 @@ export function sheetParam(s: SheetEntry): string {
 			return `hotfix:${s.app}:${s.version}`;
 		case "mismatch":
 			return `mismatch:${s.hit}`;
+		case "card":
+			return `card:${s.key}`;
+		case "llb":
+			return `llb:${s.id}`;
 		default:
 			return s.kind;
 	}

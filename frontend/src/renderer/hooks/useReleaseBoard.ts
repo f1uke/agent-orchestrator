@@ -2,7 +2,8 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { apiClient, apiErrorMessage, getApiBaseUrl, hasTrustedApiBaseUrl } from "../lib/api-client";
 import { boardFetcher } from "../lib/releases/boardFetch";
 import { demoBoard, demoResponse, failedSourceBoard } from "../lib/releases/fixture";
-import type { Board, BoardResponse, HitId } from "../lib/releases/types";
+import { PlanConflictError, planInput, type PlanDraft } from "../lib/releases/plan";
+import type { Board, BoardResponse, HitId, LlbPlan } from "../lib/releases/types";
 import { useApiReady } from "./useApiReady";
 
 export const releaseBoardKey = ["release-trains", "board"] as const;
@@ -121,6 +122,62 @@ export function useClearStaleHides() {
 			b.alerts.staleHides = [];
 		},
 	);
+}
+
+type PlanWrite = { id: string; draft: PlanDraft };
+
+function applyPlan(b: Board, { id, draft }: PlanWrite, at: string): LlbPlan {
+	const g = b.llbs.find((x) => x.id === id);
+	const current = g?.plan?.version ?? 0;
+	if (draft.ifVersion !== current) throw new PlanConflictError(current);
+	const plan: LlbPlan = {
+		id,
+		name: draft.name.trim(),
+		targetKind: draft.targetKind,
+		...(draft.targetKind === "train" && draft.targetTrain ? { targetTrain: draft.targetTrain } : {}),
+		note: draft.note,
+		branches: draft.branches,
+		accepted: draft.accepted,
+		version: current + 1,
+		updatedAt: at,
+		updatedBy: "app",
+	};
+	if (g) {
+		g.plan = plan;
+		g.name = plan.name;
+		if (g.target.kind !== "landed")
+			g.target =
+				plan.targetKind === "train" && plan.targetTrain
+					? { kind: "planned", train: plan.targetTrain }
+					: plan.targetKind === "dropped"
+						? { kind: "dropped" }
+						: { kind: "none" };
+	}
+	return plan;
+}
+
+export function useSavePlan() {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async (w: PlanWrite): Promise<LlbPlan> => {
+			if (usePreviewData) {
+				const b = (globalThis as PreviewSeam).__aoReleaseBoard?.board;
+				if (!b) throw new Error("no preview board");
+				return applyPlan(b, w, new Date().toISOString());
+			}
+			const { data, error, response } = await apiClient.PUT("/api/v1/release-trains/llb-plans/{planId}", {
+				params: { path: { planId: w.id } },
+				body: planInput(w.draft),
+			});
+			if (response.status === 409 && (error as { code?: string } | undefined)?.code === "PLAN_VERSION_CONFLICT") {
+				const current = (error as { details?: { currentVersion?: number } }).details?.currentVersion ?? 0;
+				throw new PlanConflictError(current);
+			}
+			if (error || !data) throw new Error(apiErrorMessage(error));
+			return data.plan;
+		},
+		onSettled: () => qc.invalidateQueries({ queryKey: releaseBoardKey }),
+	});
 }
 
 export function useRefreshSources() {

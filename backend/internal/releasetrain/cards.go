@@ -48,6 +48,7 @@ func (CodeNone) codeState()      {}
 type CardUnit struct {
 	Key            string       `json:"key"`
 	URL            string       `json:"url"`
+	Summary        string       `json:"summary"`
 	App            AppID        `json:"app"`
 	Status         string       `json:"status"`
 	StatusCategory string       `json:"statusCategory"`
@@ -204,7 +205,7 @@ func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage, fromBranch []Issu
 		}
 		at[is.Key] = len(units)
 		units = append(units, CardUnit{
-			Key: is.Key, URL: is.URL, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
+			Key: is.Key, URL: is.URL, Summary: is.Summary, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
 			Why: []CardWhy{why}, Code: codeOf(byKey[is.Key], cut, source, hasSource, llbs),
 		})
 	}

@@ -128,3 +128,12 @@ func TestJiraVersionJoinsTheLongestPrefix(t *testing.T) {
 		t.Fatalf("appForJiraName matched a name with no configured prefix")
 	}
 }
+
+func TestCardUnitsCarryTheCardSummary(t *testing.T) {
+	f := newFixture(t, today)
+	healthy(f)
+	units := f.reconcile().Trains[0].Versions[0].Cards
+	if len(units) != 1 || units[0].Key != "DEMO-1" || units[0].Summary != "Card DEMO-1" {
+		t.Fatalf("units = %+v, want DEMO-1 with its Jira summary for the card row", units)
+	}
+}

@@ -1,4 +1,6 @@
-import type { Severity, StageKey, StageStatus } from "./types";
+import type { CodeState, LongLivedBranch, Severity, StageKey, StageStatus } from "./types";
+
+type LLBState = LongLivedBranch["state"];
 
 /** The `data-st` value a status paints with; releases.css maps each to `--c`. */
 export type Tone =
@@ -50,6 +52,26 @@ export const SEVERITY_META: Readonly<Record<Severity, { label: string; tone: Ton
 };
 
 export const SEVERITY_ORDER: readonly Severity[] = ["block", "data", "risk", "hygiene", "info"];
+
+type Meta = { tone: Tone; label: string; short: string; glyph: string };
+
+export const CODE_META: Readonly<Record<CodeState["kind"], Meta>> = {
+	merged: { tone: "done", label: "merged", short: "merged", glyph: "✓" },
+	open: { tone: "running", label: "MR open", short: "MR open", glyph: "◐" },
+	parked: { tone: "hotfix", label: "parked in a long-lived branch", short: "parked", glyph: "⑂" },
+	elsewhere: { tone: "waiting", label: "merged elsewhere", short: "elsewhere", glyph: "!" },
+	none: { tone: "todo", label: "no MR in this repo", short: "no MR", glyph: "·" },
+};
+
+export const LLB_STATE_META: Readonly<Record<LLBState | "gone", Omit<Meta, "glyph">>> = {
+	open: { tone: "hotfix", label: "parked, not merged out yet", short: "parked" },
+	landing: { tone: "running", label: "MR open into the sprint branch", short: "landing" },
+	landing_wrong: { tone: "waiting", label: "MR open into develop", short: "MR into develop" },
+	landed: { tone: "done", label: "merged into the sprint branch", short: "landed" },
+	landed_wrong: { tone: "failed", label: "merged into develop, not the sprint branch", short: "into develop" },
+	stranded: { tone: "waiting", label: "MRs merged into it after it landed", short: "stranded" },
+	gone: { tone: "todo", label: "branch deleted, never merged", short: "deleted" },
+};
 
 export const RULE_GROUPS: Readonly<Record<string, string>> = {
 	A: "Data integrity",
