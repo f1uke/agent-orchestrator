@@ -53,15 +53,7 @@ func at(s string) time.Time {
 	return v
 }
 
-func newWorld(t *testing.T) *world {
-	t.Helper()
-	w := &world{t: t, gl: rttest.NewGitLab(t), jira: rttest.NewJira(t), now: at("2026-10-14T03:00:00Z")}
-	w.gl.Set("/projects/1001/milestones", `[{"id":11,"title":"Release 3.5.0","description":"Release Train #21/2026","state":"active","start_date":"2026-10-12","due_date":"2026-10-19","web_url":"https://gitlab.example.com/m/11"}]`)
-	w.gl.Set("/projects/1001/repository/tags", `[{"name":"3.5.0","commit":{"id":"c1","created_at":"2026-10-13T10:00:00Z","web_url":"https://gitlab.example.com/c/c1"}}]`)
-	w.gl.Set("/projects/1001/merge_requests/301", `{"has_conflicts":false,"head_pipeline":{"id":9001,"status":"success","web_url":"https://gitlab.example.com/p/9001","duration":600}}`)
-	w.gl.Set("/projects/1001/pipelines/9001/jobs", `[{"name":"build_test","status":"success"}]`)
-	w.gl.Set("/projects/1001/repository/compare", `{"web_url":"https://gitlab.example.com/compare","commits":[]}`)
-	w.gl.Set("/user", `{"username":"dee","name":"Dee Example"}`)
+func baseMRs() []rttest.MR {
 	var mrs []rttest.MR
 	base := at("2026-05-01T00:00:00Z")
 	for i := 1; i <= 300; i++ {
@@ -70,9 +62,22 @@ func newWorld(t *testing.T) *world {
 	}
 	mrs = append(mrs, rttest.MR{IID: 301, Title: "Release 3.5.0", Source: "release/3.5.0", Target: "main", State: "opened",
 		Author: "Rae Example", Username: "rae", MilestoneID: 11, CreatedAt: at("2026-10-12T02:00:00Z"), UpdatedAt: at("2026-10-12T02:00:00Z")})
-	mrs = append(mrs, rttest.MR{IID: 302, Title: "DEMO-30 wallet", Source: "feature/DEMO-30", Target: "feature/demo-wallet", State: "merged",
+	return append(mrs, rttest.MR{IID: 302, Title: "DEMO-30 wallet", Source: "feature/DEMO-30", Target: "feature/demo-wallet", State: "merged",
 		Author: "Dee Example", Username: "dee", CreatedAt: at("2026-10-01T02:00:00Z"), UpdatedAt: at("2026-10-12T03:00:00Z")})
-	w.gl.SetMRs(1001, mrs)
+}
+
+func newWorld(t *testing.T) *world { return newWorldWith(t, demoConfig) }
+
+func newWorldWith(t *testing.T, config string) *world {
+	t.Helper()
+	w := &world{t: t, gl: rttest.NewGitLab(t), jira: rttest.NewJira(t), now: at("2026-10-14T03:00:00Z")}
+	w.gl.Set("/projects/1001/milestones", `[{"id":11,"title":"Release 3.5.0","description":"Release Train #21/2026","state":"active","start_date":"2026-10-12","due_date":"2026-10-19","web_url":"https://gitlab.example.com/m/11"}]`)
+	w.gl.Set("/projects/1001/repository/tags", `[{"name":"3.5.0","commit":{"id":"c1","created_at":"2026-10-13T10:00:00Z","web_url":"https://gitlab.example.com/c/c1"}}]`)
+	w.gl.Set("/projects/1001/merge_requests/301", `{"has_conflicts":false,"head_pipeline":{"id":9001,"status":"success","web_url":"https://gitlab.example.com/p/9001","duration":600}}`)
+	w.gl.Set("/projects/1001/pipelines/9001/jobs", `[{"name":"build_test","status":"success"}]`)
+	w.gl.Set("/projects/1001/repository/compare", `{"web_url":"https://gitlab.example.com/compare","commits":[]}`)
+	w.gl.Set("/user", `{"username":"dee","name":"Dee Example"}`)
+	w.gl.SetMRs(1001, baseMRs())
 	w.jira.Set(`/rest/api/3/search/jql?jql=parent in (DEMO-1, DEMO-30, DEMO-40) AND assignee = "acc-dee" ORDER BY key`, `{"issues":[{"key":"DEMO-41","fields":{"summary":"iOS top up","status":{"name":"To Do","statusCategory":{"key":"new"}},"issuetype":{"subtask":true},"parent":{"key":"DEMO-40"},"assignee":{"accountId":"acc-dee","displayName":"Dee Example"},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
 	w.jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-30) ORDER BY key`, `{"issues":[{"key":"DEMO-30","fields":{"summary":"Wallet","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"issuetype":{"subtask":false},"assignee":{"accountId":"acc-dee","displayName":"Dee Example"},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
 
@@ -88,7 +93,7 @@ func newWorld(t *testing.T) *world {
 	w.jira.Set(`/rest/api/3/search/jql?jql=key in (DEMO-1, DEMO-40) ORDER BY key`, `{"issues":[{"key":"DEMO-40","fields":{"summary":"Wallet top up","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"issuetype":{"subtask":false},"created":"2026-10-01T10:00:00.000+0700"}}]}`)
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, svc.ConfigFileName), []byte(demoConfig), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, svc.ConfigFileName), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	st, err := sqlite.Open(dir)
@@ -178,7 +183,7 @@ func (w *world) incomplete() []string {
 	var out []string
 	for _, r := range rows {
 		if r.CompleteAt == nil || r.ErrorClass != "" {
-			out = append(out, fmt.Sprintf("%s %s %s", r.Kind, r.Scope, r.ErrorClass))
+			out = append(out, fmt.Sprintf("%s %s %s %s", r.Kind, r.Scope, r.ErrorClass, r.ErrorMessage))
 		}
 	}
 	return out
@@ -194,7 +199,7 @@ func (w *world) kinds() map[rt.KindName]int {
 }
 
 func TestBothSourcesBackfillToCompleteThenFetchOnlyWhatIsDue(t *testing.T) {
-	w := newWorld(t)
+	w := newSprintWorld(t)
 	passes := w.settle()
 	if left := w.incomplete(); len(left) > 0 || passes < 2 {
 		t.Fatalf("after %d passes still incomplete: %v", passes, left)
@@ -211,9 +216,9 @@ func TestBothSourcesBackfillToCompleteThenFetchOnlyWhatIsDue(t *testing.T) {
 	}
 	w.now = w.now.Add(5 * time.Minute)
 	_, jira = w.pass()
-	wantJira := []string{"/rest/api/3/project/DEMO/version", "/rest/api/3/search/jql", "/rest/api/3/search/jql", "/rest/api/3/search/jql", "/rest/api/3/search/jql"}
+	wantJira := append([]string{"/rest/api/3/project/DEMO/version"}, slices.Repeat([]string{"/rest/api/3/search/jql"}, 7)...)
 	if strings.Join(jira, " ") != strings.Join(wantJira, " ") {
-		t.Fatalf("steady pass after 6m fetched atlassian %v; want versions, the version's cards, the page's cards, the long-lived cards and my subtasks", jira)
+		t.Fatalf("steady pass after 6m fetched atlassian %v; want versions and seven searches: the version's cards, the page's cards, the long-lived cards, my subtasks, the sprint's cards, its This Sprint keys (10m, first due here) and the sprint-branch cards", jira)
 	}
 	w.now = w.now.Add(10 * time.Minute)
 	_, atl := w.pass()
@@ -308,7 +313,7 @@ func reachesEveryReadKind(got map[rt.KindName]int) bool {
 }
 
 func TestEveryKindHasExactlyOneProducingSource(t *testing.T) {
-	w := newWorld(t)
+	w := newSprintWorld(t)
 	w.settle()
 	snap, _, err := w.store.LoadReleaseSnapshot(context.Background())
 	if err != nil {
@@ -341,7 +346,8 @@ func TestEveryKindHasExactlyOneProducingSource(t *testing.T) {
 			t.Errorf("kind %s is read by a rule or stage and produced by %v; want exactly one source", k, producers[k])
 		}
 	}
-	for _, k := range []rt.KindName{rt.KindJiraUsers.Name, rt.KindJiraMyself.Name, rt.KindGitLabUser.Name, rt.KindPageCards.Name, rt.KindLLBCards.Name, rt.KindMySubtasks.Name} {
+	for _, k := range []rt.KindName{rt.KindJiraUsers.Name, rt.KindJiraMyself.Name, rt.KindGitLabUser.Name, rt.KindPageCards.Name, rt.KindLLBCards.Name, rt.KindMySubtasks.Name,
+		rt.KindBoardSprints.Name, rt.KindSprintCards.Name, rt.KindThisSprint.Name, rt.KindBranchCards.Name} {
 		if len(producers[k]) != 1 {
 			t.Errorf("kind %s produced by %v; want exactly one source", k, producers[k])
 		}

@@ -53,6 +53,18 @@ func everyRuleFires(t *testing.T) *fixture {
 	f.jiraVersion("di", "3.4.9", "", "2026-10-03")
 	f.milestone("di", "Hotfix 3.4.1", "crash", "2026-10-10", "2026-10-13")
 	f.jiraVersion("di", "3.4.1", "", "2026-10-13")
+
+	sp := f.sprint(42, 21, "2026-10-06", "2026-10-16")
+	f.sprintCard(sp, "DEMO-1", "In Progress", true)
+	f.mr("di", "DEMO-1 login", "feat/DEMO-1", "feature/sprint-21-2026", MRMerged, "2026-10-07", "2026-10-08")
+	f.mr("da", "DEMO-1 login", "feat/DEMO-1", "develop", MROpened, "2026-10-07", "")
+	f.sprintCard(sp, "DEMO-4", "In Progress", true)
+	f.sprintCard(sp, "DEMO-5", "In Progress", true)
+	f.subtask(sp, "DEMO-5", "DEMO-6", "iOS part", "new")
+	f.sprintCard(sp, "DEMO-7", "In Progress", false)
+	f.mr("di", "DEMO-7 chat", "feat/DEMO-7", "feature/sprint-21-2026", MRMerged, "2026-10-07", "2026-10-08")
+	f.mr("di", "DEMO-80 coupon", "feat/DEMO-80", "feature/sprint-20-2026", MRMerged, "2026-10-01", "2026-10-02")
+	f.branchIss = append(f.branchIss, &IssueFact{Key: "DEMO-80", Status: "Done", StatusCategory: StatusCategoryDone})
 	return f
 }
 

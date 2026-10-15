@@ -57,15 +57,7 @@ var ruleL3 = rule{
 	Title: "Card is on a train page but parked in a long-lived branch that does not target it",
 	Hint:  "Its code will not ride this train unless the branch lands in the sprint branch before the cut.",
 	Check: func(b *Board) []Hit {
-		groups := map[AppID]map[string]*LLBGroup{}
-		for i := range b.LLBs {
-			for _, br := range b.LLBs[i].Branches {
-				if groups[br.App] == nil {
-					groups[br.App] = map[string]*LLBGroup{}
-				}
-				groups[br.App][br.Branch] = &b.LLBs[i]
-			}
-		}
+		groups := groupsByBranch(b.LLBs)
 		var out []Hit
 		for i := range b.Trains {
 			t := &b.Trains[i]
@@ -87,7 +79,7 @@ var ruleL3 = rule{
 						Subject: SubjCardOnTrain{Train: t.ID, App: v.App, Key: c.Key}, Train: &train, App: v.App, AgesOn: dueOf(t, v),
 						Evidence: Evidence{"card": c.Key, "train": t.ID, "group": g.ID, "branch": parked.Branch, "target": targetText(g.Target)},
 						Text:     fmt.Sprintf("%s is on train %s, but its code sits in %s (%s)", c.Key, t.ID, parked.Branch, targetText(g.Target)),
-						Link:     Link{Label: "Open card"},
+						Link:     Link{Label: "Open card", URL: c.URL},
 					})
 				}
 			}

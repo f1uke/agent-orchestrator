@@ -20,6 +20,6 @@ const ExampleConfigJSON = `{
     { "id": 42, "key": "DEMO", "ownsSprintBranch": true },
     { "id": 43, "key": "OTHER", "ownsSprintBranch": false }
   ],
-  "mobile": { "projects": ["DEMO"], "subtaskPattern": "^(iOS|ADR|Android|Mobile)\\b" }
+  "mobile": { "projects": ["DEMO"], "subtaskPattern": "(?i)^\\s*(iOS|ADR|Android|Mobile)\\b" }
 }
 `

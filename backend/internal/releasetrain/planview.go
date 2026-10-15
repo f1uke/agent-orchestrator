@@ -37,6 +37,16 @@ type PlanView struct {
 	MyAccountID string
 	// WatchedCardKeys are the cards whose subtasks may be mine.
 	WatchedCardKeys []string
+	// Sprints are the active sprints jira.board_sprints read, one per board at most.
+	Sprints []PlannedSprint
+	// BranchCardKeys are the cards with an MR into a sprint branch the Board follows.
+	BranchCardKeys []string
+}
+
+// PlannedSprint is one active sprint whose cards are read.
+type PlannedSprint struct {
+	Board int
+	ID    int
 }
 
 // PlannedLLB is one long-lived branch whose ahead count is read.
@@ -110,7 +120,15 @@ func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 	for _, m := range AllItems(snap, KindJiraMyself) {
 		pv.MyAccountID = m.AccountID
 	}
-	pv.WatchedCardKeys = watchedCards(b.Trains, rs, pv.LLBCardKeys)
+	for _, sp := range activeSprints(cfg, snap) {
+		pv.Sprints = append(pv.Sprints, PlannedSprint{Board: sp.Board, ID: sp.ID})
+	}
+	live := make([]TrainID, 0, len(b.Trains))
+	for id := range liveTrains(b.Trains, rs) {
+		live = append(live, id)
+	}
+	pv.BranchCardKeys = sprintBranchKeys(cfg, snap, live)
+	pv.WatchedCardKeys = watchedCards(b.Trains, rs, append(append([]string{}, pv.LLBCardKeys...), pv.BranchCardKeys...))
 	return pv
 }
 

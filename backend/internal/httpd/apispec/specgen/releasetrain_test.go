@@ -32,6 +32,12 @@ func TestReleaseTrainUnionTwinsMatchWhatTheCoreWrites(t *testing.T) {
 		{rt.CodeOpen{MRs: []int{8}}, rtCodeOpen{}},
 		{rt.CodeElsewhere{Branch: "feature/demo", On: rt.Day{Y: 2026, M: 10, D: 1}}, rtCodeElsewhere{}},
 		{rt.CodeNone{}, rtCodeNone{}},
+		{rt.ToTrain{Train: rt.TrainID{Number: 8, Year: 2026}}, rtDestToTrain{}},
+		{rt.ToLLB{Group: "demo-chat", Branch: "feature/demo-chat", Via: &rt.TrainID{Number: 9, Year: 2026}}, rtDestToLLB{}},
+		{rt.ToLLB{Branch: "feature/demo-chat"}, rtDestToLLB{}},
+		{rt.BeforeFirstTrain{Train: rt.TrainID{Number: 6, Year: 2026}}, rtDestBefore{}},
+		{rt.OffFlow{}, rtDestOff{}},
+		{rt.NotRouted{}, rtDestNone{}},
 	} {
 		body, err := json.Marshal(tc.variant)
 		if err != nil {

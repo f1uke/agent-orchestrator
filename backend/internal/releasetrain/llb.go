@@ -446,6 +446,19 @@ func sprintTrain(branch string) (TrainID, bool) {
 	return TrainID{Number: num + 1, Year: y}, true
 }
 
+func groupsByBranch(groups []LLBGroup) map[AppID]map[string]*LLBGroup {
+	out := map[AppID]map[string]*LLBGroup{}
+	for i := range groups {
+		for _, br := range groups[i].Branches {
+			if out[br.App] == nil {
+				out[br.App] = map[string]*LLBGroup{}
+			}
+			out[br.App][br.Branch] = &groups[i]
+		}
+	}
+	return out
+}
+
 func llbsByApp(groups []LLBGroup) map[AppID]map[string]*LongLivedBranch {
 	out := map[AppID]map[string]*LongLivedBranch{}
 	for gi := range groups {

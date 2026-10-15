@@ -12948,6 +12948,12 @@ components:
       required:
       - released
       type: object
+    ReleaseTrainActiveWhy:
+      enum:
+      - new this sprint
+      - MR this sprint
+      - mobile subtask open
+      type: string
     ReleaseTrainAlertHit:
       properties:
         agesOn:
@@ -13121,6 +13127,10 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainSourceFreshness'
           type: array
+        sprints:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainSprintRow'
+          type: array
         today:
           $ref: '#/components/schemas/ReleaseTrainDay'
         trains:
@@ -13135,6 +13145,7 @@ components:
       - hotfixes
       - mismatches
       - llbs
+      - sprints
       - cutover
       - identity
       - alerts
@@ -13155,6 +13166,19 @@ components:
       - name
       - family
       - platform
+      type: object
+    ReleaseTrainBoardConfig:
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+        ownsSprintBranch:
+          type: boolean
+      required:
+      - id
+      - key
+      - ownsSprintBranch
       type: object
     ReleaseTrainBoardResponse:
       properties:
@@ -13189,12 +13213,15 @@ components:
           type: string
         statusCategory:
           type: string
+        url:
+          type: string
         why:
           items:
             $ref: '#/components/schemas/ReleaseTrainCardWhy'
           type: array
       required:
       - key
+      - url
       - app
       - status
       - statusCategory
@@ -13205,6 +13232,7 @@ components:
       enum:
       - fixVersion
       - release train page
+      - sprint branch
       type: string
     ReleaseTrainCodeElsewhere:
       properties:
@@ -13314,6 +13342,87 @@ components:
     ReleaseTrainDay:
       format: date
       type: string
+    ReleaseTrainDest:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainDestToTrain'
+      - $ref: '#/components/schemas/ReleaseTrainDestToLLB'
+      - $ref: '#/components/schemas/ReleaseTrainDestBefore'
+      - $ref: '#/components/schemas/ReleaseTrainDestOff'
+      - $ref: '#/components/schemas/ReleaseTrainDestNone'
+      type: object
+    ReleaseTrainDestBefore:
+      properties:
+        kind:
+          const: before
+          type: string
+        train:
+          description: The app's first train on the Board; the code shipped before
+            it.
+          type: string
+      required:
+      - kind
+      - train
+      type: object
+    ReleaseTrainDestKind:
+      enum:
+      - sprint
+      - sprint_open
+      - llb
+      - llb_open
+      - prev
+      - back
+      - before
+      - develop
+      - develop_open
+      - release
+      - other
+      - none
+      type: string
+    ReleaseTrainDestNone:
+      properties:
+        kind:
+          const: none
+          type: string
+      required:
+      - kind
+      type: object
+    ReleaseTrainDestOff:
+      properties:
+        kind:
+          const: "off"
+          type: string
+      required:
+      - kind
+      type: object
+    ReleaseTrainDestToLLB:
+      properties:
+        branch:
+          type: string
+        group:
+          type: string
+        kind:
+          const: llb
+          type: string
+        via:
+          description: The train the long-lived group landed in or targets.
+          type: string
+      required:
+      - kind
+      - group
+      - branch
+      type: object
+    ReleaseTrainDestToTrain:
+      properties:
+        kind:
+          const: train
+          type: string
+        train:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - kind
+      - train
+      type: object
     ReleaseTrainErrorClass:
       enum:
       - auth
@@ -14107,6 +14216,29 @@ components:
       - scope
       - failures
       type: object
+    ReleaseTrainRoute:
+      properties:
+        app:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ReleaseTrainDestKind'
+        mismatch:
+          type: boolean
+        mr:
+          type: integer
+        plan:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+        to:
+          $ref: '#/components/schemas/ReleaseTrainDest'
+        viaLlb:
+          type: string
+      required:
+      - app
+      - kind
+      - to
+      - mr
+      type: object
     ReleaseTrainRuleInfo:
       properties:
         defaultOn:
@@ -14191,6 +14323,191 @@ components:
       - system
       - resources
       - issues
+      type: object
+    ReleaseTrainSprintCard:
+      properties:
+        active:
+          type: boolean
+        activeWhy:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainActiveWhy'
+          type: array
+        assignee:
+          $ref: '#/components/schemas/ReleaseTrainPerson'
+        key:
+          type: string
+        mine:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMineReason'
+          type: array
+        mrs:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainSprintMR'
+          type: array
+        onBoard:
+          type: boolean
+        routes:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainRoute'
+          type: array
+        status:
+          type: string
+        statusCategory:
+          type: string
+        subtasks:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainSprintSubtask'
+          type: array
+        summary:
+          type: string
+        url:
+          type: string
+      required:
+      - key
+      - url
+      - summary
+      - status
+      - statusCategory
+      - subtasks
+      - mrs
+      - routes
+      - onBoard
+      - active
+      - activeWhy
+      type: object
+    ReleaseTrainSprintCounts:
+      properties:
+        carriedDone:
+          type: integer
+        carriedWithMrs:
+          type: integer
+        new:
+          type: integer
+      required:
+      - new
+      - carriedWithMrs
+      - carriedDone
+      type: object
+    ReleaseTrainSprintDest:
+      properties:
+        count:
+          type: integer
+        keys:
+          items:
+            type: string
+          type: array
+        to:
+          $ref: '#/components/schemas/ReleaseTrainDest'
+      required:
+      - to
+      - count
+      - keys
+      type: object
+    ReleaseTrainSprintFact:
+      properties:
+        board:
+          type: integer
+        end:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        id:
+          type: integer
+        name:
+          type: string
+        start:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        url:
+          type: string
+      required:
+      - board
+      - id
+      - name
+      - url
+      type: object
+    ReleaseTrainSprintMR:
+      properties:
+        app:
+          type: string
+        author:
+          type: string
+        created:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        dest:
+          $ref: '#/components/schemas/ReleaseTrainDestKind'
+        iid:
+          type: integer
+        merged:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        source:
+          type: string
+        state:
+          type: string
+        target:
+          type: string
+        title:
+          type: string
+        url:
+          type: string
+      required:
+      - app
+      - iid
+      - url
+      - title
+      - state
+      - source
+      - target
+      - author
+      - created
+      - dest
+      type: object
+    ReleaseTrainSprintRow:
+      properties:
+        board:
+          $ref: '#/components/schemas/ReleaseTrainBoardConfig'
+        cards:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainSprintCard'
+          type: array
+        counts:
+          $ref: '#/components/schemas/ReleaseTrainSprintCounts'
+        dests:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainSprintDest'
+          type: array
+        number:
+          type: integer
+        sprint:
+          $ref: '#/components/schemas/ReleaseTrainSprintFact'
+        total:
+          type: integer
+      required:
+      - board
+      - sprint
+      - number
+      - total
+      - cards
+      - counts
+      - dests
+      type: object
+    ReleaseTrainSprintSubtask:
+      properties:
+        assignee:
+          $ref: '#/components/schemas/ReleaseTrainPerson'
+        key:
+          type: string
+        mobile:
+          type: boolean
+        status:
+          type: string
+        statusCategory:
+          type: string
+        summary:
+          type: string
+      required:
+      - key
+      - summary
+      - status
+      - statusCategory
+      - mobile
       type: object
     ReleaseTrainStage:
       properties:

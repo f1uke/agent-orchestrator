@@ -55,6 +55,10 @@ type fixture struct {
 	gitlabUser *GitLabUserFact
 	subtasks   []*IssueFact
 	llbCards   []*IssueFact
+	sprints    []*SprintFact
+	sprintIss  map[int][]*IssueFact
+	thisSprint map[int][]string
+	branchIss  []*IssueFact
 	versionApp map[string]AppID
 	statuses   map[KindName]func(*ResourceStatus)
 	human      HumanState
@@ -74,6 +78,8 @@ func newFixture(t *testing.T, today string) *fixture {
 		nextID:     100,
 		issues:     map[string][]*IssueFact{},
 		pageCards:  map[string][]*IssueFact{},
+		sprintIss:  map[int][]*IssueFact{},
+		thisSprint: map[int][]string{},
 		versionApp: map[string]AppID{},
 		statuses:   map[KindName]func(*ResourceStatus){},
 		human:      HumanState{RuleSettings: map[RuleID]bool{}, Hides: map[HitID]Hide{}},
@@ -190,6 +196,18 @@ func (f *fixture) snapshot() Snapshot {
 	}
 	Put(&s, KindMySubtasks, f.fresh(KindMySubtasks.Name, MySubtasksScope, ""), deref(f.subtasks, nil))
 	Put(&s, KindLLBCards, f.fresh(KindLLBCards.Name, LLBCardsScope, ""), deref(f.llbCards, nil))
+	for _, b := range f.cfg.Boards {
+		Put(&s, KindBoardSprints, f.fresh(KindBoardSprints.Name, BoardScope(b.ID), ""), deref(f.sprints, func(sp *SprintFact) bool { return sp.Board == b.ID }))
+	}
+	for _, sp := range f.sprints {
+		Put(&s, KindSprintCards, f.fresh(KindSprintCards.Name, SprintScope(sp.ID), ""), deref(f.sprintIss[sp.ID], nil))
+		members := []SprintMemberFact{}
+		for _, k := range f.thisSprint[sp.ID] {
+			members = append(members, SprintMemberFact{Key: k})
+		}
+		Put(&s, KindThisSprint, f.fresh(KindThisSprint.Name, SprintScope(sp.ID), ""), members)
+	}
+	Put(&s, KindBranchCards, f.fresh(KindBranchCards.Name, BranchCardsScope, ""), deref(f.branchIss, nil))
 	return s
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,7 +72,7 @@ func (s *Source) Fetch(ctx context.Context, spec rt.ResourceSpec, view rt.PlanVi
 func projectScope(key string) rt.Scope { return rt.Scope("project:" + key) }
 
 func (s *Source) jobs(view rt.PlanView) []svc.Job {
-	r := reader{c: s.client, view: view}
+	r := reader{c: s.client, view: view, config: s.config}
 	cfg := view.Config.Jira
 	jobs := []svc.Job{{Spec: rt.SpecFor(rt.KindJiraVersions, projectScope(cfg.Project), ""), Fetch: r.versions}}
 	if cfg.TechRequestProject != "" {
@@ -113,12 +114,71 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 			return r.issues(ctx, rt.KindMySubtasks, "parent in ("+strings.Join(keys, ", ")+") AND assignee = "+jqlString(me)+" ORDER BY key")
 		}})
 	}
+	for _, b := range view.Config.Boards {
+		board := b.ID
+		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindBoardSprints, rt.BoardScope(board), ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) { return r.sprints(ctx, board) }})
+	}
+	for _, sp := range view.Sprints {
+		id := strconv.Itoa(sp.ID)
+		jobs = append(jobs,
+			svc.Job{Spec: rt.SpecFor(rt.KindSprintCards, rt.SprintScope(sp.ID), ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) {
+				return r.issues(ctx, rt.KindSprintCards, "sprint = "+id+" ORDER BY key")
+			}},
+			svc.Job{Spec: rt.SpecFor(rt.KindThisSprint, rt.SprintScope(sp.ID), ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) {
+				return r.sprintMembers(ctx, "sprint = "+id+" AND sprint not in closedSprints() ORDER BY key")
+			}},
+		)
+	}
+	if keys := view.BranchCardKeys; len(keys) > 0 {
+		jobs = append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindBranchCards, rt.BranchCardsScope, ""), Fetch: func(ctx context.Context, _ []byte) (svc.Batch, error) {
+			return r.issues(ctx, rt.KindBranchCards, "key in ("+strings.Join(keys, ", ")+") ORDER BY key")
+		}})
+	}
 	return append(jobs, svc.Job{Spec: rt.SpecFor(rt.KindJiraMyself, rt.MyselfScope, ""), Fetch: r.myself})
 }
 
 type reader struct {
-	c    *jira.Client
-	view rt.PlanView
+	c      *jira.Client
+	view   rt.PlanView
+	config atlassian.ConfigSource
+}
+
+func (r reader) sprints(ctx context.Context, board int) (svc.Batch, error) {
+	rows, err := r.c.BoardSprints(ctx, board, []string{"active"}, 0)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	cfg, err := r.config()
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	base := strings.TrimRight(cfg.BaseURL, "/")
+	facts := make([]rt.SprintFact, 0, len(rows))
+	for _, s := range rows {
+		f := rt.SprintFact{Board: board, ID: s.ID, Name: s.Name, URL: base + "/issues/?jql=sprint%20%3D%20" + strconv.Itoa(s.ID)}
+		if s.StartDate != nil {
+			d := rt.DayOf(*s.StartDate, r.view.Loc)
+			f.Start = &d
+		}
+		if s.EndDate != nil {
+			d := rt.DayOf(*s.EndDate, r.view.Loc)
+			f.End = &d
+		}
+		facts = append(facts, f)
+	}
+	return svc.SnapshotOf(rt.KindBoardSprints, facts)
+}
+
+func (r reader) sprintMembers(ctx context.Context, jql string) (svc.Batch, error) {
+	rows, err := r.c.SearchAllFields(ctx, jql, []string{"summary"}, 0)
+	if err != nil {
+		return svc.Batch{}, err
+	}
+	facts := make([]rt.SprintMemberFact, 0, len(rows))
+	for _, row := range rows {
+		facts = append(facts, rt.SprintMemberFact{Key: row.Key})
+	}
+	return svc.SnapshotOf(rt.KindThisSprint, facts)
 }
 
 func (r reader) versions(ctx context.Context, _ []byte) (svc.Batch, error) {

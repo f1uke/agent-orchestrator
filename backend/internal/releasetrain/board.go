@@ -44,6 +44,8 @@ type Board struct {
 	Hotfixes   []Hotfix          `json:"hotfixes"`
 	Mismatches []Mismatch        `json:"mismatches"`
 	LLBs       []LLBGroup        `json:"llbs"`
+	// Sprints is one row per configured board with an active sprint.
+	Sprints []SprintRow `json:"sprints"`
 	// Cutover is each app's first merge into a sprint branch; apps with none are absent.
 	Cutover map[AppID]Day `json:"cutover"`
 	// Identity is who "me" is for every Mine on the Board.
@@ -226,4 +228,22 @@ func (r *readSet) sources(trains []Train) []SourceFreshness {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].System < out[j].System })
 	return out
+}
+
+func (b *Board) familyOf(app AppID) FamilyID {
+	for _, a := range b.Apps {
+		if a.ID == app {
+			return a.Family
+		}
+	}
+	return ""
+}
+
+func containsString(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

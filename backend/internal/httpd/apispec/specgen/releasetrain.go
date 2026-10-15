@@ -79,7 +79,34 @@ type (
 	rtCodeNone struct {
 		Kind string `json:"kind" const:"none"`
 	}
+
+	rtDest        struct{}
+	rtDestToTrain struct {
+		Kind  string     `json:"kind" const:"train"`
+		Train rt.TrainID `json:"train"`
+	}
+	rtDestToLLB struct {
+		Kind   string      `json:"kind" const:"llb"`
+		Group  rt.PlanID   `json:"group"`
+		Branch string      `json:"branch"`
+		Via    *rt.TrainID `json:"via,omitempty" description:"The train the long-lived group landed in or targets."`
+	}
+	rtDestBefore struct {
+		Kind  string     `json:"kind" const:"before"`
+		Train rt.TrainID `json:"train" description:"The app's first train on the Board; the code shipped before it."`
+	}
+	rtDestOff struct {
+		Kind string `json:"kind" const:"off"`
+	}
+	rtDestNone struct {
+		Kind string `json:"kind" const:"none"`
+	}
 )
+
+// JSONSchemaOneOf lists the sprint destination variants.
+func (rtDest) JSONSchemaOneOf() []interface{} {
+	return []interface{}{rtDestToTrain{}, rtDestToLLB{}, rtDestBefore{}, rtDestOff{}, rtDestNone{}}
+}
 
 // JSONSchemaOneOf lists the outcome variants.
 func (rtOutcome) JSONSchemaOneOf() []interface{} {
@@ -188,6 +215,23 @@ func init() {
 		"ReleasetrainPlanBranch":                     "ReleaseTrainPlanBranch",
 		"ReleasetrainPlanAccepted":                   "ReleaseTrainPlanAccepted",
 		"ReleasetrainTargetKind":                     "ReleaseTrainTargetKind",
+		"ReleasetrainSprintRow":                      "ReleaseTrainSprintRow",
+		"ReleasetrainSprintFact":                     "ReleaseTrainSprintFact",
+		"ReleasetrainSprintCounts":                   "ReleaseTrainSprintCounts",
+		"ReleasetrainSprintDest":                     "ReleaseTrainSprintDest",
+		"ReleasetrainSprintCard":                     "ReleaseTrainSprintCard",
+		"ReleasetrainSprintSubtask":                  "ReleaseTrainSprintSubtask",
+		"ReleasetrainSprintMR":                       "ReleaseTrainSprintMR",
+		"ReleasetrainRoute":                          "ReleaseTrainRoute",
+		"ReleasetrainDestKind":                       "ReleaseTrainDestKind",
+		"ReleasetrainActiveWhy":                      "ReleaseTrainActiveWhy",
+		"ReleasetrainBoardConfig":                    "ReleaseTrainBoardConfig",
+		"SpecgenRtDest":                              "ReleaseTrainDest",
+		"SpecgenRtDestToTrain":                       "ReleaseTrainDestToTrain",
+		"SpecgenRtDestToLLB":                         "ReleaseTrainDestToLLB",
+		"SpecgenRtDestBefore":                        "ReleaseTrainDestBefore",
+		"SpecgenRtDestOff":                           "ReleaseTrainDestOff",
+		"SpecgenRtDestNone":                          "ReleaseTrainDestNone",
 	} {
 		schemaNames[name] = clean
 	}
@@ -199,6 +243,7 @@ func mapReleaseTrainTypes(r *openapi31.Reflector) {
 	js.AddTypeMapping((*rt.CodeState)(nil), rtCodeState{})
 	js.AddTypeMapping((*rt.LLBTarget)(nil), rtLLBTarget{})
 	js.AddTypeMapping((*rt.IdentityState)(nil), rtIdentity{})
+	js.AddTypeMapping((*rt.Dest)(nil), rtDest{})
 	day := jsonschema.Schema{}
 	day.WithType(jsonschema.String.Type()).WithFormat("date")
 	js.AddTypeMapping(rt.Day{}, day)
