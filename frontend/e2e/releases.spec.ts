@@ -208,10 +208,24 @@ test.describe("releases page", () => {
 			const y = box.y + box.height - 60;
 			await page.mouse.move(x, y);
 			await page.mouse.down();
-			for (let i = 1; i <= 4; i++) await page.mouse.move(x - i * 40, y - i * 15);
+			const released = await sc.evaluate(
+				(el, [x, y]) => {
+					const spin = (ms: number) => {
+						const t = performance.now();
+						while (performance.now() - t < ms);
+					};
+					for (let i = 1; i <= 4; i++) {
+						spin(16);
+						window.dispatchEvent(new PointerEvent("pointermove", { clientX: x - i * 40, clientY: y - i * 15 }));
+					}
+					const at = { left: el.scrollLeft, top: el.scrollTop };
+					window.dispatchEvent(new PointerEvent("pointerup", { clientX: x - 160, clientY: y - 60 }));
+					return at;
+				},
+				[x, y],
+			);
 			await page.mouse.up();
 			const at = () => sc.evaluate((el) => ({ left: el.scrollLeft, top: el.scrollTop }));
-			const released = await at();
 			await settle(page);
 			const rest = await at();
 			if (reduced) expect(rest).toEqual(released);
