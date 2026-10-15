@@ -1,9 +1,11 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage, getApiBaseUrl, hasTrustedApiBaseUrl } from "../lib/api-client";
 import { boardFetcher } from "../lib/releases/boardFetch";
-import { demoBoard, demoResponse, failedSourceBoard, unknownIdentityBoard } from "../lib/releases/fixture";
+import { demoBoard, demoResponse, failedSourceBoard, fixesBoard, unknownIdentityBoard } from "../lib/releases/fixture";
+import { fixFailure, FixPlanChangedError } from "../lib/releases/fix";
+import { previewConfirm, previewPlan, previewUndo, type PreviewFixStore } from "../lib/releases/fixPreview";
 import { PlanConflictError, planInput, type PlanDraft } from "../lib/releases/plan";
-import type { Board, BoardResponse, HitId, LlbPlan } from "../lib/releases/types";
+import type { Board, BoardResponse, Fix, FixPlan, HitId, LlbPlan } from "../lib/releases/types";
 import { useApiReady } from "./useApiReady";
 
 export const releaseBoardKey = ["release-trains", "board"] as const;
@@ -13,10 +15,14 @@ const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 /** Playwright sets the variant before load; a mutation edits the board kept here. */
 type PreviewSeam = {
 	__aoReleaseBoard?: BoardResponse;
-	__aoReleaseBoardVariant?: "failed-source" | "identity-unknown";
+	__aoReleaseBoardVariant?: "failed-source" | "identity-unknown" | "fixes";
 };
 
-const VARIANTS = { "failed-source": failedSourceBoard, "identity-unknown": unknownIdentityBoard } as const;
+const VARIANTS = {
+	"failed-source": failedSourceBoard,
+	"identity-unknown": unknownIdentityBoard,
+	fixes: fixesBoard,
+} as const;
 
 function previewBoard(): BoardResponse {
 	const seam = globalThis as PreviewSeam;
@@ -181,6 +187,99 @@ export function useSavePlan() {
 			return data.plan;
 		},
 		onSettled: () => qc.invalidateQueries({ queryKey: releaseBoardKey }),
+	});
+}
+
+export const releaseFixesKey = ["release-trains", "fixes"] as const;
+const fixPlanKey = (hit: HitId, choice: string | undefined) =>
+	["release-trains", "fix-plan", hit, choice ?? ""] as const;
+
+type FixSeam = { __aoReleaseFixes?: PreviewFixStore };
+
+function previewFixes(): { board: Board; store: PreviewFixStore } {
+	const seam = globalThis as PreviewSeam & FixSeam;
+	const board = seam.__aoReleaseBoard?.board;
+	if (!board) throw new Error("no preview board");
+	seam.__aoReleaseFixes ??= { fixes: [], removed: {} };
+	return { board, store: seam.__aoReleaseFixes };
+}
+
+/** Planning writes nothing; each open replans against the latest observation. */
+export function useFixPlan(hit: HitId, choice: string | undefined, enabled: boolean) {
+	return useQuery({
+		queryKey: fixPlanKey(hit, choice),
+		enabled,
+		queryFn: async (): Promise<FixPlan> => {
+			if (usePreviewData) return structuredClone(previewPlan(previewFixes().board, hit, choice));
+			const { data, error, response } = await apiClient.POST("/api/v1/release-trains/fixes/plan", {
+				body: { hitId: hit, ...(choice ? { choice } : {}) },
+			});
+			if (error || !data) throw fixFailure(response.status, error);
+			return data.plan;
+		},
+		staleTime: 0,
+		retry: false,
+	});
+}
+
+export function useFixes() {
+	return useQuery({
+		queryKey: releaseFixesKey,
+		queryFn: async (): Promise<Fix[]> => {
+			if (usePreviewData) return structuredClone(previewFixes().store.fixes);
+			const { data, error, response } = await apiClient.GET("/api/v1/release-trains/fixes");
+			if (error || !data) throw fixFailure(response.status, error);
+			return data.fixes;
+		},
+		refetchInterval: POLL_MS,
+	});
+}
+
+function useFixMutation<V>(run: (v: V) => Promise<Fix>) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: run,
+		onSettled: () =>
+			Promise.all([
+				qc.invalidateQueries({ queryKey: releaseBoardKey }),
+				qc.invalidateQueries({ queryKey: releaseFixesKey }),
+			]),
+	});
+}
+
+export function useConfirmFix() {
+	const qc = useQueryClient();
+	return useFixMutation<FixPlan>(async (plan) => {
+		const req = { hitId: plan.hit, planFingerprint: plan.fingerprint, ...(plan.choice ? { choice: plan.choice } : {}) };
+		try {
+			if (usePreviewData) {
+				const { board, store } = previewFixes();
+				return structuredClone(previewConfirm(board, store, req, new Date().toISOString()));
+			}
+			const { data, error, response } = await apiClient.POST("/api/v1/release-trains/fixes", {
+				body: { ...req, via: "app" },
+			});
+			if (error || !data) throw fixFailure(response.status, error);
+			return data.fix;
+		} catch (e) {
+			if (e instanceof FixPlanChangedError) qc.setQueryData(fixPlanKey(plan.hit, plan.choice), e.plan);
+			throw e;
+		}
+	});
+}
+
+export function useUndoFix() {
+	return useFixMutation<string>(async (id) => {
+		if (usePreviewData) {
+			const { board, store } = previewFixes();
+			return structuredClone(previewUndo(board, store, id, new Date().toISOString()));
+		}
+		const { data, error, response } = await apiClient.POST("/api/v1/release-trains/fixes/{fixId}/undo", {
+			params: { path: { fixId: id } },
+			body: { via: "app" },
+		});
+		if (error || !data) throw fixFailure(response.status, error);
+		return data.fix;
 	});
 }
 

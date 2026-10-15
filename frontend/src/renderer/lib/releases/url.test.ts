@@ -66,6 +66,23 @@ describe("releases search params", () => {
 		}
 	});
 
+	it("round-trips a fix sheet with and without a choice, and the fixes list", () => {
+		const hit = "A5~v/21-2026/di:x";
+		for (const sheet of [
+			{ kind: "fix" as const, hit },
+			{ kind: "fix" as const, hit, choice: "gitlab" },
+			{ kind: "fixes" as const },
+			{ kind: "fixes" as const, fix: "fx-0a1b2c3d4e5f6a7b" },
+		]) {
+			const raw = releasesSearch({ ...empty, sheet });
+			expect(parseReleasesSearch(raw).sheet).toEqual(sheet);
+		}
+		expect(releasesSearch({ ...empty, sheet: { kind: "fix", hit, choice: "gitlab" } }).sheet).toBe(`fix.gitlab:${hit}`);
+		for (const bad of ["fix:", "fix.:A5~v/21-2026/di", "fix.jira:"]) {
+			expect(parseReleasesSearch({ sheet: bad }).sheet).toBeNull();
+		}
+	});
+
 	it("sets exactly the named layers, and an empty list turns every layer off", () => {
 		expect(parseReleasesSearch({ layers: "past" }).layers).toEqual({
 			sprint: false,

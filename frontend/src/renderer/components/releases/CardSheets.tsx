@@ -15,6 +15,8 @@ import {
 } from "../../lib/releases/sprint";
 import type { Board, CardUnit, MineReason, SprintCard, SprintRow, Train } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
+import { cardHits } from "../../lib/releases/fix";
+import { AlertList } from "./Alerts";
 import { CardLine, Face, JiraKey } from "./CardGroups";
 import type { PageActions } from "./ReleasesPage";
 
@@ -222,6 +224,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 						))}
 					</Sec>
 				)}
+				<AlertList title="Needs attention" hits={cardHits(c.lens.attention, key)} c={c} />
 			</>
 		),
 	};

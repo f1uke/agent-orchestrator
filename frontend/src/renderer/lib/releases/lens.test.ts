@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	ageText,
+	agoText,
 	badgeLabel,
 	focusTrain,
 	lensBadge,
@@ -248,6 +249,11 @@ describe("source ages", () => {
 		expect(ageText(5 * 60_000)).toBe("5m");
 		expect(ageText(3 * 3_600_000)).toBe("3h");
 		expect(ageText(50 * 3_600_000)).toBe("2d");
+	});
+
+	it("says just now rather than now ago", () => {
+		expect(agoText(30_000)).toBe("just now");
+		expect(agoText(5 * 60_000)).toBe("5m ago");
 	});
 });
 

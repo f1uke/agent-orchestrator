@@ -1,12 +1,13 @@
 import { ArrowLeft, ChevronRight, X } from "lucide-react";
 import { AnimatePresence, m, LazyMotion, domAnimation } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
-import { useClearStaleHides, useHideHit, useSetRule, useUnhideHit } from "../../hooks/useReleaseBoard";
+import { useClearStaleHides, useSetRule } from "../../hooks/useReleaseBoard";
+import { FIX_STATE_META } from "../../lib/releases/fix";
 import { dayLabel } from "../../lib/releases/day";
 import { hotfixStages } from "../../lib/releases/layout";
 import {
 	approvals,
-	ageText,
+	agoText,
 	badgeLabel,
 	nowStage,
 	owner,
@@ -16,7 +17,7 @@ import {
 	type Lens,
 } from "../../lib/releases/lens";
 import { sheetEnter, sheetExit } from "../../lib/releases/motion";
-import type { AlertHit, Board, RuleOutcome, Stage } from "../../lib/releases/types";
+import type { Board, FixState, RuleOutcome, Stage } from "../../lib/releases/types";
 import type { ReleasesSearch, SheetEntry } from "../../lib/releases/url";
 import {
 	RULE_GROUPS,
@@ -28,8 +29,10 @@ import {
 } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Switch } from "../ui/switch";
+import { AlertList, AlertRow, appName, Ext, Sec } from "./Alerts";
 import { Avatar } from "./Avatar";
 import { cardSheet, sprintSheet } from "./CardSheets";
+import { fixesSheet, fixSheet } from "./FixSheets";
 import { llbSheet, llbsSheet } from "./LlbSheet";
 import type { PageActions } from "./ReleasesPage";
 import { Stepper } from "./StickyAppLabel";
@@ -108,6 +111,10 @@ function render(s: SheetEntry, c: Ctx): Sheet | null {
 		case "attention":
 		case "rules":
 			return panelSheet(s.kind, c);
+		case "fixes":
+			return { ...fixesSheet(s.fix, c), tabs: panelTabs("fixes", c) };
+		case "fix":
+			return fixSheet(s.hit, s.choice, c);
 		case "key":
 			return keySheet(c);
 		case "llb":
@@ -119,32 +126,6 @@ function render(s: SheetEntry, c: Ctx): Sheet | null {
 		case "sprint":
 			return sprintSheet(s.board, c);
 	}
-}
-
-function Sec({ title, extra, children }: { title: string; extra?: ReactNode; children: ReactNode }) {
-	return (
-		<div className="sec">
-			<div className="sec-h">
-				<span className="rel-eyebrow">{title}</span>
-				{extra}
-			</div>
-			{children}
-		</div>
-	);
-}
-
-function Ext({ url, children }: { url?: string; children: ReactNode }) {
-	return url ? (
-		<a href={url} target="_blank" rel="noreferrer">
-			{children}
-		</a>
-	) : (
-		<>{children}</>
-	);
-}
-
-function appName(b: Board, id: string | undefined): string {
-	return b.apps.find((a) => a.id === id)?.name ?? id ?? "all apps";
 }
 
 function StageRows({ stages, now }: { stages: Stage[]; now: number }) {
@@ -471,86 +452,6 @@ function mismatchSheet(hitId: string, c: Ctx): Sheet {
 	};
 }
 
-function sheetFor(h: AlertHit): SheetEntry | null {
-	if (/^A[1-4]$/.test(h.rule)) return { kind: "mismatch", hit: h.id };
-	if (h.train && h.app) return { kind: "version", train: h.train, app: h.app };
-	if (h.train) return { kind: "train", train: h.train };
-	return null;
-}
-
-function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: Ctx; hidden?: boolean }) {
-	const hide = useHideHit();
-	const unhide = useUnhideHit();
-	const target = sheetFor(h);
-	const who = [
-		h.train ? c.board.trains.find((t) => t.id === h.train)?.label : null,
-		h.app ? appName(c.board, h.app) : null,
-	]
-		.filter(Boolean)
-		.join(" ");
-	return (
-		<div className={`al${hidden ? " dim" : ""}`} data-st={SEVERITY_META[h.severity].tone} data-hit={h.id}>
-			<span className="bar3" />
-			<div>
-				<div className="who">
-					{who || "All apps"}
-					<span className="rid">{h.rule}</span>
-					{h.changedSinceHidden && (
-						<span className="spill" data-st="waiting">
-							changed since hidden
-						</span>
-					)}
-				</div>
-				<div className="tx">{h.text}</div>
-				<div className="acts">
-					{target && !hidden && (
-						<button type="button" onClick={() => c.actions.openSheet(target, "push")}>
-							Show
-						</button>
-					)}
-					{h.link.url && <Ext url={h.link.url}>{h.link.label}</Ext>}
-					{hidden && (
-						<button type="button" onClick={() => unhide.mutate(h.id)}>
-							Restore
-						</button>
-					)}
-				</div>
-			</div>
-			{hidden ? (
-				<span />
-			) : (
-				<button
-					type="button"
-					className="x"
-					title="Hide this alert"
-					aria-label={`Hide ${h.id}`}
-					onClick={() => hide.mutate(h.id)}
-				>
-					<X className="size-3.5" />
-				</button>
-			)}
-		</div>
-	);
-}
-
-function AlertList({ title, hits, c }: { title: string; hits: AlertHit[]; c: Ctx }) {
-	if (!hits.length) return null;
-	return (
-		<Sec
-			title={title}
-			extra={
-				<span className="badge" data-st={SEVERITY_META[hits[0].severity].tone}>
-					{hits.length}
-				</span>
-			}
-		>
-			{hits.map((h) => (
-				<AlertRow key={h.id} h={h} c={c} />
-			))}
-		</Sec>
-	);
-}
-
 function Fold({ label, children, testid }: { label: string; children: ReactNode; testid: string }) {
 	const [open, setOpen] = useState(false);
 	return (
@@ -640,7 +541,8 @@ function AttentionBody({ c }: { c: Ctx }) {
 							<div>
 								<div className="who mono">{s.id}</div>
 								<div className="tx">
-									Hidden {ageText(c.now - Date.parse(s.hiddenAt))} ago{s.reason ? `: ${s.reason}` : ""}
+									Hidden {agoText(c.now - Date.parse(s.hiddenAt))}
+									{s.reason ? `: ${s.reason}` : ""}
 								</div>
 							</div>
 							<span />
@@ -715,6 +617,30 @@ function RulesBody({ c }: { c: Ctx }) {
 	);
 }
 
+const PANEL_TABS = [
+	["attention", "Alerts"],
+	["rules", "Rules"],
+	["fixes", "Fixes"],
+] as const;
+
+function panelTabs(tab: (typeof PANEL_TABS)[number][0], c: Ctx) {
+	return (
+		<div className="tabs" role="tablist">
+			{PANEL_TABS.map(([kind, label]) => (
+				<button
+					key={kind}
+					type="button"
+					role="tab"
+					aria-selected={tab === kind}
+					onClick={() => c.actions.setSearch({ sheet: { kind } })}
+				>
+					{label}
+				</button>
+			))}
+		</div>
+	);
+}
+
 function panelSheet(tab: "attention" | "rules", c: Ctx): Sheet {
 	return {
 		title:
@@ -728,29 +654,12 @@ function panelSheet(tab: "attention" | "rules", c: Ctx): Sheet {
 					</span>
 				</>
 			),
-		tabs: (
-			<div className="tabs" role="tablist">
-				<button
-					type="button"
-					role="tab"
-					aria-selected={tab === "attention"}
-					onClick={() => c.actions.setSearch({ sheet: { kind: "attention" } })}
-				>
-					Alerts
-				</button>
-				<button
-					type="button"
-					role="tab"
-					aria-selected={tab === "rules"}
-					onClick={() => c.actions.setSearch({ sheet: { kind: "rules" } })}
-				>
-					Rules
-				</button>
-			</div>
-		),
+		tabs: panelTabs(tab, c),
 		body: tab === "rules" ? <RulesBody c={c} /> : <AttentionBody c={c} />,
 	};
 }
+
+const KEY_FIX_STATES: readonly FixState[] = ["dry_run", "applied", "withdrawn", "undone", "superseded"];
 
 const KEY_STATUSES = ["done", "running", "waiting", "failed", "unknown", "todo"] as const;
 
@@ -794,6 +703,25 @@ function keySheet(c: Ctx): Sheet {
 						</div>
 					))}
 					<div className="kr">A dashed marker is a conventional date, not one a system records.</div>
+				</Sec>
+				<Sec title="Fixes">
+					<div className="kr">
+						Fix › on an alert shows the exact request a fix would send. Every fix except L3 is a dry run: AO records it
+						and sends nothing to Jira, GitLab or Confluence. L3 applies to AO's own long-lived plan.
+					</div>
+					{KEY_FIX_STATES.map((k) => (
+						<div key={k} className="kr">
+							<span className="dot" data-st={FIX_STATE_META[k].tone} />
+							{FIX_STATE_META[k].text}
+						</div>
+					))}
+					<button
+						type="button"
+						className="lnk mt-1 text-[12.5px]"
+						onClick={() => c.actions.openSheet({ kind: "fixes" }, "push")}
+					>
+						Open the Fixes list ›
+					</button>
 				</Sec>
 				<Sec title="Status colours">
 					{KEY_STATUSES.map((k) => (
