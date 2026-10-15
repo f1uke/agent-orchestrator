@@ -282,4 +282,7 @@ var (
 	ErrNoSuchHit     = errors.New("release trains: no such hit on the board")
 	ErrNotFixable    = errors.New("release trains: this rule has no fix")
 	ErrUnknownChoice = errors.New("release trains: unknown fix choice")
+	ErrNoSuchFix     = errors.New("release trains: no such fix")
+	// ErrFixChanged is a transition from a state the fix has already left.
+	ErrFixChanged = errors.New("release trains: the fix changed state; reload it")
 )

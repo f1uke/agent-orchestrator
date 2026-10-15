@@ -362,6 +362,27 @@ type PromptFingerprint struct {
 	MatchedAt       sql.NullTime
 }
 
+type ReleaseFix struct {
+	ID              string
+	HitID           string
+	RuleID          string
+	Choice          string
+	Plan            string
+	PlanFingerprint string
+	State           string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type ReleaseFixEvent struct {
+	Seq    int64
+	FixID  string
+	At     time.Time
+	Actor  string
+	Kind   string
+	Detail string
+}
+
 type ReleaseHitHide struct {
 	HitID    string
 	Evidence string

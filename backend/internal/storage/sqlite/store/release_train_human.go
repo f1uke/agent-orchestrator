@@ -25,7 +25,12 @@ func (s *Store) LoadReleaseHumanState(ctx context.Context) (rt.HumanState, error
 	if err != nil {
 		return rt.HumanState{}, fmt.Errorf("list release hit hides: %w", err)
 	}
-	human := rt.HumanState{RuleSettings: make(map[rt.RuleID]bool, len(settings)), Hides: make(map[rt.HitID]rt.Hide, len(hides)), Plans: plans}
+	fixes, err := s.qr.ListReleaseFixes(ctx)
+	if err != nil {
+		return rt.HumanState{}, fmt.Errorf("list release fixes: %w", err)
+	}
+	human := rt.HumanState{RuleSettings: make(map[rt.RuleID]bool, len(settings)), Hides: make(map[rt.HitID]rt.Hide, len(hides)), Plans: plans,
+		OpenFixes: openFixes(fixes)}
 	for _, r := range settings {
 		human.RuleSettings[rt.RuleID(r.RuleID)] = r.Enabled
 	}

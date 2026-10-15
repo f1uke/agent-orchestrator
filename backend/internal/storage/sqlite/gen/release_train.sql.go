@@ -77,6 +77,54 @@ func (q *Queries) DeleteUnplannedReleaseResources(ctx context.Context, plannedAt
 	return result.RowsAffected()
 }
 
+const getLiveReleaseFix = `-- name: GetLiveReleaseFix :one
+SELECT id, hit_id, rule_id, choice, "plan", plan_fingerprint, state, created_at, updated_at FROM release_fix
+WHERE hit_id = ? AND plan_fingerprint = ? AND state IN ('dry_run', 'applying', 'applied')
+`
+
+type GetLiveReleaseFixParams struct {
+	HitID           string
+	PlanFingerprint string
+}
+
+func (q *Queries) GetLiveReleaseFix(ctx context.Context, arg GetLiveReleaseFixParams) (ReleaseFix, error) {
+	row := q.db.QueryRowContext(ctx, getLiveReleaseFix, arg.HitID, arg.PlanFingerprint)
+	var i ReleaseFix
+	err := row.Scan(
+		&i.ID,
+		&i.HitID,
+		&i.RuleID,
+		&i.Choice,
+		&i.Plan,
+		&i.PlanFingerprint,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getReleaseFix = `-- name: GetReleaseFix :one
+SELECT id, hit_id, rule_id, choice, "plan", plan_fingerprint, state, created_at, updated_at FROM release_fix WHERE id = ?
+`
+
+func (q *Queries) GetReleaseFix(ctx context.Context, id string) (ReleaseFix, error) {
+	row := q.db.QueryRowContext(ctx, getReleaseFix, id)
+	var i ReleaseFix
+	err := row.Scan(
+		&i.ID,
+		&i.HitID,
+		&i.RuleID,
+		&i.Choice,
+		&i.Plan,
+		&i.PlanFingerprint,
+		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getReleaseLlbPlanVersion = `-- name: GetReleaseLlbPlanVersion :one
 SELECT version FROM release_llb_plan WHERE id = ?
 `
@@ -86,6 +134,61 @@ func (q *Queries) GetReleaseLlbPlanVersion(ctx context.Context, id string) (int6
 	var version int64
 	err := row.Scan(&version)
 	return version, err
+}
+
+const insertReleaseFix = `-- name: InsertReleaseFix :exec
+INSERT INTO release_fix (id, hit_id, rule_id, choice, plan, plan_fingerprint, state, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type InsertReleaseFixParams struct {
+	ID              string
+	HitID           string
+	RuleID          string
+	Choice          string
+	Plan            string
+	PlanFingerprint string
+	State           string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (q *Queries) InsertReleaseFix(ctx context.Context, arg InsertReleaseFixParams) error {
+	_, err := q.db.ExecContext(ctx, insertReleaseFix,
+		arg.ID,
+		arg.HitID,
+		arg.RuleID,
+		arg.Choice,
+		arg.Plan,
+		arg.PlanFingerprint,
+		arg.State,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const insertReleaseFixEvent = `-- name: InsertReleaseFixEvent :exec
+INSERT INTO release_fix_event (fix_id, at, actor, kind, detail) VALUES (?, ?, ?, ?, ?)
+`
+
+type InsertReleaseFixEventParams struct {
+	FixID  string
+	At     time.Time
+	Actor  string
+	Kind   string
+	Detail string
+}
+
+func (q *Queries) InsertReleaseFixEvent(ctx context.Context, arg InsertReleaseFixEventParams) error {
+	_, err := q.db.ExecContext(ctx, insertReleaseFixEvent,
+		arg.FixID,
+		arg.At,
+		arg.Actor,
+		arg.Kind,
+		arg.Detail,
+	)
+	return err
 }
 
 const insertReleaseLlbPlanAccepted = `-- name: InsertReleaseLlbPlanAccepted :exec
@@ -116,6 +219,77 @@ type InsertReleaseLlbPlanBranchParams struct {
 func (q *Queries) InsertReleaseLlbPlanBranch(ctx context.Context, arg InsertReleaseLlbPlanBranchParams) error {
 	_, err := q.db.ExecContext(ctx, insertReleaseLlbPlanBranch, arg.PlanID, arg.AppID, arg.Branch)
 	return err
+}
+
+const listReleaseFixEvents = `-- name: ListReleaseFixEvents :many
+SELECT seq, fix_id, at, actor, kind, detail FROM release_fix_event ORDER BY fix_id, seq
+`
+
+func (q *Queries) ListReleaseFixEvents(ctx context.Context) ([]ReleaseFixEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listReleaseFixEvents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReleaseFixEvent{}
+	for rows.Next() {
+		var i ReleaseFixEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.FixID,
+			&i.At,
+			&i.Actor,
+			&i.Kind,
+			&i.Detail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReleaseFixes = `-- name: ListReleaseFixes :many
+SELECT id, hit_id, rule_id, choice, "plan", plan_fingerprint, state, created_at, updated_at FROM release_fix ORDER BY created_at, id
+`
+
+func (q *Queries) ListReleaseFixes(ctx context.Context) ([]ReleaseFix, error) {
+	rows, err := q.db.QueryContext(ctx, listReleaseFixes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReleaseFix{}
+	for rows.Next() {
+		var i ReleaseFix
+		if err := rows.Scan(
+			&i.ID,
+			&i.HitID,
+			&i.RuleID,
+			&i.Choice,
+			&i.Plan,
+			&i.PlanFingerprint,
+			&i.State,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listReleaseHitHides = `-- name: ListReleaseHitHides :many
@@ -464,6 +638,30 @@ func (q *Queries) ReleaseLlbBranchOwner(ctx context.Context, arg ReleaseLlbBranc
 	var plan_id string
 	err := row.Scan(&plan_id)
 	return plan_id, err
+}
+
+const setReleaseFixState = `-- name: SetReleaseFixState :execrows
+UPDATE release_fix SET state = ?, updated_at = ? WHERE id = ? AND state = ?
+`
+
+type SetReleaseFixStateParams struct {
+	State     string
+	UpdatedAt time.Time
+	ID        string
+	State_2   string
+}
+
+func (q *Queries) SetReleaseFixState(ctx context.Context, arg SetReleaseFixStateParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, setReleaseFixState,
+		arg.State,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.State_2,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const upsertReleaseHitHide = `-- name: UpsertReleaseHitHide :exec
