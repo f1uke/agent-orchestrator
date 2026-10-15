@@ -22,6 +22,10 @@ export function llbGroupsFor(b: Board, app: AppId): LLBGroup[] {
 	});
 }
 
+export function isOpenLlb(g: LLBGroup): boolean {
+	return g.branches.some((b) => !b.landing?.mergedOn && !b.gone);
+}
+
 export function targetTrain(g: LLBGroup): TrainKey | null {
 	return g.target.kind === "planned" || g.target.kind === "landed" ? g.target.train : null;
 }

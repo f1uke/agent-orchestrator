@@ -45,7 +45,6 @@ type ReleasesUi = {
 	setLayer: (k: Layer, on: boolean) => void;
 	toggleFold: (key: string) => void;
 	openFolds: (keys: readonly string[]) => void;
-	showLayer: (k: Layer, folds: readonly string[]) => void;
 	pushBack: (s: SheetEntry) => void;
 	popBack: () => SheetEntry | undefined;
 	clearBack: () => void;
@@ -71,10 +70,6 @@ export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 		const open = new Set([...get().open, ...keys]);
 		writeFolds(open);
 		set({ open });
-	},
-	showLayer: (k, folds) => {
-		get().setLayer(k, true);
-		get().openFolds(folds);
 	},
 	pushBack: (s) => set({ back: [...get().back, s] }),
 	popBack: () => {

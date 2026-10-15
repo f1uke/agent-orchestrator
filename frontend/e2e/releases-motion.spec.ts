@@ -179,7 +179,7 @@ for (const reduced of [false, true]) {
 
 		test("the long-lived line unfolds and folds back, with the bars below moving with it", async ({ page }) => {
 			await open(page);
-			const sum = page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button");
+			const sum = page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]");
 			const bar = page.getByTestId("bar-di-21-2026");
 			const y0 = (await bar.boundingBox())!.y;
 			const lanes = page.locator('.rel-app[data-app="di"]').getByTestId("llb-lane");
@@ -286,7 +286,7 @@ for (const reduced of [false, true]) {
 
 		test("pan and an unfold together leave no clipped label", async ({ page }) => {
 			await open(page);
-			await page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button").click();
+			await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
 			await page.getByTestId("cards-di:21-2026").locator(".csum").click();
 			const sc = page.getByTestId("release-timeline");
 			const box = (await sc.boundingBox())!;

@@ -281,11 +281,6 @@ export function lensSprintCards(row: SprintRow, lens: SprintLens): SprintCard[] 
 	);
 }
 
-export function sprintCount(b: Board, lens: SprintLens): number {
-	const me = lens.me && b.identity.kind === "known";
-	return b.sprints.reduce((n, row) => n + lensSprintCards(row, { ...lens, me }).filter((c) => c.active).length, 0);
-}
-
 export type PillApp = {
 	app: string;
 	platform: BoardApp["platform"];

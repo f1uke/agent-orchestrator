@@ -1,8 +1,9 @@
-import { RefreshCw } from "lucide-react";
+import { GitFork, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRefreshSources } from "../../hooks/useReleaseBoard";
 import { badgeLabel, sourceAges, type Lens } from "../../lib/releases/lens";
 import { appMark } from "../../lib/releases/appMark";
+import { isOpenLlb } from "../../lib/releases/llb";
 import type { Board } from "../../lib/releases/types";
 import type { ReleasesSearch } from "../../lib/releases/url";
 import { SEVERITY_META, SEVERITY_ORDER } from "../../lib/releases/vocab";
@@ -139,6 +140,18 @@ export function TopBar({
 					disabled={refresh.isPending}
 				>
 					<RefreshCw className="size-3" aria-hidden="true" />
+				</button>
+			</SimpleTooltip>
+			<SimpleTooltip label="Every long-lived branch and its plan, dropped ones included">
+				<button
+					type="button"
+					className="rel-chip"
+					data-testid="llbs-button"
+					onClick={() => actions.openSheet({ kind: "llbs" })}
+				>
+					<GitFork className="size-3 text-[var(--purple)]" aria-hidden="true" />
+					Long-lived
+					<b className="n">{board.llbs.filter(isOpenLlb).length}</b>
 				</button>
 			</SimpleTooltip>
 			<button type="button" className="rel-chip" onClick={() => actions.openSheet({ kind: "key" })}>

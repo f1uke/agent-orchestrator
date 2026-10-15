@@ -92,9 +92,6 @@ import { useWikiStatus } from "../hooks/useWiki";
 import { isWaiting, useLearningStatus, useProposals } from "../hooks/useMemory";
 import { useReleaseBoard } from "../hooks/useReleaseBoard";
 import { badgeLabel } from "../lib/releases/lens";
-import { sprintCount, sprintFoldKey } from "../lib/releases/sprint";
-import { parseReleasesSearch } from "../lib/releases/url";
-import { useReleasesUi } from "../stores/releases-ui";
 import { SEVERITY_META, TONE_COLOR } from "../lib/releases/vocab";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
@@ -202,8 +199,6 @@ function useSelection() {
 		goWiki: () => void navigate({ to: "/wiki" }),
 		goMemory: () => void navigate({ to: "/memory" }),
 		goReleases: () => void navigate({ to: "/releases", search: {} }),
-		goAlertRules: () => void navigate({ to: "/releases", search: { sheet: "rules" } }),
-		goLongLived: () => void navigate({ to: "/releases", search: { sheet: "llbs" } }),
 		goGlobalSettings: () => void navigate({ to: "/settings" }),
 		goSettings: (projectId: string) => void navigate({ to: "/projects/$projectId/settings", params: { projectId } }),
 		// Search opens the settings two-pane (where the in-settings search field
@@ -1384,23 +1379,13 @@ function TopDestinations({ selection }: { selection: ReturnType<typeof useSelect
 }
 
 /**
- * The Releases row and its "Alert rules" child. The badge reads the page's
- * cache entry without a poll of its own: the Board is large, and the page
- * polls while it is open.
+ * The Releases row. The badge reads the page's cache entry without a poll of
+ * its own: the Board is large, and the page polls while it is open.
  */
 function ReleasesNavItem({ selection }: { selection: ReturnType<typeof useSelection> }) {
 	const { state } = useSidebar();
 	const board = useReleaseBoard({ poll: false }).data?.board;
 	const badge = board?.alerts.badge;
-	const longLived = board?.llbs.filter((g) => g.branches.some((b) => !b.landing?.mergedOn && !b.gone)).length ?? 0;
-	const search = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>;
-	const lens = selection.isReleases ? parseReleasesSearch(search) : { me: false, apps: null };
-	const sprintCards = board ? sprintCount(board, lens) : 0;
-	const showLayer = useReleasesUi((s) => s.showLayer);
-	const goSprint = () => {
-		showLayer("sprint", (board?.sprints ?? []).map(sprintFoldKey));
-		selection.goReleases();
-	};
 	const showBadge = badge !== undefined && (badge.count > 0 || badge.unknown > 0);
 	const tone = badge?.worst ? TONE_COLOR[SEVERITY_META[badge.worst].tone] : TONE_COLOR.passive;
 	return (
@@ -1446,48 +1431,6 @@ function ReleasesNavItem({ selection }: { selection: ReturnType<typeof useSelect
 						Releases
 					</TooltipContent>
 				</Tooltip>
-				<SidebarMenuSub className="mt-0.5">
-					<SidebarMenuSubItem>
-						<button
-							type="button"
-							onClick={goSprint}
-							className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[12px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-						>
-							<span className="flex-1">Sprint</span>
-							{sprintCards > 0 && (
-								<span className="rounded-full bg-accent-weak px-1.5 font-mono text-[10.5px] font-semibold leading-[17px] text-accent">
-									{sprintCards}
-								</span>
-							)}
-						</button>
-					</SidebarMenuSubItem>
-					<SidebarMenuSubItem>
-						<button
-							type="button"
-							onClick={selection.goLongLived}
-							className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[12px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-						>
-							<span className="flex-1">Long-lived</span>
-							{longLived > 0 && (
-								<span
-									className="rounded-full px-1.5 font-mono text-[10.5px] font-semibold leading-[17px]"
-									style={{ color: "var(--purple)", background: "color-mix(in srgb, var(--purple) 16%, transparent)" }}
-								>
-									{longLived}
-								</span>
-							)}
-						</button>
-					</SidebarMenuSubItem>
-					<SidebarMenuSubItem>
-						<button
-							type="button"
-							onClick={selection.goAlertRules}
-							className="flex h-7 w-full items-center rounded-md px-2 text-left text-[12px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-						>
-							Alert rules
-						</button>
-					</SidebarMenuSubItem>
-				</SidebarMenuSub>
 			</SidebarMenuItem>
 		</SidebarMenu>
 	);

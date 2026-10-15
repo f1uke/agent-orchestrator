@@ -180,7 +180,7 @@ test.describe("releases page", () => {
 		page,
 	}) => {
 		await open(page);
-		const sum = page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button");
+		const sum = page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]");
 		await sum.click();
 		const app = page.locator('.rel-app[data-app="di"]');
 		await expect(app.getByTestId("llb-lane")).toHaveCount(3);
@@ -201,7 +201,7 @@ test.describe("releases page", () => {
 
 	test("the Long-lived layer off hides the line, its lanes and its wires", async ({ page }) => {
 		await open(page);
-		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button").click();
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
 		await expect(page.getByTestId("llb-lane").first()).toBeVisible();
 		await layer(page, "Long-lived").click();
 		await expect(page.getByTestId("llb-summary")).toHaveCount(0);
@@ -220,7 +220,7 @@ test.describe("releases page", () => {
 		await expect(form).toContainText("v1");
 		await expect(page.getByTestId("llb-status")).toContainText("Targets #22");
 		await page.keyboard.press("Escape");
-		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByRole("button").click();
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
 		await expect(page.locator('[data-testid="llb-lane"][data-branch="feature/demo-chat"]')).toContainText("→ #22");
 	});
 
@@ -239,15 +239,52 @@ test.describe("releases page", () => {
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-plan-conflict.png` });
 	});
 
-	test("the sidebar's Long-lived entry counts open groups and opens their list", async ({ page }) => {
+	test("the sidebar has no Releases sub-entries; the page opens the long-lived list, Sprint layer and rules", async ({
+		page,
+	}) => {
 		await open(page);
-		const entry = page.getByRole("button", { name: /^Long-lived\s*2$/ });
+		const nav = page.locator('[data-sidebar="sidebar"]');
+		await expect(nav.getByRole("button", { name: "Releases" })).toBeVisible();
+		for (const name of [/^Sprint/, /^Long-lived/, /^Alert rules$/])
+			await expect(nav.getByRole("button", { name })).toHaveCount(0);
+		await layer(page, "Sprint cards").click();
+		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await page.getByRole("button", { name: /Needs attention/ }).click();
+		await page.getByRole("dialog", { name: "Release details" }).getByRole("tab", { name: "Rules" }).click();
+		await expect(page.locator('.rule[data-rule="L9"]')).toBeVisible();
+		await page.keyboard.press("Escape");
+		const entry = page.getByTestId("llbs-button");
+		await expect(entry).toHaveText(/Long-lived\s*2/);
 		await entry.click();
 		const sheet = page.getByRole("dialog", { name: "Release details" });
 		await expect(sheet).toContainText("Long-lived branches");
 		await expect(sheet).toContainText("Open 2");
 		await sheet.getByRole("button", { name: /Wallet/ }).click();
 		await expect(page.getByTestId("plan-form")).toBeVisible();
+	});
+
+	test("a plan marked dropped by mistake is found from the page and set back to a train", async ({ page }) => {
+		await open(page);
+		await page.evaluate(() => {
+			type Seam = { __aoReleaseBoard?: { board: { llbs: { id: string; target: { kind: string } }[] } } };
+			(globalThis as Seam).__aoReleaseBoard!.board.llbs.find((x) => x.id === "demo-chat")!.target = { kind: "dropped" };
+		});
+		await page.getByRole("button", { name: "Refresh sources" }).click();
+		await expect(page.locator('[data-testid="llb-summary"][data-app="di"]')).toContainText("2 long-lived");
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').getByTestId("llbs-from-line").click();
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		const row = sheet.locator(".lbrow", { hasText: "demo-chat" });
+		await expect(row).toContainText("dropped");
+		await row.click();
+		await expect(page.getByTestId("llb-status")).toContainText("Marked dropped");
+		const form = page.getByTestId("plan-form");
+		await form.getByLabel("Name").fill("Advisor chat");
+		await form.getByRole("group", { name: "Target train" }).getByRole("button", { name: /#22/ }).click();
+		await form.getByRole("button", { name: "Save plan" }).click();
+		await expect(page.getByTestId("llb-status")).toContainText("Targets #22");
+		await page.keyboard.press("Escape");
+		await page.locator('[data-testid="llb-summary"][data-app="di"]').locator(".ls[aria-expanded]").click();
+		await expect(page.locator('[data-testid="llb-lane"][data-branch="feature/demo-chat"]')).toContainText("→ #22");
 	});
 
 	test("the plan form refuses a plan with no name", async ({ page }) => {
@@ -343,16 +380,6 @@ test.describe("releases page", () => {
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sprint-sheet.png` });
 	});
 
-	test("the sidebar's Sprint entry turns the layer on and unfolds every board", async ({ page }) => {
-		await open(page);
-		await expect(page.locator("[data-board]")).toHaveCount(0);
-		await page.getByRole("button", { name: /^Sprint\s*8$/ }).click();
-		await expect(layer(page, "Sprint cards")).toHaveAttribute("aria-pressed", "true");
-		await expect(page.locator("[data-board]")).toHaveCount(2);
-		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-dest-block")).toHaveCount(6);
-		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-dest-block")).toHaveCount(1);
-	});
-
 	test("Only me filters every kind of thing and changes the badge", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
 		await expect(page.getByTestId("attention-count")).toHaveText("8");
@@ -415,20 +442,6 @@ test.describe("releases page", () => {
 		await expect(group.locator(".crow:not(.lbr)")).toHaveCount(6);
 		await expect(group.getByTestId("mine-face")).toHaveCount(0);
 		await expect(group.locator(".crow.mine")).toHaveCount(0);
-	});
-
-	test("the sidebar's Sprint count follows Only me and the app filter", async ({ page }) => {
-		await open(page);
-		const sprint = (n: number) => page.getByRole("button", { name: new RegExp(`^Sprint\\s*${n}$`) });
-		await expect(sprint(8)).toBeVisible();
-		await page.getByTestId("only-me").click();
-		await expect(sprint(2)).toBeVisible();
-		await page.getByTestId("only-me").click();
-		await expect(sprint(8)).toBeVisible();
-		await open(page, "?apps=di");
-		await expect(sprint(4)).toBeVisible();
-		await open(page, "?apps=di&me=1");
-		await expect(sprint(1)).toBeVisible();
 	});
 
 	test("an L9 hit shows in Needs attention with its MR and link", async ({ page }) => {
@@ -742,7 +755,7 @@ for (const [width, height] of [
 	}) => {
 		await page.setViewportSize({ width, height });
 		await open(page, "?layers=sprint,llb,cards,past");
-		for (const s of await page.getByTestId("llb-summary").all()) await s.getByRole("button").click();
+		for (const s of await page.getByTestId("llb-summary").all()) await s.locator(".ls[aria-expanded]").click();
 		for (const g of await page.locator(".rel-cg .csum").all()) await g.click();
 		for (const d of await page.locator(".rel-cg.dest .dsum").all()) await d.click();
 		await page.waitForTimeout(100);

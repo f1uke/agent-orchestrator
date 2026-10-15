@@ -40,27 +40,37 @@ export function LongLivedSummary({
 	return (
 		<>
 			<div className="rel-llbsum" style={{ top: 6, width }} data-testid="llb-summary" data-app={app}>
-				<button type="button" className="ls" aria-expanded={open} onClick={() => toggle(key)}>
-					<Chev open={open} />
-					<GitFork className="ic size-3" aria-hidden="true" />
-					<b>
-						{groups.length} long-lived{mine ? " of mine" : ""}
-					</b>
-					{due.length > 0 && focus && (
-						<>
-							<span className="sep">·</span>
-							<span className="c" data-st={urgency(due[0], board)}>
-								{due.map((g) => g.plan?.name ?? g.name).join(", ")} → {focus.label}
-							</span>
-						</>
-					)}
-					{none > 0 && (
-						<>
-							<span className="sep">·</span>
-							<span className="passive">{none} no target</span>
-						</>
-					)}
-				</button>
+				<span className="lsrow">
+					<button type="button" className="ls" aria-expanded={open} onClick={() => toggle(key)}>
+						<Chev open={open} />
+						<GitFork className="ic size-3" aria-hidden="true" />
+						<b>
+							{groups.length} long-lived{mine ? " of mine" : ""}
+						</b>
+						{due.length > 0 && focus && (
+							<>
+								<span className="sep">·</span>
+								<span className="c" data-st={urgency(due[0], board)}>
+									{due.map((g) => g.plan?.name ?? g.name).join(", ")} → {focus.label}
+								</span>
+							</>
+						)}
+						{none > 0 && (
+							<>
+								<span className="sep">·</span>
+								<span className="passive">{none} no target</span>
+							</>
+						)}
+					</button>
+					<button
+						type="button"
+						className="ls all"
+						data-testid="llbs-from-line"
+						onClick={() => actions.openSheet({ kind: "llbs" })}
+					>
+						All long-lived ›
+					</button>
+				</span>
 			</div>
 			<Fade show={open}>
 				<svg className="rel-wires" width={width} height={height} data-testid="llb-wires" aria-hidden="true">

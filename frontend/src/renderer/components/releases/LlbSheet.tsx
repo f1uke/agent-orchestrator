@@ -2,7 +2,7 @@ import { GitFork, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useSavePlan } from "../../hooks/useReleaseBoard";
 import { dayDiff, dayLabel, shortDay } from "../../lib/releases/day";
-import { branchState, targetChip, trainLabel, urgency } from "../../lib/releases/llb";
+import { branchState, isOpenLlb, targetChip, trainLabel, urgency } from "../../lib/releases/llb";
 import {
 	draftDirty,
 	draftFrom,
@@ -393,7 +393,6 @@ export function llbsSheet(
 	keep: (g: LLBGroup) => boolean,
 ): { title: ReactNode; body: ReactNode } {
 	const groups = board.llbs.filter(keep);
-	const active = (g: LLBGroup) => g.branches.some((b) => !b.landing?.mergedOn && !b.gone);
 	const row = (g: LLBGroup) => {
 		const chip = targetChip(g, board);
 		const n = new Set(g.branches.flatMap((b) => b.cards.map((c) => c.key))).size;
@@ -430,8 +429,8 @@ export function llbsSheet(
 			</button>
 		);
 	};
-	const open = groups.filter(active);
-	const done = groups.filter((g) => !active(g));
+	const open = groups.filter(isOpenLlb);
+	const done = groups.filter((g) => !isOpenLlb(g));
 	return {
 		title: (
 			<>
