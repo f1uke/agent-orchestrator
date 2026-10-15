@@ -118,7 +118,8 @@ export function makeLens(b: Board, url: ReleasesSearch): Lens {
 		keepVersion: keep,
 		keepCard: keep,
 		keepHotfix: keep,
-		sprintCards: (row) => row.cards.filter((c) => c.status !== "Abandoned" && keep(c)),
+		sprintCards: (row) =>
+			row.cards.filter((c) => c.status !== "Abandoned" && keep(c) && (!c.mrs.length || c.mrs.some((m) => on(m.app)))),
 		llbs: b.llbs.filter(keep),
 	};
 }

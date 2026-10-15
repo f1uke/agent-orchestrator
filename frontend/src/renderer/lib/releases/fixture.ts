@@ -177,6 +177,8 @@ const RULES: [string, Severity, string][] = [
 function withCards(b: Board): Board {
 	attachCards(b);
 	b.llbs = demoLlbs(b);
+	b.sprints = demoSprints(b);
+	markMine(b);
 	return b;
 }
 
@@ -341,24 +343,7 @@ function baseBoard(today: string): Board {
 				},
 			},
 		],
-		sprints: [
-			{
-				board: { id: 1, key: "DEMO", ownsSprintBranch: true },
-				number: 20,
-				sprint: {
-					board: 1,
-					id: 20,
-					name: "DEMO 20",
-					url: `${JIRA}/sprint/20`,
-					start: addDays(f21, -8),
-					end: addDays(f21, 6),
-				},
-				cards: [],
-				dests: [],
-				counts: { new: 0, carriedDone: 0, carriedWithMrs: 0 },
-				total: 0,
-			},
-		],
+		sprints: [],
 		llbs: [],
 		mismatches: [{ kind: "version", app: "pi", train: "21-2026", version: "1.0.2" }],
 		sources: [
@@ -598,6 +583,266 @@ function demoLlbs(b: Board): Board["llbs"] {
 			target: { kind: "none" },
 		},
 	];
+}
+
+type SprintCard = Board["sprints"][number]["cards"][number];
+type SprintMR = SprintCard["mrs"][number];
+type Route = SprintCard["routes"][number];
+type Dest = Route["to"];
+
+function sprintMr(
+	app: string,
+	iid: number,
+	target: string,
+	dest: SprintMR["dest"],
+	who: number,
+	merged?: string,
+): SprintMR {
+	return {
+		app,
+		iid,
+		url: `${HOST}/merge_requests/${iid}`,
+		title: `MR ${iid}`,
+		state: merged ? "merged" : "opened",
+		source: `feat/demo-${iid}`,
+		target,
+		author: PEOPLE[who][1],
+		created: merged ?? "2026-01-01",
+		...(merged ? { merged } : {}),
+		dest,
+	};
+}
+
+function sprintCard(
+	key: string,
+	summary: string,
+	who: number,
+	status: [string, string],
+	why: SprintCard["activeWhy"],
+	mrs: SprintMR[],
+	routes: Route[],
+	over: Partial<SprintCard> = {},
+): SprintCard {
+	const [accountId, name] = PEOPLE[who];
+	return {
+		key,
+		summary,
+		url: `${JIRA}/browse/${key}`,
+		status: status[0],
+		statusCategory: status[1],
+		assignee: { accountId, name },
+		subtasks: [],
+		mrs,
+		routes,
+		onBoard: true,
+		active: why.length > 0,
+		activeWhy: why,
+		...over,
+	};
+}
+
+const destId = (d: Dest) =>
+	d.kind === "train" ? `t:${d.train}` : d.kind === "llb" ? `l:${d.group}` : d.kind === "before" ? "early" : d.kind;
+const DEST_RANK: Readonly<Record<Dest["kind"], number>> = { before: 0, train: 1, llb: 2, off: 3, none: 4 };
+
+function sprintRow(board: Board["sprints"][number]["board"], start: string, end: string, cards: SprintCard[]) {
+	const dests = new Map<string, { to: Dest; count: number; keys: string[] }>();
+	for (const c of cards.filter((x) => x.active))
+		for (const to of c.routes.length ? c.routes.map((r) => r.to) : [{ kind: "none" } as Dest]) {
+			const d = dests.get(destId(to)) ?? { to, count: 0, keys: [] as string[] };
+			if (!d.keys.includes(c.key)) {
+				d.keys.push(c.key);
+				d.count++;
+			}
+			dests.set(destId(to), d);
+		}
+	const active = cards.filter((c) => c.active);
+	const isNew = active.filter((c) => c.activeWhy[0] === "new this sprint").length;
+	return {
+		board,
+		number: 20,
+		sprint: {
+			board: board.id,
+			id: board.id * 100 + 20,
+			name: `${board.key} 20`,
+			url: `${JIRA}/sprint/${board.id}`,
+			start,
+			end,
+		},
+		cards,
+		dests: [...dests.values()].sort((a, b) => DEST_RANK[a.to.kind] - DEST_RANK[b.to.kind]),
+		counts: { new: isNew, carriedWithMrs: active.length - isNew, carriedDone: cards.length - active.length },
+		total: cards.length + 9,
+	};
+}
+
+function demoSprints(b: Board): Board["sprints"] {
+	const f21 = b.trains.find((t) => t.id === "21-2026")?.freeze ?? b.today;
+	const start = addDays(f21, -8);
+	const end = addDays(f21, 6);
+	const day = (n: number) => addDays(start, n);
+	const sprintBranch = "feature/sprint-2026-20";
+	const t21: Dest = { kind: "train", train: "21-2026" };
+	const wallet: Dest = { kind: "llb", group: "demo-wallet", branch: "feature/demo-wallet", via: "22-2026" };
+	const route = (app: string, kind: Route["kind"], to: Dest, mr: number, over: Partial<Route> = {}): Route => ({
+		app,
+		kind,
+		to,
+		mr,
+		...over,
+	});
+	const ready: [string, string] = ["Ready for UAT", "indeterminate"];
+	const doing: [string, string] = ["In Progress", "indeterminate"];
+	const review: [string, string] = ["Pull Request", "indeterminate"];
+	const todo: [string, string] = ["To Do", "new"];
+	const done: [string, string] = ["Done", "done"];
+	const demo = [
+		sprintCard(
+			"DEMO-301",
+			"Filter the fund list by risk level",
+			0,
+			review,
+			["new this sprint"],
+			[sprintMr("di", 401, sprintBranch, "sprint", 0, day(2)), sprintMr("da", 402, sprintBranch, "sprint_open", 0)],
+			[route("di", "sprint", t21, 401), route("da", "sprint_open", t21, 402)],
+			{
+				mine: [{ why: "assignee" }],
+				subtasks: [
+					{
+						key: "DEMO-311",
+						summary: "iOS filter sheet",
+						status: "Done",
+						statusCategory: "done",
+						mobile: true,
+						assignee: { accountId: "acc-ada", name: "Ada Example" },
+					},
+					{
+						key: "DEMO-312",
+						summary: "Android filter sheet",
+						status: "In Progress",
+						statusCategory: "indeterminate",
+						mobile: true,
+						assignee: { accountId: "acc-ben", name: "Ben Sample" },
+					},
+				],
+			},
+		),
+		sprintCard(
+			"DEMO-302",
+			"Statement as PDF",
+			1,
+			doing,
+			["new this sprint"],
+			[
+				sprintMr("di", 403, "feature/demo-wallet", "llb", 1, day(3)),
+				sprintMr("da", 404, sprintBranch, "sprint", 1, day(4)),
+			],
+			[route("di", "llb", wallet, 403), route("da", "sprint", t21, 404)],
+		),
+		sprintCard(
+			"DEMO-303",
+			"Fix the login copy",
+			2,
+			ready,
+			["MR this sprint"],
+			[sprintMr("pi", 405, "develop", "develop", 2, day(1))],
+			[route("pi", "develop", { kind: "off" }, 405)],
+		),
+		sprintCard("DEMO-304", "Rate card for the new fees", 3, todo, ["new this sprint"], [], [], {
+			subtasks: [{ key: "DEMO-314", summary: "iOS rate card", status: "To Do", statusCategory: "new", mobile: true }],
+		}),
+		sprintCard(
+			"DEMO-305",
+			"Price alert sound",
+			4,
+			review,
+			["new this sprint"],
+			[sprintMr("di", 406, sprintBranch, "sprint", 4, day(5))],
+			[route("di", "sprint", t21, 406, { plan: "22-2026", mismatch: true })],
+		),
+		sprintCard(
+			"DEMO-306",
+			"Onboarding copy",
+			5,
+			ready,
+			["MR this sprint"],
+			[sprintMr("pa", 407, "develop", "before", 5, addDays(start, -40))],
+			[route("pa", "before", { kind: "before", train: "20-2026" }, 407)],
+		),
+		sprintCard(
+			"DEMO-307",
+			"Dark mode for charts",
+			6,
+			done,
+			[],
+			[sprintMr("di", 408, "feature/sprint-2026-19", "prev", 6, addDays(start, -3))],
+			[route("di", "prev", t21, 408)],
+		),
+		sprintCard(
+			"DEMO-308",
+			"Wallet receipt email",
+			7,
+			done,
+			[],
+			[sprintMr("da", 409, "feature/demo-wallet", "llb", 7, addDays(start, -5))],
+			[route("da", "llb", wallet, 409)],
+			{ mine: [{ why: "subtask", ref: "DEMO-318" }] },
+		),
+	];
+	const pilot = [
+		sprintCard(
+			"PIL-11",
+			"Chart colours for the pilot app",
+			8,
+			doing,
+			["new this sprint"],
+			[sprintMr("pi", 410, sprintBranch, "sprint", 8, day(3)), sprintMr("pa", 411, sprintBranch, "sprint_open", 0)],
+			[route("pi", "sprint", t21, 410), route("pa", "sprint_open", t21, 411)],
+			{ mine: [{ why: "mr_author", ref: "!411" }] },
+		),
+		sprintCard(
+			"PIL-12",
+			"Pilot settings icon",
+			2,
+			review,
+			["MR this sprint"],
+			[sprintMr("pa", 412, sprintBranch, "sprint_open", 2)],
+			[route("pa", "sprint_open", t21, 412)],
+			{ onBoard: false },
+		),
+	];
+	return [
+		sprintRow({ id: 1, key: "DEMO", ownsSprintBranch: true }, start, end, demo),
+		sprintRow({ id: 2, key: "PILOT", ownsSprintBranch: false }, start, end, pilot),
+	];
+}
+
+function markMine(b: Board): void {
+	const di21 = b.trains.find((t) => t.id === "21-2026")?.versions.find((v) => v.app === "di");
+	if (di21) {
+		di21.mine = [{ why: "release_mr_author", ref: "!77" }];
+		for (const u of di21.cards) if (u.assignee?.accountId === "acc-ada") u.mine = [{ why: "assignee" }];
+	}
+	for (const h of b.alerts.hits)
+		if (h.app === "di" && h.train === "21-2026") h.mine = [{ why: "release_mr_author", ref: "!77" }];
+	for (const h of b.hotfixes) h.mine = [{ why: "mr_author", ref: "!88" }];
+	const wallet = b.llbs.find((g) => g.id === "demo-wallet");
+	if (wallet) wallet.mine = [{ why: "card", ref: "DEMO-108" }];
+}
+
+function stripMine(v: unknown): void {
+	if (Array.isArray(v)) v.forEach(stripMine);
+	else if (v && typeof v === "object") {
+		delete (v as { mine?: unknown }).mine;
+		Object.values(v).forEach(stripMine);
+	}
+}
+
+export function unknownIdentityBoard(today: string): Board {
+	const b = demoBoard(today);
+	stripMine(b);
+	b.identity = { kind: "unknown", reason: "gitlab.user has not been read yet" };
+	return b;
 }
 
 export function failedSourceBoard(today: string): Board {

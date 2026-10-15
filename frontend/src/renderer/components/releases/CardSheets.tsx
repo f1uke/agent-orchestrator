@@ -3,7 +3,16 @@ import { jiraUrl, statusTone } from "../../lib/releases/cards";
 import { shortDay } from "../../lib/releases/day";
 import { shortBranch } from "../../lib/releases/llb";
 import type { Lens } from "../../lib/releases/lens";
-import { DEST_META, destLabel, mineText } from "../../lib/releases/sprint";
+import {
+	DEST_META,
+	destBlocks,
+	destHead,
+	destKey,
+	destLabel,
+	leadKind,
+	mineText,
+	sprintShipsIn,
+} from "../../lib/releases/sprint";
 import type { Board, CardUnit, MineReason, SprintCard, SprintRow, Train } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
 import { CardLine, Face, JiraKey } from "./CardGroups";
@@ -74,7 +83,9 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 		),
 		body: (
 			<>
-				<div className="sec text-[14px]">{summary}</div>
+				<div className="sec text-[14px]" data-testid="card-summary">
+					{summary}
+				</div>
 				<div className="sec kv">
 					<span>Assignee</span>
 					<span className="inline-flex items-center gap-1.5">
@@ -167,7 +178,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 										<span className="c" data-st={m.tone}>
 											{m.label}
 										</span>{" "}
-										→ {destLabel(b, r.to)}
+										· <span data-testid="card-route-to">{destLabel(b, r.to).replace(/^→ /, "ships in ")}</span>
 										{r.mismatch && (
 											<span className="c" data-st="failed">
 												{" "}
@@ -175,7 +186,7 @@ export function cardSheet(key: string, c: Ctx): Sheet {
 											</span>
 										)}
 									</span>
-									<span />
+									<span className="mono passive text-[11px]">{mrs.find((x) => x.iid === r.mr)?.target ?? ""}</span>
 									<span className="d">
 										{mrs.map((x) => (
 											<div key={x.iid}>
@@ -220,8 +231,11 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 	const row = c.board.sprints.find((s) => s.board.key === boardKey);
 	if (!row)
 		return { title: boardKey, body: <div className="sec empty">This board has no active sprint on the Board.</div> };
-	const ships = c.board.trains.find((t) => t.label === `#${row.number + 1}`);
+	const ships = row.board.ownsSprintBranch ? sprintShipsIn(c.board, row) : undefined;
 	const cards = c.lens.sprintCards(row);
+	const active = cards.filter((x) => x.active);
+	const isNew = active.filter((x) => x.activeWhy.includes("new this sprint")).length;
+	const shown = cards.length === row.cards.length ? "" : ` ${cards.length} shown with the current filter.`;
 	return {
 		title: (
 			<>
@@ -259,9 +273,9 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 						</>
 					)}
 					<span>Cards</span>
-					<span>
-						{row.counts.new} new this sprint, {row.counts.carriedWithMrs} carried over with MRs or open mobile work,{" "}
-						{row.counts.carriedDone} carried over with mobile done. {row.total} on the board in all.
+					<span data-testid="sprint-sheet-cards">
+						{isNew} new this sprint, {active.length - isNew} carried over with MRs or open mobile work,{" "}
+						{cards.length - active.length} carried over with mobile done. {row.total} on the board in all.{shown}
 					</span>
 					<span>Jira</span>
 					<span>
@@ -271,32 +285,35 @@ export function sprintSheet(boardKey: string, c: Ctx): Sheet {
 					</span>
 				</div>
 				<Sec title="Where each card ships">
-					{row.dests.map((d) => {
-						const keys = new Set(d.keys);
-						const list = cards.filter((x) => keys.has(x.key));
-						if (!list.length) return null;
+					{destBlocks(row, cards).map((bk) => {
+						const h = destHead(c.board, bk.to, bk.cards);
 						return (
-							<div key={JSON.stringify(d.to)} className="dgrp" data-testid="sprint-dest">
+							<div key={bk.key} className="dgrp" data-st={h.tone} data-testid="sprint-dest">
 								<div className="dgh">
-									{destLabel(c.board, d.to)}
-									<i>{list.length}</i>
+									{h.to}
+									{h.target && ` ${h.target.text}`}
+									<i>{bk.cards.length}</i>
 								</div>
-								{list.map((card) => (
-									<CardLine
-										key={card.key}
-										glyph="·"
-										glyphTone={statusTone(card.status, card.statusCategory)}
-										glyphTitle={card.status}
-										person={card.assignee}
-										k={card.key}
-										url={card.url}
-										summary={card.summary}
-										status={card.status}
-										statusCategory={card.statusCategory}
-										className="wide"
-										onOpen={() => c.actions.openSheet({ kind: "card", key: card.key }, "push")}
-									/>
-								))}
+								{bk.cards.map((card) => {
+									const lead =
+										DEST_META[leadKind(bk.to ? card.routes.filter((r) => destKey(r.to) === bk.key) : card.routes)];
+									return (
+										<CardLine
+											key={card.key}
+											glyph={lead.glyph}
+											glyphTone={lead.tone}
+											glyphTitle={lead.label}
+											person={card.assignee}
+											k={card.key}
+											url={card.url}
+											summary={card.summary}
+											status={card.status}
+											statusCategory={card.statusCategory}
+											className="wide"
+											onOpen={() => c.actions.openSheet({ kind: "card", key: card.key }, "push")}
+										/>
+									);
+								})}
 							</div>
 						);
 					})}

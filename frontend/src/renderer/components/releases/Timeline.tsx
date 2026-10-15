@@ -141,19 +141,11 @@ export function Timeline({
 								))}
 						</div>
 					</div>
+					{layers.sprint &&
+						board.sprints.map((row) => (
+							<BoardSprintRow key={row.board.key} row={row} board={board} tl={tl} lens={lens} actions={actions} />
+						))}
 				</div>
-				{layers.sprint &&
-					board.sprints.map((row) => (
-						<BoardSprintRow
-							key={row.board.key}
-							row={row}
-							board={board}
-							tl={tl}
-							lens={lens}
-							apps={lens.apps}
-							actions={actions}
-						/>
-					))}
 				{lens.apps.map((a) => (
 					<AppRow key={a.id} app={a} board={board} tl={tl} url={url} lens={lens} layers={layers} actions={actions} />
 				))}

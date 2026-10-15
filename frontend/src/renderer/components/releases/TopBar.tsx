@@ -2,7 +2,8 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRefreshSources } from "../../hooks/useReleaseBoard";
 import { badgeLabel, sourceAges, type Lens } from "../../lib/releases/lens";
-import type { Board, BoardApp } from "../../lib/releases/types";
+import { shortAppName } from "../../lib/releases/sprint";
+import type { Board } from "../../lib/releases/types";
 import type { ReleasesSearch } from "../../lib/releases/url";
 import { SEVERITY_META, SEVERITY_ORDER } from "../../lib/releases/vocab";
 import { SimpleTooltip } from "../ui/tooltip";
@@ -32,11 +33,6 @@ function OnlyMe({ board, on, onToggle }: { board: Board; on: boolean; onToggle: 
 			</button>
 		</SimpleTooltip>
 	);
-}
-
-export function shortAppName(a: BoardApp): string {
-	const family = a.name.replace(/\s*(iOS|Android)\s*$/i, "").trim() || a.family;
-	return `${family.slice(0, 3)} ${a.platform === "ios" ? "iOS" : "And"}`;
 }
 
 function useNow(ms: number): number {

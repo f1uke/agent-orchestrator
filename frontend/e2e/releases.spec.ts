@@ -6,7 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const SHOTS = process.env.AO_RELEASES_SHOTS;
 
-async function open(page: Page, query = "", variant?: "failed-source") {
+async function open(page: Page, query = "", variant?: "failed-source" | "identity-unknown") {
 	await page.addInitScript((v) => {
 		try {
 			if (!sessionStorage.getItem("releases-spec")) {
@@ -280,6 +280,136 @@ test.describe("releases page", () => {
 		await expect(form.getByRole("button", { name: "Save plan" })).toBeDisabled();
 	});
 
+	test("the Sprint cards layer adds one row per board with its three-line label", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		const demo = page.getByTestId("sprint-row-DEMO");
+		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(demo.locator(".rel-lab .spn")).toContainText(/DEMO 20\s*\d+ \w+ → \d+ \w+/);
+		await expect(demo.getByTestId("sprint-scope")).toHaveText("4 new · 2 carried with MRs · 2 carried, done");
+		await expect(demo.getByTestId("sprint-dests")).toHaveText(/<#20 1\s*#21 3\s*⑂ 1\s*off 1\s*no MR 1/);
+		const label = await demo.locator(".rel-lab").boundingBox();
+		expect(label!.height).toBeGreaterThanOrEqual(76);
+		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-scope")).toHaveText(
+			"1 new · 1 carried with MRs",
+		);
+	});
+
+	test("a board row unfolds into destinations at their train, wired from the sprint, with MR pills by destination", async ({
+		page,
+	}) => {
+		await open(page, "?layers=sprint,llb,cards");
+		const demo = page.getByTestId("sprint-row-DEMO");
+		await demo.locator(".spsrc .csum").click();
+		const blocks = demo.getByTestId("sprint-dest-block");
+		await expect(blocks).toHaveCount(6);
+		await expect(blocks.locator(".dsum .to")).toHaveText([
+			"→ before #20",
+			"→ #21",
+			"⑂ demo-wallet",
+			"! off the sprint flow",
+			"· not routed yet",
+			"↺ carried over",
+		]);
+		const t21 = demo.locator('[data-dest="t:21-2026"]');
+		await expect(t21.locator(".dsum")).toContainText("2.4.0");
+		await expect(t21.locator(".dsum")).toContainText("3 cards");
+		await expect(t21.locator(".dsum")).toContainText("1 not as planned");
+		const freeze = await page.getByTestId("bar-di-21-2026").boundingBox();
+		const block = await t21.boundingBox();
+		expect(Math.abs(block!.x - freeze!.x)).toBeLessThan(40);
+		await expect(demo.locator('[data-dest="l:demo-wallet"] .dsum')).toContainText("then → #22");
+		const wires = demo.getByTestId("sprint-wires");
+		await expect(wires.locator("g[data-wire]")).toHaveCount(4);
+		await expect(wires.getByTestId("via-wire")).toContainText("#22");
+
+		await t21.locator(".dsum").click();
+		const row = t21.locator('.crow[data-key="DEMO-301"]');
+		await expect(row).toContainText("Filter the fund list by risk level");
+		const glyphs = row.getByTestId("mr-glyph");
+		await expect(glyphs).toHaveCount(2);
+		await expect(glyphs.nth(0)).toHaveAttribute("data-kind", "sprint");
+		await expect(glyphs.nth(0)).toHaveAttribute("data-st", "done");
+		await expect(glyphs.nth(1)).toHaveAttribute("data-kind", "sprint_open");
+		await expect(glyphs.nth(1)).toHaveAttribute("data-st", "running");
+		await expect(glyphs.nth(1)).toHaveAttribute("href", /merge_requests\/402$/);
+		const split = t21.locator('.crow[data-key="DEMO-302"]').getByTestId("mr-glyph");
+		await expect(split.and(page.locator('[data-app="di"]'))).toHaveClass(/away/);
+		await expect(t21.locator('.crow[data-key="DEMO-305"]')).toContainText("page says #22");
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sprint-unfolded.png` });
+		await demo.locator(".spsrc .csum").click();
+		await expect(demo.getByTestId("sprint-dest-block")).toHaveCount(0);
+	});
+
+	test("a board label opens the sprint sheet, and a card in it opens the full card sheet", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		await page.getByTestId("sprint-row-DEMO").locator(".rel-lab").click();
+		const sheet = page.getByRole("dialog", { name: "Release details" });
+		await expect(sheet.getByRole("button", { name: "Train #21" })).toBeVisible();
+		await expect(sheet.getByTestId("sprint-sheet-cards")).toContainText(
+			"4 new this sprint, 2 carried over with MRs or open mobile work, 2 carried over with mobile done.",
+		);
+		await expect(sheet.getByTestId("sprint-dest")).toHaveCount(6);
+		await sheet.locator('.crow[data-key="DEMO-301"]').click();
+		await expect(sheet.getByTestId("card-summary")).toHaveText("Filter the fund list by risk level");
+		const routes = sheet.getByTestId("card-route");
+		await expect(routes).toHaveCount(2);
+		await expect(routes.nth(0)).toContainText("Demo iOS · sprint branch · ships in #21");
+		await expect(routes.nth(1)).toContainText("MR open → sprint branch");
+		await expect(routes.nth(1)).toContainText("!402");
+		await expect(sheet.getByText("Subtasks (2)")).toBeVisible();
+		await expect(sheet.locator('.crow[data-key="DEMO-312"]')).toContainText("In Progress");
+		await expect(sheet.getByTestId("card-mine")).toHaveText("assignee");
+		await sheet.getByRole("button", { name: "DEMO 20" }).click();
+		await expect(sheet.getByTestId("sprint-sheet-cards")).toBeVisible();
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-sprint-sheet.png` });
+	});
+
+	test("the sidebar's Sprint entry turns the layer on and unfolds every board", async ({ page }) => {
+		await open(page);
+		await expect(page.locator("[data-board]")).toHaveCount(0);
+		await page.getByRole("button", { name: /^Sprint\s*8$/ }).click();
+		await expect(layer(page, "Sprint cards")).toHaveAttribute("aria-pressed", "true");
+		await expect(page.locator("[data-board]")).toHaveCount(2);
+		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-dest-block")).toHaveCount(6);
+		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-dest-block")).toHaveCount(1);
+	});
+
+	test("Only me filters every kind of thing and changes the badge", async ({ page }) => {
+		await open(page, "?layers=sprint,llb,cards");
+		await expect(page.getByTestId("attention-count")).toHaveText("6");
+		await page.getByTestId("only-me").click();
+		await expect(page).toHaveURL(/me=%221%22/);
+		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
+		await expect(page.getByTestId("attention-count")).toHaveText("2");
+		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveText(
+			"your release MR !77 · 1 of my card",
+		);
+		await expect(page.getByTestId("label-da").getByTestId("label-mine")).toHaveText("Nothing of mine in #21");
+		await expect(page.getByTestId("bar-da-21-2026")).toHaveClass(/notmine/);
+		await expect(page.getByTestId("bar-di-21-2026")).not.toHaveClass(/notmine/);
+		await expect(page.getByTestId("cards-di:21-2026")).toContainText("1 card of mine");
+		await expect(page.getByTestId("cards-da:21-2026")).toHaveCount(0);
+		await expect(page.locator('[data-testid="llb-summary"][data-app="di"]')).toContainText("1 long-lived of mine");
+		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-scope")).toHaveText("1 new · 1 carried, done");
+		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-scope")).toHaveText("1 new");
+		await page.getByRole("button", { name: /Needs attention/ }).click();
+		await expect(page.locator(".al[data-hit]")).toHaveCount(2);
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-only-me.png` });
+	});
+
+	test("with the identity unknown Only me is disabled with the reason and ?me=1 filters nothing", async ({ page }) => {
+		await open(page, "?me=1", "identity-unknown");
+		const toggle = page.getByTestId("only-me");
+		await expect(toggle).toBeDisabled();
+		await expect(toggle).toHaveAttribute("aria-pressed", "false");
+		await toggle.hover({ force: true });
+		await expect(page.getByRole("tooltip")).toContainText(
+			"Only me needs your Jira and GitLab accounts: gitlab.user has not been read yet",
+		);
+		await expect(page.getByTestId("attention-count")).toHaveText("6");
+		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveCount(0);
+	});
+
 	test("with no config the page says how to make one", async ({ page }) => {
 		await page.addInitScript(() => {
 			(globalThis as { __aoReleaseBoard?: unknown }).__aoReleaseBoard = {
@@ -315,9 +445,10 @@ for (const [width, height] of [
 		page,
 	}) => {
 		await page.setViewportSize({ width, height });
-		await open(page, "?layers=llb,cards,past");
+		await open(page, "?layers=sprint,llb,cards,past");
 		for (const s of await page.getByTestId("llb-summary").all()) await s.getByRole("button").click();
 		for (const g of await page.locator(".rel-cg .csum").all()) await g.click();
+		for (const d of await page.locator(".rel-cg.dest .dsum").all()) await d.click();
 		await page.waitForTimeout(100);
 		const report = await page.evaluate(() => {
 			const vw = innerWidth;
@@ -330,7 +461,9 @@ for (const [width, height] of [
 				);
 				return !!h && (h === e || e.contains(h) || h.contains(e));
 			};
-			const els = [...document.querySelectorAll(".bl, .sl, .lb-lbl, .csum, .ls, .rel-lyr")].filter((e) => {
+			const els = [
+				...document.querySelectorAll(".bl, .sl, .lb-lbl, .csum, .ls, .rel-lyr, .dsum, .rel-sprow .crow"),
+			].filter((e) => {
 				const r = e.getBoundingClientRect();
 				const visible = r.width > 0 && r.height > 0 && r.right > 0 && r.left < vw && r.top < vh && r.bottom > 0;
 				return visible && getComputedStyle(e).visibility !== "hidden" && !e.closest(".tight") && seen(e);

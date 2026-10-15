@@ -92,6 +92,8 @@ import { useWikiStatus } from "../hooks/useWiki";
 import { isWaiting, useLearningStatus, useProposals } from "../hooks/useMemory";
 import { useReleaseBoard } from "../hooks/useReleaseBoard";
 import { badgeLabel } from "../lib/releases/lens";
+import { sprintCount, sprintFoldKey } from "../lib/releases/sprint";
+import { useReleasesUi } from "../stores/releases-ui";
 import { SEVERITY_META, TONE_COLOR } from "../lib/releases/vocab";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
 import { IdleStatusChip } from "./IdleStatusChip";
@@ -1390,6 +1392,12 @@ function ReleasesNavItem({ selection }: { selection: ReturnType<typeof useSelect
 	const board = useReleaseBoard({ poll: false }).data?.board;
 	const badge = board?.alerts.badge;
 	const longLived = board?.llbs.filter((g) => g.branches.some((b) => !b.landing?.mergedOn && !b.gone)).length ?? 0;
+	const sprintCards = board ? sprintCount(board) : 0;
+	const showLayer = useReleasesUi((s) => s.showLayer);
+	const goSprint = () => {
+		showLayer("sprint", (board?.sprints ?? []).map(sprintFoldKey));
+		selection.goReleases();
+	};
 	const showBadge = badge !== undefined && (badge.count > 0 || badge.unknown > 0);
 	const tone = badge?.worst ? TONE_COLOR[SEVERITY_META[badge.worst].tone] : TONE_COLOR.passive;
 	return (
@@ -1436,6 +1444,20 @@ function ReleasesNavItem({ selection }: { selection: ReturnType<typeof useSelect
 					</TooltipContent>
 				</Tooltip>
 				<SidebarMenuSub className="mt-0.5">
+					<SidebarMenuSubItem>
+						<button
+							type="button"
+							onClick={goSprint}
+							className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[12px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+						>
+							<span className="flex-1">Sprint</span>
+							{sprintCards > 0 && (
+								<span className="rounded-full bg-accent-weak px-1.5 font-mono text-[10.5px] font-semibold leading-[17px] text-accent">
+									{sprintCards}
+								</span>
+							)}
+						</button>
+					</SidebarMenuSubItem>
 					<SidebarMenuSubItem>
 						<button
 							type="button"

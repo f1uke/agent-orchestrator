@@ -285,6 +285,18 @@ describe("Only me", () => {
 		activeWhy: ["new this sprint" as const],
 		...(m ? { mine } : {}),
 	});
+	const sprintMr = (app: string) => ({
+		app,
+		iid: 1,
+		url: "",
+		title: "",
+		state: "merged",
+		source: "feat/x",
+		target: "sprint-20-2026",
+		author: "Dee Example",
+		created: "2026-10-01",
+		dest: "sprint" as const,
+	});
 	const b = board({
 		identity: { kind: "known", jiraAccountId: "acc-dee", gitlabUsername: "dee", displayName: "Dee Example" },
 		trains: [t21],
@@ -342,6 +354,19 @@ describe("Only me", () => {
 	it("counts the badge per lens: my hits only, and no unknown cell it cannot tie to me", () => {
 		expect(all.badge).toEqual({ count: 2, unknown: 1, worst: "block" });
 		expect(me.badge).toEqual({ count: 1, unknown: 0, worst: "block" });
+	});
+
+	it("drops a sprint card whose MRs are all in apps the filter hides, and keeps one with no MR", () => {
+		const row = {
+			...b.sprints[0],
+			cards: [
+				{ ...sprintCard("DEMO-20", false), mrs: [sprintMr("da")] },
+				{ ...sprintCard("DEMO-21", false), mrs: [sprintMr("da"), sprintMr("di")] },
+				sprintCard("DEMO-22", false),
+			],
+		};
+		const onlyDi = makeLens(b, parseReleasesSearch({ apps: "di" }));
+		expect(onlyDi.sprintCards(row).map((c) => c.key)).toEqual(["DEMO-21", "DEMO-22"]);
 	});
 
 	it("ignores ?me=1 when the identity is unknown, so nothing filters to empty", () => {
