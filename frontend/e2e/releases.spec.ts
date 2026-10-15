@@ -22,6 +22,27 @@ async function open(page: Page, query = "", variant?: "failed-source" | "identit
 	await expect(page.getByTestId("label-di")).toBeVisible();
 }
 
+const frame = (page: Page) =>
+	page.evaluate(() =>
+		[...document.querySelectorAll(".rel-canvas *")]
+			.map((e) => {
+				const r = e.getBoundingClientRect();
+				return `${r.x},${r.y},${r.width},${r.height},${getComputedStyle(e).opacity}`;
+			})
+			.join("|"),
+	);
+
+async function settle(page: Page) {
+	let last = await frame(page);
+	for (let i = 0; i < 40; i++) {
+		await page.waitForTimeout(50);
+		const now = await frame(page);
+		if (now === last) return;
+		last = now;
+	}
+	throw new Error("the page kept moving for 2 s");
+}
+
 const layer = (page: Page, name: string) =>
 	page.getByRole("group", { name: "Layers" }).getByRole("button", { name, exact: true });
 
@@ -209,6 +230,7 @@ test.describe("releases page", () => {
 		await expect(app.getByTestId("llb-lane")).toHaveCount(3);
 		const wires = app.getByTestId("llb-wires");
 		await expect(wires.locator("g")).toHaveCount(2);
+		await settle(page);
 		await expect(wires.locator('g[data-wire="feature/demo-wallet"] path')).toHaveClass("plan");
 		await expect(wires.locator('g[data-wire="feature/demo-search"] path')).not.toHaveClass("plan");
 		const dot = await wires.locator('g[data-wire="feature/demo-wallet"] circle').boundingBox();

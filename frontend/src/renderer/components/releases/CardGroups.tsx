@@ -7,6 +7,7 @@ import type { Board, CardUnit, Person } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Avatar } from "./Avatar";
+import { Unfold } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 
 export function Chev({ open }: { open: boolean }) {
@@ -205,13 +206,11 @@ function GroupRows({
 								{landed && st.label !== "accepted" ? `merged ${shortDay(branch.landing?.mergedOn ?? "")}` : st.label}
 							</span>
 						</div>
-						{open && (
-							<div className="nest">
-								{cards.map((c) => (
-									<BranchCardRow key={c.key} c={c} landed={landed} url={jira(c.key)} actions={actions} />
-								))}
-							</div>
-						)}
+						<Unfold open={open} className="nest">
+							{cards.map((c) => (
+								<BranchCardRow key={c.key} c={c} landed={landed} url={jira(c.key)} actions={actions} />
+							))}
+						</Unfold>
 					</div>
 				);
 			})}
@@ -282,11 +281,9 @@ export function CardGroupBox({
 					</span>
 				)}
 			</button>
-			{open.has(g.key) && (
-				<div className="crows">
-					<GroupRows g={g} board={board} actions={actions} isOpen={isOpen} jira={jira} />
-				</div>
-			)}
+			<Unfold open={open.has(g.key)} className="crows">
+				<GroupRows g={g} board={board} actions={actions} isOpen={isOpen} jira={jira} />
+			</Unfold>
 		</div>
 	);
 }

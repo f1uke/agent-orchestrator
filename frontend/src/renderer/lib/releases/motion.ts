@@ -1,4 +1,5 @@
 import type { Transition } from "motion/react";
+import { LAYER_ORDER, type Layers, type ReleasesSearch } from "./url";
 
 /** Motion's own values only: a raw `transform` with a 'none' keyframe collapsed to scaleX(0) in d3. */
 export type MotionValues = Partial<
@@ -97,6 +98,17 @@ const STILL: ReleaseMotion = {
 
 export function releaseMotion(reduced: boolean): ReleaseMotion {
 	return reduced ? STILL : MOVING;
+}
+
+/** Rows FLIP only when this changes, so a refetch or a focus switch never moves them. */
+export function moveKey(url: ReleasesSearch, layers: Layers, folds: ReadonlySet<string>): string {
+	return [
+		url.apps ? [...url.apps].sort().join(",") : "*",
+		url.me ? "me" : "",
+		url.hotfixes ? "hf" : "",
+		LAYER_ORDER.filter((k) => layers[k]).join(","),
+		[...folds].sort().join(","),
+	].join("|");
 }
 
 export const PAN_MOMENTUM_MS = 260;

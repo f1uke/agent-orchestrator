@@ -1,8 +1,10 @@
 import { GitFork } from "lucide-react";
+import { LLB_LINE_H, llbBlockH } from "../../lib/releases/layout";
 import { llbWire, shortBranch, targetTrain, urgency, type LLBLane } from "../../lib/releases/llb";
 import type { Board, LLBGroup, Train, TrainKey } from "../../lib/releases/types";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Chev } from "./CardGroups";
+import { Fade, Unfold } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 
 export type BarSpot = { left: number; right: number; top: number };
@@ -60,33 +62,33 @@ export function LongLivedSummary({
 					)}
 				</button>
 			</div>
-			{open && (
-				<>
-					<svg className="rel-wires" width={width} height={height} data-testid="llb-wires" aria-hidden="true">
-						{lanes.map((l) => {
-							const bar = l.train ? barOf(l.train) : null;
-							if (!bar) return null;
-							const w = llbWire(l, bar);
-							const tone = w.planned ? urgency(l.group, board) : l.tone === "failed" ? "failed" : "done";
-							return (
-								<g key={`${l.branch.app}:${l.branch.branch}`} data-st={tone} data-wire={l.branch.branch}>
-									<path className={w.planned ? "plan" : ""} d={w.d} />
-									<circle cx={w.dot.x} cy={w.dot.y} r={2.5} />
-								</g>
-							);
-						})}
-					</svg>
-					{lanes.map((l) => (
-						<LaneRow
-							key={`${l.branch.app}:${l.branch.branch}`}
-							lane={l}
-							wired={!!(l.train && barOf(l.train))}
-							board={board}
-							actions={actions}
-						/>
-					))}
-				</>
-			)}
+			<Fade show={open}>
+				<svg className="rel-wires" width={width} height={height} data-testid="llb-wires" aria-hidden="true">
+					{lanes.map((l) => {
+						const bar = l.train ? barOf(l.train) : null;
+						if (!bar) return null;
+						const w = llbWire(l, bar);
+						const tone = w.planned ? urgency(l.group, board) : l.tone === "failed" ? "failed" : "done";
+						return (
+							<g key={`${l.branch.app}:${l.branch.branch}`} data-st={tone} data-wire={l.branch.branch}>
+								<path className={w.planned ? "plan" : ""} d={w.d} />
+								<circle cx={w.dot.x} cy={w.dot.y} r={2.5} />
+							</g>
+						);
+					})}
+				</svg>
+			</Fade>
+			<Unfold open={open} at={{ top: LLB_LINE_H, height: llbBlockH(lanes.length, true) - LLB_LINE_H }}>
+				{lanes.map((l) => (
+					<LaneRow
+						key={`${l.branch.app}:${l.branch.branch}`}
+						lane={l}
+						wired={!!(l.train && barOf(l.train))}
+						board={board}
+						actions={actions}
+					/>
+				))}
+			</Unfold>
 		</>
 	);
 }

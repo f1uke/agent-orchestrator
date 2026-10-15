@@ -16,7 +16,7 @@ import {
 } from "../../lib/releases/layout";
 import type { Lens } from "../../lib/releases/lens";
 import { llbGroupsFor, llbLanes } from "../../lib/releases/llb";
-import { momentumDistance, type ReleaseMotion } from "../../lib/releases/motion";
+import { momentumDistance, moveKey, type ReleaseMotion } from "../../lib/releases/motion";
 import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib/releases/stickyFit";
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
@@ -24,7 +24,7 @@ import { useReleasesUi } from "../../stores/releases-ui";
 import { BoardSprintRow } from "./BoardSprintRows";
 import { CardGroupBox } from "./CardGroups";
 import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
-import { useReleaseMotion } from "./ReleaseMotion";
+import { MoveRoot, Moving, useReleaseMotion } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 import { StickyAppLabel } from "./StickyAppLabel";
 import { VersionLanes } from "./VersionLanes";
@@ -53,6 +53,7 @@ export function Timeline({
 	const sc = useRef<HTMLDivElement>(null);
 	const canvas = useRef<HTMLDivElement>(null);
 	const mo = useReleaseMotion();
+	const folds = useReleasesUi((s) => s.open);
 	const focusFreeze = lens.focus?.freeze;
 
 	useLayoutEffect(() => {
@@ -109,43 +110,45 @@ export function Timeline({
 
 	return (
 		<div className="rel-sc" ref={sc} data-testid="release-timeline">
-			<div className="rel-canvas" ref={canvas} style={{ width: LABEL_W + tl.width }}>
-				<Background tl={tl} />
-				<Axis tl={tl} layers={layers} />
-				<div className="rel-sched">
-					<div className="rel-row">
-						<div className="rel-lab">
-							<span className="rel-eyebrow">Sprint</span>
+			<MoveRoot move={moveKey(url, layers, folds)}>
+				<div className="rel-canvas" ref={canvas} style={{ width: LABEL_W + tl.width }}>
+					<Background tl={tl} />
+					<Axis tl={tl} layers={layers} />
+					<div className="rel-sched">
+						<div className="rel-row">
+							<div className="rel-lab">
+								<span className="rel-eyebrow">Sprint</span>
+							</div>
+							<div className="rel-trk" style={{ width: tl.width, height: 30 }}>
+								{board.sprints
+									.filter((s) => s.board.ownsSprintBranch && s.sprint.start && s.sprint.end)
+									.map((s) => (
+										<div
+											key={s.sprint.id}
+											className="rel-spr active"
+											style={{
+												left: tl.x(s.sprint.start ?? ""),
+												width: tl.x(s.sprint.end ?? "") - tl.x(s.sprint.start ?? ""),
+											}}
+										>
+											<span className="sl" data-sticky>
+												<span>Sprint {s.number} · active</span>
+												<span className="passive">ships in #{s.number + 1}</span>
+											</span>
+										</div>
+									))}
+							</div>
 						</div>
-						<div className="rel-trk" style={{ width: tl.width, height: 30 }}>
-							{board.sprints
-								.filter((s) => s.board.ownsSprintBranch && s.sprint.start && s.sprint.end)
-								.map((s) => (
-									<div
-										key={s.sprint.id}
-										className="rel-spr active"
-										style={{
-											left: tl.x(s.sprint.start ?? ""),
-											width: tl.x(s.sprint.end ?? "") - tl.x(s.sprint.start ?? ""),
-										}}
-									>
-										<span className="sl" data-sticky>
-											<span>Sprint {s.number} · active</span>
-											<span className="passive">ships in #{s.number + 1}</span>
-										</span>
-									</div>
-								))}
-						</div>
+						{layers.sprint &&
+							board.sprints.map((row) => (
+								<BoardSprintRow key={row.board.key} row={row} board={board} tl={tl} lens={lens} actions={actions} />
+							))}
 					</div>
-					{layers.sprint &&
-						board.sprints.map((row) => (
-							<BoardSprintRow key={row.board.key} row={row} board={board} tl={tl} lens={lens} actions={actions} />
-						))}
+					{lens.apps.map((a) => (
+						<AppRow key={a.id} app={a} board={board} tl={tl} url={url} lens={lens} layers={layers} actions={actions} />
+					))}
 				</div>
-				{lens.apps.map((a) => (
-					<AppRow key={a.id} app={a} board={board} tl={tl} url={url} lens={lens} layers={layers} actions={actions} />
-				))}
-			</div>
+			</MoveRoot>
 		</div>
 	);
 }
@@ -198,9 +201,10 @@ function AppRow({
 	});
 	const cardsBottom = Math.max(0, ...boxes.map((b) => b.bottom));
 	return (
-		<div
+		<Moving
+			appear
 			className="rel-row rel-app"
-			data-app={a.id}
+			data={{ "data-app": a.id }}
 			style={{ minHeight: rowHeight({ llbH, lanesH: L.lanesH, cardsBottom }) }}
 		>
 			<StickyAppLabel app={a} lens={lens} actions={actions} />
@@ -219,22 +223,24 @@ function AppRow({
 						actions={actions}
 					/>
 				)}
-				<VersionLanes board={scoped} tl={tl} lanes={L} top={llbH} lens={lens} actions={actions} />
-				{boxes.map(({ g, left, top }) => (
-					<CardGroupBox
-						key={g.key}
-						g={g}
-						board={board}
-						left={left}
-						top={top}
-						focused={g.train.id === lens.focus?.id}
-						mine={lens.me}
-						actions={actions}
-						jira={jira}
-					/>
-				))}
+				<Moving className="rel-below" style={{ top: llbH, width: tl.width }}>
+					<VersionLanes board={scoped} tl={tl} lanes={L} top={0} lens={lens} actions={actions} />
+					{boxes.map(({ g, left, top }) => (
+						<CardGroupBox
+							key={g.key}
+							g={g}
+							board={board}
+							left={left}
+							top={top - llbH}
+							focused={g.train.id === lens.focus?.id}
+							mine={lens.me}
+							actions={actions}
+							jira={jira}
+						/>
+					))}
+				</Moving>
 			</div>
-		</div>
+		</Moving>
 	);
 }
 
