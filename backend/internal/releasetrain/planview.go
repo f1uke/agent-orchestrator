@@ -28,7 +28,8 @@ type PlanView struct {
 	Apps        []App
 	Versions    []PlannedVersion
 	Pages       []PlannedPage
-	ApproverIDs []string
+	// PersonIDs are the Jira accounts the Board shows a face for: approvers, assignees and the identity.
+	PersonIDs []string
 	// LLBs are the long-lived branches not yet landed.
 	LLBs []PlannedLLB
 	// LLBCardKeys are the card keys every long-lived branch carries.
@@ -74,13 +75,16 @@ type PlannedVersion struct {
 	Tag           string
 }
 
+// peopleKinds are the issue kinds whose assignees the page draws a face for.
+var peopleKinds = []Kind[IssueFact]{KindCards, KindPageCards, KindLLBCards, KindMySubtasks, KindSprintCards, KindBranchCards}
+
 // NewPlanView joins the snapshot as Reconcile does and lists the versions and people to fetch.
 func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 	b := Board{Today: DayOf(env.Now, env.Loc)}
 	joinTrains(&b, cfg, snap)
 	rs := readSet{today: b.Today, ageOut: env.AgeOut}
 	pv := PlanView{Config: cfg, Loc: env.Loc, HistoryFrom: cfg.HistoryFrom, Apps: cfg.Apps}
-	approvers := map[string]bool{}
+	people := map[string]bool{}
 	for i := range b.Trains {
 		t := &b.Trains[i]
 		for _, page := range t.Pages {
@@ -97,7 +101,7 @@ func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 			if v.Jira != nil {
 				p.JiraVersionID = v.Jira.ID
 				for _, a := range v.Jira.Approvers {
-					approvers[a.AccountID] = true
+					people[a.AccountID] = true
 				}
 			}
 			if r := v.ReleaseMR; r != nil {
@@ -112,14 +116,22 @@ func NewPlanView(cfg Config, snap Snapshot, env Env) PlanView {
 			pv.Versions = append(pv.Versions, p)
 		}
 	}
-	for id := range approvers {
-		pv.ApproverIDs = append(pv.ApproverIDs, id)
-	}
-	sort.Strings(pv.ApproverIDs)
 	pv.LLBs, pv.LLBCardKeys = plannedLLBs(cfg, snap)
 	for _, m := range AllItems(snap, KindJiraMyself) {
 		pv.MyAccountID = m.AccountID
+		people[m.AccountID] = true
 	}
+	for _, k := range peopleKinds {
+		for _, is := range AllItems(snap, k) {
+			if is.Assignee != nil && is.Assignee.AccountID != "" {
+				people[is.Assignee.AccountID] = true
+			}
+		}
+	}
+	for id := range people {
+		pv.PersonIDs = append(pv.PersonIDs, id)
+	}
+	sort.Strings(pv.PersonIDs)
 	for _, sp := range activeSprints(cfg, snap) {
 		pv.Sprints = append(pv.Sprints, PlannedSprint{Board: sp.Board, ID: sp.ID})
 	}
