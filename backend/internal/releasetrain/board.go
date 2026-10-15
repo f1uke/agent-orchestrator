@@ -25,6 +25,8 @@ type HumanState struct {
 	RuleSettings map[RuleID]bool
 	Hides        map[HitID]Hide
 	Plans        []LlbPlan
+	// OpenFixes is each hit's live fix, so the Board shows it without a second request.
+	OpenFixes map[HitID]FixRef
 }
 
 // Hide records a hidden hit's evidence and severity at hide time.
@@ -52,6 +54,7 @@ type Board struct {
 	Identity  IdentityState `json:"identity"`
 	Alerts    Alerts        `json:"alerts"`
 	Catalogue []RuleInfo    `json:"catalogue"`
+	fix       fixContext
 }
 
 // BoardApp is one configured app as every surface names it.

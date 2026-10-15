@@ -434,7 +434,7 @@ func TestListPipelineJobsMapsFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 1 || jobs[0] != (Job{Name: "semgrep-sast", Status: "failed", AllowFailure: true, Stage: "test"}) {
+	if len(jobs) != 1 || jobs[0] != (Job{ID: 1, Name: "semgrep-sast", Status: "failed", AllowFailure: true, Stage: "test"}) {
 		t.Errorf("jobs = %+v", jobs)
 	}
 }

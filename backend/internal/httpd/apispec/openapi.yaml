@@ -2315,6 +2315,183 @@ paths:
         an existing file
       tags:
       - release-trains
+  /api/v1/release-trains/fixes:
+    get:
+      operationId: listReleaseTrainFixes
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainFixesResponse'
+          description: OK
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: List every fix with its append-only audit events
+      tags:
+      - release-trains
+    post:
+      operationId: confirmReleaseTrainFix
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTrainFixConfirmRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainFixResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: 'Confirm a fix: L3 applies to AO''s own plan, every other fix is recorded
+        as a dry run and sends nothing; the same plan twice returns the same fix;
+        409 FIX_PLAN_CHANGED when the plan changed since it was reviewed'
+      tags:
+      - release-trains
+  /api/v1/release-trains/fixes/{fixId}/undo:
+    post:
+      operationId: undoReleaseTrainFix
+      parameters:
+      - description: Fix id from the Fixes list, e.g. fx-0a1b2c3d4e5f6a7b.
+        in: path
+        name: fixId
+        required: true
+        schema:
+          description: Fix id from the Fixes list, e.g. fx-0a1b2c3d4e5f6a7b.
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTrainFixUndoRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainFixResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Conflict
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Withdraw a dry run, or undo an applied L3 fix under the same plan-version
+        check
+      tags:
+      - release-trains
+  /api/v1/release-trains/fixes/plan:
+    post:
+      operationId: planReleaseTrainFix
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseTrainFixPlanRequest'
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseTrainFixPlanResponse'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Plan a hit's fix on the current Board with the exact request each step
+        would send; writes nothing
+      tags:
+      - release-trains
   /api/v1/release-trains/hides:
     delete:
       operationId: unhideStaleReleaseTrainHits
@@ -13015,6 +13192,8 @@ components:
           type: boolean
         evidence:
           $ref: '#/components/schemas/ReleaseTrainEvidence'
+        fix:
+          $ref: '#/components/schemas/ReleaseTrainFixKind'
         id:
           type: string
         link:
@@ -13023,6 +13202,8 @@ components:
           items:
             $ref: '#/components/schemas/ReleaseTrainMineReason'
           type: array
+        openFix:
+          $ref: '#/components/schemas/ReleaseTrainFixRef'
         rule:
           type: string
         severity:
@@ -13472,6 +13653,206 @@ components:
       - kind
       - train
       type: object
+    ReleaseTrainEffAOPlanTarget:
+      properties:
+        after:
+          $ref: '#/components/schemas/ReleaseTrainLLBTargetInput'
+        before:
+          $ref: '#/components/schemas/ReleaseTrainLLBTargetInput'
+        kind:
+          const: ao_plan_target
+          type: string
+        plan:
+          type: string
+        planVersion:
+          type: integer
+      required:
+      - kind
+      - plan
+      - before
+      - after
+      - planVersion
+      type: object
+    ReleaseTrainEffCopyText:
+      properties:
+        kind:
+          const: copy_text
+          type: string
+        target:
+          type: string
+        text:
+          type: string
+      required:
+      - kind
+      - target
+      - text
+      type: object
+    ReleaseTrainEffGitLabJobRetry:
+      properties:
+        app:
+          type: string
+        host:
+          type: string
+        jobId:
+          type: integer
+        kind:
+          const: gitlab_job_retry
+          type: string
+        name:
+          type: string
+        project:
+          type: integer
+      required:
+      - kind
+      - host
+      - app
+      - project
+      - jobId
+      - name
+      type: object
+    ReleaseTrainEffGitLabMilestoneDue:
+      properties:
+        after:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        app:
+          type: string
+        before:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        host:
+          type: string
+        kind:
+          const: gitlab_milestone_due
+          type: string
+        milestoneId:
+          type: integer
+        project:
+          type: integer
+      required:
+      - kind
+      - host
+      - app
+      - project
+      - milestoneId
+      - before
+      - after
+      type: object
+    ReleaseTrainEffGitLabRetarget:
+      properties:
+        app:
+          type: string
+        from:
+          type: string
+        host:
+          type: string
+        iid:
+          type: integer
+        kind:
+          const: gitlab_retarget
+          type: string
+        project:
+          type: integer
+        to:
+          type: string
+      required:
+      - kind
+      - host
+      - app
+      - project
+      - iid
+      - from
+      - to
+      type: object
+    ReleaseTrainEffJiraApprovers:
+      properties:
+        after:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainPerson'
+          type: array
+        kind:
+          const: jira_approvers
+          type: string
+        site:
+          type: string
+        versionId:
+          type: string
+      required:
+      - kind
+      - site
+      - versionId
+      - after
+      type: object
+    ReleaseTrainEffJiraRelatedWork:
+      properties:
+        category:
+          type: string
+        kind:
+          const: jira_related_work
+          type: string
+        site:
+          type: string
+        title:
+          type: string
+        versionId:
+          type: string
+      required:
+      - kind
+      - site
+      - versionId
+      - category
+      - title
+      type: object
+    ReleaseTrainEffJiraTransition:
+      properties:
+        from:
+          type: string
+        key:
+          type: string
+        kind:
+          const: jira_transition
+          type: string
+        site:
+          type: string
+        to:
+          type: string
+      required:
+      - kind
+      - site
+      - key
+      - from
+      - to
+      type: object
+    ReleaseTrainEffJiraVersionUpdate:
+      properties:
+        after:
+          $ref: '#/components/schemas/ReleaseTrainVersionFields'
+        before:
+          $ref: '#/components/schemas/ReleaseTrainVersionFields'
+        kind:
+          const: jira_version_update
+          type: string
+        site:
+          type: string
+        versionId:
+          type: string
+      required:
+      - kind
+      - site
+      - versionId
+      - before
+      - after
+      type: object
+    ReleaseTrainEffect:
+      oneOf:
+      - $ref: '#/components/schemas/ReleaseTrainEffJiraVersionUpdate'
+      - $ref: '#/components/schemas/ReleaseTrainEffJiraTransition'
+      - $ref: '#/components/schemas/ReleaseTrainEffJiraApprovers'
+      - $ref: '#/components/schemas/ReleaseTrainEffJiraRelatedWork'
+      - $ref: '#/components/schemas/ReleaseTrainEffGitLabRetarget'
+      - $ref: '#/components/schemas/ReleaseTrainEffGitLabJobRetry'
+      - $ref: '#/components/schemas/ReleaseTrainEffGitLabMilestoneDue'
+      - $ref: '#/components/schemas/ReleaseTrainEffCopyText'
+      - $ref: '#/components/schemas/ReleaseTrainEffAOPlanTarget'
+      type: object
     ReleaseTrainErrorClass:
       enum:
       - auth
@@ -13484,6 +13865,260 @@ components:
       type: string
     ReleaseTrainEvidence:
       additionalProperties: {}
+      type: object
+    ReleaseTrainFix:
+      properties:
+        choice:
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        events:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainFixEvent'
+          type: array
+        hit:
+          type: string
+        id:
+          type: string
+        plan:
+          $ref: '#/components/schemas/ReleaseTrainFixPlan'
+        rule:
+          type: string
+        state:
+          $ref: '#/components/schemas/ReleaseTrainFixState'
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+      - id
+      - hit
+      - rule
+      - plan
+      - state
+      - createdAt
+      - updatedAt
+      - events
+      type: object
+    ReleaseTrainFixChoice:
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        steps:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainFixStep'
+          type: array
+      required:
+      - id
+      - label
+      - steps
+      type: object
+    ReleaseTrainFixConfirmRequest:
+      properties:
+        choice:
+          type: string
+        hitId:
+          type: string
+        planFingerprint:
+          description: The fingerprint of the plan the person reviewed; 409 when the
+            plan changed since.
+          type: string
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
+          type: string
+      required:
+      - hitId
+      - planFingerprint
+      type: object
+    ReleaseTrainFixEvent:
+      properties:
+        actor:
+          type: string
+        at:
+          format: date-time
+          type: string
+        detail: {}
+        kind:
+          $ref: '#/components/schemas/ReleaseTrainFixEventKind'
+        seq:
+          format: int64
+          type: integer
+      required:
+      - seq
+      - at
+      - actor
+      - kind
+      - detail
+      type: object
+    ReleaseTrainFixEventKind:
+      enum:
+      - confirmed
+      - dry_run_recorded
+      - applied
+      - apply_failed
+      - undone
+      - undo_failed
+      - withdrawn
+      - superseded
+      type: string
+    ReleaseTrainFixKind:
+      enum:
+      - apply
+      - queue
+      - choose
+      - copy
+      type: string
+    ReleaseTrainFixMode:
+      enum:
+      - apply
+      - queue
+      - choose
+      - copy
+      - blocked
+      type: string
+    ReleaseTrainFixNeed:
+      properties:
+        label:
+          type: string
+        llb:
+          type: string
+      required:
+      - label
+      - llb
+      type: object
+    ReleaseTrainFixPlan:
+      properties:
+        app:
+          type: string
+        choice:
+          type: string
+        choices:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainFixChoice'
+          type: array
+        fingerprint:
+          type: string
+        hit:
+          type: string
+        mode:
+          $ref: '#/components/schemas/ReleaseTrainFixMode'
+        need:
+          $ref: '#/components/schemas/ReleaseTrainFixNeed'
+        note:
+          type: string
+        rule:
+          type: string
+        steps:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainFixStep'
+          type: array
+        title:
+          type: string
+      required:
+      - hit
+      - rule
+      - title
+      - mode
+      - steps
+      - fingerprint
+      type: object
+    ReleaseTrainFixPlanRequest:
+      properties:
+        choice:
+          description: 'For a choose plan (A5): the side to take, jira or gitlab.'
+          type: string
+        hitId:
+          type: string
+      required:
+      - hitId
+      type: object
+    ReleaseTrainFixPlanResponse:
+      properties:
+        plan:
+          $ref: '#/components/schemas/ReleaseTrainFixPlan'
+      required:
+      - plan
+      type: object
+    ReleaseTrainFixRef:
+      properties:
+        id:
+          type: string
+        state:
+          $ref: '#/components/schemas/ReleaseTrainFixState'
+      required:
+      - id
+      - state
+      type: object
+    ReleaseTrainFixResponse:
+      properties:
+        fix:
+          $ref: '#/components/schemas/ReleaseTrainFix'
+      required:
+      - fix
+      type: object
+    ReleaseTrainFixState:
+      enum:
+      - dry_run
+      - applying
+      - applied
+      - failed
+      - undone
+      - withdrawn
+      - superseded
+      type: string
+    ReleaseTrainFixStep:
+      properties:
+        after:
+          type: string
+        before:
+          type: string
+        effect:
+          $ref: '#/components/schemas/ReleaseTrainEffect'
+        label:
+          type: string
+        request:
+          $ref: '#/components/schemas/ReleaseTrainShownRequest'
+      required:
+      - label
+      - before
+      - after
+      - effect
+      - request
+      type: object
+    ReleaseTrainFixUndoRequest:
+      properties:
+        session:
+          description: The AO session that ran the decision, e.g. an orchestrator
+            acting on the person's word.
+          type: string
+        via:
+          description: 'The surface deciding: the app, the ao CLI, or a bare API call
+            (the default).'
+          enum:
+          - app
+          - cli
+          - api
+          type: string
+      type: object
+    ReleaseTrainFixesResponse:
+      properties:
+        fixes:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainFix'
+          type: array
+      required:
+      - fixes
       type: object
     ReleaseTrainForceUpdateFact:
       properties:
@@ -13656,6 +14291,8 @@ components:
       properties:
         allowFailure:
           type: boolean
+        id:
+          type: integer
         name:
           type: string
         status:
@@ -13777,6 +14414,16 @@ components:
       - $ref: '#/components/schemas/ReleaseTrainLLBPlanned'
       - $ref: '#/components/schemas/ReleaseTrainLLBNoTarget'
       - $ref: '#/components/schemas/ReleaseTrainLLBDropped'
+      type: object
+    ReleaseTrainLLBTargetInput:
+      properties:
+        targetKind:
+          $ref: '#/components/schemas/ReleaseTrainTargetKind'
+        targetTrain:
+          description: Train key, "21-2026" or "20-1-2026".
+          type: string
+      required:
+      - targetKind
       type: object
     ReleaseTrainLink:
       properties:
@@ -14292,6 +14939,8 @@ components:
       properties:
         defaultOn:
           type: boolean
+        fix:
+          $ref: '#/components/schemas/ReleaseTrainFixKind'
         group:
           type: string
         hint:
@@ -14353,6 +15002,19 @@ components:
       - hygiene
       - info
       type: string
+    ReleaseTrainShownRequest:
+      properties:
+        body:
+          description: The JSON body as sent; never credentials.
+        method:
+          description: An HTTP method, or COPY for text to paste by hand.
+          type: string
+        url:
+          type: string
+      required:
+      - method
+      - url
+      type: object
     ReleaseTrainSourceFreshness:
       properties:
         asOf:
@@ -14701,6 +15363,15 @@ components:
           type: array
       required:
       - removed
+      type: object
+    ReleaseTrainVersionFields:
+      properties:
+        releaseDate:
+          $ref: '#/components/schemas/ReleaseTrainDay'
+        released:
+          type: boolean
+      required:
+      - released
       type: object
     RemoveProjectResult:
       properties:

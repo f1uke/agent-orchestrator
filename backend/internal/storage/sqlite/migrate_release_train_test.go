@@ -136,3 +136,74 @@ func TestMigration0085ReleaseTrainHumanState(t *testing.T) {
 		t.Fatalf("release_resource after Down = %d, want the seed kept", n)
 	}
 }
+
+func TestMigration0086ReleaseTrainFixOutbox(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "ao.db")+pragmas)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(1)
+
+	exec := func(what string, stmts ...string) {
+		t.Helper()
+		for _, stmt := range stmts {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatalf("%s (%s): %v", what, stmt, err)
+			}
+		}
+	}
+	refused := func(what, stmt string) {
+		t.Helper()
+		if _, err := db.Exec(stmt); err == nil {
+			t.Fatalf("%s was accepted: %s", what, stmt)
+		}
+	}
+	count := func(q string) int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	fix := func(id, state string) string {
+		return `INSERT INTO release_fix (id, hit_id, rule_id, plan, plan_fingerprint, state, created_at, updated_at) VALUES ('` +
+			id + `', 'E1~v/21-2026/di', 'E1', '{}', 'fp1', '` + state + `', '2026-10-15', '2026-10-15')`
+	}
+
+	upTo(t, db, 85)
+	exec("seed at 0085",
+		`INSERT INTO release_llb_plan (id, name, target_kind, version, updated_by, updated_at) VALUES ('demo-llb', 'Demo', 'unplanned', 1, 'cli', '2026-10-15')`)
+	changeLogBefore := count(`SELECT COUNT(*) FROM change_log`)
+
+	upTo(t, db, 86)
+	exec("record a dry run", fix("fx-1", "dry_run"),
+		`INSERT INTO release_fix_event (fix_id, at, actor, kind, detail) VALUES ('fx-1', '2026-10-15', 'cli', 'dry_run_recorded', '{}')`)
+	refused("a second live fix for the same hit and plan", fix("fx-2", "applied"))
+	refused("an unknown state", fix("fx-3", "queued"))
+	refused("an unknown event kind",
+		`INSERT INTO release_fix_event (fix_id, at, actor, kind, detail) VALUES ('fx-1', '2026-10-15', 'cli', 'sent', '{}')`)
+	refused("an event of no fix",
+		`INSERT INTO release_fix_event (fix_id, at, actor, kind, detail) VALUES ('nope', '2026-10-15', 'cli', 'withdrawn', '{}')`)
+	refused("an edited event", `UPDATE release_fix_event SET actor = 'someone else'`)
+	refused("a deleted event", `DELETE FROM release_fix_event`)
+	refused("a deleted fix with events", `DELETE FROM release_fix WHERE id = 'fx-1'`)
+
+	exec("withdraw it, then confirm the same plan again",
+		`UPDATE release_fix SET state = 'withdrawn' WHERE id = 'fx-1'`, fix("fx-2", "dry_run"))
+	if n := count(`SELECT COUNT(*) FROM release_fix`); n != 2 {
+		t.Fatalf("release_fix rows = %d, want the withdrawn fix kept beside the new one", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM change_log`); n != changeLogBefore {
+		t.Fatalf("change_log grew from %d to %d; the fix outbox is not CDC", changeLogBefore, n)
+	}
+
+	downTo(t, db, 85)
+	if n := count(`SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'release_fix%'`); n != 0 {
+		t.Fatalf("%d fix outbox objects after Down", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM release_llb_plan`); n != 1 {
+		t.Fatalf("release_llb_plan after Down = %d, want the seed kept", n)
+	}
+}

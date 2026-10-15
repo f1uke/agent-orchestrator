@@ -150,7 +150,7 @@ func TestTagURLIsItsCommitURL(t *testing.T) {
 func TestDetailJobsCompareAndUserMapIntoFacts(t *testing.T) {
 	gl := rttest.NewGitLab(t)
 	gl.Set("/projects/1001/merge_requests/41", `{"has_conflicts":true,"detailed_merge_status":"conflict","head_pipeline":{"id":9001,"status":"failed","web_url":"https://gitlab.example.com/p/9001","duration":4260}}`)
-	gl.Set("/projects/1001/pipelines/9001/jobs", `[{"name":"build_test","status":"failed","allow_failure":false,"stage":"test"},{"name":"lint","status":"failed","allow_failure":true,"stage":"test"}]`)
+	gl.Set("/projects/1001/pipelines/9001/jobs", `[{"id":801,"name":"build_test","status":"failed","allow_failure":false,"stage":"test"},{"id":802,"name":"lint","status":"failed","allow_failure":true,"stage":"test"}]`)
 	gl.Set("/projects/1001/repository/compare", `{"web_url":"https://gitlab.example.com/compare/3.5.0...main","commits":[{"id":"d1","title":"Merge branch 'fix/crash' into 'main'","created_at":"2026-10-20T09:00:00+07:00","web_url":"https://gitlab.example.com/c/d1"}]}`)
 	gl.Set("/user", `{"username":"dee","name":"Dee Example"}`)
 	s := newSource(t, gl)
@@ -163,7 +163,7 @@ func TestDetailJobsCompareAndUserMapIntoFacts(t *testing.T) {
 	}
 
 	b, err = fetch(t, s, rt.SpecFor(rt.KindJobs, rt.PipelineScope(1001, 9001), "di"), nil)
-	wantJobs := []rt.JobsFact{{Project: 1001, Pipeline: 9001, Jobs: []rt.JobFact{{Name: "build_test", Status: "failed"}, {Name: "lint", Status: "failed", AllowFailure: true}}}}
+	wantJobs := []rt.JobsFact{{Project: 1001, Pipeline: 9001, Jobs: []rt.JobFact{{ID: 801, Name: "build_test", Status: "failed"}, {ID: 802, Name: "lint", Status: "failed", AllowFailure: true}}}}
 	if got := decode(t, rt.KindJobs, b); err != nil || !reflect.DeepEqual(got, wantJobs) {
 		t.Fatalf("jobs = %+v, %v", got, err)
 	}

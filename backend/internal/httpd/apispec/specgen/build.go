@@ -652,6 +652,55 @@ func releaseTrainOperations() []operation {
 			},
 		},
 		{
+			method: http.MethodPost, path: "/api/v1/release-trains/fixes/plan", id: "planReleaseTrainFix", tag: "release-trains",
+			summary: "Plan a hit's fix on the current Board with the exact request each step would send; writes nothing",
+			reqBody: controllers.ReleaseTrainFixPlanRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainFixPlanResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/release-trains/fixes", id: "confirmReleaseTrainFix", tag: "release-trains",
+			summary: "Confirm a fix: L3 applies to AO's own plan, every other fix is recorded as a dry run and sends nothing; " +
+				"the same plan twice returns the same fix; 409 FIX_PLAN_CHANGED when the plan changed since it was reviewed",
+			reqBody: controllers.ReleaseTrainFixConfirmRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainFixResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodGet, path: "/api/v1/release-trains/fixes", id: "listReleaseTrainFixes", tag: "release-trains",
+			summary: "List every fix with its append-only audit events",
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainFixesResponse{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
+			method: http.MethodPost, path: "/api/v1/release-trains/fixes/{fixId}/undo", id: "undoReleaseTrainFix", tag: "release-trains",
+			summary:    "Withdraw a dry run, or undo an applied L3 fix under the same plan-version check",
+			pathParams: []any{controllers.ReleaseTrainFixIDParam{}},
+			reqBody:    controllers.ReleaseTrainFixUndoRequest{},
+			resps: []respUnit{
+				{http.StatusOK, controllers.ReleaseTrainFixResponse{}},
+				{http.StatusBadRequest, envelope.APIError{}},
+				{http.StatusNotFound, envelope.APIError{}},
+				{http.StatusConflict, envelope.APIError{}},
+				{http.StatusInternalServerError, envelope.APIError{}},
+				{http.StatusNotImplemented, envelope.APIError{}},
+			},
+		},
+		{
 			method: http.MethodGet, path: "/api/v1/release-trains/avatars/{accountId}", id: "getReleaseTrainAvatar", tag: "release-trains",
 			summary:    "Serve a Jira user's avatar that the user read cached; 404 until it is downloaded",
 			pathParams: []any{controllers.ReleaseTrainAccountIDParam{}},

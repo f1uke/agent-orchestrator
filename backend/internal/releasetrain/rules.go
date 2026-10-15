@@ -52,6 +52,7 @@ type RuleInfo struct {
 	On        bool     `json:"on"`
 	Title     string   `json:"title"`
 	Hint      string   `json:"hint,omitempty"`
+	Fix       FixKind  `json:"fix,omitempty"`
 }
 
 // LookupRule returns the catalogue row of id under settings, or false when no rule has that id.
@@ -69,7 +70,7 @@ func catalogue(settings map[RuleID]bool) []RuleInfo {
 	out := make([]RuleInfo, len(table))
 	for i, r := range table {
 		out[i] = RuleInfo{ID: r.ID, Group: r.Group, Severity: r.Severity, DefaultOn: r.DefaultOn,
-			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint}
+			On: r.effectiveOn(settings), Title: r.Title, Hint: r.Hint, Fix: fixKindOf(r.ID)}
 	}
 	return out
 }
@@ -217,7 +218,10 @@ func cells(b *Board, cfg Config, r rule, hits []Hit) []cell {
 }
 
 func bucket(h Hit, rs *readSet, human HumanState) AlertHit {
-	ah := AlertHit{Hit: h, Bucket: BucketBadge}
+	ah := AlertHit{Hit: h, Bucket: BucketBadge, Fix: fixKindOf(h.Rule)}
+	if f, ok := human.OpenFixes[h.ID]; ok {
+		ah.OpenFix = &f
+	}
 	if hide, ok := human.Hides[h.ID]; ok && !h.Severity.MoreSevereThan(hide.Severity) {
 		ah.Bucket = BucketHidden
 		ah.ChangedSinceHidden = hide.Fingerprint != h.Fingerprint()

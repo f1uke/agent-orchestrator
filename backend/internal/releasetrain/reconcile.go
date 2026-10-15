@@ -40,6 +40,7 @@ func Reconcile(in Inputs, env Env) Board {
 	mine(&b, meOf(b.Identity, in.Snap), mrs, in.Snap, in.Config)
 	b.Alerts = alerts(&b, in, rs)
 	b.Catalogue = catalogue(in.Human.RuleSettings)
+	b.fix = newFixContext(in.Config, in.Snap)
 	return b
 }
 

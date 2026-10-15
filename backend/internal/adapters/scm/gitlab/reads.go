@@ -199,6 +199,7 @@ func (c *Client) MergeRequestDetail(ctx context.Context, project, iid int) (MRDe
 
 // Job is one pipeline job.
 type Job struct {
+	ID           int    `json:"id"`
 	Name         string `json:"name"`
 	Status       string `json:"status"`
 	AllowFailure bool   `json:"allow_failure"`

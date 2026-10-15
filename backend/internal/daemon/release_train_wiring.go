@@ -52,7 +52,14 @@ func startReleaseTrains(ctx context.Context, store *sqlite.Store, dataDir string
 		Rand:   rand.Float64, //nolint:gosec // backoff jitter, not security
 		Logger: logger,
 	})
-	board := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, Store: store, Clock: clock})
-	done := observe.StartPollLoop(ctx, rtsvc.Tick, poller.Poll, logger, "release trains", rec.Tick)
+	board := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, Store: store, Fixes: store, Clock: clock})
+	board.UsePlanTargetExecutor()
+	pass := func(ctx context.Context) error {
+		if err := poller.Poll(ctx); err != nil {
+			return err
+		}
+		return board.SupersedeFixes(ctx)
+	}
+	done := observe.StartPollLoop(ctx, rtsvc.Tick, pass, logger, "release trains", rec.Tick)
 	return releaseTrains{Poller: poller, BoardService: board, configPath: path, avatars: avatars}, done
 }

@@ -26,7 +26,8 @@ func newTrainCommand(ctx *commandContext) *cobra.Command {
 	config := &cobra.Command{Use: "config", Short: "Create the release-train config file"}
 	config.AddCommand(newTrainConfigInitCommand(ctx))
 	cmd.AddCommand(newTrainSourcesCommand(ctx), newTrainAlertsCommand(ctx), config,
-		newTrainRulesCommand(ctx), newTrainHideCommand(ctx), newTrainUnhideCommand(ctx), newTrainPlanCommand(ctx))
+		newTrainRulesCommand(ctx), newTrainHideCommand(ctx), newTrainUnhideCommand(ctx), newTrainPlanCommand(ctx),
+		newTrainFixCommand(ctx), newTrainFixesCommand(ctx))
 	return cmd
 }
 

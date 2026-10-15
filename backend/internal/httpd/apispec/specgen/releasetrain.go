@@ -244,6 +244,8 @@ func mapReleaseTrainTypes(r *openapi31.Reflector) {
 	js.AddTypeMapping((*rt.LLBTarget)(nil), rtLLBTarget{})
 	js.AddTypeMapping((*rt.IdentityState)(nil), rtIdentity{})
 	js.AddTypeMapping((*rt.Dest)(nil), rtDest{})
+	js.AddTypeMapping((*rt.Effect)(nil), rtEffect{})
+	js.AddTypeMapping(rt.ShownRequest{}, rtShownRequest{})
 	day := jsonschema.Schema{}
 	day.WithType(jsonschema.String.Type()).WithFormat("date")
 	js.AddTypeMapping(rt.Day{}, day)

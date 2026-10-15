@@ -150,7 +150,8 @@ func newBoardFixture(t *testing.T) *boardFixture {
 	t.Cleanup(func() { _ = st.Close() })
 	f := &boardFixture{t: t, store: st, now: time.Date(2026, 10, 14, 3, 0, 0, 0, time.UTC), tags: rt.SpecFor(rt.KindTags, rt.ProjectScope(1001), "di")}
 	f.svc = &fakeReleaseTrains{BoardService: rtsvc.NewBoardService(rtsvc.BoardDeps{
-		Config: rtsvc.NewConfigLoader(path), Store: st, Clock: func() time.Time { return f.now }})}
+		Config: rtsvc.NewConfigLoader(path), Store: st, Fixes: st, Clock: func() time.Time { return f.now }})}
+	f.svc.UsePlanTargetExecutor()
 	ctx := context.Background()
 	if err := st.PlanReleaseResources(ctx, []rt.ResourceSpec{f.tags}, f.now); err != nil {
 		t.Fatal(err)

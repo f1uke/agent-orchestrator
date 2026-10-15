@@ -118,3 +118,26 @@ DELETE FROM release_llb_plan_accepted WHERE plan_id = ?;
 
 -- name: InsertReleaseLlbPlanAccepted :exec
 INSERT INTO release_llb_plan_accepted (plan_id, mr_ref, reason) VALUES (?, ?, ?);
+
+-- name: GetLiveReleaseFix :one
+SELECT * FROM release_fix
+WHERE hit_id = ? AND plan_fingerprint = ? AND state IN ('dry_run', 'applying', 'applied');
+
+-- name: GetReleaseFix :one
+SELECT * FROM release_fix WHERE id = ?;
+
+-- name: ListReleaseFixes :many
+SELECT * FROM release_fix ORDER BY created_at, id;
+
+-- name: InsertReleaseFix :exec
+INSERT INTO release_fix (id, hit_id, rule_id, choice, plan, plan_fingerprint, state, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: SetReleaseFixState :execrows
+UPDATE release_fix SET state = ?, updated_at = ? WHERE id = ? AND state = ?;
+
+-- name: InsertReleaseFixEvent :exec
+INSERT INTO release_fix_event (fix_id, at, actor, kind, detail) VALUES (?, ?, ?, ?, ?);
+
+-- name: ListReleaseFixEvents :many
+SELECT * FROM release_fix_event ORDER BY fix_id, seq;
