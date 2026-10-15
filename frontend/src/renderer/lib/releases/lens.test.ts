@@ -15,6 +15,7 @@ import {
 	visibleApps,
 	worstTone,
 } from "./lens";
+import { cardGroups } from "./cards";
 import { board, hotfix as hotfixOf, stage, train, version } from "./testkit";
 import type { AlertHit, Badge, RuleOutcome } from "./types";
 import { parseReleasesSearch } from "./url";
@@ -338,15 +339,21 @@ describe("Only me", () => {
 	const me = makeLens(b, parseReleasesSearch({ me: "1" }));
 	const all = makeLens(b, parseReleasesSearch({}));
 
-	it("keeps only my versions, cards, card units, sprint cards, long-lived groups, hotfixes and hits", () => {
+	it("keeps only my versions, sprint cards, long-lived groups, hotfixes and hits", () => {
 		expect(me.me).toBe(true);
 		expect(me.keepVersion(t21.versions[0])).toBe(true);
 		expect(me.keepVersion(t21.versions[1])).toBe(false);
-		expect(t21.versions[0].cards.filter(me.keepCard).map((u) => u.key)).toEqual(["DEMO-1"]);
 		expect(me.sprintCards(b.sprints[0]).map((c) => c.key)).toEqual(["DEMO-7"]);
 		expect(me.llbs.map((g) => g.id)).toEqual(["a"]);
 		expect(b.hotfixes.filter(me.keepHotfix).map((h) => h.version)).toEqual(["2.3.1"]);
 		expect(me.attention.map((h) => h.id)).toEqual(["C1~v/21-2026/di"]);
+	});
+
+	it("leaves the card lists inside a train whole, and shows my face only with Only me on", () => {
+		expect(cardGroups(b, "di")[0].units.map((u) => u.key)).toEqual(["DEMO-1", "DEMO-2"]);
+		expect(cardGroups(b, "da")[0].units.map((u) => u.key)).toEqual(["DEMO-3"]);
+		expect(me.face?.jiraAccountId).toBe("acc-dee");
+		expect(all.face).toBeNull();
 	});
 
 	it("keeps everything with Only me off", () => {
@@ -381,6 +388,7 @@ describe("Only me", () => {
 			parseReleasesSearch({ me: "1" }),
 		);
 		expect(blind.me).toBe(false);
+		expect(blind.face).toBeNull();
 		expect(blind.badge.count).toBe(2);
 	});
 });

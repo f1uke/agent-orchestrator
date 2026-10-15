@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { branchFoldKey, statusTone, type BranchCard, type CardGroup } from "../../lib/releases/cards";
 import { shortDay } from "../../lib/releases/day";
 import { branchState, shortBranch, targetChip } from "../../lib/releases/llb";
-import type { Board, CardUnit, Person } from "../../lib/releases/types";
+import { mineText } from "../../lib/releases/sprint";
+import type { Board, CardUnit, IdentityKnown, MineReason, Person } from "../../lib/releases/types";
 import { CODE_META } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Avatar } from "./Avatar";
@@ -36,6 +37,16 @@ export function JiraKey({ k, url }: { k: string; url?: string }) {
 		</a>
 	) : (
 		<span className="k">{k}</span>
+	);
+}
+
+export function MineFace({ face, mine }: { face: IdentityKnown | null; mine?: readonly MineReason[] }) {
+	if (!face || !mine?.length) return <span />;
+	const why = `Yours: ${mineText(mine)}`;
+	return (
+		<span className="mecell" title={why} aria-label={why} data-testid="mine-face">
+			<Avatar accountId={face.jiraAccountId} name={face.displayName} size={18} />
+		</span>
 	);
 }
 
@@ -89,7 +100,7 @@ export function CardLine({
 	);
 }
 
-function UnitRow({ u, actions }: { u: CardUnit; actions: PageActions }) {
+function UnitRow({ u, face, actions }: { u: CardUnit; face: IdentityKnown | null; actions: PageActions }) {
 	const m = CODE_META[u.code.kind];
 	const into = u.code.kind === "parked" || u.code.kind === "elsewhere" ? ` into ${u.code.branch}` : "";
 	return (
@@ -108,6 +119,8 @@ function UnitRow({ u, actions }: { u: CardUnit; actions: PageActions }) {
 			}
 			status={u.status}
 			statusCategory={u.statusCategory}
+			extra={<MineFace face={face} mine={u.mine} />}
+			className={face && u.mine?.length ? "mine" : ""}
 			onOpen={() => actions.openSheet({ kind: "card", key: u.key }, "push")}
 		/>
 	);
@@ -117,11 +130,13 @@ function BranchCardRow({
 	c,
 	landed,
 	url,
+	face,
 	actions,
 }: {
 	c: BranchCard;
 	landed: boolean;
 	url?: string;
+	face: IdentityKnown | null;
 	actions: PageActions;
 }) {
 	const [glyph, tone, title] = c.pending
@@ -140,6 +155,8 @@ function BranchCardRow({
 			summary={c.summary}
 			status={c.status}
 			statusCategory={c.statusCategory}
+			extra={<MineFace face={face} mine={c.mine} />}
+			className={face && c.mine?.length ? "mine" : ""}
 			onOpen={() => actions.openSheet({ kind: "card", key: c.key }, "push")}
 		/>
 	);
@@ -148,12 +165,14 @@ function BranchCardRow({
 function GroupRows({
 	g,
 	board,
+	face,
 	actions,
 	isOpen,
 	jira,
 }: {
 	g: CardGroup;
 	board: Board;
+	face: IdentityKnown | null;
 	actions: PageActions;
 	isOpen: (k: string) => boolean;
 	jira: (key: string) => string | undefined;
@@ -162,7 +181,7 @@ function GroupRows({
 	return (
 		<>
 			{g.direct.map((u) => (
-				<UnitRow key={u.key} u={u} actions={actions} />
+				<UnitRow key={u.key} u={u} face={face} actions={actions} />
 			))}
 			{g.llbs.map(({ group, branch, cards }) => {
 				const fk = branchFoldKey(g, branch);
@@ -208,7 +227,7 @@ function GroupRows({
 						</div>
 						<Unfold open={open} className="nest">
 							{cards.map((c) => (
-								<BranchCardRow key={c.key} c={c} landed={landed} url={jira(c.key)} actions={actions} />
+								<BranchCardRow key={c.key} c={c} landed={landed} url={jira(c.key)} face={face} actions={actions} />
 							))}
 						</Unfold>
 					</div>
@@ -235,7 +254,7 @@ export function CardGroupBox({
 	left,
 	top,
 	focused,
-	mine,
+	face,
 	actions,
 	jira,
 }: {
@@ -244,7 +263,7 @@ export function CardGroupBox({
 	left: number;
 	top: number;
 	focused: boolean;
-	mine: boolean;
+	face: IdentityKnown | null;
 	actions: PageActions;
 	jira: (key: string) => string | undefined;
 }) {
@@ -265,7 +284,6 @@ export function CardGroupBox({
 				<span>{g.train.label}</span>
 				<b>
 					{n} card{n === 1 ? "" : "s"}
-					{mine ? " of mine" : ""}
 				</b>
 				<CodeMix g={g} />
 				<span>
@@ -282,7 +300,7 @@ export function CardGroupBox({
 				)}
 			</button>
 			<Unfold open={open.has(g.key)} className="crows">
-				<GroupRows g={g} board={board} actions={actions} isOpen={isOpen} jira={jira} />
+				<GroupRows g={g} board={board} face={face} actions={actions} isOpen={isOpen} jira={jira} />
 			</Unfold>
 		</div>
 	);

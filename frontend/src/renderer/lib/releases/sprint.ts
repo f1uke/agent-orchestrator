@@ -2,6 +2,7 @@ import { statusTone } from "./cards";
 import { shortDay } from "./day";
 import { shortBranch, trainLabel, urgency } from "./llb";
 import type {
+	AppId,
 	AppVersion,
 	Board,
 	BoardApp,
@@ -268,8 +269,20 @@ export function sprintFoldKey(row: SprintRow): string {
 	return `sp-${row.board.key}`;
 }
 
-export function sprintCount(b: Board): number {
-	return b.sprints.reduce((n, row) => n + row.cards.filter((c) => c.active && c.status !== "Abandoned").length, 0);
+export type SprintLens = { me: boolean; apps: ReadonlySet<AppId> | null };
+
+export function lensSprintCards(row: SprintRow, lens: SprintLens): SprintCard[] {
+	return row.cards.filter(
+		(c) =>
+			c.status !== "Abandoned" &&
+			(!lens.me || (c.mine?.length ?? 0) > 0) &&
+			(!lens.apps || !c.mrs.length || c.mrs.some((m) => lens.apps?.has(m.app))),
+	);
+}
+
+export function sprintCount(b: Board, lens: SprintLens): number {
+	const me = lens.me && b.identity.kind === "known";
+	return b.sprints.reduce((n, row) => n + lensSprintCards(row, { ...lens, me }).filter((c) => c.active).length, 0);
 }
 
 export type PillApp = {

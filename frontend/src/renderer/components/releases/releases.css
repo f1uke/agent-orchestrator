@@ -1707,6 +1707,14 @@
 	.rel .crow.mine {
 		box-shadow: inset 2px 0 0 var(--accent);
 	}
+	.rel .crow .mecell {
+		display: inline-grid;
+		place-items: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
+		box-shadow: 0 0 0 1.5px var(--accent);
+	}
 	.rel .crow.split .k::after {
 		content: " ⇄";
 		color: var(--amber);

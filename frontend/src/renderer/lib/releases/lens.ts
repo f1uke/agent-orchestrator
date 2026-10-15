@@ -5,9 +5,9 @@ import type {
 	Badge,
 	Board,
 	BoardApp,
-	CardUnit,
 	Hotfix,
 	Identity,
+	IdentityKnown,
 	LLBGroup,
 	MineReason,
 	SprintCard,
@@ -19,6 +19,7 @@ import type {
 	Train,
 	TrainKey,
 } from "./types";
+import { lensSprintCards } from "./sprint";
 import type { ReleasesSearch } from "./url";
 import { SEVERITY_META, stageTone, type Tone } from "./vocab";
 
@@ -93,8 +94,9 @@ export type Lens = {
 	/** Only me is on and the identity is known; with an unknown identity ?me=1 filters nothing. */
 	me: boolean;
 	identity: Identity;
+	/** Whose face marks my rows in a train's card lists, which Only me never filters. */
+	face: IdentityKnown | null;
 	keepVersion: (v: AppVersion) => boolean;
-	keepCard: (u: CardUnit) => boolean;
 	keepHotfix: (h: Hotfix) => boolean;
 	sprintCards: (row: SprintRow) => SprintCard[];
 	llbs: LLBGroup[];
@@ -118,11 +120,10 @@ export function makeLens(b: Board, url: ReleasesSearch): Lens {
 		appHits: (app) => attention.filter((h) => h.app === app && h.train === focus?.id),
 		me,
 		identity: b.identity,
+		face: me && b.identity.kind === "known" ? b.identity : null,
 		keepVersion: keep,
-		keepCard: keep,
 		keepHotfix: keep,
-		sprintCards: (row) =>
-			row.cards.filter((c) => c.status !== "Abandoned" && keep(c) && (!c.mrs.length || c.mrs.some((m) => on(m.app)))),
+		sprintCards: (row) => lensSprintCards(row, { me, apps: url.apps }),
 		llbs: b.llbs.filter(keep),
 	};
 }

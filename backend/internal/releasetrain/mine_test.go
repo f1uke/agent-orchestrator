@@ -146,6 +146,27 @@ func TestMineOnHotfixesAndLongLivedGroups(t *testing.T) {
 	}
 }
 
+func TestMineOnLongLivedBranchCards(t *testing.T) {
+	f := newFixture(t, today)
+	f.me()
+	f.mr("di", "DEMO-1 wallet", "feat/DEMO-1", "feature/demo-wallet", MRMerged, "2026-09-01", "2026-09-02")
+	f.llbCards = append(f.llbCards, &IssueFact{Key: "DEMO-1", Assignee: dee})
+	authored := f.mr("di", "DEMO-2 wallet", "feat/DEMO-2", "feature/demo-wallet", MRMerged, "2026-09-03", "2026-09-04")
+	authored.AuthorUsername = "dee"
+	f.mr("di", "DEMO-3 wallet", "feat/DEMO-3", "feature/demo-wallet", MRMerged, "2026-09-05", "2026-09-06")
+	got := map[string][]MineWhy{}
+	for _, c := range f.reconcile().LLBs[0].Branches[0].Cards {
+		got[c.Key] = nil
+		for _, r := range c.Mine {
+			got[c.Key] = append(got[c.Key], r.Why)
+		}
+	}
+	want := map[string][]MineWhy{"DEMO-1": {MineAssignee}, "DEMO-2": {MineMRAuthor}, "DEMO-3": nil}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("long-lived card mine = %v, want %v", got, want)
+	}
+}
+
 func TestMineOnHitsFollowsTheirSubject(t *testing.T) {
 	f, v := mineSetup(t)
 	v.mr.AuthorUsername = "dee"

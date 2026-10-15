@@ -86,16 +86,16 @@ test.describe("releases page", () => {
 	test("hiding an alert moves it to Hidden and Restore brings it back", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const count = page.getByTestId("attention-count");
-		await expect(count).toHaveText("6");
+		await expect(count).toHaveText("7");
 		await page.getByRole("button", { name: "Hide C1~v/21-2026/di" }).click();
-		await expect(count).toHaveText("5");
+		await expect(count).toHaveText("6");
 		await page
 			.getByTestId("hidden-fold")
 			.getByRole("button", { name: /hidden/ })
 			.click();
 		const hidden = page.locator('.al[data-hit="C1~v/21-2026/di"]');
 		await hidden.getByRole("button", { name: "Restore" }).click();
-		await expect(count).toHaveText("6");
+		await expect(count).toHaveText("7");
 	});
 
 	test("panning 500 px leaves no half-visible label and no bar at scaleX(0)", async ({ page }) => {
@@ -131,7 +131,7 @@ test.describe("releases page", () => {
 			/gitlab unknown · \d+[mhd]/,
 		);
 		await expect(page.getByTestId("release-sources").locator('[data-source="jira"]')).not.toContainText("unknown");
-		await expect(page.getByTestId("attention-count")).toHaveText("6 · 1 unknown");
+		await expect(page.getByTestId("attention-count")).toHaveText("7 · 1 unknown");
 		await expect(page.locator('.rel-app[data-app="di"] .rel-mk[data-stage="scan"]')).toHaveAttribute(
 			"data-st",
 			"unknown",
@@ -353,7 +353,7 @@ test.describe("releases page", () => {
 
 	test("Only me filters every kind of thing and changes the badge", async ({ page }) => {
 		await open(page, "?layers=sprint,llb,cards");
-		await expect(page.getByTestId("attention-count")).toHaveText("6");
+		await expect(page.getByTestId("attention-count")).toHaveText("7");
 		await page.getByTestId("only-me").click();
 		await expect(page).toHaveURL(/me=%221%22/);
 		await expect(page.getByTestId("only-me")).toHaveAttribute("aria-pressed", "true");
@@ -364,14 +364,86 @@ test.describe("releases page", () => {
 		await expect(page.getByTestId("label-da").getByTestId("label-mine")).toHaveText("Nothing of mine in #21");
 		await expect(page.getByTestId("bar-da-21-2026")).toHaveClass(/notmine/);
 		await expect(page.getByTestId("bar-di-21-2026")).not.toHaveClass(/notmine/);
-		await expect(page.getByTestId("cards-di:21-2026")).toContainText("1 card of mine");
-		await expect(page.getByTestId("cards-da:21-2026")).toHaveCount(0);
+		await expect(page.getByTestId("cards-di:21-2026").locator(".csum")).toContainText("6 cards");
+		await expect(page.getByTestId("cards-da:21-2026").locator(".csum")).toContainText("4 cards");
 		await expect(page.locator('[data-testid="llb-summary"][data-app="di"]')).toContainText("1 long-lived of mine");
 		await expect(page.getByTestId("sprint-row-DEMO").getByTestId("sprint-scope")).toHaveText("1 new · 1 carried, done");
 		await expect(page.getByTestId("sprint-row-PILOT").getByTestId("sprint-scope")).toHaveText("1 new");
 		await page.getByRole("button", { name: /Needs attention/ }).click();
 		await expect(page.locator(".al[data-hit]")).toHaveCount(2);
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-only-me.png` });
+	});
+
+	test("?me=1 leaves the train's card groups whole and puts my face on my cards", async ({ page }) => {
+		await open(page, "?me=1");
+		const group = page.getByTestId("cards-di:21-2026");
+		await expect(group.locator(".csum")).toContainText("6 cards");
+		await expect(group.locator(".csum")).not.toContainText("of mine");
+		await group.locator(".csum").click();
+		await expect(group.locator(".crow:not(.lbr)")).toHaveCount(6);
+		await expect(group.locator(".crow.mine")).toHaveCount(1);
+		const mine = group.locator('.crow[data-key="DEMO-101"]');
+		await expect(mine).toHaveClass(/mine/);
+		const face = mine.getByTestId("mine-face");
+		await expect(face).toHaveAttribute("aria-label", "Yours: assignee");
+		await expect(face.locator(".av")).toHaveAttribute("data-account", "acc-ada");
+		await expect(group.locator('.crow[data-key="DEMO-102"]').getByTestId("mine-face")).toHaveCount(0);
+
+		const wallet = page.getByTestId("cards-di:22-2026");
+		await wallet.locator(".csum").click();
+		await wallet.locator(".crow.lbr").click();
+		await expect(wallet.locator(".nest .crow")).toHaveCount(3);
+		await expect(wallet.locator('.nest .crow[data-key="DEMO-108"]').getByTestId("mine-face")).toHaveAttribute(
+			"aria-label",
+			"Yours: your MR !303",
+		);
+		await expect(wallet.locator('.nest .crow[data-key="DEMO-107"]').getByTestId("mine-face")).toHaveCount(0);
+
+		const da = page.getByTestId("cards-da:21-2026");
+		await da.locator(".csum").click();
+		await expect(da.locator(".crow")).toHaveCount(4);
+		await expect(da.getByTestId("mine-face")).toHaveCount(0);
+		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-only-me-faces.png` });
+	});
+
+	test("without Only me the card groups show no face", async ({ page }) => {
+		await open(page);
+		const group = page.getByTestId("cards-di:21-2026");
+		await group.locator(".csum").click();
+		await expect(group.locator(".crow:not(.lbr)")).toHaveCount(6);
+		await expect(group.getByTestId("mine-face")).toHaveCount(0);
+		await expect(group.locator(".crow.mine")).toHaveCount(0);
+	});
+
+	test("the sidebar's Sprint count follows Only me and the app filter", async ({ page }) => {
+		await open(page);
+		const sprint = (n: number) => page.getByRole("button", { name: new RegExp(`^Sprint\\s*${n}$`) });
+		await expect(sprint(8)).toBeVisible();
+		await page.getByTestId("only-me").click();
+		await expect(sprint(2)).toBeVisible();
+		await page.getByTestId("only-me").click();
+		await expect(sprint(8)).toBeVisible();
+		await open(page, "?apps=di");
+		await expect(sprint(4)).toBeVisible();
+		await open(page, "?apps=di&me=1");
+		await expect(sprint(1)).toBeVisible();
+	});
+
+	test("an L9 hit shows in Needs attention with its MR and link", async ({ page }) => {
+		await open(page, "?sheet=attention");
+		const hit = page.locator('.al[data-hit="L9~mr/da/415"]');
+		await expect(hit).toContainText(
+			"!415 feat/DEMO-203 → feat/DEMO-201-base: not a sprint branch, a long-lived branch or develop",
+		);
+		await expect(hit).toContainText("Demo Android");
+		await expect(hit.getByRole("link", { name: "Open MR" })).toHaveAttribute(
+			"href",
+			"https://gitlab.example.com/demo/merge_requests/415",
+		);
+		await open(page, "?sheet=rules");
+		await expect(page.locator('.rule[data-rule="L9"]')).toContainText(
+			"MR into a branch that is not a sprint branch, a long-lived branch or develop",
+		);
 	});
 
 	test("with the identity unknown Only me is disabled with the reason and ?me=1 filters nothing", async ({ page }) => {
@@ -383,7 +455,7 @@ test.describe("releases page", () => {
 		await expect(page.getByRole("tooltip")).toContainText(
 			"Only me needs your Jira and GitLab accounts: gitlab.user has not been read yet",
 		);
-		await expect(page.getByTestId("attention-count")).toHaveText("6");
+		await expect(page.getByTestId("attention-count")).toHaveText("7");
 		await expect(page.getByTestId("label-di").getByTestId("label-mine")).toHaveCount(0);
 	});
 

@@ -106,9 +106,12 @@ func mine(b *Board, m *me, mrs mrIndex, snap Snapshot, cfg Config) {
 	}
 	for i := range b.LLBs {
 		g := &b.LLBs[i]
-		for _, br := range g.Branches {
-			for _, c := range br.Cards {
-				if r := m.card(c.Key, c.Assignee, []MRFact{c.MR}); len(r) > 0 {
+		for bi := range g.Branches {
+			br := &g.Branches[bi]
+			for ci := range br.Cards {
+				c := &br.Cards[ci]
+				c.Mine = m.card(c.Key, c.Assignee, []MRFact{c.MR})
+				if len(c.Mine) > 0 {
 					g.Mine = append(g.Mine, MineReason{Why: MineCard, Ref: c.Key})
 				}
 			}

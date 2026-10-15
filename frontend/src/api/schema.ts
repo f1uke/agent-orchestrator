@@ -5066,6 +5066,7 @@ export interface components {
         ReleaseTrainLLBCard: {
             assignee?: components["schemas"]["ReleaseTrainPerson"];
             key: string;
+            mine?: components["schemas"]["ReleaseTrainMineReason"][];
             mr: components["schemas"]["ReleaseTrainMRFact"];
             status?: string;
             statusCategory?: string;
