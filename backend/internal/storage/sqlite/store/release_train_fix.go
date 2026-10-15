@@ -82,6 +82,19 @@ func insertFixEvent(ctx context.Context, q *gen.Queries, id string, ev rt.FixEve
 	})
 }
 
+// LiveReleaseFix finds the hit's live fix for one plan fingerprint.
+func (s *Store) LiveReleaseFix(ctx context.Context, hit rt.HitID, fingerprint string) (rt.Fix, bool, error) {
+	row, err := s.qr.GetLiveReleaseFix(ctx, gen.GetLiveReleaseFixParams{HitID: string(hit), PlanFingerprint: fingerprint})
+	if errors.Is(err, sql.ErrNoRows) {
+		return rt.Fix{}, false, nil
+	}
+	if err != nil {
+		return rt.Fix{}, false, fmt.Errorf("get live release fix: %w", err)
+	}
+	f, err := s.GetReleaseFix(ctx, row.ID)
+	return f, err == nil, err
+}
+
 // GetReleaseFix reads one fix with its events, or rt.ErrNoSuchFix.
 func (s *Store) GetReleaseFix(ctx context.Context, id string) (rt.Fix, error) {
 	row, err := s.qr.GetReleaseFix(ctx, id)

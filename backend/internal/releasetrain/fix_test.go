@@ -253,7 +253,7 @@ func TestPlanFixL3AppliesToTheLongLivedPlan(t *testing.T) {
 	wantMode(t, p, ModeApply)
 	wantRequests(t, p, `PUT /api/v1/release-trains/llb-plans/demo-wallet {"targetKind":"train","targetTrain":"21-2026","ifVersion":4}`)
 	e := p.Steps[0].Effect.(EffAOPlanTarget)
-	if e.Before.Kind != TargetTrain || *e.Before.Train != (TrainID{Number: 22, Year: fixtureYear}) || e.PlanVersion != 4 || !p.Applies() {
+	if e.Before.Kind != TargetTrain || *e.Before.Train != (TrainID{Number: 22, Year: fixtureYear}) || e.PlanVersion != 4 {
 		t.Fatalf("L3 effect = %+v; want before #22 at version 4", e)
 	}
 }

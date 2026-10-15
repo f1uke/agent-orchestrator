@@ -84,6 +84,11 @@ func PlanFix(b Board, id HitID, choice string) (FixPlan, error) {
 	}
 	plan := p.plan(&b, h)
 	plan.Hit, plan.Rule = h.ID, h.Rule
+	for _, r := range ruleTable() {
+		if r.ID == h.Rule && r.Scope == scopePerApp {
+			plan.App = h.App
+		}
+	}
 	if plan.Steps == nil {
 		plan.Steps = []FixStep{}
 	}

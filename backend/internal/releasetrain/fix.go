@@ -89,8 +89,10 @@ type FixNeed struct {
 
 // FixPlan is what confirming a hit's fix would do, as of one Board.
 type FixPlan struct {
-	Hit     HitID       `json:"hit"`
-	Rule    RuleID      `json:"rule"`
+	Hit  HitID  `json:"hit"`
+	Rule RuleID `json:"rule"`
+	// App is the hit's app; empty for a rule that spans every app.
+	App     AppID       `json:"app,omitempty"`
 	Title   string      `json:"title"`
 	Note    string      `json:"note,omitempty"`
 	Mode    FixMode     `json:"mode"`
@@ -107,17 +109,6 @@ type FixPlan struct {
 // copy and blocked plans, and a choose plan with no choice, have nothing to record.
 func (p FixPlan) Recordable() bool {
 	return len(p.Steps) > 0 && (p.Mode == ModeApply || p.Mode == ModeQueue || p.Mode == ModeChoose)
-}
-
-// Applies reports whether every step writes AO's own data, so the fix applies
-// instead of being recorded as a dry run.
-func (p FixPlan) Applies() bool {
-	for _, s := range p.Steps {
-		if s.Effect.Kind() != EffectAOPlanTarget {
-			return false
-		}
-	}
-	return len(p.Steps) > 0
 }
 
 func fingerprint(hit HitID, choice string, steps []FixStep) string {

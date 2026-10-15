@@ -45,7 +45,10 @@ type BoardStore interface {
 type BoardDeps struct {
 	Config *ConfigLoader
 	Store  BoardStore
-	Clock  func() time.Time
+	Fixes  FixStore
+	// Executors are the effect kinds that really apply; every other is a dry run.
+	Executors Executors
+	Clock     func() time.Time
 }
 
 // BoardService reconciles the stored observations into the Board and caches
@@ -161,7 +164,12 @@ func humanFingerprint(h rt.HumanState) string {
 	for i, p := range h.Plans {
 		plans[i] = fmt.Sprintf("%s@%d", p.ID, p.Version)
 	}
-	sum := sha256.Sum256([]byte(strings.Join(rules, "\n") + "\n\n" + strings.Join(hides, "\n") + "\n\n" + strings.Join(plans, "\n")))
+	fixes := make([]string, 0, len(h.OpenFixes))
+	for hit, f := range h.OpenFixes {
+		fixes = append(fixes, fmt.Sprintf("%s\x00%s@%s", hit, f.ID, f.State))
+	}
+	sort.Strings(fixes)
+	sum := sha256.Sum256([]byte(strings.Join(rules, "\n") + "\n\n" + strings.Join(hides, "\n") + "\n\n" + strings.Join(plans, "\n") + "\n\n" + strings.Join(fixes, "\n")))
 	return hex.EncodeToString(sum[:])
 }
 
