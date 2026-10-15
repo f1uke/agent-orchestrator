@@ -22,7 +22,7 @@ function hit(id: string, over: Partial<AlertHit> = {}): AlertHit {
 		bucket: "badge",
 		text: "",
 		evidence: {},
-		link: { label: "Open" },
+		links: [],
 		asOf: "2026-10-15T00:00:00Z",
 		...over,
 	};

@@ -24,9 +24,13 @@ func forEachSprintCard(b *Board, fn func(row *SprintRow, c *SprintCard) []Hit) [
 	return out
 }
 
-func cardHit(row *SprintRow, c *SprintCard, text string, ev Evidence) Hit {
+func cardHit(row *SprintRow, c *SprintCard, text string, ev Evidence, mrs ...SprintMR) Hit {
 	ev["board"], ev["sprint"] = row.Board.Key, row.Number
-	return Hit{Subject: SubjCard{Key: c.Key}, Evidence: ev, Text: text, Link: Link{Label: "Open card", URL: c.URL}}
+	links := []Link{{Label: "Open card", URL: c.URL}}
+	for _, m := range mrs {
+		links = append(links, Link{Label: fmt.Sprintf("Open !%d", m.IID), URL: m.URL})
+	}
+	return Hit{Subject: SubjCard{Key: c.Key}, Evidence: ev, Text: text, Links: links}
 }
 
 func mrList(mrs []SprintMR, short func(AppID) string) string {
@@ -62,7 +66,7 @@ var ruleG1 = rule{
 				}
 			}
 			return []Hit{cardHit(row, c, fmt.Sprintf("Jira says %s, all %d MR(s) merged (%s)", c.Status, len(c.MRs), mrList(c.MRs, b.appName)),
-				Evidence{"status": c.Status, "mrs": len(c.MRs)})}
+				Evidence{"status": c.Status, "mrs": len(c.MRs)}, c.MRs...)}
 		})
 	},
 }
@@ -119,8 +123,12 @@ var ruleG3 = rule{
 				if to, ok := r.To.(ToLLB); ok {
 					goes = to.Branch
 				}
+				var by []SprintMR
+				if m := routeMR(c.MRs, r); m != nil {
+					by = append(by, *m)
+				}
 				return []Hit{cardHit(row, c, fmt.Sprintf("Page or fixVersion says %s, code goes to %s (%s)", r.Plan, goes, b.appName(r.App)),
-					Evidence{"app": r.App, "plan": *r.Plan, "to": r.To.destKey()})}
+					Evidence{"app": r.App, "plan": *r.Plan, "to": r.To.destKey()}, by...)}
 			}
 			return nil
 		})
@@ -208,7 +216,7 @@ var ruleG5 = rule{
 						Severity: bucket.sev,
 						Evidence: Evidence{"page": pg.ID, "cards": keys, "bucket": bucket.name},
 						Text:     fmt.Sprintf("%d card(s) not on %q: %s", len(keys), pg.Title, joinNames(keys)),
-						Link:     Link{Label: "Open page", URL: pg.URL},
+						Links:    []Link{{Label: "Open page", URL: pg.URL}},
 					})
 				}
 			}
@@ -250,7 +258,7 @@ var ruleL8 = rule{
 					Subject: SubjMR{App: m.App, IID: m.IID}, App: m.App,
 					Evidence: Evidence{"card": c.Key, "target": m.Target, "state": m.State, "board": row.Board.Key},
 					Text:     fmt.Sprintf("%s !%d %s; it should go to the sprint branch", b.appName(m.App), m.IID, what),
-					Link:     Link{Label: "Open MR", URL: m.URL},
+					Links:    []Link{{Label: "Open MR", URL: m.URL}},
 				})
 			}
 			return out

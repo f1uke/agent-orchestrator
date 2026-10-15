@@ -28,7 +28,7 @@ import {
 } from "../../lib/releases/vocab";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Switch } from "../ui/switch";
-import { AlertList, AlertRow, appName, Ext, Sec } from "./Alerts";
+import { AlertList, AlertRow, appName, Ext, HitLinks, Sec } from "./Alerts";
 import { Avatar } from "./Avatar";
 import { cardSheet, sprintSheet } from "./CardSheets";
 import { fixesSheet, fixSheet } from "./FixSheets";
@@ -438,11 +438,11 @@ function mismatchSheet(hitId: string, c: Ctx): Sheet {
 						</span>
 					</>
 				)}
-				{h.link.url && (
+				{h.links.some((l) => l.url) && (
 					<>
-						<span>Source</span>
-						<span>
-							<Ext url={h.link.url}>{h.link.label}</Ext>
+						<span>Open</span>
+						<span className="links">
+							<HitLinks h={h} />
 						</span>
 					</>
 				)}

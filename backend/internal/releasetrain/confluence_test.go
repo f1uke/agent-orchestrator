@@ -272,8 +272,8 @@ func TestA6(t *testing.T) {
 				t.Fatalf("A6 = %v, want %v", got, tc.want)
 			}
 			for i, text := range tc.text {
-				if h := firedHits(b, "A6")[i]; h.Text != text || h.Link.URL == "" {
-					t.Fatalf("hit %d = %q (%s), want %q and the page link", i, h.Text, h.Link.URL, text)
+				if h := firedHits(b, "A6")[i]; h.Text != text || len(h.Links) == 0 || h.Links[0].URL == "" {
+					t.Fatalf("hit %d = %q (%v), want %q and the page link", i, h.Text, h.Links, text)
 				}
 			}
 			if _, clean := outcomeOf(b, "A6", "di").(Clean); len(tc.want) == 0 && !clean {

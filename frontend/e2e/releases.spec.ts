@@ -86,16 +86,16 @@ test.describe("releases page", () => {
 	test("hiding an alert moves it to Hidden and Restore brings it back", async ({ page }) => {
 		await open(page, "?sheet=attention");
 		const count = page.getByTestId("attention-count");
-		await expect(count).toHaveText("7");
+		await expect(count).toHaveText("8");
 		await page.getByRole("button", { name: "Hide C1~v/21-2026/di" }).click();
-		await expect(count).toHaveText("6");
+		await expect(count).toHaveText("7");
 		await page
 			.getByTestId("hidden-fold")
 			.getByRole("button", { name: /hidden/ })
 			.click();
 		const hidden = page.locator('.al[data-hit="C1~v/21-2026/di"]');
 		await hidden.getByRole("button", { name: "Restore" }).click();
-		await expect(count).toHaveText("7");
+		await expect(count).toHaveText("8");
 	});
 
 	test("panning 500 px leaves no half-visible label and no bar at scaleX(0)", async ({ page }) => {
@@ -444,6 +444,33 @@ test.describe("releases page", () => {
 		await expect(page.locator('.rule[data-rule="L9"]')).toContainText(
 			"MR into a branch that is not a sprint branch, a long-lived branch or develop",
 		);
+	});
+
+	test("an A6 hit opens both sources it compares, in Attention and the version sheet", async ({ page }) => {
+		const expectBoth = async (scope: ReturnType<Page["locator"]>) => {
+			await expect(scope.getByRole("link", { name: "Open page" })).toHaveAttribute(
+				"href",
+				"https://wiki.example.com/pages/21-demo",
+			);
+			await expect(scope.getByRole("link", { name: "Open milestone" })).toHaveAttribute(
+				"href",
+				"https://gitlab.example.com/demo/milestones/1",
+			);
+		};
+		await open(page, "?sheet=attention");
+		const hit = page.locator('.al[data-hit="A6~vd/21-2026/di/freeze"]');
+		await expect(hit).toContainText("Page says freeze");
+		await expectBoth(hit);
+		await hit.getByRole("button", { name: "Show" }).click();
+		await expectBoth(page.locator('.rel-sheet .al[data-hit="A6~vd/21-2026/di/freeze"]'));
+	});
+
+	test("an A1 hit's mismatch sheet opens the Jira release and the milestone", async ({ page }) => {
+		await open(page, "?sheet=attention");
+		await page.locator('.al[data-hit="A1~v/21-2026/pi"]').getByRole("button", { name: "Show" }).click();
+		const links = page.locator(".rel-sheet .kv .links");
+		await expect(links.getByRole("link", { name: "Open Jira release" })).toBeVisible();
+		await expect(links.getByRole("link", { name: "Open milestone" })).toBeVisible();
 	});
 
 	test("with the identity unknown Only me is disabled with the reason and ?me=1 filters nothing", async ({ page }) => {

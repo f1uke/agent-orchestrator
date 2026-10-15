@@ -25,6 +25,20 @@ export function Sec({ title, extra, children }: { title: string; extra?: ReactNo
 	);
 }
 
+export function HitLinks({ h }: { h: AlertHit }) {
+	return (
+		<>
+			{h.links
+				.filter((l) => l.url)
+				.map((l) => (
+					<Ext key={l.url} url={l.url}>
+						{l.label}
+					</Ext>
+				))}
+		</>
+	);
+}
+
 export function Ext({ url, children }: { url?: string; children: ReactNode }) {
 	return url ? (
 		<a href={url} target="_blank" rel="noreferrer">
@@ -96,7 +110,7 @@ export function AlertRow({ h, c, hidden = false }: { h: AlertHit; c: AlertCtx; h
 							Show
 						</button>
 					)}
-					{h.link.url && <Ext url={h.link.url}>{h.link.label}</Ext>}
+					<HitLinks h={h} />
 					<FixButton h={h} hidden={hidden} c={c} />
 					{hidden && (
 						<button type="button" onClick={() => unhide.mutate(h.id)}>

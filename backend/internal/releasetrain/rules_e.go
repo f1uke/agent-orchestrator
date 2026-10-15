@@ -18,7 +18,7 @@ var ruleE1 = rule{
 			if len(pending) > 0 {
 				text += fmt.Sprintf("; %d of %d approvers pending: %s", len(pending), len(v.Jira.Approvers), joinNames(pending))
 			}
-			return versionHit(t, v, text, Evidence{"tag": v.Tag.Name, "pending": pending}, jiraLink(v.Jira))
+			return versionHit(t, v, text, Evidence{"tag": v.Tag.Name, "pending": pending}, jiraLink(v.Jira), Link{Label: "Open tag", URL: v.Tag.URL})
 		})
 		for _, h := range b.Hotfixes {
 			due := h.Milestone.Due
@@ -27,7 +27,7 @@ var ruleE1 = rule{
 			}
 			hits = append(hits, Hit{
 				Subject: SubjHotfix{App: h.App, Version: h.Version}, App: h.App, AgesOn: due,
-				Evidence: Evidence{"hotfix": h.Version}, Text: "Hotfix shipped, Jira release still unreleased", Link: jiraLink(h.Jira),
+				Evidence: Evidence{"hotfix": h.Version}, Text: "Hotfix shipped, Jira release still unreleased", Links: []Link{jiraLink(h.Jira), {Label: "Open hotfix", URL: h.Milestone.URL}},
 			})
 		}
 		return hits

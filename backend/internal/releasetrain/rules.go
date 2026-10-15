@@ -95,11 +95,11 @@ func forEachVersion(b *Board, fn func(t *Train, v *AppVersion) *Hit) []Hit {
 	return out
 }
 
-func versionHit(t *Train, v *AppVersion, text string, ev Evidence, link Link) *Hit {
+func versionHit(t *Train, v *AppVersion, text string, ev Evidence, links ...Link) *Hit {
 	train := t.ID
 	return &Hit{
 		Subject: SubjVersion{Train: t.ID, App: v.App}, Train: &train, App: v.App,
-		AgesOn: dueOf(t, v), Evidence: ev, Text: text, Link: link,
+		AgesOn: dueOf(t, v), Evidence: ev, Text: text, Links: links,
 	}
 }
 
@@ -109,6 +109,8 @@ func jiraLink(j *JiraVersionFact) Link {
 	}
 	return Link{Label: "Open Jira release", URL: j.URL}
 }
+
+func milestoneLink(m *MilestoneFact) Link { return Link{Label: "Open milestone", URL: m.URL} }
 
 func pendingApprovers(j *JiraVersionFact) []string {
 	var out []string
@@ -135,6 +137,9 @@ func alerts(b *Board, in Inputs, rs *readSet) Alerts {
 		for i := range hits {
 			hits[i].Rule = r.ID
 			hits[i].ID = hitID(r.ID, hits[i].Subject)
+			if hits[i].Links == nil {
+				hits[i].Links = []Link{}
+			}
 			if hits[i].Severity == 0 {
 				hits[i].Severity = r.Severity
 			}

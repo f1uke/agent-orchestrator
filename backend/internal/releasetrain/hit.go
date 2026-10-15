@@ -75,7 +75,7 @@ func ParseSeverity(s string) (Severity, bool) {
 // Evidence is the structured facts a hit's text renders from.
 type Evidence map[string]any
 
-// Link is where a hit sends the human.
+// Link is one place a hit sends the human; a hit about two systems disagreeing links both.
 type Link struct {
 	Label string `json:"label"`
 	URL   string `json:"url,omitempty"`
@@ -92,7 +92,7 @@ type Hit struct {
 	AgesOn   *Day         `json:"agesOn,omitempty"`
 	Evidence Evidence     `json:"evidence"`
 	Text     string       `json:"text"`
-	Link     Link         `json:"link"`
+	Links    []Link       `json:"links"`
 	AsOf     time.Time    `json:"asOf"`
 	Mine     []MineReason `json:"mine,omitempty"`
 }

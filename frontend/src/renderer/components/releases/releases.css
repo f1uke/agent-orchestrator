@@ -946,6 +946,11 @@
 	.rel-sheet .kv > :nth-child(odd) {
 		color: var(--fg-passive);
 	}
+	.rel-sheet .kv .links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 12px;
+	}
 	.rel-sheet a {
 		color: var(--accent);
 	}

@@ -290,7 +290,7 @@ function baseBoard(today: string): Board {
 		bucket: "badge",
 		text,
 		evidence: {},
-		link: { label: "Open", url: `${HOST}/x` },
+		links: [{ label: "Open", url: `${HOST}/x` }],
 		asOf: `${today}T02:00:00Z`,
 		...over,
 	});
@@ -308,6 +308,19 @@ function baseBoard(today: string): Board {
 			app: "pi",
 			train: "21-2026",
 			evidence: { kind: "version", version: "1.0.2", milestone: "v 1.0.1", jira: "pi 1.0.2" },
+			links: [
+				{ label: "Open Jira release", url: `${JIRA}/versions/1` },
+				{ label: "Open milestone", url: `${HOST}/milestones/1` },
+			],
+		}),
+		hit("A6~vd/21-2026/di/freeze", "A6", "data", `Page says freeze ${dayLabel(addDays(f21, 1))}, milestone starts ${dayLabel(f21)}`, {
+			app: "di",
+			train: "21-2026",
+			evidence: { page: addDays(f21, 1), milestone: f21 },
+			links: [
+				{ label: "Open page", url: "https://wiki.example.com/pages/21-demo" },
+				{ label: "Open milestone", url: `${HOST}/milestones/1` },
+			],
 		}),
 		hit("D3~v/21-2026/da", "D3", "risk", "0 of 9 approvers approved, publish in 6 days", {
 			app: "da",
@@ -322,7 +335,7 @@ function baseBoard(today: string): Board {
 			{
 				app: "da",
 				evidence: { mr: 415, source: "feat/DEMO-203", target: "feat/DEMO-201-base", state: "opened" },
-				link: { label: "Open MR", url: `${HOST}/merge_requests/415` },
+				links: [{ label: "Open MR", url: `${HOST}/merge_requests/415` }],
 			},
 		),
 		hit("E1~v/20-2026/di", "E1", "hygiene", "Published but the Jira release is not marked released", {
@@ -921,7 +934,7 @@ export function fixesBoard(today: string): Board {
 		bucket: "badge",
 		text,
 		evidence: {},
-		link: { label: "Open", url: `${HOST}/x` },
+		links: [{ label: "Open", url: `${HOST}/x` }],
 		asOf: at,
 		fix: FIX_KINDS[id.slice(0, id.indexOf("~"))],
 		...over,
@@ -939,7 +952,7 @@ export function fixesBoard(today: string): Board {
 				app: "di",
 				train: "21-2026",
 				evidence: { card: "DEMO-110", group: "demo-chat", branch: "feature/demo-chat" },
-				link: { label: "Open card", url: `${JIRA}/browse/DEMO-110` },
+				links: [{ label: "Open card", url: `${JIRA}/browse/DEMO-110` }],
 			},
 		),
 		fixable(

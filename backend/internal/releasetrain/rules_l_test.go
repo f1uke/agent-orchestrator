@@ -71,7 +71,7 @@ func TestL1EvidenceAndText(t *testing.T) {
 	}
 	h := hits[0]
 	want := "!" + strconv.Itoa(mr.IID) + " feature/demo-wallet → develop is open; land it in the sprint branch instead"
-	if h.Text != want || h.Severity != SevBlock || h.App != "di" || h.Train != nil || h.AgesOn != nil || h.Link.URL != mr.URL {
+	if h.Text != want || h.Severity != SevBlock || h.App != "di" || h.Train != nil || h.AgesOn != nil || len(h.Links) != 1 || h.Links[0].URL != mr.URL {
 		t.Fatalf("L1 hit = %+v, want text %q, block, app di, no train, never ages, the MR link", h, want)
 	}
 }
@@ -117,8 +117,8 @@ func TestL3CardOnATrainParkedInALongLivedBranchThatDoesNotTargetIt(t *testing.T)
 			if tc.text == "" {
 				return
 			}
-			if link := firedHits(b, "L3")[0].Link; link.URL != "https://jira.example.com/browse/DEMO-7" {
-				t.Fatalf("L3 link = %+v, want the card's browse URL", link)
+			if links := firedHits(b, "L3")[0].Links; len(links) != 1 || links[0].URL != "https://jira.example.com/browse/DEMO-7" {
+				t.Fatalf("L3 links = %+v, want the card's browse URL", links)
 			}
 			h := firedHits(b, "L3")[0]
 			if h.Text != tc.text || h.Evidence["train"] != (TrainID{Number: 21, Year: fixtureYear}) || h.Evidence["group"] != PlanID("demo-wallet") || h.AgesOn == nil {
@@ -232,7 +232,7 @@ func TestL9EvidenceAndText(t *testing.T) {
 	}
 	h := hits[0]
 	want := "!" + strconv.Itoa(mr.IID) + " feat/DEMO-2 → feat/DEMO-1-base: not a sprint branch, a long-lived branch or develop"
-	if h.Text != want || h.Severity != SevRisk || h.App != "di" || h.Train != nil || h.AgesOn != nil || h.Link.URL != mr.URL {
+	if h.Text != want || h.Severity != SevRisk || h.App != "di" || h.Train != nil || h.AgesOn != nil || len(h.Links) != 1 || h.Links[0].URL != mr.URL {
 		t.Fatalf("L9 hit = %+v, want text %q, risk, app di, no train, never ages, the MR link", h, want)
 	}
 	if h.Evidence["source"] != "feat/DEMO-2" || h.Evidence["target"] != "feat/DEMO-1-base" || h.Evidence["state"] != MROpened {

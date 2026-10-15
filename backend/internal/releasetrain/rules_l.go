@@ -29,7 +29,7 @@ var ruleL1 = rule{
 						Subject: SubjMR{App: br.App, IID: mr.IID}, App: br.App,
 						Evidence: Evidence{"group": g.ID, "branch": br.Branch, "mr": mr.IID, "target": mr.TargetBranch, "cutover": cutover},
 						Text:     fmt.Sprintf("!%d %s → %s is open; land it in the sprint branch instead", mr.IID, br.Branch, mr.TargetBranch),
-						Link:     Link{Label: "Open MR", URL: mr.URL},
+						Links:    []Link{{Label: "Open MR", URL: mr.URL}},
 					})
 				}
 			}
@@ -79,7 +79,7 @@ var ruleL3 = rule{
 						Subject: SubjCardOnTrain{Train: t.ID, App: v.App, Key: c.Key}, Train: &train, App: v.App, AgesOn: dueOf(t, v),
 						Evidence: Evidence{"card": c.Key, "train": t.ID, "group": g.ID, "branch": parked.Branch, "target": targetText(g.Target)},
 						Text:     fmt.Sprintf("%s is on train %s, but its code sits in %s (%s)", c.Key, t.ID, parked.Branch, targetText(g.Target)),
-						Link:     Link{Label: "Open card", URL: c.URL},
+						Links:    []Link{{Label: "Open card", URL: c.URL}},
 					})
 				}
 			}
@@ -115,7 +115,7 @@ var ruleL9 = rule{
 					Subject: SubjMR{App: app.ID, IID: mr.IID}, App: app.ID,
 					Evidence: Evidence{"mr": mr.IID, "source": mr.SourceBranch, "target": mr.TargetBranch, "state": mr.State},
 					Text:     fmt.Sprintf("!%d %s → %s: not a sprint branch, a long-lived branch or develop", mr.IID, mr.SourceBranch, mr.TargetBranch),
-					Link:     Link{Label: "Open MR", URL: mr.URL},
+					Links:    []Link{{Label: "Open MR", URL: mr.URL}},
 				})
 			}
 		}
