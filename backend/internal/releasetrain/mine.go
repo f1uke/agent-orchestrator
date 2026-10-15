@@ -98,6 +98,12 @@ func mine(b *Board, m *me, mrs mrIndex, snap Snapshot, cfg Config) {
 			}
 		}
 	}
+	for i := range b.Sprints {
+		for j := range b.Sprints[i].Cards {
+			c := &b.Sprints[i].Cards[j]
+			c.Mine = m.sprintCard(c)
+		}
+	}
 	for i := range b.LLBs {
 		g := &b.LLBs[i]
 		for _, br := range g.Branches {
@@ -111,6 +117,24 @@ func mine(b *Board, m *me, mrs mrIndex, snap Snapshot, cfg Config) {
 			}
 		}
 	}
+}
+
+func (m *me) sprintCard(c *SprintCard) []MineReason {
+	var out []MineReason
+	if m.assigned(c.Assignee) {
+		out = append(out, MineReason{Why: MineAssignee})
+	}
+	for _, st := range c.Subtasks {
+		if m.assigned(st.Assignee) {
+			out = append(out, MineReason{Why: MineSubtask, Ref: st.Key})
+		}
+	}
+	for _, mr := range c.MRs {
+		if mr.username != "" && mr.username == m.id.GitLabUsername {
+			out = append(out, MineReason{Why: MineMRAuthor, Ref: mrRef(MRFact{IID: mr.IID})})
+		}
+	}
+	return out
 }
 
 func (m *me) version(v *AppVersion) []MineReason {
@@ -171,7 +195,35 @@ func mineOfSubject(b *Board, s Subject) []MineReason {
 				}
 			}
 		}
+	case SubjCard:
+		if c := b.sprintCard(s.Key); c != nil {
+			return c.Mine
+		}
+	case SubjPageFamily:
+		var out []MineReason
+		if t := b.train(s.Train); t != nil {
+			for _, v := range t.Versions {
+				if b.familyOf(v.App) != s.Family {
+					continue
+				}
+				for _, c := range v.Cards {
+					if len(c.Mine) > 0 && containsString(s.Keys, c.Key) {
+						out = append(out, MineReason{Why: MineCard, Ref: c.Key})
+					}
+				}
+			}
+		}
+		return out
 	case SubjMR:
+		for _, row := range b.Sprints {
+			for _, c := range row.Cards {
+				for _, mr := range c.MRs {
+					if mr.App == s.App && mr.IID == s.IID {
+						return c.Mine
+					}
+				}
+			}
+		}
 		for _, g := range b.LLBs {
 			for _, br := range g.Branches {
 				for _, out := range br.outs {

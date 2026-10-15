@@ -82,3 +82,20 @@ func (s SubjTrainPair) subjectKey() string { return fmt.Sprintf("tt/%s/%s", s.A.
 func (s SubjHotfixTrain) subjectKey() string {
 	return fmt.Sprintf("ht/%s/%s/%s", s.App, s.Version, s.Train.Key())
 }
+
+// SubjCard is one sprint card.
+type SubjCard struct{ Key string }
+
+// SubjPageFamily is one family's train page and the cards missing from it,
+// bucketed by whether their code merged; Keys does not take part in the hit's identity.
+type SubjPageFamily struct {
+	Train  TrainID
+	Family FamilyID
+	Bucket string
+	Keys   []string
+}
+
+func (s SubjCard) subjectKey() string { return "c/" + s.Key }
+func (s SubjPageFamily) subjectKey() string {
+	return fmt.Sprintf("pf/%s/%s/%s", s.Train.Key(), s.Family, s.Bucket)
+}

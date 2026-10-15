@@ -47,6 +47,7 @@ func (CodeNone) codeState()      {}
 // CardUnit is one card on one app's version.
 type CardUnit struct {
 	Key            string       `json:"key"`
+	URL            string       `json:"url"`
 	App            AppID        `json:"app"`
 	Status         string       `json:"status"`
 	StatusCategory string       `json:"statusCategory"`
@@ -61,12 +62,13 @@ type CardWhy string
 
 // Reasons a card is on a version.
 const (
-	WhyFixVersion CardWhy = "fixVersion"
-	WhyPage       CardWhy = "release train page"
+	WhyFixVersion   CardWhy = "fixVersion"
+	WhyPage         CardWhy = "release train page"
+	WhySprintBranch CardWhy = "sprint branch"
 )
 
 // Enum lists the reasons for the API schema.
-func (CardWhy) Enum() []any { return []any{WhyFixVersion, WhyPage} }
+func (CardWhy) Enum() []any { return []any{WhyFixVersion, WhyPage, WhySprintBranch} }
 
 type mrIndex map[AppID]map[string][]MRFact
 
@@ -158,7 +160,29 @@ func sprintOf(branch string) (int, bool) {
 	return v, true
 }
 
-func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact, llbs map[string]*LongLivedBranch) []CardUnit {
+// branchMembers is the cards with an MR in v's app into the branch of the
+// sprint before t; their Jira facts come from jira.branch_cards.
+func branchMembers(t *Train, v *AppVersion, mrs mrIndex, jira map[string]IssueFact) []IssueFact {
+	if t.ID.Extra != 0 {
+		return nil
+	}
+	var out []IssueFact
+	for key, list := range mrs[v.App] {
+		is, known := jira[key]
+		if !known || is.Subtask || is.ReleaseTicket {
+			continue
+		}
+		for _, mr := range list {
+			if n, ok := sprintOf(mr.TargetBranch); ok && n == t.ID.Number-1 {
+				out = append(out, is)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage, fromBranch []IssueFact, llbs map[string]*LongLivedBranch) []CardUnit {
 	byKey := mrs[v.App]
 	var cut *Day
 	if v.ReleaseMR != nil {
@@ -180,7 +204,7 @@ func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact, llbs 
 		}
 		at[is.Key] = len(units)
 		units = append(units, CardUnit{
-			Key: is.Key, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
+			Key: is.Key, URL: is.URL, App: v.App, Status: is.Status, StatusCategory: is.StatusCategory, Assignee: is.Assignee,
 			Why: []CardWhy{why}, Code: codeOf(byKey[is.Key], cut, source, hasSource, llbs),
 		})
 	}
@@ -189,6 +213,9 @@ func cardUnits(t *Train, v *AppVersion, mrs mrIndex, fromPage []IssueFact, llbs 
 	}
 	for _, is := range fromPage {
 		add(is, WhyPage)
+	}
+	for _, is := range fromBranch {
+		add(is, WhySprintBranch)
 	}
 	sort.Slice(units, func(i, j int) bool { return units[i].Key < units[j].Key })
 	return units

@@ -615,6 +615,20 @@ func writeFilteredBoardJSON(w io.Writer, raw json.RawMessage, f trainFilter) err
 			kept = []any{}
 		}
 		board["trains"] = kept
+		if list, ok := board["hotfixes"].([]any); ok {
+			board["hotfixes"] = keepByApp(list, f)
+		}
+		if list, ok := board["llbs"].([]any); ok {
+			board["llbs"] = keepMine(list, f)
+		}
+		if rows, ok := board["sprints"].([]any); ok {
+			for _, r := range rows {
+				if row, ok := r.(map[string]any); ok {
+					cards, _ := row["cards"].([]any)
+					row["cards"] = keepMine(cards, f)
+				}
+			}
+		}
 		if alerts, ok := board["alerts"].(map[string]any); ok {
 			hits, _ := alerts["hits"].([]any)
 			var keptHits []any
@@ -638,6 +652,16 @@ func writeFilteredBoardJSON(w io.Writer, raw json.RawMessage, f trainFilter) err
 func mineOf(m map[string]any) trainMine {
 	list, _ := m["mine"].([]any)
 	return make(trainMine, len(list))
+}
+
+func keepMine(items []any, f trainFilter) []any {
+	out := []any{}
+	for _, it := range items {
+		if m, _ := it.(map[string]any); f.mine(mineOf(m)) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func keepByApp(items []any, f trainFilter) []any {

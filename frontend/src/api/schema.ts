@@ -4564,6 +4564,8 @@ export interface components {
             /** @description True when the caller's lease was dropped. */
             released: boolean;
         };
+        /** @enum {string} */
+        ReleaseTrainActiveWhy: "new this sprint" | "MR this sprint" | "mobile subtask open";
         ReleaseTrainAlertHit: {
             agesOn?: components["schemas"]["ReleaseTrainDay"];
             app?: string;
@@ -4626,6 +4628,7 @@ export interface components {
             llbs: components["schemas"]["ReleaseTrainLLBGroup"][];
             mismatches: components["schemas"]["ReleaseTrainMismatch"][];
             sources: components["schemas"]["ReleaseTrainSourceFreshness"][];
+            sprints: components["schemas"]["ReleaseTrainSprintRow"][];
             today: components["schemas"]["ReleaseTrainDay"];
             trains: components["schemas"]["ReleaseTrainTrain"][];
         };
@@ -4634,6 +4637,11 @@ export interface components {
             id: string;
             name: string;
             platform: components["schemas"]["ReleaseTrainPlatform"];
+        };
+        ReleaseTrainBoardConfig: {
+            id: number;
+            key: string;
+            ownsSprintBranch: boolean;
         };
         ReleaseTrainBoardResponse: {
             board?: components["schemas"]["ReleaseTrainBoard"];
@@ -4649,10 +4657,11 @@ export interface components {
             mine?: components["schemas"]["ReleaseTrainMineReason"][];
             status: string;
             statusCategory: string;
+            url: string;
             why: components["schemas"]["ReleaseTrainCardWhy"][];
         };
         /** @enum {string} */
-        ReleaseTrainCardWhy: "fixVersion" | "release train page";
+        ReleaseTrainCardWhy: "fixVersion" | "release train page" | "sprint branch";
         ReleaseTrainCodeElsewhere: {
             branch: string;
             /** @constant */
@@ -4696,6 +4705,37 @@ export interface components {
         };
         /** Format: date */
         ReleaseTrainDay: string;
+        ReleaseTrainDest: components["schemas"]["ReleaseTrainDestToTrain"] | components["schemas"]["ReleaseTrainDestToLLB"] | components["schemas"]["ReleaseTrainDestBefore"] | components["schemas"]["ReleaseTrainDestOff"] | components["schemas"]["ReleaseTrainDestNone"];
+        ReleaseTrainDestBefore: {
+            /** @constant */
+            kind: "before";
+            /** @description The app's first train on the Board; the code shipped before it. */
+            train: string;
+        };
+        /** @enum {string} */
+        ReleaseTrainDestKind: "sprint" | "sprint_open" | "llb" | "llb_open" | "prev" | "back" | "before" | "develop" | "develop_open" | "release" | "other" | "none";
+        ReleaseTrainDestNone: {
+            /** @constant */
+            kind: "none";
+        };
+        ReleaseTrainDestOff: {
+            /** @constant */
+            kind: "off";
+        };
+        ReleaseTrainDestToLLB: {
+            branch: string;
+            group: string;
+            /** @constant */
+            kind: "llb";
+            /** @description The train the long-lived group landed in or targets. */
+            via?: string;
+        };
+        ReleaseTrainDestToTrain: {
+            /** @constant */
+            kind: "train";
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            train: string;
+        };
         /** @enum {string} */
         ReleaseTrainErrorClass: "auth" | "rate_limited" | "unavailable" | "not_found" | "decode" | "truncated" | "unconfigured";
         ReleaseTrainEvidence: {
@@ -5008,6 +5048,16 @@ export interface components {
             lastAttemptAt?: null | string;
             scope: string;
         };
+        ReleaseTrainRoute: {
+            app: string;
+            kind: components["schemas"]["ReleaseTrainDestKind"];
+            mismatch?: boolean;
+            mr: number;
+            /** @description Train key, "21-2026" or "20-1-2026". */
+            plan?: string;
+            to: components["schemas"]["ReleaseTrainDest"];
+            viaLlb?: string;
+        };
         ReleaseTrainRuleInfo: {
             defaultOn: boolean;
             group: string;
@@ -5038,6 +5088,69 @@ export interface components {
             issues: components["schemas"]["ReleaseTrainResourceStatus"][];
             resources: number;
             system: string;
+        };
+        ReleaseTrainSprintCard: {
+            active: boolean;
+            activeWhy: components["schemas"]["ReleaseTrainActiveWhy"][];
+            assignee?: components["schemas"]["ReleaseTrainPerson"];
+            key: string;
+            mine?: components["schemas"]["ReleaseTrainMineReason"][];
+            mrs: components["schemas"]["ReleaseTrainSprintMR"][];
+            onBoard: boolean;
+            routes: components["schemas"]["ReleaseTrainRoute"][];
+            status: string;
+            statusCategory: string;
+            subtasks: components["schemas"]["ReleaseTrainSprintSubtask"][];
+            summary: string;
+            url: string;
+        };
+        ReleaseTrainSprintCounts: {
+            carriedDone: number;
+            carriedWithMrs: number;
+            new: number;
+        };
+        ReleaseTrainSprintDest: {
+            count: number;
+            keys: string[];
+            to: components["schemas"]["ReleaseTrainDest"];
+        };
+        ReleaseTrainSprintFact: {
+            board: number;
+            end?: components["schemas"]["ReleaseTrainDay"];
+            id: number;
+            name: string;
+            start?: components["schemas"]["ReleaseTrainDay"];
+            url: string;
+        };
+        ReleaseTrainSprintMR: {
+            app: string;
+            author: string;
+            created: components["schemas"]["ReleaseTrainDay"];
+            dest: components["schemas"]["ReleaseTrainDestKind"];
+            iid: number;
+            merged?: components["schemas"]["ReleaseTrainDay"];
+            source: string;
+            state: string;
+            target: string;
+            title: string;
+            url: string;
+        };
+        ReleaseTrainSprintRow: {
+            board: components["schemas"]["ReleaseTrainBoardConfig"];
+            cards: components["schemas"]["ReleaseTrainSprintCard"][];
+            counts: components["schemas"]["ReleaseTrainSprintCounts"];
+            dests: components["schemas"]["ReleaseTrainSprintDest"][];
+            number: number;
+            sprint: components["schemas"]["ReleaseTrainSprintFact"];
+            total: number;
+        };
+        ReleaseTrainSprintSubtask: {
+            assignee?: components["schemas"]["ReleaseTrainPerson"];
+            key: string;
+            mobile: boolean;
+            status: string;
+            statusCategory: string;
+            summary: string;
         };
         ReleaseTrainStage: {
             conventional?: boolean;

@@ -18,15 +18,24 @@ func Reconcile(in Inputs, env Env) Board {
 	branches, cutover := detectLLBs(in.Config, in.Snap)
 	b.LLBs, b.Cutover = groupLLBs(branches, in.Human.Plans, b.Trains, in.Config), cutover
 	mrs, llbs := indexMRs(in.Config, in.Snap), llbsByApp(b.LLBs)
+	jira, live := branchCards(in.Snap), liveTrains(b.Trains, *rs)
 	for i := range b.Trains {
 		t := &b.Trains[i]
 		t.DatesSplit = datesSplit(t)
 		fromPages := pageMembers(t, in.Config, in.Snap, mrs)
 		for _, v := range t.Versions {
-			v.Cards = cardUnits(t, v, mrs, fromPages[v.App], llbs[v.App])
+			var fromBranch []IssueFact
+			if live[t.ID] {
+				fromBranch = branchMembers(t, v, mrs, jira)
+			}
+			v.Cards = cardUnits(t, v, mrs, fromPages[v.App], fromBranch, llbs[v.App])
 			v.Stages = stages(t, v, b.Today, rs)
 		}
 	}
+	b.Sprints = sprintRows(in.Config, in.Snap, routing{
+		today: b.Today, cutover: b.Cutover, llbs: llbs, groups: groupsByBranch(b.LLBs),
+		trains: b.Trains, plans: planTrains(b.Trains, b.Today),
+	})
 	b.Identity = identityOf(in.Snap)
 	mine(&b, meOf(b.Identity, in.Snap), mrs, in.Snap, in.Config)
 	b.Alerts = alerts(&b, in, rs)
@@ -94,6 +103,19 @@ func joinTrains(b *Board, cfg Config, snap Snapshot) {
 		h.Tag = tagFor(app, h.Version, snap)
 		h.ForceUpdate = forceUpdateFor(app, h.Version, snap)
 	}
+}
+
+func liveTrains(trains []Train, rs readSet) map[TrainID]bool {
+	out := map[TrainID]bool{}
+	for i := range trains {
+		t := &trains[i]
+		for _, v := range t.Versions {
+			if rs.live(dueOf(t, v)) {
+				out[t.ID] = true
+			}
+		}
+	}
+	return out
 }
 
 func containsFamily(fs []FamilyID, f FamilyID) bool {

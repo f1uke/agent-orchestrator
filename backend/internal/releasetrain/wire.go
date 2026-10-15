@@ -120,6 +120,39 @@ func (c CodeElsewhere) MarshalJSON() ([]byte, error) {
 // MarshalJSON writes the code state with "kind": "none".
 func (c CodeNone) MarshalJSON() ([]byte, error) { type plain CodeNone; return tagged(c, plain(c)) }
 
+// Variant is "train".
+func (ToTrain) Variant() string { return "train" }
+
+// Variant is "llb".
+func (ToLLB) Variant() string { return "llb" }
+
+// Variant is "before".
+func (BeforeFirstTrain) Variant() string { return "before" }
+
+// Variant is "off".
+func (OffFlow) Variant() string { return "off" }
+
+// Variant is "none".
+func (NotRouted) Variant() string { return "none" }
+
+// MarshalJSON writes the destination with "kind": "train".
+func (d ToTrain) MarshalJSON() ([]byte, error) { type plain ToTrain; return tagged(d, plain(d)) }
+
+// MarshalJSON writes the destination with "kind": "llb".
+func (d ToLLB) MarshalJSON() ([]byte, error) { type plain ToLLB; return tagged(d, plain(d)) }
+
+// MarshalJSON writes the destination with "kind": "before".
+func (d BeforeFirstTrain) MarshalJSON() ([]byte, error) {
+	type plain BeforeFirstTrain
+	return tagged(d, plain(d))
+}
+
+// MarshalJSON writes the destination with "kind": "off".
+func (d OffFlow) MarshalJSON() ([]byte, error) { type plain OffFlow; return tagged(d, plain(d)) }
+
+// MarshalJSON writes the destination with "kind": "none".
+func (d NotRouted) MarshalJSON() ([]byte, error) { type plain NotRouted; return tagged(d, plain(d)) }
+
 // Enum lists the phases for the API schema.
 func (TrainPhase) Enum() []any { return []any{PhasePast, PhaseCurrent, PhaseNext} }
 

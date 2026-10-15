@@ -26,6 +26,8 @@ const (
 	perApp coverMode = iota + 1
 	global
 	perEntity
+	perBoard
+	perSprint
 )
 
 type kindMeta struct {

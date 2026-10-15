@@ -150,6 +150,24 @@ func (r *readSet) coverageFor(reads []KindName, app AppID, versions []*AppVersio
 			for _, st := range sts {
 				note(st, false)
 			}
+		case perBoard:
+			for _, b := range r.cfg.Boards {
+				scope := BoardScope(b.ID)
+				st, ok := r.snap.Status(k, scope)
+				if !ok {
+					st = ResourceStatus{Kind: k, Scope: scope, ErrorClass: ErrUnconfigured}
+				}
+				note(st, false)
+			}
+		case perSprint:
+			for _, s := range activeSprints(r.cfg, r.snap) {
+				scope := SprintScope(s.ID)
+				st, ok := r.snap.Status(k, scope)
+				if !ok {
+					st = ResourceStatus{Kind: k, Scope: scope}
+				}
+				note(st, false)
+			}
 		case perEntity:
 			for _, v := range versions {
 				if !r.live(v.Milestone.Due) {

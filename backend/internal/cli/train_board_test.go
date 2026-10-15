@@ -263,6 +263,43 @@ func TestTrainMeKeepsOnlyWhatConcernsMe(t *testing.T) {
 	}
 }
 
+func TestTrainJSONMeFiltersLongLivedHotfixesAndSprintCardsToo(t *testing.T) {
+	body := strings.Replace(trainBoardJSON, `"mismatches": [],`, `"mismatches": [], "identity": {"kind": "known", "jiraAccountId": "acc-ex", "gitlabUsername": "ex", "displayName": "Example Person"},
+    "hotfixes": [{"app": "di", "version": "2.3.1", "mine": [{"why": "mr_author", "ref": "!80"}]}, {"app": "da", "version": "2.3.2"}],
+    "llbs": [{"id": "demo-wallet", "mine": [{"why": "card", "ref": "DEMO-1"}]}, {"id": "demo-chat"}],
+    "sprints": [{"number": 7, "cards": [{"key": "DEMO-1", "mine": [{"why": "assignee"}]}, {"key": "DEMO-2"}]}],`, 1)
+	out, err := runTrain(t, body, "--json", "--me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Board struct {
+			Hotfixes []struct{ Version string } `json:"hotfixes"`
+			LLBs     []struct{ ID string }      `json:"llbs"`
+			Sprints  []struct {
+				Number int                    `json:"number"`
+				Cards  []struct{ Key string } `json:"cards"`
+			} `json:"sprints"`
+		} `json:"board"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	b := got.Board
+	if len(b.Hotfixes) != 1 || b.Hotfixes[0].Version != "2.3.1" || len(b.LLBs) != 1 || b.LLBs[0].ID != "demo-wallet" ||
+		len(b.Sprints) != 1 || b.Sprints[0].Number != 7 || len(b.Sprints[0].Cards) != 1 || b.Sprints[0].Cards[0].Key != "DEMO-1" {
+		t.Fatalf("--json --me = %+v; want only my hotfix, my long-lived group and my sprint card, the row kept", b)
+	}
+
+	out, err = runTrain(t, body, "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"demo-chat"`) || !strings.Contains(out, `"2.3.2"`) || !strings.Contains(out, `"DEMO-2"`) {
+		t.Fatalf("--json without --me dropped something: %s", out)
+	}
+}
+
 func TestTrainMeWithUnknownIdentitySaysWhyAndExitsZero(t *testing.T) {
 	body := strings.Replace(trainBoardJSON, `"mismatches": [],`, `"mismatches": [], "identity": {"kind": "unknown", "reason": "the GitLab user (gitlab.user) has not been read"},`, 1)
 	for _, args := range [][]string{{"--me"}, {"alerts", "--me"}, {"--me", "--json"}} {
