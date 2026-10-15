@@ -98,6 +98,37 @@ describe("card groups", () => {
 		expect(groupRowCount(g, (k) => k === "di:21-2026:llb:feature/demo-wallet")).toBe(3 + 1 + 2);
 	});
 
+	it("carries mine on each row, from the unit or the long-lived branch's own card", () => {
+		const mine = [{ why: "assignee" as const }];
+		const t = train("21-2026", "2026-10-13", "2026-10-20", "current", [
+			version("21-2026", "di", "2.4.0", "2026-10-13", "2026-10-20", {
+				cards: [
+					{ ...unit("DEMO-2", { kind: "merged", mrs: [2] }), mine },
+					unit("DEMO-3", { kind: "open", mrs: [3] }),
+					{ ...unit("DEMO-4", { kind: "parked", branch: "feature/demo-wallet", mrs: [4] }), mine },
+				],
+			}),
+		]);
+		const w: LLBGroup = {
+			...wallet,
+			branches: [
+				branch("feature/demo-wallet", {
+					cards: [{ ...llbCard("DEMO-9"), mine }, llbCard("DEMO-4"), llbCard("DEMO-8")],
+				}),
+			],
+		};
+		const g = cardGroups(board({ trains: [t], llbs: [w] }), "di")[0];
+		expect(g.direct.map((u) => [u.key, !!u.mine?.length])).toEqual([
+			["DEMO-2", true],
+			["DEMO-3", false],
+		]);
+		expect(g.llbs[0].cards.map((c) => [c.key, !!c.mine?.length])).toEqual([
+			["DEMO-9", true],
+			["DEMO-4", true],
+			["DEMO-8", false],
+		]);
+	});
+
 	it("does not nest a branch whose group targets another train", () => {
 		const other = board({ trains: [t21], llbs: [{ ...wallet, target: { kind: "planned", train: "22-2026" } }] });
 		expect(cardGroups(other, "di")[0].llbs).toEqual([]);

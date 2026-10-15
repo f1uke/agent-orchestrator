@@ -173,6 +173,7 @@ const RULES: [string, Severity, string][] = [
 	["D3", "risk", "Not every approver approved before publish"],
 	["E1", "hygiene", "Published but the Jira release is not marked released"],
 	["F1", "info", "Two trains overlap"],
+	["L9", "risk", "MR into a branch that is not a sprint branch, a long-lived branch or develop"],
 ];
 
 const FIX_KINDS: Readonly<Record<string, FixKind>> = {
@@ -313,6 +314,17 @@ function baseBoard(today: string): Board {
 			train: "21-2026",
 		}),
 		hit("F1~t/21-2026+22-2026", "F1", "info", "#21 and #22 are two weeks apart", { train: "21-2026" }),
+		hit(
+			"L9~mr/da/415",
+			"L9",
+			"risk",
+			"!415 feat/DEMO-203 → feat/DEMO-201-base: not a sprint branch, a long-lived branch or develop",
+			{
+				app: "da",
+				evidence: { mr: 415, source: "feat/DEMO-203", target: "feat/DEMO-201-base", state: "opened" },
+				link: { label: "Open MR", url: `${HOST}/merge_requests/415` },
+			},
+		),
 		hit("E1~v/20-2026/di", "E1", "hygiene", "Published but the Jira release is not marked released", {
 			app: "di",
 			train: "20-2026",
@@ -840,6 +852,8 @@ function markMine(b: Board): void {
 	for (const h of b.hotfixes) h.mine = [{ why: "mr_author", ref: "!88" }];
 	const wallet = b.llbs.find((g) => g.id === "demo-wallet");
 	if (wallet) wallet.mine = [{ why: "card", ref: "DEMO-108" }];
+	for (const c of wallet?.branches[0]?.cards ?? [])
+		if (c.key === "DEMO-108") c.mine = [{ why: "mr_author", ref: "!303" }];
 }
 
 function stripMine(v: unknown): void {

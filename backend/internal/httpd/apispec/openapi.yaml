@@ -14323,6 +14323,10 @@ components:
           $ref: '#/components/schemas/ReleaseTrainPerson'
         key:
           type: string
+        mine:
+          items:
+            $ref: '#/components/schemas/ReleaseTrainMineReason'
+          type: array
         mr:
           $ref: '#/components/schemas/ReleaseTrainMRFact'
         status:

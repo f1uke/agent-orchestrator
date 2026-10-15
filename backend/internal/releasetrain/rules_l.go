@@ -91,6 +91,48 @@ var ruleL3 = rule{
 	},
 }
 
+var ruleL9 = rule{
+	ID: "L9", Group: "G", Severity: SevRisk, DefaultOn: true, Scope: scopePerApp,
+	Reads: []KindName{KindMRs.Name},
+	Title: "MR into a branch that is not a sprint branch, a long-lived branch or develop",
+	Hint:  "No train takes code from that branch, so the change stays there until someone moves it on.",
+	Check: func(b *Board) []Hit {
+		llbs := groupsByBranch(b.LLBs)
+		var out []Hit
+		for _, app := range b.Apps {
+			cutover, hasCutover := b.Cutover[app.ID]
+			for _, mr := range b.mrs[app.ID] {
+				switch {
+				case mr.State == MRClosed,
+					mr.State == MRMerged && (!hasCutover || mr.MergedOn == nil || !mr.MergedOn.After(cutover)),
+					roleRE.MatchString(mr.TargetBranch),
+					llbs[app.ID][mr.TargetBranch] != nil,
+					llbs[app.ID][mr.SourceBranch] != nil,
+					sprintBranchRE.MatchString(mr.SourceBranch):
+					continue
+				}
+				out = append(out, Hit{
+					Subject: SubjMR{App: app.ID, IID: mr.IID}, App: app.ID,
+					Evidence: Evidence{"mr": mr.IID, "source": mr.SourceBranch, "target": mr.TargetBranch, "state": mr.State},
+					Text:     fmt.Sprintf("!%d %s → %s: not a sprint branch, a long-lived branch or develop", mr.IID, mr.SourceBranch, mr.TargetBranch),
+					Link:     Link{Label: "Open MR", URL: mr.URL},
+				})
+			}
+		}
+		return out
+	},
+}
+
+func mrsByApp(cfg Config, snap Snapshot) map[AppID][]MRFact {
+	out := map[AppID][]MRFact{}
+	for _, app := range cfg.Apps {
+		mrs := Items(snap, KindMRs, ProjectScope(app.GitLabProject))
+		sort.Slice(mrs, func(i, j int) bool { return mrs[i].IID < mrs[j].IID })
+		out[app.ID] = mrs
+	}
+	return out
+}
+
 func targetText(t LLBTarget) string {
 	switch t := t.(type) {
 	case LLBPlanned:

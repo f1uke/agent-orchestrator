@@ -39,7 +39,7 @@ func ruleTable() []rule {
 		ruleE1, ruleE2, ruleE4, ruleE5,
 		ruleF1, ruleF2,
 		ruleG1, ruleG2, ruleG3, ruleG4, ruleG5,
-		ruleL1, ruleL3, ruleL8,
+		ruleL1, ruleL3, ruleL8, ruleL9,
 	}
 }
 

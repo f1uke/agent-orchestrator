@@ -188,7 +188,7 @@ function AppRow({
 	const llbH = llbBlockH(lanes.length, open.has(`${a.id}:llbs`));
 	const isOpen = (k: string) => open.has(k);
 	const jira = (key: string) => jiraUrl(board, key);
-	const boxes = (layers.cards ? cardGroups(scoped, a.id, lens.keepCard) : []).map((g) => {
+	const boxes = (layers.cards ? cardGroups(board, a.id) : []).map((g) => {
 		const it = L.items.find((x) => x.kind === "train" && x.key === g.train.id);
 		const top = it ? cardGroupTop(L, it, tl, llbH) : llbH + 8 + L.lanesH + 2;
 		const rows = open.has(g.key) ? groupRowCount(g, isOpen) : 0;
@@ -234,7 +234,7 @@ function AppRow({
 							left={left}
 							top={top - llbH}
 							focused={g.train.id === lens.focus?.id}
-							mine={lens.me}
+							face={lens.face}
 							actions={actions}
 							jira={jira}
 						/>

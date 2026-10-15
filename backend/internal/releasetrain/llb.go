@@ -28,12 +28,13 @@ func (LLBState) Enum() []any {
 
 // LLBCard is one card an MR carried into a long-lived branch, with its Jira status.
 type LLBCard struct {
-	Key            string  `json:"key"`
-	Summary        string  `json:"summary,omitempty"`
-	Status         string  `json:"status,omitempty"`
-	StatusCategory string  `json:"statusCategory,omitempty"`
-	Assignee       *Person `json:"assignee,omitempty"`
-	MR             MRFact  `json:"mr"`
+	Key            string       `json:"key"`
+	Summary        string       `json:"summary,omitempty"`
+	Status         string       `json:"status,omitempty"`
+	StatusCategory string       `json:"statusCategory,omitempty"`
+	Assignee       *Person      `json:"assignee,omitempty"`
+	MR             MRFact       `json:"mr"`
+	Mine           []MineReason `json:"mine,omitempty"`
 }
 
 // LongLivedBranch is a branch card MRs merge into before it lands in a sprint branch.

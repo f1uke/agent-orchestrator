@@ -1,4 +1,4 @@
-import type { AppId, Board, CardUnit, CodeState, LLBGroup, LongLivedBranch, Person, Train } from "./types";
+import type { AppId, Board, CardUnit, CodeState, LLBGroup, LongLivedBranch, MineReason, Person, Train } from "./types";
 import type { Tone } from "./vocab";
 
 const READY = new Set(["ready for uat", "uat approved", "ready to deploy", "ready to deliver", "deployed", "done"]);
@@ -17,6 +17,7 @@ export type BranchCard = {
 	status?: string;
 	statusCategory?: string;
 	assignee?: Person;
+	mine?: MineReason[];
 	pending: boolean;
 };
 
@@ -54,16 +55,20 @@ function throughBranch(u: CardUnit, names: ReadonlySet<string>): string | null {
 	return null;
 }
 
+function uniqueReasons(list: MineReason[]): MineReason[] {
+	return [...new Map(list.map((m) => [`${m.why}:${m.ref ?? ""}`, m])).values()];
+}
+
 function tally(units: CardUnit[]): CodeTally {
 	const t: CodeTally = { merged: 0, open: 0, parked: 0, elsewhere: 0, none: 0 };
 	for (const u of units) t[u.code.kind]++;
 	return t;
 }
 
-export function cardGroups(board: Board, app: AppId, keep: (u: CardUnit) => boolean = () => true): CardGroup[] {
+export function cardGroups(board: Board, app: AppId): CardGroup[] {
 	return board.trains.flatMap((train) => {
 		if (train.phase === "past") return [];
-		const units = (train.versions.find((v) => v.app === app)?.cards ?? []).filter(keep);
+		const units = train.versions.find((v) => v.app === app)?.cards ?? [];
 		if (!units.length) return [];
 		const rides = branchesForTrain(board, app, train.id);
 		const names = new Set(rides.map((r) => r.branch.branch));
@@ -76,11 +81,13 @@ export function cardGroups(board: Board, app: AppId, keep: (u: CardUnit) => bool
 			else direct.push(u);
 		}
 		const llbs = rides.map(({ group, branch }) => {
+			const parked = inBranch.get(branch.branch) ?? [];
 			const cards = new Map<string, BranchCard>();
 			for (const c of branch.cards) if (!cards.has(c.key)) cards.set(c.key, { ...c, pending: c.mr.state === "opened" });
-			for (const u of inBranch.get(branch.branch) ?? [])
-				if (!cards.has(u.key)) cards.set(u.key, { ...u, pending: u.code.kind === "open" });
-			return { group, branch, cards: [...cards.values()] };
+			for (const u of parked) if (!cards.has(u.key)) cards.set(u.key, { ...u, pending: u.code.kind === "open" });
+			const mineOf = (key: string) =>
+				uniqueReasons([...branch.cards, ...parked].filter((x) => x.key === key).flatMap((x) => x.mine ?? []));
+			return { group, branch, cards: [...cards.values()].map((c) => ({ ...c, mine: mineOf(c.key) })) };
 		});
 		return [
 			{

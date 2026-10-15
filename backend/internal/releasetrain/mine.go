@@ -106,9 +106,12 @@ func mine(b *Board, m *me, mrs mrIndex, snap Snapshot, cfg Config) {
 	}
 	for i := range b.LLBs {
 		g := &b.LLBs[i]
-		for _, br := range g.Branches {
-			for _, c := range br.Cards {
-				if r := m.card(c.Key, c.Assignee, []MRFact{c.MR}); len(r) > 0 {
+		for bi := range g.Branches {
+			br := &g.Branches[bi]
+			for ci := range br.Cards {
+				c := &br.Cards[ci]
+				c.Mine = m.card(c.Key, c.Assignee, []MRFact{c.MR})
+				if len(c.Mine) > 0 {
 					g.Mine = append(g.Mine, MineReason{Why: MineCard, Ref: c.Key})
 				}
 			}
@@ -232,6 +235,20 @@ func mineOfSubject(b *Board, s Subject) []MineReason {
 					}
 				}
 			}
+		}
+		return b.authoredByMe(s)
+	}
+	return nil
+}
+
+func (b *Board) authoredByMe(s SubjMR) []MineReason {
+	id, ok := b.Identity.(IdentityKnown)
+	if !ok {
+		return nil
+	}
+	for _, mr := range b.mrs[s.App] {
+		if mr.IID == s.IID && mr.AuthorUsername != "" && mr.AuthorUsername == id.GitLabUsername {
+			return []MineReason{{Why: MineMRAuthor, Ref: mrRef(mr)}}
 		}
 	}
 	return nil

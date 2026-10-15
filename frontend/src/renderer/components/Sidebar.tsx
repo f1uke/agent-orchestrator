@@ -93,6 +93,7 @@ import { isWaiting, useLearningStatus, useProposals } from "../hooks/useMemory";
 import { useReleaseBoard } from "../hooks/useReleaseBoard";
 import { badgeLabel } from "../lib/releases/lens";
 import { sprintCount, sprintFoldKey } from "../lib/releases/sprint";
+import { parseReleasesSearch } from "../lib/releases/url";
 import { useReleasesUi } from "../stores/releases-ui";
 import { SEVERITY_META, TONE_COLOR } from "../lib/releases/vocab";
 import { CreateProjectAgentSheet, type CreateProjectAgentSelection } from "./CreateProjectAgentSheet";
@@ -1392,7 +1393,9 @@ function ReleasesNavItem({ selection }: { selection: ReturnType<typeof useSelect
 	const board = useReleaseBoard({ poll: false }).data?.board;
 	const badge = board?.alerts.badge;
 	const longLived = board?.llbs.filter((g) => g.branches.some((b) => !b.landing?.mergedOn && !b.gone)).length ?? 0;
-	const sprintCards = board ? sprintCount(board) : 0;
+	const search = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>;
+	const lens = selection.isReleases ? parseReleasesSearch(search) : { me: false, apps: null };
+	const sprintCards = board ? sprintCount(board, lens) : 0;
 	const showLayer = useReleasesUi((s) => s.showLayer);
 	const goSprint = () => {
 		showLayer("sprint", (board?.sprints ?? []).map(sprintFoldKey));
