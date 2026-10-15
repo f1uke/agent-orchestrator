@@ -36,7 +36,12 @@ export function ReleasesPage() {
 
 	const setSearch = useCallback(
 		(patch: Partial<ReleasesSearch>) =>
-			void navigate({ to: "/releases", search: releasesSearch({ ...url, ...patch }), replace: true }),
+			void navigate({
+				to: "/releases",
+				search: releasesSearch({ ...url, ...patch }),
+				replace: true,
+				resetScroll: false,
+			}),
 		[navigate, url],
 	);
 	const actions: PageActions = useMemo(
