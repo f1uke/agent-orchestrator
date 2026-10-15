@@ -2,15 +2,37 @@ import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRefreshSources } from "../../hooks/useReleaseBoard";
 import { badgeLabel, sourceAges, type Lens } from "../../lib/releases/lens";
-import type { Board, BoardApp } from "../../lib/releases/types";
+import { shortAppName } from "../../lib/releases/sprint";
+import type { Board } from "../../lib/releases/types";
 import type { ReleasesSearch } from "../../lib/releases/url";
 import { SEVERITY_META, SEVERITY_ORDER } from "../../lib/releases/vocab";
 import { SimpleTooltip } from "../ui/tooltip";
+import { Avatar } from "./Avatar";
 import type { PageActions } from "./ReleasesPage";
 
-export function shortAppName(a: BoardApp): string {
-	const family = a.name.replace(/\s*(iOS|Android)\s*$/i, "").trim() || a.family;
-	return `${family.slice(0, 3)} ${a.platform === "ios" ? "iOS" : "And"}`;
+function OnlyMe({ board, on, onToggle }: { board: Board; on: boolean; onToggle: () => void }) {
+	const id = board.identity;
+	if (id.kind === "unknown") {
+		return (
+			<SimpleTooltip label={`Only me needs your Jira and GitLab accounts: ${id.reason}`}>
+				<span>
+					<button type="button" className="rel-me" aria-pressed="false" disabled data-testid="only-me">
+						<span className="sw" />
+						Only me
+					</button>
+				</span>
+			</SimpleTooltip>
+		);
+	}
+	return (
+		<SimpleTooltip label={`Show only what is ${id.displayName}'s`}>
+			<button type="button" className="rel-me" aria-pressed={on} onClick={onToggle} data-testid="only-me">
+				<span className="sw" />
+				<Avatar accountId={id.jiraAccountId} name={id.displayName} size={18} />
+				Only me
+			</button>
+		</SimpleTooltip>
+	);
 }
 
 function useNow(ms: number): number {
@@ -70,7 +92,7 @@ export function TopBar({
 					</button>
 				</span>
 			</SimpleTooltip>
-			<div className="flex min-w-0 gap-1.5" role="group" aria-label="Apps">
+			<div className="flex flex-none gap-1.5" role="group" aria-label="Apps">
 				{board.apps.map((a) => (
 					<SimpleTooltip key={a.id} label={a.name}>
 						<button
@@ -106,6 +128,7 @@ export function TopBar({
 					</SimpleTooltip>
 				))}
 			</div>
+			<OnlyMe board={board} on={lens.me} onToggle={() => actions.setSearch({ me: !url.me })} />
 			<SimpleTooltip label="Read every source again now">
 				<button
 					type="button"

@@ -92,7 +92,14 @@ function TrainBar({
 	const hits = lens.attention.filter((h) => h.train === t.id && h.app === it.version.app);
 	const flag = hits[0];
 	const tone = t.phase === "next" ? "todo" : worstTone(it.stages);
-	const cls = ["rel-bar", t.phase, focused && "focus", !it.markers && "quiet", it.offDates && "offtrain"]
+	const cls = [
+		"rel-bar",
+		t.phase,
+		focused && "focus",
+		!it.markers && "quiet",
+		it.offDates && "offtrain",
+		!lens.keepVersion(it.version) && "notmine",
+	]
 		.filter(Boolean)
 		.join(" ");
 	const open = () => actions.openSheet({ kind: "version", train: t.id, app: it.version.app });

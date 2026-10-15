@@ -32,6 +32,7 @@ type ResourceStatus struct {
 	Failures      int           `json:"failures"`
 	ErrorClass    ErrorClass    `json:"errorClass,omitempty"`
 	Budget        time.Duration `json:"-"`
+	PlannedAt     time.Time     `json:"-"`
 }
 
 func (st ResourceStatus) budget() time.Duration {
@@ -50,7 +51,6 @@ type Resource struct {
 	LastSuccessAt *time.Time `json:"lastSuccessAt,omitempty"`
 	ErrorMessage  string     `json:"errorMessage,omitempty"`
 	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
-	PlannedAt     time.Time  `json:"plannedAt"`
 	Generation    int64      `json:"generation"`
 }
 

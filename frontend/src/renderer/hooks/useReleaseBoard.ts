@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiErrorMessage, getApiBaseUrl, hasTrustedApiBaseUrl } from "../lib/api-client";
 import { boardFetcher } from "../lib/releases/boardFetch";
-import { demoBoard, demoResponse, failedSourceBoard } from "../lib/releases/fixture";
+import { demoBoard, demoResponse, failedSourceBoard, unknownIdentityBoard } from "../lib/releases/fixture";
 import { PlanConflictError, planInput, type PlanDraft } from "../lib/releases/plan";
 import type { Board, BoardResponse, HitId, LlbPlan } from "../lib/releases/types";
 import { useApiReady } from "./useApiReady";
@@ -11,14 +11,18 @@ const POLL_MS = 15_000;
 const usePreviewData = import.meta.env.VITE_NO_ELECTRON === "1";
 
 /** Playwright sets the variant before load; a mutation edits the board kept here. */
-type PreviewSeam = { __aoReleaseBoard?: BoardResponse; __aoReleaseBoardVariant?: "failed-source" };
+type PreviewSeam = {
+	__aoReleaseBoard?: BoardResponse;
+	__aoReleaseBoardVariant?: "failed-source" | "identity-unknown";
+};
+
+const VARIANTS = { "failed-source": failedSourceBoard, "identity-unknown": unknownIdentityBoard } as const;
 
 function previewBoard(): BoardResponse {
 	const seam = globalThis as PreviewSeam;
 	const today = new Date().toISOString().slice(0, 10);
-	seam.__aoReleaseBoard ??= demoResponse(
-		seam.__aoReleaseBoardVariant === "failed-source" ? failedSourceBoard(today) : demoBoard(today),
-	);
+	const variant = seam.__aoReleaseBoardVariant;
+	seam.__aoReleaseBoard ??= demoResponse(variant ? VARIANTS[variant](today) : demoBoard(today));
 	return structuredClone(seam.__aoReleaseBoard);
 }
 

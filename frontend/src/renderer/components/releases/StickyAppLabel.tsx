@@ -1,6 +1,7 @@
 import { approvals, nowStage, owner, unknownText, versionOf, type Lens } from "../../lib/releases/lens";
 import type { BoardApp, Stage } from "../../lib/releases/types";
 import { SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
+import { versionMineText } from "../../lib/releases/sprint";
 import type { PageActions } from "./ReleasesPage";
 
 export function Stepper({ stages, big = false }: { stages: Stage[]; big?: boolean }) {
@@ -13,6 +14,25 @@ export function Stepper({ stages, big = false }: { stages: Stage[]; big?: boolea
 				</span>
 			))}
 		</span>
+	);
+}
+
+function MineLine({ app, lens }: { app: string; lens: Lens }) {
+	const t = lens.focus;
+	const v = t ? versionOf(t, app) : undefined;
+	const units = (v?.cards ?? []).filter((u) => u.mine?.length);
+	const bits = [
+		v ? versionMineText(v, lens.identity) : "",
+		units.length ? `${units.length} of my card${units.length === 1 ? "" : "s"}` : "",
+	].filter(Boolean);
+	return bits.length ? (
+		<div className="meline" data-testid="label-mine">
+			{bits.join(" · ")}
+		</div>
+	) : (
+		<div className="meline off" data-testid="label-mine">
+			Nothing of mine in {t?.label ?? "this train"}
+		</div>
 	);
 }
 
@@ -86,23 +106,27 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 					<span className="passive">Nothing blocking</span>
 				)}
 			</div>
-			<div className="meta">
-				{v.cards.length > 0 && (
+			{lens.me ? (
+				<MineLine app={app.id} lens={lens} />
+			) : (
+				<div className="meta">
+					{v.cards.length > 0 && (
+						<span>
+							<b>
+								{merged}/{v.cards.length}
+							</b>{" "}
+							merged
+						</span>
+					)}
 					<span>
 						<b>
-							{merged}/{v.cards.length}
+							{ap.ok}/{ap.total}
 						</b>{" "}
-						merged
+						approved
 					</span>
-				)}
-				<span>
-					<b>
-						{ap.ok}/{ap.total}
-					</b>{" "}
-					approved
-				</span>
-				{own && <span title={`${own.name} (${own.from})`}>{own.name.split(" ")[0]}</span>}
-			</div>
+					{own && <span title={`${own.name} (${own.from})`}>{own.name.split(" ")[0]}</span>}
+				</div>
+			)}
 		</button>
 	);
 }

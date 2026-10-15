@@ -63,11 +63,11 @@ func releaseResource(r gen.ReleaseResource) rt.Resource {
 		ResourceStatus: rt.ResourceStatus{
 			Kind: rt.KindName(r.Kind), Scope: rt.Scope(r.Scope), App: rt.AppID(r.AppID.String),
 			CompleteAt: timePtr(r.CompleteAt), LastAttemptAt: timePtr(r.LastAttemptAt),
-			Failures: int(r.Failures), ErrorClass: rt.ErrorClass(r.ErrorClass.String),
+			Failures: int(r.Failures), ErrorClass: rt.ErrorClass(r.ErrorClass.String), PlannedAt: r.PlannedAt.UTC(),
 		},
 		Mode: rt.SyncMode(r.SyncMode), FactVersion: int(r.FactVersion),
 		LastSuccessAt: timePtr(r.LastSuccessAt), ErrorMessage: r.ErrorMessage.String,
-		NextAttemptAt: timePtr(r.NextAttemptAt), PlannedAt: r.PlannedAt.UTC(), Generation: r.Generation,
+		NextAttemptAt: timePtr(r.NextAttemptAt), Generation: r.Generation,
 	}
 	if r.Cursor.Valid {
 		res.Cursor = []byte(r.Cursor.String)

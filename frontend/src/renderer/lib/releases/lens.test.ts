@@ -14,7 +14,7 @@ import {
 	visibleApps,
 	worstTone,
 } from "./lens";
-import { board, stage, train, version } from "./testkit";
+import { board, hotfix as hotfixOf, stage, train, version } from "./testkit";
 import type { AlertHit, Badge, RuleOutcome } from "./types";
 import { parseReleasesSearch } from "./url";
 
@@ -248,6 +248,134 @@ describe("source ages", () => {
 		expect(ageText(5 * 60_000)).toBe("5m");
 		expect(ageText(3 * 3_600_000)).toBe("3h");
 		expect(ageText(50 * 3_600_000)).toBe("2d");
+	});
+});
+
+describe("Only me", () => {
+	const mine = [{ why: "assignee" as const }];
+	const unit = (key: string, m = false) => ({
+		key,
+		url: "",
+		summary: key,
+		app: "di",
+		status: "To Do",
+		statusCategory: "new",
+		why: ["fixVersion" as const],
+		code: { kind: "none" as const },
+		...(m ? { mine } : {}),
+	});
+	const t21 = train("21-2026", "2026-10-13", "2026-10-20", "current", [
+		version("21-2026", "di", "2.4.0", "2026-10-13", "2026-10-20", {
+			cards: [unit("DEMO-1", true), unit("DEMO-2")],
+			mine,
+		}),
+		version("21-2026", "da", "2.4.0", "2026-10-13", "2026-10-20", { cards: [unit("DEMO-3")] }),
+	]);
+	const sprintCard = (key: string, m: boolean) => ({
+		key,
+		url: "",
+		summary: key,
+		status: "To Do",
+		statusCategory: "new",
+		subtasks: [],
+		mrs: [],
+		routes: [],
+		onBoard: true,
+		active: true,
+		activeWhy: ["new this sprint" as const],
+		...(m ? { mine } : {}),
+	});
+	const sprintMr = (app: string) => ({
+		app,
+		iid: 1,
+		url: "",
+		title: "",
+		state: "merged",
+		source: "feat/x",
+		target: "sprint-20-2026",
+		author: "Dee Example",
+		created: "2026-10-01",
+		dest: "sprint" as const,
+	});
+	const b = board({
+		identity: { kind: "known", jiraAccountId: "acc-dee", gitlabUsername: "dee", displayName: "Dee Example" },
+		trains: [t21],
+		hotfixes: [
+			{ ...hotfixOf("di", "2.3.1", "2026-10-14", "2026-10-16"), mine },
+			hotfixOf("da", "2.3.2", "2026-10-14", "2026-10-16"),
+		],
+		llbs: [
+			{ id: "a", name: "a", branches: [], target: { kind: "none" }, mine },
+			{ id: "b", name: "b", branches: [], target: { kind: "none" } },
+		],
+		sprints: [
+			{
+				board: { id: 1, key: "DEMO", ownsSprintBranch: true },
+				number: 20,
+				sprint: { board: 1, id: 20, name: "DEMO 20", url: "" },
+				total: 2,
+				cards: [sprintCard("DEMO-7", true), sprintCard("DEMO-8", false)],
+				counts: { new: 2, carriedWithMrs: 0, carriedDone: 0 },
+				dests: [],
+			},
+		],
+		alerts: {
+			badge: { count: 2, unknown: 1, worst: "block" },
+			hits: [
+				hit("C1~v/21-2026/di", { app: "di", train: "21-2026", severity: "block", mine }),
+				hit("B1~v/21-2026/da", { app: "da", train: "21-2026" }),
+			],
+			rules: [unknownOutcome("C5", "da")],
+			staleHides: [],
+		},
+	});
+	const me = makeLens(b, parseReleasesSearch({ me: "1" }));
+	const all = makeLens(b, parseReleasesSearch({}));
+
+	it("keeps only my versions, cards, card units, sprint cards, long-lived groups, hotfixes and hits", () => {
+		expect(me.me).toBe(true);
+		expect(me.keepVersion(t21.versions[0])).toBe(true);
+		expect(me.keepVersion(t21.versions[1])).toBe(false);
+		expect(t21.versions[0].cards.filter(me.keepCard).map((u) => u.key)).toEqual(["DEMO-1"]);
+		expect(me.sprintCards(b.sprints[0]).map((c) => c.key)).toEqual(["DEMO-7"]);
+		expect(me.llbs.map((g) => g.id)).toEqual(["a"]);
+		expect(b.hotfixes.filter(me.keepHotfix).map((h) => h.version)).toEqual(["2.3.1"]);
+		expect(me.attention.map((h) => h.id)).toEqual(["C1~v/21-2026/di"]);
+	});
+
+	it("keeps everything with Only me off", () => {
+		expect(all.me).toBe(false);
+		expect(all.keepVersion(t21.versions[1])).toBe(true);
+		expect(all.sprintCards(b.sprints[0])).toHaveLength(2);
+		expect(all.llbs).toHaveLength(2);
+		expect(all.attention).toHaveLength(2);
+	});
+
+	it("counts the badge per lens: my hits only, and no unknown cell it cannot tie to me", () => {
+		expect(all.badge).toEqual({ count: 2, unknown: 1, worst: "block" });
+		expect(me.badge).toEqual({ count: 1, unknown: 0, worst: "block" });
+	});
+
+	it("drops a sprint card whose MRs are all in apps the filter hides, and keeps one with no MR", () => {
+		const row = {
+			...b.sprints[0],
+			cards: [
+				{ ...sprintCard("DEMO-20", false), mrs: [sprintMr("da")] },
+				{ ...sprintCard("DEMO-21", false), mrs: [sprintMr("da"), sprintMr("di")] },
+				sprintCard("DEMO-22", false),
+			],
+		};
+		const onlyDi = makeLens(b, parseReleasesSearch({ apps: "di" }));
+		expect(onlyDi.sprintCards(row).map((c) => c.key)).toEqual(["DEMO-21", "DEMO-22"]);
+	});
+
+	it("ignores ?me=1 when the identity is unknown, so nothing filters to empty", () => {
+		const blind = makeLens(
+			{ ...b, identity: { kind: "unknown", reason: "gitlab.user never read" } },
+			parseReleasesSearch({ me: "1" }),
+		);
+		expect(blind.me).toBe(false);
+		expect(blind.badge.count).toBe(2);
 	});
 });
 

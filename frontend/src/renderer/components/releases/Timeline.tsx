@@ -22,6 +22,7 @@ import { BAR_DROP_ORDER, fitParts, labelHidden, type BarPartId } from "../../lib
 import type { Board, BoardApp, TrainKey } from "../../lib/releases/types";
 import { LAYER_ORDER, type Layer, type Layers, type ReleasesSearch } from "../../lib/releases/url";
 import { useReleasesUi } from "../../stores/releases-ui";
+import { BoardSprintRow } from "./BoardSprintRows";
 import { CardGroupBox } from "./CardGroups";
 import { LongLivedSummary, type BarSpot } from "./LongLivedSummary";
 import type { PageActions } from "./ReleasesPage";
@@ -140,6 +141,10 @@ export function Timeline({
 								))}
 						</div>
 					</div>
+					{layers.sprint &&
+						board.sprints.map((row) => (
+							<BoardSprintRow key={row.board.key} row={row} board={board} tl={tl} lens={lens} actions={actions} />
+						))}
 				</div>
 				{lens.apps.map((a) => (
 					<AppRow key={a.id} app={a} board={board} tl={tl} url={url} lens={lens} layers={layers} actions={actions} />
@@ -177,13 +182,14 @@ function AppRow({
 	actions: PageActions;
 }) {
 	const open = useReleasesUi((s) => s.open);
-	const L = appLanes(board, tl, a.id, { focus: lens.focus?.id ?? null, past: layers.past, hotfixes: url.hotfixes });
-	const groups = layers.llb ? llbGroupsFor(board, a.id) : [];
-	const lanes = groups.length ? llbLanes(board, a.id, tl) : [];
+	const scoped = lens.me ? { ...board, llbs: lens.llbs, hotfixes: board.hotfixes.filter(lens.keepHotfix) } : board;
+	const L = appLanes(scoped, tl, a.id, { focus: lens.focus?.id ?? null, past: layers.past, hotfixes: url.hotfixes });
+	const groups = layers.llb ? llbGroupsFor(scoped, a.id) : [];
+	const lanes = groups.length ? llbLanes(scoped, a.id, tl) : [];
 	const llbH = llbBlockH(lanes.length, open.has(`${a.id}:llbs`));
 	const isOpen = (k: string) => open.has(k);
 	const jira = (key: string) => jiraUrl(board, key);
-	const boxes = (layers.cards ? cardGroups(board, a.id) : []).map((g) => {
+	const boxes = (layers.cards ? cardGroups(scoped, a.id, lens.keepCard) : []).map((g) => {
 		const it = L.items.find((x) => x.kind === "train" && x.key === g.train.id);
 		const top = it ? cardGroupTop(L, it, tl, llbH) : llbH + 8 + L.lanesH + 2;
 		const rows = open.has(g.key) ? groupRowCount(g, isOpen) : 0;
@@ -213,11 +219,11 @@ function AppRow({
 						width={tl.width}
 						height={llbH + L.lanesH + 8}
 						barOf={(t) => barSpot(L, tl, llbH, t)}
-						mine={false}
+						mine={lens.me}
 						actions={actions}
 					/>
 				)}
-				<VersionLanes board={board} tl={tl} lanes={L} top={llbH} lens={lens} actions={actions} />
+				<VersionLanes board={scoped} tl={tl} lanes={L} top={llbH} lens={lens} actions={actions} />
 				{boxes.map(({ g, left, top }) => (
 					<CardGroupBox
 						key={g.key}
@@ -226,7 +232,7 @@ function AppRow({
 						left={left}
 						top={top}
 						focused={g.train.id === lens.focus?.id}
-						mine={false}
+						mine={lens.me}
 						actions={actions}
 						jira={jira}
 					/>

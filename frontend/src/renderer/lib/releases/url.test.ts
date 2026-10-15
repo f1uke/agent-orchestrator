@@ -53,14 +53,15 @@ describe("releases search params", () => {
 			version: "1.0.2",
 		});
 		expect(parseReleasesSearch({ sheet: "card:DEMO-12" }).sheet).toEqual({ kind: "card", key: "DEMO-12" });
+		expect(parseReleasesSearch({ sheet: "sprint:DEMO" }).sheet).toEqual({ kind: "sprint", board: "DEMO" });
 		expect(parseReleasesSearch({ sheet: "llb:demo-wallet.2" }).sheet).toEqual({ kind: "llb", id: "demo-wallet.2" });
-		for (const s of ["card:DEMO-12", "llb:demo-wallet.2", "llbs"]) {
+		for (const s of ["card:DEMO-12", "sprint:DEMO", "llb:demo-wallet.2", "llbs"]) {
 			expect(releasesSearch(parseReleasesSearch({ sheet: s })).sheet).toBe(s);
 		}
 		for (const k of ["attention", "rules", "key", "llbs"] as const) {
 			expect(parseReleasesSearch({ sheet: k }).sheet).toEqual({ kind: k });
 		}
-		for (const bad of ["version:21-2026", "train:", "nope:1", "", 7, "card:", "llb:", "sprint:DEMO"]) {
+		for (const bad of ["version:21-2026", "train:", "nope:1", "", 7, "card:", "llb:", "sprint:"]) {
 			expect(parseReleasesSearch({ sheet: bad }).sheet).toBeNull();
 		}
 	});

@@ -29,7 +29,7 @@ import {
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Switch } from "../ui/switch";
 import { Avatar } from "./Avatar";
-import { cardSheet } from "./CardSheets";
+import { cardSheet, sprintSheet } from "./CardSheets";
 import { llbSheet, llbsSheet } from "./LlbSheet";
 import type { PageActions } from "./ReleasesPage";
 import { Stepper } from "./StickyAppLabel";
@@ -116,6 +116,8 @@ function render(s: SheetEntry, c: Ctx): Sheet | null {
 			return llbsSheet(c.board, c.actions, () => true);
 		case "card":
 			return cardSheet(s.key, c);
+		case "sprint":
+			return sprintSheet(s.board, c);
 	}
 }
 
