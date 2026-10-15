@@ -225,6 +225,10 @@ type AlertHit struct {
 	Hit
 	Bucket             Bucket `json:"bucket"`
 	ChangedSinceHidden bool   `json:"changedSinceHidden,omitempty"`
+	// Fix is what the rule's Fix button does; empty when the rule has none.
+	Fix FixKind `json:"fix,omitempty"`
+	// OpenFix is the hit's live fix, if one was confirmed.
+	OpenFix *FixRef `json:"openFix,omitempty"`
 }
 
 // RuleOutcome is one rule's outcome for one app, or for every app when App is empty.

@@ -199,7 +199,7 @@ func (r reader) jobs(ctx context.Context, project, pipeline int) (svc.Batch, err
 	}
 	f := rt.JobsFact{Project: project, Pipeline: pipeline, Jobs: make([]rt.JobFact, 0, len(rows))}
 	for _, j := range rows {
-		f.Jobs = append(f.Jobs, rt.JobFact{Name: j.Name, Status: j.Status, AllowFailure: j.AllowFailure})
+		f.Jobs = append(f.Jobs, rt.JobFact{ID: j.ID, Name: j.Name, Status: j.Status, AllowFailure: j.AllowFailure})
 	}
 	return svc.SnapshotOf(rt.KindJobs, []rt.JobsFact{f})
 }

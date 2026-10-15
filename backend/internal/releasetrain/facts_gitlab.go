@@ -66,6 +66,7 @@ type JobsFact struct {
 
 // JobFact is one pipeline job.
 type JobFact struct {
+	ID           int    `json:"id,omitempty"`
 	Name         string `json:"name"`
 	Status       string `json:"status"`
 	AllowFailure bool   `json:"allowFailure"`
