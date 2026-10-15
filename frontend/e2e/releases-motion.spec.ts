@@ -97,7 +97,6 @@ async function stopFrames(page: Page): Promise<{ frames: Box[][]; covered: strin
 
 const key = (b: Box) => `${b.id} ${b.x},${b.y} ${b.w}x${b.h} ${b.opacity.toFixed(2)} ${b.transform}`;
 
-/** Every frame keeps the limits: no bar at scaleX(0), label parts move on opacity only. */
 function frameViolations(frames: Box[][]): string[] {
 	const bad = new Set<string>();
 	for (const f of frames)
@@ -109,7 +108,6 @@ function frameViolations(frames: Box[][]): string[] {
 	return [...bad];
 }
 
-/** The settled page equals a cold load of the same state, so nothing is left mid-way. */
 async function expectSameAsColdLoad(page: Page) {
 	await settle(page);
 	const now = (await boxes(page)).map(key);

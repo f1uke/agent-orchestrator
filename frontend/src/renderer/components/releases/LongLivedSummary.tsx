@@ -78,7 +78,7 @@ export function LongLivedSummary({
 					})}
 				</svg>
 			</Fade>
-			<Unfold open={open} at={{ top: LLB_LINE_H, height: llbBlockH(lanes.length, true) - LLB_LINE_H }}>
+			<Unfold open={open} clipAt={{ top: LLB_LINE_H, height: llbBlockH(lanes.length, true) - LLB_LINE_H }}>
 				{lanes.map((l) => (
 					<LaneRow
 						key={`${l.branch.app}:${l.branch.branch}`}

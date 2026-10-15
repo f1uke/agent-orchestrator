@@ -6,7 +6,6 @@ export type MotionValues = Partial<
 	Record<"x" | "y" | "scale" | "scaleX" | "scaleY" | "opacity", number | number[]> & { height: number | "auto" }
 >;
 
-/** What an element animates as it mounts and unmounts. `initial: false` starts it at its end state. */
 export type Presence = {
 	initial: MotionValues | false;
 	animate: MotionValues;
@@ -17,21 +16,14 @@ export type Presence = {
 
 export type ReleaseMotion = {
 	reduced: boolean;
-	/** Card groups, the long-lived line and sprint destinations opening, and folding back in reverse. */
 	unfold: Presence;
-	/** Rows a filter, Only me or a layer adds. */
 	appear: Presence;
 	sheet: Presence;
-	/** The i-th changed part of a sticky app label after a focus switch. */
 	label: (i: number) => Presence;
-	/** Absolute siblings moving with an unfold, so nothing overlaps mid-way. */
 	fold: Transition;
-	/** Rows that stay, moving to their new place (FLIP). */
 	row: Transition;
 	axis: Transition;
 	momentum: Transition;
-	/** A change that must not animate: a focus switch or a refetch resizing a row. */
-	snap: Transition;
 };
 
 export const DURATION = { micro: 0.08, short: 0.16, medium: 0.24 } as const;
@@ -80,7 +72,6 @@ const MOVING: ReleaseMotion = {
 	row: moving,
 	axis: moving,
 	momentum: { duration: DURATION.medium, ease: ease.coast },
-	snap: instant,
 };
 
 function still(p: Presence): Presence {
@@ -97,7 +88,6 @@ const STILL: ReleaseMotion = {
 	row: instant,
 	axis: instant,
 	momentum: instant,
-	snap: instant,
 };
 
 export function releaseMotion(reduced: boolean): ReleaseMotion {
@@ -106,10 +96,6 @@ export function releaseMotion(reduced: boolean): ReleaseMotion {
 
 export type MoveKeys = { rows: string; blocks: string };
 
-/**
- * Rows FLIP when `rows` changes, blocks inside a row when `blocks` does (a fold too). A focus switch or a
- * refetch changes neither, so nothing moves.
- */
 export function moveKeys(url: ReleasesSearch, layers: Layers, folds: ReadonlySet<string>): MoveKeys {
 	const rows = [
 		url.apps ? [...url.apps].sort().join(",") : "*",

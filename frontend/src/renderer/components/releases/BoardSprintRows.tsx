@@ -341,7 +341,7 @@ export function BoardSprintRow({
 						</span>
 					</button>
 				</div>
-				<Unfold open={unfolded} at={{ top: DESTS_TOP, height: L.bottom - DESTS_TOP }}>
+				<Unfold open={unfolded} clipAt={{ top: DESTS_TOP, height: L.bottom - DESTS_TOP }}>
 					{L.placed.length > 0 && <Wires board={board} placed={L.placed} x0={x0} tl={tl} />}
 					{L.placed.map((bk) => (
 						<Moving

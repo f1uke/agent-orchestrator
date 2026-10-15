@@ -35,17 +35,12 @@ type Box = { className?: string; style?: CSSProperties; data?: Data; children?: 
 
 const MoveScope = createContext<MoveKeys & { loaded: boolean }>({ rows: "", blocks: "", loaded: false });
 
-/** Rows and blocks inside glide when their key changes; rows that mount after the first render fade in. */
 export function MoveRoot({ keys, children }: { keys: MoveKeys; children: ReactNode }) {
 	const [loaded, setLoaded] = useState(false);
 	useEffect(() => setLoaded(true), []);
 	return <MoveScope.Provider value={{ ...keys, loaded }}>{children}</MoveScope.Provider>;
 }
 
-/**
- * Glides to its new place when its key changes. A row (`height`) grows or shrinks with a fold instead of
- * jumping, and resizes at once on anything else. With `appear` it fades in when it mounts after load.
- */
 export function Moving({
 	track,
 	height,
@@ -96,26 +91,26 @@ export function Moving({
 	);
 }
 
-/**
- * Opens on height and opacity and folds back in reverse. Absolutely placed content passes `at`: the box
- * sits at `at.top` with that height, and the content keeps the coordinates of the box's parent.
- */
 export function Unfold({
 	open,
-	at,
+	clipAt: clip,
 	className,
 	style,
 	data,
 	children,
-}: Box & { open: boolean; at?: { top: number; height: number } }) {
+}: Box & { open: boolean; clipAt?: { top: number; height: number } }) {
 	const mo = useReleaseMotion();
-	const box: CSSProperties = at
-		? { ...style, position: "absolute", left: 0, right: 0, top: at.top, overflow: "clip" }
+	const box: CSSProperties = clip
+		? { ...style, position: "absolute", left: 0, right: 0, top: clip.top, overflow: "clip" }
 		: { ...style, overflow: "clip" };
-	const body = at ? <div style={{ position: "absolute", left: 0, right: 0, top: -at.top }}>{children}</div> : children;
+	const body = clip ? (
+		<div style={{ position: "absolute", left: 0, right: 0, top: -clip.top }}>{children}</div>
+	) : (
+		children
+	);
 	if (mo.reduced)
 		return open ? (
-			<div className={className} style={{ ...box, height: at?.height }} {...data}>
+			<div className={className} style={{ ...box, height: clip?.height }} {...data}>
 				{body}
 			</div>
 		) : null;
@@ -128,7 +123,7 @@ export function Unfold({
 					style={box}
 					{...data}
 					initial={mo.unfold.initial}
-					animate={at ? { ...mo.unfold.animate, height: at.height } : mo.unfold.animate}
+					animate={clip ? { ...mo.unfold.animate, height: clip.height } : mo.unfold.animate}
 					exit={mo.unfold.exit}
 					transition={mo.unfold.transition}
 				>
@@ -139,7 +134,6 @@ export function Unfold({
 	);
 }
 
-/** Fades in as it shows and out as it hides, on the unfold's clock: wires that follow an unfold. */
 export function Fade({ show, children }: { show: boolean; children: ReactNode }) {
 	const mo = useReleaseMotion();
 	if (mo.reduced) return show ? <>{children}</> : null;
@@ -162,7 +156,6 @@ export function Fade({ show, children }: { show: boolean; children: ReactNode })
 
 type Dot = { x: number; y: number; r: number };
 
-/** A wire whose ends glide with the blocks it joins. */
 export function Wire({ d, dot, className }: { d: string; dot: Dot; className?: string }) {
 	const mo = useReleaseMotion();
 	if (mo.reduced)
@@ -195,7 +188,6 @@ export function WireText({ x, y, children }: { x: number; y: number; children: R
 	);
 }
 
-/** On a focus switch, the parts of the label whose text changed fade in one after another. A refetch never fades. */
 export function useLabelStagger(root: RefObject<HTMLElement | null>, focus: string) {
 	const mo = useReleaseMotion();
 	const last = useRef<{ focus: string; texts: string[] } | null>(null);

@@ -1,8 +1,5 @@
 import { expect, type Page } from "@playwright/test";
 
-// dev:web (VITE_NO_ELECTRON=1) serves lib/releases/fixture.ts: a fictional Board
-// with DEMO apps, made-up people and versions.
-
 export async function open(page: Page, query = "", variant?: "failed-source" | "identity-unknown" | "fixes") {
 	await page.addInitScript((v) => {
 		try {
@@ -43,7 +40,6 @@ export async function settle(page: Page) {
 export const layer = (page: Page, name: string) =>
 	page.getByRole("group", { name: "Layers" }).getByRole("button", { name, exact: true });
 
-/** Sticky labels cut by the label column: their text starts left of the edge yet shows to its right. */
 export function halfLabels(page: Page): Promise<string[]> {
 	return page.evaluate(() => {
 		const edge = document.querySelector(".rel-sc")!.getBoundingClientRect().left + 280;
@@ -59,7 +55,6 @@ export function halfLabels(page: Page): Promise<string[]> {
 	});
 }
 
-/** Visible labels and summaries that cover each other by more than 2 px. */
 export function labelOverlaps(page: Page): Promise<{ n: number; overlaps: string[] }> {
 	return page.evaluate(() => {
 		const vw = innerWidth;
