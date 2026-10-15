@@ -21,6 +21,7 @@ import {
 import type { Board, BoardApp, Dest, SprintCard, SprintRow } from "../../lib/releases/types";
 import { useReleasesUi } from "../../stores/releases-ui";
 import { CardLine, Chev } from "./CardGroups";
+import { Moving, Unfold, Wire, WireText } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 
 const SRC_TOP = 6;
@@ -29,6 +30,8 @@ const BLOCK_HEAD = 28;
 const ROW_H = 24;
 const HEAD_ROW_H = 20;
 const MIN_H = 76;
+const ROW_BORDER = 1;
+const DESTS_TOP = SRC_TOP + SUM_H;
 const INDENT = 44;
 const BLOCK_W = 683;
 
@@ -245,15 +248,13 @@ function Wires({ board, placed, x0, tl }: { board: Board; placed: Placed[]; x0: 
 				const viaTone = g?.target.kind === "landed" ? "done" : bk.tone;
 				return (
 					<g key={bk.key} data-st={bk.tone} data-wire={bk.key}>
-						<path d={d} />
-						<circle cx={ex} cy={ey} r={3} />
+						<Wire d={d} dot={{ x: ex, y: ey, r: 3 }} />
 						{via && tx > lx && (
 							<g data-st={viaTone} data-testid="via-wire">
-								<path className="via" d={`M${lx} ${ey} H${tx - 4}`} />
-								<circle cx={tx} cy={ey} r={3.5} />
-								<text x={tx + 8} y={ey + 4}>
+								<Wire className="via" d={`M${lx} ${ey} H${tx - 4}`} dot={{ x: tx, y: ey, r: 3.5 }} />
+								<WireText x={tx + 8} y={ey + 4}>
 									{trainLabel(board, via)}
-								</text>
+								</WireText>
 							</g>
 						)}
 					</g>
@@ -285,16 +286,20 @@ export function BoardSprintRow({
 	const start = row.sprint.start ?? tl.start;
 	const x0 = tl.x(start) + 2;
 	const width = Math.max(4 * DW, tl.x(row.sprint.end ?? start) - tl.x(start) - 4);
-	const L = open.has(fk)
-		? place(board, destBlocks(row, cards), tl, x0, fk, (k) => open.has(k))
-		: { placed: [], bottom: 0 };
+	const unfolded = open.has(fk);
+	const L = unfolded ? place(board, destBlocks(row, cards), tl, x0, fk, (k) => open.has(k)) : { placed: [], bottom: 0 };
 	const h = Math.max(L.bottom + 4, SRC_TOP + SUM_H + 8, MIN_H);
 	return (
-		<div className="rel-row rel-sprow" data-board={row.board.key} data-testid={`sprint-row-${row.board.key}`}>
+		<Moving
+			track="rows"
+			appear
+			height={h + ROW_BORDER}
+			className="rel-row rel-sprow"
+			data={{ "data-board": row.board.key, "data-testid": `sprint-row-${row.board.key}` }}
+		>
 			<button
 				type="button"
 				className="rel-lab top"
-				style={{ height: h }}
 				onClick={() => actions.openSheet({ kind: "sprint", board: row.board.key })}
 			>
 				<span className="spn">
@@ -316,8 +321,7 @@ export function BoardSprintRow({
 					)}
 				</span>
 			</button>
-			<div className="rel-trk" style={{ width: tl.width, height: h }}>
-				{L.placed.length > 0 && <Wires board={board} placed={L.placed} x0={x0} tl={tl} />}
+			<div className="rel-trk" style={{ width: tl.width }}>
 				<div className="rel-cg spsrc" style={{ left: x0, top: SRC_TOP, width }}>
 					<button type="button" className="csum" aria-expanded={open.has(fk)} onClick={() => toggle(fk)}>
 						<span className="sl" data-sticky>
@@ -337,24 +341,24 @@ export function BoardSprintRow({
 						</span>
 					</button>
 				</div>
-				{L.placed.map((bk) => (
-					<div
-						key={bk.key}
-						className="rel-cg dest"
-						data-st={bk.tone}
-						data-dest={bk.key}
-						style={{ left: bk.x, top: bk.top, width: BLOCK_W }}
-						data-testid="sprint-dest-block"
-					>
-						<DestSummary
-							board={board}
-							block={bk}
-							open={bk.open}
-							onToggle={() => toggle(`${fk}:${bk.key}`)}
-							actions={actions}
-						/>
-						{bk.open && (
-							<div className="crows">
+				<Unfold open={unfolded} clipAt={{ top: DESTS_TOP, height: L.bottom - DESTS_TOP }}>
+					{L.placed.length > 0 && <Wires board={board} placed={L.placed} x0={x0} tl={tl} />}
+					{L.placed.map((bk) => (
+						<Moving
+							track="blocks"
+							key={bk.key}
+							className="rel-cg dest"
+							data={{ "data-st": bk.tone, "data-dest": bk.key, "data-testid": "sprint-dest-block" }}
+							style={{ left: bk.x, top: bk.top, width: BLOCK_W }}
+						>
+							<DestSummary
+								board={board}
+								block={bk}
+								open={bk.open}
+								onToggle={() => toggle(`${fk}:${bk.key}`)}
+								actions={actions}
+							/>
+							<Unfold open={bk.open} className="crows">
 								<div className="crow sp sph" aria-hidden="true">
 									<span />
 									<span />
@@ -374,11 +378,11 @@ export function BoardSprintRow({
 										actions={actions}
 									/>
 								))}
-							</div>
-						)}
-					</div>
-				))}
+							</Unfold>
+						</Moving>
+					))}
+				</Unfold>
 			</div>
-		</div>
+		</Moving>
 	);
 }

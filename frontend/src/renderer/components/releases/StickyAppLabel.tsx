@@ -1,7 +1,9 @@
+import { useRef } from "react";
 import { approvals, nowStage, owner, unknownText, versionOf, type Lens } from "../../lib/releases/lens";
 import type { BoardApp, Stage } from "../../lib/releases/types";
 import { SEVERITY_META, STAGE_META, STATUS_TEXT, stageTone } from "../../lib/releases/vocab";
 import { versionMineText } from "../../lib/releases/sprint";
+import { useLabelStagger } from "./ReleaseMotion";
 import type { PageActions } from "./ReleasesPage";
 
 export function Stepper({ stages, big = false }: { stages: Stage[]; big?: boolean }) {
@@ -39,6 +41,8 @@ function MineLine({ app, lens }: { app: string; lens: Lens }) {
 export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Lens; actions: PageActions }) {
 	const t = lens.focus;
 	const v = t ? versionOf(t, app.id) : undefined;
+	const root = useRef<HTMLElement>(null);
+	useLabelStagger(root, t?.id ?? "");
 	const hits = lens.appHits(app.id);
 	const top = hits[0];
 	const family = app.name.replace(/\s*(iOS|Android)\s*$/i, "").trim() || app.name;
@@ -59,7 +63,7 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 	);
 	if (!t || !v) {
 		return (
-			<div className="rel-lab" data-testid={`label-${app.id}`}>
+			<div className="rel-lab" data-testid={`label-${app.id}`} ref={(el) => void (root.current = el)}>
 				{head}
 				<div className="passive text-[12px]">Not in train {t?.label ?? ""}</div>
 			</div>
@@ -75,6 +79,7 @@ export function StickyAppLabel({ app, lens, actions }: { app: BoardApp; lens: Le
 			type="button"
 			className="rel-lab"
 			data-testid={`label-${app.id}`}
+			ref={(el) => void (root.current = el)}
 			onClick={() => actions.openSheet({ kind: "version", train: t.id, app: app.id })}
 		>
 			{head}

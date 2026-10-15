@@ -1,29 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
+import { halfLabels, labelOverlaps, layer, open, settle } from "./releases-kit";
 
 // dev:web (VITE_NO_ELECTRON=1) serves lib/releases/fixture.ts: a fictional Board
 // with DEMO apps, made-up people and versions. Sticky labels, clipping, pan and
 // Motion need a real browser, so these checks live here and not in jsdom.
 
 const SHOTS = process.env.AO_RELEASES_SHOTS;
-
-async function open(page: Page, query = "", variant?: "failed-source" | "identity-unknown" | "fixes") {
-	await page.addInitScript((v) => {
-		try {
-			if (!sessionStorage.getItem("releases-spec")) {
-				localStorage.removeItem("ao.releases.layers.v1");
-				localStorage.removeItem("ao.releases.folds.v1");
-			}
-			sessionStorage.setItem("releases-spec", "1");
-		} catch {}
-		if (v) (globalThis as { __aoReleaseBoardVariant?: string }).__aoReleaseBoardVariant = v;
-	}, variant);
-	await page.goto(`/#/releases${query}`);
-	await expect(page.getByTestId("releases-page")).toBeVisible();
-	await expect(page.getByTestId("label-di")).toBeVisible();
-}
-
-const layer = (page: Page, name: string) =>
-	page.getByRole("group", { name: "Layers" }).getByRole("button", { name, exact: true });
 
 test.describe("releases page", () => {
 	test.use({ viewport: { width: 1512, height: 945 } });
@@ -128,22 +110,16 @@ test.describe("releases page", () => {
 		await page.mouse.move(box.x + 400, y, { steps: 8 });
 		await page.mouse.up();
 		await page.waitForTimeout(400);
-		const report = await page.evaluate(() => {
-			const edge = document.querySelector(".rel-sc")!.getBoundingClientRect().left + 280;
-			const half: string[] = [];
-			for (const el of document.querySelectorAll<HTMLElement>(".rel-bar .bl, .rel-spr .sl")) {
-				if (getComputedStyle(el).visibility === "hidden") continue;
-				const r = el.getBoundingClientRect();
-				const clip = el.parentElement!.getBoundingClientRect();
-				const visibleLeft = Math.max(r.left, clip.left, edge);
-				if (r.right > edge && r.left < edge - 1 && visibleLeft > r.left + 1) half.push(el.innerText.slice(0, 30));
-			}
-			const zero = [...document.querySelectorAll<HTMLElement>(".rel-bar")].filter((b) => {
-				const t = getComputedStyle(b).transform;
-				return t.startsWith("matrix(0,") || b.getBoundingClientRect().width === 0;
-			}).length;
-			return { half, zero, moved: document.querySelector(".rel-sc")!.scrollLeft };
-		});
+		const report = {
+			half: await halfLabels(page),
+			...(await page.evaluate(() => ({
+				zero: [...document.querySelectorAll<HTMLElement>(".rel-bar")].filter((b) => {
+					const t = getComputedStyle(b).transform;
+					return t.startsWith("matrix(0,") || b.getBoundingClientRect().width === 0;
+				}).length,
+				moved: document.querySelector(".rel-sc")!.scrollLeft,
+			}))),
+		};
 		expect(report.moved).toBeGreaterThan(0);
 		expect(report.half).toEqual([]);
 		expect(report.zero).toBe(0);
@@ -209,6 +185,7 @@ test.describe("releases page", () => {
 		await expect(app.getByTestId("llb-lane")).toHaveCount(3);
 		const wires = app.getByTestId("llb-wires");
 		await expect(wires.locator("g")).toHaveCount(2);
+		await settle(page);
 		await expect(wires.locator('g[data-wire="feature/demo-wallet"] path')).toHaveClass("plan");
 		await expect(wires.locator('g[data-wire="feature/demo-search"] path')).not.toHaveClass("plan");
 		const dot = await wires.locator('g[data-wire="feature/demo-wallet"] circle').boundingBox();
@@ -624,38 +601,7 @@ for (const [width, height] of [
 		for (const g of await page.locator(".rel-cg .csum").all()) await g.click();
 		for (const d of await page.locator(".rel-cg.dest .dsum").all()) await d.click();
 		await page.waitForTimeout(100);
-		const report = await page.evaluate(() => {
-			const vw = innerWidth;
-			const vh = innerHeight;
-			const seen = (e: Element) => {
-				const r = e.getBoundingClientRect();
-				const h = document.elementFromPoint(
-					Math.min(vw - 1, Math.max(0, r.left + r.width / 2)),
-					Math.min(vh - 1, Math.max(0, r.top + r.height / 2)),
-				);
-				return !!h && (h === e || e.contains(h) || h.contains(e));
-			};
-			const els = [
-				...document.querySelectorAll(".bl, .sl, .lb-lbl, .csum, .ls, .rel-lyr, .dsum, .rel-sprow .crow"),
-			].filter((e) => {
-				const r = e.getBoundingClientRect();
-				const visible = r.width > 0 && r.height > 0 && r.right > 0 && r.left < vw && r.top < vh && r.bottom > 0;
-				return visible && getComputedStyle(e).visibility !== "hidden" && !e.closest(".tight") && seen(e);
-			});
-			const overlaps: string[] = [];
-			for (let i = 0; i < els.length; i++)
-				for (let j = i + 1; j < els.length; j++) {
-					const [a, b] = [els[i], els[j]];
-					if (a.contains(b) || b.contains(a)) continue;
-					const r = a.getBoundingClientRect();
-					const q = b.getBoundingClientRect();
-					const ix = Math.min(r.right, q.right) - Math.max(r.left, q.left);
-					const iy = Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top);
-					if (ix > 2 && iy > 2)
-						overlaps.push(`${a.textContent?.trim().slice(0, 24)} x ${b.textContent?.trim().slice(0, 24)}`);
-				}
-			return { n: els.length, overlaps };
-		});
+		const report = await labelOverlaps(page);
 		expect(report.n).toBeGreaterThan(10);
 		expect(report.overlaps).toEqual([]);
 		if (SHOTS) await page.screenshot({ path: `${SHOTS}/releases-all-${width}.png` });

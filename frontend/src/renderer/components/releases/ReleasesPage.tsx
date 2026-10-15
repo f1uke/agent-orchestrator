@@ -1,5 +1,4 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { MotionConfig } from "motion/react";
 import { useCallback, useMemo } from "react";
 import { useReleaseBoard } from "../../hooks/useReleaseBoard";
 import { makeLens } from "../../lib/releases/lens";
@@ -12,6 +11,7 @@ import {
 	type SheetEntry,
 } from "../../lib/releases/url";
 import { useReleasesUi } from "../../stores/releases-ui";
+import { ReleaseMotionRoot } from "./ReleaseMotion";
 import { SheetStack } from "./SheetStack";
 import { SummaryStrip } from "./SummaryStrip";
 import { Timeline } from "./Timeline";
@@ -36,7 +36,12 @@ export function ReleasesPage() {
 
 	const setSearch = useCallback(
 		(patch: Partial<ReleasesSearch>) =>
-			void navigate({ to: "/releases", search: releasesSearch({ ...url, ...patch }), replace: true }),
+			void navigate({
+				to: "/releases",
+				search: releasesSearch({ ...url, ...patch }),
+				replace: true,
+				resetScroll: false,
+			}),
 		[navigate, url],
 	);
 	const actions: PageActions = useMemo(
@@ -64,7 +69,7 @@ export function ReleasesPage() {
 		: null;
 
 	return (
-		<MotionConfig reducedMotion="user">
+		<ReleaseMotionRoot>
 			<div className="rel" data-testid="releases-page">
 				{!response ? (
 					<div className="rel-empty">{fetchError ? `Release trains: ${fetchError}` : "Loading release trains…"}</div>
@@ -81,7 +86,7 @@ export function ReleasesPage() {
 					/>
 				)}
 			</div>
-		</MotionConfig>
+		</ReleaseMotionRoot>
 	);
 }
 

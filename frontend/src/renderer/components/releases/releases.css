@@ -370,6 +370,7 @@
 	.rel-row {
 		display: flex;
 		position: relative;
+		isolation: isolate;
 	}
 	.rel-lab {
 		position: sticky;
@@ -534,6 +535,11 @@
 	}
 	.rel-app > .rel-trk {
 		align-self: stretch;
+	}
+	.rel-below {
+		position: absolute;
+		left: 0;
+		height: 0;
 	}
 	.rel-lab .nm {
 		display: flex;
@@ -720,6 +726,7 @@
 		max-width: 100%;
 		overflow: hidden;
 	}
+	.rel-spr .sl.tight,
 	.rel-bar .bl.tight {
 		visibility: hidden;
 	}
@@ -1710,6 +1717,7 @@
 		border-top: 1px solid var(--border);
 	}
 	.rel-sched > .rel-sprow > .rel-lab.top {
+		height: auto;
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
