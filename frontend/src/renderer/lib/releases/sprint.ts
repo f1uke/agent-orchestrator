@@ -131,10 +131,12 @@ export type BoardLabel = { title: string; dates: string; scope: string; dests: C
 
 type KeptDest = { to: Dest; cards: SprintCard[] };
 
+const byKey = (a: SprintCard, b: SprintCard) => a.key.localeCompare(b.key, undefined, { numeric: true });
+
 function keptDests(row: SprintRow, cards: readonly SprintCard[]): KeptDest[] {
 	const active = new Map(cards.filter((c) => c.active).map((c) => [c.key, c]));
 	return row.dests
-		.map((d) => ({ to: d.to, cards: d.keys.flatMap((k) => active.get(k) ?? []) }))
+		.map((d) => ({ to: d.to, cards: d.keys.flatMap((k) => active.get(k) ?? []).sort(byKey) }))
 		.filter((d) => d.cards.length > 0);
 }
 
@@ -162,8 +164,6 @@ export function boardLabel(row: SprintRow, b: Board, cards: readonly SprintCard[
 }
 
 export type DestBlock = { key: string; to: Dest | null; cards: SprintCard[] };
-
-const byKey = (a: SprintCard, b: SprintCard) => a.key.localeCompare(b.key, undefined, { numeric: true });
 
 export function destBlocks(row: SprintRow, cards: readonly SprintCard[]): DestBlock[] {
 	const carried = cards.filter((c) => !c.active).sort(byKey);

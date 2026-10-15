@@ -154,6 +154,12 @@ describe("destination blocks", () => {
 		]);
 	});
 
+	it("orders a block's cards by key number, as d4 does, whatever order the Board lists them in", () => {
+		const late = card("DEMO-10", [], { routes: [route("di", "sprint", t21Dest)] });
+		const r = { ...fullRow, dests: [{ to: t21Dest, count: 3, keys: ["DEMO-10", "DEMO-2", "DEMO-1"] }] };
+		expect(destBlocks(r, [...cards, late])[0].cards.map((c) => c.key)).toEqual(["DEMO-1", "DEMO-2", "DEMO-10"]);
+	});
+
 	it("heads a train block with its freeze and versions, a long-lived block with its target, the rest with what they mean", () => {
 		const b2 = { ...b, llbs: [{ ...b.llbs[0], target: { kind: "landed" as const, train: "21-2026" } }] };
 		expect(destHead(b, t21Dest, cards.slice(0, 2))).toEqual({
