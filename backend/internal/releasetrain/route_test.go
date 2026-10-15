@@ -31,7 +31,7 @@ func goldenRouting(t *testing.T) routing {
 		Landing: &MRFact{TargetBranch: "feature/sprint-2026-6", State: MRMerged, MergedOn: dayPtr(t, "2026-09-30")}}
 	parked := &LongLivedBranch{App: "di", Branch: "feature/demo-chat"}
 	return routing{
-		today: day(t, "2026-10-14"), sprint: 7, year: 2026, start: day(t, "2026-10-06"),
+		sprint: 7, year: 2026, start: day(t, "2026-10-06"),
 		cutover: map[AppID]Day{"di": day(t, "2026-09-01")},
 		llbs:    map[AppID]map[string]*LongLivedBranch{"di": {landed.Branch: landed, parked.Branch: parked}},
 		groups: map[AppID]map[string]*LLBGroup{"di": {

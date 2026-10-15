@@ -33,7 +33,7 @@ func Reconcile(in Inputs, env Env) Board {
 		}
 	}
 	b.Sprints = sprintRows(in.Config, in.Snap, routing{
-		today: b.Today, cutover: b.Cutover, llbs: llbs, groups: groupsByBranch(b.LLBs),
+		cutover: b.Cutover, llbs: llbs, groups: groupsByBranch(b.LLBs),
 		trains: b.Trains, plans: planTrains(b.Trains, b.Today),
 	})
 	b.Identity = identityOf(in.Snap)

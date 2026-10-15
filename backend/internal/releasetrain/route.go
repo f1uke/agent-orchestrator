@@ -103,7 +103,6 @@ type SprintMR struct {
 }
 
 type routing struct {
-	today   Day
 	sprint  int
 	year    int
 	start   Day

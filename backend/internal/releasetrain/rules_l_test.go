@@ -117,6 +117,9 @@ func TestL3CardOnATrainParkedInALongLivedBranchThatDoesNotTargetIt(t *testing.T)
 			if tc.text == "" {
 				return
 			}
+			if link := firedHits(b, "L3")[0].Link; link.URL != "https://jira.example.com/browse/DEMO-7" {
+				t.Fatalf("L3 link = %+v, want the card's browse URL", link)
+			}
 			h := firedHits(b, "L3")[0]
 			if h.Text != tc.text || h.Evidence["train"] != (TrainID{Number: 21, Year: fixtureYear}) || h.Evidence["group"] != PlanID("demo-wallet") || h.AgesOn == nil {
 				t.Fatalf("L3 hit = %+v; want text %q, evidence naming train #21 and group demo-wallet, ageing with the version", h, tc.text)
