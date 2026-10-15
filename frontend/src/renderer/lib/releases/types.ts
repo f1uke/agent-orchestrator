@@ -19,6 +19,24 @@ export type RuleOutcome = S["ReleaseTrainRuleOutcome"];
 export type SourceFreshness = S["ReleaseTrainSourceFreshness"];
 export type ResourceStatus = S["ReleaseTrainResourceStatus"];
 export type LLBGroup = S["ReleaseTrainLLBGroup"];
+export type LongLivedBranch = S["ReleaseTrainLongLivedBranch"];
+export type LLBCard = S["ReleaseTrainLLBCard"];
+export type LlbPlan = S["ReleaseTrainLlbPlan"];
+export type LlbPlanInput = S["ReleaseTrainLlbPlanInput"];
+export type PlanBranch = S["ReleaseTrainPlanBranch"];
+export type PlanAccepted = S["ReleaseTrainPlanAccepted"];
+export type CardUnit = S["ReleaseTrainCardUnit"];
+export type CodeState = S["ReleaseTrainCodeState"];
+export type Person = S["ReleaseTrainPerson"];
+export type MineReason = S["ReleaseTrainMineReason"];
+export type Identity = S["ReleaseTrainIdentity"];
+export type SprintRow = S["ReleaseTrainSprintRow"];
+export type SprintCard = S["ReleaseTrainSprintCard"];
+export type SprintMR = S["ReleaseTrainSprintMR"];
+export type SprintDest = S["ReleaseTrainSprintDest"];
+export type Dest = S["ReleaseTrainDest"];
+export type DestKind = S["ReleaseTrainDestKind"];
+export type Route = S["ReleaseTrainRoute"];
 
 /** "2026-10-15": a civil date in the Board's timezone, never a Date. */
 export type Day = string;

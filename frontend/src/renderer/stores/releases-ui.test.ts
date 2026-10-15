@@ -15,6 +15,31 @@ describe("releases UI layers", () => {
 		expect(reloaded.useReleasesUi.getState().layers.past).toBe(true);
 	});
 
+	it("keeps folds open across a reload and closes them on a second toggle", async () => {
+		const first = await import("./releases-ui");
+		expect(first.useReleasesUi.getState().open.has("di:21-2026")).toBe(false);
+		first.useReleasesUi.getState().toggleFold("di:21-2026");
+		first.useReleasesUi.getState().openFolds(["di:llbs", "sp-DEMO"]);
+		vi.resetModules();
+		const reloaded = await import("./releases-ui");
+		const open = reloaded.useReleasesUi.getState().open;
+		expect([...open].sort()).toEqual(["di:21-2026", "di:llbs", "sp-DEMO"]);
+		reloaded.useReleasesUi.getState().toggleFold("di:llbs");
+		expect(reloaded.useReleasesUi.getState().open.has("di:llbs")).toBe(false);
+	});
+
+	it("starts with every fold closed when the stored folds are junk or storage throws", async () => {
+		window.localStorage.setItem("ao.releases.folds.v1", '{"a":1}');
+		const { useReleasesUi } = await import("./releases-ui");
+		expect(useReleasesUi.getState().open.size).toBe(0);
+		const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+			throw new Error("blocked");
+		});
+		useReleasesUi.getState().toggleFold("pa:22-2026");
+		expect(useReleasesUi.getState().open.has("pa:22-2026")).toBe(true);
+		set.mockRestore();
+	});
+
 	it("falls back to the defaults when storage holds junk or throws", async () => {
 		window.localStorage.setItem("ao.releases.layers.v1", "{not json");
 		const { useReleasesUi } = await import("./releases-ui");

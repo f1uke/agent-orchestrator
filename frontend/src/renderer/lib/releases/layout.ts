@@ -8,6 +8,7 @@ export const FOCUS_LANE = 56;
 export const QUIET_LANE = 40;
 export const BAR_H = 34;
 export const LLB_LINE_H = 30;
+const LLB_LANE_H = 24;
 const LANES_PAD = 8;
 const ROW_PAD = 10;
 const LOOKBACK_DAYS = 56;
@@ -143,8 +144,31 @@ export function appLanes(b: Board, tl: Timeline, app: AppId, o: LaneOptions): Ap
 	return { items, laneH, laneTop, lanesH: laneH.reduce((a, h) => a + h, 0) };
 }
 
-export function rowHeight({ llbLine, lanesH }: { llbLine: boolean; lanesH: number }): number {
-	return Math.max((llbLine ? LLB_LINE_H : 0) + LANES_PAD + lanesH + ROW_PAD, LABEL_H);
+export function llbBlockH(lanes: number, open: boolean): number {
+	if (!lanes) return 0;
+	return LLB_LINE_H + (open ? lanes * LLB_LANE_H + 2 : 0);
+}
+
+const GROUP_REACH = 520;
+
+export function cardGroupTop(L: AppLanes, it: LaneItem, tl: Timeline, llbH: number): number {
+	const gx = tl.x(it.freeze) + 2;
+	const covered = L.items.some(
+		(o) => o !== it && o.lane > it.lane && tl.x(o.freeze) < gx + GROUP_REACH && tl.x(o.publish) + DW > gx,
+	);
+	return covered ? llbH + LANES_PAD + L.lanesH + 2 : llbH + L.laneTop[it.lane] + L.laneH[it.lane] - 2;
+}
+
+export function rowHeight({
+	llbH,
+	lanesH,
+	cardsBottom,
+}: {
+	llbH: number;
+	lanesH: number;
+	cardsBottom: number;
+}): number {
+	return Math.max(llbH + LANES_PAD + lanesH + ROW_PAD, cardsBottom + ROW_PAD, LABEL_H);
 }
 
 export function markerSpots(tl: Timeline, stages: Stage[]): { stage: Stage; left: number }[] {

@@ -104,7 +104,7 @@ function Loaded({
 	return (
 		<>
 			<TopBar board={board} url={url} lens={lens} actions={actions} fetchError={fetchError} updatedAt={updatedAt} />
-			<SummaryStrip board={board} lens={lens} actions={actions} />
+			<SummaryStrip board={board} lens={lens} history={layers.past} actions={actions} />
 			<Timeline board={board} url={url} lens={lens} layers={layers} actions={actions} />
 			<SheetStack board={board} url={url} lens={lens} actions={actions} />
 		</>

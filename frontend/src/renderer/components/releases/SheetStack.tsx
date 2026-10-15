@@ -29,6 +29,8 @@ import {
 import { useReleasesUi } from "../../stores/releases-ui";
 import { Switch } from "../ui/switch";
 import { Avatar } from "./Avatar";
+import { cardSheet } from "./CardSheets";
+import { llbSheet, llbsSheet } from "./LlbSheet";
 import type { PageActions } from "./ReleasesPage";
 import { Stepper } from "./StickyAppLabel";
 import { phaseTone } from "./SummaryStrip";
@@ -108,6 +110,12 @@ function render(s: SheetEntry, c: Ctx): Sheet | null {
 			return panelSheet(s.kind, c);
 		case "key":
 			return keySheet(c);
+		case "llb":
+			return llbSheet(s.id, c.board, c.actions);
+		case "llbs":
+			return llbsSheet(c.board, c.actions, () => true);
+		case "card":
+			return cardSheet(s.key, c);
 	}
 }
 

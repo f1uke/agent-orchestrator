@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { appLanes, barBox, DW, FOCUS_LANE, LABEL_H, markerSpots, QUIET_LANE, rowHeight, timeline } from "./layout";
+import {
+	appLanes,
+	barBox,
+	cardGroupTop,
+	DW,
+	FOCUS_LANE,
+	LABEL_H,
+	llbBlockH,
+	markerSpots,
+	QUIET_LANE,
+	rowHeight,
+	timeline,
+} from "./layout";
 import { board, hotfix, stage, train, version } from "./testkit";
 
 const t20 = train("20-2026", "2026-09-29", "2026-10-06", "past", [
@@ -139,9 +151,26 @@ describe("app lanes", () => {
 });
 
 describe("row height and markers", () => {
-	it("never drops below the 134 px label, and grows with the long-lived line and the lanes", () => {
-		expect(rowHeight({ llbLine: false, lanesH: 40 })).toBe(LABEL_H);
-		expect(rowHeight({ llbLine: true, lanesH: 3 * FOCUS_LANE })).toBe(30 + 8 + 3 * FOCUS_LANE + 10);
+	it("never drops below the 134 px label, and grows with the long-lived block, the lanes and the card groups", () => {
+		expect(rowHeight({ llbH: 0, lanesH: 40, cardsBottom: 0 })).toBe(LABEL_H);
+		expect(rowHeight({ llbH: 30, lanesH: 3 * FOCUS_LANE, cardsBottom: 0 })).toBe(30 + 8 + 3 * FOCUS_LANE + 10);
+		expect(rowHeight({ llbH: 30, lanesH: 40, cardsBottom: 400 })).toBe(410);
+	});
+
+	it("makes the long-lived block one 30 px line, plus 24 px per lane when unfolded", () => {
+		expect(llbBlockH(0, true)).toBe(0);
+		expect(llbBlockH(3, false)).toBe(30);
+		expect(llbBlockH(3, true)).toBe(30 + 3 * 24 + 2);
+	});
+
+	it("puts a card group right under its own bar, or below every lane when a later lane would cover it", () => {
+		const bb = board({ today: "2026-10-14", trains: [t21, t22] });
+		const tl = timeline(bb);
+		const L = appLanes(bb, tl, "di", { focus: "21-2026", past: false, hotfixes: true });
+		const it21 = L.items.find((it) => it.key === "21-2026")!;
+		expect(cardGroupTop(L, it21, tl, 30)).toBe(30 + L.laneTop[it21.lane] + FOCUS_LANE - 2);
+		const crowded = { ...L, items: [...L.items, { ...it21, key: "x", lane: it21.lane + 1 }] };
+		expect(cardGroupTop(crowded, it21, tl, 30)).toBe(30 + 8 + L.lanesH + 2);
 	});
 
 	it("puts same-day markers side by side, 15 px apart, centred on the day", () => {

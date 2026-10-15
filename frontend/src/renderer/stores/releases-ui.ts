@@ -2,6 +2,22 @@ import { create } from "zustand";
 import { DEFAULT_LAYERS, type Layer, type Layers, type SheetEntry } from "../lib/releases/url";
 
 const LAYERS_KEY = "ao.releases.layers.v1";
+const FOLDS_KEY = "ao.releases.folds.v1";
+
+function readFolds(): ReadonlySet<string> {
+	try {
+		const saved: unknown = JSON.parse(window.localStorage.getItem(FOLDS_KEY) ?? "[]");
+		return new Set(Array.isArray(saved) ? saved.filter((k): k is string => typeof k === "string") : []);
+	} catch {
+		return new Set();
+	}
+}
+
+function writeFolds(open: ReadonlySet<string>): void {
+	try {
+		window.localStorage.setItem(FOLDS_KEY, JSON.stringify([...open]));
+	} catch {}
+}
 
 function readLayers(): Layers {
 	try {
@@ -23,9 +39,12 @@ function writeLayers(l: Layers): void {
 
 type ReleasesUi = {
 	layers: Layers;
+	open: ReadonlySet<string>;
 	/** Sheets under the one in the URL, for the back button. */
 	back: SheetEntry[];
 	setLayer: (k: Layer, on: boolean) => void;
+	toggleFold: (key: string) => void;
+	openFolds: (keys: readonly string[]) => void;
 	pushBack: (s: SheetEntry) => void;
 	popBack: () => SheetEntry | undefined;
 	clearBack: () => void;
@@ -33,11 +52,24 @@ type ReleasesUi = {
 
 export const useReleasesUi = create<ReleasesUi>((set, get) => ({
 	layers: readLayers(),
+	open: readFolds(),
 	back: [],
 	setLayer: (k, on) => {
 		const layers = { ...get().layers, [k]: on };
 		writeLayers(layers);
 		set({ layers });
+	},
+	toggleFold: (key) => {
+		const open = new Set(get().open);
+		if (open.has(key)) open.delete(key);
+		else open.add(key);
+		writeFolds(open);
+		set({ open });
+	},
+	openFolds: (keys) => {
+		const open = new Set([...get().open, ...keys]);
+		writeFolds(open);
+		set({ open });
 	},
 	pushBack: (s) => set({ back: [...get().back, s] }),
 	popBack: () => {
