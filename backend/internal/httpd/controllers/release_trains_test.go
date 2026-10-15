@@ -21,6 +21,7 @@ import (
 
 type fakeReleaseTrains struct {
 	*rtsvc.BoardService
+	avatars   *rtsvc.AvatarStore
 	report    rtsvc.Report
 	initErr   error
 	inits     int
@@ -28,6 +29,8 @@ type fakeReleaseTrains struct {
 }
 
 func (f *fakeReleaseTrains) Report(context.Context) (rtsvc.Report, error) { return f.report, nil }
+
+func (f *fakeReleaseTrains) Avatar(accountID string) ([]byte, error) { return f.avatars.Get(accountID) }
 
 func (f *fakeReleaseTrains) Refresh(source string) error {
 	if source != "" && source != "gitlab" && source != "jira" {

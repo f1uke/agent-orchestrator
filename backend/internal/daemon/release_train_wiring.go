@@ -20,7 +20,10 @@ type releaseTrains struct {
 	*rtsvc.Poller
 	*rtsvc.BoardService
 	configPath string
+	avatars    *rtsvc.AvatarStore
 }
+
+func (r releaseTrains) Avatar(accountID string) ([]byte, error) { return r.avatars.Get(accountID) }
 
 func (r releaseTrains) InitConfig() (string, error) {
 	return r.configPath, rtsvc.WriteExampleConfig(r.configPath)
@@ -35,13 +38,14 @@ func startReleaseTrains(ctx context.Context, store *sqlite.Store, dataDir string
 	})
 	path := filepath.Join(dataDir, rtsvc.ConfigFileName)
 	config := rtsvc.NewConfigLoader(path)
+	avatars := rtsvc.NewAvatarStore(filepath.Join(dataDir, "release-train", "avatars"))
 	clock := func() time.Time { return time.Now().UTC() }
 	poller := rtsvc.NewPoller(rtsvc.PollerDeps{
 		Config: config,
 		Store:  store,
 		Sources: []rtsvc.Source{
 			gitlabsrc.New(gitlabsrc.Options{Tokens: gitlabTokenSource}),
-			jirasrc.New(jirasrc.Options{}),
+			jirasrc.New(jirasrc.Options{Avatars: avatars}),
 			confluencesrc.New(confluencesrc.Options{}),
 		},
 		Clock:  clock,
@@ -50,5 +54,5 @@ func startReleaseTrains(ctx context.Context, store *sqlite.Store, dataDir string
 	})
 	board := rtsvc.NewBoardService(rtsvc.BoardDeps{Config: config, Store: store, Clock: clock})
 	done := observe.StartPollLoop(ctx, rtsvc.Tick, poller.Poll, logger, "release trains", rec.Tick)
-	return releaseTrains{Poller: poller, BoardService: board, configPath: path}, done
+	return releaseTrains{Poller: poller, BoardService: board, configPath: path, avatars: avatars}, done
 }

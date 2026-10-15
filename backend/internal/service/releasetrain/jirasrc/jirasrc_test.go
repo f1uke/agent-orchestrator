@@ -166,6 +166,48 @@ func TestRelatedWorkUsersAndMyselfMapIntoFacts(t *testing.T) {
 	}
 }
 
+func TestUserReadDownloadsTheAvatarIntoTheStore(t *testing.T) {
+	jira := rttest.NewJira(t)
+	jira.Set("/rest/api/3/user?accountId=acc-ann", `{"accountId":"acc-ann","displayName":"Ann Example","avatarUrls":{"48x48":"`+jira.URL+`/avatars/ann.png"}}`)
+	jira.Set("/avatars/ann.png", "ann-bytes")
+	jira.Set("/rest/api/3/user?accountId=acc-bob", `{"accountId":"acc-bob","displayName":"Bob Example","avatarUrls":{"48x48":"https://avatars.elsewhere.example/bob.png"}}`)
+	store := svc.NewAvatarStore(t.TempDir())
+	s := New(Options{Avatars: store, Config: func() (atlassian.Config, error) {
+		return atlassian.Config{BaseURL: jira.URL, Email: "dee@example.com", Token: "t"}, nil
+	}})
+
+	for _, id := range []string{"acc-ann", "acc-bob"} {
+		b, err := fetch(t, s, rt.SpecFor(rt.KindJiraUsers, rt.UserScope(id), ""))
+		if got := decode(t, rt.KindJiraUsers, b); err != nil || len(got) != 1 || got[0].AccountID != id {
+			t.Fatalf("user %s = %+v, %v", id, got, err)
+		}
+	}
+	if got, err := store.Get("acc-ann"); err != nil || string(got) != "ann-bytes" {
+		t.Fatalf("ann's avatar = %q, %v", got, err)
+	}
+	if _, err := store.Get("acc-bob"); !errors.Is(err, svc.ErrNoAvatar) {
+		t.Fatalf("an avatar on a host that is not allowed was stored: %v", err)
+	}
+	for _, req := range jira.TakeRequests() {
+		if !strings.HasPrefix(req, "GET ") {
+			t.Fatalf("the user read sent %s", req)
+		}
+	}
+}
+
+func TestUserReadKeepsTheProfileWhenTheAvatarFails(t *testing.T) {
+	jira := rttest.NewJira(t)
+	jira.Set("/rest/api/3/user?accountId=acc-ann", `{"accountId":"acc-ann","displayName":"Ann Example","avatarUrls":{"48x48":"`+jira.URL+`/avatars/ann.png"}}`)
+	jira.Fail("/avatars/ann.png", http.StatusServiceUnavailable, nil)
+	s := New(Options{Avatars: svc.NewAvatarStore(t.TempDir()), Config: func() (atlassian.Config, error) {
+		return atlassian.Config{BaseURL: jira.URL, Email: "dee@example.com", Token: "t"}, nil
+	}})
+	b, err := fetch(t, s, rt.SpecFor(rt.KindJiraUsers, rt.UserScope("acc-ann"), ""))
+	if got := decode(t, rt.KindJiraUsers, b); err != nil || len(got) != 1 || got[0].DisplayName != "Ann Example" {
+		t.Fatalf("user = %+v, %v", got, err)
+	}
+}
+
 func issue(key, summary, status, category string, subtask bool, fixVersions []string, extra string) string {
 	fv := make([]string, len(fixVersions))
 	for i, id := range fixVersions {

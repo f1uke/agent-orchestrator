@@ -2209,6 +2209,52 @@ paths:
       summary: Resolve review threads on a pull request
       tags:
       - prs
+  /api/v1/release-trains/avatars/{accountId}:
+    get:
+      operationId: getReleaseTrainAvatar
+      parameters:
+      - description: Jira account id, percent-encoded (its colon may be %3A).
+        in: path
+        name: accountId
+        required: true
+        schema:
+          description: Jira account id, percent-encoded (its colon may be %3A).
+          type: string
+      responses:
+        "200":
+          content:
+            image/*:
+              schema:
+                type: string
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Found
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Internal Server Error
+        "501":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Not Implemented
+      summary: Serve a Jira user's avatar that the user read cached; 404 until it
+        is downloaded
+      tags:
+      - release-trains
   /api/v1/release-trains/board:
     get:
       operationId: getReleaseTrainBoard

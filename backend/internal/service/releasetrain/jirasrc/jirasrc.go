@@ -21,12 +21,15 @@ import (
 type Options struct {
 	Config    atlassian.ConfigSource
 	Transport http.RoundTripper
+	// Avatars receives each user's avatar on the user read; nil skips the download.
+	Avatars *svc.AvatarStore
 }
 
 // Source is the Jira Source.
 type Source struct {
-	config atlassian.ConfigSource
-	client *jira.Client
+	config  atlassian.ConfigSource
+	client  *jira.Client
+	avatars *svc.AvatarStore
 }
 
 var _ svc.Source = (*Source)(nil)
@@ -37,7 +40,7 @@ func New(opts Options) *Source {
 		opts.Config = atlassian.DefaultConfigSource
 	}
 	httpClient := &http.Client{Timeout: 15 * time.Second, Transport: svc.CountingTransport{Base: opts.Transport}}
-	return &Source{config: opts.Config, client: jira.NewClient(jira.WithHTTPDoer(httpClient.Do), jira.WithConfigSource(opts.Config))}
+	return &Source{config: opts.Config, avatars: opts.Avatars, client: jira.NewClient(jira.WithHTTPDoer(httpClient.Do), jira.WithConfigSource(opts.Config))}
 }
 
 // System implements svc.Source.
@@ -72,7 +75,7 @@ func (s *Source) Fetch(ctx context.Context, spec rt.ResourceSpec, view rt.PlanVi
 func projectScope(key string) rt.Scope { return rt.Scope("project:" + key) }
 
 func (s *Source) jobs(view rt.PlanView) []svc.Job {
-	r := reader{c: s.client, view: view, config: s.config}
+	r := reader{c: s.client, view: view, config: s.config, avatars: s.avatars}
 	cfg := view.Config.Jira
 	jobs := []svc.Job{{Spec: rt.SpecFor(rt.KindJiraVersions, projectScope(cfg.Project), ""), Fetch: r.versions}}
 	if cfg.TechRequestProject != "" {
@@ -138,9 +141,10 @@ func (s *Source) jobs(view rt.PlanView) []svc.Job {
 }
 
 type reader struct {
-	c      *jira.Client
-	view   rt.PlanView
-	config atlassian.ConfigSource
+	c       *jira.Client
+	view    rt.PlanView
+	config  atlassian.ConfigSource
+	avatars *svc.AvatarStore
 }
 
 func (r reader) sprints(ctx context.Context, board int) (svc.Batch, error) {
@@ -317,7 +321,20 @@ func (r reader) user(ctx context.Context, accountID string) (svc.Batch, error) {
 	if err != nil {
 		return svc.Batch{}, err
 	}
+	r.saveAvatar(ctx, u)
 	return svc.SnapshotOf(rt.KindJiraUsers, []rt.JiraUserFact{{AccountID: u.AccountID, DisplayName: u.DisplayName, AvatarURL: u.AvatarURL}})
+}
+
+// saveAvatar is best-effort: a missing face falls back to initials, so it never fails the profile read.
+func (r reader) saveAvatar(ctx context.Context, u jira.UserProfile) {
+	if r.avatars == nil || u.AvatarURL == "" {
+		return
+	}
+	img, err := r.c.Avatar(ctx, u.AvatarURL)
+	if err != nil {
+		return
+	}
+	_ = r.avatars.Put(u.AccountID, img.Bytes)
 }
 
 func (r reader) myself(ctx context.Context, _ []byte) (svc.Batch, error) {

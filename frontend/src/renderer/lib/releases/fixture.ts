@@ -1,0 +1,436 @@
+import { addDays, dayLabel } from "./day";
+import type {
+	AlertHit,
+	AppVersion,
+	Board,
+	BoardResponse,
+	RuleInfo,
+	Severity,
+	Stage,
+	StageStatus,
+	Train,
+} from "./types";
+
+/** A fictional Board for the browser preview and Playwright: DEMO keys, made-up people, versions and hosts. */
+
+const HOST = "https://gitlab.example.com/demo";
+const JIRA = "https://demo.example.com";
+
+const PEOPLE = [
+	["acc-ada", "Ada Example"],
+	["acc-ben", "Ben Sample"],
+	["acc-cy", "Cy Placeholder"],
+	["acc-dot", "Dot Fiction"],
+	["acc-eli", "Eli Mock"],
+	["acc-fay", "Fay Pretend"],
+	["acc-gus", "Gus Invented"],
+	["acc-hal", "Hal Madeup"],
+	["acc-ivy", "Ivy Dummy"],
+] as const;
+
+const APPS = [
+	{ id: "di", name: "Demo iOS", family: "demo", platform: "ios" },
+	{ id: "da", name: "Demo Android", family: "demo", platform: "android" },
+	{ id: "pi", name: "Pilot iOS", family: "pilot", platform: "ios" },
+	{ id: "pa", name: "Pilot Android", family: "pilot", platform: "android" },
+] as const;
+
+function st(
+	key: Stage["key"],
+	date: string | undefined,
+	status: StageStatus,
+	detail = "",
+	conventional = false,
+): Stage {
+	return { key, date, status, detail, reads: [], ...(conventional ? { conventional } : {}) };
+}
+
+function approvers(n: number, ok: number) {
+	return PEOPLE.slice(0, n).map(([accountId, name], i) => ({
+		accountId,
+		name,
+		status: i < ok ? "APPROVED" : "PENDING",
+	}));
+}
+
+type Spec = {
+	app: string;
+	v: string;
+	start: string;
+	due: string;
+	stages: Stage[];
+	mr?: { iid: number; state?: string; conflicts?: boolean; pipeline?: string; author: string };
+	ok?: number;
+	tag?: string;
+};
+
+function appVersion(train: string, s: Spec): AppVersion {
+	return {
+		train,
+		app: s.app,
+		version: s.v,
+		milestone: {
+			id: 1,
+			project: 1,
+			title: `v ${s.v}`,
+			description: `Release Train #${train}`,
+			state: "active",
+			url: `${HOST}/milestones/1`,
+			start: s.start,
+			due: s.due,
+		},
+		jira: {
+			id: `${train}-${s.app}`,
+			name: `${s.app} ${s.v}`,
+			description: "",
+			released: false,
+			url: `${JIRA}/versions/1`,
+			approvers: approvers(9, s.ok ?? 0),
+		},
+		releaseMr: s.mr
+			? {
+					mr: {
+						iid: s.mr.iid,
+						project: 1,
+						title: `Release ${s.v}`,
+						state: s.mr.state ?? "opened",
+						author: s.mr.author,
+						sourceBranch: `release/${s.v}`,
+						targetBranch: "main",
+						createdOn: s.start,
+						url: `${HOST}/merge_requests/${s.mr.iid}`,
+					},
+					detail: {
+						iid: s.mr.iid,
+						project: 1,
+						conflicts: s.mr.conflicts ?? false,
+						pipeline: s.mr.pipeline ? { id: 1, status: s.mr.pipeline, url: `${HOST}/pipelines/1` } : undefined,
+					},
+				}
+			: undefined,
+		tag: s.tag
+			? { name: s.tag, project: 1, url: `${HOST}/tags/${s.tag}`, commitOn: s.due, newest: true, mergesAfter: [] }
+			: undefined,
+		stages: s.stages,
+		cards: [],
+		issues: [],
+	};
+}
+
+function trainOf(
+	id: string,
+	phase: Train["phase"],
+	freeze: string,
+	publish: string,
+	specs: Spec[],
+	datesSplit: string[] = [],
+): Train {
+	return {
+		id,
+		label: `#${id.replace(/-\d{4}$/, "")}`,
+		phase,
+		freeze,
+		publish,
+		families: ["demo", "pilot"],
+		versions: specs.map((s) => appVersion(id, s)),
+		datesSplit,
+		pages: [],
+	};
+}
+
+function done(f: string, p: string, tag: string): Stage[] {
+	return [
+		st("freeze", f, "done"),
+		st("scan", addDays(f, 1), "done"),
+		st("approve", addDays(f, 2), "done"),
+		st("tag", addDays(p, -1), "done"),
+		st("publish", p, "done"),
+		st("force", undefined, "not_observable", "No force-update ticket matches this version"),
+	].map((x) => (x.key === "tag" ? { ...x, detail: `Tag ${tag}` } : x));
+}
+
+function current(f: string, p: string, scan: StageStatus, approveDetail: string): Stage[] {
+	return [
+		st("freeze", f, "done", "Release MR opened"),
+		st("scan", addDays(f, 1), scan, scan === "failed" ? "build_test failed" : "Pipeline passed"),
+		st("approve", addDays(f, 2), "waiting", approveDetail),
+		st("tag", addDays(p, -1), "todo", "", true),
+		st("publish", p, "todo"),
+		st("force", undefined, "not_observable", "No force-update ticket matches this version"),
+	];
+}
+
+const RULES: [string, Severity, string][] = [
+	["A1", "data", "Milestone and Jira release name different versions"],
+	["A5", "data", "Jira release date differs from milestone due date"],
+	["A6", "data", "Release train page dates differ from the milestone"],
+	["A7", "data", "An app's milestone dates differ from the rest of its train"],
+	["B1", "risk", "Freeze day passed and no release MR is open"],
+	["C1", "block", "Release MR pipeline failed on a required job"],
+	["C5", "block", "Release MR has conflicts"],
+	["D1", "risk", "No approvers set on the Jira release"],
+	["D3", "risk", "Not every approver approved before publish"],
+	["E1", "hygiene", "Published but the Jira release is not marked released"],
+	["F1", "info", "Two trains overlap"],
+];
+
+export function demoBoard(today: string): Board {
+	const f20 = addDays(today, -16);
+	const f21 = addDays(today, -1);
+	const f22 = addDays(today, 13);
+	const p20 = addDays(f20, 7);
+	const p21 = addDays(f21, 7);
+	const p22 = addDays(f22, 7);
+	const t20 = trainOf(
+		"20-2026",
+		"past",
+		f20,
+		p20,
+		APPS.map((a) => ({
+			app: a.id,
+			v: a.family === "demo" ? "2.3.0" : "1.0.0",
+			start: f20,
+			due: p20,
+			stages: done(f20, p20, a.family === "demo" ? "2.3.0" : "1.0.0"),
+			ok: 9,
+			tag: a.family === "demo" ? "2.3.0" : "1.0.0",
+		})),
+	);
+	const t21 = trainOf(
+		"21-2026",
+		"current",
+		f21,
+		p21,
+		[
+			{
+				app: "di",
+				v: "2.4.0",
+				start: f21,
+				due: p21,
+				stages: current(f21, p21, "failed", "3 of 9 approved"),
+				mr: { iid: 77, conflicts: true, pipeline: "failed", author: "Ada Example" },
+				ok: 3,
+			},
+			{
+				app: "da",
+				v: "2.4.0",
+				start: f21,
+				due: p21,
+				stages: current(f21, p21, "done", "0 of 9 approved"),
+				mr: { iid: 41, pipeline: "success", author: "Ben Sample" },
+				ok: 0,
+			},
+			{
+				app: "pi",
+				v: "1.0.1",
+				start: f21,
+				due: p21,
+				stages: current(f21, p21, "done", "2 of 9 approved"),
+				mr: { iid: 9, pipeline: "success", author: "Cy Placeholder" },
+				ok: 2,
+			},
+			{
+				app: "pa",
+				v: "1.0.1",
+				start: addDays(f21, 2),
+				due: addDays(p21, 2),
+				stages: current(addDays(f21, 2), addDays(p21, 2), "done", "0 of 9 approved"),
+				mr: { iid: 12, author: "Dot Fiction" },
+				ok: 0,
+			},
+		],
+		["pa"],
+	);
+	const t22 = trainOf(
+		"22-2026",
+		"next",
+		f22,
+		p22,
+		APPS.map((a) => ({
+			app: a.id,
+			v: a.family === "demo" ? "2.5.0" : "1.0.2",
+			start: f22,
+			due: p22,
+			stages: [
+				st("freeze", f22, "todo"),
+				st("scan", addDays(f22, 1), "todo"),
+				st("approve", addDays(f22, 2), "todo"),
+				st("tag", addDays(p22, -1), "todo", "", true),
+				st("publish", p22, "todo"),
+			],
+		})),
+	);
+	const hit = (id: string, rule: string, severity: Severity, text: string, over: Partial<AlertHit> = {}): AlertHit => ({
+		id,
+		rule,
+		severity,
+		bucket: "badge",
+		text,
+		evidence: {},
+		link: { label: "Open", url: `${HOST}/x` },
+		asOf: `${today}T02:00:00Z`,
+		...over,
+	});
+	const hits: AlertHit[] = [
+		hit("C5~v/21-2026/di", "C5", "block", "!77 has merge conflicts", { app: "di", train: "21-2026" }),
+		hit("C1~v/21-2026/di", "C1", "block", "!77 failed: build_test", { app: "di", train: "21-2026" }),
+		hit(
+			"A7~v/21-2026/pa",
+			"A7",
+			"data",
+			`Milestone ${dayLabel(addDays(f21, 2))} → ${dayLabel(addDays(p21, 2))}, the rest of #21 runs ${dayLabel(f21)} → ${dayLabel(p21)}. Give it its own train or move the milestone`,
+			{ app: "pa", train: "21-2026" },
+		),
+		hit("A1~v/21-2026/pi", "A1", "data", "Milestone says 1.0.1, Jira release says 1.0.2", {
+			app: "pi",
+			train: "21-2026",
+			evidence: { kind: "version", version: "1.0.2", milestone: "v 1.0.1", jira: "pi 1.0.2" },
+		}),
+		hit("D3~v/21-2026/da", "D3", "risk", "0 of 9 approvers approved, publish in 6 days", {
+			app: "da",
+			train: "21-2026",
+		}),
+		hit("F1~t/21-2026+22-2026", "F1", "info", "#21 and #22 are two weeks apart", { train: "21-2026" }),
+		hit("E1~v/20-2026/di", "E1", "hygiene", "Published but the Jira release is not marked released", {
+			app: "di",
+			train: "20-2026",
+			bucket: "history",
+		}),
+		hit("D1~v/22-2026/da", "D1", "risk", "No approvers set on the Jira release", {
+			app: "da",
+			train: "22-2026",
+			bucket: "hidden",
+		}),
+	];
+	const catalogue: RuleInfo[] = RULES.map(([id, severity, title]) => ({
+		id,
+		group: id[0],
+		severity,
+		title,
+		on: id !== "F1",
+		defaultOn: true,
+	}));
+	const badge = hits.filter((h) => h.bucket === "badge");
+	return {
+		today,
+		apps: APPS.map((a) => ({ ...a })),
+		trains: [t20, t21, t22],
+		hotfixes: [
+			{
+				app: "da",
+				version: "2.3.1",
+				milestone: {
+					id: 3,
+					project: 1,
+					title: "Hotfix 2.3.1 login crash",
+					description: "hotfix",
+					state: "active",
+					url: `${HOST}/milestones/3`,
+					start: addDays(today, 1),
+					due: addDays(today, 2),
+				},
+			},
+		],
+		sprints: [
+			{
+				board: { id: 1, key: "DEMO", ownsSprintBranch: true },
+				number: 20,
+				sprint: {
+					board: 1,
+					id: 20,
+					name: "DEMO 20",
+					url: `${JIRA}/sprint/20`,
+					start: addDays(f21, -8),
+					end: addDays(f21, 6),
+				},
+				cards: [],
+				dests: [],
+				counts: { new: 0, carriedDone: 0, carriedWithMrs: 0 },
+				total: 0,
+			},
+		],
+		llbs: [
+			{
+				id: "demo-wallet",
+				name: "Wallet",
+				branches: [
+					{
+						app: "di",
+						branch: "feature/demo-wallet",
+						openedOn: addDays(today, -40),
+						lastIn: addDays(today, -3),
+						state: "open",
+						cards: [],
+					},
+				],
+				target: { kind: "planned", train: "21-2026" },
+			},
+			{
+				id: "demo-chat",
+				name: "demo-chat",
+				branches: [
+					{
+						app: "di",
+						branch: "feature/demo-chat",
+						openedOn: addDays(today, -20),
+						lastIn: addDays(today, -5),
+						state: "open",
+						cards: [],
+					},
+				],
+				target: { kind: "none" },
+			},
+		],
+		mismatches: [{ kind: "version", app: "pi", train: "21-2026", version: "1.0.2" }],
+		sources: [
+			{ system: "gitlab", resources: 40, asOf: `${today}T02:58:00Z`, issues: [] },
+			{ system: "jira", resources: 30, asOf: `${today}T02:57:00Z`, issues: [] },
+			{ system: "confluence", resources: 2, asOf: `${today}T02:50:00Z`, issues: [] },
+		],
+		cutover: null,
+		identity: { kind: "known", jiraAccountId: "acc-ada", gitlabUsername: "ada", displayName: "Ada Example" },
+		alerts: {
+			badge: { count: badge.length, unknown: 0, worst: "block" },
+			hits,
+			rules: catalogue.map((r) => ({
+				rule: r.id,
+				on: r.on,
+				outcome: hits.some((h) => h.rule === r.id && h.bucket === "badge")
+					? {
+							kind: "fired" as const,
+							asOf: `${today}T02:00:00Z`,
+							hits: hits.filter((h) => h.rule === r.id).map((h) => h.id),
+						}
+					: { kind: "clean" as const, checkedAt: `${today}T02:00:00Z` },
+			})),
+			staleHides: [{ id: "B3~v/19-2026/di", hiddenAt: `${today}T01:00:00Z`, reason: "" }],
+		},
+		catalogue,
+	};
+}
+
+export function failedSourceBoard(today: string): Board {
+	const b = demoBoard(today);
+	const missing = [
+		{
+			kind: "gitlab.mrs",
+			scope: "p:1",
+			app: "di",
+			failures: 4,
+			errorClass: "unavailable" as const,
+			completeAt: `${today}T01:40:00Z`,
+		},
+	];
+	b.sources = b.sources.map((s) => (s.system === "gitlab" ? { ...s, asOf: `${today}T01:40:00Z`, issues: missing } : s));
+	b.alerts.rules = [...b.alerts.rules, { rule: "B1", app: "di", on: true, outcome: { kind: "unknown", missing } }];
+	b.alerts.badge = { ...b.alerts.badge, unknown: 1 };
+	const t21 = b.trains[1];
+	t21.versions[0].stages = t21.versions[0].stages.map((s) =>
+		s.key === "scan" ? { ...s, status: "unknown", detail: "", missing } : s,
+	);
+	return b;
+}
+
+export function demoResponse(board: Board): BoardResponse {
+	return { config: { state: "ok", path: "~/.ao/data/release-train.json" }, board };
+}

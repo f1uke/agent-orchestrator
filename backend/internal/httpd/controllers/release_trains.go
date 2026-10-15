@@ -3,8 +3,11 @@ package controllers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -35,6 +38,13 @@ type ReleaseTrainsService interface {
 	Plans(ctx context.Context) ([]rt.LlbPlan, error)
 	// PutPlan returns rt.ErrInvalidPlan, *rt.PlanVersionError or *rt.BranchTakenError.
 	PutPlan(ctx context.Context, p rt.LlbPlan, ifVersion int) (rt.LlbPlan, error)
+	// Avatar returns rtsvc.ErrNoAvatar until the account's avatar is downloaded, rtsvc.ErrBadAccountID for an id no file can have.
+	Avatar(accountID string) ([]byte, error)
+}
+
+// ReleaseTrainAccountIDParam is the path of GET /api/v1/release-trains/avatars/{accountId}.
+type ReleaseTrainAccountIDParam struct {
+	AccountID string `path:"accountId" description:"Jira account id, percent-encoded (its colon may be %3A)."`
 }
 
 // ReleaseTrainBoardResponse is the body of GET /api/v1/release-trains/board.
@@ -106,6 +116,41 @@ func (c *ReleaseTrainsController) Register(r chi.Router) {
 	r.Delete("/release-trains/hides", c.unhideStale)
 	r.Get("/release-trains/llb-plans", c.plans)
 	r.Put("/release-trains/llb-plans/{planId}", c.putPlan)
+	r.Get("/release-trains/avatars/{accountId}", c.avatar)
+}
+
+// avatarCacheSeconds matches the jira.users budget: a face changes at most once a day.
+const avatarCacheSeconds = 24 * 60 * 60
+
+func (c *ReleaseTrainsController) avatar(w http.ResponseWriter, r *http.Request) {
+	if c.Svc == nil {
+		apispec.NotImplemented(w, r, "GET", "/api/v1/release-trains/avatars/{accountId}")
+		return
+	}
+	id, err := url.PathUnescape(chi.URLParam(r, "accountId"))
+	if err != nil {
+		id = ""
+	}
+	b, err := c.Svc.Avatar(id)
+	if errors.Is(err, rtsvc.ErrBadAccountID) {
+		envelope.WriteAPIError(w, r, http.StatusBadRequest, "bad_request", "BAD_ACCOUNT_ID", "not a Jira account id", nil)
+		return
+	}
+	if err != nil && !errors.Is(err, rtsvc.ErrNoAvatar) {
+		envelope.WriteError(w, r, err)
+		return
+	}
+	ct := http.DetectContentType(b)
+	if err != nil || !strings.HasPrefix(ct, "image/") {
+		envelope.WriteAPIError(w, r, http.StatusNotFound, "not_found", "RELEASE_AVATAR_NOT_FOUND",
+			"no avatar downloaded for this account yet", nil)
+		return
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", avatarCacheSeconds))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b) //nolint:gosec // G705: sniffed as a raster image above and served with nosniff
 }
 
 func (c *ReleaseTrainsController) board(w http.ResponseWriter, r *http.Request) {
